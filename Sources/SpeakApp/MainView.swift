@@ -11,7 +11,7 @@ struct MainView: View {
 
   var body: some View {
     NavigationSplitView {
-      SideBarView(selection: $selection)
+      SideBarView(selection: $selection.clampedToLastSelection)
         .navigationSplitViewColumnWidth(
           min: settings.visualDensity.isCompact ? 170 : 220,
           ideal: settings.visualDensity.isCompact ? 188 : 240,
@@ -61,6 +61,9 @@ struct MainView: View {
 
   @ViewBuilder
   private var detailView: some View {
+    // The sidebar binding is clamped (`clampedToLastSelection`), so `selection`
+    // never actually goes nil once set; the fallback only covers a nil initial
+    // value.
     switch selection ?? .dashboard {
     case .dashboard:
       DashboardView()
@@ -87,7 +90,8 @@ struct MainView: View {
         toolbarRecordLabel
       }
       // No shortcut here: Start/Stop Recording has one canonical binding, owned
-      // by ShortcutManager and surfaced on the App menu item and the Speak menu.
+      // by ShortcutManager and installed on exactly one menu item — the Speak
+      // menu's, built by MenuBarManager.
       .speakTooltip("Start or stop a recording from anywhere in Speak. We'll let you know when we're listening.")
       .accessibilityLabel(recordButtonAccessibility.label)
       .accessibilityHint(recordButtonAccessibility.hint)

@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 
 @testable import SpeakApp
@@ -91,5 +92,36 @@ final class SidebarNavigationTests: XCTestCase {
         let item = SidebarItem.settings(.postProcessing)
         XCTAssertEqual(item.title(isAssemblyAI: false), "Post-processing")
         XCTAssertEqual(item.title(isAssemblyAI: true), "Pre-processing")
+    }
+
+    // MARK: - Selection clamping
+
+    /// `List(selection:)` clears the selection when the highlighted row is
+    /// ⌘-clicked or empty space below the rows is clicked. `MainView` then
+    /// showed the dashboard with no row highlighted, so the clamped binding
+    /// swallows the `nil` and keeps the last real selection.
+    func testClampedSelection_snapsBackToThePreviousItemOnNil() {
+        var storage: SidebarItem? = .history
+        let binding = Binding(get: { storage }, set: { storage = $0 })
+            .clampedToLastSelection
+
+        binding.wrappedValue = nil
+
+        XCTAssertEqual(storage, .history)
+        XCTAssertEqual(binding.wrappedValue, .history)
+    }
+
+    func testClampedSelection_stillAcceptsEveryRealRow() {
+        var storage: SidebarItem? = .dashboard
+        let binding = Binding(get: { storage }, set: { storage = $0 })
+            .clampedToLastSelection
+
+        for item in SidebarItem.orderedItems {
+            binding.wrappedValue = item
+            XCTAssertEqual(storage, item, "\(item) should be selectable")
+            // A deselect between rows never strands the sidebar.
+            binding.wrappedValue = nil
+            XCTAssertEqual(storage, item)
+        }
     }
 }

@@ -14,9 +14,9 @@ final class MenuBarManager {
         self.appSettings = appSettings
     }
 
-    /// Sets up the main application menu with shortcuts displayed.
-    func setupMainMenu() {
-        guard let mainMenu = NSApp.mainMenu else { return }
+    /// Sets up the main menu. `mainMenu` is injectable so tests can assert its shortcuts.
+    func setupMainMenu(in mainMenu: NSMenu? = NSApp.mainMenu) {
+        guard let mainMenu else { return }
 
         // Find or create the "Speak" menu
         if let existingSpeakMenu = mainMenu.item(withTitle: "Speak") {

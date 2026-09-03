@@ -1,3 +1,4 @@
+import Combine
 import SpeakCore
 import SwiftUI
 
@@ -17,6 +18,11 @@ struct DashboardView: View {
   /// flipping `isLoadingMore`, a persistence error, a load-state change — do
   /// not re-walk every record on the main actor while the body evaluates.
   @State private var aggregates = DashboardAggregates(items: [])
+  /// The day the cached `aggregates` were built for. The daily-usage series is
+  /// a rolling 30-day window ending "today", so a dashboard left open across
+  /// midnight has to rebuild even when history has not changed (issue: stale
+  /// axis after a day rollover). Refreshed from `NSCalendarDayChanged`.
+  @State private var aggregatesDay = Calendar.current.startOfDay(for: .now)
 
   var body: some View {
     ScrollView {
@@ -251,14 +257,31 @@ struct DashboardView: View {
         ttsProviderChartSection
       }
     }
-    // One pass over history per content revision feeds all five charts.
-    // `contentRevision` is bumped by every mutator that touches `allItems`
-    // (load, append, update, remove, remove-all — CloudKit merges included),
-    // and paging only ever appends to the already-counted `items` page, so it
-    // is the complete dependency for these aggregations.
-    .task(id: history.contentRevision) {
-      aggregates = DashboardAggregates(items: history.allItems)
+    // One pass over history per content revision *and* per day feeds all five
+    // charts. `contentRevision` is bumped by every mutator that touches
+    // `allItems` (load, append, update, remove, remove-all — CloudKit merges
+    // included), and paging only ever appends to the already-counted `items`
+    // page; the day is the other input, because `dailyUsageForLastMonth`
+    // derives its window from it.
+    .task(id: aggregatesKey) {
+      aggregates = DashboardAggregates(items: history.allItems, referenceDate: aggregatesDay)
     }
+    // Posted on a background thread at midnight and on wake, so hop to main
+    // before touching view state.
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: .NSCalendarDayChanged)
+        .receive(on: DispatchQueue.main)
+    ) { _ in
+      let today = Calendar.current.startOfDay(for: .now)
+      if today != aggregatesDay {
+        aggregatesDay = today
+      }
+    }
+  }
+
+  private var aggregatesKey: DashboardAggregatesKey {
+    DashboardAggregatesKey(revision: history.contentRevision, startOfDay: aggregatesDay)
   }
 
   private func heroChip(title: String, value: String, systemImage: String) -> some View {
@@ -804,13 +827,22 @@ struct DashboardAggregates {
   let transcriptionModels: [ModelUsageData]
   let postProcessingModels: [ModelUsageData]
 
-  init(items: [HistoryItem]) {
-    dailyUsage = items.dailyUsageForLastMonth()
+  init(items: [HistoryItem], referenceDate: Date = .now) {
+    dailyUsage = items.dailyUsageForLastMonth(referenceDate: referenceDate)
     latencyProviders = items.latencyInsightsByProvider()
     latencyOverview = items.latencyOverview()
     transcriptionModels = items.modelUsage(for: .transcription)
     postProcessingModels = items.modelUsage(for: .postProcessing)
   }
+}
+
+/// What `DashboardAggregates` actually depends on: the history content *and*
+/// the day the rolling 30-day usage window ends on. Keying the dashboard's
+/// `.task` on both is what makes the charts survive a midnight rollover with
+/// the window left open.
+struct DashboardAggregatesKey: Equatable {
+  let revision: UInt64
+  let startOfDay: Date
 }
 
 private func formattedModels(_ identifiers: [String]) -> String {

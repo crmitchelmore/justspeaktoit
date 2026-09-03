@@ -81,7 +81,6 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
   private let sampleRate: Int
   private let featureConfiguration: ModulateFeatureConfiguration
   private let session: URLSession
-  private let bufferPool: AudioBufferPool
   private let logger = SpeakLogger.logger(category: "ModulateLiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
@@ -98,14 +97,12 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
     apiKey: String,
     sampleRate: Int = 16_000,
     featureConfiguration: ModulateFeatureConfiguration,
-    session: URLSession = .shared,
-    bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
+    session: URLSession = .shared
   ) {
     self.apiKey = apiKey
     self.sampleRate = sampleRate
     self.featureConfiguration = featureConfiguration
     self.session = session
-    self.bufferPool = bufferPool
   }
 
   func start(
@@ -202,7 +199,6 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
       return current
     }
     task?.cancel(with: .normalClosure, reason: nil)
-    bufferPool.logMetrics()
   }
 
   func waitForPendingSends(timeout: TimeInterval = 1.5) async {
@@ -360,16 +356,13 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
   private let baseURL = URL(string: "https://modulate-developer-apis.com")!
   private let session: URLSession
   private let defaultsSuiteName: String?
-  private let bufferPool: AudioBufferPool
 
   init(
     session: URLSession = .shared,
-    defaults: UserDefaults = .standard,
-    bufferPool: AudioBufferPool? = nil
+    defaults: UserDefaults = .standard
   ) {
     self.session = session
     self.defaultsSuiteName = Self.defaultsSuiteName(for: defaults)
-    self.bufferPool = bufferPool ?? AudioBufferPool(poolSize: 10, bufferSize: 8192)
   }
 
   func transcribeFile(
@@ -501,8 +494,7 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
         apiKey: apiKey,
         sampleRate: sampleRate,
         featureConfiguration: featureConfiguration,
-        session: session,
-        bufferPool: bufferPool
+        session: session
       )
   }
 

@@ -98,20 +98,28 @@ jobs:
   #   job still satisfies a required check, so the gate can be marked required)
   # - the workflow-level concurrency group cancels superseded runs
   # - a release-specific .build cache avoids cold dependency builds
-  # - runs only on pull_request: pushes to main were just gated by their PR,
-  #   and tags are re-validated by release-mac.yml.
+  # - path filtering on pull_request skips the expensive legs for changes that
+  #   cannot affect them.
+  #
+  # On push to main the filter is skipped and every output is 'true', so the
+  # release, core-journey and fixture-UI gates actually run on main. They used
+  # to be skipped there (the whole job was `if: pull_request`), which meant a
+  # merge queue collision, a direct push, or a merge whose result differs from
+  # the PR head reached the release tag ungated (the superseded-run cancellation
+  # in the concurrency group above can also cancel a PR's last run).
   release-paths:
     name: Detect Release-Relevant Changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event_name == 'pull_request'
     outputs:
-      package: ${{ steps.filter.outputs.package }}
-      core-journey: ${{ steps.filter.outputs.core-journey }}
+      package: ${{ steps.select.outputs.package }}
+      core-journey: ${{ steps.select.outputs.core-journey }}
     steps:
       - name: Filter changed paths
         # No checkout needed: on pull_request events the action lists changed
-        # files via the GitHub API.
+        # files via the GitHub API. It has no changed-file list to work from on
+        # a push, so it only runs for pull requests.
+        if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -137,6 +145,22 @@ jobs:
               - 'Tests/SpeakHotKeysTests/**'
               - 'scripts/run-core-journey-e2e.sh'
               - '.github/workflows/ci.yml'
+
+      - name: Select gate outputs
+        id: select
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PACKAGE: ${{ steps.filter.outputs.package }}
+          CORE_JOURNEY: ${{ steps.filter.outputs.core-journey }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+            echo "core-journey=$CORE_JOURNEY" >> "$GITHUB_OUTPUT"
+          else
+            # Push to main: no changed-file filtering, run every gate.
+            echo "package=true" >> "$GITHUB_OUTPUT"
+            echo "core-journey=true" >> "$GITHUB_OUTPUT"
+          fi
 
   core-journey-e2e:
     name: Core Dictation Journey (≤10m)

@@ -20,6 +20,10 @@ struct SpeakApp: App {
     @Environment(\.openWindow) private var openWindow
 
     init() {
+        // A Sparkle smoke run (scripts/sparkle-update-smoke.sh) is headless and
+        // throw-away: no crash reporting, no windows, no onboarding. Bail out
+        // before anything else initialises.
+        guard !SparkleSmokeSession.isActive else { return }
         // Initialize Sentry as early as possible
         SentryManager.start()
     }
@@ -27,6 +31,29 @@ struct SpeakApp: App {
     var body: some Scene {
         WindowGroup("Just Speak to It", id: "main") {
             Group {
+                if SparkleSmokeSession.isActive {
+                    // A zero-size placeholder: SwiftUI still needs a scene, but
+                    // the smoke run must not bootstrap the environment, show
+                    // onboarding, or install the HUD and menu bar.
+                    Color.clear.frame(width: 1, height: 1)
+                } else {
+                    normalLaunchContent
+                }
+            }
+            .tint(.brandAccent)
+            .preferredColorScheme(environmentHolder.environment?.settings.appearance.colorScheme)
+        }
+        .defaultSize(width: 1080, height: 720)
+        .commands {
+            if let environment = environmentHolder.environment {
+                SpeakCommands(environment: environment)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var normalLaunchContent: some View {
+        Group {
                 if let environment = environmentHolder.environment {
                     if hasCompletedOnboarding {
                         MainView()
@@ -105,15 +132,6 @@ struct SpeakApp: App {
                         }
                 }
             }
-            .tint(.brandAccent)
-            .preferredColorScheme(environmentHolder.environment?.settings.appearance.colorScheme)
-        }
-        .defaultSize(width: 1080, height: 720)
-        .commands {
-            if let environment = environmentHolder.environment {
-                SpeakCommands(environment: environment)
-            }
-        }
     }
 }
 
@@ -234,6 +252,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Headless Sparkle self-update (scripts/sparkle-update-smoke.sh). Nothing
+        // else in the app runs in this mode: no dock icon, no windows, no audio
+        // engine warm-up, no DMG-cleanup prompts. The process is either killed by
+        // Sparkle as it installs, or exits with a verdict of its own.
+        if SparkleSmokeSession.isActive {
+            NSApp.setActivationPolicy(.accessory)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            SparkleSmokeSession.begin()
+            return
+        }
+
         NSApp.setActivationPolicy(.regular)
         NSApp.applicationIconImage = AppIconProvider.applicationIcon()
         DispatchQueue.main.async {

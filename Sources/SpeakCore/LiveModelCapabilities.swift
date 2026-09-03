@@ -59,8 +59,11 @@ extension ModelCatalog {
     }
 
     /// Explicit per-model capability registry. Keep in sync with
-    /// `ModelCatalog.liveTranscription`.
-    private static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
+    /// `ModelCatalog.liveTranscription`: every catalogue entry that needs an
+    /// API key must appear here, or `AppSettings.enforceSpeedModeConstraints()`
+    /// silently rewrites the user's speed mode to `.instant` whenever that
+    /// model is selected. `LiveModelCapabilitiesTests` asserts that parity.
+    static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
         // Apple on-device — raw passthrough only.
         "apple/local/SFSpeechRecognizer": .default,
         "apple/local/SpeechTranscriber": .default,
@@ -92,6 +95,11 @@ extension ModelCatalog {
         GeminiTranscribeModels.liveCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 2.0
+        ),
+        // Meta Muse Voice emits one `speechComplete` per endpointed turn, which
+        // the incremental tail rewrite can polish like any other segment final.
+        MetaMuseVoiceTranscribe.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish]
         ),
         "modulate/velma-2-stt-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]

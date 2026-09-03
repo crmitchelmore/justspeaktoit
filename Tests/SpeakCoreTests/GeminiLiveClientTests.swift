@@ -385,6 +385,52 @@ final class GeminiLiveClientTests: XCTestCase { // swiftlint:disable:this type_b
         XCTAssertTrue(client.finishFlushesBufferedAudio)
     }
 
+    // MARK: - Keyword biasing
+
+    /// The user's keyword list is provider-agnostic: Gemini takes it as
+    /// `customVocabulary`, exactly as Meta takes it as `keywords`.
+    func testFactory_forwardsKeywordsToGeminiAsBoundedCustomVocabulary() throws {
+        let route = try XCTUnwrap(
+            LiveTranscriptionRouting.route(for: GeminiTranscribeModels.liveCatalogID))
+
+        let client = try XCTUnwrap(
+            LiveTranscriptionClientFactory.makeClient(
+                for: route,
+                apiKey: "k",
+                language: "en_GB",
+                keywords: ["JustSpeakToIt", "   ", "Muse Voice"]
+            ) as? GeminiLiveClient
+        )
+
+        // Blank phrases are dropped before they reach the wire.
+        XCTAssertEqual(client.customVocabulary, ["JustSpeakToIt", "Muse Voice"])
+
+        let json = try XCTUnwrap(
+            GeminiLiveClient.setupMessageJSON(
+                model: route.apiModelName,
+                language: "en_GB",
+                customVocabulary: client.customVocabulary
+            )
+        )
+        let setup = try XCTUnwrap(try Self.object(from: json)["setup"] as? [String: Any])
+        let transcription = try XCTUnwrap(setup["inputAudioTranscription"] as? [String: Any])
+        XCTAssertEqual(
+            transcription["customVocabulary"] as? [String], ["JustSpeakToIt", "Muse Voice"])
+    }
+
+    func testFactory_sendsNoCustomVocabularyWhenTheUserHasNoKeywords() throws {
+        let route = try XCTUnwrap(
+            LiveTranscriptionRouting.route(for: GeminiTranscribeModels.liveCatalogID))
+
+        let client = try XCTUnwrap(
+            LiveTranscriptionClientFactory.makeClient(
+                for: route, apiKey: "k", language: nil, keywords: []
+            ) as? GeminiLiveClient
+        )
+
+        XCTAssertEqual(client.customVocabulary, [])
+    }
+
     // MARK: - Fixtures
 
     /// `StreamingClientError` is deliberately not `Equatable` (it is a

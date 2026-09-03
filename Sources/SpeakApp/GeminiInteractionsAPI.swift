@@ -211,6 +211,9 @@ private struct GeminiRESTErrorEnvelope: Decodable {
 struct GeminiUploadedFile: Decodable {
   let name: String?
   let uri: String?
+  /// `PROCESSING`, `ACTIVE` or `FAILED`. An Interactions request that
+  /// references a file before it is `ACTIVE` is rejected, so this is polled.
+  let state: String?
 }
 
 struct GeminiFileUploadResponse: Decodable {

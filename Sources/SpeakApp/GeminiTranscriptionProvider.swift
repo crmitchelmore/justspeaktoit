@@ -53,9 +53,20 @@ struct GeminiTranscriptionProvider: TranscriptionProvider {
   )
 
   private let session: URLSession
+  private let inlineAudioByteLimit: Int
+  private let filePollInterval: TimeInterval
+  private let filePollTimeout: TimeInterval
 
-  init(session: URLSession = .shared) {
+  init(
+    session: URLSession = .shared,
+    inlineAudioByteLimit: Int = GeminiTranscribeModels.inlineAudioByteLimit,
+    filePollInterval: TimeInterval = 1.5,
+    filePollTimeout: TimeInterval = 60
+  ) {
     self.session = session
+    self.inlineAudioByteLimit = inlineAudioByteLimit
+    self.filePollInterval = filePollInterval
+    self.filePollTimeout = filePollTimeout
   }
 
   func transcribeFile(
@@ -115,7 +126,7 @@ struct GeminiTranscriptionProvider: TranscriptionProvider {
     apiKey: String
   ) async throws -> GeminiAudioSource {
     let audioData = try Data(contentsOf: url)
-    guard audioData.count > GeminiTranscribeModels.inlineAudioByteLimit else {
+    guard audioData.count > self.inlineAudioByteLimit else {
       return .inline(audioData)
     }
     return .fileURI(
@@ -243,11 +254,72 @@ struct GeminiTranscriptionProvider: TranscriptionProvider {
       throw GeminiInteractionsResponse.mapHTTPFailure(status: uploadHTTP.statusCode, body: uploadBody)
     }
     guard let file = try? JSONDecoder().decode(GeminiFileUploadResponse.self, from: uploadBody),
-      let uri = file.file?.uri
+      let uploaded = file.file, uploaded.uri != nil
     else {
       throw GeminiBatchError.uploadFailed("The upload response did not contain a file URI.")
     }
-    return uri
+    return try await self.activeFileURI(for: uploaded, apiKey: apiKey)
+  }
+
+  /// A freshly uploaded file starts in `PROCESSING`; referencing its URI before
+  /// the Files API reports `ACTIVE` fails the Interactions request. Polls the
+  /// file resource until it is usable, or gives up inside a bounded budget.
+  private func activeFileURI(
+    for file: GeminiUploadedFile,
+    apiKey: String
+  ) async throws -> String {
+    guard let uri = file.uri else {
+      throw GeminiBatchError.uploadFailed("The upload response did not contain a file URI.")
+    }
+    switch file.state?.uppercased() {
+    case "ACTIVE":
+      return uri
+    case "FAILED":
+      throw GeminiBatchError.uploadFailed("Google could not process the uploaded recording.")
+    default:
+      break
+    }
+    guard let name = file.name,
+      let statusURL = GeminiTranscribeModels.fileStatusURL(name: name)
+    else {
+      throw GeminiBatchError.uploadFailed("The upload response did not name the uploaded file.")
+    }
+
+    let deadline = Date().addingTimeInterval(self.filePollTimeout)
+    while Date() < deadline {
+      try await Task.sleep(nanoseconds: UInt64(max(0, self.filePollInterval) * 1_000_000_000))
+      switch try await self.fileState(at: statusURL, apiKey: apiKey)?.uppercased() {
+      case "ACTIVE":
+        return uri
+      case "FAILED":
+        throw GeminiBatchError.uploadFailed("Google could not process the uploaded recording.")
+      default:
+        continue
+      }
+    }
+    throw GeminiBatchError.uploadFailed(
+      "The uploaded recording was still processing after \(Int(self.filePollTimeout)) seconds.")
+  }
+
+  private func fileState(at url: URL, apiKey: String) async throws -> String? {
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue(apiKey, forHTTPHeaderField: GeminiTranscribeModels.apiKeyHeader)
+
+    let (data, response) = try await self.session.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw TranscriptionProviderError.invalidResponse
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      throw GeminiInteractionsResponse.mapHTTPFailure(status: http.statusCode, body: data)
+    }
+    let decoder = JSONDecoder()
+    // The status endpoint answers with the File resource itself; the upload
+    // endpoint wraps it in `{"file": …}`. Accept either spelling.
+    if let file = try? decoder.decode(GeminiUploadedFile.self, from: data), file.state != nil {
+      return file.state
+    }
+    return (try? decoder.decode(GeminiFileUploadResponse.self, from: data))?.file?.state
   }
 
   private static func assetDuration(for url: URL) async -> TimeInterval {

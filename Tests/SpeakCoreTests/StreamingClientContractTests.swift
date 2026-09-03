@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import XCTest
 
@@ -15,7 +16,7 @@ import XCTest
 /// event shapes and then finishes. No session is started: `finishAndWait()`
 /// must answer with the full transcript on the "socket already gone" path too,
 /// which is exactly what a stop after a dropped connection hits.
-final class StreamingClientContractTests: XCTestCase {
+final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this type_body_length
 
     // MARK: - Deepgram (segment-shaped finals, v1/listen)
 
@@ -337,12 +338,65 @@ final class StreamingClientContractTests: XCTestCase {
         XCTAssertEqual(accumulator.text, "Hello there! Second turn.")
     }
 
+    // MARK: - The trailing final is consumed once, never twice
+
+    /// A final that resolves `finishAndWait()` must not also reach
+    /// `onTranscript`: the return value is the whole session transcript, and a
+    /// consumer that appends every delivered final would otherwise double the
+    /// last utterance. Deepgram has always behaved this way (see
+    /// `parseTranscriptResponse`); Gemini and Meta now match it.
+    func testGemini_trailingFinalConsumedByFinishIsNotAlsoDelivered() async {
+        let client = GeminiLiveClient(apiKey: "k")
+        let observer = TranscriptObserver()
+        client.beginSession(
+            onTranscript: { text, isFinal in observer.record(text: text, isFinal: isFinal) },
+            onError: { _ in }
+        )
+        client.ingest(Self.geminiInterim("Hello th"))
+
+        // The client is not connected, so drive the same waiter the socket path
+        // arms and deliver the trailing final into it.
+        let transcript = await client.waitForTrailingFinal(
+            deadline: Date().addingTimeInterval(2)
+        ) {
+            client.ingest(Self.geminiFinal("Hello there."))
+        }
+
+        XCTAssertEqual(transcript, "Hello there.")
+        XCTAssertEqual(observer.finals, [], "the trailing final must not be doubled")
+    }
+
+    /// Meta's stop used to burn the whole five-second budget because no event
+    /// ever resolved the waiter; the trailing `speechComplete` now ends it.
+    func testMetaMuse_trailingFinalResolvesTheFinishWithoutDoublingIt() async {
+        let client = MetaMuseLiveClient(apiKey: "k")
+        let observer = TranscriptObserver()
+        client.beginSession(
+            onTranscript: { text, isFinal in observer.record(text: text, isFinal: isFinal) },
+            onError: { _ in }
+        )
+        client.ingest(Self.metaSpeechComplete(turnID: 1, "Hello there."))
+
+        let started = Date()
+        let transcript = await client.awaitTrailingFinal(budget: 5) {
+            client.ingest(Self.metaSpeechComplete(turnID: 2, "Goodbye."))
+        }
+
+        XCTAssertEqual(transcript, "Hello there. Goodbye.")
+        XCTAssertEqual(observer.finals, ["Hello there."], "the trailing final must not be doubled")
+        XCTAssertLessThan(
+            Date().timeIntervalSince(started), 2,
+            "the final must resolve the finish rather than the timeout"
+        )
+    }
+
     func testEveryStreamingClient_declaresItsDocumentedFinalShape() {
         // The declaration is the contract consumers fold by; pin each one.
         XCTAssertEqual(DeepgramLiveClient(apiKey: "k", model: "nova-3").finalShape, .standaloneSegments)
         XCTAssertEqual(ElevenLabsLiveClient(apiKey: "k").finalShape, .standaloneSegments)
         XCTAssertEqual(GladiaLiveClient(apiKey: "k").finalShape, .standaloneSegments)
         XCTAssertEqual(GeminiLiveClient(apiKey: "k").finalShape, .standaloneSegments)
+        XCTAssertEqual(MetaMuseLiveClient(apiKey: "k").finalShape, .standaloneSegments)
         XCTAssertEqual(CartesiaLiveClient(apiKey: "k").finalShape, .standaloneSegments)
         XCTAssertEqual(XAILiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
         XCTAssertEqual(SonioxLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
@@ -370,6 +424,37 @@ final class StreamingClientContractTests: XCTestCase {
                 return completion
             }()
             held?(error)
+        }
+    }
+
+    private static func geminiInterim(_ text: String) -> String {
+        #"{"serverContent":{"interimInputTranscription":{"text":"\#(text)"}}}"#
+    }
+
+    private static func geminiFinal(_ text: String) -> String {
+        #"{"serverContent":{"inputTranscription":{"text":"\#(text)"}}}"#
+    }
+
+    private static func metaSpeechComplete(turnID: Int, _ text: String) -> String {
+        #"{"type":"speechComplete","turnId":\#(turnID),"transcript":"\#(text)"}"#
+    }
+
+    /// Collects what a client delivered through `onTranscript`.
+    private final class TranscriptObserver: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedFinals: [String] = []
+
+        var finals: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedFinals
+        }
+
+        func record(text: String, isFinal: Bool) {
+            guard isFinal else { return }
+            lock.lock()
+            defer { lock.unlock() }
+            storedFinals.append(text)
         }
     }
 

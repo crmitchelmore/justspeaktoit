@@ -314,7 +314,16 @@ public final class ConfigTransferManager: Sendable {
 
     /// Non-secret settings keys a transfer payload may carry. Import refuses
     /// anything else so a payload cannot write arbitrary defaults.
-    public static let transferableSettingKeys: Set<String> = ["selectedModel"]
+    ///
+    /// `transcriptionKeywords` is the one keyword list both platforms store
+    /// under that defaults key, so it transfers verbatim.
+    public static let transferableSettingKeys: Set<String> = [
+        "selectedModel",
+        transcriptionKeywordsKey
+    ]
+
+    /// Shared UserDefaults key for the user's transcription keywords.
+    public static let transcriptionKeywordsKey = "transcriptionKeywords"
 
     /// Collects the transferable secrets currently stored in `storage`,
     /// skipping identifiers that are missing or empty.
@@ -349,6 +358,11 @@ public final class ConfigTransferManager: Sendable {
         var settings: [String: String] = [:]
         if let model = defaults.string(forKey: liveModelDefaultsKey) {
             settings["selectedModel"] = model
+        }
+        // Import refuses empty values, and an empty keyword list carries
+        // nothing worth transferring anyway.
+        if let keywords = defaults.string(forKey: Self.transcriptionKeywordsKey), !keywords.isEmpty {
+            settings[Self.transcriptionKeywordsKey] = keywords
         }
         return settings
     }

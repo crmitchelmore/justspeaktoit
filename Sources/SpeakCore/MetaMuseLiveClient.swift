@@ -1,3 +1,6 @@
+// The client owns connection, handshake, reconnect and bounded finalisation
+// alongside the frame decoding, which is what carries it past the file cap.
+// swiftlint:disable file_length
 import Foundation
 import os
 
@@ -58,6 +61,17 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
             onError(MetaMuseError.missingAPIKey)
             return
         }
+        beginSession(onTranscript: onTranscript, onError: onError)
+        connect()
+    }
+
+    /// Arms the callbacks and clears per-recording state without opening a
+    /// socket. `start` is this plus `connect()`; tests pair it with `ingest` to
+    /// drive the receive path offline.
+    func beginSession(
+        onTranscript: @escaping (String, Bool) -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
         withStateLock {
             self.onTranscript = onTranscript
             self.onError = onError
@@ -67,9 +81,16 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
             reconnectAttempt = 0
             accumulated.reset()
             completedTurnIDs = []
+            finishContinuation = nil
         }
         preroll.reset()
-        connect()
+    }
+
+    /// Feeds one raw server frame through the receive path. The WebSocket loop
+    /// is the only production caller; tests drive the client with it instead of
+    /// opening a socket.
+    func ingest(_ text: String) {
+        handle(.string(text))
     }
 
     public func sendAudio(_ audioData: Data) {
@@ -97,12 +118,8 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
             return fullTranscript()
         }
 
-        let result: String? = await withCheckedContinuation { continuation in
-            finishLock.lock()
-            finishContinuation = continuation
-            finishLock.unlock()
-
-            DispatchQueue.global().async { [weak self, weak task] in
+        let result = await awaitTrailingFinal { [weak self, weak task] in
+            DispatchQueue.global().async {
                 guard let self, let task else { return }
                 self.flushPreroll(to: task)
                 _ = self.pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
@@ -112,13 +129,32 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
                     self.resolveFinish()
                 }
             }
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishBudget) { [weak self] in
-                self?.resolveFinish()
-            }
         }
         stop()
         return result
+    }
+
+    /// The bounded wait for the trailing `speechComplete`, resolved either by
+    /// that event (the common case, one round trip) or by the finish budget.
+    ///
+    /// `whenArmed` runs once the waiter is installed, so a caller can put the
+    /// `endStream` frame on the wire without racing its own completion handler;
+    /// tests use it to deliver a final into an armed finish without a socket.
+    func awaitTrailingFinal(
+        budget: TimeInterval = MetaMuseLiveClient.finishBudget,
+        whenArmed: () -> Void = {}
+    ) async -> String? {
+        await withCheckedContinuation { continuation in
+            finishLock.lock()
+            finishContinuation = continuation
+            finishLock.unlock()
+
+            whenArmed()
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + budget) { [weak self] in
+                self?.resolveFinish()
+            }
+        }
     }
 
     public func stop() {
@@ -168,7 +204,9 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
                 self.handleTransportFailure(error, task: task)
             }
         } catch {
-            currentOnError()?(MetaMuseError.invalidResponse)
+            // Keep a specific handshake failure (an unsupported capture rate,
+            // say) legible instead of flattening it to "invalid response".
+            currentOnError()?((error as? MetaMuseError) ?? MetaMuseError.invalidResponse)
             stop()
         }
     }
@@ -186,7 +224,13 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
         }
     }
 
-    // Event dispatch deliberately validates each documented envelope shape.
+    // Dispatches one server frame. Only an explicit `error` envelope tears the
+    // session down: anything the client does not recognise — a non-JSON frame,
+    // a frame with no `type`, a new envelope shape — is ignored, matching
+    // Deepgram and Gemini, because a heartbeat or a field added upstream must
+    // never end a live recording.
+    //
+    // Dispatch deliberately validates each documented envelope shape.
     // swiftlint:disable:next cyclomatic_complexity
     private func handle(_ message: URLSessionWebSocketTask.Message) {
         let data: Data
@@ -196,7 +240,6 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
         @unknown default: return
         }
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            fail(MetaMuseError.invalidResponse)
             return
         }
         if object["type"] == nil, object["sessionId"] is String {
@@ -204,25 +247,35 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
             if let task = currentTask() { flushPreroll(to: task) }
             return
         }
-        guard let event = MetaMuseServerEvent(object: object) else {
-            fail(MetaMuseError.invalidResponse)
-            return
-        }
+        guard let event = MetaMuseServerEvent(object: object) else { return }
         switch event {
         case .transcript(let text):
             currentOnTranscript()?(text, false)
         case .speechComplete(let turnID, let text):
-            let shouldDeliver = withStateLock { () -> Bool in
-                guard completedTurnIDs.insert(turnID).inserted else { return false }
-                accumulated.append(final: text, eventID: String(turnID))
-                return !isFinishing
-            }
-            if shouldDeliver { currentOnTranscript()?(text, true) }
+            handleFinal(turnID: turnID, text: text)
         case .error(let message):
             fail(Self.error(fromServerMessage: message))
         case .lifecycle:
             break
         }
+    }
+
+    /// Folds a completed turn into the session transcript and releases a
+    /// waiting `finishAndWait()` immediately, so a stop costs one round trip
+    /// rather than the whole finish budget.
+    private func handleFinal(turnID: Int, text: String) {
+        let isNewTurn = withStateLock { () -> Bool in
+            guard completedTurnIDs.insert(turnID).inserted else { return false }
+            accumulated.append(final: text, eventID: String(turnID))
+            return true
+        }
+        if resolveFinish() {
+            // Trailing final consumed by finishAndWait(), which returns the
+            // whole transcript; delivering it again through onTranscript would
+            // double it for callers that append.
+            return
+        }
+        if isNewTurn { currentOnTranscript()?(text, true) }
     }
 
     private func handleTransportFailure(_ error: Error, task: URLSessionWebSocketTask) {
@@ -291,6 +344,9 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
         return true
     }
 
+    /// Whether the handshake has completed and the socket is accepting audio.
+    var isSessionConfigured: Bool { withStateLock { isConfigured } }
+
     private var isEnding: Bool { withStateLock { isStopping || isFinishing } }
     private func isCurrent(_ task: URLSessionWebSocketTask) -> Bool {
         withStateLock { webSocketTask === task }
@@ -322,7 +378,7 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
     ) throws -> Data {
         var object: [String: Any] = [
             "authorization": ["accessToken": "Bearer \(apiKey)"],
-            "audioEncoding": sampleRate == 16_000 ? "PCM_16KHZ" : "PCM_24KHZ",
+            "audioEncoding": try audioEncoding(forSampleRate: sampleRate),
             "model": model,
             "mode": MetaMuseMode.endpointing.rawValue,
             "partialMode": "CUMULATIVE",
@@ -332,6 +388,20 @@ public final class MetaMuseLiveClient: FinalizingStreamingTranscriptionClient, @
         if !languageBias.isEmpty { object["languageBias"] = languageBias }
         if !keywords.isEmpty { object["keywords"] = keywords }
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    }
+
+    /// The realtime endpoint documents exactly two PCM encodings. Any other
+    /// capture rate is a configuration error, not something to mislabel as
+    /// 24 kHz — the server would transcribe resampled noise.
+    static func audioEncoding(forSampleRate sampleRate: Int) throws -> String {
+        switch sampleRate {
+        case 16_000: return "PCM_16KHZ"
+        case 24_000: return "PCM_24KHZ"
+        default:
+            throw MetaMuseError.invalidAudio(
+                "Unsupported capture rate \(sampleRate) Hz; Muse Voice realtime accepts 16 kHz or 24 kHz."
+            )
+        }
     }
 
     static func shouldReconnect(

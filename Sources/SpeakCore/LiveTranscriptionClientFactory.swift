@@ -70,6 +70,7 @@ public enum LiveTranscriptionClientFactory {
                 apiKey: apiKey,
                 model: route.apiModelName,
                 language: language,
+                customVocabulary: GeminiTranscribeModels.boundedCustomVocabulary(keywords),
                 sampleRate: route.sampleRate
             )
         case .xai:

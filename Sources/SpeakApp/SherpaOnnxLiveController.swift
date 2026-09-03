@@ -176,6 +176,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     isStopping = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
+    if let writer = stdinPipe?.fileHandleForWriting {
+      audioProcessor.drainConverterTail(to: writer, logger: logger)
+    }
     audioProcessor.setRunning(false)
 
     await applyLiveStopGrace(appSettings.liveStopGracePeriod)
@@ -437,18 +440,36 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
   private final class SherpaOnnxAudioProcessor: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.github.speakapp.sherpa-onnx.audioProcessing")
+    private let copyBufferPool = LivePCMBufferPool(
+      maximumBuffers: 4,
+      tapBufferSize: 4096,
+      label: "sherpa-onnx"
+    )
     private var isRunning = false
-    private var cachedConverter: AVAudioConverter?
-    private var cachedInputFormat: AVAudioFormat?
+    private let converterCache = LiveConverterCache()
     private var reusableOutputBuffer: AVAudioPCMBuffer?
 
     func setRunning(_ running: Bool) {
       queue.sync {
         isRunning = running
         if !running {
-          cachedConverter = nil
-          cachedInputFormat = nil
+          converterCache.reset()
           reusableOutputBuffer = nil
+          copyBufferPool.removeAll()
+        }
+      }
+    }
+
+    /// Flushes the retained resampler's trailing frames to the sidecar before the
+    /// converter is released and stdin is closed (issue #849).
+    func drainConverterTail(to writer: FileHandle, logger: Logger) {
+      queue.sync {
+        guard let tail = converterCache.drainFloat32() else { return }
+        do {
+          try writer.write(contentsOf: tail)
+        } catch {
+          let description = error.localizedDescription
+          logger.error("Failed to write drained audio to sherpa-onnx: \(description, privacy: .public)")
         }
       }
     }
@@ -462,14 +483,16 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
     ) {
       guard let copied = copyPCMBuffer(buffer) else { return }
       queue.async { [weak self] in
-        guard let self, self.isRunning else { return }
+        guard let self else { return }
+        defer { self.copyBufferPool.recycle(copied) }
+        guard self.isRunning else { return }
         self.processAndWriteAudio(copied, from: inputFormat, to: outputFormat, writer: writer, logger: logger)
       }
     }
 
     private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
       let frameLength = buffer.frameLength
-      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+      guard let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
         return nil
       }
       copy.frameLength = frameLength
@@ -490,17 +513,9 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
       writer: FileHandle,
       logger: Logger
     ) {
-      let converter: AVAudioConverter
-      if let cachedConverter, cachedInputFormat == inputFormat {
-        converter = cachedConverter
-      } else {
-        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-          logger.error("Failed to create sherpa-onnx audio converter")
-          return
-        }
-        cachedConverter = newConverter
-        cachedInputFormat = inputFormat
-        converter = newConverter
+      guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+        logger.error("Failed to create sherpa-onnx audio converter")
+        return
       }
 
       let ratio = outputFormat.sampleRate / inputFormat.sampleRate

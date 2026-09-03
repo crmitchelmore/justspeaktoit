@@ -114,6 +114,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     isStopping = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
+    if let client {
+      audioProcessor.drainConverterTail(to: client)
+    }
     audioProcessor.setRunning(false)
 
     if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
@@ -264,22 +267,33 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 /// between chunks.
 private final class SharedClientAudioProcessor: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.speak.app.sharedClient.audioProcessing")
-  private let copyBufferPool = LivePCMBufferPool(maximumBuffers: 4)
+  private let copyBufferPool = LivePCMBufferPool(
+    maximumBuffers: 4,
+    tapBufferSize: 4096,
+    label: "shared-client"
+  )
   private let logger = SpeakLogger.logger(category: "SharedClientLiveController")
   private var isRunning = false
-  private var cachedConverter: AVAudioConverter?
-  private var cachedInputFormat: AVAudioFormat?
+  private let converterCache = LiveConverterCache()
   private var reusableOutputBuffer: AVAudioPCMBuffer?
 
   func setRunning(_ running: Bool) {
     queue.sync {
       isRunning = running
       if !running {
-        cachedConverter = nil
-        cachedInputFormat = nil
+        converterCache.reset()
         reusableOutputBuffer = nil
         copyBufferPool.removeAll()
       }
+    }
+  }
+
+  /// Flushes the retained resampler's trailing frames down the live send path
+  /// before the converter is released (issue #849).
+  func drainConverterTail(to client: StreamingTranscriptionClient) {
+    queue.sync {
+      guard let tail = converterCache.drainPCM16() else { return }
+      client.sendAudio(tail)
     }
   }
 
@@ -327,17 +341,9 @@ private final class SharedClientAudioProcessor: @unchecked Sendable {
     to outputFormat: AVAudioFormat,
     client: StreamingTranscriptionClient
   ) {
-    let converter: AVAudioConverter
-    if let cached = cachedConverter, cachedInputFormat == inputFormat {
-      converter = cached
-    } else {
-      guard let created = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-        logger.error("Failed to create audio converter")
-        return
-      }
-      cachedConverter = created
-      cachedInputFormat = inputFormat
-      converter = created
+    guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+      logger.error("Failed to create audio converter")
+      return
     }
 
     let ratio = outputFormat.sampleRate / inputFormat.sampleRate
@@ -354,11 +360,8 @@ private final class SharedClientAudioProcessor: @unchecked Sendable {
       output = created
     }
 
-    // NOTE: We deliberately do NOT call converter.reset() between chunks —
-    // doing so wipes the resampler's filter history and priming/trailing
-    // frames, which audibly clicks at chunk boundaries and pays the
-    // re-priming cost on every chunk. The converter is only created once
-    // per inputFormat, so its state is the *correct* thing to preserve.
+    // No `converter.reset()` between chunks: `LiveConverterCache` owns the
+    // retained converter and its end-of-stream drain (see issue #849).
     var conversionError: NSError?
     var didProvideInput = false
     let status = converter.convert(to: output, error: &conversionError) { _, outStatus in

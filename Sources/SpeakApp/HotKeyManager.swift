@@ -278,9 +278,15 @@ final class HotKeyManager: ObservableObject {
 	}
 
 	private func handleKeyboardShortcuts(event: NSEvent, scope: ShortcutScope) {
+		// Exact match, not `contains`: `contains` made ⌘R fire on ⌃⌘R and ⇧⌘R too. Escape
+		// opts out and matches whatever is held — see `ignoresModifiers`.
+		let pressedModifiers = event.modifierFlags.intersection(KeyboardShortcut.trackedModifiers)
 		for (shortcut, handlers) in shortcutListeners {
 			guard scope == .local || shortcut.deliveredGlobally else { continue }
-			let modifiersMatch = event.modifierFlags.contains(shortcut.requiredModifiers)
+			let modifiersMatch =
+				shortcut.ignoresModifiers
+				|| pressedModifiers
+					== shortcut.requiredModifiers.intersection(KeyboardShortcut.trackedModifiers)
 			let keyCodeMatch = event.keyCode == shortcut.keyCode
 			if modifiersMatch && keyCodeMatch {
 				log.debug("Firing keyboard shortcut: \(String(describing: shortcut))")

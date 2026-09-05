@@ -12,7 +12,7 @@ public enum VoiceOutputProvider: String, CaseIterable, Codable, Hashable, Identi
 
     public var displayName: String {
         switch self {
-        case .deepgram: "Deepgram Aura"
+        case .deepgram: "Deepgram"
         case .soniox: "Soniox"
         }
     }

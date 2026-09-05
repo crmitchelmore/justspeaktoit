@@ -94,7 +94,7 @@ public final class OpenClawSettings: ObservableObject {
         switch ttsProvider {
         case .deepgram:
             let incompatibleVoice = ttsVoice.hasPrefix("soniox/") ? nil : ttsVoice
-            let selection = DeepgramTTSCatalog.resolvedSelection(modelID: ttsModel, voiceID: incompatibleVoice)
+            let selection = DeepgramSpeechCatalog.resolvedSelection(modelID: ttsModel, voiceID: incompatibleVoice)
             if ttsModel != selection.model.id { ttsModel = selection.model.id }
             if ttsVoice != selection.voice.id { ttsVoice = selection.voice.id }
             ttsVoiceName = selection.voice.displayName
@@ -139,7 +139,7 @@ public final class OpenClawSettings: ObservableObject {
                 ).providerVoiceID
             }
         } else {
-            let selection = DeepgramTTSCatalog.resolvedSelection(modelID: storedModel, voiceID: storedVoice)
+            let selection = DeepgramSpeechCatalog.resolvedSelection(modelID: storedModel, voiceID: storedVoice)
             resolvedVoice = selection.voice.id
             resolvedModel = selection.model.id
         }

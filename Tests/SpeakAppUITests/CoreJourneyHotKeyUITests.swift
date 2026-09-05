@@ -28,7 +28,8 @@ final class CoreJourneyHotKeyUITests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
         let diagnosticsURL = directory.appendingPathComponent("hotkey-probe.json")
         let app = XCUIApplication(bundleIdentifier: "com.justspeaktoit.mac")
-        let fixture = XCUIApplication(bundleIdentifier: "com.justspeaktoit.core-journey-fixture")
+        let fixtureBundleID = "com.justspeaktoit.core-journey-fixture"
+        let fixture = XCUIApplication(bundleIdentifier: fixtureBundleID)
         app.launchEnvironment["SPEAK_CORE_JOURNEY_PROFILE"] = identifier.uuidString
         app.launchEnvironment["SPEAK_CORE_JOURNEY_HOTKEY_PROBE"] = "1"
         app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
@@ -51,7 +52,7 @@ final class CoreJourneyHotKeyUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
 
         for count in 1...2 {
-            XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, fixture.bundleIdentifier)
+            XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, fixtureBundleID)
             // XCTest synthesizes actual keyboard input in the foreground target.
             // Speak receives RegisterEventHotKey events while it is in background.
             fixture.typeKey("k", modifierFlags: [.control, .option, .shift])
@@ -65,7 +66,7 @@ final class CoreJourneyHotKeyUITests: XCTestCase {
         XCTAssertTrue(snapshot.registered)
         XCTAssertEqual(snapshot.events.map(\.stage), ["keyDown", "keyUp", "singleTap", "keyDown", "keyUp", "singleTap"])
         XCTAssertEqual(snapshot.events.filter { $0.stage == "singleTap" }.map(\.source), ["carbon", "carbon"])
-        XCTAssertTrue(snapshot.events.allSatisfy { $0.frontmostBundleID == fixture.bundleIdentifier })
+        XCTAssertTrue(snapshot.events.allSatisfy { $0.frontmostBundleID == fixtureBundleID })
         XCTAssertFalse(process.isTerminated)
         XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
         XCTAssertEqual(target.value as? String, "hotkey probe target")

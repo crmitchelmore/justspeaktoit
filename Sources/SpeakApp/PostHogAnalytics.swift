@@ -57,10 +57,15 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
   private let queueURL: URL
   private let session: URLSession
   private let now: @Sendable () -> Date
+  private let requestDeadline: Duration
+  private let retryDelays: [Duration]
   private var queue: [QueuedEvent] = []
   private var isOpen = false
   private var activeFlushID: UUID?
-  private var activeRequest: Task<(Data, URLResponse), Error>?
+  private var activeRequest: Task<URLResponse, Error>?
+  private var retryTask: Task<Void, Never>?
+  private var retryID: UUID?
+  private var retryAttempt = 0
 
   nonisolated static var isConfigured: Bool { Configuration.resolve() != nil }
 
@@ -68,11 +73,15 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     queueURL: URL,
     session: URLSession = .shared,
     configuration: (projectKey: String, endpoint: URL)? = nil,
-    now: @escaping @Sendable () -> Date = { Date() }
+    now: @escaping @Sendable () -> Date = { Date() },
+    requestDeadline: Duration = .seconds(15),
+    retryDelays: [Duration] = [.seconds(1), .seconds(5), .seconds(30)]
   ) {
     self.queueURL = queueURL
     self.session = session
     self.now = now
+    self.requestDeadline = requestDeadline
+    self.retryDelays = retryDelays
     self.configuration = configuration.map {
       Configuration(projectKey: $0.projectKey, endpoint: $0.endpoint)
     }
@@ -81,6 +90,8 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
   }
 
   func reopen() async throws {
+    cancelRetry()
+    retryAttempt = 0
     pruneQueue()
     try persistQueue()
     isOpen = true
@@ -110,10 +121,32 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     activeFlushID = nil
     activeRequest?.cancel()
     activeRequest = nil
+    cancelRetry()
+  }
+
+  private func cancelRetry() {
+    retryID = nil
+    retryTask?.cancel()
+    retryTask = nil
+  }
+
+  private func scheduleRetry() {
+    guard isOpen, !queue.isEmpty, retryTask == nil, retryAttempt < retryDelays.count else { return }
+    let delay = retryDelays[retryAttempt]
+    retryAttempt += 1
+    let scheduledID = UUID()
+    retryID = scheduledID
+    retryTask = Task {
+      do { try await Task.sleep(for: delay) } catch { return }
+      guard isOpen, retryID == scheduledID else { return }
+      retryID = nil
+      retryTask = nil
+      try? await flush()
+    }
   }
 
   private func flush() async throws {
-    guard isOpen, let configuration, activeFlushID == nil else { return }
+    guard isOpen, let configuration, activeFlushID == nil, retryTask == nil else { return }
     let flushID = UUID()
     activeFlushID = flushID
     defer {
@@ -125,32 +158,27 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     while isOpen, activeFlushID == flushID {
       pruneQueue()
       try persistQueue()
-      guard let next = queue.first else { return }
-      var properties = next.properties.mapValues(\.foundationValue)
-      properties["distinct_id"] = next.distinctID
-      properties["$lib"] = "just-speak-to-it"
-      properties["$lib_version"] = "1"
-      properties["timestamp"] = ISO8601DateFormatter().string(from: next.createdAt)
-      let body: [String: Any] = [
-        "api_key": configuration.projectKey,
-        "event": next.event,
-        "properties": properties
-      ]
-      var request = URLRequest(url: configuration.endpoint)
-      request.httpMethod = "POST"
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-      request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-      let requestTask = Task { [session, request] in
-        try Task.checkCancellation()
-        return try await session.data(for: request)
+      guard let next = queue.first else {
+        retryAttempt = 0
+        return
       }
-      activeRequest = requestTask
-      let (_, response) = try await requestTask.value
+      let request = try makeRequest(event: next, configuration: configuration)
+      let response: URLResponse
+      do {
+        response = try await deliver(request)
+      } catch {
+        if activeFlushID == flushID, Self.isRetryable(error) { scheduleRetry() }
+        throw error
+      }
       // An opt-out can purge the queue and a later opt-in can start a new flush
       // while the cancelled request is finishing. Its response owns neither queue.
       guard isOpen, activeFlushID == flushID else { return }
       activeRequest = nil
       guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
+        if let http = response as? HTTPURLResponse,
+           http.statusCode == 408 || http.statusCode == 429 || (500 ..< 600).contains(http.statusCode) {
+          scheduleRetry()
+        }
         throw URLError(.badServerResponse)
       }
       // A concurrent capture may have evicted this entry at the queue cap.
@@ -159,11 +187,72 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     }
   }
 
-  private func pruneQueue() {
+}
+
+private extension PostHogProductAnalyticsSink {
+  func makeRequest(event: QueuedEvent, configuration: Configuration) throws -> URLRequest {
+    var properties = event.properties.mapValues(\.foundationValue)
+    properties["distinct_id"] = event.distinctID
+    properties["$lib"] = "just-speak-to-it"
+    properties["$lib_version"] = "1"
+    properties["timestamp"] = ISO8601DateFormatter().string(from: event.createdAt)
+    let body: [String: Any] = [
+      "api_key": configuration.projectKey,
+      "event": event.event,
+      "properties": properties
+    ]
+    var request = URLRequest(url: configuration.endpoint)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    return request
+  }
+
+  func deliver(_ request: URLRequest) async throws -> URLResponse {
+    let requestTask = Task { [session, request] in
+      try Task.checkCancellation()
+      let (bytes, response) = try await session.bytes(for: request)
+      let networkTask = bytes.task
+      defer { networkTask.cancel() }
+      return try await withTaskCancellationHandler {
+        var byteCount = 0
+        for try await _ in bytes {
+          try Task.checkCancellation()
+          byteCount += 1
+          guard byteCount <= 16_384 else { throw URLError(.dataLengthExceedsMaximum) }
+        }
+        return response
+      } onCancel: {
+        // Cancellation must wake a suspended iterator even if no next byte arrives.
+        networkTask.cancel()
+      }
+    }
+    activeRequest = requestTask
+    let deadlineTask = Task { [requestDeadline] in
+      do { try await Task.sleep(for: requestDeadline) } catch { return }
+      requestTask.cancel()
+    }
+    defer { deadlineTask.cancel() }
+    return try await requestTask.value
+  }
+
+  static func isRetryable(_ error: Error) -> Bool {
+    if error is CancellationError { return true }
+    guard let error = error as? URLError else { return false }
+    switch error.code {
+    case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+         .dnsLookupFailed, .notConnectedToInternet, .cancelled:
+      return true
+    default:
+      return false
+    }
+  }
+
+  func pruneQueue() {
     queue = Self.pruned(queue, now: now())
   }
 
-  private func persistQueue() throws {
+  func persistQueue() throws {
     if queue.isEmpty {
       if FileManager.default.fileExists(atPath: queueURL.path) {
         try FileManager.default.removeItem(at: queueURL)
@@ -180,14 +269,14 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
     )
   }
 
-  private static func loadQueue(from url: URL) -> [QueuedEvent] {
+  static func loadQueue(from url: URL) -> [QueuedEvent] {
     guard let data = try? Data(contentsOf: url),
           let events = try? JSONDecoder().decode([QueuedEvent].self, from: data)
     else { return [] }
     return events
   }
 
-  private static func pruned(_ events: [QueuedEvent], now: Date = Date()) -> [QueuedEvent] {
+  static func pruned(_ events: [QueuedEvent], now: Date = Date()) -> [QueuedEvent] {
     let cutoff = now.addingTimeInterval(-7 * 24 * 60 * 60)
     return Array(events.filter { $0.createdAt >= cutoff }.suffix(1_000))
   }

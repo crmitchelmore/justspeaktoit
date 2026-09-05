@@ -623,7 +623,7 @@ enum WireUp {
     // Construct production managers and UI, but never preload credentials,
     // sync accounts, open listeners, or install voice-edit capture in this check.
     if let profile = CoreJourneyLaunchProfile.current {
-      profile.startHotKeyProbe(manager: environment.hotKeys)
+        profile.startHotKeyProbe(manager: environment.hotKeys)
       logger.info("AppEnvironment.bootstrap complete (isolated UI launch profile)")
       return
     }

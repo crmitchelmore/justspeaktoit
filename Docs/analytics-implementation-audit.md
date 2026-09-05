@@ -67,6 +67,16 @@ expiry while the process remains alive, and oldest-first legacy queue-cap
 enforcement. Existing typed/scalar tests remain applicable. Apple Swift CI must
 run these tests; they were not executed in the Linux audit environment.
 
+The follow-up delivery audit adds a 15-second total request deadline and a
+16 KiB response limit. Transient network failures, HTTP 408/429 and HTTP 5xx
+schedule at most three automatic retries (after 1, 5 and 30 seconds), including
+events accepted during a failed in-flight flush. Permanent rejections and
+oversized responses do not automatically retry. Exhaustion keeps the bounded
+queue on disk; close and withdrawal cancel scheduled retries. New delivery
+tests exercise recovery, stalled/oversized responses, exhaustion, revoked-key
+responses and withdrawal during backoff. These safeguards do not establish the
+outstanding production network or kill-switch audit evidence.
+
 The next engineering step is to validate the consent lifecycle and local kill
 switch, then implement the exact-payload release inspector without expanding
 the collected catalogue. Before enabling or widening production, record the

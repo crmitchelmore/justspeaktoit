@@ -5,7 +5,7 @@ import XCTest
 
 final class PostHogAnalyticsTests: XCTestCase {
   func testCaptureIsSilentUntilSinkIsReopenedAfterConsent() async throws {
-    let recorder = RequestRecorder()
+    let recorder = AnalyticsRequestRecorder()
     let sink = makeSink(recorder: recorder)
 
     try await sink.capture(makePayload())
@@ -14,7 +14,7 @@ final class PostHogAnalyticsTests: XCTestCase {
   }
 
   func testOptedInCaptureUsesOnlyAuditedPostHogCaptureEndpoint() async throws {
-    let recorder = RequestRecorder()
+    let recorder = AnalyticsRequestRecorder()
     let sink = makeSink(recorder: recorder)
     try await sink.reopen()
 
@@ -35,7 +35,7 @@ final class PostHogAnalyticsTests: XCTestCase {
   }
 
   func testCapturePreservesNativeScalarPropertyTypes() async throws {
-    let recorder = RequestRecorder()
+    let recorder = AnalyticsRequestRecorder()
     let sink = makeSink(recorder: recorder)
     try await sink.reopen()
     let payload = ProductAnalyticsPayload(
@@ -64,7 +64,7 @@ final class PostHogAnalyticsTests: XCTestCase {
 
   func testPurgeDeletesQueuedEventsAfterWithdrawal() async throws {
     let queueURL = temporaryQueueURL()
-    let recorder = RequestRecorder(statusCode: 500)
+    let recorder = AnalyticsRequestRecorder(statusCode: 500)
     let sink = makeSink(queueURL: queueURL, recorder: recorder)
     try? await sink.reopen()
     try? await sink.capture(makePayload())
@@ -75,9 +75,9 @@ final class PostHogAnalyticsTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: queueURL.path))
   }
 
-  func testConcurrentCaptureUsesOneFlushAndSendsEachEntryOnce() async throws {
+  func testConcurrentCapture_UsesOneFlushAndSendsEachEntryOnce() async throws {
     let started = expectation(description: "First request is in flight")
-    let recorder = RequestRecorder(holdResponses: true) { count in
+    let recorder = AnalyticsRequestRecorder(holdResponses: true) { count in
       if count == 1 { started.fulfill() }
     }
     let queueURL = temporaryQueueURL()
@@ -101,10 +101,10 @@ final class PostHogAnalyticsTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: queueURL.path))
   }
 
-  func testPurgeCancelsInFlightFlushAndCannotRemoveANewConsentQueuesEntry() async throws {
+  func testPurge_CancelsInFlightFlushAndPreservesNewConsentQueue() async throws {
     let started = expectation(description: "Request is in flight")
     let restarted = expectation(description: "New consent starts a fresh request")
-    let recorder = RequestRecorder(holdResponses: true) { count in
+    let recorder = AnalyticsRequestRecorder(holdResponses: true) { count in
       if count == 1 { started.fulfill() }
       if count == 2 { restarted.fulfill() }
     }
@@ -130,11 +130,11 @@ final class PostHogAnalyticsTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: queueURL.path))
   }
 
-  func testReopenPrunesExpiredLegacyQueueBeforeSendingAndPersistsTheResult() async throws {
-    let clock = TestClock(Date())
+  func testReopen_PrunesExpiredLegacyQueueBeforeSendingAndPersistsTheResult() async throws {
+    let clock = AnalyticsTestClock(Date())
     let queueURL = temporaryQueueURL()
     try writeLegacyQueue(count: 1, createdAt: clock.now, to: queueURL)
-    let recorder = RequestRecorder()
+    let recorder = AnalyticsRequestRecorder()
     let sink = makeSink(queueURL: queueURL, recorder: recorder, now: { clock.now })
     clock.advance(by: 8 * 24 * 60 * 60)
 
@@ -144,10 +144,10 @@ final class PostHogAnalyticsTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: queueURL.path))
   }
 
-  func testReopenPersistsThousandEventCapWithOldestFirstEviction() async throws {
+  func testReopen_PersistsThousandEventCapWithOldestFirstEviction() async throws {
     let queueURL = temporaryQueueURL()
     try writeLegacyQueue(count: 1_001, createdAt: Date(), to: queueURL)
-    let recorder = RequestRecorder(statusCode: 500)
+    let recorder = AnalyticsRequestRecorder(statusCode: 500)
     let sink = makeSink(queueURL: queueURL, recorder: recorder)
 
     do {
@@ -176,12 +176,12 @@ final class PostHogAnalyticsTests: XCTestCase {
 
   private func makeSink(
     queueURL: URL? = nil,
-    recorder: RequestRecorder,
+    recorder: AnalyticsRequestRecorder,
     now: @escaping @Sendable () -> Date = { Date() }
   ) -> PostHogProductAnalyticsSink {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [RecordingURLProtocol.self]
-    RecordingURLProtocol.recorder = recorder
+    configuration.protocolClasses = [AnalyticsRecordingURLProtocol.self]
+    AnalyticsRecordingURLProtocol.recorder = recorder
     return PostHogProductAnalyticsSink(
       queueURL: queueURL ?? temporaryQueueURL(),
       session: URLSession(configuration: configuration),
@@ -189,7 +189,8 @@ final class PostHogAnalyticsTests: XCTestCase {
         projectKey: "phc_test",
         endpoint: URL(string: "https://eu.i.posthog.com/capture")!
       ),
-      now: now
+      now: now,
+      retryDelays: []
     )
   }
 
@@ -216,94 +217,4 @@ final class PostHogAnalyticsTests: XCTestCase {
   }
 }
 
-private final class RequestRecorder: @unchecked Sendable {
-  private let lock = NSLock()
-  private var storedRequests: [URLRequest] = []
-  private var heldResponses: [() -> Void] = []
-  private var holdResponses: Bool
-  private let onRequest: (Int) -> Void
-  let statusCode: Int
-
-  init(statusCode: Int = 200, holdResponses: Bool = false, onRequest: @escaping (Int) -> Void = { _ in }) {
-    self.statusCode = statusCode
-    self.holdResponses = holdResponses
-    self.onRequest = onRequest
-  }
-  var requests: [URLRequest] { lock.withLock { storedRequests } }
-
-  func append(_ request: URLRequest, respond: @escaping () -> Void) {
-    let (count, shouldRespond) = lock.withLock {
-      storedRequests.append(request)
-      if holdResponses { heldResponses.append(respond) }
-      return (storedRequests.count, !holdResponses)
-    }
-    onRequest(count)
-    if shouldRespond { respond() }
-  }
-
-  func releaseResponses() {
-    let responses = lock.withLock {
-      holdResponses = false
-      let responses = heldResponses
-      heldResponses.removeAll()
-      return responses
-    }
-    responses.forEach { $0() }
-  }
-}
-
-private final class TestClock: @unchecked Sendable {
-  private let lock = NSLock()
-  private var date: Date
-
-  init(_ date: Date) { self.date = date }
-  var now: Date { lock.withLock { date } }
-  func advance(by interval: TimeInterval) { lock.withLock { date.addTimeInterval(interval) } }
-}
-
-private final class RecordingURLProtocol: URLProtocol {
-  nonisolated(unsafe) static var recorder: RequestRecorder?
-  private let responseLock = NSRecursiveLock()
-  private var stopped = false
-
-  override static func canInit(with _: URLRequest) -> Bool { true }
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-  override func startLoading() {
-    guard let recorder = Self.recorder, let url = request.url else { return }
-    var recordedRequest = request
-    if recordedRequest.httpBody == nil, let stream = recordedRequest.httpBodyStream {
-      stream.open()
-      defer { stream.close() }
-      var data = Data()
-      var buffer = [UInt8](repeating: 0, count: 4_096)
-      while stream.hasBytesAvailable {
-        let count = stream.read(&buffer, maxLength: buffer.count)
-        guard count > 0 else { break }
-        data.append(buffer, count: count)
-      }
-      recordedRequest.httpBody = data
-    }
-    let response = HTTPURLResponse(
-      url: url,
-      statusCode: recorder.statusCode,
-      httpVersion: "HTTP/1.1",
-      headerFields: nil
-    )!
-    recorder.append(recordedRequest) { [self] in
-      responseLock.lock()
-      defer { responseLock.unlock() }
-      guard !stopped else { return }
-      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-      client?.urlProtocol(self, didLoad: Data())
-      client?.urlProtocolDidFinishLoading(self)
-    }
-  }
-
-  override func stopLoading() {
-    responseLock.lock()
-    defer { responseLock.unlock() }
-    stopped = true
-  }
-}
 #endif

@@ -182,7 +182,7 @@ final class TextToSpeechManager: ObservableObject {
   func estimatedCost(text: String, voice: String? = nil) -> Decimal? {
     let effectiveVoice = voice ?? appSettings.defaultTTSVoice
     return TTSProvider.from(voiceID: effectiveVoice)
-      .estimatedCost(characterCount: text.count, quality: appSettings.ttsQuality)
+      .estimatedCost(characterCount: text.count, quality: appSettings.ttsQuality, voiceID: effectiveVoice)
   }
 
   func totalCostThisMonth() -> Decimal {

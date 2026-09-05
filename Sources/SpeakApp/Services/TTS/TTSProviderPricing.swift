@@ -7,8 +7,9 @@ import SpeakCore
 /// rate changes are a one-file edit rather than a hunt through the manager.
 extension TTSProvider {
   /// Estimated spend for `characterCount` characters, or `nil` when synthesis
-  /// is free. `quality` only affects providers that price per model tier.
-  func estimatedCost(characterCount: Int, quality: TTSQuality) -> Decimal? {
+  /// is free or the selected model rate is unknown.
+  func estimatedCost(characterCount: Int, quality: TTSQuality, voiceID: String? = nil) -> Decimal? {
+    if self == .deepgram, voiceID?.hasPrefix("deepgram/flux-") == true { return nil }
     guard let rate = costPerThousandCharacters(quality: quality) else { return nil }
     return Decimal(characterCount) * rate / 1000
   }

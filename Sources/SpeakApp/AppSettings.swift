@@ -337,6 +337,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case recordingSoundVolume
     case assemblyAIKeyterms
     case transcriptionKeywords
+    case transcriptionKeywordsLastReconciled
     case assemblyAIIgnoredPronunciationTerms
     case modulateSpeakerDiarization
     case modulateEmotionSignal
@@ -562,6 +563,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if transcriptionKeywords != assemblyAIKeyterms {
         transcriptionKeywords = assemblyAIKeyterms
       }
+      store(assemblyAIKeyterms, key: .transcriptionKeywordsLastReconciled)
     }
   }
 
@@ -571,6 +573,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if assemblyAIKeyterms != transcriptionKeywords {
         assemblyAIKeyterms = transcriptionKeywords
       }
+      store(transcriptionKeywords, key: .transcriptionKeywordsLastReconciled)
     }
   }
 
@@ -1115,13 +1118,27 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     )
     postProcessingTemperature =
       defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
-    // One list, two keys: whichever side an existing install wrote is the
-    // seed, so upgrading from either platform's spelling keeps the words.
+    // Neither key has an edit timestamp. Preserve both lists on conflict,
+    // with canonical entries first, instead of guessing which edit is newer.
     let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
     let storedKeyterms = defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
-    let keywords = storedKeywords.isEmpty ? storedKeyterms : storedKeywords
+    let lastReconciled = defaults.string(forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
+    let keywords = Self.mergedTranscriptionKeywords(
+      canonical: storedKeywords, legacy: storedKeyterms, lastReconciled: lastReconciled
+    )
     assemblyAIKeyterms = keywords
     transcriptionKeywords = keywords
+    // Initial assignments do not invoke didSet. Persist the reconciliation
+    // explicitly so the next launch cannot resurrect an old conflicting list.
+    if storedKeywords != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.transcriptionKeywords.rawValue)
+    }
+    if storedKeyterms != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.assemblyAIKeyterms.rawValue)
+    }
+    if lastReconciled != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
+    }
     assemblyAIIgnoredPronunciationTerms =
       defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
     modulateSpeakerDiarizationEnabled =
@@ -1360,6 +1377,25 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   func applyAppVisibility() {
     let policy: NSApplication.ActivationPolicy = appVisibility.showInDock ? .regular : .accessory
     NSApplication.shared.setActivationPolicy(policy)
+  }
+
+  private static func mergedTranscriptionKeywords(
+    canonical: String, legacy: String, lastReconciled: String?
+  ) -> String {
+    if canonical == legacy { return canonical }
+    // After a downgrade or a write from another platform, an unchanged mirror
+    // must not override a deliberate edit (including clearing) on the other side.
+    if let lastReconciled {
+      if canonical == lastReconciled { return legacy }
+      if legacy == lastReconciled { return canonical }
+    }
+    if canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return legacy }
+    if legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return canonical }
+    var seen: Set<String> = []
+    return (canonical + "," + legacy).components(separatedBy: ",")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty && seen.insert($0).inserted }
+      .joined(separator: ", ")
   }
 
   private static func normalizedBatchModel(_ identifier: String?) -> String {

@@ -42,6 +42,25 @@ final class RecordingLibraryListingTests: XCTestCase {
     XCTAssertEqual(recordings.map(\.url), [recording])
   }
 
+  func testCleanupSnapshot_excludesCaptureEvenIfItStopsBeforeDeletion() throws {
+    let directory = try temporaryDirectory()
+    let activeRecording = directory.appendingPathComponent("Recording-active.m4a")
+    let savedRecording = directory.appendingPathComponent("Recording-saved.m4a")
+    for file in [activeRecording, savedRecording] {
+      try Data([0x01]).write(to: file)
+    }
+
+    let snapshot = AudioFileManager.listRecordings(in: directory, excluding: activeRecording)
+    // Even if capture finishes now, deletion must only consider the saved files
+    // that were eligible when the snapshot was made.
+    for recording in snapshot {
+      try FileManager.default.removeItem(at: recording.url)
+    }
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: activeRecording.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: savedRecording.path))
+  }
+
   private func temporaryDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -618,14 +618,18 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   /// neither cleanup caller needs to open or decode the user's audio files.
   func listRecordings() async -> [RecordingSummary] {
     let directory = await MainActor.run { appSettings.recordingsDirectory }
-    // Directory walks can take time on external disks and large libraries. Keep
-    // them off the recorder actor so capture start/stop need not wait behind one.
-    return await Task.detached(priority: .utility) {
-      Self.listRecordings(in: directory)
-    }.value
+    // A start reserves ownership across awaits before currentRecordingURL is set
+    // (including claiming a warm file). Never snapshot that unfinished capture.
+    guard !isStartingRecording else { return [] }
+    // Keep the metadata walk on this actor: without a suspension, a new capture
+    // cannot enter the deletion snapshot halfway through enumeration. This also
+    // avoids accumulating detached walks against a slow or unavailable volume.
+    return Self.listRecordings(in: directory, excluding: currentRecordingURL)
   }
 
-  nonisolated static func listRecordings(in directory: URL) -> [RecordingSummary] {
+  nonisolated static func listRecordings(
+    in directory: URL, excluding activeRecordingURL: URL? = nil
+  ) -> [RecordingSummary] {
     guard
       let enumerator = FileManager.default.enumerator(
         at: directory,
@@ -642,7 +646,9 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     var summaries: [RecordingSummary] = []
     while let next = enumerator.nextObject() as? URL {
       let url = next
-      guard allowedExtensions.contains(url.pathExtension.lowercased()) else { continue }
+      guard allowedExtensions.contains(url.pathExtension.lowercased()),
+        url.standardizedFileURL != activeRecordingURL?.standardizedFileURL
+      else { continue }
       do {
         let resource = try url.resourceValues(forKeys: [.creationDateKey, .fileSizeKey, .isRegularFileKey])
         guard resource.isRegularFile == true else { continue }
@@ -669,9 +675,11 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   }
 
   func removeRecording(at url: URL) {
-    // A recording can begin while the detached library scan is still running.
-    // Recheck ownership on the actor immediately before deleting a listed file.
-    guard currentRecordingURL?.standardizedFileURL != url.standardizedFileURL else { return }
+    // Capture can start between snapshot creation and this call. Reserve the
+    // entire startup interval, including a claimed warm file awaiting device setup.
+    guard !isStartingRecording,
+      currentRecordingURL?.standardizedFileURL != url.standardizedFileURL
+    else { return }
     try? FileManager.default.removeItem(at: url)
   }
 

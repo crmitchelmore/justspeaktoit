@@ -29,6 +29,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   /// re-created in start() once the client is known.
   private var accumulated = TranscriptAccumulator(shape: .cumulativeTranscript)
   private var isStopping = false
+  private var isStarting = false
   private let audioProcessor = SharedClientAudioProcessor()
 
   init(
@@ -50,8 +51,13 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 
   // swiftlint:disable:next function_body_length
   func start() async throws {
-    guard !isRunning else { return }
-    guard (await permissionsManager.ensureGranted(.microphone)).isGranted else {
+    guard !isRunning, !isStarting else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+    isStarting = true
+    defer { isStarting = false }
+    try Task.checkCancellation()
+    let permission = await permissionsManager.ensureGranted(.microphone)
+    try Task.checkCancellation()
+    guard permission.isGranted else {
       throw TranscriptionManagerError.microphonePermissionMissing
     }
     guard let model = currentModel,
@@ -61,6 +67,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     }
 
     let apiKey = try await loadAPIKey(identifier: keyIdentifier)
+    try Task.checkCancellation()
     guard let client = LiveTranscriptionClientFactory.makeClient(
       for: route,
       apiKey: apiKey,
@@ -80,6 +87,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     self.client = client
 
     do {
+      // A preferred-input session may have been acquired while cancellation
+      // was pending; from here every exit must release it through cleanup.
+      try Task.checkCancellation()
       client.start(
         onTranscript: { [weak self, weak client] text, isFinal in
           Task { @MainActor [weak self, weak client] in
@@ -101,6 +111,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       )
       try installAudioTap(route: route, client: client)
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      try Task.checkCancellation()
       startedAt = Date()
       isRunning = true
     } catch {

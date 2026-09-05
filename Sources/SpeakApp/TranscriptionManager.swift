@@ -22,6 +22,7 @@ func applyLiveStopGrace(_ period: TimeInterval) async {
 
 enum TranscriptionManagerError: LocalizedError, Equatable {
   case liveSessionAlreadyRunning
+  case liveSessionAlreadyStopping
   case liveSessionNotRunning
   case recognizerUnavailable
   case permissionsMissing
@@ -35,6 +36,8 @@ enum TranscriptionManagerError: LocalizedError, Equatable {
     switch self {
     case .liveSessionAlreadyRunning:
       return "A live transcription session is already running."
+    case .liveSessionAlreadyStopping:
+      return "A live transcription session is already stopping."
     case .liveSessionNotRunning:
       return "No live transcription session is currently running."
     case .recognizerUnavailable:
@@ -132,6 +135,9 @@ final class TranscriptionManager: ObservableObject {
 
   private var continuation: CheckedContinuation<TranscriptionResult, Error>?
   private var pendingError: Error?
+  private var startupGeneration: UUID?
+  private var startupTask: Task<Void, Error>?
+  private var cancelledStartupGeneration: UUID?
   /// Monotonic token identifying the current stop request. The safety timeout
   /// captures the value at spawn time and only fires if it still matches, so a
   /// stale timeout from an earlier session can never resume a later session's
@@ -145,14 +151,16 @@ final class TranscriptionManager: ObservableObject {
     audioDeviceManager: AudioInputDeviceManager,
     batchClient: BatchTranscriptionClient,
     openRouter: OpenRouterAPIClient,
-    secureStorage: SecureAppStorage
+    secureStorage: SecureAppStorage,
+    controllerOverride: ((String) -> any LiveTranscriptionController)? = nil
   ) {
     self.appSettings = appSettings
     self.liveController = SwitchingLiveTranscriber(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
       audioDeviceManager: audioDeviceManager,
-      secureStorage: secureStorage
+      secureStorage: secureStorage,
+      controllerOverride: controllerOverride
     )
     self.batchClient = batchClient
     self.openRouter = openRouter
@@ -179,31 +187,59 @@ final class TranscriptionManager: ObservableObject {
     preRollBuffers: [AVAudioPCMBuffer],
     analyzerFallbackAllowed: Bool = true
   ) async throws {
-    guard !isLiveTranscribing else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+    guard !isLiveTranscribing, startupGeneration == nil else {
+      throw TranscriptionManagerError.liveSessionAlreadyRunning
+    }
     let model = try liveTranscriptionModelForCurrentMode()
     let language = appSettings.preferredModelLanguage
+    let generation = UUID()
+    startupGeneration = generation
+    defer {
+      self.startupTask = nil
+      self.startupGeneration = nil
+      self.cancelledStartupGeneration = nil
+    }
     logger.info("startLiveTranscription - model: \(model), language: \(language ?? "automatic")")
     // Opened before the controller starts: the first partial can arrive while
     // `start()` is still awaiting, and it must land in the new session.
+    pendingError = nil
     beginLiveTranscriptDisplaySession()
     liveController.configure(
       language: language,
       model: model
     )
-    do {
-      try await liveController.start(
+    let startupTask = Task { @MainActor in
+      try Task.checkCancellation()
+      try await self.liveController.start(
         preRollBuffers: preRollBuffers,
         analyzerFallbackAllowed: analyzerFallbackAllowed
       )
+    }
+    self.startupTask = startupTask
+    do {
+      try await withTaskCancellationHandler {
+        try await startupTask.value
+      } onCancel: {
+        startupTask.cancel()
+      }
+      // Keep the startup reservation until teardown completes: a replacement
+      // must not reuse the controller while this cancelled start is unwinding.
+      if cancelledStartupGeneration == generation || Task.isCancelled {
+        await liveController.stop()
+        throw CancellationError()
+      }
     } catch {
+      pendingError = nil
       endLiveTranscriptDisplaySession()
       throw error
     }
-    pendingError = nil
     isLiveTranscribing = true
   }
 
   func stopLiveTranscription() async throws -> TranscriptionResult {
+    // Never replace an outstanding checked continuation: its caller would be
+    // suspended forever, even after the replacement stop times out.
+    guard continuation == nil else { throw TranscriptionManagerError.liveSessionAlreadyStopping }
     // If there was a mid-session error, still stop the controller so audio resources
     // and preferred input-device sessions are released before surfacing the failure.
     if let error = pendingError {
@@ -218,9 +254,9 @@ final class TranscriptionManager: ObservableObject {
     let generation = stopGeneration
     return try await withCheckedThrowingContinuation { continuation in
       self.continuation = continuation
-      Task {
-        await self.liveController.stop()
-      }
+      // Capture the run now; a delayed stop must never resolve its target
+      // after cancellation has allowed a replacement recording to start.
+      self.liveController.scheduleStop()
       // Safety timeout: if the delegate never calls back, resume with an error
       // rather than hanging forever. Guarded by the generation token so a stale
       // timeout from a previous session can't resume a later session's continuation.
@@ -249,11 +285,14 @@ final class TranscriptionManager: ObservableObject {
   }
 
   func cancelLiveTranscription() {
+    cancelledStartupGeneration = startupGeneration
+    startupTask?.cancel()
     cancelStopTimeout()
     continuation?.resume(throwing: TranscriptionManagerError.liveSessionNotRunning)
     continuation = nil
     liveController.scheduleStop()
     isLiveTranscribing = false
+    pendingError = nil
     resetLiveTranscriptDisplay()
   }
 
@@ -512,6 +551,9 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
     _ session: any LiveTranscriptionController,
     didFinishWith result: TranscriptionResult
   ) {
+    // Ownership must be checked before touching the pending stop, not just
+    // before publishing its text: an old provider must not finish a new run.
+    guard displayScope.accepts(session) else { return }
     // Guard against double-resume of continuation - the controllers have their own
     // guards but this is belt-and-suspenders safety
     guard let cont = continuation else {
@@ -538,6 +580,8 @@ extension TranscriptionManager: LiveTranscriptionSessionDelegate {
   }
 
   func liveTranscriber(_ session: any LiveTranscriptionController, didFail error: Error) {
+    // Late failures must neither consume a new stop nor poison its next stop.
+    guard displayScope.accepts(session) else { return }
     if let cont = continuation {
       // We're in the middle of stopping - resume with the error
       cancelStopTimeout()

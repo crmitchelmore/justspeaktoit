@@ -256,6 +256,42 @@ final class GeminiInteractionsClientTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path), "Uploading must not delete the source")
     }
 
+    // swiftlint:disable:next function_body_length
+    func testPollingCadenceAndOverallDeadlineAreBounded() async throws {
+        let audioURL = try Self.makeTemporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        for interval in [0.0, -1.0, 100.0] {
+            let recorder = GeminiRequestLog()
+            GeminiMockURLProtocol.requestHandler = { request in
+                let url = try XCTUnwrap(request.url)
+                _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
+                let headers = url.path == "/upload/v1beta/files"
+                    ? ["x-goog-upload-url": "https://generativelanguage.googleapis.com/upload/session"] : [:]
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
+                let body = url.path == "/upload/session"
+                    ? #"{"file":{"name":"files/abc123","uri":"u","state":"PROCESSING"}}"#
+                    : #"{"state":"PROCESSING"}"#
+                return (response, Data(body.utf8))
+            }
+            defer { GeminiMockURLProtocol.requestHandler = nil }
+            let client = GeminiInteractionsClient(session: self.makeMockSession(), inlineAudioByteLimit: 0,
+                                                  filePollInterval: interval, filePollTimeout: 0.2)
+            let start = ContinuousClock.now
+            do {
+                _ = try await client.transcribeFile(at: audioURL, apiKey: "k", language: nil)
+                XCTFail("Processing should time out")
+            } catch let error as GeminiBatchError {
+                guard case .uploadFailed = error else { return XCTFail("Unexpected error: \(error)") }
+            }
+            XCTAssertLessThan(start.duration(to: .now), .seconds(2))
+            let calls = await recorder.calls
+            let polls = calls.filter { $0.hasPrefix("GET ") }
+            XCTAssertLessThanOrEqual(polls.count, 20, "Nonpositive intervals must not cause a tight loop")
+            if interval > 0.2 { XCTAssertTrue(polls.isEmpty, "Do not start a request after its deadline") }
+            XCTAssertFalse(calls.contains("POST /v1beta/interactions"))
+        }
+    }
+
     func testUploadedFile_failedProcessingSurfacesAnUploadFailure() async throws {
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }

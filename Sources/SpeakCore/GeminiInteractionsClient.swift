@@ -230,22 +230,57 @@ public struct GeminiInteractionsClient: Sendable {
             throw GeminiBatchError.uploadFailed("The upload response did not name the uploaded file.")
         }
 
-        let deadline = Date().addingTimeInterval(self.filePollTimeout)
-        while Date() < deadline {
-            try await Task.sleep(
-                nanoseconds: UInt64(max(0, self.filePollInterval) * 1_000_000_000))
-            switch try await self.fileState(at: statusURL, apiKey: apiKey)?.uppercased() {
-            case "ACTIVE":
-                return uri
+        let timeout = self.filePollTimeout.isFinite ? min(max(0, self.filePollTimeout), 86_400) : 60
+        let interval = self.filePollInterval.isFinite ? min(max(0.01, self.filePollInterval), 86_400) : 1
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(timeout))
+        // Race the entire operation, including an in-flight URLSession request,
+        // against one monotonic deadline. Cancelling the losing child cancels I/O.
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask {
+                try await clock.sleep(until: deadline)
+                throw Self.processingTimeout
+            }
+            group.addTask {
+                try await self.pollUntilActive(
+                    at: statusURL, apiKey: apiKey, uri: uri,
+                    interval: interval, deadline: deadline, clock: clock
+                )
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else { throw Self.processingTimeout }
+            return result
+        }
+    }
+
+    private static var processingTimeout: GeminiBatchError {
+        .uploadFailed("The uploaded recording was still processing when the time limit was reached.")
+    }
+
+    // One loop owns the positive cadence and checks the same deadline around I/O.
+    // swiftlint:disable:next function_parameter_count
+    private func pollUntilActive(
+        at url: URL, apiKey: String, uri: String, interval: TimeInterval,
+        deadline: ContinuousClock.Instant, clock: ContinuousClock
+    ) async throws -> String {
+        while true {
+            try Task.checkCancellation()
+            let nextPoll = clock.now.advanced(by: .seconds(interval))
+            guard nextPoll < deadline else {
+                try await clock.sleep(until: deadline)
+                throw Self.processingTimeout
+            }
+            try await clock.sleep(until: nextPoll)
+            guard clock.now < deadline else { throw Self.processingTimeout }
+            let state = try await self.fileState(at: url, apiKey: apiKey)
+            guard clock.now < deadline else { throw Self.processingTimeout }
+            switch state?.uppercased() {
+            case "ACTIVE": return uri
             case "FAILED":
-                throw GeminiBatchError.uploadFailed(
-                    "Google could not process the uploaded recording.")
-            default:
-                continue
+                throw GeminiBatchError.uploadFailed("Google could not process the uploaded recording.")
+            default: continue
             }
         }
-        throw GeminiBatchError.uploadFailed(
-            "The uploaded recording was still processing after \(Int(self.filePollTimeout)) seconds.")
     }
 
     private func fileState(at url: URL, apiKey: String) async throws -> String? {

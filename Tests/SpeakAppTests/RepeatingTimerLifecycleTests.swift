@@ -13,7 +13,7 @@ final class RepeatingTimerLifecycleTests: XCTestCase {
     }
   }
 
-  func testTimerDeliversRepeatedCallbacksWhileOwnerLives() {
+  func testTimer_deliversRepeatedCallbacksWhileOwnerLives() {
     let target = CountingTarget()
     let timer = WeakRepeatingTimerTarget.scheduledTimer(interval: 3600, target: target)
     defer { timer.invalidate() }
@@ -25,7 +25,7 @@ final class RepeatingTimerLifecycleTests: XCTestCase {
     XCTAssertTrue(timer.isValid)
   }
 
-  func testTimerDoesNotRetainOwnerAndInvalidatesAfterOwnerRelease() throws {
+  func testTimer_doesNotRetainOwnerAndInvalidatesAfterOwnerRelease() throws {
     var target: CountingTarget? = CountingTarget()
     weak var weakTarget = target
     let timer = WeakRepeatingTimerTarget.scheduledTimer(interval: 3600, target: try XCTUnwrap(target))
@@ -37,7 +37,7 @@ final class RepeatingTimerLifecycleTests: XCTestCase {
     XCTAssertFalse(timer.isValid)
   }
 
-  func testLoadedHistoryManagerDeallocatesWithRepeatingFlushScheduled() async throws {
+  func testLoadedHistoryManager_deallocatesWithRepeatingFlushScheduled() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let fileManager = TimerTestFileManager(supportURL: directory)

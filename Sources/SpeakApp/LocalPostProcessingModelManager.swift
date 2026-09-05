@@ -566,9 +566,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
       process.terminationHandler = { process in
         group.notify(queue: .global(qos: .utility)) {
           let outputText = output.stdout
-          let errorOutput = output.stderr
-          guard process.terminationStatus == 0, output.captureError == nil else {
-            let details = output.captureError ?? errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+          if let details = output.failureDescription(exitStatus: process.terminationStatus) {
             let error = standardInput == nil
               ? LocalPostProcessingModelError.runtimeUnavailable(details)
               : LocalPostProcessingModelError.processFailed(details)

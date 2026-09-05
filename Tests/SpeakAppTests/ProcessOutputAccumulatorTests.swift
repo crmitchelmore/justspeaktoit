@@ -31,6 +31,27 @@ final class ProcessOutputAccumulatorTests: XCTestCase {
     XCTAssertNil(output.captureError)
   }
 
+  func testFailedProcessPreservesActionableStderrWhenStdoutOverflows() throws {
+    let output = ProcessOutputAccumulator(byteLimit: 32)
+    output.captureStdout(from: try inputHandle(containing: Data(repeating: 0x61, count: 128)))
+    let failure = "fatal: missing compiler"
+    var diagnostics = Data(repeating: 0x62, count: 128)
+    diagnostics.append(contentsOf: failure.utf8)
+    output.captureStderr(from: try inputHandle(containing: diagnostics))
+
+    let message = try XCTUnwrap(output.failureDescription(exitStatus: 1))
+    XCTAssertTrue(message.contains(failure))
+    XCTAssertTrue(message.contains("exceeded the 32-byte limit"))
+    XCTAssertTrue(message.contains("Earlier process diagnostics omitted"))
+    XCTAssertNotNil(output.failureDescription(exitStatus: 0), "Clipped successful responses must still fail")
+  }
+
+  func testFailedProcessWithoutDiagnosticsStillReportsExitStatus() {
+    let output = ProcessOutputAccumulator()
+    XCTAssertEqual(output.failureDescription(exitStatus: 7), "Local process exited with status 7.")
+    XCTAssertNil(output.failureDescription(exitStatus: 0))
+  }
+
   func testTruncatedUTF8DiagnosticsRemainReadable() throws {
     let output = ProcessOutputAccumulator(byteLimit: 5)
     output.captureStderr(from: try inputHandle(containing: Data("🎤done".utf8)))

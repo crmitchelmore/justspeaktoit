@@ -46,6 +46,20 @@ final class ProcessOutputAccumulator: @unchecked Sendable {
     return stdoutCapture.truncated ? "Local process output exceeded the \(byteLimit)-byte limit." : nil
   }
 
+  /// Retain the child's actionable failure tail even when stdout exceeded its cap.
+  /// Successful children still fail if their response was clipped or unreadable.
+  func failureDescription(exitStatus: Int32) -> String? {
+    let captureError = self.captureError
+    guard exitStatus != 0 else { return captureError }
+    let errorText = stderr
+    let diagnostics = errorText.isEmpty ? stdout : errorText
+    let details = [diagnostics, captureError]
+      .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+      .joined(separator: "\n")
+    return details.isEmpty ? "Local process exited with status \(exitStatus)." : details
+  }
+
   func captureStdout(from handle: FileHandle) {
     let capture = read(from: handle, keepingTail: false)
     lock.lock()

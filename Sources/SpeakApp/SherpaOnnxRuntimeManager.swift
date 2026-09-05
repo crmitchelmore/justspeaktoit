@@ -347,11 +347,10 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         process.terminationHandler = { process in
           group.notify(queue: .global(qos: .utility)) {
             let outputText = output.stdout
-            let errorText = output.stderr.isEmpty ? outputText : output.stderr
-            guard process.terminationStatus == 0, output.captureError == nil else {
+            if let details = output.failureDescription(exitStatus: process.terminationStatus) {
               continuation.resume(
                 throwing: SherpaOnnxRuntimeError.runtimeUnavailable(
-                  output.captureError ?? errorText.trimmingCharacters(in: .whitespacesAndNewlines)
+                  details
                 )
               )
               return

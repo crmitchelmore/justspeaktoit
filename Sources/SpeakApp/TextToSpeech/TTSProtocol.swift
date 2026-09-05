@@ -480,7 +480,7 @@ struct VoiceCatalog {
   ]
 
   // Both platform pickers project from the canonical SpeakCore Deepgram catalogue.
-  static let deepgramVoices: [TTSVoice] = DeepgramTTSCatalog.voices.map { voice in
+  static let deepgramVoices: [TTSVoice] = DeepgramSpeechCatalog.voices.map { voice in
     TTSVoice(
       id: voice.providerVoiceID,
       name: "\(voice.name) · \(voice.model.displayName)",
@@ -549,7 +549,7 @@ struct VoiceCatalog {
     return legacyMappings[id] ?? id
   }
 
-  private static func deepgramTraits(for voice: DeepgramTTSVoice) -> [TTSVoice.VoiceTrait] {
+  private static func deepgramTraits(for voice: DeepgramSpeechCatalog.Voice) -> [TTSVoice.VoiceTrait] {
     let gender: TTSVoice.VoiceTrait = voice.gender == .female ? .female : .male
     return [gender, deepgramAccent(voice.accent), deepgramStyle(voice.style), .lowLatency]
   }

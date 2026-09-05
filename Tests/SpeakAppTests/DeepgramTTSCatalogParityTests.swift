@@ -6,7 +6,7 @@ final class DeepgramTTSCatalogParityTests: XCTestCase {
     func testMacVoiceProjection_MatchesEverySharedDeepgramVoice() {
         XCTAssertEqual(
             Set(VoiceCatalog.deepgramVoices.map(\.id)),
-            Set(DeepgramTTSCatalog.voices.map(\.providerVoiceID))
+            Set(DeepgramSpeechCatalog.voices.map(\.providerVoiceID))
         )
     }
 

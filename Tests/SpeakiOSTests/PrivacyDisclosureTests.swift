@@ -181,7 +181,7 @@ final class PrivacyDisclosureTests: XCTestCase {
         )
 
         // Deepgram receives both the audio and the spoken text, but is listed once.
-        XCTAssertEqual(summary.activeRecipients, ["Deepgram", "OpenRouter", "Deepgram Aura"])
+        XCTAssertEqual(summary.activeRecipients, ["Deepgram", "OpenRouter"])
     }
 
     func testFullyOnDeviceWorkflowHasNoRecipients() {

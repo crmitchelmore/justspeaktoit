@@ -145,6 +145,7 @@ jobs:
               - 'Tests/SpeakHotKeysTests/**'
               - 'scripts/run-core-journey-e2e.sh'
               - 'scripts/run-core-journey-e2e.py'
+              - 'scripts/verify-core-journey-ui.py'
               - 'scripts/tests/test_core_journey_gate.py'
               - '.github/workflows/ci.yml'
 
@@ -220,12 +221,14 @@ jobs:
             -only-testing:SpeakAppUITests/LaunchUITests \
             -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
             -only-testing:SpeakAppUITests/CoreJourneyHotKeyUITests \
+            -only-testing:SpeakAppUITests/CoreJourneyBatchUITests \
             -resultBundlePath .artifacts/core-journey-fixture-ui/CoreJourneyFixture.xcresult \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="-" \
             DEVELOPMENT_TEAM="" \
             CODE_SIGN_STYLE=Manual \
             | tee .artifacts/core-journey-fixture-ui/xcodebuild.log
+          python3 scripts/verify-core-journey-ui.py .artifacts/core-journey-fixture-ui/xcodebuild.log
 
       - name: Upload launched-app diagnostics
         if: always()

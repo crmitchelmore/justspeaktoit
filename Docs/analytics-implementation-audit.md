@@ -30,7 +30,7 @@ audit. No request was made to an analytics endpoint during this work.
 | Area | Evidence and remaining gap |
 | --- | --- |
 | Transport | `PostHogAnalytics.swift` contains a minimal `/capture` client, excluded by `APP_STORE`. Missing configuration is no-op. The source comment explains avoiding SDK remote config; it is not the required current-SDK spike or release network capture. |
-| Consent | `AppSettings.analyticsEnabled` defaults false. `WireUp` synchronizes consent into `ProductAnalyticsController`; macOS onboarding and Settings expose an explicit choice. Core tests cover unknown/opted-out silence and cleanup errors. End-to-end withdrawal, rapid consent changes, and release-build zero-traffic evidence still need validation. |
+| Consent | `AppSettings.analyticsEnabled` defaults false. `WireUp` synchronizes consent into `ProductAnalyticsController`; macOS onboarding and Settings expose an explicit choice. Core tests cover unknown/opted-out silence, cleanup errors, rapid consent changes, and suspended opt-in/capture after withdrawal. Transition revisions prevent stale resumptions and new opt-ins await withdrawal cleanup. Real UI withdrawal and release-build zero-traffic evidence still need validation. |
 | Queue | Durable queue has 1,000-entry/seven-day limits. This change serializes flushes, cancels active requests on purge/close, rejects stale responses after reopening, removes acknowledged entries by local queue ID, and persists pruning before replay. Legacy queue files remain readable. |
 | Identity | `FileProductAnalyticsStateStore` stores a random install UUID in app data; core tests cover deletion and anonymous counters without that UUID. Backend separation from Sentry still needs evidence. |
 | Kill switches | Core exposes a tested `forceDisabled` closure, but the production factory does not supply an override. The build/defaults kill switch and server key-rotation drill are not established by source tests. |
@@ -77,8 +77,14 @@ tests exercise recovery, stalled/oversized responses, exhaustion, revoked-key
 responses and withdrawal during backoff. These safeguards do not establish the
 outstanding production network or kill-switch audit evidence.
 
-The next engineering step is to validate the consent lifecycle and local kill
-switch, then implement the exact-payload release inspector without expanding
+The controller follow-up adds five deterministic suspended-sink tests for
+consent transitions, identity ownership, restored consent, and kill-switch
+rechecks. Native Debug CI passed all 2,446 tests at PR head `d1f3fe5`, including
+these consent and delivery regressions; this does not replace release-network
+qualification.
+
+The next engineering step is to validate the local kill switch and real UI
+withdrawal, then implement the exact-payload release inspector without expanding
 the collected catalogue. Before enabling or widening production, record the
 remaining retention verification, release network capture, inspector checks,
 server kill-switch drill, and identity-separation evidence. Existing project,

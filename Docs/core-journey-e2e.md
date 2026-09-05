@@ -36,7 +36,7 @@ status; they fail an otherwise successful gate.
 | Streaming delivery | `LiveTextInserterStreamingTests` | Actual inserter with an in-memory AX field contract; partial replacement, duplication and fallback decisions. |
 | Clipboard and target policy | `TextOutputTests`, `ClipboardFieldIdentityPolicyTests` | Isolated pasteboard, empty text preservation, target identity and changed-field warnings; no assertion of native editor delivery. |
 | Automation transport | `AutomationServerTests`, `AutomationDeadlineTests` | Real listener, framing, shipped client, owner permissions, idempotent retries, deadlines, failure followed by recovery; command execution is stubbed. |
-| Recording ownership | `CaptureSessionOwnershipTests`, `LiveTranscriptSessionIsolationTests` | Capture exclusion and actual TranscriptionManager callback routing reject superseded runs and stale stop timeouts. |
+| Recording ownership | `CaptureSessionOwnershipTests`, `LiveTranscriptSessionIsolationTests`, `CoreJourneyRecordingSourceTests` | Capture exclusion and actual TranscriptionManager callback routing reject superseded runs and stale stop timeouts. |
 | History durability | `HistoryPersistenceFailureTests` | Real temporary files: startup read failures, queued append recovery, quarantining corruption and durable recovery after WAL write failure. |
 
 The original filter selected `AutomationIntentSupportTests` instead of the
@@ -73,7 +73,7 @@ cleanup actions are disabled. The test exercises the real manager/view graph
 with these startup integrations excluded. Local model singletons may still
 discover caches or prepare their storage directories; this does not isolate
 every app singleton or test model runtime execution.
-Release builds ignore the profile. `CoreJourneyLaunchProfileTests` checks the
+The batch variant described below uses genuine system permission status; the bootstrap/probe variants keep their existing disabled-capture permission fixture. Release builds ignore the profile. `CoreJourneyLaunchProfileTests` checks the
 typed opt-outs and per-launch settings/storage boundaries; native CI execution
 is required to validate the launched-app test itself.
 
@@ -104,19 +104,52 @@ History. It does not prove Fn, a held physical key, Input Monitoring, or an
 Accessibility grant. Microphone and Accessibility remain denied in the profile.
 The AX diagnostic is evidence about the launched process, not an override.
 
-The next batch journey has concrete prerequisites still missing in production:
-`MainManager.startSession` rejects an empty physical device list, and
-`AudioFileManager` owns concrete `AVAudioRecorder` capture with permission/device
-setup. A prerecorded capture implementation must enter at that lifecycle
-boundary, and a deterministic batch client must be injected at WireUp's existing
-`TranscriptionManager` batch-client dependency. Direct insertion additionally
-requires genuine AX authorisation for the launched Speak process; XCTest's
-ability to type into the fixture does not confer that permission on Speak.
-No supported unattended cold-runner AX bootstrap has been established here.
-Do not edit TCC databases, fake an AX grant, or substitute internal callbacks to
-mark the direct-insertion P0 complete. Use the attached actual AX readiness when
-choosing the next native journey, and retain the clipboard-only boundary as a
-separate honest case if native insertion remains unavailable.
+### Integrated batch clipboard journey
+
+`CoreJourneyBatchUITests` opts into `SPEAK_CORE_JOURNEY_BATCH=1` alongside the UUID
+profile. A real global Control–Option–Shift–K double-tap starts MainManager's
+production session. A separate tap stops it after the configured gesture window.
+The test never calls recording, transcription, or output methods directly.
+
+The optional `RecordingCaptureSource` boundary inside `AudioFileManager` supplies
+a fixed 250 ms, 16 kHz mono PCM WAV instead of opening a microphone. The normal
+nil source keeps AVAudioRecorder and its physical device/permission checks. The
+fixture is a synthetic waveform, not recognised speech. Its actor supports start,
+stop, cancellation and owner isolation; focused tests decode the actual WAV and
+check cancellation, duplicate admission, and immediate reuse.
+
+WireUp supplies a real `OpenRouterAPIClient` with an ephemeral URLSession and a
+fixture-only key provider. The URLProtocol intercepts every request on that
+session and rejects unexpected hosts, methods, keys, models, streaming requests,
+or audio bytes. It returns the known transcript only when the actual serialized
+`input_audio` is byte-for-byte the recording fixture. The real batch routing,
+request construction, response decoding, post-processing-off decision, output,
+and History persistence all run. No real credential, paid API, microphone,
+permission override, or external provider request is used.
+
+The batch profile reads **genuine system permissions** and explicitly selects the
+user's Clipboard output setting, with clipboard restoration disabled. On macOS
+this setting writes the clipboard and attempts PID-directed Command-V. The test
+always requires the exact final clipboard text and one durable History item
+with raw text, no processed text, batch-only usage, clipboard output, captured
+destination, recording duration/file, and successful production stage events.
+While recording, both the fixture and clipboard must retain their original text.
+
+If the launched process genuinely has `CGPreflightPostEventAccess()`, the test
+also requires exactly one insertion in the original focused fixture. Otherwise
+it requires the field to remain unchanged and explicitly attaches the native
+insertion limitation. AX and event-posting status, Carbon events, production
+states, accepted/rejected HTTP request counts, History JSON, and screenshots are
+attached to `xcresult`. This is a full batch **clipboard-route** journey; it does
+not claim a physical microphone, permission-denial regression, direct AX
+insertion, or native editor delivery on a runner without posting permission.
+
+The native CI job selects all four UI suites under its ten-minute timeout.
+`scripts/verify-core-journey-ui.py` reuses the required gate's XCTest parser and
+fails missing, all-skipped, partially-skipped, or zero-test suites, even after a
+successful xcodebuild exit. Its `coverage.json` is uploaded with the native logs.
+Native compilation and repeated cold-runner execution remain necessary before
+claiming the expanded journey is validated or the flake/time targets are met.
 
 The native P0 matrix is not complete. Before promoting the launched-app layer
 as capture-to-delivery protection, #802 needs the following concrete evidence:
@@ -124,7 +157,7 @@ as capture-to-delivery protection, #802 needs the following concrete evidence:
 | Scenario | Required assertion |
 | --- | --- |
 | Cold runner bootstrap | Launch the signed Speak app with isolated settings/history/keychain; establish AX/Input Monitoring permission readiness without skipping or reusing warm-host state. |
-| Batch recording | Trigger the supported recording gesture; inject a deterministic audio/provider boundary; stop; read exactly one final transcript in the fixture and the matching persisted History item. |
+| Batch direct insertion | The clipboard-route journey above covers orchestration; direct AX insertion still requires genuine permission bootstrap and exact captured-field delivery on cold runners. |
 | Streaming recording | Deliver changing partials and a final; assert replacement in the captured field, no duplicate final, and the final History text. |
 | Processing off/on | Run both routes through MainManager and assert the expected raw/processed editor text and History metadata. |
 | Provider failure and recovery | Fail a recording, verify actionable UI plus recoverable History, then successfully dictate again in the same process. |

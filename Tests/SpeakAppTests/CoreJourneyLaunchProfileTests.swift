@@ -63,8 +63,28 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         XCTAssertEqual(permissions?.status(for: .inputMonitoring), .denied)
     }
 
-    private func makeProfile(probesHotKey: Bool = false) -> CoreJourneyLaunchProfile {
-        let profile = CoreJourneyLaunchProfile(identifier: UUID(), probesHotKey: probesHotKey)
+    func testBatchJourney_usesRealPermissionsAndExplicitClipboardSettings() {
+        let profile = makeProfile(runsBatchJourney: true)
+        XCTAssertTrue(profile.runsBatchJourney)
+        XCTAssertEqual(profile.settings.transcriptionMode, .batchRemote)
+        XCTAssertEqual(profile.settings.batchTranscriptionModel, CoreJourneyBatchFixture.model)
+        XCTAssertFalse(profile.settings.postProcessingEnabled)
+        XCTAssertEqual(profile.settings.textOutputMethod, .clipboardOnly)
+        XCTAssertFalse(profile.settings.restoreClipboardAfterPaste)
+        XCTAssertFalse(profile.settings.recordingSoundsEnabled)
+        XCTAssertFalse(profile.settings.silenceDetectionEnabled)
+        XCTAssertEqual(profile.settings.hotKeyActivationStyle, .doubleTapToggle)
+        let permissions = profile.bootstrapOptions().permissionsOverride
+        let actualPermissions = PermissionsManager()
+        for permission in PermissionType.allCases {
+            XCTAssertEqual(permissions?.status(for: permission), actualPermissions.status(for: permission))
+        }
+    }
+
+    private func makeProfile(probesHotKey: Bool = false, runsBatchJourney: Bool = false) -> CoreJourneyLaunchProfile {
+        let profile = CoreJourneyLaunchProfile(
+            identifier: UUID(), probesHotKey: probesHotKey, runsBatchJourney: runsBatchJourney
+        )
         let suiteName = profile.suiteName
         let directory = profile.directory
         addTeardownBlock {

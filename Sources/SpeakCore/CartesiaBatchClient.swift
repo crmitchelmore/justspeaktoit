@@ -5,10 +5,12 @@ import Foundation
 public struct CartesiaBatchClient: Sendable {
     public static let catalogID = "cartesia/ink-whisper"
     public static let apiVersion = "2026-08-14"
-    private let session: URLSession
+    var uploadRecording: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
 
     public init(session: URLSession = .shared) {
-        self.session = session
+        self.uploadRecording = { request, file in
+            try await session.upload(for: request, fromFile: file)
+        }
     }
 
     public func transcribeFile(
@@ -17,8 +19,16 @@ public struct CartesiaBatchClient: Sendable {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
         try Task.checkCancellation()
-        let request = try Self.makeRequest(url: url, apiKey: key, language: language)
-        let (data, response) = try await self.session.data(for: request)
+        let upload = try Self.makeUpload(url: url, apiKey: key, language: language)
+        defer { try? FileManager.default.removeItem(at: upload.file.deletingLastPathComponent()) }
+        try Task.checkCancellation()
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await self.uploadRecording(upload.request, upload.file)
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        }
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse else { throw TranscriptionProviderError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
@@ -27,7 +37,8 @@ public struct CartesiaBatchClient: Sendable {
         return try Self.decode(data)
     }
 
-    static func makeRequest(url: URL, apiKey: String, language: String?) throws -> URLRequest {
+    static func makeUpload(url: URL, apiKey: String, language: String?) throws
+        -> (request: URLRequest, file: URL) {
         let mimeTypes = [
             "flac": "audio/flac", "m4a": "audio/mp4", "mp3": "audio/mpeg", "mp4": "audio/mp4",
             "mpeg": "audio/mpeg", "mpga": "audio/mpeg", "oga": "audio/ogg", "ogg": "audio/ogg",
@@ -46,17 +57,43 @@ public struct CartesiaBatchClient: Sendable {
         var body = Data()
         body.appendFormField(named: "model", value: "ink-whisper", boundary: boundary)
         // The documented API default is English; no auto-detection value is advertised.
-        if let language, language != "automatic",
-           let code = language.trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: { $0 == "-" || $0 == "_" }).first {
+        let normalizedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if !normalizedLanguage.isEmpty, normalizedLanguage != "automatic",
+           let code = normalizedLanguage.split(whereSeparator: { $0 == "-" || $0 == "_" }).first {
             body.appendFormField(named: "language", value: String(code).lowercased(), boundary: boundary)
         }
         body.appendFormField(named: "timestamp_granularities[]", value: "word", boundary: boundary)
-        body.appendFileField(named: "file", filename: "recording.\(extensionName)", mimeType: mimeType,
-                             fileData: try Data(contentsOf: url), boundary: boundary)
-        body.appendString("--\(boundary)--\r\n")
-        request.httpBody = body
-        return request
+        body.appendString("--\(boundary)\r\n")
+        body.appendString("Content-Disposition: form-data; name=\"file\"; filename=\"recording.\(extensionName)\"\r\n")
+        body.appendString("Content-Type: \(mimeType)\r\n\r\n")
+        let file = try Self.writeUpload(source: url, header: body, boundary: boundary)
+        return (request, file)
+    }
+
+    /// Build a stable multipart snapshot with a fixed 64 KiB copy buffer.
+    /// No recording-sized Data is retained in the request or upload operation.
+    private static func writeUpload(source: URL, header: Data, boundary: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+        let file = directory.appendingPathComponent("upload.multipart")
+        do {
+            try header.write(to: file)
+            let input = try FileHandle(forReadingFrom: source)
+            defer { try? input.close() }
+            let output = try FileHandle(forWritingTo: file)
+            defer { try? output.close() }
+            try output.seekToEnd()
+            while let chunk = try input.read(upToCount: 65_536), !chunk.isEmpty {
+                try Task.checkCancellation()
+                try output.write(contentsOf: chunk)
+            }
+            try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
+            return file
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
     }
 
     static func decode(_ data: Data) throws -> TranscriptionResult {
@@ -73,7 +110,7 @@ public struct CartesiaBatchClient: Sendable {
         }
         guard let response = try? JSONDecoder().decode(Response.self, from: data),
               response.type == "transcript" else { throw TranscriptionProviderError.invalidResponse }
-        let duration = response.duration ?? 0
+        let duration = response.duration ?? response.words?.map(\.end).max() ?? 0
         let segments = response.words?.map {
             TranscriptionSegment(startTime: $0.start, endTime: $0.end, text: $0.word)
         } ?? []

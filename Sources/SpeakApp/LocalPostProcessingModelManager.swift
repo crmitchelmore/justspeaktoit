@@ -555,11 +555,10 @@ final class LocalPostProcessingModelManager: ObservableObject {
       }
       let group = DispatchGroup()
       let output = ProcessOutputAccumulator()
-      let drain: (FileHandle, @escaping (Data) -> Void) -> Void = { handle, store in
+      let drain: (FileHandle, @escaping (FileHandle) -> Void) -> Void = { handle, capture in
         group.enter()
         DispatchQueue.global(qos: .utility).async {
-          let data = handle.readDataToEndOfFile()
-          store(data)
+          capture(handle)
           group.leave()
         }
       }
@@ -568,8 +567,8 @@ final class LocalPostProcessingModelManager: ObservableObject {
         group.notify(queue: .global(qos: .utility)) {
           let outputText = output.stdout
           let errorOutput = output.stderr
-          guard process.terminationStatus == 0 else {
-            let details = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+          guard process.terminationStatus == 0, output.captureError == nil else {
+            let details = output.captureError ?? errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
             let error = standardInput == nil
               ? LocalPostProcessingModelError.runtimeUnavailable(details)
               : LocalPostProcessingModelError.processFailed(details)
@@ -581,8 +580,8 @@ final class LocalPostProcessingModelManager: ObservableObject {
       }
 
       do {
-        drain(outputPipe.fileHandleForReading, output.setStdout)
-        drain(errorPipe.fileHandleForReading, output.setStderr)
+        drain(outputPipe.fileHandleForReading, output.captureStdout)
+        drain(errorPipe.fileHandleForReading, output.captureStderr)
         try process.run()
       } catch {
         outputPipe.fileHandleForReading.closeFile()

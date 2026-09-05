@@ -333,11 +333,10 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         let errorPipe = Pipe()
         let group = DispatchGroup()
         let output = ProcessOutputAccumulator()
-        let drain: (FileHandle, @escaping (Data) -> Void) -> Void = { handle, store in
+        let drain: (FileHandle, @escaping (FileHandle) -> Void) -> Void = { handle, capture in
           group.enter()
           DispatchQueue.global(qos: .utility).async {
-            let data = handle.readDataToEndOfFile()
-            store(data)
+            capture(handle)
             group.leave()
           }
         }
@@ -349,10 +348,10 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
           group.notify(queue: .global(qos: .utility)) {
             let outputText = output.stdout
             let errorText = output.stderr.isEmpty ? outputText : output.stderr
-            guard process.terminationStatus == 0 else {
+            guard process.terminationStatus == 0, output.captureError == nil else {
               continuation.resume(
                 throwing: SherpaOnnxRuntimeError.runtimeUnavailable(
-                  errorText.trimmingCharacters(in: .whitespacesAndNewlines)
+                  output.captureError ?? errorText.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
               )
               return
@@ -361,8 +360,8 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
           }
         }
         do {
-          drain(outputPipe.fileHandleForReading, output.setStdout)
-          drain(errorPipe.fileHandleForReading, output.setStderr)
+          drain(outputPipe.fileHandleForReading, output.captureStdout)
+          drain(errorPipe.fileHandleForReading, output.captureStderr)
           try process.run()
         } catch {
           outputPipe.fileHandleForReading.closeFile()

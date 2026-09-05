@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build-macos:
-    name: Build & Test (macOS)
+    name: Build & Test (macOS Debug)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -144,6 +144,8 @@ jobs:
               - 'Tests/SpeakCoreTests/**'
               - 'Tests/SpeakHotKeysTests/**'
               - 'scripts/run-core-journey-e2e.sh'
+              - 'scripts/run-core-journey-e2e.py'
+              - 'scripts/tests/test_core_journey_gate.py'
               - '.github/workflows/ci.yml'
 
       - name: Select gate outputs
@@ -327,11 +329,22 @@ jobs:
         # extension is embedded in the app, so this step covers it too.
         run: |
           set -o pipefail
-          TUIST_WATCH_APP=1 tuist generate --no-open
+          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakWatchApp \
             -destination generic/platform=watchOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
+          # Compile the containing iOS app with WATCH_APP_FEATURE enabled to
+          # verify integration and embedding of the feature-flagged watch companion.
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS \
+            -destination generic/platform=iOS \
             CODE_SIGNING_ALLOWED=NO \
             -skipPackagePluginValidation \
             -quiet \
@@ -393,6 +406,11 @@ jobs:
       - name: Check tooling Package.resolved drift
         run: git diff --exit-code Tooling/Package.resolved
 
+      - name: Test CI and release gates
+        run: |
+          node --test scripts/tests/*.test.mjs
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
 
@@ -415,3 +433,55 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: bash scripts/check-api-compatibility.sh "origin/${{ github.base_ref }}"
+
+  # Branch protection already requires this exact name. Make it an aggregate
+  # so release-mode and journey failures cannot merge behind a green debug job.
+  required-macos:
+    name: Build & Test (macOS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs:
+      - build-macos
+      - build-ios
+      - build-ios-keyboard-direct-capture
+      - lint
+      - release-paths
+      - release-validation
+      - core-journey-e2e
+      - core-journey-fixture-ui
+      - api-compatibility
+    # Evaluate GitHub's job results directly. This aggregate never checks out
+    # or executes a PR-controlled helper; workflow edits still require review.
+    permissions: {}
+    steps:
+      - name: Reject unsuccessful CI gates
+        if: >-
+          always() && (
+            needs.build-macos.result != 'success' ||
+            needs.build-ios.result != 'success' ||
+            needs.build-ios-keyboard-direct-capture.result != 'success' ||
+            needs.lint.result != 'success' ||
+            needs.release-paths.result != 'success' ||
+            (needs.release-paths.outputs.package != 'true' && needs.release-paths.outputs.package != 'false') ||
+            (needs.release-paths.outputs.core-journey != 'true' && needs.release-paths.outputs.core-journey != 'false') ||
+            (needs.release-validation.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.package == 'false' &&
+              needs.release-validation.result == 'skipped')) ||
+            (needs.core-journey-e2e.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
+              needs.core-journey-e2e.result == 'skipped')) ||
+            (needs.core-journey-fixture-ui.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
+              needs.core-journey-fixture-ui.result == 'skipped')) ||
+            (needs.api-compatibility.result != 'success' && !(
+              github.event_name != 'pull_request' && needs.api-compatibility.result == 'skipped'))
+          )
+        env:
+          CI_GATE_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo '::error::A required CI gate failed, was cancelled, or did not run as expected.'
+          printf '%s\n' "$CI_GATE_NEEDS"
+          exit 1
+      - name: Confirm successful CI gates
+        run: echo 'All required CI gates passed; only explicitly excluded gates may skip.'

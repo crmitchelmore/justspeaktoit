@@ -36,7 +36,7 @@ struct AudioPlaybackControls: View {
 }
 
 @MainActor
-final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDelegate {
+final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDelegate, RepeatingTimerTarget {
   enum PlaybackState {
     case idle
     case playing
@@ -110,19 +110,14 @@ final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDe
     // Use target-selector pattern to avoid Swift concurrency crashes during deallocation.
     // Block-based timers with [weak self] can crash in swift_getObjectType during executor
     // verification when the object is deallocating.
-    timer = Timer.scheduledTimer(
-      timeInterval: 0.05,
-      target: self,
-      selector: #selector(timerFired),
-      userInfo: nil,
-      repeats: true
-    )
+    // Let StateObject release the controller so its existing deinit stops audio.
+    timer = WeakRepeatingTimerTarget.scheduledTimer(interval: 0.05, target: self)
     if let timer {
       RunLoop.main.add(timer, forMode: .common)
     }
   }
 
-  @objc private func timerFired() {
+  func repeatingTimerDidFire() {
     guard let player else { return }
     currentTime = player.currentTime
     if !player.isPlaying {

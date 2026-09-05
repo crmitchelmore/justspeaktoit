@@ -321,6 +321,18 @@ jobs:
           echo "Generated appcast-arm64.xml (Apple Silicon):"
           cat "$RUNNER_TEMP/appcast-arm64.xml"
 
+      # The signed bytes and installer must pass before GitHub Latest makes
+      # either appcast visible. Post-publication smoke below also checks delivery.
+      - name: Verify Sparkle installation before publication
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        timeout-minutes: 20
+        env:
+          SPARKLE_SMOKE_LOCAL_ENCLOSURE: '1'
+          SPARKLE_SMOKE_REQUIRE_SUPPORTED: '1'
+        run: |
+          scripts/sparkle-update-smoke.sh "$DMG_PATH" "$ARM64_APPCAST_PATH"
+          scripts/sparkle-update-smoke.sh "$LEGACY_DMG_PATH" "$APPCAST_PATH"
+
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/mac-v')
         uses: softprops/action-gh-release@v3

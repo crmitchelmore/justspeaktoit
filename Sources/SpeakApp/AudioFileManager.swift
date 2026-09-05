@@ -5,7 +5,7 @@ import os.log
 
 // @Implement: This file manages the audio recording bit rate and other audio settings. It also depends on app settings to know where to write the audio files to. It never loses any data during recording. It also has the ability to manager audio files e.g. listing, deleting, accessing etc.
 
-struct RecordingSummary: Identifiable, Hashable {
+struct RecordingSummary: Identifiable, Hashable, Sendable {
   let id: UUID
   let url: URL
   let startedAt: Date
@@ -614,12 +614,26 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     }
   }
 
+  /// Metadata-only listing for recording management. Listed durations are zero;
+  /// neither cleanup caller needs to open or decode the user's audio files.
   func listRecordings() async -> [RecordingSummary] {
     let directory = await MainActor.run { appSettings.recordingsDirectory }
+    // A start reserves ownership across awaits before currentRecordingURL is set
+    // (including claiming a warm file). Never snapshot that unfinished capture.
+    guard !isStartingRecording else { return [] }
+    // Keep the metadata walk on this actor: without a suspension, a new capture
+    // cannot enter the deletion snapshot halfway through enumeration. This also
+    // avoids accumulating detached walks against a slow or unavailable volume.
+    return Self.listRecordings(in: directory, excluding: currentRecordingURL)
+  }
+
+  nonisolated static func listRecordings(
+    in directory: URL, excluding activeRecordingURL: URL? = nil
+  ) -> [RecordingSummary] {
     guard
       let enumerator = FileManager.default.enumerator(
         at: directory,
-        includingPropertiesForKeys: [.creationDateKey, .fileSizeKey],
+        includingPropertiesForKeys: [.creationDateKey, .fileSizeKey, .isRegularFileKey],
         // Keeps the hidden staging folder, which holds files no session has
         // claimed, out of the user's recordings list.
         options: [.skipsHiddenFiles])
@@ -632,22 +646,24 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     var summaries: [RecordingSummary] = []
     while let next = enumerator.nextObject() as? URL {
       let url = next
-      guard allowedExtensions.contains(url.pathExtension.lowercased()) else { continue }
+      guard allowedExtensions.contains(url.pathExtension.lowercased()),
+        url.standardizedFileURL != activeRecordingURL?.standardizedFileURL
+      else { continue }
       do {
-        let resource = try url.resourceValues(forKeys: [.creationDateKey, .fileSizeKey])
+        let resource = try url.resourceValues(forKeys: [.creationDateKey, .fileSizeKey, .isRegularFileKey])
+        guard resource.isRegularFile == true else { continue }
         let creationDate = resource.creationDate ?? Date()
         let fileSize = Int64(resource.fileSize ?? 0)
         let stem = url.deletingPathExtension().lastPathComponent
           .replacingOccurrences(of: "Recording-", with: "")
           .replacingOccurrences(of: "Imported-", with: "")
         let id = UUID(uuidString: stem) ?? UUID()
-        let duration = try AVAudioPlayer(contentsOf: url).duration
         summaries.append(
           RecordingSummary(
             id: id,
             url: url,
             startedAt: creationDate,
-            duration: duration,
+            duration: 0,
             fileSize: fileSize
           )
         )
@@ -659,6 +675,11 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   }
 
   func removeRecording(at url: URL) {
+    // Capture can start between snapshot creation and this call. Reserve the
+    // entire startup interval, including a claimed warm file awaiting device setup.
+    guard !isStartingRecording,
+      currentRecordingURL?.standardizedFileURL != url.standardizedFileURL
+    else { return }
     try? FileManager.default.removeItem(at: url)
   }
 

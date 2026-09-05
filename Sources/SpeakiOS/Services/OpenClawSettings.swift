@@ -130,25 +130,9 @@ public final class OpenClawSettings: ObservableObject {
         let resolvedProvider = VoiceOutputProvider(
             rawValue: UserDefaults.standard.string(forKey: "openclaw.ttsProvider") ?? ""
         ) ?? VoiceOutputProvider.inferred(modelID: storedModel, voiceID: storedVoice)
-        let resolvedModel: String
-        let resolvedVoice: String
-        if resolvedProvider == .soniox {
-            resolvedModel = SonioxTTSCatalog.defaultModel.rawValue
-            if let storedVoice, storedVoice.hasPrefix("soniox/") {
-                resolvedVoice = storedVoice
-            } else {
-                resolvedVoice = SonioxTTSCatalog.defaultVoice(
-                    for: SonioxTTSCatalog.defaultModel
-                ).providerVoiceID
-            }
-        } else if resolvedProvider == .openrouter {
-            resolvedModel = storedModel ?? ""
-            resolvedVoice = storedVoice ?? ""
-        } else {
-            let selection = DeepgramSpeechCatalog.resolvedSelection(modelID: storedModel, voiceID: storedVoice)
-            resolvedVoice = selection.voice.id
-            resolvedModel = selection.model.id
-        }
+        let (resolvedModel, resolvedVoice) = Self.restoredVoiceSelection(
+            provider: resolvedProvider, model: storedModel, voice: storedVoice
+        )
         self.ttsProvider = resolvedProvider
         self.ttsVoice = resolvedVoice
         self.ttsVoiceName = UserDefaults.standard.string(forKey: "openclaw.ttsVoiceName") ?? resolvedVoice
@@ -174,6 +158,24 @@ public final class OpenClawSettings: ObservableObject {
         UserDefaults.standard.set(ttsVoice, forKey: "openclaw.ttsVoice")
         UserDefaults.standard.set(ttsModel, forKey: "openclaw.ttsModel")
         UserDefaults.standard.set(ttsProvider.rawValue, forKey: "openclaw.ttsProvider")
+    }
+
+    private static func restoredVoiceSelection(
+        provider: VoiceOutputProvider, model: String?, voice: String?
+    ) -> (model: String, voice: String) {
+        switch provider {
+        case .soniox:
+            let storedVoice = voice.flatMap { $0.hasPrefix("soniox/") ? $0 : nil }
+            return (
+                SonioxTTSCatalog.defaultModel.rawValue,
+                storedVoice ?? SonioxTTSCatalog.defaultVoice(for: SonioxTTSCatalog.defaultModel).providerVoiceID
+            )
+        case .openrouter:
+            return (model ?? "", voice ?? "")
+        case .deepgram:
+            let selection = DeepgramSpeechCatalog.resolvedSelection(modelID: model, voiceID: voice)
+            return (selection.model.id, selection.voice.id)
+        }
     }
 
     // MARK: - Keychain

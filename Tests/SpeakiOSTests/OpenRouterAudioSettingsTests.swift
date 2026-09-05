@@ -61,20 +61,22 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
     }
 
     func testOnlyDisruptiveAudioSessionEventsInterruptPlayback() {
-        let cases: [(Notification.Name, String, UInt, Bool)] = [
-            (AVAudioSession.interruptionNotification, AVAudioSessionInterruptionTypeKey,
-             AVAudioSession.InterruptionType.began.rawValue, true),
-            (AVAudioSession.interruptionNotification, AVAudioSessionInterruptionTypeKey,
-             AVAudioSession.InterruptionType.ended.rawValue, false),
-            (AVAudioSession.routeChangeNotification, AVAudioSessionRouteChangeReasonKey,
-             AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, true),
-            (AVAudioSession.routeChangeNotification, AVAudioSessionRouteChangeReasonKey,
-             AVAudioSession.RouteChangeReason.categoryChange.rawValue, false)
+        let cases: [AudioSessionCase] = [
+            .init(name: AVAudioSession.interruptionNotification, key: AVAudioSessionInterruptionTypeKey,
+             value: AVAudioSession.InterruptionType.began.rawValue, expected: true),
+            .init(name: AVAudioSession.interruptionNotification, key: AVAudioSessionInterruptionTypeKey,
+             value: AVAudioSession.InterruptionType.ended.rawValue, expected: false),
+            .init(name: AVAudioSession.routeChangeNotification, key: AVAudioSessionRouteChangeReasonKey,
+             value: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, expected: true),
+            .init(name: AVAudioSession.routeChangeNotification, key: AVAudioSessionRouteChangeReasonKey,
+             value: AVAudioSession.RouteChangeReason.categoryChange.rawValue, expected: false)
         ]
-        for (name, key, value, expected) in cases {
+        for item in cases {
             XCTAssertEqual(
-                OpenRouterIOSAudioPlayback.interruptsPlayback(Notification(name: name, userInfo: [key: value])),
-                expected
+                OpenRouterIOSAudioPlayback.interruptsPlayback(
+                    Notification(name: item.name, userInfo: [item.key: item.value])
+                ),
+                item.expected
             )
         }
         XCTAssertTrue(OpenRouterIOSAudioPlayback.interruptsPlayback(
@@ -106,5 +108,11 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
             XCTAssertFalse(client.isSpeaking)
         }
     }
+}
+private struct AudioSessionCase {
+    let name: Notification.Name
+    let key: String
+    let value: UInt
+    let expected: Bool
 }
 #endif

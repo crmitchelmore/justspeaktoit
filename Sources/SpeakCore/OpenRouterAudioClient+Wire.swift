@@ -32,21 +32,8 @@ struct OpenRouterSpeechRequest: Encodable {
 }
 
 struct OpenRouterTranscriptionResponse: Decodable {
-    struct Usage: Decodable {
-        let seconds: Double?
-        let cost: Decimal?
-        let inputTokens: Int?
-        let outputTokens: Int?
-
-        enum CodingKeys: String, CodingKey {
-            case seconds, cost
-            case inputTokens = "input_tokens"
-            case outputTokens = "output_tokens"
-        }
-    }
-
     let text: String
-    let usage: Usage?
+    let usage: OpenRouterTranscriptionUsage?
 
     func result(model: String) -> TranscriptionResult {
         let seconds = usage?.seconds ?? 0
@@ -70,5 +57,18 @@ struct OpenRouterTranscriptionResponse: Decodable {
             rawPayload: nil,
             debugInfo: nil
         )
+    }
+}
+
+struct OpenRouterTranscriptionUsage: Decodable {
+    let seconds: Double?
+    let cost: Decimal?
+    let inputTokens: Int?
+    let outputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case seconds, cost
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
     }
 }

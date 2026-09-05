@@ -23,6 +23,20 @@ public final class VoiceOutputRouter: ObservableObject {
             .assign(to: &$isSpeaking)
     }
 
+    /// Retains the original public entry point for existing clients.
+    public func speak( // swiftlint:disable:this function_parameter_count
+        text: String, provider: VoiceOutputProvider, model: String, voice: String,
+        lastKnownVoiceName: String?, speed: Double, languageIdentifier: String,
+        sonioxRegion: SonioxTTSRegion, deepgramAPIKey: String, sonioxAPIKey: String
+    ) async throws {
+        try await speak(
+            text: text, provider: provider, model: model, voice: voice,
+            lastKnownVoiceName: lastKnownVoiceName, speed: speed, languageIdentifier: languageIdentifier,
+            sonioxRegion: sonioxRegion, deepgramAPIKey: deepgramAPIKey, sonioxAPIKey: sonioxAPIKey,
+            openRouterAPIKey: ""
+        )
+    }
+
     public func speak( // swiftlint:disable:this function_parameter_count
         text: String,
         provider: VoiceOutputProvider,
@@ -34,7 +48,7 @@ public final class VoiceOutputRouter: ObservableObject {
         sonioxRegion: SonioxTTSRegion,
         deepgramAPIKey: String,
         sonioxAPIKey: String,
-        openRouterAPIKey: String = ""
+        openRouterAPIKey: String
     ) async throws {
         stop()
         switch provider {

@@ -38,16 +38,6 @@ public struct OpenRouterAudioModel: Identifiable, Codable, Equatable, Sendable {
         case expirationDate = "expiration_date"
     }
 
-    private struct Architecture: Codable {
-        let inputModalities: [String]
-        let outputModalities: [String]
-
-        enum CodingKeys: String, CodingKey {
-            case inputModalities = "input_modalities"
-            case outputModalities = "output_modalities"
-        }
-    }
-
     private struct PriceValue: Decodable {
         let value: String?
 
@@ -65,7 +55,7 @@ public struct OpenRouterAudioModel: Identifiable, Codable, Equatable, Sendable {
         }
         name = (try? container.decode(String.self, forKey: .name)).flatMap { $0.isEmpty ? nil : $0 } ?? id
         description = (try? container.decode(String.self, forKey: .description)) ?? ""
-        let architecture = try container.decode(Architecture.self, forKey: .architecture)
+        let architecture = try container.decode(OpenRouterAudioArchitecture.self, forKey: .architecture)
         inputModalities = architecture.inputModalities
         outputModalities = architecture.outputModalities
         pricing = (try? container.decode([String: PriceValue].self, forKey: .pricing))?.compactMapValues(\.value) ?? [:]
@@ -83,7 +73,7 @@ public struct OpenRouterAudioModel: Identifiable, Codable, Equatable, Sendable {
         try container.encode(name, forKey: .name)
         try container.encode(description, forKey: .description)
         try container.encode(
-            Architecture(inputModalities: inputModalities, outputModalities: outputModalities), forKey: .architecture
+            OpenRouterAudioArchitecture(inputModalities: inputModalities, outputModalities: outputModalities), forKey: .architecture
         )
         try container.encode(pricing, forKey: .pricing)
         try container.encode(supportedParameters, forKey: .supportedParameters)
@@ -117,5 +107,15 @@ struct OpenRouterAudioModelResponse: Decodable {
         if !entries.isEmpty && data.isEmpty {
             throw OpenRouterAudioCatalogError.invalidResponse
         }
+    }
+}
+
+private struct OpenRouterAudioArchitecture: Codable {
+    let inputModalities: [String]
+    let outputModalities: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case inputModalities = "input_modalities"
+        case outputModalities = "output_modalities"
     }
 }

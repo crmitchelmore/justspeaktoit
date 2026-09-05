@@ -230,8 +230,8 @@ public struct GeminiInteractionsClient: Sendable {
             throw GeminiBatchError.uploadFailed("The upload response did not name the uploaded file.")
         }
 
-        let timeout = self.filePollTimeout.isFinite ? min(max(0, self.filePollTimeout), 86_400) : 60
-        let interval = self.filePollInterval.isFinite ? min(max(0.01, self.filePollInterval), 86_400) : 1
+        let timeout = try Self.processingBudget(for: self.filePollTimeout)
+        let interval = self.filePollInterval.isFinite ? max(0.01, self.filePollInterval) : 1
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(timeout))
         // Race the entire operation, including an in-flight URLSession request,
@@ -244,13 +244,23 @@ public struct GeminiInteractionsClient: Sendable {
             group.addTask {
                 try await self.pollUntilActive(
                     at: statusURL, apiKey: apiKey, uri: uri,
-                    interval: interval, deadline: deadline, clock: clock
+                    interval: min(interval, max(0.01, timeout)), deadline: deadline, clock: clock
                 )
             }
             defer { group.cancelAll() }
             guard let result = try await group.next() else { throw Self.processingTimeout }
             return result
         }
+    }
+
+    /// Preserve finite multi-day budgets. Reject values too large for a clock
+    /// duration explicitly rather than silently replacing the configured deadline.
+    static func processingBudget(for timeout: TimeInterval) throws -> TimeInterval {
+        guard timeout.isFinite else { return 60 }
+        guard timeout < Double(Int64.max) / 4 else {
+            throw GeminiBatchError.uploadFailed("The file processing timeout is too large for the system clock.")
+        }
+        return max(0, timeout)
     }
 
     private static var processingTimeout: GeminiBatchError {

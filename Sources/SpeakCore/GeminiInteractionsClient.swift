@@ -23,6 +23,8 @@ public struct GeminiInteractionsClient: Sendable {
     private let inlineAudioByteLimit: Int
     private let filePollInterval: TimeInterval
     private let filePollTimeout: TimeInterval
+    // Internal seam lets tests inspect the on-disk source without buffering it.
+    var uploadRecording: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
 
     public init(
         session: URLSession = .shared,
@@ -34,6 +36,9 @@ public struct GeminiInteractionsClient: Sendable {
         self.inlineAudioByteLimit = inlineAudioByteLimit
         self.filePollInterval = filePollInterval
         self.filePollTimeout = filePollTimeout
+        self.uploadRecording = { request, url in
+            try await session.upload(for: request, fromFile: url)
+        }
     }
 
     public func transcribeFile(
@@ -92,17 +97,26 @@ public struct GeminiInteractionsClient: Sendable {
         mimeType: String,
         apiKey: String
     ) async throws -> GeminiAudioSource {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        // Freeze the source before the first network suspension. A retry, file
+        // replacement or deletion must not change the bytes/length mid-upload.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let snapshot = directory.appendingPathComponent("recording")
+        try FileManager.default.copyItem(at: url.resolvingSymlinksInPath(), to: snapshot)
+        let attributes = try FileManager.default.attributesOfItem(atPath: snapshot.path)
         guard let fileSize = attributes[.size] as? NSNumber else {
             throw CocoaError(.fileReadUnknown)
         }
         let byteCount = fileSize.int64Value
         guard byteCount > self.inlineAudioByteLimit else {
-            return .inline(try Data(contentsOf: url))
+            return .inline(try Data(contentsOf: snapshot))
         }
         return .fileURI(
             try await self.uploadFile(
-                at: url,
+                at: snapshot,
                 byteCount: byteCount,
                 mimeType: mimeType,
                 apiKey: apiKey,
@@ -173,7 +187,7 @@ public struct GeminiInteractionsClient: Sendable {
         upload.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
         // URLSession reads the recording from disk as it uploads. Keeping it out
         // of httpBody avoids retaining a full recording (and copies) in memory.
-        let (uploadBody, uploadResponse) = try await self.session.upload(for: upload, fromFile: url)
+        let (uploadBody, uploadResponse) = try await self.uploadRecording(upload, url)
         guard let uploadHTTP = uploadResponse as? HTTPURLResponse else {
             throw TranscriptionProviderError.invalidResponse
         }

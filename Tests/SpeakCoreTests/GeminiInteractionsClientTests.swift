@@ -178,6 +178,7 @@ final class GeminiInteractionsClientTests: XCTestCase {
         )
     }
 
+    // swiftlint:disable:next function_body_length
     func testLargeRecordingUsesFileUploadWithItsExactLength() async throws {
         let recorder = GeminiRequestLog()
         let audioURL = try Self.makeTemporaryAudioFile()
@@ -201,6 +202,7 @@ final class GeminiInteractionsClientTests: XCTestCase {
                 )
                 XCTAssertEqual(request.value(forHTTPHeaderField: "X-Goog-Upload-Protocol"), "resumable")
                 headers["x-goog-upload-url"] = "https://generativelanguage.googleapis.com/upload/session"
+                try Data([9, 9, 9, 9]).write(to: audioURL, options: .atomic)
                 body = "{}"
             case "/upload/session":
                 XCTAssertNil(request.httpBody, "The upload must not retain the recording as Data")
@@ -220,10 +222,28 @@ final class GeminiInteractionsClientTests: XCTestCase {
         }
         defer { GeminiMockURLProtocol.requestHandler = nil }
 
-        let result = try await GeminiInteractionsClient(session: self.makeMockSession()).transcribeFile(
+        let session = self.makeMockSession()
+        var client = GeminiInteractionsClient(session: session)
+        client.uploadRecording = { request, snapshot in
+            await recorder.recordUpload(snapshot)
+            XCTAssertNotEqual(snapshot, audioURL)
+            let input = try FileHandle(forReadingFrom: snapshot)
+            defer { try? input.close() }
+            XCTAssertEqual(try input.read(upToCount: 4), Data([0, 1, 2, 3]))
+            var count: UInt64 = 4
+            while let chunk = try input.read(upToCount: 65_536), !chunk.isEmpty {
+                count += UInt64(chunk.count)
+                XCTAssertTrue(chunk.allSatisfy { $0 == 0 })
+            }
+            XCTAssertEqual(count, byteCount)
+            return try await session.upload(for: request, fromFile: snapshot)
+        }
+        let result = try await client.transcribeFile(
             at: audioURL, apiKey: "k", language: nil
         )
         XCTAssertEqual(result.text, "Large recording")
+        let uploadedURL = await recorder.uploadedFileURL
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(uploadedURL).path))
         let calls = await recorder.calls
         XCTAssertEqual(calls, ["POST /upload/v1beta/files", "POST /upload/session", "POST /v1beta/interactions"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path), "Uploading must not delete the source")
@@ -292,6 +312,11 @@ final class GeminiInteractionsClientTests: XCTestCase {
 
 private actor GeminiRequestLog {
     private(set) var calls: [String] = []
+    private(set) var uploadedFileURL: URL?
+
+    func recordUpload(_ url: URL) {
+        self.uploadedFileURL = url
+    }
 
     /// Records one call and answers how many times that same call has been
     /// made, so a handler can vary its answer per attempt.

@@ -264,6 +264,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         releaseAudioSession()
     }
 
+}
+
+extension SharedClientLiveTranscriber {
     // MARK: - Private
 
     /// Closes the client, giving providers that can still deliver words a

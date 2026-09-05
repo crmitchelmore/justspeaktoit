@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import time
 import unittest
@@ -46,6 +47,29 @@ class CoverageTests(unittest.TestCase):
         output += "Test Case '-[Module.Required testFail]' failed (0.001 seconds).\n"
         errors, _ = gate.coverage_errors(output, ["Required"])
         self.assertTrue(errors)
+
+
+class NativeUICoverageTests(unittest.TestCase):
+    def test_native_gate_requires_each_suite_and_rejects_partial_skips(self):
+        verifier = MODULE_PATH.with_name("verify-core-journey-ui.py")
+        suites = ["LaunchUITests", "CoreJourneyFixtureUITests", "CoreJourneyHotKeyUITests", "CoreJourneyBatchUITests"]
+        passing = "".join(f"Test Case '-[SpeakAppUITests.{suite} testJourney]' passed (0.001 seconds).\n"
+                          for suite in suites)
+        cases = [
+            (passing, 0),
+            (passing.replace("CoreJourneyBatchUITests", "RenamedBatchUITests"), 1),
+            (passing + "Test Case '-[SpeakAppUITests.CoreJourneyBatchUITests testSkipped]' skipped (0 seconds).\n", 1),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "xcodebuild.log"
+            for output, expected in cases:
+                with self.subTest(expected=expected, output=output):
+                    log.write_text(output)
+                    result = subprocess.run([sys.executable, str(verifier), str(log)], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    coverage = json.loads(log.with_name("coverage.json").read_text())
+                    self.assertEqual(bool(coverage["errors"]), expected != 0)
+                    self.assertEqual(coverage["required_suites"], suites)
 
 
 class RunnerTests(unittest.TestCase):

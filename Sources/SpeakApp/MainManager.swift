@@ -453,7 +453,7 @@ final class MainManager: ObservableObject {
   // swiftlint:disable:next function_body_length
   private func configureHotKeys() {
     #if DEBUG
-    if CoreJourneyLaunchProfile.isRequested { return }
+    if CoreJourneyLaunchProfile.isRequested, CoreJourneyLaunchProfile.current?.runsBatchJourney != true { return }
     #endif
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
@@ -515,7 +515,11 @@ final class MainManager: ObservableObject {
     // is a recording to cancel — outside that window Speak reads no system-wide key presses.
     hotKeyManager.trackRecordingState($state.map { $0 == .recording })
 
+    #if DEBUG
+    hotKeyManager.startMonitoring(requestPermission: !CoreJourneyLaunchProfile.isRequested)
+    #else
     hotKeyManager.startMonitoring()
+    #endif
 
     // Pre-warm LLM connection at app launch
     warmUpConnectionIfEnabled()
@@ -601,7 +605,7 @@ final class MainManager: ObservableObject {
       return .rejected(.captureFailed)
     }
 
-    if audioInputDeviceManager.devices.isEmpty {
+    if audioFileManager.requiresPhysicalInput && audioInputDeviceManager.devices.isEmpty {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
       captureWarmer?.sessionDidEnd()
       let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."

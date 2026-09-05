@@ -516,7 +516,8 @@ enum WireUp {
     let audio = AudioFileManager(
       appSettings: settings,
       permissionsManager: permissions,
-      audioDeviceManager: audioDevices
+      audioDeviceManager: audioDevices,
+      captureSource: captureSourceForLaunch()
     )
     if options.sweepsStagedLeftovers {
       AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
@@ -527,7 +528,12 @@ enum WireUp {
       keychainService: options.keychainServiceOverride
         ?? "com.github.speakapp.credentials"
     )
+    #if DEBUG
+    let openRouter = profile?.runsBatchJourney == true
+      ? CoreJourneyBatchFixture.makeClient() : OpenRouterAPIClient(secureStorage: secureStorage)
+    #else
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
+    #endif
     let transcription = TranscriptionManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -612,6 +618,13 @@ enum WireUp {
     return environment
   }
 
+  private static func captureSourceForLaunch() -> (any RecordingCaptureSource)? {
+    #if DEBUG
+    if CoreJourneyLaunchProfile.current?.runsBatchJourney == true { return CoreJourneyRecordingSource() }
+    #endif
+    return nil
+  }
+
   // MARK: - Service Configuration
   // swiftlint:disable:next function_body_length
   private static func configureServices(
@@ -622,7 +635,8 @@ enum WireUp {
     #if DEBUG
     // Construct production managers and UI, but never preload credentials,
     // sync accounts, open listeners, or install voice-edit capture in this check.
-    if CoreJourneyLaunchProfile.isRequested {
+    if let profile = CoreJourneyLaunchProfile.current {
+        profile.startHotKeyProbe(manager: environment.hotKeys, main: environment.main)
       logger.info("AppEnvironment.bootstrap complete (isolated UI launch profile)")
       return
     }

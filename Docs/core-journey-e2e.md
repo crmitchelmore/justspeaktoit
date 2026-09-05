@@ -60,14 +60,14 @@ MainView, which is created only after the production AppEnvironment is built.
 It captures the frontmost Speak process identity, switches focus to the fixture,
 types there, then activates that same process and checks its PID and the control
 again. It never clicks Record or sends a
-recording hotkey. The job uploads its `xcresult`, xcodebuild log, and screenshots
+recording hotkey. The separate hotkey probe below exercises native keyboard delivery. The job uploads its `xcresult`, xcodebuild log, and screenshots
 of both apps. This proves bootstrap and focus survival, not transcript delivery.
 
 The explicit `SPEAK_CORE_JOURNEY_PROFILE=<UUID>` launch profile exists only in
 Debug builds. It supplies typed, separate UserDefaults and temporary History,
 recording, personal lexicon, and auto-correction stores; pronunciation and
 dictation profiles use that separate defaults suite. Capture/connection
-prewarming, hands-free mode, network listeners, analytics, input monitoring,
+prewarming, hands-free mode, network listeners, analytics, Fn/input-event-tap monitoring,
 credential preloading/sync, voice-edit startup, automatic updates, and launch
 cleanup actions are disabled. The test exercises the real manager/view graph
 with these startup integrations excluded. Local model singletons may still
@@ -76,6 +76,47 @@ every app singleton or test model runtime execution.
 Release builds ignore the profile. `CoreJourneyLaunchProfileTests` checks the
 typed opt-outs and per-launch settings/storage boundaries; native CI execution
 is required to validate the launched-app test itself.
+
+### Native global-hotkey prerequisite
+
+`CoreJourneyHotKeyUITests` opts into `SPEAK_CORE_JOURNEY_HOTKEY_PROBE=1`
+alongside the UUID profile. It configures the supported **Control–Option–Shift–K**
+chord and starts the production `HotKeyManager` and Carbon backend without a
+permission request. XCTest's `typeKey(_:modifierFlags:)` sends keyboard input
+while the fixture is frontmost. The test requires two ordered
+`keyDown → keyUp → singleTap` sequences, each with the fixture still frontmost,
+and the gesture source must be `carbon`. It also checks the same live Speak PID,
+background state, unchanged target text, and retained target focus.
+
+An atomic `hotkey-probe.json` snapshot in the isolated profile directory records
+registration status, process identity, ordered events, and the actual
+`AXIsProcessTrusted()` result. The UI test attaches this snapshot and both app
+screenshots to `xcresult` before cleanup. Registration/input failures fail the
+test; no permission-denied skip or internal event injection exists. The existing
+`Core Journey Fixture UI` job selects this suite with the bootstrap/fixture suites
+under its ten-minute timeout. This is new native coverage pending cold-runner CI
+validation, not an established flake-rate or full-journey claim.
+
+This probe intentionally leaves MainManager's recording listeners disabled; its
+listeners only observe the real engine. It proves the global keyboard boundary,
+not MainManager orchestration, capture, transcription, clipboard, insertion, or
+History. It does not prove Fn, a held physical key, Input Monitoring, or an
+Accessibility grant. Microphone and Accessibility remain denied in the profile.
+The AX diagnostic is evidence about the launched process, not an override.
+
+The next batch journey has concrete prerequisites still missing in production:
+`MainManager.startSession` rejects an empty physical device list, and
+`AudioFileManager` owns concrete `AVAudioRecorder` capture with permission/device
+setup. A prerecorded capture implementation must enter at that lifecycle
+boundary, and a deterministic batch client must be injected at WireUp's existing
+`TranscriptionManager` batch-client dependency. Direct insertion additionally
+requires genuine AX authorisation for the launched Speak process; XCTest's
+ability to type into the fixture does not confer that permission on Speak.
+No supported unattended cold-runner AX bootstrap has been established here.
+Do not edit TCC databases, fake an AX grant, or substitute internal callbacks to
+mark the direct-insertion P0 complete. Use the attached actual AX readiness when
+choosing the next native journey, and retain the clipboard-only boundary as a
+separate honest case if native insertion remains unavailable.
 
 The native P0 matrix is not complete. Before promoting the launched-app layer
 as capture-to-delivery protection, #802 needs the following concrete evidence:

@@ -14,6 +14,7 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         ] {
             XCTAssertEqual(profile.defaults.object(forKey: key) as? Bool, false, key)
         }
+        XCTAssertFalse(profile.probesHotKey)
         XCTAssertFalse(profile.settings.audioPreWarmingEnabled)
         XCTAssertFalse(profile.settings.connectionPreWarmingEnabled)
         XCTAssertFalse(profile.settings.handsFreeDictationEnabled)
@@ -47,8 +48,23 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         )
     }
 
-    private func makeProfile() -> CoreJourneyLaunchProfile {
-        let profile = CoreJourneyLaunchProfile(identifier: UUID())
+    func testHotKeyProbe_usesSupportedCarbonChordWithoutGrantingCapturePermissions() {
+        let profile = makeProfile(probesHotKey: true)
+
+        XCTAssertTrue(profile.probesHotKey)
+        XCTAssertTrue(profile.settings.selectedHotKey.isSupportedForGlobalMonitoring)
+        XCTAssertFalse(profile.settings.selectedHotKey.isFnKey)
+        XCTAssertEqual(profile.settings.selectedHotKey.displayString, "⌃⌥⇧K")
+        XCTAssertEqual(profile.settings.holdThreshold, 5)
+        XCTAssertEqual(profile.settings.doubleTapWindow, 0.1)
+        let permissions = profile.bootstrapOptions().permissionsOverride
+        XCTAssertEqual(permissions?.status(for: .microphone), .denied)
+        XCTAssertEqual(permissions?.status(for: .accessibility), .denied)
+        XCTAssertEqual(permissions?.status(for: .inputMonitoring), .denied)
+    }
+
+    private func makeProfile(probesHotKey: Bool = false) -> CoreJourneyLaunchProfile {
+        let profile = CoreJourneyLaunchProfile(identifier: UUID(), probesHotKey: probesHotKey)
         let suiteName = profile.suiteName
         let directory = profile.directory
         addTeardownBlock {

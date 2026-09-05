@@ -208,7 +208,7 @@ jobs:
       - name: Generate macOS project
         run: tuist generate --no-open
 
-      - name: Test Speak bootstrap and launched fixture
+      - name: Test Speak bootstrap, global hotkey, and launched fixture
         run: |
           set -o pipefail
           mkdir -p .artifacts/core-journey-fixture-ui
@@ -219,6 +219,7 @@ jobs:
             -destination "platform=macOS" \
             -only-testing:SpeakAppUITests/LaunchUITests \
             -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
+            -only-testing:SpeakAppUITests/CoreJourneyHotKeyUITests \
             -resultBundlePath .artifacts/core-journey-fixture-ui/CoreJourneyFixture.xcresult \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="-" \

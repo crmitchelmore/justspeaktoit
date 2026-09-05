@@ -28,65 +28,104 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
   }
 
   private struct QueuedEvent: Codable, Sendable {
+    let id: UUID
     let createdAt: Date
     let event: String
     let distinctID: String
     let properties: [String: AnalyticsPropertyValue]
+
+    init(createdAt: Date, payload: ProductAnalyticsPayload) {
+      id = UUID()
+      self.createdAt = createdAt
+      event = payload.event
+      distinctID = payload.distinctID?.uuidString ?? "anonymous-counter"
+      properties = payload.properties
+    }
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      // Queues written before request serialization did not carry an entry ID.
+      id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+      createdAt = try container.decode(Date.self, forKey: .createdAt)
+      event = try container.decode(String.self, forKey: .event)
+      distinctID = try container.decode(String.self, forKey: .distinctID)
+      properties = try container.decode([String: AnalyticsPropertyValue].self, forKey: .properties)
+    }
   }
 
   private let configuration: Configuration?
   private let queueURL: URL
   private let session: URLSession
+  private let now: @Sendable () -> Date
   private var queue: [QueuedEvent] = []
   private var isOpen = false
+  private var activeFlushID: UUID?
+  private var activeRequest: Task<(Data, URLResponse), Error>?
 
   nonisolated static var isConfigured: Bool { Configuration.resolve() != nil }
 
   init(
     queueURL: URL,
     session: URLSession = .shared,
-    configuration: (projectKey: String, endpoint: URL)? = nil
+    configuration: (projectKey: String, endpoint: URL)? = nil,
+    now: @escaping @Sendable () -> Date = { Date() }
   ) {
     self.queueURL = queueURL
     self.session = session
+    self.now = now
     self.configuration = configuration.map {
       Configuration(projectKey: $0.projectKey, endpoint: $0.endpoint)
     }
       ?? Configuration.resolve()
-    queue = Self.pruned(Self.loadQueue(from: queueURL))
+    queue = Self.pruned(Self.loadQueue(from: queueURL), now: now())
   }
 
   func reopen() async throws {
+    pruneQueue()
+    try persistQueue()
     isOpen = true
     try await flush()
   }
 
   func capture(_ payload: ProductAnalyticsPayload) async throws {
     guard isOpen, configuration != nil else { return }
-    queue.append(QueuedEvent(
-      createdAt: Date(),
-      event: payload.event,
-      distinctID: payload.distinctID?.uuidString ?? "anonymous-counter",
-      properties: payload.properties
-    ))
+    queue.append(QueuedEvent(createdAt: now(), payload: payload))
     pruneQueue()
     try persistQueue()
     try await flush()
   }
 
   func purge() async throws {
-    isOpen = false
+    stopRequests()
     queue.removeAll(keepingCapacity: false)
     if FileManager.default.fileExists(atPath: queueURL.path) {
       try FileManager.default.removeItem(at: queueURL)
     }
   }
 
-  func close() async { isOpen = false }
+  func close() async { stopRequests() }
+
+  private func stopRequests() {
+    isOpen = false
+    activeFlushID = nil
+    activeRequest?.cancel()
+    activeRequest = nil
+  }
 
   private func flush() async throws {
-    guard isOpen, let configuration else { return }
-    while let next = queue.first {
+    guard isOpen, let configuration, activeFlushID == nil else { return }
+    let flushID = UUID()
+    activeFlushID = flushID
+    defer {
+      if activeFlushID == flushID {
+        activeFlushID = nil
+        activeRequest = nil
+      }
+    }
+    while isOpen, activeFlushID == flushID {
+      pruneQueue()
+      try persistQueue()
+      guard let next = queue.first else { return }
       var properties = next.properties.mapValues(\.foundationValue)
       properties["distinct_id"] = next.distinctID
       properties["$lib"] = "just-speak-to-it"
@@ -101,17 +140,27 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
       request.httpMethod = "POST"
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
       request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-      let (_, response) = try await session.data(for: request)
+      let requestTask = Task { [session, request] in
+        try Task.checkCancellation()
+        return try await session.data(for: request)
+      }
+      activeRequest = requestTask
+      let (_, response) = try await requestTask.value
+      // An opt-out can purge the queue and a later opt-in can start a new flush
+      // while the cancelled request is finishing. Its response owns neither queue.
+      guard isOpen, activeFlushID == flushID else { return }
+      activeRequest = nil
       guard let http = response as? HTTPURLResponse, (200 ..< 300).contains(http.statusCode) else {
         throw URLError(.badServerResponse)
       }
-      queue.removeFirst()
+      // A concurrent capture may have evicted this entry at the queue cap.
+      queue.removeAll { $0.id == next.id }
       try persistQueue()
     }
   }
 
-  private func pruneQueue(now: Date = Date()) {
-    queue = Self.pruned(queue, now: now)
+  private func pruneQueue() {
+    queue = Self.pruned(queue, now: now())
   }
 
   private func persistQueue() throws {

@@ -1,5 +1,7 @@
 #if DEBUG
+import Carbon
 import Foundation
+import SpeakHotKeys
 
 /// Explicit opt-in for the launched-app bootstrap check, never a release mode.
 /// The real managers/views are built; recording and external startup work stay
@@ -7,6 +9,7 @@ import Foundation
 @MainActor
 final class CoreJourneyLaunchProfile {
     nonisolated static let environmentKey = "SPEAK_CORE_JOURNEY_PROFILE"
+    nonisolated static let hotKeyProbeKey = "SPEAK_CORE_JOURNEY_HOTKEY_PROBE"
 
     nonisolated static var isRequested: Bool {
         ProcessInfo.processInfo.environment[environmentKey] != nil
@@ -17,7 +20,10 @@ final class CoreJourneyLaunchProfile {
         guard let identifier = UUID(uuidString: value) else {
             preconditionFailure("SPEAK_CORE_JOURNEY_PROFILE must contain a UUID")
         }
-        return CoreJourneyLaunchProfile(identifier: identifier)
+        return CoreJourneyLaunchProfile(
+            identifier: identifier,
+            probesHotKey: ProcessInfo.processInfo.environment[hotKeyProbeKey] == "1"
+        )
     }()
 
     let defaults: UserDefaults
@@ -25,8 +31,15 @@ final class CoreJourneyLaunchProfile {
     let fileManager: FileManager
     let directory: URL
     let suiteName: String
+    let probesHotKey: Bool
+    private var hotKeyProbe: CoreJourneyHotKeyProbe?
 
-    init(identifier: UUID, temporaryDirectory: URL = FileManager.default.temporaryDirectory) {
+    init(
+        identifier: UUID,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        probesHotKey: Bool = false
+    ) {
+        self.probesHotKey = probesHotKey
         let suiteName = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
         let directory = temporaryDirectory.appendingPathComponent(suiteName, isDirectory: true)
         guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -48,6 +61,17 @@ final class CoreJourneyLaunchProfile {
         }
         defaults.set(directory.appendingPathComponent("Recordings").path, forKey: "recordingsDirectory")
         settings = AppSettings(defaults: defaults)
+        if probesHotKey {
+            settings.selectedHotKey = .custom(keyCode: UInt16(kVK_ANSI_K), modifiers: [.control, .option, .shift])
+            settings.holdThreshold = 5
+            settings.doubleTapWindow = 0.1
+        }
+    }
+
+    func startHotKeyProbe(manager: HotKeyManager) {
+        guard probesHotKey else { return }
+        precondition(hotKeyProbe == nil, "Core journey hotkey probe must start once")
+        hotKeyProbe = CoreJourneyHotKeyProbe(manager: manager, directory: directory)
     }
 
     func bootstrapOptions() -> WireUp.BootstrapOptions {

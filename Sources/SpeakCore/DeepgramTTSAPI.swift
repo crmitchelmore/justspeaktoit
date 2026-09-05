@@ -23,7 +23,7 @@ public enum DeepgramTTSAPIError: Error, Sendable, Equatable {
 public struct DeepgramTTSAPI: Sendable {
     /// Synthesis endpoint; callers append `model` and format query items.
     public static let speakEndpoint = URL(string: "https://api.deepgram.com/v1/speak")!
-    public static let fluxSpeakEndpoint = URL(string: "https://api.deepgram.com/v2/speak")!
+    static let fluxSpeakEndpoint = URL(string: "https://api.deepgram.com/v2/speak")!
     /// Cheap authenticated endpoint used to validate API keys.
     public static let projectsEndpoint = URL(string: "https://api.deepgram.com/v1/projects")!
     /// Deepgram Aura pricing: $0.0135 per 1000 characters.

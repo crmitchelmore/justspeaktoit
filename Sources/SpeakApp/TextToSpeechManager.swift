@@ -179,11 +179,11 @@ final class TextToSpeechManager: ObservableObject {
     return voices.isEmpty ? VoiceCatalog.systemVoices : voices
   }
 
-  func estimatedCost(text: String, voice: String? = nil) -> Decimal? {
-    let effectiveVoice = voice ?? appSettings.defaultTTSVoice
-    return TTSProvider.from(voiceID: effectiveVoice)
-      .estimatedCost(characterCount: text.count, quality: appSettings.ttsQuality, voiceID: effectiveVoice)
-  }
+    func estimatedCost(text: String, voice: String? = nil) -> Decimal? {
+        let effectiveVoice = voice ?? appSettings.defaultTTSVoice
+        return TTSProvider.from(voiceID: effectiveVoice)
+            .estimatedCost(characterCount: text.count, quality: appSettings.ttsQuality, voiceID: effectiveVoice)
+    }
 
   func totalCostThisMonth() -> Decimal {
     let calendar = Calendar.current

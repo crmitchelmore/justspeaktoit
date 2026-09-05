@@ -2,7 +2,7 @@ import XCTest
 @testable import SpeakCore
 
 final class DeepgramSpeechCatalogTests: XCTestCase {
-    func testFluxSelectionAndLegacyMigrationRemainCompatible() {
+    func testFluxSelectionAndLegacyMigration_remainsCompatible() {
         let selection = DeepgramSpeechCatalog.resolvedSelection(modelID: " flux ", voiceID: "deepgram/flux-haley-en")
         XCTAssertEqual(selection.model.id, "flux")
         XCTAssertEqual(selection.voice.id, "flux-haley-en")
@@ -20,7 +20,7 @@ final class DeepgramSpeechCatalogTests: XCTestCase {
         XCTAssertEqual(DeepgramSpeechCatalog.voices(forModelID: "flux").count, 13)
     }
 
-    func testTransportRoutesFluxAndAuraToTheirOwnEndpoints() async throws {
+    func testTransportRoutesFluxAndAura_usesOwnEndpoints() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SpeechCatalogURLProtocol.self]
         let session = URLSession(configuration: configuration)

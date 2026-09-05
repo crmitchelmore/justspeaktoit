@@ -3,7 +3,7 @@ import XCTest
 @testable import SpeakApp
 
 final class DeepgramTTSCatalogParityTests: XCTestCase {
-    func testFluxPricingRemainsUnknownWhileAuraRetainsItsRate() {
+    func testFluxPricing_unknownWhileAuraRetainsItsRate() {
         XCTAssertNil(TTSProvider.deepgram.estimatedCost(
             characterCount: 1000, quality: .high, voiceID: "deepgram/flux-kit-en"
         ))

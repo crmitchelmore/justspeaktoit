@@ -479,16 +479,16 @@ struct VoiceCatalog {
     ),
   ]
 
-  // Both platform pickers project from the canonical SpeakCore Deepgram catalogue.
-  static let deepgramVoices: [TTSVoice] = DeepgramSpeechCatalog.voices.map { voice in
-    TTSVoice(
-      id: voice.providerVoiceID,
-      name: "\(voice.name) · \(voice.model.displayName)",
-      provider: .deepgram,
-      traits: deepgramTraits(for: voice),
-      previewURL: nil
-    )
-  }
+    // Both platform pickers project from the canonical SpeakCore Deepgram catalogue.
+    static let deepgramVoices: [TTSVoice] = DeepgramSpeechCatalog.voices.map { voice in
+        TTSVoice(
+            id: voice.providerVoiceID,
+            name: "\(voice.name) · \(voice.model.displayName)",
+            provider: .deepgram,
+            traits: deepgramTraits(for: voice),
+            previewURL: nil
+        )
+    }
 
   // Both platform pickers project from the canonical SpeakCore Soniox catalogue.
   static let sonioxVoices: [TTSVoice] = SonioxTTSCatalog.voices.map { voice in

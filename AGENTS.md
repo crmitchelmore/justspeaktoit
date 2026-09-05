@@ -31,14 +31,14 @@ gh release list --repo crmitchelmore/justspeaktoit | grep "mac-v" | head -1
 Releases are **fully automated** via conventional commits:
 
 1. Push to `main` with a releasable commit type (`feat:`, `fix:`, `perf:`, or breaking change)
-2. `auto-release.yml` determines the version bump and creates a `mac-v*` tag
+2. After successful `CI` on the current `main` commit, `auto-release.yml` determines the version bump and creates a `mac-v*` tag
 3. `release-mac.yml` builds two downloads — `JustSpeakToIt-arm64.dmg` (Apple Silicon, primary) and `JustSpeakToIt-universal.dmg` (Intel/legacy) — notarises both, publishes them with `appcast.xml` (universal feed) and `appcast-arm64.xml` (Apple Silicon feed) to GitHub Releases, records their sizes in the job summary, and updates the per-architecture Homebrew cask
 
 Manual releases are still possible by creating and pushing a `mac-v*` tag directly.
 
 ### iOS Release Process
 
-1. The macOS auto-release workflow dispatches an iOS TestFlight build with the same new version when it creates a release.
+1. The macOS auto-release workflow dispatches an iOS TestFlight build from the same validated release tag with the same new version when it creates a release.
 2. For an iOS-only release, go to Actions → "Release iOS (TestFlight)" → Run workflow.
 3. Check App Store Connect for the current iOS version, then enter the intended semantic version explicitly. Never infer it from `VERSION`.
 4. Follow [`Docs/ios-testflight-release.md`](Docs/ios-testflight-release.md) for signing repair, upload, tester assignment, and physical-device verification.
@@ -201,7 +201,7 @@ public final class iOSLiveTranscriber: ObservableObject { ... }
 - Direct pushes to `main` are blocked by branch protection; create a branch and PR even for small fixes, then merge through the normal repo gate.
 
 ### Automated Release Process
-- Every push to `main` triggers `.github/workflows/auto-release.yml`
+- Successful push CI on the current `main` commit triggers `.github/workflows/auto-release.yml`; manual runs on main require the same successful CI.
 - The workflow analyses conventional commits since the last `mac-v*` tag
 - If releasable commits exist, it creates a new `mac-v*` tag which triggers the full macOS build/notarise/release pipeline
 - The `VERSION` file is updated as a best-effort side effect; the **tag is the source of truth**

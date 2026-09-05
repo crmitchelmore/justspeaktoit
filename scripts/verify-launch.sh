@@ -46,36 +46,54 @@ if [ ! -e "$APP_PATH" ]; then
     exit 1
 fi
 
-# --- Clear any existing crash reports for this app ---
+# Resolve the candidate executable, then launch it directly so $! identifies
+# exactly the process we own. A name lookup can accept or kill another install.
+APP_EXECUTABLE="$(python3 - "$APP_PATH" <<'PYTHON'
+import pathlib, plistlib, sys
+path = pathlib.Path(sys.argv[1]).resolve()
+if path.suffix == '.app':
+    with (path / 'Contents/Info.plist').open('rb') as handle:
+        executable = plistlib.load(handle)['CFBundleExecutable']
+    path = path / 'Contents/MacOS' / executable
+print(path)
+PYTHON
+)"
+if [ ! -x "$APP_EXECUTABLE" ]; then
+    echo "❌ Candidate executable is missing or not executable: $APP_EXECUTABLE"
+    exit 1
+fi
+PROCESS_NAME="$(basename "$APP_EXECUTABLE")"
+APP_PID=""
+CRASH_MARKER="$(mktemp "${TMPDIR:-/tmp}/verify-launch.XXXXXX")"
+cleanup() {
+    if [ -n "$APP_PID" ]; then
+        kill "$APP_PID" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$APP_PID" 2>/dev/null; then
+            kill -9 "$APP_PID" 2>/dev/null || true
+        fi
+        wait "$APP_PID" 2>/dev/null || true
+    fi
+    rm -f "$CRASH_MARKER"
+}
+trap cleanup EXIT
+
+# --- Mark this run's crash-report interval ---
 CRASH_DIR="$HOME/Library/Logs/DiagnosticReports"
-touch /tmp/.verify-launch-marker
 CRASH_COUNT_BEFORE=0
 if [ -d "$CRASH_DIR" ]; then
-    CRASH_COUNT_BEFORE=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer /tmp/.verify-launch-marker 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+    CRASH_COUNT_BEFORE=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 fi
 
 # --- Launch the app ---
 LAUNCH_START_NS=$(_now_ns)
-APP_PID=""
+echo "  Launching candidate executable..."
+"$APP_EXECUTABLE" &
+APP_PID=$!
+sleep 2
 
-if [[ "$APP_PATH" == *.app ]]; then
-    # It's an .app bundle — use `open` to launch it properly
-    echo "  Launching .app bundle..."
-    open -a "$APP_PATH" &
-    sleep 2
-
-    # Find the PID
-    APP_PID=$(pgrep -f "$PROCESS_NAME" 2>/dev/null | head -1 || true)
-else
-    # It's a bare executable (SPM build) — launch directly
-    echo "  Launching executable..."
-    "$APP_PATH" &
-    APP_PID=$!
-    sleep 2
-fi
-
-if [ -z "$APP_PID" ]; then
-    echo "❌ Failed to find running process after launch"
+if ! kill -0 "$APP_PID" 2>/dev/null; then
+    echo "❌ Candidate process exited during launch"
     exit 1
 fi
 
@@ -107,7 +125,7 @@ while [ $ELAPSED -lt "$TIMEOUT_SECONDS" ]; do
 
         # Check for crash reports
         if [ -d "$CRASH_DIR" ]; then
-            CRASH_FILES=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer /tmp/.verify-launch-marker 2>/dev/null || true)
+            CRASH_FILES=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null || true)
             if [ -n "$CRASH_FILES" ]; then
                 echo ""
                 echo "📋 Crash report(s) found:"
@@ -135,31 +153,16 @@ echo "  ✅ Process still alive after ${TIMEOUT_SECONDS}s"
 # --- Check for crash reports generated during launch ---
 CRASH_COUNT_AFTER=0
 if [ -d "$CRASH_DIR" ]; then
-    CRASH_COUNT_AFTER=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer /tmp/.verify-launch-marker 2>/dev/null | wc -l | tr -d ' ')
+    CRASH_COUNT_AFTER=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null | wc -l | tr -d ' ')
 fi
 
 if [ "$CRASH_COUNT_AFTER" -gt "$CRASH_COUNT_BEFORE" ]; then
     echo "⚠️  New crash reports detected (before: $CRASH_COUNT_BEFORE, after: $CRASH_COUNT_AFTER)"
     echo "  This may indicate a crash-and-relaunch cycle."
-    find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer /tmp/.verify-launch-marker 2>/dev/null
+    find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null
     # Don't fail — the process is running. But warn.
 fi
 
-# --- Clean up: kill the launched app ---
-echo "  Terminating process..."
-kill "$APP_PID" 2>/dev/null || true
-wait "$APP_PID" 2>/dev/null || true
-
-# Wait briefly for clean shutdown
-sleep 1
-if kill -0 "$APP_PID" 2>/dev/null; then
-    echo "  Force-killing..."
-    kill -9 "$APP_PID" 2>/dev/null || true
-    wait "$APP_PID" 2>/dev/null || true
-fi
-
-# Clean up marker file
-rm -f /tmp/.verify-launch-marker
-
+# The EXIT trap terminates only the child this invocation launched.
 echo "✅ Launch verification passed"
 exit 0

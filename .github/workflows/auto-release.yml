@@ -1,9 +1,16 @@
 name: Auto Release
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch: {}
+
+# Version allocation and tag creation must not race another release run.
+concurrency:
+  group: auto-release-main
+  cancel-in-progress: false
 
 jobs:
   check-and-release:
@@ -11,10 +18,14 @@ jobs:
     # Tag/version bookkeeping only — no build. Keep the timeout tight since
     # macOS runners bill at 10x.
     timeout-minutes: 15
-    # Skip bot commits (version bumps, appcast updates) to avoid loops
+    # workflow_run also fires for failures and PRs; only trusted main push CI
+    # may release. Manual runs must select main and pass the same SHA gate.
     if: >-
-      !contains(github.event.head_commit.message, 'chore: bump version') &&
-      !contains(github.event.head_commit.message, 'chore: update appcast')
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     permissions:
       contents: write
       actions: write
@@ -23,8 +34,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           token: ${{ secrets.AUTO_RELEASE_TOKEN }}
           persist-credentials: true
+
+      - name: Verify main CI for the release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/verify-release-ci.sh "$(git rev-parse HEAD)"
 
       - name: Check for releasable changes
         id: check
@@ -107,9 +124,10 @@ jobs:
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Create tag and bump VERSION
+        id: tag
         if: steps.check.outputs.should_release == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           TAG="mac-v$NEW_VERSION"
@@ -125,25 +143,32 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Tag the triggering commit (kicks off release-mac.yml)
+          # Recheck immediately before publishing in case main advanced while
+          # this run calculated its version. Never release an unvalidated HEAD.
+          bash scripts/verify-release-ci.sh "$RELEASE_SHA"
+
+          # Tag the validated commit (kicks off release-mac.yml)
           git tag "$TAG" "$RELEASE_SHA"
           git push origin "$TAG"
+          echo "created=true" >> "$GITHUB_OUTPUT"
           echo "🚀 Created tag $TAG on ${RELEASE_SHA:0:7}"
 
           # Best-effort VERSION file update
           echo "$NEW_VERSION" > VERSION
           git add VERSION
-          git commit -m "chore: bump version to $NEW_VERSION"
-          git push origin main || echo "⚠️ Could not push VERSION bump (branch protection)"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: bump version to $NEW_VERSION"
+            git push origin HEAD:main || echo "⚠️ Could not push VERSION bump (branch protection or main advanced)"
+          fi
 
       - name: Trigger iOS TestFlight Release
-        if: steps.check.outputs.should_release == 'true'
+        if: steps.tag.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           echo "🚀 Triggering iOS TestFlight build for v$NEW_VERSION"
-          if gh workflow run "Release iOS (TestFlight)" --ref main \
+          if gh workflow run "Release iOS (TestFlight)" --ref "mac-v$NEW_VERSION" \
             -f version="$NEW_VERSION" \
             -f release_notes_source_tag="mac-v$NEW_VERSION" \
             -f include_keyboard=true \

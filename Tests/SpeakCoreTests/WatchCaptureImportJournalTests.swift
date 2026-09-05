@@ -65,11 +65,12 @@ final class WatchCaptureImportJournalTests: XCTestCase {
         let journal = makeJournal()
         let stale = UUID()
         let fresh = UUID()
-        journal.parkJob(
+        journal.parkJobReportingDurability(
             captureID: stale,
             fileExtension: "m4a",
             createdAt: Date().addingTimeInterval(-15 * 24 * 60 * 60),
-            duration: 5
+            duration: 5,
+            now: Date().addingTimeInterval(-15 * 24 * 60 * 60)
         )
         journal.parkJob(captureID: fresh, fileExtension: "m4a", createdAt: Date(), duration: 5)
 
@@ -116,6 +117,177 @@ final class WatchCaptureImportJournalTests: XCTestCase {
         journal.confirmAckDelivered(captureID: captureID)
         XCTAssertTrue(journal.pendingAcks().isEmpty)
         XCTAssertTrue(makeJournal().pendingAcks().isEmpty)
+    }
+
+    func testParkWriteFailure_reportsFailureAndCanRetryAfterStorageRecovers() throws {
+        let journal = makeJournal()
+        let captureID = UUID()
+        try withBlockedJournal {
+            XCTAssertFalse(journal.parkJobReportingDurability(
+                captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 5
+            ))
+            XCTAssertTrue(journal.pendingJobs().isEmpty)
+        }
+        XCTAssertTrue(journal.parkJobReportingDurability(
+            captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 5
+        ))
+        XCTAssertEqual(makeJournal().pendingJobs().map(\.captureID), [captureID])
+    }
+
+    func testCompleteWithAcknowledgement_persistsBothChangesTogether() {
+        let journal = makeJournal()
+        let captureID = UUID()
+        journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 5)
+
+        XCTAssertTrue(journal.completeJobReportingDurability(
+            captureID: captureID,
+            acknowledgement: WatchCaptureAckRecord(captureID: captureID, outcome: .transcribed)
+        ))
+
+        let relaunched = makeJournal()
+        XCTAssertTrue(relaunched.pendingJobs().isEmpty)
+        XCTAssertEqual(relaunched.pendingAcks().map(\.captureID), [captureID])
+        XCTAssertEqual(relaunched.pendingAcks().first?.outcome, .transcribed)
+    }
+
+    func testCompletionWriteFailure_keepsJobAndDoesNotExposeUncommittedAck() throws {
+        let journal = makeJournal()
+        let captureID = UUID()
+        journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 5)
+        let acknowledgement = WatchCaptureAckRecord(captureID: captureID, outcome: .transcribed)
+
+        try withBlockedJournal {
+            XCTAssertFalse(journal.completeJobReportingDurability(
+                captureID: captureID, acknowledgement: acknowledgement
+            ))
+            XCTAssertEqual(journal.pendingJobs().map(\.captureID), [captureID])
+            XCTAssertTrue(journal.pendingAcks().isEmpty)
+        }
+        XCTAssertEqual(makeJournal().pendingJobs().map(\.captureID), [captureID])
+        XCTAssertTrue(journal.completeJobReportingDurability(
+            captureID: captureID, acknowledgement: acknowledgement
+        ))
+        XCTAssertEqual(makeJournal().pendingAcks().map(\.captureID), [captureID])
+    }
+
+    func testPurge_persistsFailureAckBeforeReleasingExpiredJob() {
+        let journal = makeJournal()
+        let captureID = UUID()
+        journal.parkJobReportingDurability(
+            captureID: captureID, fileExtension: "m4a",
+            createdAt: Date().addingTimeInterval(-15 * 24 * 60 * 60), duration: 5,
+            now: Date().addingTimeInterval(-15 * 24 * 60 * 60)
+        )
+        journal.recordAttemptFailure(captureID: captureID, message: "network unavailable")
+
+        XCTAssertEqual(journal.purgeExpired().map(\.captureID), [captureID])
+        let relaunched = makeJournal()
+        XCTAssertTrue(relaunched.pendingJobs().isEmpty)
+        XCTAssertEqual(relaunched.pendingAcks().first?.outcome, .failed)
+        XCTAssertEqual(relaunched.pendingAcks().first?.message, "network unavailable")
+    }
+
+    func testPurgeWriteFailure_returnsNoAudioToDeleteAndKeepsJobRetryable() throws {
+        let journal = makeJournal()
+        let captureID = UUID()
+        journal.parkJobReportingDurability(
+            captureID: captureID, fileExtension: "m4a",
+            createdAt: Date().addingTimeInterval(-15 * 24 * 60 * 60), duration: 5,
+            now: Date().addingTimeInterval(-15 * 24 * 60 * 60)
+        )
+
+        try withBlockedJournal {
+            XCTAssertTrue(journal.purgeExpired().isEmpty)
+            XCTAssertEqual(journal.pendingJobs().map(\.captureID), [captureID])
+            XCTAssertTrue(journal.pendingAcks().isEmpty)
+        }
+        XCTAssertEqual(makeJournal().pendingJobs().map(\.captureID), [captureID])
+        XCTAssertEqual(journal.purgeExpired().map(\.captureID), [captureID])
+    }
+
+    func testAckConfirmationWriteFailure_keepsAckAvailableForReplay() throws {
+        let journal = makeJournal()
+        let captureID = UUID()
+        journal.recordPendingAck(WatchCaptureAckRecord(captureID: captureID, outcome: .transcribed))
+
+        try withBlockedJournal {
+            journal.confirmAckDelivered(captureID: captureID)
+            XCTAssertEqual(journal.pendingAcks().map(\.captureID), [captureID])
+        }
+        XCTAssertEqual(makeJournal().pendingAcks().map(\.captureID), [captureID])
+        journal.confirmAckDelivered(captureID: captureID)
+        XCTAssertTrue(makeJournal().pendingAcks().isEmpty)
+    }
+
+    /// Replace the parent directory with a regular file, preserving the last
+    /// durable snapshot. This forces ENOTDIR even when tests run as root.
+    private func withBlockedJournal(_ body: () throws -> Void) throws {
+        let backup = directory.appendingPathExtension("backup")
+        try FileManager.default.moveItem(at: directory, to: backup)
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.moveItem(at: backup, to: directory)
+        }
+        try Data("blocked".utf8).write(to: directory)
+        try body()
+    }
+
+    func testRedeliveryAfterConfirmedAckAndRelaunch_replaysReceiptWithoutRetranscription() {
+        let journal = makeJournal()
+        let captureID = UUID()
+        journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 5)
+        XCTAssertTrue(journal.completeJobReportingDurability(
+            captureID: captureID,
+            acknowledgement: WatchCaptureAckRecord(captureID: captureID, outcome: .transcribed)
+        ))
+        journal.confirmAckDelivered(captureID: captureID)
+
+        // Transport delivered the ack, but the watch may have died before its
+        // handler persisted it. Its next activation resends the retained audio.
+        let relaunched = makeJournal()
+        XCTAssertTrue(relaunched.pendingAcks().isEmpty)
+        XCTAssertEqual(relaunched.completedAcknowledgement(captureID: captureID)?.outcome, .transcribed)
+        XCTAssertTrue(relaunched.parkJobReportingDurability(
+            captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 5
+        ))
+        XCTAssertTrue(relaunched.pendingJobs().isEmpty)
+        XCTAssertEqual(makeJournal().pendingAcks().map(\.captureID), [captureID])
+    }
+
+    func testExpiredSuccessReceipt_allowsBoundedRetentionAndReimport() {
+        let journal = makeJournal()
+        let captureID = UUID()
+        XCTAssertTrue(journal.completeJobReportingDurability(
+            captureID: captureID,
+            acknowledgement: WatchCaptureAckRecord(
+                captureID: captureID, outcome: .transcribed,
+                recordedAt: Date().addingTimeInterval(-15 * 24 * 60 * 60)
+            )
+        ))
+        journal.confirmAckDelivered(captureID: captureID)
+        XCTAssertNil(makeJournal().completedAcknowledgement(captureID: captureID))
+        // Real retransfers retain the original capture date. Retention must
+        // start at this phone arrival, or recovery purges it before import.
+        let originalDate = Date().addingTimeInterval(-15 * 24 * 60 * 60)
+        journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: originalDate, duration: 5)
+        let relaunched = makeJournal()
+        XCTAssertTrue(relaunched.purgeExpired().isEmpty)
+        XCTAssertEqual(relaunched.pendingJobs().map(\.captureID), [captureID])
+        XCTAssertTrue(relaunched.pendingAcks().isEmpty)
+    }
+
+    func testLegacyJournalWithoutReceipts_retainsPendingJobsOnUpgrade() throws {
+        let captureID = UUID()
+        let legacyJSON = """
+        {"jobs":[{"captureID":"\(captureID.uuidString)","fileExtension":"m4a",
+        "createdAt":"2026-08-06T12:00:00Z","duration":5,"attempts":0,
+        "updatedAt":"2026-08-06T12:00:00Z"}],"pendingAcks":[]}
+        """
+        try Data(legacyJSON.utf8).write(to: directory.appendingPathComponent("import-journal.json"))
+        let journal = makeJournal()
+        XCTAssertEqual(journal.pendingJobs().map(\.captureID), [captureID])
+        XCTAssertNil(journal.pendingJobs().first?.parkedAt)
+        XCTAssertEqual(journal.purgeExpired(now: .distantFuture).map(\.captureID), [captureID])
     }
 
     func testAckRecord_bridgesToTheWireAck() {

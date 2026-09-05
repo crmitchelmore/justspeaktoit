@@ -13,7 +13,7 @@ struct WatchCapture: Identifiable, Codable, Equatable {
 
 /// Owns the watch-side capture queue: persists capture metadata, hands audio
 /// files to WatchConnectivity (whose transfer queue survives the phone being
-/// out of range), deletes local audio once delivery is confirmed, and applies
+/// out of range), retains local audio until transcription is acknowledged, and applies
 /// transcription acknowledgements coming back from the iPhone.
 @MainActor
 final class WatchCaptureStore: NSObject, ObservableObject {
@@ -32,9 +32,6 @@ final class WatchCaptureStore: NSObject, ObservableObject {
     private let fileURL: URL
     private var activated = false
     private var retryAttempts: [UUID: Int] = [:]
-    /// Acks that arrived before WatchConnectivity confirmed delivery, keyed by
-    /// capture id, applied once the transfer completes.
-    private var pendingAcks: [UUID: WatchCaptureAck] = [:]
 
     /// Name of the persisted queue inside the shared container.
     private static let queueFileName = "captures.json"
@@ -96,19 +93,20 @@ final class WatchCaptureStore: NSObject, ObservableObject {
     /// process was killed mid-transfer). Skips ids WatchConnectivity is
     /// already transferring.
     func retryPending() {
-        for capture in captures where capture.status == .recorded || capture.status == .failed {
-            startTransfer(for: capture.id)
+        for capture in captures {
+            if capture.status.canReleaseAudio {
+                // Also recover a crash between durable acknowledgement and deletion.
+                try? FileManager.default.removeItem(at: WatchAudioRecorder.fileURL(for: capture.id))
+            } else {
+                startTransfer(for: capture.id)
+            }
         }
     }
 
     private func startTransfer(for id: UUID) {
         guard let capture = captures.first(where: { $0.id == id }) else { return }
-        // Only a capture that is not already in flight may be queued; anything
-        // else would hand WatchConnectivity a second copy of the same audio.
-        guard capture.status == .recorded || capture.status == .failed else { return }
         guard WCSession.default.activationState == .activated else { return }
-        guard !hasOutstandingTransfer(for: id) else {
-            transition(id, to: .transferring)
+        guard capture.status.shouldRetryTransfer(hasOutstandingTransfer: hasOutstandingTransfer(for: id)) else {
             return
         }
 
@@ -134,28 +132,32 @@ final class WatchCaptureStore: NSObject, ObservableObject {
 
     // MARK: - State transitions
 
-    private func transition(_ id: UUID, to status: WatchCaptureStatus, message: String? = nil) {
-        guard let index = captures.firstIndex(where: { $0.id == id }) else { return }
-        guard captures[index].status.canTransition(to: status) else { return }
+    @discardableResult
+    private func transition(_ id: UUID, to status: WatchCaptureStatus, message: String? = nil) -> Bool {
+        guard let index = captures.firstIndex(where: { $0.id == id }) else { return false }
+        guard captures[index].status.canTransition(to: status) else { return false }
+        let previous = captures[index]
         captures[index].status = status
         captures[index].message = message
-        _ = save()
+        guard save() else {
+            captures[index] = previous
+            return false
+        }
+        return true
     }
 
     private func handleTransferFinished(id: UUID, error: Error?) {
+        // An early transcription acknowledgement wins over any late callback.
+        guard let capture = captures.first(where: { $0.id == id }), !capture.status.isTerminal else { return }
         if let error {
             transition(id, to: .failed, message: error.localizedDescription)
             scheduleRetry(for: id)
             return
         }
         retryAttempts[id] = nil
-        // Delivery confirmed at the WatchConnectivity layer — the local audio
-        // copy is no longer needed.
+        // Transport completion does not prove the phone parked the file or
+        // durably imported it. Retain our recovery copy until its success ack.
         transition(id, to: .delivered)
-        try? FileManager.default.removeItem(at: WatchAudioRecorder.fileURL(for: id))
-        if let ack = pendingAcks.removeValue(forKey: id) {
-            apply(ack)
-        }
     }
 
     /// Re-queues a transfer that failed while the process is still running.
@@ -167,28 +169,23 @@ final class WatchCaptureStore: NSObject, ObservableObject {
         retryAttempts[id] = attempt
         let delay = pow(2.0, Double(attempt))
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch { return }
             self?.startTransfer(for: id)
         }
     }
 
     private func handleAck(_ ack: WatchCaptureAck) {
         guard let capture = captures.first(where: { $0.id == ack.id }) else { return }
-        // `transferUserInfo` can outrun the file-transfer completion callback.
-        // The state machine rejects transferring → transcribed, so hold the
-        // ack and replay it once delivery lands.
-        guard capture.status != .transferring else {
-            pendingAcks[ack.id] = ack
-            return
-        }
-        apply(ack)
-    }
-
-    private func apply(_ ack: WatchCaptureAck) {
         switch ack.outcome {
         case .transcribed:
+            // Persist even an early acknowledgement immediately. Buffering it
+            // in memory loses the only success signal if the process dies.
+            let durable = capture.status.canReleaseAudio || transition(ack.id, to: .transcribed)
+            guard durable else { return }
             retryAttempts[ack.id] = nil
-            transition(ack.id, to: .transcribed)
+            try? FileManager.default.removeItem(at: WatchAudioRecorder.fileURL(for: ack.id))
         case .failed:
             transition(ack.id, to: .failed, message: ack.message ?? "Transcription failed on iPhone")
         }

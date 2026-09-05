@@ -70,8 +70,8 @@ public enum WatchCaptureStatus: String, Codable, CaseIterable, Sendable {
     case recorded
     /// Queued with WatchConnectivity (survives the phone being out of range).
     case transferring
-    /// WatchConnectivity confirmed delivery to the iPhone; the local audio
-    /// file can be deleted.
+    /// WatchConnectivity confirmed delivery to the iPhone. Keep local audio
+    /// until a successful transcription acknowledgement is persisted.
     case delivered
     /// The iPhone acknowledged a successful transcription into history.
     case transcribed
@@ -83,23 +83,33 @@ public enum WatchCaptureStatus: String, Codable, CaseIterable, Sendable {
         self == .transcribed
     }
 
-    /// Legal state-machine transitions:
-    /// recorded → transferring; transferring → delivered/failed;
-    /// delivered → transcribed/failed; failed → transferring (retry).
+    /// A transcription acknowledgement may overtake transfer completion or
+    /// arrive after relaunch. Success is authoritative from any pending state;
+    /// subsequent transport callbacks must never regress a terminal capture.
     public func canTransition(to next: WatchCaptureStatus) -> Bool {
         switch self {
         case .recorded:
-            return next == .transferring
+            return next == .transferring || next == .transcribed || next == .failed
         case .transferring:
-            return next == .delivered || next == .failed
+            return next == .delivered || next == .failed || next == .transcribed
         case .delivered:
-            return next == .transcribed || next == .failed
+            return next == .transcribed || next == .failed || next == .transferring
         case .failed:
-            return next == .transferring
+            return next == .transferring || next == .transcribed
         case .transcribed:
             return false
         }
     }
+
+    /// Recovery uses the transport's durable queue, not a persisted in-flight
+    /// label whose completion callback may have been lost during process death.
+    public func shouldRetryTransfer(hasOutstandingTransfer: Bool) -> Bool {
+        self != .transcribed && !hasOutstandingTransfer
+    }
+
+    /// Audio cleanup follows durable application acknowledgement only.
+    public var canReleaseAudio: Bool { self == .transcribed }
+
 }
 
 /// iPhone → watch acknowledgement for one capture, sent via

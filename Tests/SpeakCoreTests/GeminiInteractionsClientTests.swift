@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import XCTest
 
@@ -256,6 +257,85 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path), "Uploading must not delete the source")
     }
 
+    func testPollingCadenceAndOverallDeadlineAreBounded() async throws {
+        let audioURL = try Self.makeTemporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        for interval in [0.0, -1.0, 100.0] {
+            let recorder = GeminiRequestLog()
+            GeminiMockURLProtocol.requestHandler = { request in
+                let url = try XCTUnwrap(request.url)
+                _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
+                let headers = url.path == "/upload/v1beta/files"
+                    ? ["x-goog-upload-url": "https://generativelanguage.googleapis.com/upload/session"] : [:]
+                let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
+                let body = url.path == "/upload/session"
+                    ? #"{"file":{"name":"files/abc123","uri":"u","state":"PROCESSING"}}"#
+                    : #"{"state":"PROCESSING"}"#
+                return (response, Data(body.utf8))
+            }
+            defer { GeminiMockURLProtocol.requestHandler = nil }
+            let client = GeminiInteractionsClient(session: self.makeMockSession(), inlineAudioByteLimit: 0,
+                                                  filePollInterval: interval, filePollTimeout: 0.2)
+            let start = ContinuousClock.now
+            do {
+                _ = try await client.transcribeFile(at: audioURL, apiKey: "k", language: nil)
+                XCTFail("Processing should time out")
+            } catch let error as GeminiBatchError {
+                guard case .uploadFailed = error else { return XCTFail("Unexpected error: \(error)") }
+            }
+            XCTAssertLessThan(start.duration(to: .now), .seconds(2))
+            let calls = await recorder.calls
+            let polls = calls.filter { $0.hasPrefix("GET ") }
+            XCTAssertLessThanOrEqual(polls.count, 20, "Nonpositive intervals must not cause a tight loop")
+            if interval > 0.2 { XCTAssertTrue(polls.isEmpty, "Do not start a request after its deadline") }
+            XCTAssertFalse(calls.contains("POST /v1beta/interactions"))
+        }
+    }
+
+    func testMultiDayPollingBudgetIsNotShortened() throws {
+        XCTAssertEqual(try GeminiInteractionsClient.processingBudget(for: 172_800), 172_800)
+        XCTAssertThrowsError(try GeminiInteractionsClient.processingBudget(for: .greatestFiniteMagnitude))
+    }
+
+    func testDeadlineCancelsAnInFlightStatusRequest() async throws {
+        let cancelled = expectation(description: "Status request work was cancelled")
+        let recorder = GeminiRequestLog()
+        let audioURL = try Self.makeTemporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        GeminiMockURLProtocol.requestHandler = { request in
+            let url = try XCTUnwrap(request.url)
+            _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
+            if request.httpMethod == "GET" {
+                do { try await Task.sleep(for: .seconds(60)) } catch {
+                    cancelled.fulfill()
+                    throw error
+                }
+                XCTFail("A timed-out status request must not keep working")
+            }
+            let headers = url.path == "/upload/v1beta/files"
+                ? ["x-goog-upload-url": "https://generativelanguage.googleapis.com/upload/session"] : [:]
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: headers)!
+            let body = url.path == "/upload/session"
+                ? #"{"file":{"name":"files/abc123","uri":"u","state":"PROCESSING"}}"# : "{}"
+            return (response, Data(body.utf8))
+        }
+        defer { GeminiMockURLProtocol.requestHandler = nil }
+        let client = GeminiInteractionsClient(session: self.makeMockSession(), inlineAudioByteLimit: 0,
+                                              filePollInterval: 0.01, filePollTimeout: 0.2)
+        let start = ContinuousClock.now
+        do {
+            _ = try await client.transcribeFile(at: audioURL, apiKey: "k", language: nil)
+            XCTFail("Expected processing timeout")
+        } catch let error as GeminiBatchError {
+            guard case .uploadFailed = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+        XCTAssertLessThan(start.duration(to: .now), .seconds(2))
+        await fulfillment(of: [cancelled], timeout: 2)
+        let calls = await recorder.calls
+        XCTAssertEqual(calls.filter { $0.hasPrefix("GET ") }.count, 1)
+        XCTAssertFalse(calls.contains("POST /v1beta/interactions"))
+    }
+
     func testUploadedFile_failedProcessingSurfacesAnUploadFailure() async throws {
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
@@ -335,6 +415,8 @@ private actor GeminiRequestLog {
 }
 
 private final class GeminiMockURLProtocol: URLProtocol {
+    private let stateLock = NSLock()
+    private var loadTask: Task<Void, Never>?
     #if compiler(>=5.10)
         nonisolated(unsafe) static var requestHandler:
             (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
@@ -356,17 +438,26 @@ private final class GeminiMockURLProtocol: URLProtocol {
             return
         }
 
-        Task {
+        stateLock.lock()
+        loadTask = Task {
             do {
                 let (response, data) = try await handler(self.request)
+                try Task.checkCancellation()
                 self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
                 self.client?.urlProtocol(self, didLoad: data)
                 self.client?.urlProtocolDidFinishLoading(self)
             } catch {
-                self.client?.urlProtocol(self, didFailWithError: error)
+                if !Task.isCancelled { self.client?.urlProtocol(self, didFailWithError: error) }
             }
         }
+        stateLock.unlock()
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        stateLock.lock()
+        let task = loadTask
+        loadTask = nil
+        stateLock.unlock()
+        task?.cancel()
+    }
 }

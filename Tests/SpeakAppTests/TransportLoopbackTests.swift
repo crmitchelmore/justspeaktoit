@@ -18,7 +18,7 @@ import XCTest
 /// ready fails with its state so CI cannot silently skip a transport regression.
 @MainActor
 final class TransportLoopbackTests: XCTestCase {
-    private var server: TransportServer?
+    var server: TransportServer?
     private let codeKey = "speakTransportPairingCode"
     private let devicesKey = "speakTransportPairedDevices"
     private var savedCode: String?
@@ -246,8 +246,8 @@ final class TransportLoopbackTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func startServer() async throws -> NWEndpoint {
-        let server = TransportServer()
+    func startServer(configuredServer: TransportServer? = nil) async throws -> NWEndpoint {
+        let server = configuredServer ?? TransportServer()
         self.server = server
         try server.start(on: .any, advertisesService: false)
         return try await self.readyEndpoint(for: server)
@@ -266,7 +266,7 @@ final class TransportLoopbackTests: XCTestCase {
         ])
     }
 
-    private func authenticatedChannel(to endpoint: NWEndpoint, deviceId: String) async throws -> TransportChannel {
+    func authenticatedChannel(to endpoint: NWEndpoint, deviceId: String) async throws -> TransportChannel {
         let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
         do {
             try await channel.start()
@@ -284,7 +284,7 @@ final class TransportLoopbackTests: XCTestCase {
         }
     }
 
-    private func ping(_ channel: TransportChannel) async throws {
+    func ping(_ channel: TransportChannel) async throws {
         try await channel.send(.ping)
         guard case .pong = try await channel.receive() else {
             throw NSError(domain: "TransportLoopbackTests", code: 2)
@@ -292,12 +292,17 @@ final class TransportLoopbackTests: XCTestCase {
     }
 
     /// Waits for the Mac to hang up, and reports whether it did.
-    private func waitForClosure(of channel: TransportChannel, timeout: TimeInterval = 5) async -> Bool {
+    func waitForClosure(
+        of channel: TransportChannel, timeout: TimeInterval = 5, ignoringPongs: Bool = false
+    ) async -> Bool {
         let result = await withTaskGroup(of: Bool.self) { group in
             group.addTask {
                 do {
-                    _ = try await channel.receive()
-                    return false
+                    while true {
+                        let message = try await channel.receive()
+                        if ignoringPongs, case .pong = message { continue }
+                        return false
+                    }
                 } catch {
                     return true
                 }

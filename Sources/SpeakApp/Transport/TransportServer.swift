@@ -36,6 +36,12 @@ public final class TransportServer: ObservableObject {
     // Own channels from accept through disconnect, including unpaired peers.
     private var acceptedConnections: [UUID: TransportConnection] = [:]
     private var listenerGeneration: UUID?
+    private let maximumPendingConnections: Int
+    private let handshakeTimeout: Duration
+
+    var pendingConnectionCount: Int {
+        self.acceptedConnections.values.filter { !$0.isAuthenticated }.count
+    }
 
     /// Callback when transcript chunk received
     public var onTranscriptReceived: ((String, String) -> Void)?
@@ -48,7 +54,14 @@ public final class TransportServer: ObservableObject {
     /// "Send to Mac" preference) in sync with reality.
     public var onFailure: ((Error) -> Void)?
 
-    public init() {}
+    public convenience init() {
+        self.init(maximumPendingConnections: 8, handshakeTimeout: .seconds(10))
+    }
+
+    init(maximumPendingConnections: Int, handshakeTimeout: Duration) {
+        self.maximumPendingConnections = maximumPendingConnections
+        self.handshakeTimeout = handshakeTimeout
+    }
 
     /// Start advertising and accepting connections.
     public func start() throws {
@@ -171,7 +184,11 @@ public final class TransportServer: ObservableObject {
     private func handleNewConnection(_ nwConnection: NWConnection) {
         SpeakLogger.transport.info("New connection from \(String(describing: nwConnection.endpoint))")
 
-        let connection = TransportConnection(connection: nwConnection)
+        guard self.pendingConnectionCount < self.maximumPendingConnections else {
+            nwConnection.cancel()
+            return
+        }
+        let connection = TransportConnection(connection: nwConnection, handshakeTimeout: self.handshakeTimeout)
         let connectionID = UUID()
         self.acceptedConnections[connectionID] = connection
 

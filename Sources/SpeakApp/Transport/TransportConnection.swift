@@ -15,7 +15,10 @@ import SpeakCore
 final class TransportConnection {
     private let channel: TransportChannel
     private var receiveTask: Task<Void, Never>?
-    private var isAuthenticated = false
+    private(set) var isAuthenticated = false
+    private let handshakeTimeout: Duration
+    private var handshakeTimeoutTask: Task<Void, Never>?
+    private var didReportDisconnect = false
     private var deviceId: String?
     private var deviceName: String?
     private(set) var currentSessionId: String?
@@ -24,30 +27,44 @@ final class TransportConnection {
     var onTranscriptChunk: ((String, String) -> Void)?
     var onDisconnected: (() -> Void)?
 
-    init(connection: NWConnection) {
+    init(connection: NWConnection, handshakeTimeout: Duration) {
         self.channel = TransportChannel(connection: connection)
+        self.handshakeTimeout = handshakeTimeout
     }
 
     func start() {
+        // Absolute admission deadline: silence, hello and ping traffic all
+        // consume the same budget, including the WebSocket handshake itself.
+        let timeout = self.handshakeTimeout
+        self.handshakeTimeoutTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: timeout)
+            } catch { return }
+            guard let self, !self.isAuthenticated else { return }
+            self.disconnect()
+        }
         self.receiveTask = Task { @MainActor [weak self] in
             await self?.run()
         }
     }
 
     func disconnect() {
+        self.handshakeTimeoutTask?.cancel()
+        self.handshakeTimeoutTask = nil
         self.receiveTask?.cancel()
         self.receiveTask = nil
         self.channel.close()
+        self.reportDisconnected()
     }
 
     // MARK: - Receive loop
 
     private func run() async {
+        defer { self.disconnect() }
         do {
             try await self.channel.start()
         } catch {
             SpeakLogger.logError(error, context: "Transport handshake", logger: SpeakLogger.transport)
-            self.reportDisconnected()
             return
         }
 
@@ -61,12 +78,11 @@ final class TransportConnection {
             }
             guard !Task.isCancelled, await self.handle(message) else { break }
         }
-
-        self.channel.close()
-        self.reportDisconnected()
     }
 
     private func reportDisconnected() {
+        guard !self.didReportDisconnect else { return }
+        self.didReportDisconnect = true
         self.onDisconnected?()
     }
 
@@ -123,6 +139,8 @@ final class TransportConnection {
         }
 
         self.isAuthenticated = true
+        self.handshakeTimeoutTask?.cancel()
+        self.handshakeTimeoutTask = nil
         // A paired device earns the session frame ceiling. Raise it before the
         // result goes out, so the first transcript frame cannot outrun it.
         await self.channel.admitSessionFrames()

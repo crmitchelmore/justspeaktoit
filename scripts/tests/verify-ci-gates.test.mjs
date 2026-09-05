@@ -1,6 +1,32 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { assessCIGates } from '../verify-ci-gates.mjs';
+import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
+
+const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const aggregate = workflow.slice(workflow.indexOf('\n  required-macos:'));
+const predicate = aggregate.match(/name: Reject unsuccessful CI gates\n        if: >-\n([\s\S]*?)\n        env:/)?.[1];
+assert.ok(predicate, 'must test the actual workflow rejection predicate');
+// GitHub property names permit hyphens; adapt those paths for local evaluation.
+// The predicate uses only boolean/string comparisons, with no Actions-specific
+// coercions. This tests the shipped predicate against the diagnostic oracle.
+const evaluatePredicate = new Function('needs', 'github', 'always', `return (${
+  predicate.replace(/\bneeds((?:\.[a-zA-Z0-9_-]+)+)/g, (_, path) =>
+    'needs' + path.split('.').slice(1).map(key => `?.[${JSON.stringify(key)}]`).join(''))
+});`);
+
+function assessCIGates(needs, event) {
+  const errors = assessOracle(needs, event);
+  assert.equal(evaluatePredicate(needs, { event_name: event }, () => true), errors.length > 0,
+    'workflow predicate must agree with fixture expectations');
+  return errors;
+}
+
+test('aggregate never checks out or executes repository helper code', () => {
+  assert.doesNotMatch(aggregate, /uses:|run:.*scripts\//);
+  assert.match(aggregate, /permissions: \{\}/);
+  assert.match(aggregate, /exit 1/);
+});
 
 function passing() {
   return Object.fromEntries([

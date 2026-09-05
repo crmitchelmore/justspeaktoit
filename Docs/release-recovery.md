@@ -19,6 +19,12 @@ Release tests, both core-journey gates, iOS builds, lint, and public API checks.
 Only explicitly path-excluded PR gates (and the PR-only API check on main) may
 skip. A failed, cancelled, missing, or unexpectedly skipped job blocks that
 protected context. Main pushes always require the Release and journey gates.
+The aggregate evaluates GitHub-provided job results directly without checking
+out or executing repository helper code. Workflow edits themselves remain
+subject to the repository's trusted review process: a required check name is
+not an organization-enforced immutable workflow policy. This gate prevents
+accidental or helper-level bypasses; it does not make arbitrary approved edits
+to the workflow harmless.
 
 Manual macOS tags still run the Release-configuration test suite before signing.
 Keep that gate: automatic CI validation does not cover manually created tags.

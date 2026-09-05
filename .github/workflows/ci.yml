@@ -451,13 +451,37 @@ jobs:
       - core-journey-e2e
       - core-journey-fixture-ui
       - api-compatibility
-    permissions:
-      contents: read
+    # Evaluate GitHub's job results directly. This aggregate never checks out
+    # or executes a PR-controlled helper; workflow edits still require review.
+    permissions: {}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Require successful CI gates
+      - name: Reject unsuccessful CI gates
+        if: >-
+          always() && (
+            needs.build-macos.result != 'success' ||
+            needs.build-ios.result != 'success' ||
+            needs.build-ios-keyboard-direct-capture.result != 'success' ||
+            needs.lint.result != 'success' ||
+            needs.release-paths.result != 'success' ||
+            (needs.release-paths.outputs.package != 'true' && needs.release-paths.outputs.package != 'false') ||
+            (needs.release-paths.outputs.core-journey != 'true' && needs.release-paths.outputs.core-journey != 'false') ||
+            (needs.release-validation.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.package == 'false' &&
+              needs.release-validation.result == 'skipped')) ||
+            (needs.core-journey-e2e.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
+              needs.core-journey-e2e.result == 'skipped')) ||
+            (needs.core-journey-fixture-ui.result != 'success' && !(
+              github.event_name == 'pull_request' && needs.release-paths.outputs.core-journey == 'false' &&
+              needs.core-journey-fixture-ui.result == 'skipped')) ||
+            (needs.api-compatibility.result != 'success' && !(
+              github.event_name != 'pull_request' && needs.api-compatibility.result == 'skipped'))
+          )
         env:
           CI_GATE_NEEDS: ${{ toJSON(needs) }}
-        run: node scripts/verify-ci-gates.mjs
+        run: |
+          echo '::error::A required CI gate failed, was cancelled, or did not run as expected.'
+          printf '%s\n' "$CI_GATE_NEEDS"
+          exit 1
+      - name: Confirm successful CI gates
+        run: echo 'All required CI gates passed; only explicitly excluded gates may skip.'

@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 
-// Keep the existing protected check name, but make it represent every gate.
+// Local diagnostic/test oracle for the explicit predicate in ci.yml.
+// The protected aggregate does not execute this repository-controlled helper.
 // A skipped conditional job is acceptable only when path detection says so.
 export function assessCIGates(needs, event) {
   const errors = [];

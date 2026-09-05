@@ -82,7 +82,7 @@ enum HistoryLoadState: Equatable {
 
 @MainActor
 // swiftlint:disable:next type_body_length
-final class HistoryManager: ObservableObject {
+final class HistoryManager: ObservableObject, RepeatingTimerTarget {
   @Published private(set) var items: [HistoryItem] = []
   @Published private(set) var statistics: HistoryStatistics = .init(
     totalSessions: 0,
@@ -238,18 +238,13 @@ final class HistoryManager: ObservableObject {
     // Use target-selector pattern to avoid Swift concurrency crashes during deallocation.
     // Block-based timers with [weak self] can crash in swift_getObjectType during executor
     // verification when the object is deallocating.
-    flushTimer = Timer.scheduledTimer(
-      timeInterval: flushInterval,
-      target: self,
-      selector: #selector(flushTimerFired),
-      userInfo: nil,
-      repeats: true
-    )
+    // A direct target retains the manager forever, so deinit cannot invalidate it.
+    flushTimer = WeakRepeatingTimerTarget.scheduledTimer(interval: flushInterval, target: self)
   }
 
-  @objc private func flushTimerFired() {
-    flushIfNeededSync()
-  }
+    func repeatingTimerDidFire() {
+        flushIfNeededSync()
+    }
 
   // MARK: - WAL Operations (delegated to HistoryWALStore actor)
 

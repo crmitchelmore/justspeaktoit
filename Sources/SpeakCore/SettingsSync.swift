@@ -290,8 +290,15 @@ public final class ConfigTransferManager: Sendable {
 
     private var encoder: JSONEncoder { Self.makeCoderEncoder() }
     private var decoder: JSONDecoder { Self.makeCoderDecoder() }
-    private var envelopeEncoder: JSONEncoder { Self.makeCoderEncoder() }
     private var envelopeDecoder: JSONDecoder { Self.makeCoderDecoder() }
+
+    static func encodeEnvelope(_ envelope: ConfigTransferEnvelope) throws -> Data {
+        let encoder = Self.makeCoderEncoder()
+        // Base64 ciphertext contains random slashes. Escaping them adds a
+        // random number of bytes and can push a valid transfer over QR capacity.
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        return try encoder.encode(envelope)
+    }
 
     private static func makeCoderEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
@@ -443,7 +450,7 @@ public final class ConfigTransferManager: Sendable {
             nonce: Data(nonce),
             ciphertext: sealedBox.ciphertext + sealedBox.tag
         )
-        let encoded = try envelopeEncoder.encode(envelope)
+        let encoded = try Self.encodeEnvelope(envelope)
         let base64 = encoded.base64EncodedString()
         // The doubly-encoded form stays the default so older importers keep
         // working, but it cannot fit a full credential set in one QR code

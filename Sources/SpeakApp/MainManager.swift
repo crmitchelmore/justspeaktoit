@@ -450,8 +450,11 @@ final class MainManager: ObservableObject {
       await startSession(trigger: .doubleTap, triggerTiming: triggerTiming)
     }
   }
-
+  // swiftlint:disable:next function_body_length
   private func configureHotKeys() {
+    #if DEBUG
+    if CoreJourneyLaunchProfile.isRequested { return }
+    #endif
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
         // Stamped here, before the actor hop, so the latency dashboard measures

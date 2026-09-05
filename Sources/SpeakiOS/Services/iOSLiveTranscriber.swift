@@ -35,13 +35,33 @@ public final class iOSLiveTranscriber: ObservableObject {
     // MARK: - Private
 
     private let audioSessionManager: AudioSessionManager
+    private let startup = RecordingStartupOperation()
+    private var ownsAudioSession = false
+    private var hasInputTap = false
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
     private var speechRecognizer: SFSpeechRecognizer?
     private let audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var latestResult: SFSpeechRecognitionResult?
     private var speechAnalyzerSession: Any?
+    private var analyzerCancellationTask: Task<Void, Never>?
+    private var activeCaptureID: UUID?
     private var speechAnalyzerConverter: Any?
+    // Isolates permission/analyzer boundaries in cancellation tests.
+    var permissionCheck: (() async -> Bool)?
+    var analyzerStart: (() async throws -> Void)?
     private var activeModelID = AppleLocalModels.legacySpeechModelID
     private var startTime: Date?
     private var accumulatedSegments: [TranscriptionSegment] = []
@@ -76,9 +96,11 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     /// Check and request all required permissions.
     public func ensurePermissions() async -> Bool {
+        if let permissionCheck { return await permissionCheck() }
         // Check microphone
         if !audioSessionManager.hasMicrophonePermission() {
             let granted = await audioSessionManager.requestMicrophonePermission()
+            guard !Task.isCancelled else { return false }
             if !granted {
                 error = iOSTranscriptionError.permissionDenied(.microphone)
                 return false
@@ -86,13 +108,15 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
 
         // Check speech recognition
+        guard !Task.isCancelled else { return false }
         let speechStatus = SFSpeechRecognizer.authorizationStatus()
         if speechStatus != .authorized {
-            let granted = await withCheckedContinuation { continuation in
+            let granted = await CancellablePermissionRequest.request { completion in
                 SFSpeechRecognizer.requestAuthorization { status in
-                    continuation.resume(returning: status == .authorized)
+                    completion(status == .authorized)
                 }
             }
+            guard !Task.isCancelled else { return false }
             if !granted {
                 error = iOSTranscriptionError.permissionDenied(.speechRecognition)
                 return false
@@ -111,38 +135,64 @@ public final class iOSLiveTranscriber: ObservableObject {
         preRollBuffers: [AVAudioPCMBuffer],
         analyzerFallbackAllowed: Bool = true
     ) async throws {
-        guard !isRunning else { return }
+        guard !isRunning, !startup.isStarting else { return }
+        do {
+            try await startup.run({
+                await self.finishAnalyzerCancellation()
+                try Task.checkCancellation()
+                try await self.startCapture(
+                    preRollBuffers: preRollBuffers, analyzerFallbackAllowed: analyzerFallbackAllowed
+                )
+            }, onFailure: {
+                self.cleanupCapture()
+                await self.finishAnalyzerCancellation()
+            })
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+    }
 
+    private func startCapture(
+        preRollBuffers: [AVAudioPCMBuffer],
+        analyzerFallbackAllowed: Bool
+    ) async throws {
+        let captureID = UUID()
+        activeCaptureID = captureID
         SpeakLogger.logTranscription(event: "start", model: "Apple Speech")
 
         // Verify permissions
-        guard await ensurePermissions() else {
+        let permissionsGranted = await ensurePermissions()
+        try Task.checkCancellation()
+        guard permissionsGranted else {
             let err = error ?? iOSTranscriptionError.permissionDenied(.microphone)
             SpeakLogger.logError(err, context: "iOSLiveTranscriber.start", logger: SpeakLogger.transcription)
             throw err
         }
 
-        // Configure audio session
-        do {
-            try await audioSessionManager.configureForRecording()
-            SpeakLogger.audio.info("Audio session configured for recording")
-        } catch {
-            SpeakLogger.logError(error, context: "Audio session setup", logger: SpeakLogger.audio)
-            throw iOSTranscriptionError.audioSessionFailed(error)
-        }
-
+        try await configureAudioSession()
         resetState()
 
         if AppleLocalModels.isSpeechAnalyzerModel(modelID) {
             if #available(iOS 26.0, *) {
                 do {
                     let engine = AppleSpeechAnalyzerEngine(modelID: modelID)
-                    try await startSpeechAnalyzer(engine: engine, preRollBuffers: preRollBuffers)
+                    if let analyzerStart {
+                        try await analyzerStart()
+                    } else {
+                        try await startSpeechAnalyzer(
+                            engine: engine, preRollBuffers: preRollBuffers, captureID: captureID
+                        )
+                    }
+                    try Task.checkCancellation()
                     activeModelID = engine.modelID
                     isRunning = true
                     logger.info("Started with SpeechAnalyzer (\(engine.modelID))")
                     return
                 } catch {
+                    // Cancellation is a control action, never a reason to
+                    // activate the legacy recognizer after the user stopped.
+                    if Task.isCancelled || error is CancellationError { throw CancellationError() }
                     SpeakLogger.logError(
                         error,
                         context: "SpeechAnalyzer setup; falling back to SFSpeechRecognizer",
@@ -160,6 +210,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         // Start recognition
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
+                guard self?.activeCaptureID == captureID else { return }
                 self?.handleRecognitionResult(result, error: error)
             }
         }
@@ -168,23 +219,39 @@ public final class iOSLiveTranscriber: ObservableObject {
         logger.info("Started")
     }
 
+    private func configureAudioSession() async throws {
+        do {
+            ownsAudioSession = true
+            try await audioSessionManager.configureForRecording()
+            try Task.checkCancellation()
+            SpeakLogger.audio.info("Audio session configured for recording")
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            SpeakLogger.logError(error, context: "Audio session setup", logger: SpeakLogger.audio)
+            throw iOSTranscriptionError.audioSessionFailed(error)
+        }
+    }
+
     @available(iOS 26.0, *)
     private func startSpeechAnalyzer(
         engine: AppleSpeechAnalyzerEngine,
-        preRollBuffers: [AVAudioPCMBuffer]
+        preRollBuffers: [AVAudioPCMBuffer],
+        captureID: UUID
     ) async throws {
         let session = try await AppleSpeechAnalyzerLiveSession(
             localeIdentifier: language,
             engine: engine
         ) { [weak self] update in
             Task { @MainActor [weak self] in
+                guard self?.activeCaptureID == captureID else { return }
                 self?.handleSpeechAnalyzerUpdate(update)
             }
         }
-        let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-
         do {
+            try Task.checkCancellation()
+            let inputNode = audioEngine.inputNode
+            let recordingFormat = inputNode.outputFormat(forBus: 0)
             let converter = try AppleSpeechAudioConverter(
                 sourceFormat: recordingFormat,
                 targetFormat: session.audioFormat
@@ -200,6 +267,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                     session.send(converted)
                 }
             }
+            hasInputTap = true
             _ = try? audioRecorder.startRecording(format: recordingFormat)
             for buffer in preRollBuffers {
                 if let converted = converter.convert(buffer) {
@@ -211,9 +279,10 @@ public final class iOSLiveTranscriber: ObservableObject {
             speechAnalyzerSession = session
             speechAnalyzerConverter = converter
         } catch {
-            audioRecorder.cancelRecording()
             audioEngine.stop()
-            inputNode.removeTap(onBus: 0)
+            removeInputTap()
+            audioProcessingQueue.sync {}
+            audioRecorder.cancelRecording()
             await session.cancel()
             throw error
         }
@@ -279,6 +348,7 @@ public final class iOSLiveTranscriber: ObservableObject {
                 recorder.writeBuffer(copied)
             }
         }
+        hasInputTap = true
         return recordingFormat
     }
 
@@ -322,7 +392,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         // processing queue be appended to the request — `endAudio()` before the
         // drain would discard the last words spoken.
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         await audioProcessingQueue.drainPendingWork()
 
         // Signal end of audio
@@ -343,8 +413,9 @@ public final class iOSLiveTranscriber: ObservableObject {
         recognitionTask = nil
         speechRecognizer = nil
         isRunning = false
+        activeCaptureID = nil
 
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         SpeakLogger.logTranscription(event: "stop", model: "Apple Speech", wordCount: result.text.split(separator: " ").count)
         onFinalResult?(result)
@@ -355,7 +426,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     @available(iOS 26.0, *)
     private func stopSpeechAnalyzer(_ session: AppleSpeechAnalyzerLiveSession) async -> TranscriptionResult {
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         // Let queued buffers reach the analyser and the recorder before
         // `session.finish()` and the recorder close below.
         await audioProcessingQueue.drainPendingWork()
@@ -393,7 +464,8 @@ public final class iOSLiveTranscriber: ObservableObject {
         speechAnalyzerSession = nil
         speechAnalyzerConverter = nil
         isRunning = false
-        audioSessionManager.deactivate()
+        activeCaptureID = nil
+        releaseAudioSession()
         SpeakLogger.logTranscription(
             event: "stop",
             model: activeModelID,
@@ -405,7 +477,13 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     /// Cancel transcription without returning result.
     public func cancel() {
-        guard isRunning else { return }
+        startup.cancel()
+        cleanupCapture()
+    }
+
+    private func cleanupCapture() {
+        activeCaptureID = nil
+        guard isRunning || ownsAudioSession || hasInputTap else { return }
 
         SpeakLogger.transcription.info("Cancelling transcription")
 
@@ -417,7 +495,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         // main actor; the queued work never waits on the main actor, so it
         // cannot deadlock.
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         audioProcessingQueue.sync {}
 
         recognitionRequest?.endAudio()
@@ -428,7 +506,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         if #available(iOS 26.0, *),
            let session = speechAnalyzerSession as? AppleSpeechAnalyzerLiveSession {
-            Task { await session.cancel() }
+            analyzerCancellationTask = Task { await session.cancel() }
         }
 
         recognitionRequest = nil
@@ -437,10 +515,17 @@ public final class iOSLiveTranscriber: ObservableObject {
         speechAnalyzerSession = nil
         speechAnalyzerConverter = nil
         isRunning = false
+        activeCaptureID = nil
 
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         logger.info("Cancelled")
+    }
+
+    private func finishAnalyzerCancellation() async {
+        guard let task = analyzerCancellationTask else { return }
+        await task.value
+        analyzerCancellationTask = nil
     }
 
     // MARK: - Private
@@ -569,11 +654,13 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         // Reinstall the tap so its closure captures the new request; the old
         // tap holds the previous (cancelled) request immutably.
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         installTap(appendingTo: newRequest)
 
+        let captureID = activeCaptureID
         recognitionTask = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
             Task { @MainActor in
+                guard let captureID, self?.activeCaptureID == captureID else { return }
                 self?.handleRecognitionResult(result, error: error)
             }
         }

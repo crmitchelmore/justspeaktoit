@@ -117,24 +117,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.recordingStartTime = startTime
 
         if !usesBatchTranscription && keyboardProfile == nil {
-            let requestedModel = currentModel
-            let route = LiveTranscriptionRouting.route(for: currentModel)
-            currentModel = LiveTranscriptionRouting.resolvedModelID(
-                for: currentModel,
-                apiKey: route.map { settings.liveAPIKey(for: $0) }
-            )
-            if currentModel != requestedModel {
-                // Make the silent on-device fallback visible: publish it for
-                // the UI and log it so a "worse than usual" session is
-                // diagnosable.
-                providerFallbackNotice = "Using \(modelDisplayName) (no API key)"
-                SpeakLogger.transcription.warning(
-                    """
-                    No API key for \(requestedModel, privacy: .public); \
-                    falling back to \(self.currentModel, privacy: .public)
-                    """
-                )
-            }
+            resolveLiveModel(settings: settings)
         }
 
         // A Live Activity is required to record in the *background* via an
@@ -179,13 +162,20 @@ public final class TranscriptionRecordingService: ObservableObject {
                 liveAPIKey: settings.liveAPIKey(for:),
                 transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
             )
-            session.onPartialResult = { [weak self] text, _ in
-                self?.handlePartialResult(text: text)
+            session.onPartialResult = { [weak self, weak session] text, _ in
+                guard let self, let session,
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
+                self.handlePartialResult(text: text)
             }
-            session.onError = { [weak self] error in
-                self?.handleError(error)
+            session.onError = { [weak self, weak session] error in
+                guard let self, let session,
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
+                self.handleError(error)
             }
             startedSession = session
+            guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
+                throw CancellationError()
+            }
             try await session.start()
             // The session this run allocated is published only while the run
             // is still current; a stop during start() retires the run, and the
@@ -206,6 +196,27 @@ public final class TranscriptionRecordingService: ObservableObject {
             startedSession?.cancel()
             unwindCancelledStart()
             throw error
+        }
+    }
+
+    private func resolveLiveModel(settings: AppSettings) {
+        let requestedModel = currentModel
+        let route = LiveTranscriptionRouting.route(for: currentModel)
+        currentModel = LiveTranscriptionRouting.resolvedModelID(
+            for: currentModel,
+            apiKey: route.map { settings.liveAPIKey(for: $0) }
+        )
+        if currentModel != requestedModel {
+            // Make the silent on-device fallback visible: publish it for
+            // the UI and log it so a "worse than usual" session is
+            // diagnosable.
+            providerFallbackNotice = "Using \(modelDisplayName) (no API key)"
+            SpeakLogger.transcription.warning(
+                """
+                No API key for \(requestedModel, privacy: .public); \
+                falling back to \(self.currentModel, privacy: .public)
+                """
+            )
         }
     }
 
@@ -367,8 +378,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     }
 
     /// Cancels recording without saving. During startup this retires the
-    /// pending run; the suspended start unwinds its own allocations when it
-    /// resumes (issue #701).
+    /// pending run and cancels its allocated provider immediately. The owned
+    /// startup task unwinds before another run can begin (issues #701, #786).
     public func cancelRecording() {
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()

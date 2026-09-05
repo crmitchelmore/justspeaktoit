@@ -14,8 +14,13 @@ final class UpdaterManager: NSObject, ObservableObject {
 #if !APP_STORE
     /// The Sparkle updater controller
     private lazy var updaterController: SPUStandardUpdaterController = {
-        SPUStandardUpdaterController(
-            startingUpdater: true,
+        #if DEBUG
+        let startsUpdater = !CoreJourneyLaunchProfile.isRequested
+        #else
+        let startsUpdater = true
+        #endif
+        return SPUStandardUpdaterController(
+            startingUpdater: startsUpdater,
             updaterDelegate: self,
             userDriverDelegate: nil
         )
@@ -41,6 +46,9 @@ final class UpdaterManager: NSObject, ObservableObject {
         automaticallyChecksForUpdates = false
         super.init()
         _ = updaterController
+        #if DEBUG
+        if CoreJourneyLaunchProfile.isRequested { return }
+        #endif
 
         automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
 

@@ -29,9 +29,22 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     /// `handleAckTransferFinished`.
     nonisolated(unsafe) public var sendAck: (@Sendable (WatchCaptureAck) -> Void)?
 
-    private let journal: WatchCaptureImportJournal
+    let journal: WatchCaptureImportJournal
     private let inboxDirectory: URL
+    // Serialises delivery with journal retirement and audio deletion so a
+    // replacement job cannot reference a payload that cleanup then removes.
+    private let inboxLock = NSLock()
     private var isProcessing = false
+    private var anotherPassRequested = false
+    // Internal seams keep pass scheduling tests independent of networking and
+    // UIKit background allowances while exercising the production coordinator.
+    var importJobExecutor: (@MainActor (WatchCaptureImportJob) async -> Void)?
+    var scheduleNextPass: @MainActor (@escaping @MainActor () async -> Void) -> Void = { operation in
+        Task { @MainActor in
+            await Task.yield()
+            await operation()
+        }
+    }
     private var activeImportTask: Task<Void, Error>?
 
     public convenience init() {
@@ -57,6 +70,11 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         at temporaryURL: URL,
         envelope: WatchCaptureEnvelope
     ) -> Bool {
+        inboxLock.lock()
+        defer { inboxLock.unlock() }
+        if let completed = journal.completedAcknowledgement(captureID: envelope.id) {
+            return journal.recordPendingAckReportingDurability(completed)
+        }
         let destination = inboxDirectory
             .appendingPathComponent(envelope.id.uuidString)
             .appendingPathExtension(envelope.fileExtension)
@@ -65,22 +83,31 @@ public final class WatchCaptureImportPipeline: ObservableObject {
                 at: inboxDirectory,
                 withIntermediateDirectories: true
             )
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
+            // A duplicate must not replace audio an import is currently reading,
+            // or destroy the only parked copy if the incoming move fails.
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.moveItem(at: temporaryURL, to: destination)
             }
-            try FileManager.default.moveItem(at: temporaryURL, to: destination)
+            // Moves preserve a Watch file's old timestamp. Retain an orphan
+            // from its arrival here, including when journal persistence fails.
+            try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: destination.path)
         } catch {
             SpeakLogger.logError(error, context: "WatchCaptureImportPipeline.park")
             return false
         }
-        // The job is parked the moment the audio is: a process death after
-        // this point is recovered by the next reconcile pass.
-        journal.parkJob(
+        // Report receipt only after the recovery record is durable. Keep the
+        // parked audio if journalling fails so a re-delivery can retry it.
+        guard journal.parkJobReportingDurability(
             captureID: envelope.id,
             fileExtension: envelope.fileExtension,
             createdAt: envelope.createdAt,
             duration: envelope.duration
-        )
+        ) else { return false }
+        // Completion can race the synchronous delivery delegate. If it won,
+        // parkJob replayed its receipt and this redundant audio is disposable.
+        if journal.completedAcknowledgement(captureID: envelope.id) != nil {
+            try? FileManager.default.removeItem(at: destination)
+        }
         return true
     }
 
@@ -91,16 +118,38 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     /// acknowledgements, and runs every retryable pending import serially.
     /// Call on activation and on foreground entry; safe to call repeatedly.
     public func processPendingImports() async {
-        guard !isProcessing else { return }
+        guard !isProcessing else {
+            anotherPassRequested = true
+            return
+        }
         isProcessing = true
-        defer { isProcessing = false }
+        defer {
+            isProcessing = false
+            if anotherPassRequested {
+                anotherPassRequested = false
+                scheduleNextPass { [weak self] in
+                    await self?.processPendingImports()
+                }
+            }
+        }
 
+        journal.pruneExpiredCompletedAcknowledgements()
         purgeExpiredJobs()
+        purgeOrphanedAudio()
         replayPendingAcks()
 
-        for job in journal.pendingJobs() {
+        // Freeze this pass before the first suspension. A stream of arrivals
+        // cannot extend its work or retained identities indefinitely. Delivery
+        // callbacks request one later pass, which starts with fresh cleanup and
+        // acknowledgement replay instead of joining this snapshot.
+        let jobs = journal.pendingJobs()
+        for job in jobs {
             guard journal.isRetryable(captureID: job.captureID) else { continue }
-            await runImport(for: job)
+            if let importJobExecutor {
+                await importJobExecutor(job)
+            } else {
+                await runImport(for: job)
+            }
         }
     }
 
@@ -204,25 +253,29 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     /// The audio is gone (e.g. reclaimed storage): the capture is
     /// unrecoverable, which is exactly what the Watch must learn.
     private func completeUnrecoverable(_ job: WatchCaptureImportJob) {
-        journal.recordPendingAck(WatchCaptureAckRecord(
+        guard journal.completeJobReportingDurability(
             captureID: job.captureID,
-            outcome: .failed,
-            message: "The capture's audio was no longer available on the phone."
-        ))
-        journal.completeJob(captureID: job.captureID)
+            acknowledgement: WatchCaptureAckRecord(
+                captureID: job.captureID,
+                outcome: .failed,
+                message: "The capture's audio was no longer available on the phone."
+            )
+        ) else { return }
         replayPendingAcks()
     }
 
     /// Records the durable success: acknowledgement retained until confirmed,
     /// job removed, parked audio released.
     private func commitSuccessfulImport(of job: WatchCaptureImportJob, audioURL: URL) {
-        journal.recordPendingAck(WatchCaptureAckRecord(
+        inboxLock.lock()
+        let completed = journal.completeJobReportingDurability(
             captureID: job.captureID,
-            outcome: .transcribed
-        ))
-        journal.completeJob(captureID: job.captureID)
-        try? FileManager.default.removeItem(at: audioURL)
-        replayPendingAcks()
+            acknowledgement: WatchCaptureAckRecord(captureID: job.captureID, outcome: .transcribed)
+        )
+        if completed { try? FileManager.default.removeItem(at: audioURL) }
+        inboxLock.unlock()
+        // Transport callbacks may synchronously re-enter the delivery path.
+        if completed { replayPendingAcks() }
     }
 
     // MARK: - Acknowledgements
@@ -245,19 +298,38 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
     // MARK: - Retention
 
+    func purgeOrphanedAudio(now: Date = Date()) {
+        inboxLock.lock()
+        defer { inboxLock.unlock() }
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: inboxDirectory, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]
+        ) else { return }
+        let referenced = Set(journal.pendingJobs().map(\.captureID))
+            .union(journal.pendingAcks().map(\.captureID))
+        let cutoff = now.addingTimeInterval(-WatchCaptureImportJournal.defaultRetentionInterval)
+        for file in files {
+            guard !file.pathExtension.isEmpty,
+                  let captureID = UUID(uuidString: file.deletingPathExtension().lastPathComponent),
+                  !referenced.contains(captureID),
+                  let values = try? file.resourceValues(forKeys: keys),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  let modifiedAt = values.contentModificationDate, modifiedAt < cutoff else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     private func purgeExpiredJobs() {
+        // Retiring a job and deleting its audio are one inbox transaction:
+        // re-delivery must not create a replacement job between these steps.
+        inboxLock.lock()
+        defer { inboxLock.unlock() }
         let purged = journal.purgeExpired()
         for job in purged {
             let audioURL = inboxDirectory
                 .appendingPathComponent(job.captureID.uuidString)
                 .appendingPathExtension(job.fileExtension)
             try? FileManager.default.removeItem(at: audioURL)
-            journal.recordPendingAck(WatchCaptureAckRecord(
-                captureID: job.captureID,
-                outcome: .failed,
-                message: job.lastErrorMessage
-                    ?? "The capture could not be imported and was removed after retries."
-            ))
         }
     }
 }

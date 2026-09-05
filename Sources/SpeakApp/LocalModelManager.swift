@@ -11,6 +11,8 @@ enum LocalModelError: LocalizedError {
   case emptyTranscript(String)
   case invalidHuggingFaceRepo(String)
   case invalidHuggingFaceModel
+  case modelBusy
+  case missingManagedModelFolder
 
   var errorDescription: String? {
     switch self {
@@ -22,6 +24,10 @@ enum LocalModelError: LocalizedError {
       return "\(model) produced an empty transcript."
     case .invalidHuggingFaceRepo(let repo):
       return "\(repo) is not a valid Hugging Face repo ID. Use owner/repo, for example argmaxinc/whisperkit-coreml."
+    case .modelBusy:
+      return "The model is loading or transcribing. Wait for it to finish before deleting it."
+    case .missingManagedModelFolder:
+      return "The model files are missing. Download this model again to restore them."
     case .invalidHuggingFaceModel:
       #if APP_STORE
       return "Enter a supported local batch model name. Local Batch expects a WhisperKit variant."
@@ -109,9 +115,13 @@ final class LocalModelManager: ObservableObject {
 
   private var activePipelines: [String: WhisperKit] = [:]
   private var loadingPipelines: [String: Task<WhisperKit, Error>] = [:]
+  @Published private var activePipelineUses: [String: Int] = [:]
   private let fileManager: FileManager
   private let logger = SpeakLogger.logger(category: "LocalModelManager")
   private let markerDirectory: URL
+  private let modelStorage: WhisperKitModelStorage
+  private let pipelineLoader: @MainActor (WhisperKitConfig) async throws -> WhisperKit
+  private let fileTranscriber: @MainActor (WhisperKit, String) async throws -> String
   private let importedModelsURL: URL
   #if !APP_STORE
   private let streamingModelSourcesURL: URL
@@ -123,14 +133,30 @@ final class LocalModelManager: ObservableObject {
   /// Not gated on DEBUG: CI also runs the tests in the Release configuration.
   private(set) static var instanceCount = 0
 
-  private init(fileManager: FileManager = .default) {
+  init(
+    fileManager: FileManager = .default,
+    storageDirectory: URL? = nil,
+    modelStorage: WhisperKitModelStorage? = nil,
+    pipelineLoader: @escaping @MainActor (WhisperKitConfig) async throws -> WhisperKit = {
+      try await WhisperKitOffMain.load($0)
+    },
+    fileTranscriber: @escaping @MainActor (WhisperKit, String) async throws -> String = { pipeline, path in
+      try await WhisperKitOffMain.transcribe(pipeline, audioPath: path).map(\.text).joined(separator: " ")
+    }
+  ) {
     Self.instanceCount += 1
     self.fileManager = fileManager
+    self.pipelineLoader = pipelineLoader
+    self.fileTranscriber = fileTranscriber
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
-    markerDirectory = base
+    let defaultStorageDirectory = base
       .appendingPathComponent("SpeakApp", isDirectory: true)
       .appendingPathComponent("LocalModels", isDirectory: true)
+    markerDirectory = storageDirectory ?? defaultStorageDirectory
+    self.modelStorage = modelStorage ?? WhisperKitModelStorage(
+      root: markerDirectory.appendingPathComponent("WhisperKitDownloads", isDirectory: true), fileManager: fileManager
+    )
     importedModelsURL = markerDirectory.appendingPathComponent("imported-hugging-face-models.json")
     #if !APP_STORE
     streamingModelSourcesURL = markerDirectory.appendingPathComponent("streaming-model-sources.json")
@@ -139,7 +165,7 @@ final class LocalModelManager: ObservableObject {
       try fileManager.createDirectory(at: markerDirectory, withIntermediateDirectories: true)
     } catch {
       storageError = error
-      logger.error("Failed to prepare local model storage: \(error.localizedDescription, privacy: .public)")
+      logger.error("Failed to prepare local model storage: \(error.localizedDescription, privacy: .private)")
     }
     loadImportedModels()
     #if !APP_STORE
@@ -167,7 +193,7 @@ final class LocalModelManager: ObservableObject {
       if installStates[model.id] == .installing {
         continue
       }
-      installStates[model.id] = markerExists(for: model) ? .installed : .notInstalled
+      refreshInstallState(for: model)
     }
   }
 
@@ -218,7 +244,7 @@ final class LocalModelManager: ObservableObject {
     }
     importedModels.append(model)
     try saveImportedModels()
-    installStates[model.id] = markerExists(for: model) ? .installed : .notInstalled
+    refreshInstallState(for: model)
     return model
   }
 
@@ -255,33 +281,42 @@ final class LocalModelManager: ObservableObject {
     do {
       try saveStreamingModelSources()
     } catch {
-      logger.error("Failed to save local streaming model sources: \(error.localizedDescription, privacy: .public)")
+      logger.error("Failed to save local streaming model sources: \(error.localizedDescription, privacy: .private)")
     }
   }
   #endif
 
   func install(_ model: LocalTranscriptionModel) async {
+    guard loadingPipelines[model.id] == nil else { return }
     installStates[model.id] = .installing
     do {
-      _ = try await pipeline(for: model)
-      try Data("installed\n".utf8).write(to: markerURL(for: model), options: .atomic)
+      _ = try await pipeline(for: model, useManagedStorage: true)
+      try Data("installed-managed-v1\n".utf8).write(to: markerURL(for: model), options: .atomic)
       installStates[model.id] = .installed
     } catch {
       installStates[model.id] = .failed(error.localizedDescription)
     }
   }
 
-  func delete(_ model: LocalTranscriptionModel) {
-    activePipelines[model.id] = nil
+  @discardableResult
+  func delete(_ model: LocalTranscriptionModel) -> Bool {
+    guard !isModelBusy(model.id) else {
+      logger.warning("Cannot remove local model: \(LocalModelError.modelBusy.localizedDescription, privacy: .public)")
+      return false
+    }
     do {
+      activePipelines[model.id] = nil
+      try modelStorage.removeDownload(for: model.id)
       let markerURL = markerURL(for: model)
       if fileManager.fileExists(atPath: markerURL.path) {
         try fileManager.removeItem(at: markerURL)
       }
       installStates[model.id] = .notInstalled
+      return true
     } catch {
       installStates[model.id] = .failed(error.localizedDescription)
-      logger.error("Failed to remove local model marker: \(error.localizedDescription, privacy: .public)")
+      logger.error("Failed to remove local model: \(error.localizedDescription, privacy: .private)")
+      return false
     }
   }
 
@@ -293,14 +328,16 @@ final class LocalModelManager: ObservableObject {
       throw LocalModelError.notInstalled(model.displayName)
     }
 
+    // Hold the files through loading and every suspended inference. Cancellation
+    // only releases this lease once the decoder has actually unwound.
+    activePipelineUses[model.id, default: 0] += 1
+    defer { releasePipelineUse(for: model.id) }
+    try Task.checkCancellation()
     let start = Date()
     let pipe = try await pipeline(for: model)
-    let whisperResults = try await WhisperKitOffMain.transcribe(pipe, audioPath: url.path)
-    let text = cleanTranscriptText(
-      whisperResults
-      .map(\.text)
-      .joined(separator: " ")
-    )
+    try Task.checkCancellation()
+    let text = cleanTranscriptText(try await fileTranscriber(pipe, url.path))
+    try Task.checkCancellation()
     guard !text.isEmpty else {
       throw LocalModelError.emptyTranscript(model.displayName)
     }
@@ -327,30 +364,96 @@ final class LocalModelManager: ObservableObject {
     return try await pipeline(for: model)
   }
 
-  private func pipeline(for model: LocalTranscriptionModel) async throws -> WhisperKit {
+  /// A live stream owns its files until capture, in-flight decoding, and the
+  /// final tail decode have all released the lease, including timed-out work.
+  func makeReadyPipelineLease(modelID: String) async throws -> LocalModelPipelineLease {
+    guard let model = model(for: modelID) else { throw LocalModelError.unknownModel(modelID) }
+    guard isInstalled(model.id) else { throw LocalModelError.notInstalled(model.displayName) }
+    activePipelineUses[model.id, default: 0] += 1
+    do {
+      try Task.checkCancellation()
+      let pipe = try await pipeline(for: model)
+      try Task.checkCancellation()
+      return LocalModelPipelineLease(pipeline: pipe) { self.releasePipelineUse(for: model.id) }
+    } catch {
+      releasePipelineUse(for: model.id)
+      throw error
+    }
+  }
+
+  private func releasePipelineUse(for modelID: String) {
+    activePipelineUses[modelID, default: 0] -= 1
+    if activePipelineUses[modelID] == 0 { activePipelineUses[modelID] = nil }
+  }
+
+  private func pipeline(
+    for model: LocalTranscriptionModel, useManagedStorage: Bool = false
+  ) async throws -> WhisperKit {
+    let hasOwnership = try modelStorage.hasOwnership(for: model.id)
+    let managed = useManagedStorage || hasOwnership
     if let existing = activePipelines[model.id] {
-      return existing
+      if !managed { return existing }
+      if let folder = try modelStorage.modelFolder(for: model.id),
+         existing.modelFolder?.standardizedFileURL == folder.standardizedFileURL {
+        return existing
+      }
+      // Preparing managed storage writes provenance before download. That
+      // record must not let a legacy cached pipeline survive a failed upgrade.
+      activePipelines[model.id] = nil
     }
     if let loading = loadingPipelines[model.id] {
       return try await loading.value
     }
 
-    let config = WhisperKitConfig(
-      model: model.modelName,
-      modelRepo: model.modelRepo,
-      verbose: false,
-      load: true
-    )
+    let config = try configuration(for: model, managedStorage: managed)
     let task = Task<WhisperKit, Error> {
-      try await WhisperKitOffMain.load(config)
+      try await self.pipelineLoader(config)
     }
     loadingPipelines[model.id] = task
     defer { loadingPipelines[model.id] = nil }
 
     let pipe = try await task.value
+    if managed {
+      guard let folder = pipe.modelFolder else { throw LocalModelError.missingManagedModelFolder }
+      try modelStorage.recordModelFolder(folder, for: model.id)
+    }
     activePipelines = [:]
     activePipelines[model.id] = pipe
     return pipe
+  }
+
+  func canDelete(_ model: LocalTranscriptionModel) -> Bool {
+    !isModelBusy(model.id) && (markerExists(for: model) || (try? modelStorage.hasDownload(for: model.id)) == true)
+  }
+
+  private func isModelBusy(_ modelID: String) -> Bool {
+    loadingPipelines[modelID] != nil || activePipelineUses[modelID, default: 0] > 0
+  }
+
+  /// Legacy installs continue using their dependency-managed cache. Only an
+  /// explicit installation selects a new owned base; deletion never guesses the
+  /// old cache path. Reinstalling after removal migrates future downloads.
+  func usesLegacyStorage(_ model: LocalTranscriptionModel) -> Bool {
+    let marker = try? String(contentsOf: markerURL(for: model), encoding: .utf8)
+    return marker != nil && marker != "installed-managed-v1\n"
+      && (try? modelStorage.hasOwnership(for: model.id)) == false
+  }
+
+  func configuration(for model: LocalTranscriptionModel, managedStorage: Bool) throws -> WhisperKitConfig {
+    let base = managedStorage ? try modelStorage.prepare(for: model.id) : nil
+    let folder = managedStorage ? try modelStorage.modelFolder(for: model.id) : nil
+    // Pinned argmax-oss-swift 1.1.0: modelFolder bypasses model downloading;
+    // downloadBase also owns tokenizer storage unless tokenizerFolder is set.
+    return WhisperKitConfig(
+      model: model.modelName,
+      downloadBase: base,
+      modelRepo: model.modelRepo,
+      modelFolder: folder?.path,
+      tokenizerFolder: base,
+      verbose: false,
+      load: true,
+      download: folder == nil
+    )
   }
 
   private func cleanTranscriptText(_ text: String) -> String {
@@ -358,6 +461,25 @@ final class LocalModelManager: ObservableObject {
       .replacingOccurrences(of: "[BLANK_AUDIO]", with: "", options: .caseInsensitive)
       .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
       .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func refreshInstallState(for model: LocalTranscriptionModel) {
+    guard markerExists(for: model) else {
+      installStates[model.id] = .notInstalled
+      return
+    }
+    do {
+      let marker = try String(contentsOf: markerURL(for: model), encoding: .utf8)
+      let hasOwnership = try modelStorage.hasOwnership(for: model.id)
+      if marker == "installed-managed-v1\n" || hasOwnership {
+        guard try modelStorage.modelFolder(for: model.id) != nil else {
+          throw LocalModelError.missingManagedModelFolder
+        }
+      }
+      installStates[model.id] = .installed
+    } catch {
+      installStates[model.id] = .failed(error.localizedDescription)
+    }
   }
 
   private func markerExists(for model: LocalTranscriptionModel) -> Bool {
@@ -386,7 +508,7 @@ final class LocalModelManager: ObservableObject {
         try? saveImportedModels()
       }
     } catch {
-      logger.error("Failed to load imported Hugging Face models: \(error.localizedDescription, privacy: .public)")
+      logger.error("Failed to load imported Hugging Face models: \(error.localizedDescription, privacy: .private)")
     }
   }
 
@@ -404,7 +526,7 @@ final class LocalModelManager: ObservableObject {
         try? saveStreamingModelSources()
       }
     } catch {
-      logger.error("Failed to load local streaming model sources: \(error.localizedDescription, privacy: .public)")
+      logger.error("Failed to load local streaming model sources: \(error.localizedDescription, privacy: .private)")
     }
   }
   #endif

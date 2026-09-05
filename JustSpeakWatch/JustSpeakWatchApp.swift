@@ -29,6 +29,7 @@ struct JustSpeakWatchApp: App {
                     // the app; perform it once the audio session is available.
                     // watchOS 11+ runs its AudioRecordingIntent headlessly.
                     guard phase == .active else { return }
+                    captureStore.retryPending()
                     Task {
                         await WatchRecordingCoordinator.shared.performPendingWatchFaceRequest()
                     }

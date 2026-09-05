@@ -180,6 +180,7 @@ public enum AudioSessionActivation {
         var attempt = 1
         let limit = max(1, maxAttempts)
         while true {
+            try Task.checkCancellation()
             do {
                 try perform()
                 return

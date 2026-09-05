@@ -186,7 +186,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
     }
 
     // swiftlint:disable:next function_body_length
-    func testLargeRecordingUsesFileUploadWithItsExactLength() async throws {
+    func testLargeRecordingUsesFileUpload_preservesExactLength() async throws {
         let recorder = GeminiRequestLog()
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }

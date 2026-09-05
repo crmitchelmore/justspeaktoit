@@ -762,6 +762,7 @@ public final class AppSettings: ObservableObject {
                 || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
+                || option.id == CartesiaBatchClient.catalogID
         }
 
     // MARK: - Legacy migration

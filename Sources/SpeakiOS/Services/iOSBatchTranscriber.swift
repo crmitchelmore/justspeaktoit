@@ -123,6 +123,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case appleSpeechAnalyzer
     case openAI
     case metaMuse
+    case cartesia
     /// Google's own Interactions API, through the shared
     /// `GeminiInteractionsClient`. Matched on the direct-batch identifiers
     /// only: the `google/gemini-2.0-flash-*` catalogue entries share the
@@ -134,6 +135,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         if AppleLocalModels.isSpeechAnalyzerModel(model) { return .appleSpeechAnalyzer }
         if AppSettings.openAIBatchModelIDs.contains(model) { return .openAI }
+        if model.trimmingCharacters(in: .whitespacesAndNewlines) == CartesiaBatchClient.catalogID { return .cartesia }
         if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
         return .openRouter
@@ -165,6 +167,10 @@ private struct IOSBatchTranscriptionClient {
                 model: model,
                 language: language,
                 apiKey: try requireAPIKey()
+            )
+        case .cartesia:
+            return try await CartesiaBatchClient(session: session).transcribeFile(
+                at: url, apiKey: try requireAPIKey(), language: language
             )
         case .metaMuse:
             return try await MetaMuseBatchClient(session: session).transcribeFile(

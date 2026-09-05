@@ -38,7 +38,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // listed whenever the runtime supports one of the analyzer engines
         // (SpeechTranscriber needs Apple Intelligence; DictationTranscriber
         // needs OS 26), so the expected provider set depends on the runtime.
-        var expectedProviders: Set<String> = ["google", "meta", "openai"]
+        var expectedProviders: Set<String> = ["cartesia", "google", "meta", "openai"]
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }
@@ -62,6 +62,12 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
     /// The `google/` prefix is shared by two different upload paths, so the
     /// routing has to split them: Gemini 3.5 Transcribe goes to Google's own
     /// Interactions API, the Gemini 2.x entries stay on OpenRouter.
+    func testCartesiaBatchIsSelectableAndUsesItsOwnUploadRoute() {
+        XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == CartesiaBatchClient.catalogID })
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: CartesiaBatchClient.catalogID), .cartesia)
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " cartesia/ink-whisper "), .cartesia)
+    }
+
     func testBatchRouting_sendsGemini35ToItsOwnClientAndLeavesOpenRouterModelsAlone() {
         XCTAssertEqual(
             IOSBatchTranscriptionRoute.route(for: GeminiTranscribeModels.batchCatalogID),

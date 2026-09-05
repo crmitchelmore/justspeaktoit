@@ -42,9 +42,18 @@ public enum SpeakLogger {
 
     // MARK: - Convenience Methods
 
-    /// Logs an error with context.
+    /// Logs an error with caller-controlled context and public type/code metadata.
+    /// Free-form descriptions may contain paths, credentials or provider response text.
     public static func logError(_ error: Error, context: String, logger: Logger = general) {
-        logger.error("[\(context, privacy: .public)] \(error.localizedDescription, privacy: .public)")
+        let kind = String(reflecting: type(of: error))
+        let code = (error as NSError).code
+        let detail = error.localizedDescription
+        logger.error(
+            """
+            [\(context, privacy: .public)] \(kind, privacy: .public) code=\(code): \
+            \(detail, privacy: .private)
+            """
+        )
         if isDebugMode {
             logger.debug("[\(context, privacy: .public)] Full error: \(String(describing: error), privacy: .private)")
         }

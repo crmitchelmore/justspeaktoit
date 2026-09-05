@@ -16,7 +16,7 @@ final class RecordingLibraryListingTests: XCTestCase {
     XCTAssertEqual(recordings.count, 1)
     let listed = try XCTUnwrap(recordings.first)
     XCTAssertEqual(listed.id, recordingID)
-    XCTAssertEqual(listed.url, recording.resolvingSymlinksInPath())
+    XCTAssertEqual(try fileIdentity(of: listed.url), try fileIdentity(of: recording))
     XCTAssertEqual(listed.fileSize, Int64(partialFile.count))
     XCTAssertEqual(listed.duration, 0, "Management listings must not decode audio for unused durations")
   }
@@ -39,7 +39,7 @@ final class RecordingLibraryListingTests: XCTestCase {
 
     let recordings = AudioFileManager.listRecordings(in: directory)
 
-    XCTAssertEqual(recordings.map(\.url), [recording.resolvingSymlinksInPath()])
+    XCTAssertEqual(try recordings.map { try fileIdentity(of: $0.url) }, [try fileIdentity(of: recording)])
   }
 
   func testCleanupSnapshot_excludesCaptureEvenIfItStopsBeforeDeletion() throws {
@@ -59,6 +59,15 @@ final class RecordingLibraryListingTests: XCTestCase {
 
     XCTAssertTrue(FileManager.default.fileExists(atPath: activeRecording.path))
     XCTAssertFalse(FileManager.default.fileExists(atPath: savedRecording.path))
+  }
+
+  /// NSURL may preserve /var and /private/var aliases differently on macOS.
+  /// Device and inode identify the actual listed file independently of spelling.
+  private func fileIdentity(of url: URL) throws -> [UInt64] {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    let device = try XCTUnwrap(attributes[.systemNumber] as? NSNumber)
+    let inode = try XCTUnwrap(attributes[.systemFileNumber] as? NSNumber)
+    return [device.uint64Value, inode.uint64Value]
   }
 
   private func temporaryDirectory() throws -> URL {

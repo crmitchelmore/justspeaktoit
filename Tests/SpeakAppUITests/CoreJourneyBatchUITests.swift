@@ -160,33 +160,44 @@ final class CoreJourneyBatchUITests: XCTestCase {
     }
 
     private func registerCleanup(app: XCUIApplication, fixture: XCUIApplication, suiteName: String, directory: URL) {
-        let previousClipboard = NSPasteboard.general.pasteboardItems?.map { original in
+        let previousClipboard: [NSPasteboardItem] = NSPasteboard.general.pasteboardItems?.map { original in
             let copy = NSPasteboardItem()
             for type in original.types {
                 if let data = original.data(forType: type) { copy.setData(data, forType: type) }
             }
             return copy
         } ?? []
-        addTeardownBlock {
-            for path in ["hotkey-probe.json", "batch-http.json", "SpeakApp/History/history-log.json"] {
-                if let data = try? Data(contentsOf: directory.appendingPathComponent(path)) {
-                    let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
-                    attachment.name = path
-                    attachment.lifetime = .keepAlways
-                    self.add(attachment)
-                }
-            }
-            for application in [app, fixture] where application.state != .notRunning {
-                let attachment = XCTAttachment(screenshot: application.screenshot())
-                attachment.lifetime = .keepAlways
-                self.add(attachment)
-                application.terminate()
-            }
+        // Select XCTest's synchronous overload before type-checking the body.
+        let cleanup: () throws -> Void = {
+            self.attachDiagnostics(in: directory)
+            self.terminateWithScreenshot(app)
+            self.terminateWithScreenshot(fixture)
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects(previousClipboard)
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
             try? FileManager.default.removeItem(at: directory)
         }
+        addTeardownBlock(cleanup)
+    }
+
+    private func attachDiagnostics(in directory: URL) {
+        let paths = ["hotkey-probe.json", "batch-http.json", "SpeakApp/History/history-log.json"]
+        for path in paths {
+            let url = directory.appendingPathComponent(path)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            attachment.name = path
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    private func terminateWithScreenshot(_ application: XCUIApplication) {
+        guard application.state != .notRunning else { return }
+        let attachment = XCTAttachment(screenshot: application.screenshot())
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        application.terminate()
     }
 }
 

@@ -715,6 +715,12 @@ extension ConfigTransferManager {
         for (key, value) in payload.settings {
             let localKey = key == "selectedModel" ? liveModelDefaultsKey : key
             defaults.set(value, forKey: localKey)
+            if key == Self.transcriptionKeywordsKey {
+                // An import is an intentional write, even when its text equals
+                // an earlier migration. Keep the legacy macOS mirror in sync.
+                defaults.set(value, forKey: "assemblyAIKeyterms")
+                defaults.set(value, forKey: "transcriptionKeywordsLastReconciled")
+            }
         }
     }
 

@@ -122,6 +122,19 @@ final class ConfigTransferImportTests: XCTestCase { // swiftlint:disable:this ty
         XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "JustSpeakToIt, Muse")
     }
 
+    func testKeywordImportReplacesLegacyEditEvenWhenTextMatchesPreviousMigration() async throws {
+        defaults.set("Original", forKey: "transcriptionKeywords")
+        defaults.set("Original", forKey: "transcriptionKeywordsLastReconciled")
+        for legacyValue in ["Replacement", ""] {
+            defaults.set(legacyValue, forKey: "assemblyAIKeyterms")
+            let payload = ConfigTransferPayload(secrets: [:], settings: ["transcriptionKeywords": "Original"])
+            try await manager.applyImport(payload: payload, storage: makeStorage(), defaults: defaults)
+            XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "Original")
+            XCTAssertEqual(defaults.string(forKey: "assemblyAIKeyterms"), "Original")
+            XCTAssertEqual(defaults.string(forKey: "transcriptionKeywordsLastReconciled"), "Original")
+        }
+    }
+
     // MARK: - Transactional apply
 
     func testApplyImport_appliesSecretsAndSettings() async throws {

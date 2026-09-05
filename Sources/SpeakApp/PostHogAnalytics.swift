@@ -189,8 +189,8 @@ actor PostHogProductAnalyticsSink: ProductAnalyticsSink {
 
 }
 
-private extension PostHogProductAnalyticsSink {
-  func makeRequest(event: QueuedEvent, configuration: Configuration) throws -> URLRequest {
+extension PostHogProductAnalyticsSink {
+  private func makeRequest(event: QueuedEvent, configuration: Configuration) throws -> URLRequest {
     var properties = event.properties.mapValues(\.foundationValue)
     properties["distinct_id"] = event.distinctID
     properties["$lib"] = "just-speak-to-it"
@@ -208,7 +208,7 @@ private extension PostHogProductAnalyticsSink {
     return request
   }
 
-  func deliver(_ request: URLRequest) async throws -> URLResponse {
+  private func deliver(_ request: URLRequest) async throws -> URLResponse {
     let requestTask = Task { [session, request] in
       try Task.checkCancellation()
       let (bytes, response) = try await session.bytes(for: request)
@@ -236,7 +236,7 @@ private extension PostHogProductAnalyticsSink {
     return try await requestTask.value
   }
 
-  static func isRetryable(_ error: Error) -> Bool {
+  private static func isRetryable(_ error: Error) -> Bool {
     if error is CancellationError { return true }
     guard let error = error as? URLError else { return false }
     switch error.code {
@@ -248,11 +248,11 @@ private extension PostHogProductAnalyticsSink {
     }
   }
 
-  func pruneQueue() {
+  private func pruneQueue() {
     queue = Self.pruned(queue, now: now())
   }
 
-  func persistQueue() throws {
+  private func persistQueue() throws {
     if queue.isEmpty {
       if FileManager.default.fileExists(atPath: queueURL.path) {
         try FileManager.default.removeItem(at: queueURL)
@@ -269,14 +269,14 @@ private extension PostHogProductAnalyticsSink {
     )
   }
 
-  static func loadQueue(from url: URL) -> [QueuedEvent] {
+  private static func loadQueue(from url: URL) -> [QueuedEvent] {
     guard let data = try? Data(contentsOf: url),
           let events = try? JSONDecoder().decode([QueuedEvent].self, from: data)
     else { return [] }
     return events
   }
 
-  static func pruned(_ events: [QueuedEvent], now: Date = Date()) -> [QueuedEvent] {
+  private static func pruned(_ events: [QueuedEvent], now: Date = Date()) -> [QueuedEvent] {
     let cutoff = now.addingTimeInterval(-7 * 24 * 60 * 60)
     return Array(events.filter { $0.createdAt >= cutoff }.suffix(1_000))
   }

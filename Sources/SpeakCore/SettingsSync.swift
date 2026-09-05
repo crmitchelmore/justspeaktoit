@@ -384,7 +384,7 @@ public final class ConfigTransferManager: Sendable {
     // MARK: - Export
 
     /// Builds an encrypted QR payload together with the one-time code that
-    /// unlocks it. The exporting device displays the code beside the QR; it is
+    /// unlocks it. The exporting device reveals the code after removing the QR; it is
     /// never encoded into the QR, so scanning the image alone reveals nothing.
     public func makeTransfer(
         secrets: [String: String],

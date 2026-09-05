@@ -187,3 +187,17 @@ For privacy questions, contact: [hello@justspeaktoit.com](mailto:hello@justspeak
 ---
 
 *Last updated: August 2026*
+
+## Configuration transfer captures
+
+On both macOS and iOS, the source first displays only the encrypted QR. After
+scanning on the receiver, choose **I’ve scanned the QR** on the source. The QR is
+removed before the unlock code appears, with transition animations disabled.
+There is no back step for the same transfer; regenerating creates fresh encrypted
+material and a fresh code. Neither source UI offers a combined share sheet.
+
+This prevents a single screenshot or photograph of one step from collecting both
+factors. It does **not** protect a recording, screen share, or separate photographs
+of both steps. Keep screen sharing and recording off during transfer. The receiver
+checks an authenticated ten-minute timestamp; this acceptance window does not
+prevent offline decryption by someone who has already captured both factors.

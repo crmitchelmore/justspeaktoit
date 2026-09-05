@@ -17,7 +17,7 @@ public enum PrivacyDataDestination: Equatable, Sendable {
     /// The step is switched off, so no content is sent for it at all.
     case disabled
 
-    /// Provider that receives the content, or `nil` when nothing is sent.
+    /// Provider that can receive content, or `nil` when this step cannot send it.
     public var providerName: String? {
         switch self {
         case .cloud(let providerName), .conditionalCloud(let providerName): return providerName
@@ -60,6 +60,9 @@ public struct PrivacyWorkflowInputs: Equatable, Sendable {
     public var voiceOutputEnabled: Bool
     /// The voice-output provider that receives the text to speak.
     public var voiceOutputProvider: VoiceOutputProvider
+    /// Live SpeechAnalyzer may fall back to the legacy, cloud-capable recognizer.
+    /// Set false only when the execution path explicitly disables that fallback.
+    public var appleSpeechAnalyzerFallbackAllowed = true
 
     public init(
         usesBatchTranscription: Bool,
@@ -122,7 +125,7 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
     /// each text hop.
     public var rows: [Row] { [transcription, postProcessing, voiceOutput] }
 
-    /// Providers that receive content under the current settings, in row order
+    /// Providers that can receive content under the current settings, in row order
     /// and without duplicates.
     public var activeRecipients: [String] {
         var seen: Set<String> = []
@@ -150,11 +153,7 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
         let purpose: ModelCredentialPurpose = inputs.usesBatchTranscription
             ? .batchTranscription
             : .liveTranscription
-        // Legacy Speech only requires on-device recognition when the current
-        // recognizer supports it. SpeechAnalyzer models have no cloud fallback.
-        let destination: PrivacyDataDestination = modelID == AppleLocalModels.legacySpeechModelID
-            ? .conditionalCloud(providerName: "Apple")
-            : resolveDestination(for: modelID, purpose: purpose)
+        let destination = transcriptionDestination(for: modelID, inputs: inputs, purpose: purpose)
         let modelName = ModelCatalog.friendlyName(for: modelID)
         let title = inputs.usesBatchTranscription ? "Recorded audio" : "Live microphone audio"
 
@@ -165,7 +164,7 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
                 ? "Your recording is uploaded to \(providerName) and transcribed with \(modelName)."
                 : "Your microphone audio is streamed to \(providerName) and transcribed with \(modelName)."
         case .conditionalCloud(let providerName):
-            detail = "\(modelName) uses on-device recognition when available. Otherwise, your audio may be sent "
+            detail = "\(modelName) prefers on-device recognition. If it is unavailable or fails, audio may be sent "
                 + "to \(providerName) for transcription."
         case .onDevice, .disabled:
             detail = "\(modelName) transcribes your audio on this device; it is not uploaded for transcription."
@@ -178,6 +177,24 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
             destination: destination,
             detail: detail
         )
+    }
+
+    private static func transcriptionDestination(
+        for modelID: String,
+        inputs: PrivacyWorkflowInputs,
+        purpose: ModelCredentialPurpose
+    ) -> PrivacyDataDestination {
+        if inputs.usesBatchTranscription {
+            // iOS only implements SpeechAnalyzer as a local batch route. An
+            // older persisted SFSpeechRecognizer ID falls through to OpenRouter.
+            if modelID == AppleLocalModels.legacySpeechModelID {
+                return .cloud(providerName: "OpenRouter")
+            }
+        } else if modelID == AppleLocalModels.legacySpeechModelID
+            || (AppleLocalModels.isSpeechAnalyzerModel(modelID) && inputs.appleSpeechAnalyzerFallbackAllowed) {
+            return .conditionalCloud(providerName: "Apple")
+        }
+        return resolveDestination(for: modelID, purpose: purpose)
     }
 
     private static func postProcessingRow(_ inputs: PrivacyWorkflowInputs) -> Row {

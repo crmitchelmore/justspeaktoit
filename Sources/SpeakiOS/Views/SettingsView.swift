@@ -967,9 +967,8 @@ public struct SettingsView: View {
 
                     if !usesInlineDensityLayout {
                         Text(
-                            settings.selectedModel == AppleLocalModels.legacySpeechModelID
-                                ? "Uses on-device recognition when available; otherwise audio may be sent to Apple."
-                                : "Uses Apple's built-in speech engine. Audio stays on this device."
+                            "Uses Apple's on-device speech engines when available. "
+                                + "If recognition is unavailable or fails, audio may be sent to Apple."
                         )
                             .font(.caption)
                             .foregroundStyle(.secondary)

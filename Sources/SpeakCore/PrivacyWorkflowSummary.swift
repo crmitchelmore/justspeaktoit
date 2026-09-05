@@ -12,13 +12,15 @@ public enum PrivacyDataDestination: Equatable, Sendable {
     case onDevice
     /// Content is sent to the named cloud provider.
     case cloud(providerName: String)
+    /// Processing prefers the device but can send content to this provider.
+    case conditionalCloud(providerName: String)
     /// The step is switched off, so no content is sent for it at all.
     case disabled
 
     /// Provider that receives the content, or `nil` when nothing is sent.
     public var providerName: String? {
         switch self {
-        case .cloud(let providerName): return providerName
+        case .cloud(let providerName), .conditionalCloud(let providerName): return providerName
         case .onDevice, .disabled: return nil
         }
     }
@@ -28,11 +30,12 @@ public enum PrivacyDataDestination: Equatable, Sendable {
         switch self {
         case .onDevice: return "On device"
         case .cloud(let providerName): return providerName
+        case .conditionalCloud(let providerName): return "On device or " + providerName
         case .disabled: return "Off"
         }
     }
 
-    /// Whether this step sends content off the device.
+    /// Whether this step can send content off the device.
     public var leavesDevice: Bool { providerName != nil }
 }
 
@@ -140,13 +143,18 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
     }
 
     private static func transcriptionRow(_ inputs: PrivacyWorkflowInputs) -> Row {
-        let modelID = inputs.usesBatchTranscription
+        let selectedModelID = inputs.usesBatchTranscription
             ? inputs.batchTranscriptionModelID
             : inputs.liveTranscriptionModelID
+        let modelID = selectedModelID.trimmingCharacters(in: .whitespacesAndNewlines)
         let purpose: ModelCredentialPurpose = inputs.usesBatchTranscription
             ? .batchTranscription
             : .liveTranscription
-        let destination = resolveDestination(for: modelID, purpose: purpose)
+        // Legacy Speech only requires on-device recognition when the current
+        // recognizer supports it. SpeechAnalyzer models have no cloud fallback.
+        let destination: PrivacyDataDestination = modelID == AppleLocalModels.legacySpeechModelID
+            ? .conditionalCloud(providerName: "Apple")
+            : resolveDestination(for: modelID, purpose: purpose)
         let modelName = ModelCatalog.friendlyName(for: modelID)
         let title = inputs.usesBatchTranscription ? "Recorded audio" : "Live microphone audio"
 
@@ -156,13 +164,11 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
             detail = inputs.usesBatchTranscription
                 ? "Your recording is uploaded to \(providerName) and transcribed with \(modelName)."
                 : "Your microphone audio is streamed to \(providerName) and transcribed with \(modelName)."
+        case .conditionalCloud(let providerName):
+            detail = "\(modelName) uses on-device recognition when available. Otherwise, your audio may be sent "
+                + "to \(providerName) for transcription."
         case .onDevice, .disabled:
-            var text = "\(modelName) transcribes your audio on this device; it is not uploaded for transcription."
-            if AppleLocalModels.isAppleSpeechModel(modelID) {
-                text += " Apple's speech service may process audio on its servers when on-device "
-                    + "recognition is unavailable."
-            }
-            detail = text
+            detail = "\(modelName) transcribes your audio on this device; it is not uploaded for transcription."
         }
 
         return Row(
@@ -184,7 +190,7 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
         switch destination {
         case .disabled:
             detail = "Post-processing is off, so your transcript text is not sent anywhere to be cleaned up."
-        case .cloud(let providerName):
+        case .cloud(let providerName), .conditionalCloud(let providerName):
             detail = "Your transcript text is sent to \(providerName) and cleaned up with \(modelName)."
         case .onDevice:
             detail = "\(modelName) cleans up your transcript on this device; the text is not uploaded."

@@ -43,7 +43,7 @@ final class DeepgramSpeechCatalogTests: XCTestCase {
     }
 }
 
-private final class SpeechCatalogURLProtocol: URLProtocol, @unchecked Sendable {
+private class SpeechCatalogURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((URLRequest) -> Data)?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

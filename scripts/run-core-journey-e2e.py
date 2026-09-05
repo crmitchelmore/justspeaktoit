@@ -67,28 +67,46 @@ def stop_process_group(process):
 
 def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES):
     artifacts_dir = Path(artifacts_dir)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
+    command_elapsed = None
     exit_code = 1
     errors = []
     counts = {}
     process = None
     log_path = artifacts_dir / "test.log"
+
+    def record_error(message):
+        nonlocal exit_code
+        errors.append(message)
+        # Diagnostic failures must fail a successful gate, but never replace
+        # the test command's original failure or timeout status.
+        if exit_code == 0:
+            exit_code = 1
+
     try:
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
         with log_path.open("w", encoding="utf-8") as log:
             log.write("command: " + " ".join(command) + "\n")
             log.flush()
             # A separate process group lets a timeout terminate XCTest and any
             # compiler descendants too. Killing only `swift` leaks those jobs.
-            process = subprocess.Popen(
-                command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
-            )
+            command_started = time.monotonic()
             try:
-                exit_code = process.wait(timeout=budget)
-            except subprocess.TimeoutExpired:
-                stop_process_group(process)
-                exit_code = 124
-                errors.append(f"Core journey gate exceeded its {budget}s test budget.")
+                process = subprocess.Popen(
+                    command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+                )
+                try:
+                    exit_code = process.wait(timeout=budget)
+                    if exit_code != 0:
+                        errors.append(f"Test command exited with status {exit_code}; see {log_path}.")
+                except subprocess.TimeoutExpired:
+                    exit_code = 124
+                    errors.append(f"Core journey gate exceeded its {budget}s test budget.")
+                    stop_process_group(process)
+            finally:
+                # The budget covers the command, not log replay, coverage
+                # parsing, or writing diagnostics after the command finishes.
+                command_elapsed = time.monotonic() - command_started
         output = log_path.read_text(encoding="utf-8", errors="replace")
         print(output, end="", flush=True)
         if exit_code == 0:
@@ -96,31 +114,37 @@ def run_gate(command, artifacts_dir, budget, required_suites=REQUIRED_SUITES):
             if errors:
                 exit_code = 1
     except (OSError, ValueError) as error:
-        errors.append(str(error))
-        exit_code = 1
+        record_error(str(error))
     finally:
         if process is not None and process.poll() is None:
-            stop_process_group(process)
+            try:
+                stop_process_group(process)
+            except OSError as error:
+                record_error(f"Could not stop test process group: {error}")
         elapsed = time.monotonic() - started
-        if elapsed > budget and exit_code == 0:
-            exit_code = 124
-            errors.append(f"Core journey gate exceeded its {budget}s test budget.")
         timing = f"core_journey_elapsed_seconds={elapsed:.3f}\n"
-        (artifacts_dir / "timing.txt").write_text(timing, encoding="utf-8")
-        (artifacts_dir / "result.json").write_text(
-            json.dumps(
-                {
-                    "exit_code": exit_code,
-                    "elapsed_seconds": elapsed,
-                    "budget_seconds": budget,
-                    "required_suites": list(required_suites),
-                    "executed_cases": counts,
-                    "errors": errors,
-                },
-                indent=2,
-            ) + "\n",
-            encoding="utf-8",
-        )
+        try:
+            (artifacts_dir / "timing.txt").write_text(timing, encoding="utf-8")
+        except OSError as error:
+            record_error(f"Could not write timing.txt: {error}")
+        try:
+            (artifacts_dir / "result.json").write_text(
+                json.dumps(
+                    {
+                        "exit_code": exit_code,
+                        "elapsed_seconds": elapsed,
+                        "command_elapsed_seconds": command_elapsed,
+                        "budget_seconds": budget,
+                        "required_suites": list(required_suites),
+                        "executed_cases": counts,
+                        "errors": errors,
+                    },
+                    indent=2,
+                ) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as error:
+            record_error(f"Could not write result.json: {error}")
         print(timing, end="", flush=True)
         for error in errors:
             print(error, file=sys.stderr)

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "run-core-journey-e2e.py"
 SPEC = importlib.util.spec_from_file_location("core_journey_gate", MODULE_PATH)
@@ -69,9 +70,10 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(result["errors"])
 
     def test_failure_retains_status_and_log(self):
-        code, _, output = self.run_command('print("compiler failed"); raise SystemExit(17)')
+        code, result, output = self.run_command('print("compiler failed"); raise SystemExit(17)')
         self.assertEqual(code, 17)
         self.assertIn("compiler failed", output)
+        self.assertTrue(any("status 17" in error for error in result["errors"]))
 
     def test_timeout_retains_partial_log_and_timing(self):
         code, result, output = self.run_command('import time; print("started", flush=True); time.sleep(60)', budget=0.1)
@@ -88,6 +90,69 @@ class RunnerTests(unittest.TestCase):
             result = json.loads((Path(directory) / "result.json").read_text())
             self.assertTrue(result["errors"])
             self.assertTrue((Path(directory) / "timing.txt").exists())
+
+    def test_artifact_write_failure_preserves_command_failure_or_timeout(self):
+        for filename in ["timing.txt", "result.json"]:
+            for source, budget, expected in [
+                ("raise SystemExit(17)", 5, 17),
+                ("import time; time.sleep(60)", 0.1, 124),
+            ]:
+                with self.subTest(filename=filename, expected=expected), tempfile.TemporaryDirectory() as directory:
+                    original_write = Path.write_text
+
+                    def fail_selected_artifact(path, *args, **kwargs):
+                        if path.name == filename:
+                            raise OSError("fixture disk full")
+                        return original_write(path, *args, **kwargs)
+
+                    diagnostics = io.StringIO()
+                    with mock.patch.object(Path, "write_text", fail_selected_artifact):
+                        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(diagnostics):
+                            code = gate.run_gate(
+                                [sys.executable, "-c", source], directory, budget, ["Required"]
+                            )
+                    self.assertEqual(code, expected)
+                    self.assertIn(f"Could not write {filename}: fixture disk full", diagnostics.getvalue())
+                    self.assertTrue((Path(directory) / "test.log").exists())
+                    if filename == "timing.txt":
+                        result = json.loads((Path(directory) / "result.json").read_text())
+                        self.assertEqual(result["exit_code"], expected)
+                        self.assertTrue(any("timing.txt" in error for error in result["errors"]))
+                    else:
+                        self.assertTrue((Path(directory) / "timing.txt").exists())
+
+    def test_artifact_write_failure_cannot_leave_successful_command_green(self):
+        source = 'print("Test Case \'-[Module.Required testResult]\' passed (0.001 seconds).")'
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostics = io.StringIO()
+            with mock.patch.object(Path, "write_text", side_effect=OSError("fixture disk full")):
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(diagnostics):
+                    code = gate.run_gate([sys.executable, "-c", source], directory, 5, ["Required"])
+            self.assertEqual(code, 1)
+            self.assertIn("Could not write timing.txt", diagnostics.getvalue())
+            self.assertIn("Could not write result.json", diagnostics.getvalue())
+
+    def test_unusable_artifact_directory_reports_failure_without_raising(self):
+        with tempfile.TemporaryDirectory() as directory:
+            blocked_path = Path(directory) / "occupied"
+            blocked_path.write_text("an existing file")
+            diagnostics = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(diagnostics):
+                code = gate.run_gate([sys.executable, "-c", "raise SystemExit(17)"], blocked_path, 5, ["Required"])
+            self.assertEqual(code, 1)
+            self.assertIn("Could not write result.json", diagnostics.getvalue())
+            self.assertEqual(blocked_path.read_text(), "an existing file")
+
+    def test_post_command_work_cannot_turn_on_time_success_into_timeout(self):
+        source = 'print("Test Case \'-[Module.Required testResult]\' passed (0.001 seconds).")'
+        # Runner start, command start/end, then delayed log replay/coverage work.
+        # subprocess has its own captured clock, so this controls only our timing.
+        with mock.patch.object(gate.time, "monotonic", side_effect=[0, 0, 0.1, 100]):
+            code, result, _ = self.run_command(source, budget=5)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["command_elapsed_seconds"], 0.1)
+        self.assertEqual(result["elapsed_seconds"], 100)
+        self.assertEqual(result["errors"], [])
 
     def test_timeout_stops_descendants_too(self):
         with tempfile.TemporaryDirectory() as directory:

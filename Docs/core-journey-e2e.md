@@ -20,7 +20,10 @@ retains `test.log`, `timing.txt`, and `result.json` in
 `.artifacts/core-journey-e2e/` on success, failure, or timeout; CI uploads them.
 Timeouts terminate the entire test process group, including compiler/test
 children. `result.json` records the required suites, execution counts on a
-successful test-command exit, elapsed time, and gate errors.
+successful test-command exit, command and runner elapsed times, and gate errors.
+Log replay and artifact writing do not count toward the test-command budget.
+Artifact write failures are reported without replacing a failed command's exit
+status; they fail an otherwise successful gate.
 
 ## Covered contracts
 

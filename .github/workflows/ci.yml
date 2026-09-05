@@ -144,6 +144,8 @@ jobs:
               - 'Tests/SpeakCoreTests/**'
               - 'Tests/SpeakHotKeysTests/**'
               - 'scripts/run-core-journey-e2e.sh'
+              - 'scripts/run-core-journey-e2e.py'
+              - 'scripts/tests/test_core_journey_gate.py'
               - '.github/workflows/ci.yml'
 
       - name: Select gate outputs

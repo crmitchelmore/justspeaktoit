@@ -92,12 +92,12 @@ public final class IOSBatchTranscriber {
     public func stop(language: String?) async throws -> TranscriptionResult {
         audioEngine.stop()
         removeInputTap()
+        startTime = nil
         guard let recording = audioRecorder.stopRecording() else {
             releaseAudioSession()
             throw IOSBatchTranscriptionError.missingRecording
         }
         releaseAudioSession()
-        startTime = nil
 
         // A non-retained recording is temporary, but it is still the only copy
         // of what the user said. Delete it after the transcript is safely in

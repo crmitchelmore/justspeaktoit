@@ -117,14 +117,14 @@ final class AudioPlaybackController: NSObject, ObservableObject, AVAudioPlayerDe
     }
   }
 
-  func repeatingTimerDidFire() {
-    guard let player else { return }
-    currentTime = player.currentTime
-    if !player.isPlaying {
-      state = .idle
-      timer?.invalidate()
+    func repeatingTimerDidFire() {
+        guard let player else { return }
+        currentTime = player.currentTime
+        if !player.isPlaying {
+            state = .idle
+            timer?.invalidate()
+        }
     }
-  }
 
   private func format(_ time: TimeInterval) -> String {
     guard time.isFinite else { return "--:--.--" }

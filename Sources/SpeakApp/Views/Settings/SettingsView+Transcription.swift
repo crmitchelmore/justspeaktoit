@@ -889,8 +889,9 @@ extension SettingsView {
             }
           }
           Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
-            deleteLocalBatchModel(model)
+            deleteDownloadedWhisperKitModel(model)
           }
+          .disabled(!localModels.canDelete(model))
         }
       case .installing:
         VStack(alignment: .trailing, spacing: 6) {
@@ -906,7 +907,7 @@ extension SettingsView {
             Task { await localModels.install(model) }
           }
           if localModels.canDelete(model) {
-            Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteLocalBatchModel(model) }
+            Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteDownloadedWhisperKitModel(model) }
           }
         }
       }
@@ -914,26 +915,14 @@ extension SettingsView {
     }
   }
 
-  private func deleteLocalBatchModel(_ model: LocalTranscriptionModel) {
+  private func deleteDownloadedWhisperKitModel(_ model: LocalTranscriptionModel) {
     guard localModels.delete(model) else { return }
-    if settings.localTranscriptionModel == model.id {
-      settings.repairDownloadedTranscriptionSelection(
-        fallbackModelID: firstInstalledLocalTranscriptionModelID(excluding: model.id)
-      )
-    }
-  }
-
-  private func deleteWhisperKitStreamingModel(_ model: LocalTranscriptionModel) {
-    guard localModels.delete(model) else { return }
-    let streamingID = WhisperKitStreamingModel.id(for: model)
-    if settings.localStreamingModelSource == streamingID {
-      if let fallback = firstInstalledStreamingSourceID(excluding: streamingID) {
-        settings.localStreamingModelSource = fallback
-      } else {
-        settings.localStreamingModelSource = ""
-        settings.localTranscriptionMode = .batch
-      }
-    }
+    let sourceID = WhisperKitStreamingModel.id(for: model)
+    settings.repairRemovedWhisperKitSelection(
+      modelID: model.id, streamingSourceID: sourceID,
+      fallbackBatchModelID: firstInstalledLocalTranscriptionModelID(excluding: model.id),
+      fallbackStreamingSourceID: firstInstalledStreamingSourceID(excluding: sourceID)
+    )
   }
 
   private var localModelQuickStart: some View {
@@ -1353,8 +1342,9 @@ extension SettingsView {
               }
             }
             Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
-              deleteWhisperKitStreamingModel(model)
+              deleteDownloadedWhisperKitModel(model)
             }
+            .disabled(!localModels.canDelete(model))
           case .installing:
             ProgressView()
               .controlSize(.small)
@@ -1363,7 +1353,7 @@ extension SettingsView {
               Task { await localModels.install(model) }
             }
             if localModels.canDelete(model) {
-              Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteWhisperKitStreamingModel(model) }
+              Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteDownloadedWhisperKitModel(model) }
             }
           }
         }

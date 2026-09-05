@@ -6,6 +6,8 @@ import Foundation
 /// need minutes, while import probes and an interactive inference must finish soon.
 enum LocalProcessRunner {
     static let setupTimeout: TimeInterval = 15 * 60
+    /// A source build needs a larger, still bounded budget than environment setup.
+    static let runtimeBuildTimeout: TimeInterval = 60 * 60
     static let probeTimeout: TimeInterval = 30
     static let inferenceTimeout: TimeInterval = 120
     static let extractionTimeout: TimeInterval = 120

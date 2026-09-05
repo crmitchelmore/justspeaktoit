@@ -223,7 +223,8 @@ final class LocalPostProcessingModelManager: ObservableObject {
         ],
         environment: [
           "CMAKE_ARGS": "-DGGML_METAL=on"
-        ]
+        ],
+        timeout: LocalProcessRunner.runtimeBuildTimeout
       )
       try await ensureRuntimeAvailable()
       try Task.checkCancellation()

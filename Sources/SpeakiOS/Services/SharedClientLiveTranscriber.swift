@@ -27,8 +27,15 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private let audioSessionManager: AudioSessionManager
     private let startup = RecordingStartupOperation()
+    private var cleanupTask: Task<Void, Never>?
+    private var isStopping = false
+    private var activeCaptureID: UUID?
     private var ownsAudioSession = false
     private var hasInputTap = false
+    // Isolates system boundaries in lifecycle tests.
+    var drainCaptureWork: (() async -> Void)?
+    var clientFactory: (() -> StreamingTranscriptionClient?)?
+    var startCaptureAudio: (() throws -> Void)?
 
     private func releaseAudioSession() {
         guard ownsAudioSession else { return }
@@ -89,11 +96,15 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func start() async throws {
-        guard !isRunning, !startup.isStarting else { return }
+        guard !isRunning, !isStopping, !startup.isStarting else { return }
         do {
             try await startup.run(
-                { try await self.startCapture() },
-                onFailure: { self.cleanupCapture() }
+                {
+                    await self.cleanupTask?.value
+                    try Task.checkCancellation()
+                    try await self.startCapture()
+                },
+                onFailure: { await self.cleanupCapture()?.value }
             )
         } catch {
             if Task.isCancelled || error is CancellationError { throw CancellationError() }
@@ -111,9 +122,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             throw err
         }
 
-        guard let client = LiveTranscriptionClientFactory.makeClient(
-            for: route, apiKey: apiKey, language: language, keywords: keywords
-        ) else {
+        guard let client = makeClient() else {
             let err = LiveTranscriptionClientError.providerNotAvailable(route.provider)
             self.error = err
             throw err
@@ -131,33 +140,52 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // Fold finals by the client's declared shape: standalone segments
         // append (identical text repeats included), cumulative finals replace.
         accumulated = TranscriptAccumulator(shape: client.finalShape)
-        client.start(
-            onTranscript: { [weak self] text, isFinal in
-                Task { @MainActor in self?.handleTranscript(text: text, isFinal: isFinal) }
-            },
-            onError: { [weak self] error in
-                Task { @MainActor in self?.handleError(error) }
-            }
-        )
+        startClient(client)
 
-        do {
+        // The startup owner's failure path drains queued capture work before
+        // closing the client and releasing the audio session.
+        if let startCaptureAudio {
+            try startCaptureAudio()
+        } else {
             try startAudioEngine()
-        } catch {
-            // Capture startup failed after the client connected — tear the
-            // client and audio session back down so nothing is left running.
-            client.stop()
-            self.client = nil
-            releaseAudioSession()
-            throw error
         }
         resetState()
     }
 
+    private func makeClient() -> StreamingTranscriptionClient? {
+        if let clientFactory { return clientFactory() }
+        return LiveTranscriptionClientFactory.makeClient(
+            for: route, apiKey: apiKey, language: language, keywords: keywords
+        )
+    }
+
+    private func startClient(_ client: StreamingTranscriptionClient) {
+        let captureID = UUID()
+        activeCaptureID = captureID
+        client.start(
+            onTranscript: { [weak self] text, isFinal in
+                Task { @MainActor in
+                    guard self?.activeCaptureID == captureID else { return }
+                    self?.handleTranscript(text: text, isFinal: isFinal)
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor in
+                    guard self?.activeCaptureID == captureID else { return }
+                    self?.handleError(error)
+                }
+            }
+        )
+    }
+
     public func stop() async -> TranscriptionResult {
-        guard isRunning else {
+        guard isRunning, !isStopping else {
+            await cleanupTask?.value
             let text = partialText.isEmpty ? accumulated.text : partialText
             return makeResult(text: text, duration: 0)
         }
+        isStopping = true
+        defer { isStopping = false }
 
         audioEngine.stop()
         removeInputTap()
@@ -165,12 +193,25 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // being written and sent; let them land before the client is finalised
         // and the recorder is closed.
         await audioProcessingQueue.drainPendingWork()
+        guard isRunning else {
+            await cleanupTask?.value
+            return makeResult(text: partialText, duration: 0)
+        }
         // The retained resampler is still holding the frames whose filter
         // window has not closed. Flush them down the same send path the live
         // chunks use, before the client is finalised, or the tail of a short
         // utterance is dropped (issue #872).
         await drainConverterTail()
+        guard isRunning else {
+            await cleanupTask?.value
+            return makeResult(text: partialText, duration: 0)
+        }
         await finishClient()
+        guard isRunning else {
+            await cleanupTask?.value
+            return makeResult(text: partialText, duration: 0)
+        }
+        activeCaptureID = nil
         _ = audioRecorder.stopRecording()
         isRunning = false
         releaseAudioSession()
@@ -189,14 +230,30 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     public func cancel() {
         startup.cancel()
-        cleanupCapture()
+        _ = cleanupCapture()
     }
 
-    private func cleanupCapture() {
-        guard isRunning || ownsAudioSession || hasInputTap else { return }
+    private func cleanupCapture() -> Task<Void, Never>? {
+        if let cleanupTask { return cleanupTask }
+        guard isRunning || ownsAudioSession || hasInputTap else { return nil }
         audioEngine.stop()
         removeInputTap()
-        audioProcessingQueue.sync {}
+        activeCaptureID = nil
+        isRunning = false
+        let task = Task { @MainActor in
+            if let drainCaptureWork {
+                await drainCaptureWork()
+            } else {
+                await audioProcessingQueue.drainPendingWork()
+            }
+            finishCaptureCleanup()
+            cleanupTask = nil
+        }
+        cleanupTask = task
+        return task
+    }
+
+    private func finishCaptureCleanup() {
         client?.stop()
         client = nil
         // Cancelled audio is thrown away, so there is nothing to drain — just
@@ -204,7 +261,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         converterCache.reset()
         // Cancel persistent recording (keeps the partial file).
         audioRecorder.cancelRecording()
-        isRunning = false
         releaseAudioSession()
     }
 
@@ -219,9 +275,11 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     /// with nothing outstanding would just add latency, so the socket closes
     /// straight away when every interim has already been finalised.
     private func finishClient() async {
-        defer { client = nil }
-        guard let finalizingClient = client as? FinalizingStreamingTranscriptionClient else {
-            client?.stop()
+        let finishingClient = client
+        let captureID = activeCaptureID
+        defer { if client === finishingClient { client = nil } }
+        guard let finalizingClient = finishingClient as? FinalizingStreamingTranscriptionClient else {
+            finishingClient?.stop()
             return
         }
         guard StreamingFinalisationPolicy.shouldAwaitFinalisation(
@@ -236,6 +294,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // trailing segment, so it replaces what we accumulated. Appending it
         // would double every word the client already streamed.
         if let finalTranscript = await finalizingClient.finishAndWait(),
+           activeCaptureID == captureID,
            !finalTranscript.isEmpty,
            finalText != finalTranscript {
             applyFullTranscript(finalTranscript)

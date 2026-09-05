@@ -31,6 +31,9 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
     let journal: WatchCaptureImportJournal
     private let inboxDirectory: URL
+    // Serialises delivery with journal retirement and audio deletion so a
+    // replacement job cannot reference a payload that cleanup then removes.
+    private let inboxLock = NSLock()
     private var isProcessing = false
     private var anotherPassRequested = false
     // Internal seams keep pass scheduling tests independent of networking and
@@ -67,6 +70,8 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         at temporaryURL: URL,
         envelope: WatchCaptureEnvelope
     ) -> Bool {
+        inboxLock.lock()
+        defer { inboxLock.unlock() }
         if let completed = journal.completedAcknowledgement(captureID: envelope.id) {
             return journal.recordPendingAckReportingDurability(completed)
         }
@@ -83,6 +88,9 @@ public final class WatchCaptureImportPipeline: ObservableObject {
             if !FileManager.default.fileExists(atPath: destination.path) {
                 try FileManager.default.moveItem(at: temporaryURL, to: destination)
             }
+            // Moves preserve a Watch file's old timestamp. Retain an orphan
+            // from its arrival here, including when journal persistence fails.
+            try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: destination.path)
         } catch {
             SpeakLogger.logError(error, context: "WatchCaptureImportPipeline.park")
             return false
@@ -127,6 +135,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
         journal.pruneExpiredCompletedAcknowledgements()
         purgeExpiredJobs()
+        purgeOrphanedAudio()
         replayPendingAcks()
 
         // Freeze this pass before the first suspension. A stream of arrivals
@@ -258,12 +267,15 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     /// Records the durable success: acknowledgement retained until confirmed,
     /// job removed, parked audio released.
     private func commitSuccessfulImport(of job: WatchCaptureImportJob, audioURL: URL) {
-        guard journal.completeJobReportingDurability(
+        inboxLock.lock()
+        let completed = journal.completeJobReportingDurability(
             captureID: job.captureID,
             acknowledgement: WatchCaptureAckRecord(captureID: job.captureID, outcome: .transcribed)
-        ) else { return }
-        try? FileManager.default.removeItem(at: audioURL)
-        replayPendingAcks()
+        )
+        if completed { try? FileManager.default.removeItem(at: audioURL) }
+        inboxLock.unlock()
+        // Transport callbacks may synchronously re-enter the delivery path.
+        if completed { replayPendingAcks() }
     }
 
     // MARK: - Acknowledgements
@@ -286,7 +298,32 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
     // MARK: - Retention
 
+    func purgeOrphanedAudio(now: Date = Date()) {
+        inboxLock.lock()
+        defer { inboxLock.unlock() }
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: inboxDirectory, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]
+        ) else { return }
+        let referenced = Set(journal.pendingJobs().map(\.captureID))
+            .union(journal.pendingAcks().map(\.captureID))
+        let cutoff = now.addingTimeInterval(-WatchCaptureImportJournal.defaultRetentionInterval)
+        for file in files {
+            guard !file.pathExtension.isEmpty,
+                  let captureID = UUID(uuidString: file.deletingPathExtension().lastPathComponent),
+                  !referenced.contains(captureID),
+                  let values = try? file.resourceValues(forKeys: keys),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  let modifiedAt = values.contentModificationDate, modifiedAt < cutoff else { continue }
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     private func purgeExpiredJobs() {
+        // Retiring a job and deleting its audio are one inbox transaction:
+        // re-delivery must not create a replacement job between these steps.
+        inboxLock.lock()
+        defer { inboxLock.unlock() }
         let purged = journal.purgeExpired()
         for job in purged {
             let audioURL = inboxDirectory

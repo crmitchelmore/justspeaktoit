@@ -51,15 +51,15 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 
   // swiftlint:disable:next function_body_length
   func start() async throws {
-    guard !isRunning, !isStarting else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
-    isStarting = true
-    defer { isStarting = false }
-    try Task.checkCancellation()
-    let permission = await permissionsManager.ensureGranted(.microphone)
-    try Task.checkCancellation()
-    guard permission.isGranted else {
-      throw TranscriptionManagerError.microphonePermissionMissing
-    }
+        guard !isRunning, !isStarting else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+        isStarting = true
+        defer { isStarting = false }
+        try Task.checkCancellation()
+        let permission = await permissionsManager.ensureGranted(.microphone)
+        try Task.checkCancellation()
+        guard permission.isGranted else {
+            throw TranscriptionManagerError.microphonePermissionMissing
+        }
     guard let model = currentModel,
           let route = LiveTranscriptionRouting.route(for: model),
           let keyIdentifier = route.apiKeyIdentifier else {

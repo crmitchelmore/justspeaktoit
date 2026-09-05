@@ -632,7 +632,7 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   ) -> [RecordingSummary] {
     guard
       let enumerator = FileManager.default.enumerator(
-        at: directory,
+        at: directory.resolvingSymlinksInPath(),
         includingPropertiesForKeys: [.creationDateKey, .fileSizeKey, .isRegularFileKey],
         // Keeps the hidden staging folder, which holds files no session has
         // claimed, out of the user's recordings list.
@@ -642,12 +642,13 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     }
 
     let allowedExtensions: Set<String> = ["m4a", "wav", "mp3", "aac", "m4b", "caf"]
+    let activeRecording = activeRecordingURL?.resolvingSymlinksInPath().standardizedFileURL
 
     var summaries: [RecordingSummary] = []
     while let next = enumerator.nextObject() as? URL {
       let url = next
       guard allowedExtensions.contains(url.pathExtension.lowercased()),
-        url.standardizedFileURL != activeRecordingURL?.standardizedFileURL
+        url.resolvingSymlinksInPath().standardizedFileURL != activeRecording
       else { continue }
       do {
         let resource = try url.resourceValues(forKeys: [.creationDateKey, .fileSizeKey, .isRegularFileKey])
@@ -677,11 +678,17 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   func removeRecording(at url: URL) {
     // Capture can start between snapshot creation and this call. Reserve the
     // entire startup interval, including a claimed warm file awaiting device setup.
-    guard !isStartingRecording,
-      currentRecordingURL?.standardizedFileURL != url.standardizedFileURL
-    else { return }
-    try? FileManager.default.removeItem(at: url)
+    guard !isStartingRecording else { return }
+    Self.removeRecording(at: url, excluding: currentRecordingURL)
   }
+
+    nonisolated static func removeRecording(at url: URL, excluding activeRecordingURL: URL?) {
+        // macOS can expose the same recording through /var and /private/var,
+        // or through a user-selected directory symlink. Neither alias is safe to delete.
+        guard url.resolvingSymlinksInPath().standardizedFileURL
+            != activeRecordingURL?.resolvingSymlinksInPath().standardizedFileURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
 
   func importRecording(from url: URL) async throws -> URL {
     let directory = await MainActor.run { appSettings.recordingsDirectory }

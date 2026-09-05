@@ -242,9 +242,9 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
     flushTimer = WeakRepeatingTimerTarget.scheduledTimer(interval: flushInterval, target: self)
   }
 
-  func repeatingTimerDidFire() {
-    flushIfNeededSync()
-  }
+    func repeatingTimerDidFire() {
+        flushIfNeededSync()
+    }
 
   // MARK: - WAL Operations (delegated to HistoryWALStore actor)
 

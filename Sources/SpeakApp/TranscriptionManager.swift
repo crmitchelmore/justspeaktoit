@@ -187,9 +187,9 @@ final class TranscriptionManager: ObservableObject {
     preRollBuffers: [AVAudioPCMBuffer],
     analyzerFallbackAllowed: Bool = true
   ) async throws {
-    guard !isLiveTranscribing, startupGeneration == nil else {
-      throw TranscriptionManagerError.liveSessionAlreadyRunning
-    }
+        guard !isLiveTranscribing, startupGeneration == nil else {
+            throw TranscriptionManagerError.liveSessionAlreadyRunning
+        }
     let model = try liveTranscriptionModelForCurrentMode()
     let language = appSettings.preferredModelLanguage
     let generation = UUID()

@@ -33,6 +33,21 @@ The combined branch passes 76 Node and 25 Python gate/installer regression tests
 plus staged and working-tree whitespace checks. Native CI results remain a
 separate merge requirement.
 
+Native CI also caught test-fixture errors: automation requests needed an actual
+input path, macOS temporary-directory aliases needed filesystem identity checks,
+and the UI test needed Speak's explicit bundle identifier to avoid launching the
+destination fixture. The transport overflow probe observes WebSocket handshake
+failure directly because the channel wrapper leaves Network's waiting state
+pending. It fails if the connection reaches readiness or rejection times out.
+Review follow-ups protect active recordings through directory aliases and give
+the local runtime source build a separate, cancellable one-hour deadline.
+Counted model-use leases now retain files through batch inference and streaming
+tail work, even after cancellation or a controller timeout. Both Settings rows
+repair the shared batch/streaming selections after deletion. iOS cancellation
+drains asynchronously with capture identity checks; missing-recording errors
+clear startup state. Watch reconciliation reclaims expired unjournalled audio,
+serializing retirement and deletion with incoming delivery.
+
 ## What the tests prove
 
 The hermetic journey gate exercises production contracts with deterministic

@@ -200,3 +200,136 @@ final class LocalModelStorageLifecycleTests: XCTestCase {
         return directory.resolvingSymlinksInPath()
     }
 }
+
+// MARK: - Inference ownership
+
+extension LocalModelStorageLifecycleTests {
+    func testDeletion_waitsForEveryActiveInferenceWithoutChangingInstalledState() async throws {
+        let firstStarted = self.expectation(description: "First decoder started")
+        let secondStarted = self.expectation(description: "Second decoder started")
+        var starts = [firstStarted, secondStarted]
+        let decoder = SuspendedFileTranscriber(onStart: { starts.removeFirst().fulfill() })
+        let fixture = try self.makeInferenceFixture(decoder: decoder)
+        let first = Task {
+            try await fixture.manager.transcribeFile(at: fixture.audio, modelID: fixture.model.id, language: nil)
+        }
+        await self.fulfillment(of: [firstStarted], timeout: 2)
+        let second = Task {
+            try await fixture.manager.transcribeFile(at: fixture.audio, modelID: fixture.model.id, language: nil)
+        }
+        await self.fulfillment(of: [secondStarted], timeout: 2)
+
+        XCTAssertFalse(fixture.manager.delete(fixture.model))
+        XCTAssertFalse(fixture.manager.canDelete(fixture.model))
+        XCTAssertEqual(fixture.manager.installState(for: fixture.model.id), .installed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.base.path))
+        decoder.completeNext(.success("first result"))
+        let firstResult = try await first.value
+        XCTAssertFalse(fixture.manager.delete(fixture.model), "One remaining inference still owns the files")
+
+        decoder.completeNext(.success("second result"))
+        let secondResult = try await second.value
+        XCTAssertEqual(Set([firstResult.text, secondResult.text]), ["first result", "second result"])
+        XCTAssertTrue(fixture.manager.delete(fixture.model))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.base.path))
+    }
+
+    func testDecoderFailure_releasesInferenceOwnershipForDeletion() async throws {
+        let started = self.expectation(description: "Decoder started")
+        let decoder = SuspendedFileTranscriber(onStart: { started.fulfill() })
+        let fixture = try self.makeInferenceFixture(decoder: decoder)
+        let transcription = Task {
+            try await fixture.manager.transcribeFile(at: fixture.audio, modelID: fixture.model.id, language: nil)
+        }
+        await self.fulfillment(of: [started], timeout: 2)
+        XCTAssertFalse(fixture.manager.delete(fixture.model))
+
+        decoder.completeNext(.failure(CocoaError(.fileReadCorruptFile)))
+        if case .success = await transcription.result { XCTFail("Decoder failure must propagate") }
+        XCTAssertTrue(fixture.manager.delete(fixture.model))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.base.path))
+    }
+
+    func testCancellation_keepsFilesUntilAnUncooperativeDecoderReturns() async throws {
+        let started = self.expectation(description: "Decoder started")
+        let decoder = SuspendedFileTranscriber(onStart: { started.fulfill() })
+        let fixture = try self.makeInferenceFixture(decoder: decoder)
+        let transcription = Task {
+            try await fixture.manager.transcribeFile(at: fixture.audio, modelID: fixture.model.id, language: nil)
+        }
+        await self.fulfillment(of: [started], timeout: 2)
+
+        transcription.cancel()
+        XCTAssertFalse(fixture.manager.delete(fixture.model), "Cancellation alone does not end native inference")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.base.path))
+        decoder.completeNext(.success("late result"))
+        switch await transcription.result {
+        case .failure(let error): XCTAssertTrue(error is CancellationError)
+        case .success: XCTFail("Cancelled transcription must not publish a late result")
+        }
+        XCTAssertTrue(fixture.manager.delete(fixture.model))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.base.path))
+    }
+
+    func testPipelineFailure_releasesInferenceOwnershipForDeletion() async throws {
+        let decoder = SuspendedFileTranscriber(onStart: { XCTFail("Failed loading must not start decoding") })
+        let fixture = try self.makeInferenceFixture(decoder: decoder, pipelineLoader: { _ in
+            throw CocoaError(.fileReadCorruptFile)
+        })
+        do {
+            _ = try await fixture.manager.transcribeFile(at: fixture.audio, modelID: fixture.model.id, language: nil)
+            XCTFail("Pipeline failure must propagate")
+        } catch {
+            XCTAssertTrue(error is CocoaError)
+        }
+        XCTAssertTrue(fixture.manager.delete(fixture.model))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.base.path))
+    }
+
+    private func makeInferenceFixture(
+        decoder: SuspendedFileTranscriber,
+        pipelineLoader: @escaping @MainActor (WhisperKitConfig) async throws -> WhisperKit = { config in
+            try await WhisperKit(WhisperKitConfig(modelFolder: config.modelFolder, load: false, download: false))
+        }
+    ) throws -> LocalInferenceFixture {
+        let directory = try self.makeDirectory()
+        let storage = WhisperKitModelStorage(root: directory.appendingPathComponent("WhisperKitDownloads"))
+        let model = try XCTUnwrap(ModelCatalog.localTranscription.first)
+        let base = try self.installFixture(model, storage: storage, directory: directory)
+        let manager = LocalModelManager(
+            storageDirectory: directory, modelStorage: storage,
+            pipelineLoader: pipelineLoader,
+            fileTranscriber: { _, _ in try await decoder.transcribe() }
+        )
+        return LocalInferenceFixture(
+            manager: manager, model: model, base: base, audio: directory.appendingPathComponent("input.wav")
+        )
+    }
+}
+
+private struct LocalInferenceFixture {
+    let manager: LocalModelManager
+    let model: LocalTranscriptionModel
+    let base: URL
+    let audio: URL
+}
+
+@MainActor
+private final class SuspendedFileTranscriber {
+    private let onStart: () -> Void
+    private var continuations: [CheckedContinuation<String, Error>] = []
+
+    init(onStart: @escaping () -> Void) { self.onStart = onStart }
+
+    func transcribe() async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuations.append(continuation)
+            self.onStart()
+        }
+    }
+
+    func completeNext(_ result: Result<String, Error>) {
+        guard !self.continuations.isEmpty else { return XCTFail("No suspended decoder") }
+        self.continuations.removeFirst().resume(with: result)
+    }
+}

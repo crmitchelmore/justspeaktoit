@@ -14,7 +14,7 @@ final class CartesiaBatchClientTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Cartesia-Version"), "2026-08-14")
-        let body = String(decoding: try Data(contentsOf: upload.file), as: UTF8.self)
+        let body = try XCTUnwrap(String(bytes: Data(contentsOf: upload.file), encoding: .utf8))
         XCTAssertTrue(body.contains("\r\n\r\nink-whisper\r\n"))
         XCTAssertTrue(body.contains("name=\"language\"\r\n\r\nfr\r\n"))
         XCTAssertTrue(body.contains("filename=\"recording.m4a\"\r\nContent-Type: audio/mp4"))
@@ -22,7 +22,7 @@ final class CartesiaBatchClientTests: XCTestCase {
         for language in [nil, " automatic ", "AUTOMATIC", " "] as [String?] {
             let automatic = try CartesiaBatchClient.makeUpload(url: url, apiKey: "fixture", language: language)
             defer { try? FileManager.default.removeItem(at: automatic.file.deletingLastPathComponent()) }
-            let automaticBody = String(decoding: try Data(contentsOf: automatic.file), as: UTF8.self)
+            let automaticBody = try XCTUnwrap(String(bytes: Data(contentsOf: automatic.file), encoding: .utf8))
             XCTAssertFalse(automaticBody.contains("name=\"language\""))
         }
     }
@@ -78,7 +78,7 @@ final class CartesiaBatchClientTests: XCTestCase {
         let result = try CartesiaBatchClient.decode(data)
         XCTAssertEqual(result.text, "Hello world")
         XCTAssertEqual(result.duration, 2.5)
-        let withoutDuration = String(decoding: data, as: UTF8.self)
+        let withoutDuration = try XCTUnwrap(String(bytes: data, encoding: .utf8))
             .replacingOccurrences(of: "\"duration\":2.5,", with: "")
         XCTAssertEqual(try CartesiaBatchClient.decode(Data(withoutDuration.utf8)).duration, 1.1)
         XCTAssertEqual(result.segments.count, 2)

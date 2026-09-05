@@ -97,16 +97,16 @@ public struct CartesiaBatchClient: Sendable {
     }
 
     static func decode(_ data: Data) throws -> TranscriptionResult {
+        struct Word: Decodable {
+            let word: String
+            let start: Double
+            let end: Double
+        }
         struct Response: Decodable {
             let type: String
             let text: String
             let duration: Double?
             let words: [Word]?
-            struct Word: Decodable {
-                let word: String
-                let start: Double
-                let end: Double
-            }
         }
         guard let response = try? JSONDecoder().decode(Response.self, from: data),
               response.type == "transcript" else { throw TranscriptionProviderError.invalidResponse }

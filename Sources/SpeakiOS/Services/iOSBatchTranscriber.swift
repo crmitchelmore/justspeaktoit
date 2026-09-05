@@ -26,7 +26,7 @@ public final class IOSBatchTranscriber {
         session: URLSession = .shared
     ) {
         self.audioSessionManager = audioSessionManager
-        self.model = model
+        self.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         self.retainRecording = retainRecording
         self.client = IOSBatchTranscriptionClient(apiKey: apiKey, keywords: keywords, session: session)
     }
@@ -132,6 +132,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case openRouter
 
     static func route(for model: String) -> IOSBatchTranscriptionRoute {
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         if AppleLocalModels.isSpeechAnalyzerModel(model) { return .appleSpeechAnalyzer }
         if AppSettings.openAIBatchModelIDs.contains(model) { return .openAI }
         if model.trimmingCharacters(in: .whitespacesAndNewlines) == CartesiaBatchClient.catalogID { return .cartesia }
@@ -147,6 +148,9 @@ private struct IOSBatchTranscriptionClient {
     let session: URLSession
 
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
+        // Credential resolution uses the trimmed ID. Use the same ID for both
+        // route selection and the provider request, including file-only callers.
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         switch IOSBatchTranscriptionRoute.route(for: model) {
         case .appleSpeechAnalyzer:
             if #available(iOS 26.0, *) {

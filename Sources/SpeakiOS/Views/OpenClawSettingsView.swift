@@ -190,6 +190,15 @@ public struct OpenClawSettingsView: View {
                         .foregroundStyle(.secondary)
                     }
 
+                    if !selectedProviderHasKey {
+                        Label(
+                            "Add your \(settings.ttsProvider.displayName) API key in Settings → API Keys.",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    }
+
                     Button {
                         voiceTestTask?.cancel()
                         voiceTestTask = Task { await testVoice() }

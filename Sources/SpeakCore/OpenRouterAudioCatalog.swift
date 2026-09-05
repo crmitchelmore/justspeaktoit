@@ -54,6 +54,7 @@ public final class OpenRouterAudioCatalog: ObservableObject {
         guard !Task.isCancelled, force || (!isRefreshing && isStale) else { return }
         activeRefresh?.cancel()
         let identifier = UUID()
+        let requestOrder = OpenRouterAudioCatalogRequestOrder.begin(at: clock())
         refreshID = identifier
         isRefreshing = true
         errorMessage = nil
@@ -84,7 +85,9 @@ public final class OpenRouterAudioCatalog: ObservableObject {
             let updatedAt = clock()
             models = fetched
             lastUpdated = updatedAt
-            OpenRouterAudioCatalogSnapshot(version: 1, updatedAt: updatedAt, models: fetched).write(to: cacheURL)
+            OpenRouterAudioCatalogSnapshot(
+                version: 1, updatedAt: updatedAt, models: fetched, requestOrder: requestOrder
+            ).write(to: cacheURL)
         } catch {
             guard refreshID == identifier, !Task.isCancelled, !(error is CancellationError),
                   (error as? URLError)?.code != .cancelled else { return }

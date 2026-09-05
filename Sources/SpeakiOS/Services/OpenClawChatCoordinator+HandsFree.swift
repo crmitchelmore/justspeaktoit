@@ -45,8 +45,7 @@ extension OpenClawChatCoordinator {
                 self.updateLiveActivityState()
 
                 // Summarise and speak if enabled
-                if self.settings.ttsEnabled
-                    && (self.hasSelectedVoiceOutputKey || self.settings.ttsProvider == .openrouter) {
+                if self.settings.ttsEnabled && self.hasSelectedVoiceOutputKey {
                     await self.speakAssistantResponses(responseBatch)
                 }
                 self.isBufferingForTTS = false

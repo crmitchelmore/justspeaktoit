@@ -47,7 +47,7 @@ final class AutomationServerTests: XCTestCase {
     // MARK: - Round trip
 
     func testRequest_isAnsweredOverTheSocket() async throws {
-        let response = try await self.send(AutomationRequest(id: "req-1", command: .status))
+        let response = try await self.sendWithProductionClient(AutomationRequest(id: "req-1", command: .status))
 
         // The error is the diagnosis when this fails: on CI it once carried a
         // `timed_out` for a command that had finished (issue #793).
@@ -56,6 +56,26 @@ final class AutomationServerTests: XCTestCase {
         XCTAssertEqual(response.command, .status)
         XCTAssertEqual(response.result?.text, "handled-status")
         XCTAssertEqual(self.handler.handledCommands, [.status])
+    }
+
+    func testCommandFailure_isReplayedAndTheNextRequestRecovers() async throws {
+        self.handler.responseError = AutomationError(code: .transcriptionFailed, message: "Fixture provider failure")
+        let request = AutomationRequest(id: "req-failure", command: .transcribeFile)
+
+        let failed = try await self.sendWithProductionClient(request)
+        XCTAssertFalse(failed.ok)
+        XCTAssertEqual(failed.error?.code, .transcriptionFailed)
+
+        self.handler.responseError = nil
+        let replayed = try await self.sendWithProductionClient(request)
+        XCTAssertEqual(replayed, failed, "Retrying a failed command must preserve its original outcome")
+
+        let recovered = try await self.sendWithProductionClient(
+            AutomationRequest(id: "req-recovered", command: .transcribeFile)
+        )
+        XCTAssertTrue(recovered.ok, "A prior failure must not poison the listener or its command queue")
+        XCTAssertEqual(recovered.result?.text, "handled-transcribe_file")
+        XCTAssertEqual(self.handler.handledCommands, [.transcribeFile, .transcribeFile])
     }
 
     func testOversizedReply_returnsABoundedStructuredFailure() async throws {
@@ -169,7 +189,7 @@ final class AutomationServerTests: XCTestCase {
         // the same id joins the run in progress rather than starting another.
         var retry = request
         retry.timeout = 30
-        let collected = try await self.send(retry)
+        let collected = try await self.sendWithProductionClient(retry)
 
         XCTAssertTrue(collected.ok)
         XCTAssertEqual(collected.result?.text, "handled-stop_dictation")
@@ -226,11 +246,15 @@ private final class StubAutomationHandler: AutomationCommandHandling {
     /// Holds the command past the caller's deadline when set.
     var delay: Duration?
     var responseText: String?
+    var responseError: AutomationError?
 
     func handle(_ request: AutomationRequest) async -> AutomationResponse {
         self.handledCommands.append(request.command)
         if let delay {
             try? await Task.sleep(for: delay)
+        }
+        if let responseError {
+            return .failure(id: request.id, command: request.command, error: responseError)
         }
         return .success(
             id: request.id,

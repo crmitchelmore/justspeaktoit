@@ -82,6 +82,21 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     // MARK: - Private
 
     private let audioSessionManager: AudioSessionManager
+    private let startup = RecordingStartupOperation()
+    private var ownsAudioSession = false
+    private var hasInputTap = false
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
     private let audioEngine = AVAudioEngine()
     private var apiKey: String?
     private var startTime: Date?
@@ -132,8 +147,19 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
 
     public func start() async throws {
-        guard !isRunning else { return }
+        guard !isRunning, !startup.isStarting else { return }
+        do {
+            try await startup.run(
+                { try await self.startCapture() },
+                onFailure: { self.cleanupCapture() }
+            )
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+    }
 
+    private func startCapture() async throws {
         SpeakLogger.logTranscription(event: "start", model: "openai/\(modelID)")
 
         guard let apiKey, !apiKey.isEmpty else {
@@ -144,7 +170,10 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
 
         try await ensureMicrophonePermission()
+        try Task.checkCancellation()
+        ownsAudioSession = true
         try await configureAudioSession()
+        try Task.checkCancellation()
         connectClient(apiKey: apiKey)
         do {
             try startAudioEngine()
@@ -165,7 +194,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
         hasFinishedStopping = true
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
 
         // Buffers handed to the queue just before the tap came off are still
         // being written and sent; let them land before the input buffer is
@@ -202,7 +231,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         )
 
         isRunning = false
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         SpeakLogger.logTranscription(
             event: "stop",
@@ -288,10 +317,16 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
-        guard isRunning else { return }
+        startup.cancel()
+        cleanupCapture()
+    }
+
+    private func cleanupCapture() {
+        guard isRunning || ownsAudioSession || hasInputTap else { return }
 
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
+        audioProcessingQueue.sync {}
         transcriber?.stop()
         transcriber = nil
         // Cancelled audio is thrown away, so there is nothing to drain — just
@@ -301,7 +336,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         audioRecorder.cancelRecording()
 
         isRunning = false
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         logger.info("Cancelled")
     }
@@ -311,6 +346,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private func ensureMicrophonePermission() async throws {
         if !audioSessionManager.hasMicrophonePermission() {
             let granted = await audioSessionManager.requestMicrophonePermission()
+            try Task.checkCancellation()
             if !granted {
                 let err = iOSTranscriptionError.permissionDenied(.microphone)
                 SpeakLogger.logError(err, context: "Microphone permission", logger: SpeakLogger.audio)
@@ -325,6 +361,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
             try await audioSessionManager.configureForRecording()
             SpeakLogger.audio.info("Audio session configured for OpenAI Realtime")
         } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
             let wrapped = iOSTranscriptionError.audioSessionFailed(error)
             SpeakLogger.logError(wrapped, context: "Audio session setup", logger: SpeakLogger.audio)
             self.error = wrapped
@@ -378,6 +415,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
                 )
             }
         }
+        hasInputTap = true
 
         audioEngine.prepare()
         try audioEngine.start()

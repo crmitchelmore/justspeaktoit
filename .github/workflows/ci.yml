@@ -208,14 +208,16 @@ jobs:
       - name: Generate macOS project
         run: tuist generate --no-open
 
-      - name: Test launched fixture app
+      - name: Test Speak bootstrap and launched fixture
         run: |
           set -o pipefail
           mkdir -p .artifacts/core-journey-fixture-ui
           xcodebuild test \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakApp \
+            -configuration Debug \
             -destination "platform=macOS" \
+            -only-testing:SpeakAppUITests/LaunchUITests \
             -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
             -resultBundlePath .artifacts/core-journey-fixture-ui/CoreJourneyFixture.xcresult \
             -skipPackagePluginValidation \

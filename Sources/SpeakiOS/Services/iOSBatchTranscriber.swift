@@ -9,6 +9,21 @@ import SpeakCore
 @MainActor
 public final class IOSBatchTranscriber {
     private let audioSessionManager: AudioSessionManager
+    private let startup = RecordingStartupOperation()
+    private var ownsAudioSession = false
+    private var hasInputTap = false
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
     private let audioEngine = AVAudioEngine()
     private let audioRecorder = AudioRecordingPersistence()
     private let client: IOSBatchTranscriptionClient
@@ -32,10 +47,27 @@ public final class IOSBatchTranscriber {
     }
 
     public func start() async throws {
-        guard await ensureMicrophonePermission() else {
+        guard startTime == nil, !startup.isStarting else { return }
+        do {
+            try await startup.run(
+                { try await self.startCapture() },
+                onFailure: { self.cleanupCapture() }
+            )
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+    }
+
+    private func startCapture() async throws {
+        let permissionGranted = await ensureMicrophonePermission()
+        try Task.checkCancellation()
+        guard permissionGranted else {
             throw iOSTranscriptionError.permissionDenied(.microphone)
         }
+        ownsAudioSession = true
         try await audioSessionManager.configureForRecording()
+        try Task.checkCancellation()
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
@@ -43,27 +75,28 @@ public final class IOSBatchTranscriber {
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder] buffer, _ in
             audioRecorder.writeBuffer(buffer)
         }
+        hasInputTap = true
 
         do {
             audioEngine.prepare()
             try audioEngine.start()
             startTime = Date()
         } catch {
-            inputNode.removeTap(onBus: 0)
+            removeInputTap()
             audioRecorder.cancelRecording()
-            audioSessionManager.deactivate()
+            releaseAudioSession()
             throw error
         }
     }
 
     public func stop(language: String?) async throws -> TranscriptionResult {
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         guard let recording = audioRecorder.stopRecording() else {
-            audioSessionManager.deactivate()
+            releaseAudioSession()
             throw IOSBatchTranscriptionError.missingRecording
         }
-        audioSessionManager.deactivate()
+        releaseAudioSession()
         startTime = nil
 
         // A non-retained recording is temporary, but it is still the only copy
@@ -84,10 +117,15 @@ public final class IOSBatchTranscriber {
     }
 
     public func cancel() {
+        startup.cancel()
+        cleanupCapture()
+    }
+
+    private func cleanupCapture() {
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         audioRecorder.cancelRecording()
-        audioSessionManager.deactivate()
+        releaseAudioSession()
         startTime = nil
     }
 

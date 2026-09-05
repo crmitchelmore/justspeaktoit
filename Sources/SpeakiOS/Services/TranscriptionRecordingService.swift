@@ -179,13 +179,20 @@ public final class TranscriptionRecordingService: ObservableObject {
                 liveAPIKey: settings.liveAPIKey(for:),
                 transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
             )
-            session.onPartialResult = { [weak self] text, _ in
-                self?.handlePartialResult(text: text)
+            session.onPartialResult = { [weak self, weak session] text, _ in
+                guard let self, let session,
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
+                self.handlePartialResult(text: text)
             }
-            session.onError = { [weak self] error in
-                self?.handleError(error)
+            session.onError = { [weak self, weak session] error in
+                guard let self, let session,
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
+                self.handleError(error)
             }
             startedSession = session
+            guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
+                throw CancellationError()
+            }
             try await session.start()
             // The session this run allocated is published only while the run
             // is still current; a stop during start() retires the run, and the
@@ -367,8 +374,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     }
 
     /// Cancels recording without saving. During startup this retires the
-    /// pending run; the suspended start unwinds its own allocations when it
-    /// resumes (issue #701).
+    /// pending run and cancels its allocated provider immediately. The owned
+    /// startup task unwinds before another run can begin (issues #701, #786).
     public func cancelRecording() {
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()

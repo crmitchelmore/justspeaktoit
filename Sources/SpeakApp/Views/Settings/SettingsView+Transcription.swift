@@ -859,6 +859,12 @@ extension SettingsView {
         Text(localModelSizeLabel(for: model))
           .font(.caption2.monospacedDigit())
           .foregroundStyle(.tertiary)
+        if localModels.usesLegacyStorage(model) {
+          Text("Removing this legacy installation keeps its shared cache. "
+            + "Download again afterward to manage its storage.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
         if case .failed(let message) = state {
           Text(message)
             .font(.caption2)
@@ -878,13 +884,8 @@ extension SettingsView {
               settings.localTranscriptionModel = model.id
             }
           }
-          Button("Delete") {
-            localModels.delete(model)
-            if settings.localTranscriptionModel == model.id {
-              settings.repairDownloadedTranscriptionSelection(
-                fallbackModelID: firstInstalledLocalTranscriptionModelID(excluding: model.id)
-              )
-            }
+          Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
+            deleteLocalBatchModel(model)
           }
         }
       case .installing:
@@ -900,8 +901,33 @@ extension SettingsView {
           Button("Download") {
             Task { await localModels.install(model) }
           }
+          if localModels.canDelete(model) {
+            Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteLocalBatchModel(model) }
+          }
         }
       }
+      }
+    }
+  }
+
+  private func deleteLocalBatchModel(_ model: LocalTranscriptionModel) {
+    guard localModels.delete(model) else { return }
+    if settings.localTranscriptionModel == model.id {
+      settings.repairDownloadedTranscriptionSelection(
+        fallbackModelID: firstInstalledLocalTranscriptionModelID(excluding: model.id)
+      )
+    }
+  }
+
+  private func deleteWhisperKitStreamingModel(_ model: LocalTranscriptionModel) {
+    guard localModels.delete(model) else { return }
+    let streamingID = WhisperKitStreamingModel.id(for: model)
+    if settings.localStreamingModelSource == streamingID {
+      if let fallback = firstInstalledStreamingSourceID(excluding: streamingID) {
+        settings.localStreamingModelSource = fallback
+      } else {
+        settings.localStreamingModelSource = ""
+        settings.localTranscriptionMode = .batch
       }
     }
   }
@@ -1322,16 +1348,8 @@ extension SettingsView {
                 settings.localStreamingModelSource = streamingID
               }
             }
-            Button("Delete") {
-              localModels.delete(model)
-              if isSelected {
-                if let fallback = firstInstalledStreamingSourceID(excluding: streamingID) {
-                  settings.localStreamingModelSource = fallback
-                } else {
-                  settings.localStreamingModelSource = ""
-                  settings.localTranscriptionMode = .batch
-                }
-              }
+            Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
+              deleteWhisperKitStreamingModel(model)
             }
           case .installing:
             ProgressView()
@@ -1339,6 +1357,9 @@ extension SettingsView {
           case .notInstalled, .failed:
             Button("Download") {
               Task { await localModels.install(model) }
+            }
+            if localModels.canDelete(model) {
+              Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteWhisperKitStreamingModel(model) }
             }
           }
         }

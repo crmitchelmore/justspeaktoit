@@ -107,6 +107,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
 
   func installRuntime() async {
     guard runtimeState != .installing else { return }
+    let previousState = runtimeState
     runtimeState = .installing
     do {
       let bootstrapPython = try bootstrapPythonExecutable()
@@ -124,7 +125,10 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         arguments: ["-m", "pip", "install", "sherpa-onnx==1.13.2"]
       )
       try await ensureRuntimeAvailable()
+      try Task.checkCancellation()
       runtimeState = .installed
+    } catch is CancellationError {
+      runtimeState = previousState
     } catch {
       runtimeState = .failed(error.localizedDescription)
     }
@@ -132,12 +136,13 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
 
   func installModel(_ source: LocalStreamingModelSource) async {
     guard modelStates[source.id] != .installing else { return }
+    let previousState = modelStates[source.id] ?? .notInstalled
     modelStates[source.id] = .installing
     let finalDirectory = modelDirectory(for: source)
     let tempDirectory = finalDirectory.deletingLastPathComponent()
       .appendingPathComponent(finalDirectory.lastPathComponent + ".download", isDirectory: true)
     defer {
-      if modelStates[source.id] != .installed, fileManager.fileExists(atPath: tempDirectory.path) {
+      if fileManager.fileExists(atPath: tempDirectory.path) {
         try? fileManager.removeItem(at: tempDirectory)
       }
     }
@@ -157,11 +162,14 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
         }
       }
 
+      try Task.checkCancellation()
       if fileManager.fileExists(atPath: finalDirectory.path) {
         try fileManager.removeItem(at: finalDirectory)
       }
       try fileManager.moveItem(at: tempDirectory, to: finalDirectory)
       modelStates[source.id] = .installed
+    } catch is CancellationError {
+      modelStates[source.id] = previousState
     } catch {
       modelStates[source.id] = .failed(error.localizedDescription)
     }
@@ -227,6 +235,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
   func ensureReady(sourceID: String) async throws -> SherpaOnnxModelBundle {
     let source = try source(for: sourceID)
     try await ensureRuntimeAvailable()
+    try Task.checkCancellation()
     return try bundle(for: source)
   }
 
@@ -234,7 +243,10 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     guard runtimeState != .installing else { return }
     do {
       try await ensureRuntimeAvailable()
+      try Task.checkCancellation()
       runtimeState = .installed
+    } catch is CancellationError {
+      return
     } catch {
       runtimeState = .notInstalled
     }
@@ -245,8 +257,11 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     do {
       _ = try await Self.runProcess(
         executableURL: python,
-        arguments: ["-c", "import sherpa_onnx; print(getattr(sherpa_onnx, '__version__', 'ok'))"]
+        arguments: ["-c", "import sherpa_onnx; print(getattr(sherpa_onnx, '__version__', 'ok'))"],
+        timeout: LocalProcessRunner.probeTimeout
       )
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
       throw SherpaOnnxRuntimeError.runtimeUnavailable(error.localizedDescription)
     }
@@ -305,8 +320,11 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     do {
       _ = try await Self.runProcess(
         executableURL: URL(fileURLWithPath: "/usr/bin/tar"),
-        arguments: ["-xf", downloadedURL.path, "-C", destination.path]
+        arguments: ["-xf", downloadedURL.path, "-C", destination.path],
+        timeout: LocalProcessRunner.extractionTimeout
       )
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
       throw SherpaOnnxRuntimeError.downloadFailed(
         "Failed to extract model archive: \(error.localizedDescription)"
@@ -325,49 +343,15 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     return hasher.finalize().map { String(format: "%02x", $0) }.joined()
   }
 
-  private nonisolated static func runProcess(executableURL: URL, arguments: [String]) async throws -> String {
-    try await withCheckedThrowingContinuation { continuation in
-      DispatchQueue.global(qos: .utility).async {
-        let process = Process()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        let group = DispatchGroup()
-        let output = ProcessOutputAccumulator()
-        let drain: (FileHandle, @escaping (FileHandle) -> Void) -> Void = { handle, capture in
-          group.enter()
-          DispatchQueue.global(qos: .utility).async {
-            capture(handle)
-            group.leave()
-          }
-        }
-        process.executableURL = executableURL
-        process.arguments = arguments
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-        process.terminationHandler = { process in
-          group.notify(queue: .global(qos: .utility)) {
-            let outputText = output.stdout
-            if let details = output.failureDescription(exitStatus: process.terminationStatus) {
-              continuation.resume(
-                throwing: SherpaOnnxRuntimeError.runtimeUnavailable(
-                  details
-                )
-              )
-              return
-            }
-            continuation.resume(returning: outputText)
-          }
-        }
-        do {
-          drain(outputPipe.fileHandleForReading, output.captureStdout)
-          drain(errorPipe.fileHandleForReading, output.captureStderr)
-          try process.run()
-        } catch {
-          outputPipe.fileHandleForReading.closeFile()
-          errorPipe.fileHandleForReading.closeFile()
-          continuation.resume(throwing: error)
-        }
-      }
+  private nonisolated static func runProcess(
+    executableURL: URL, arguments: [String], timeout: TimeInterval = LocalProcessRunner.setupTimeout
+  ) async throws -> String {
+    do {
+      return try await LocalProcessRunner.run(executableURL: executableURL, arguments: arguments, timeout: timeout)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw SherpaOnnxRuntimeError.runtimeUnavailable(error.localizedDescription)
     }
   }
 

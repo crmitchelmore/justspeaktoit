@@ -300,6 +300,9 @@ final class AppEnvironment: ObservableObject {
     shortcuts.register(action: .editSelectionByVoice) { [weak self] in self?.toggleVoiceEdit() }
     registerNavigationShortcutHandlers()
     registerQuickVoiceShortcutHandlers()
+    #if DEBUG
+    if CoreJourneyLaunchProfile.isRequested { return }
+    #endif
     shortcuts.startMonitoring()
   }
 
@@ -491,12 +494,22 @@ enum WireUp {
 
   // swiftlint:disable:next function_body_length
   static func bootstrap(
-    options: BootstrapOptions = .default
+    options suppliedOptions: BootstrapOptions = .default
   ) -> AppEnvironment {
+    #if DEBUG
+    let profile = CoreJourneyLaunchProfile.current
+    let options = profile?.bootstrapOptions() ?? suppliedOptions
+    let fileManager = profile?.fileManager ?? FileManager.default
+    let profileDefaults = profile?.defaults ?? UserDefaults.standard
+    #else
+    let options = suppliedOptions
+    let fileManager = FileManager.default
+    let profileDefaults = UserDefaults.standard
+    #endif
     let settings = options.settingsOverride ?? AppSettings()
     let permissions = options.permissionsOverride
       ?? PermissionsManager()
-    let history = HistoryManager(flushInterval: settings.historyFlushInterval)
+    let history = HistoryManager(fileManager: fileManager, flushInterval: settings.historyFlushInterval)
     let hud = HUDManager(appSettings: settings)
     let hotKeys = HotKeyManager(permissionsManager: permissions, appSettings: settings)
     let audioDevices = AudioInputDeviceManager(appSettings: settings)
@@ -523,9 +536,9 @@ enum WireUp {
       openRouter: openRouter,
       secureStorage: secureStorage
     )
-    let personalLexiconStore = PersonalLexiconStore()
+    let personalLexiconStore = PersonalLexiconStore(fileManager: fileManager)
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
-    let pronunciationManager = PronunciationManager()
+    let pronunciationManager = PronunciationManager(defaults: profileDefaults)
     let postProcessing = PostProcessingManager(
       client: openRouter,
       settings: settings,
@@ -538,13 +551,13 @@ enum WireUp {
       appSettings: settings
     )
     let textProcessor = TranscriptionTextProcessor(appSettings: settings)
-    let autoCorrectionStore = AutoCorrectionStore()
+    let autoCorrectionStore = AutoCorrectionStore(fileManager: fileManager)
     let autoCorrectionTracker = AutoCorrectionTracker(
       store: autoCorrectionStore,
       lexiconService: personalLexicon,
       appSettings: settings
     )
-    let profiles = DictationProfileStore()
+    let profiles = DictationProfileStore(defaults: profileDefaults)
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -606,6 +619,14 @@ enum WireUp {
     settings: AppSettings,
     secureStorage: SecureAppStorage
   ) {
+    #if DEBUG
+    // Construct production managers and UI, but never preload credentials,
+    // sync accounts, open listeners, or install voice-edit capture in this check.
+    if CoreJourneyLaunchProfile.isRequested {
+      logger.info("AppEnvironment.bootstrap complete (isolated UI launch profile)")
+      return
+    }
+    #endif
     environment.installVoiceEdit()
 
     environment.transportServer.onTranscriptReceived = { _, text in

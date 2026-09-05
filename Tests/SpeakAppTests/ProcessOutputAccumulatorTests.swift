@@ -76,7 +76,7 @@ final class ProcessOutputAccumulatorTests: XCTestCase {
     let exited = expectation(description: "child exits after writing more than pipe capacity")
     let drained = expectation(description: "pipe drains through EOF")
     process.executableURL = URL(fileURLWithPath: "/bin/sh")
-    process.arguments = ["-c", "head -c 2097152 /dev/zero"]
+    process.arguments = ["-c", "dd if=/dev/zero bs=65536 count=32 2>/dev/null"]
     process.standardOutput = pipe
     process.terminationHandler = { _ in exited.fulfill() }
     try process.run()

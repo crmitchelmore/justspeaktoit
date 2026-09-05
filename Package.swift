@@ -138,7 +138,9 @@ let package = Package(
                 "SpeakHotKeys",
                 // The Sentry event tests inspect the serialised payload, so the
                 // test target needs the SDK types, not just SpeakApp.
-                .product(name: "Sentry", package: "sentry-cocoa")
+                .product(name: "Sentry", package: "sentry-cocoa"),
+                // Storage lifecycle tests construct unloaded SDK models.
+                .product(name: "WhisperKit", package: "argmax-oss-swift")
             ]
         ),
         .testTarget(

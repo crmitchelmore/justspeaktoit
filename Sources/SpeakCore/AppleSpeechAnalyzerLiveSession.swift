@@ -20,6 +20,7 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
     public let audioFormat: AVAudioFormat
 
     private let analyzer: SpeechAnalyzer
+    private let cancellation: SpeechAnalyzerCancellation
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let resultTask: Task<TranscriptionResult, Error>
 
@@ -28,11 +29,13 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         engine: AppleSpeechAnalyzerEngine = .speechTranscriber,
         onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
     ) async throws {
+        try Task.checkCancellation()
         let configuration = try await AppleSpeechAnalyzerTranscriber.makeModule(
             engine: engine,
             localeIdentifier: localeIdentifier,
             progressive: true
         )
+        try Task.checkCancellation()
         let module = configuration.module
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(
             compatibleWith: [module.speechModule]
@@ -40,8 +43,11 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
             throw AppleLocalModelError.compatibleAudioFormatUnavailable
         }
 
+        try Task.checkCancellation()
         let (inputSequence, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         let analyzer = SpeechAnalyzer(modules: [module.speechModule])
+        let cancellation = SpeechAnalyzerCancellation(analyzer: analyzer)
+        self.cancellation = cancellation
         self.audioFormat = format
         self.analyzer = analyzer
         self.inputContinuation = continuation
@@ -52,12 +58,19 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         )
 
         do {
-            try await analyzer.start(inputSequence: inputSequence)
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                try await analyzer.start(inputSequence: inputSequence)
+                try Task.checkCancellation()
+            } onCancel: {
+                continuation.finish()
+                cancellation.start()
+            }
         } catch {
             // The result task is already consuming the module stream — leaving it
             // running would strand it on a stream that never finishes.
             continuation.finish()
-            await analyzer.cancelAndFinishNow()
+            await cancellation.finish()
             self.resultTask.cancel()
             throw error
         }
@@ -121,7 +134,7 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
             try await analyzer.finalizeAndFinishThroughEndOfInput()
             return try await resultTask.value
         } catch {
-            await analyzer.cancelAndFinishNow()
+            await cancellation.finish()
             resultTask.cancel()
             throw error
         }
@@ -129,7 +142,34 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
 
     public func cancel() async {
         inputContinuation.finish()
-        await analyzer.cancelAndFinishNow()
+        await cancellation.finish()
         resultTask.cancel()
+    }
+}
+
+/// A cancellation handler cannot await. Retain its one teardown task so the
+/// initializer's catch and every later cancel join the same native operation.
+@available(macOS 26.0, iOS 26.0, *)
+private final class SpeechAnalyzerCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private let analyzer: SpeechAnalyzer
+    private var task: Task<Void, Never>?
+
+    init(analyzer: SpeechAnalyzer) {
+        self.analyzer = analyzer
+    }
+
+    @discardableResult
+    func start() -> Task<Void, Never> {
+        lock.lock()
+        defer { lock.unlock() }
+        if let task { return task }
+        let pending = Task { await self.analyzer.cancelAndFinishNow() }
+        task = pending
+        return pending
+    }
+
+    func finish() async {
+        await start().value
     }
 }

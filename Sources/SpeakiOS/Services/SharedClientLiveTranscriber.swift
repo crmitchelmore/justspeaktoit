@@ -26,6 +26,21 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     public var onError: ((Error) -> Void)?
 
     private let audioSessionManager: AudioSessionManager
+    private let startup = RecordingStartupOperation()
+    private var ownsAudioSession = false
+    private var hasInputTap = false
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
     private let route: LiveTranscriptionRoute
     private let apiKey: String
     private let language: String?
@@ -74,8 +89,19 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func start() async throws {
-        guard !isRunning else { return }
+        guard !isRunning, !startup.isStarting else { return }
+        do {
+            try await startup.run(
+                { try await self.startCapture() },
+                onFailure: { self.cleanupCapture() }
+            )
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+    }
 
+    private func startCapture() async throws {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             let err = StreamingClientError.missingAPIKey(provider: route.provider.displayName)
             SpeakLogger.logError(
@@ -96,7 +122,10 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         SpeakLogger.logTranscription(event: "start", model: route.modelID)
 
         try await ensureMicrophonePermission()
+        try Task.checkCancellation()
+        ownsAudioSession = true
         try await configureAudioSession()
+        try Task.checkCancellation()
 
         self.client = client
         // Fold finals by the client's declared shape: standalone segments
@@ -118,7 +147,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             // client and audio session back down so nothing is left running.
             client.stop()
             self.client = nil
-            audioSessionManager.deactivate()
+            releaseAudioSession()
             throw error
         }
         resetState()
@@ -131,7 +160,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         }
 
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         // Buffers handed to the queue just before the tap came off are still
         // being written and sent; let them land before the client is finalised
         // and the recorder is closed.
@@ -144,7 +173,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         await finishClient()
         _ = audioRecorder.stopRecording()
         isRunning = false
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         // `partialText` is the fullest view (finalised text plus any trailing
         // non-final words); fall back to the accumulated finals if empty.
@@ -159,9 +188,15 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
-        guard isRunning else { return }
+        startup.cancel()
+        cleanupCapture()
+    }
+
+    private func cleanupCapture() {
+        guard isRunning || ownsAudioSession || hasInputTap else { return }
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
+        audioProcessingQueue.sync {}
         client?.stop()
         client = nil
         // Cancelled audio is thrown away, so there is nothing to drain — just
@@ -170,7 +205,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // Cancel persistent recording (keeps the partial file).
         audioRecorder.cancelRecording()
         isRunning = false
-        audioSessionManager.deactivate()
+        releaseAudioSession()
     }
 
     // MARK: - Private
@@ -232,6 +267,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func ensureMicrophonePermission() async throws {
         if !audioSessionManager.hasMicrophonePermission() {
             let granted = await audioSessionManager.requestMicrophonePermission()
+            try Task.checkCancellation()
             if !granted {
                 let err = iOSTranscriptionError.permissionDenied(.microphone)
                 self.error = err
@@ -244,6 +280,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         do {
             try await audioSessionManager.configureForRecording()
         } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
             let wrapped = iOSTranscriptionError.audioSessionFailed(error)
             self.error = wrapped
             throw wrapped
@@ -324,6 +361,7 @@ private extension SharedClientLiveTranscriber {
                 )
             }
         }
+        hasInputTap = true
 
         audioEngine.prepare()
         try audioEngine.start()

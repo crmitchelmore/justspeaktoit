@@ -60,6 +60,18 @@ final class ProcessOutputAccumulator: @unchecked Sendable {
     return details.isEmpty ? "Local process exited with status \(exitStatus)." : details
   }
 
+  func appendStdout(_ data: Data) {
+    lock.lock()
+    defer { lock.unlock() }
+    retain(data, in: &stdoutCapture, keepingTail: false)
+  }
+
+  func appendStderr(_ data: Data) {
+    lock.lock()
+    defer { lock.unlock() }
+    retain(data, in: &stderrCapture, keepingTail: true)
+  }
+
   func captureStdout(from handle: FileHandle) {
     let capture = read(from: handle, keepingTail: false)
     lock.lock()
@@ -74,6 +86,22 @@ final class ProcessOutputAccumulator: @unchecked Sendable {
     lock.unlock()
   }
 
+  private func retain(_ chunk: Data, in capture: inout Capture, keepingTail: Bool) {
+    let available = byteLimit - capture.data.count
+    if chunk.count > available { capture.truncated = true }
+    if keepingTail {
+      if chunk.count >= byteLimit {
+        capture.data = Data(chunk.suffix(byteLimit))
+      } else {
+        let overflow = max(0, chunk.count - available)
+        if overflow > 0 { capture.data.removeFirst(overflow) }
+        capture.data.append(chunk)
+      }
+    } else {
+      capture.data.append(contentsOf: chunk.prefix(available))
+    }
+  }
+
   private func read(from handle: FileHandle, keepingTail: Bool) -> Capture {
     var capture = Capture()
     defer { try? handle.close() }
@@ -81,19 +109,7 @@ final class ProcessOutputAccumulator: @unchecked Sendable {
       // Continue consuming after the retention cap: stopping here fills the pipe
       // and deadlocks the child before its termination handler can run.
       while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
-        let available = byteLimit - capture.data.count
-        if chunk.count > available { capture.truncated = true }
-        if keepingTail {
-          if chunk.count >= byteLimit {
-            capture.data = Data(chunk.suffix(byteLimit))
-          } else {
-            let overflow = max(0, chunk.count - available)
-            if overflow > 0 { capture.data.removeFirst(overflow) }
-            capture.data.append(chunk)
-          }
-        } else {
-          capture.data.append(contentsOf: chunk.prefix(available))
-        }
+        retain(chunk, in: &capture, keepingTail: keepingTail)
       }
     } catch {
       capture.readError = error.localizedDescription

@@ -52,11 +52,30 @@ and Terminal Secure Keyboard Entry.
 ## Launched-app layer and remaining P0 work (#802)
 
 `CoreJourneyFixtureApp` provides one named editable field and a readiness marker.
-`CoreJourneyFixtureUITests` launches **only the fixture**, types directly into
-it using XCTest, and reads the value back. The bounded `Core Journey Fixture UI`
-job uploads its `xcresult`, xcodebuild log, and final screenshot. This checks
-that the destination fixture works; it does not launch Speak or prove Speak
-inserts a transcript.
+`CoreJourneyFixtureUITests` launches only the fixture, types directly into it
+using XCTest, and reads the value back. The same bounded `Core Journey Fixture UI`
+job now also selects `LaunchUITests` in Debug configuration. That test launches
+the actual Speak app and waits for the existing `toolbarRecordToggleButton` in
+MainView, which is created only after the production AppEnvironment is built.
+It captures the frontmost Speak process identity, switches focus to the fixture,
+types there, then activates that same process and checks its PID and the control
+again. It never clicks Record or sends a
+recording hotkey. The job uploads its `xcresult`, xcodebuild log, and screenshots
+of both apps. This proves bootstrap and focus survival, not transcript delivery.
+
+The explicit `SPEAK_CORE_JOURNEY_PROFILE=<UUID>` launch profile exists only in
+Debug builds. It supplies typed, separate UserDefaults and temporary History,
+recording, personal lexicon, and auto-correction stores; pronunciation and
+dictation profiles use that separate defaults suite. Capture/connection
+prewarming, hands-free mode, network listeners, analytics, input monitoring,
+credential preloading/sync, voice-edit startup, automatic updates, and launch
+cleanup actions are disabled. The test exercises the real manager/view graph
+with these startup integrations excluded. Local model singletons may still
+discover caches or prepare their storage directories; this does not isolate
+every app singleton or test model runtime execution.
+Release builds ignore the profile. `CoreJourneyLaunchProfileTests` checks the
+typed opt-outs and per-launch settings/storage boundaries; native CI execution
+is required to validate the launched-app test itself.
 
 The native P0 matrix is not complete. Before promoting the launched-app layer
 as capture-to-delivery protection, #802 needs the following concrete evidence:

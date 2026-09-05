@@ -198,6 +198,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
 
   func installRuntime() async {
     guard runtimeState != .installing else { return }
+    let previousState = runtimeState
     runtimeState = .installing
     do {
       let bootstrapPython = try bootstrapPythonExecutable()
@@ -225,7 +226,10 @@ final class LocalPostProcessingModelManager: ObservableObject {
         ]
       )
       try await ensureRuntimeAvailable()
+      try Task.checkCancellation()
       runtimeState = .installed
+    } catch is CancellationError {
+      runtimeState = previousState
     } catch {
       runtimeState = .failed(Self.readableRuntimeInstallError(from: error))
     }
@@ -331,8 +335,10 @@ final class LocalPostProcessingModelManager: ObservableObject {
     let output = try await Self.runProcess(
       executableURL: python,
       arguments: [script.path, "--model", modelURL.path],
-      standardInput: payload
+      standardInput: payload,
+      timeout: LocalProcessRunner.inferenceTimeout
     )
+    try Task.checkCancellation()
     let response = try JSONDecoder().decode(LocalPostProcessingResponse.self, from: Data(output.utf8))
     let cleanedResponse = Self.sanitizedModelOutput(response.text)
     guard !cleanedResponse.isEmpty else {
@@ -382,7 +388,10 @@ final class LocalPostProcessingModelManager: ObservableObject {
     guard runtimeState != .installing else { return }
     do {
       try await ensureRuntimeAvailable()
+      try Task.checkCancellation()
       runtimeState = .installed
+    } catch is CancellationError {
+      return
     } catch {
       runtimeState = .notInstalled
     }
@@ -392,7 +401,8 @@ final class LocalPostProcessingModelManager: ObservableObject {
     let python = try pythonExecutable()
     _ = try await Self.runProcess(
       executableURL: python,
-      arguments: ["-c", "import llama_cpp; print(getattr(llama_cpp, '__version__', 'ok'))"]
+      arguments: ["-c", "import llama_cpp; print(getattr(llama_cpp, '__version__', 'ok'))"],
+      timeout: LocalProcessRunner.probeTimeout
     )
   }
 
@@ -531,71 +541,27 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
 
   #if !APP_STORE
-  // swiftlint:disable:next function_body_length
   private nonisolated static func runProcess(
     executableURL: URL,
     arguments: [String],
     standardInput: Data? = nil,
-    environment: [String: String] = [:]
+    environment: [String: String] = [:],
+    timeout: TimeInterval = LocalProcessRunner.setupTimeout
   ) async throws -> String {
-    try await withCheckedThrowingContinuation { continuation in
-      let process = Process()
-      process.executableURL = executableURL
-      process.arguments = arguments
-      if !environment.isEmpty {
-        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
-      }
-      let outputPipe = Pipe()
-      let errorPipe = Pipe()
-      process.standardOutput = outputPipe
-      process.standardError = errorPipe
-      let inputPipe = standardInput == nil ? nil : Pipe()
-      if let inputPipe {
-        process.standardInput = inputPipe
-      }
-      let group = DispatchGroup()
-      let output = ProcessOutputAccumulator()
-      let drain: (FileHandle, @escaping (FileHandle) -> Void) -> Void = { handle, capture in
-        group.enter()
-        DispatchQueue.global(qos: .utility).async {
-          capture(handle)
-          group.leave()
-        }
-      }
-
-      process.terminationHandler = { process in
-        group.notify(queue: .global(qos: .utility)) {
-          let outputText = output.stdout
-          if let details = output.failureDescription(exitStatus: process.terminationStatus) {
-            let error = standardInput == nil
-              ? LocalPostProcessingModelError.runtimeUnavailable(details)
-              : LocalPostProcessingModelError.processFailed(details)
-            continuation.resume(throwing: error)
-            return
-          }
-          continuation.resume(returning: outputText)
-        }
-      }
-
-      do {
-        drain(outputPipe.fileHandleForReading, output.captureStdout)
-        drain(errorPipe.fileHandleForReading, output.captureStderr)
-        try process.run()
-      } catch {
-        outputPipe.fileHandleForReading.closeFile()
-        errorPipe.fileHandleForReading.closeFile()
-        continuation.resume(throwing: error)
-        return
-      }
-
-      do {
-        if let standardInput, let inputPipe {
-          inputPipe.fileHandleForWriting.write(standardInput)
-          try inputPipe.fileHandleForWriting.close()
-        }
-      } catch {
-        process.terminate()
-      }
+    do {
+      return try await LocalProcessRunner.run(
+        executableURL: executableURL,
+        arguments: arguments,
+        standardInput: standardInput,
+        environment: environment,
+        timeout: timeout
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw standardInput == nil
+        ? LocalPostProcessingModelError.runtimeUnavailable(error.localizedDescription)
+        : LocalPostProcessingModelError.processFailed(error.localizedDescription)
     }
   }
 

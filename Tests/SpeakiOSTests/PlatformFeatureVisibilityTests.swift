@@ -108,21 +108,21 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
     }
 
     func testPaddedBatchModelsKeepRoutingAndCredentialsInAgreement() {
-        let cases: [(String, IOSBatchTranscriptionRoute, String)] = [
-            (GeminiTranscribeModels.batchCatalogID, .gemini, "google.apiKey"),
-            ("google/gemini-2.0-flash-001", .openRouter, "openrouter.apiKey"),
-            (MetaMuseVoiceTranscribe.batchCatalogID, .metaMuse, "meta.apiKey"),
-            (OpenAITranscriptionModels.gptTranscribeCatalogID, .openAI, "openai.apiKey")
+        let cases: [String: (IOSBatchTranscriptionRoute, String)] = [
+            GeminiTranscribeModels.batchCatalogID: (.gemini, "google.apiKey"),
+            "google/gemini-2.0-flash-001": (.openRouter, "openrouter.apiKey"),
+            MetaMuseVoiceTranscribe.batchCatalogID: (.metaMuse, "meta.apiKey"),
+            OpenAITranscriptionModels.gptTranscribeCatalogID: (.openAI, "openai.apiKey")
         ]
-        for (model, route, credential) in cases {
+        for (model, expected) in cases {
             let padded = " \n\t" + model + " \r\n"
-            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: padded), route)
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: padded), expected.0)
             guard case .apiKey(let identifier, _) = ModelCredentialResolver.requirement(
                 for: padded, purpose: .batchTranscription
             ) else {
                 return XCTFail("Expected a credential for \(model)")
             }
-            XCTAssertEqual(identifier, credential)
+            XCTAssertEqual(identifier, expected.1)
         }
     }
 

@@ -88,6 +88,16 @@ struct QRCodeGeneratorView: View {
             .navigationTitle("Share Configuration")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    // Same escape hatch as macOS: a failed scan after the code
+                    // was revealed starts a fresh transfer instead of forcing
+                    // the user to leave the screen.
+                    if qrImage != nil, !isGenerating {
+                        Button("Regenerate") {
+                            Task { await generateQRCode() }
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }

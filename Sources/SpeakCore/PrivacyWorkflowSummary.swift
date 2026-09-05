@@ -163,7 +163,10 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
         switch destination {
         case .cloud(let providerName):
             if route.conditional {
-                detail = "\(modelName) prefers on-device recognition. If it is unavailable or fails, audio may be sent "
+                // "Apple SpeechTranscriber (On-device) prefers on-device" reads
+                // badly; the sentence already says where the audio goes.
+                let plainName = modelName.replacingOccurrences(of: " (On-device)", with: "")
+                detail = "\(plainName) prefers on-device recognition. If it is unavailable or fails, audio may be sent "
                     + "to \(providerName) for transcription."
             } else {
                 detail = inputs.usesBatchTranscription

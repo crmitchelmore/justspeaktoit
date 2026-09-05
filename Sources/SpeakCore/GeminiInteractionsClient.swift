@@ -97,23 +97,26 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
         mimeType: String,
         apiKey: String
     ) async throws -> GeminiAudioSource {
-        // Freeze the source before the first network suspension. A retry, file
-        // replacement or deletion must not change the bytes/length mid-upload.
+        let source = url.resolvingSymlinksInPath()
+        // A small recording is read straight into memory: `Data(contentsOf:)`
+        // is already an atomic snapshot, and the inline path must not depend on
+        // a writable temporary directory or spare disk space.
+        if try Self.byteCount(at: source) <= self.inlineAudioByteLimit {
+            let data = try Data(contentsOf: source)
+            if Int64(data.count) <= self.inlineAudioByteLimit { return .inline(data) }
+            // The file grew between the size check and the read; upload it instead.
+        }
+        // Freeze a large source before the first network suspension. A retry,
+        // file replacement or deletion must not change the bytes/length that
+        // URLSession streams from disk or the length declared to the session.
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]
         )
         defer { try? FileManager.default.removeItem(at: directory) }
         let snapshot = directory.appendingPathComponent("recording")
-        try FileManager.default.copyItem(at: url.resolvingSymlinksInPath(), to: snapshot)
-        let attributes = try FileManager.default.attributesOfItem(atPath: snapshot.path)
-        guard let fileSize = attributes[.size] as? NSNumber else {
-            throw CocoaError(.fileReadUnknown)
-        }
-        let byteCount = fileSize.int64Value
-        guard byteCount > self.inlineAudioByteLimit else {
-            return .inline(try Data(contentsOf: snapshot))
-        }
+        try FileManager.default.copyItem(at: source, to: snapshot)
+        let byteCount = try Self.byteCount(at: snapshot)
         return .fileURI(
             try await self.uploadFile(
                 at: snapshot,
@@ -123,6 +126,14 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
                 displayName: url.lastPathComponent
             )
         )
+    }
+
+    private static func byteCount(at url: URL) throws -> Int64 {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let fileSize = attributes[.size] as? NSNumber else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        return fileSize.int64Value
     }
 
     /// One segment per annotated word, or a single whole-recording segment when
@@ -244,7 +255,7 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
             group.addTask {
                 try await self.pollUntilActive(
                     at: statusURL, apiKey: apiKey, uri: uri,
-                    interval: min(interval, max(0.01, timeout)), deadline: deadline, clock: clock
+                    interval: interval, deadline: deadline, clock: clock
                 )
             }
             defer { group.cancelAll() }
@@ -253,8 +264,9 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
         }
     }
 
-    /// Preserve finite multi-day budgets. Reject values too large for a clock
-    /// duration explicitly rather than silently replacing the configured deadline.
+    /// Preserve finite multi-day budgets. A nonfinite value falls back to the
+    /// default budget; a finite value too large for a clock duration is rejected
+    /// explicitly rather than silently replacing the configured deadline.
     static func processingBudget(for timeout: TimeInterval) throws -> TimeInterval {
         guard timeout.isFinite else { return 60 }
         guard timeout < Double(Int64.max) / 4 else {
@@ -282,9 +294,9 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
             }
             try await clock.sleep(until: nextPoll)
             guard clock.now < deadline else { throw Self.processingTimeout }
-            let state = try await self.fileState(at: url, apiKey: apiKey)
-            guard clock.now < deadline else { throw Self.processingTimeout }
-            switch state?.uppercased() {
+            // A definitive answer that lands as the deadline passes is still an
+            // answer; only an inconclusive one is subject to the budget.
+            switch try await self.fileState(at: url, apiKey: apiKey)?.uppercased() {
             case "ACTIVE": return uri
             case "FAILED":
                 throw GeminiBatchError.uploadFailed("Google could not process the uploaded recording.")

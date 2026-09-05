@@ -209,9 +209,11 @@ public struct ConfigTransfer: Equatable, Sendable {
 ///
 /// Uses Crockford Base32, whose alphabet omits `I`, `L`, `O` and `U`, so the
 /// characters a user is most likely to mistype have a single defined meaning
-/// (`I`/`l` → `1`, `O` → `0`). Eight characters give 40 bits of entropy, which
-/// combined with PBKDF2 stretching and the 10-minute expiry keeps an offline
-/// attack on a captured QR code impractical.
+/// (`I`/`l` → `1`, `O` → `0`). Eight characters give 40 bits of entropy, and
+/// PBKDF2 stretching slows a brute-force attempt, but neither prevents offline
+/// decryption once both factors have been captured. The source UI therefore
+/// shows the code only after the QR has left the screen
+/// (see `ConfigTransferPresentation`).
 public enum ConfigTransferCode {
     static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
     public static let length = 8

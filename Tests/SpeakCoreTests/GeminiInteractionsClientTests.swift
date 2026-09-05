@@ -8,7 +8,7 @@ import XCTest
 /// resumable Files API upload with its ACTIVE-state poll. The client moved out
 /// of the Mac app so iOS uploads through the same code, so this coverage lives
 /// beside it in SpeakCore.
-final class GeminiInteractionsClientTests: XCTestCase {
+final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:this type_body_length
     // MARK: - transcribeFile guards
 
     func testTranscribeFile_rejectsAModelThisClientDoesNotOwn() async {

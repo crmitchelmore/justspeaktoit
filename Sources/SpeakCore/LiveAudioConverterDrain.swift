@@ -32,6 +32,7 @@ public enum LiveAudioConverterDrain {
     outputFormat: AVAudioFormat,
     frameCapacity: AVAudioFrameCount = drainFrameCapacity
   ) -> AVAudioPCMBuffer? {
+    guard outputFormat == converter.outputFormat, frameCapacity > 0 else { return nil }
     var collected: [AVAudioPCMBuffer] = []
     var totalFrames = 0
 
@@ -65,10 +66,13 @@ public enum LiveAudioConverterDrain {
 
   /// Convenience wrapper for the PCM16 send paths: flushes `converter` and
   /// returns the trailing frames as little-endian 16-bit mono samples.
+  /// Unsupported formats return `nil` without consuming the converter's tail.
   public static func drainPCM16Data(
     converter: AVAudioConverter,
     outputFormat: AVAudioFormat
   ) -> Data? {
+    guard outputFormat.commonFormat == .pcmFormatInt16,
+          outputFormat.channelCount == 1, !outputFormat.isInterleaved else { return nil }
     guard let tail = drain(converter: converter, outputFormat: outputFormat),
           tail.frameLength > 0,
           let samples = tail.int16ChannelData else {
@@ -77,11 +81,14 @@ public enum LiveAudioConverterDrain {
     return Data(bytes: samples[0], count: Int(tail.frameLength) * MemoryLayout<Int16>.size)
   }
 
-  /// Convenience wrapper for the float32 sidecar path.
+  /// Convenience wrapper for the noninterleaved mono float32 sidecar path.
+  /// Unsupported formats return `nil` without consuming the converter's tail.
   public static func drainFloat32Data(
     converter: AVAudioConverter,
     outputFormat: AVAudioFormat
   ) -> Data? {
+    guard outputFormat.commonFormat == .pcmFormatFloat32,
+          outputFormat.channelCount == 1, !outputFormat.isInterleaved else { return nil }
     guard let tail = drain(converter: converter, outputFormat: outputFormat),
           tail.frameLength > 0,
           let samples = tail.floatChannelData else {

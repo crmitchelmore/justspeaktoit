@@ -181,6 +181,44 @@ final class LiveAudioConverterDrainTests: XCTestCase {
     XCTAssertEqual(data.count % MemoryLayout<Int16>.size, 0)
   }
 
+  func testByteDrainsRejectUnsupportedFormatsWithoutConsumingTheTail() throws {
+    for commonFormat in [AVAudioCommonFormat.pcmFormatInt16, .pcmFormatFloat32] {
+      for (channels, interleaved) in [(AVAudioChannelCount(2), false), (1, true), (2, true)] {
+        let output = try XCTUnwrap(AVAudioFormat(
+          commonFormat: commonFormat, sampleRate: outputSampleRate,
+          channels: channels, interleaved: interleaved
+        ))
+        let input = makeInputFormat()
+        let converter = try XCTUnwrap(AVAudioConverter(from: input, to: output))
+        for index in 0..<10 {
+          let chunk = makeToneChunk(format: input, frames: 1024, startingFrame: index * 1024)
+          _ = convertChunk(chunk, converter: converter, outputFormat: output)
+        }
+
+        XCTAssertNil(LiveAudioConverterDrain.drainPCM16Data(converter: converter, outputFormat: output))
+        XCTAssertNil(LiveAudioConverterDrain.drainFloat32Data(converter: converter, outputFormat: output))
+        let tail = try XCTUnwrap(LiveAudioConverterDrain.drain(converter: converter, outputFormat: output))
+        XCTAssertGreaterThan(tail.frameLength, 0, "Rejecting a byte format must preserve its multichannel tail")
+        XCTAssertEqual(tail.format, output)
+      }
+    }
+  }
+
+  func testWrongSampleTypeAndMismatchedFormatDoNotConsumePCM16Tail() throws {
+    let input = makeInputFormat()
+    let output = makeOutputFormat()
+    let converter = try XCTUnwrap(AVAudioConverter(from: input, to: output))
+    for index in 0..<10 {
+      let chunk = makeToneChunk(format: input, frames: 1024, startingFrame: index * 1024)
+      _ = convertChunk(chunk, converter: converter, outputFormat: output)
+    }
+
+    XCTAssertNil(LiveAudioConverterDrain.drainFloat32Data(converter: converter, outputFormat: output))
+    XCTAssertNil(LiveAudioConverterDrain.drain(converter: converter, outputFormat: input))
+    XCTAssertNil(LiveAudioConverterDrain.drain(converter: converter, outputFormat: output, frameCapacity: 0))
+    XCTAssertNotNil(LiveAudioConverterDrain.drainPCM16Data(converter: converter, outputFormat: output))
+  }
+
   func testDrainingAnAlreadyDrainedConverterYieldsNothing() {
     let inputFormat = makeInputFormat()
     let outputFormat = makeOutputFormat()

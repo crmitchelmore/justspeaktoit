@@ -139,6 +139,8 @@ final class GeminiInteractionsClientTests: XCTestCase {
                 return try respond(
                     #"{"file":{"name":"files/abc123","uri":"\#(Self.fileURI)","state":"PROCESSING"}}"#)
             case ("GET", "/v1beta/files/abc123"):
+                let snapshot = await recorder.uploadedFileURL
+                XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(snapshot).path))
                 // First poll still processing, second one active.
                 let state = attempt == 1 ? "PROCESSING" : "ACTIVE"
                 return try respond(#"{"name":"files/abc123","uri":"\#(Self.fileURI)","state":"\#(state)"}"#)
@@ -151,13 +153,18 @@ final class GeminiInteractionsClientTests: XCTestCase {
         }
         defer { GeminiMockURLProtocol.requestHandler = nil }
 
-        let client = GeminiInteractionsClient(
-            session: self.makeMockSession(),
+        let session = self.makeMockSession()
+        var client = GeminiInteractionsClient(
+            session: session,
             // Force the Files API path for a tiny fixture, and keep the poll quick.
             inlineAudioByteLimit: 0,
             filePollInterval: 0.01,
             filePollTimeout: 5
         )
+        client.uploadRecording = { request, snapshot in
+            await recorder.recordUpload(snapshot)
+            return try await session.upload(for: request, fromFile: snapshot)
+        }
 
         let result = try await client.transcribeFile(
             at: audioURL, apiKey: "k", model: GeminiTranscribeModels.batchCatalogID, language: nil

@@ -188,6 +188,9 @@ public struct GeminiInteractionsClient: Sendable {
         // URLSession reads the recording from disk as it uploads. Keeping it out
         // of httpBody avoids retaining a full recording (and copies) in memory.
         let (uploadBody, uploadResponse) = try await self.uploadRecording(upload, url)
+        // The private snapshot is no longer needed once transfer completes.
+        // Release its disk space before provider processing and transcription.
+        try? FileManager.default.removeItem(at: url)
         guard let uploadHTTP = uploadResponse as? HTTPURLResponse else {
             throw TranscriptionProviderError.invalidResponse
         }

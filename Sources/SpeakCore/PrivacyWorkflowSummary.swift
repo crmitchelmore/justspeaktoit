@@ -15,7 +15,7 @@ public enum PrivacyDataDestination: Equatable, Sendable {
     /// The step is switched off, so no content is sent for it at all.
     case disabled
 
-    /// Provider that receives the content, or `nil` when nothing is sent.
+    /// Provider that can receive content, or `nil` when this step cannot send it.
     public var providerName: String? {
         switch self {
         case .cloud(let providerName): return providerName
@@ -32,7 +32,7 @@ public enum PrivacyDataDestination: Equatable, Sendable {
         }
     }
 
-    /// Whether this step sends content off the device.
+    /// Whether this step can send content off the device.
     public var leavesDevice: Bool { providerName != nil }
 }
 
@@ -57,6 +57,9 @@ public struct PrivacyWorkflowInputs: Equatable, Sendable {
     public var voiceOutputEnabled: Bool
     /// The voice-output provider that receives the text to speak.
     public var voiceOutputProvider: VoiceOutputProvider
+    /// Live SpeechAnalyzer may fall back to the legacy, cloud-capable recognizer.
+    /// Set false only when the execution path explicitly disables that fallback.
+    public var appleSpeechAnalyzerFallbackAllowed = true
 
     public init(
         usesBatchTranscription: Bool,
@@ -92,6 +95,8 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
         public let systemImage: String
         public let destination: PrivacyDataDestination
         public let detail: String
+        /// True when this cloud destination is a permitted fallback, not an unconditional upload.
+        public internal(set) var isConditionalCloud = false
 
         public init(
             id: String,
@@ -108,7 +113,9 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
         }
 
         /// Short right-hand label for a settings row.
-        public var destinationLabel: String { destination.label }
+        public var destinationLabel: String {
+            isConditionalCloud ? "On device or " + destination.label : destination.label
+        }
     }
 
     public let transcription: Row
@@ -119,7 +126,7 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
     /// each text hop.
     public var rows: [Row] { [transcription, postProcessing, voiceOutput] }
 
-    /// Providers that receive content under the current settings, in row order
+    /// Providers that can receive content under the current settings, in row order
     /// and without duplicates.
     public var activeRecipients: [String] {
         var seen: Set<String> = []
@@ -140,38 +147,60 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
     }
 
     private static func transcriptionRow(_ inputs: PrivacyWorkflowInputs) -> Row {
-        let modelID = inputs.usesBatchTranscription
+        let selectedModelID = inputs.usesBatchTranscription
             ? inputs.batchTranscriptionModelID
             : inputs.liveTranscriptionModelID
+        let modelID = selectedModelID.trimmingCharacters(in: .whitespacesAndNewlines)
         let purpose: ModelCredentialPurpose = inputs.usesBatchTranscription
             ? .batchTranscription
             : .liveTranscription
-        let destination = resolveDestination(for: modelID, purpose: purpose)
+        let route = transcriptionDestination(for: modelID, inputs: inputs, purpose: purpose)
+        let destination = route.destination
         let modelName = ModelCatalog.friendlyName(for: modelID)
         let title = inputs.usesBatchTranscription ? "Recorded audio" : "Live microphone audio"
 
         let detail: String
         switch destination {
         case .cloud(let providerName):
-            detail = inputs.usesBatchTranscription
-                ? "Your recording is uploaded to \(providerName) and transcribed with \(modelName)."
-                : "Your microphone audio is streamed to \(providerName) and transcribed with \(modelName)."
-        case .onDevice, .disabled:
-            var text = "\(modelName) transcribes your audio on this device; it is not uploaded for transcription."
-            if AppleLocalModels.isAppleSpeechModel(modelID) {
-                text += " Apple's speech service may process audio on its servers when on-device "
-                    + "recognition is unavailable."
+            if route.conditional {
+                detail = "\(modelName) prefers on-device recognition. If it is unavailable or fails, audio may be sent "
+                    + "to \(providerName) for transcription."
+            } else {
+                detail = inputs.usesBatchTranscription
+                    ? "Your recording is uploaded to \(providerName) and transcribed with \(modelName)."
+                    : "Your microphone audio is streamed to \(providerName) and transcribed with \(modelName)."
             }
-            detail = text
+        case .onDevice, .disabled:
+            detail = "\(modelName) transcribes your audio on this device; it is not uploaded for transcription."
         }
 
-        return Row(
+        var row = Row(
             id: "transcription",
             title: title,
             systemImage: destination.leavesDevice ? "waveform.badge.magnifyingglass" : "iphone.gen3",
             destination: destination,
             detail: detail
         )
+        row.isConditionalCloud = route.conditional
+        return row
+    }
+
+    private static func transcriptionDestination(
+        for modelID: String,
+        inputs: PrivacyWorkflowInputs,
+        purpose: ModelCredentialPurpose
+    ) -> (destination: PrivacyDataDestination, conditional: Bool) {
+        if inputs.usesBatchTranscription {
+            // iOS only implements SpeechAnalyzer as a local batch route. An
+            // older persisted SFSpeechRecognizer ID falls through to OpenRouter.
+            if modelID == AppleLocalModels.legacySpeechModelID {
+                return (.cloud(providerName: "OpenRouter"), false)
+            }
+        } else if modelID == AppleLocalModels.legacySpeechModelID
+            || (AppleLocalModels.isSpeechAnalyzerModel(modelID) && inputs.appleSpeechAnalyzerFallbackAllowed) {
+            return (.cloud(providerName: "Apple"), true)
+        }
+        return (resolveDestination(for: modelID, purpose: purpose), false)
     }
 
     private static func postProcessingRow(_ inputs: PrivacyWorkflowInputs) -> Row {

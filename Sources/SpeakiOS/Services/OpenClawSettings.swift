@@ -98,6 +98,9 @@ public final class OpenClawSettings: ObservableObject {
             if ttsModel != selection.model.id { ttsModel = selection.model.id }
             if ttsVoice != selection.voice.id { ttsVoice = selection.voice.id }
             ttsVoiceName = selection.voice.displayName
+        case .openrouter:
+            // Preserve dynamic selections, including retired IDs, for explicit errors and reselection.
+            break
         case .soniox:
             ttsModel = SonioxTTSCatalog.defaultModel.rawValue
             if let voice = SonioxTTSCatalog.voice(forID: ttsVoice) {
@@ -138,6 +141,9 @@ public final class OpenClawSettings: ObservableObject {
                     for: SonioxTTSCatalog.defaultModel
                 ).providerVoiceID
             }
+        } else if resolvedProvider == .openrouter {
+            resolvedModel = storedModel ?? ""
+            resolvedVoice = storedVoice ?? ""
         } else {
             let selection = DeepgramSpeechCatalog.resolvedSelection(modelID: storedModel, voiceID: storedVoice)
             resolvedVoice = selection.voice.id

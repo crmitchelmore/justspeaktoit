@@ -17,19 +17,26 @@ final class TextToSpeechManager: ObservableObject {
   private let appSettings: AppSettings
   private let secureStorage: SecureAppStorage
   private let pronunciationManager: PronunciationManager?
+  private let recordingSaver: (@MainActor (TTSResult) async throws -> Void)?
   let clients: [TTSProvider: TextToSpeechClient]
   private var audioPlayer: AVAudioPlayer?
+  private var synthesisTask: Task<TTSResult, Error>?
+  private var playbackTask: Task<Void, Never>?
+  private var synthesisID = UUID()
+  private let openRouterOutput = OpenRouterSpeechOutput()
 
   init(
     appSettings: AppSettings,
     secureStorage: SecureAppStorage,
     clients: [TTSProvider: TextToSpeechClient],
-    pronunciationManager: PronunciationManager? = nil
+    pronunciationManager: PronunciationManager? = nil,
+    recordingSaver: (@MainActor (TTSResult) async throws -> Void)? = nil
   ) {
     self.appSettings = appSettings
     self.secureStorage = secureStorage
     self.clients = clients
     self.pronunciationManager = pronunciationManager
+    self.recordingSaver = recordingSaver
     loadUsageHistory()
   }
 
@@ -42,108 +49,124 @@ final class TextToSpeechManager: ObservableObject {
       throw TTSError.synthesisFailure("Text cannot be empty")
     }
 
+    synthesisTask?.cancel()
+    let requestID = UUID()
+    synthesisID = requestID
     isSynthesizing = true
     synthesisProgress = 0
     lastError = nil
     defer {
-      isSynthesizing = false
-      synthesisProgress = 0
+      if synthesisID == requestID {
+        isSynthesizing = false
+        synthesisProgress = 0
+        synthesisTask = nil
+      }
     }
-
-    let requestedVoice = voice ?? appSettings.defaultTTSVoice
-    // Migrate legacy voice IDs and validate
-    let effectiveVoice = migrateAndValidateVoiceID(requestedVoice)
-    let provider = TTSProvider.from(voiceID: effectiveVoice)
-
-    guard let client = clients[provider] else {
-      throw TTSError.providerNotAvailable(provider)
-    }
-
-    synthesisProgress = 0.3
-
-    let settings = TTSSettings(
-      speed: appSettings.ttsSpeed,
-      pitch: appSettings.ttsPitch,
-      quality: appSettings.ttsQuality,
-      format: appSettings.ttsOutputFormat,
-      useSSML: useSSML ?? appSettings.ttsUseSSML,
-      language: appSettings.ttsLanguageIdentifier,
-      sonioxRegion: appSettings.sonioxTTSRegion
-    )
-
-    synthesisProgress = 0.5
-
-    // Apply pronunciation replacements
-    let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
-
     do {
-      let result = try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings)
-      synthesisProgress = 0.9
-
-      lastResult = result
-      usageHistory.append(result)
-      saveUsageHistory()
-
-      // Optionally save to recordings directory
-      if appSettings.ttsSaveToDirectory {
-        try? await saveToRecordingsDirectory(result: result)
-      }
-
-      synthesisProgress = 1.0
-
-      // Auto-play if enabled
-      if appSettings.ttsAutoPlay {
-        try await play(url: result.audioURL)
-      }
-
-      return result
-    } catch let error as TTSError {
-      lastError = error
-      throw error
+      return try await performSynthesis(text: text, voice: voice, useSSML: useSSML, requestID: requestID)
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
-      let ttsError = TTSError.synthesisFailure(error.localizedDescription)
-      lastError = ttsError
+      let ttsError = error as? TTSError ?? .synthesisFailure(error.localizedDescription)
+      if synthesisID == requestID { lastError = ttsError }
       throw ttsError
     }
   }
 
+  private func performSynthesis(
+    text: String, voice: String?, useSSML: Bool?, requestID: UUID
+  ) async throws -> TTSResult {
+    let effectiveVoice = migrateAndValidateVoiceID(voice ?? appSettings.defaultTTSVoice)
+    let provider = TTSProvider.from(voiceID: effectiveVoice)
+    guard let client = clients[provider] else { throw TTSError.providerNotAvailable(provider) }
+    let settings = synthesisSettings(useSSML: useSSML)
+    let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
+    synthesisProgress = 0.5
+    let task = Task { try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings) }
+    synthesisTask = task
+    let result: TTSResult
+    do {
+      result = try await withTaskCancellationHandler {
+        try await task.value
+      } onCancel: {
+        task.cancel()
+      }
+    } catch {
+      if task.isCancelled || Task.isCancelled { throw CancellationError() }
+      throw error
+    }
+    guard synthesisID == requestID, !Task.isCancelled, !task.isCancelled else {
+      if result.provider == .openrouter { try? FileManager.default.removeItem(at: result.audioURL) }
+      throw CancellationError()
+    }
+    stopPlayback()
+    openRouterOutput.replace(with: result)
+    lastResult = result
+    usageHistory.append(result)
+    saveUsageHistory()
+    if appSettings.ttsSaveToDirectory { try? await saveToRecordingsDirectory(result: result) }
+    try ensureSynthesisActive(task: task, requestID: requestID)
+    synthesisProgress = 1
+    if appSettings.ttsAutoPlay { try await play(url: result.audioURL) }
+    try ensureSynthesisActive(task: task, requestID: requestID)
+    return result
+  }
+
+  private func synthesisSettings(useSSML: Bool?) -> TTSSettings {
+    TTSSettings(
+      speed: appSettings.ttsSpeed, pitch: appSettings.ttsPitch,
+      quality: appSettings.ttsQuality, format: appSettings.ttsOutputFormat,
+      useSSML: useSSML ?? appSettings.ttsUseSSML,
+      language: appSettings.ttsLanguageIdentifier, sonioxRegion: appSettings.sonioxTTSRegion
+    )
+  }
+
   func play(url: URL) async throws {
-    stop()
+    stopPlayback()
 
     do {
-      audioPlayer = try AVAudioPlayer(contentsOf: url)
-      audioPlayer?.prepareToPlay()
-      audioPlayer?.play()
-      isPlaying = true
-
-      // Monitor playback completion
-      Task {
-        while audioPlayer?.isPlaying == true {
-          try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1 second
-        }
-        await MainActor.run {
-          isPlaying = false
-        }
+      let player = try AVAudioPlayer(contentsOf: url)
+      if lastResult?.provider == .openrouter, lastResult?.audioURL == url {
+        player.enableRate = true
+        player.rate = Self.openRouterPlaybackRate(speed: appSettings.ttsSpeed)
       }
+      audioPlayer = player
+      player.prepareToPlay()
+      guard player.play() else { throw TTSError.audioPlaybackFailure }
+      isPlaying = true
+      monitorPlayback(player)
     } catch {
       throw TTSError.audioPlaybackFailure
     }
   }
 
   func stop() {
+    synthesisID = UUID()
+    isSynthesizing = false
+    synthesisProgress = 0
+    synthesisTask?.cancel()
+    synthesisTask = nil
+    stopPlayback()
+  }
+
+  private func stopPlayback() {
+    playbackTask?.cancel()
+    playbackTask = nil
     audioPlayer?.stop()
     audioPlayer = nil
     isPlaying = false
   }
 
   func pause() {
+    playbackTask?.cancel()
     audioPlayer?.pause()
     isPlaying = false
   }
 
   func resume() {
-    audioPlayer?.play()
-    isPlaying = audioPlayer?.isPlaying ?? false
+    guard let audioPlayer else { return }
+    isPlaying = audioPlayer.play()
+    if isPlaying { monitorPlayback(audioPlayer) }
   }
 
   func previewVoice(_ voice: String, sampleText: String = "Hello, this is a voice preview.") async {
@@ -154,12 +177,15 @@ final class TextToSpeechManager: ObservableObject {
     }
   }
 
+  func openRouterAPIKey() async -> String? {
+    try? await secureStorage.secret(identifier: TTSProvider.openrouter.apiKeyIdentifier)
+  }
+
   func hasAPIKey(for provider: TTSProvider) async -> Bool {
     guard provider.requiresAPIKey else { return true }
 
     if let key = try? await secureStorage.secret(identifier: provider.apiKeyIdentifier),
-      !key.isEmpty
-    {
+      !key.isEmpty {
       return true
     }
     return false
@@ -217,14 +243,36 @@ final class TextToSpeechManager: ObservableObject {
     return usage
   }
 
+}
+
+extension TextToSpeechManager {
   // MARK: - Private Helpers
+
+  private func ensureSynthesisActive(task: Task<TTSResult, Error>, requestID: UUID) throws {
+    guard synthesisID == requestID, !task.isCancelled, !Task.isCancelled else { throw CancellationError() }
+  }
+
+  static func openRouterPlaybackRate(speed: Double) -> Float {
+    speed.isFinite ? Float(min(2, max(0.5, speed))) : 1
+  }
+
+  private func monitorPlayback(_ player: AVAudioPlayer) {
+    playbackTask?.cancel()
+    playbackTask = Task { [weak self, weak player] in
+      while player?.isPlaying == true {
+        do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+      }
+      guard !Task.isCancelled, let self, self.audioPlayer === player else { return }
+      self.isPlaying = self.audioPlayer?.isPlaying ?? false
+    }
+  }
 
   private func migrateAndValidateVoiceID(_ voiceID: String) -> String {
     // Migration mappings for legacy voice IDs
     let legacyMappings: [String: String] = [
       "elevenlabs/rachel": "elevenlabs/21m00Tcm4TlvDq8ikWAM",
       "elevenlabs/adam": "elevenlabs/pNInz6obpgDQGcFmaJgB",
-      "elevenlabs/bella": "elevenlabs/EXAVITQu4vr4xnSDxMaL",
+      "elevenlabs/bella": "elevenlabs/EXAVITQu4vr4xnSDxMaL"
     ]
 
     // Try migration first
@@ -238,7 +286,7 @@ final class TextToSpeechManager: ObservableObject {
 
     // Validate the voice ID. Some providers return dynamic voice IDs (not in VoiceCatalog).
     let knownPrefixes = [
-      "elevenlabs/", "openai/", "azure/", "deepgram/", "soniox/", "cartesia/", "system/"
+      "elevenlabs/", "openai/", "azure/", "deepgram/", "soniox/", "cartesia/", "openrouter/", "system/"
     ]
     if VoiceCatalog.voice(forID: voiceID) != nil || knownPrefixes.contains(where: { voiceID.hasPrefix($0) }) {
       return voiceID
@@ -253,6 +301,10 @@ final class TextToSpeechManager: ObservableObject {
   }
 
   private func saveToRecordingsDirectory(result: TTSResult) async throws {
+    if let recordingSaver {
+      try await recordingSaver(result)
+      return
+    }
     let recordingsDir = appSettings.recordingsDirectory
     let timestamp = ISO8601DateFormatter().string(from: result.timestamp)
     let filename = "tts_\(timestamp).\(result.audioURL.pathExtension)"

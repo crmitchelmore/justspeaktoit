@@ -142,9 +142,9 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   @ViewBuilder
   private var compactHeroAction: some View {
     if tts.isSynthesizing {
-      ProgressView()
-        .controlSize(.mini)
-        .accessibilityLabel("Synthesizing voice")
+      Button("Cancel") { tts.stop() }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Cancel voice synthesis")
     } else if tts.isPlaying {
       Button {
         tts.stop()
@@ -202,6 +202,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
           .controlSize(.small)
         Text("Synthesizing…")
           .font(.headline)
+        Button("Cancel") { tts.stop() }
       }
       .padding(.horizontal, 32)
       .padding(.vertical, 18)
@@ -336,7 +337,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
           }
         } else {
           Picker("Voice", selection: $selectedVoice) {
-            ForEach(availableVoices) { voice in
+            ForEach(VoiceCatalog.includingSelection(selectedVoice, in: availableVoices)) { voice in
               HStack {
                 Text(voice.displayName)
                 Spacer()
@@ -353,6 +354,8 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
             }
           }
           .labelsHidden()
+
+          OpenRouterSpeechPickerButton(selectedVoice: $selectedVoice)
 
           if let voice = VoiceCatalog.voice(forID: selectedVoice) {
             HStack(spacing: 6) {
@@ -604,7 +607,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
 
   private func loadAvailableVoices() async {
     availableVoices = await tts.availableVoices()
-    if selectedVoice.isEmpty || !availableVoices.contains(where: { $0.id == selectedVoice }) {
+    if selectedVoice.isEmpty {
       selectedVoice = settings.defaultTTSVoice
     }
   }

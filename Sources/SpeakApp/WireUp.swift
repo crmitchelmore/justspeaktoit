@@ -752,6 +752,7 @@ enum WireUp {
     let clients: [TTSProvider: TextToSpeechClient] = [
       .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
       .openai: OpenAITTSClient(secureStorage: secureStorage),
+      .openrouter: OpenRouterTTSClient(secureStorage: secureStorage),
       .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
       .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
       .soniox: SonioxTTSClient(secureStorage: secureStorage, appSettings: settings),

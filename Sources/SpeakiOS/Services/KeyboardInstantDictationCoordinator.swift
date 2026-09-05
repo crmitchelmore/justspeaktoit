@@ -343,9 +343,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             }
         }
         if profile.transcriptionMode == .batch {
-            guard AppSettings.supportedBatchModels.contains(where: {
-                $0.id == profile.transcriptionModelIdentifier
-            }) else {
+            guard AppSettings.supportsBatchModel(profile.transcriptionModelIdentifier) else {
                 return false
             }
             if profile.transcriptionModelIdentifier != AppleLocalModels.speechTranscriberModelID,

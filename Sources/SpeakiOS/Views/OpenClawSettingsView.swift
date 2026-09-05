@@ -14,6 +14,7 @@ public struct OpenClawSettingsView: View {
     @State private var urlInput = ""
     @State private var testState: OpenClawConnectionTester.Outcome = .idle
     @State private var voiceTestState: VoiceTestState = .idle
+    @State private var voiceTestTask: Task<Void, Never>?
     @State private var sonioxAccountVoices: [SonioxTTSAccountVoice] = []
     @State private var loadedSonioxDiscoveryID: String?
 
@@ -134,6 +135,9 @@ public struct OpenClawSettingsView: View {
                         .onChange(of: settings.ttsModel) { _ in
                             settings.validateVoiceModelCombination()
                         }
+                    } else if settings.ttsProvider == .openrouter {
+                        IOSOpenRouterAudioSettingsLink(forSpeech: true)
+                        IOSOpenRouterSpeechSelectionLabel(selectionID: settings.ttsModel)
                     } else {
                         Picker("Voice", selection: $settings.ttsVoice) {
                             ForEach(OpenClawSettings.sonioxBuiltInVoices) { voice in
@@ -160,9 +164,11 @@ public struct OpenClawSettingsView: View {
                         }
                     }
 
-                    Picker("Language", selection: $settings.ttsLanguageIdentifier) {
-                        ForEach(VoiceOutputLanguageCatalog.options) { option in
-                            Text(option.displayName).tag(option.id)
+                    if settings.ttsProvider != .openrouter {
+                        Picker("Language", selection: $settings.ttsLanguageIdentifier) {
+                            ForEach(VoiceOutputLanguageCatalog.options) { option in
+                                Text(option.displayName).tag(option.id)
+                            }
                         }
                     }
 
@@ -185,7 +191,8 @@ public struct OpenClawSettingsView: View {
                     }
 
                     Button {
-                        Task { await testVoice() }
+                        voiceTestTask?.cancel()
+                        voiceTestTask = Task { await testVoice() }
                     } label: {
                         HStack {
                             switch voiceTestState {
@@ -276,6 +283,10 @@ public struct OpenClawSettingsView: View {
         .navigationTitle("OpenClaw Settings")
         .navigationBarTitleDisplayMode(.inline)
         .controlSize(appSettings.visualDensity.isCompact ? .small : .regular)
+        .onDisappear {
+            voiceTestTask?.cancel()
+            voiceTestTask = nil
+        }
         .task(id: sonioxDiscoveryID) {
             await refreshSonioxAccountVoices()
         }
@@ -302,6 +313,7 @@ public struct OpenClawSettingsView: View {
         switch settings.ttsProvider {
         case .deepgram: appSettings.hasDeepgramKey
         case .soniox: appSettings.hasSonioxKey
+        case .openrouter: appSettings.hasOpenRouterKey
         }
     }
 
@@ -387,7 +399,8 @@ public struct OpenClawSettingsView: View {
                 languageIdentifier: settings.ttsLanguageIdentifier,
                 sonioxRegion: settings.sonioxRegion,
                 deepgramAPIKey: appSettings.deepgramAPIKey,
-                sonioxAPIKey: appSettings.sonioxAPIKey
+                sonioxAPIKey: appSettings.sonioxAPIKey,
+                openRouterAPIKey: appSettings.openRouterAPIKey
             )
             voiceTestState = .success
         } catch {

@@ -45,7 +45,8 @@ extension OpenClawChatCoordinator {
                 self.updateLiveActivityState()
 
                 // Summarise and speak if enabled
-                if self.settings.ttsEnabled && self.hasSelectedVoiceOutputKey {
+                if self.settings.ttsEnabled
+                    && (self.hasSelectedVoiceOutputKey || self.settings.ttsProvider == .openrouter) {
                     await self.speakAssistantResponses(responseBatch)
                 }
                 self.isBufferingForTTS = false
@@ -72,6 +73,7 @@ extension OpenClawChatCoordinator {
         switch settings.ttsProvider {
         case .deepgram: appSettings.hasDeepgramKey
         case .soniox: appSettings.hasSonioxKey
+        case .openrouter: appSettings.hasOpenRouterKey
         }
     }
 
@@ -318,11 +320,14 @@ extension OpenClawChatCoordinator {
                 languageIdentifier: settings.ttsLanguageIdentifier,
                 sonioxRegion: settings.sonioxRegion,
                 deepgramAPIKey: appSettings.deepgramAPIKey,
-                sonioxAPIKey: appSettings.sonioxAPIKey
+                sonioxAPIKey: appSettings.sonioxAPIKey,
+                openRouterAPIKey: appSettings.openRouterAPIKey
             )
         } catch {
             logger.error("TTS failed: \(error.localizedDescription)")
-            // Don't set self.error — TTS failure shouldn't block the UI
+            if settings.ttsProvider == .openrouter, !(error is CancellationError) {
+                self.error = error
+            }
         }
     }
 

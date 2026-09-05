@@ -200,6 +200,12 @@ extension SettingsView {
           credentialPurpose: .batchTranscription,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
         )
+        OpenRouterTranscriptionPickerButton(
+          selection: remoteTranscriptionModelBinding(
+            \AppSettings.batchTranscriptionModel, options: ModelCatalog.batchTranscription
+          ),
+          storage: environment.secureStorage
+        )
         if isCustomBatchTranscriptionModel {
           SettingsInlineInfo(
             title: "Custom batch models use OpenRouter",

@@ -7,6 +7,7 @@ import Foundation
 enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case elevenlabs
   case openai
+  case openrouter
   case azure
   case deepgram
   case soniox
@@ -19,6 +20,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     switch self {
     case .elevenlabs: return "ElevenLabs"
     case .openai: return "OpenAI"
+    case .openrouter: return "OpenRouter"
     case .azure: return "Azure Cognitive Services"
     case .deepgram: return "Deepgram"
     case .soniox: return "Soniox"
@@ -38,6 +40,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     switch self {
     case .elevenlabs: return "elevenlabs.apiKey"
     case .openai: return "openai.tts.apiKey"
+    case .openrouter: return "openrouter.apiKey"
     case .azure: return "azure.speech.apiKey"
     case .deepgram: return "deepgram.apiKey"
     // One Soniox key covers transcription and speech generation.
@@ -54,7 +57,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   /// separate transcription entry writing the same Keychain item.
   var sharesTranscriptionCredential: Bool {
     switch self {
-    case .elevenlabs, .soniox, .cartesia: return true
+    case .elevenlabs, .soniox, .cartesia, .openrouter: return true
     case .openai, .azure, .deepgram, .system: return false
     }
   }
@@ -62,6 +65,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   static func from(voiceID: String) -> TTSProvider {
     if voiceID.hasPrefix("elevenlabs/") { return .elevenlabs }
     if voiceID.hasPrefix("openai/") { return .openai }
+    if voiceID.hasPrefix("openrouter/") { return .openrouter }
     if voiceID.hasPrefix("azure/") { return .azure }
     if voiceID.hasPrefix("deepgram/") { return .deepgram }
     if voiceID.hasPrefix("soniox/") { return .soniox }
@@ -313,7 +317,7 @@ struct VoiceCatalog {
       provider: .elevenlabs,
       traits: [.female, .american, .energetic, .casual],
       previewURL: nil
-    ),
+    )
   ]
 
   static let openaiVoices: [TTSVoice] = [
@@ -393,7 +397,7 @@ struct VoiceCatalog {
       provider: .openai,
       traits: [.neutral, .clear, .multilingual],
       previewURL: nil
-    ),
+    )
   ]
 
   static let azureVoices: [TTSVoice] = [
@@ -445,7 +449,7 @@ struct VoiceCatalog {
       provider: .azure,
       traits: [.female, .australian, .professional],
       previewURL: nil
-    ),
+    )
   ]
 
   static let systemVoices: [TTSVoice] = [
@@ -476,7 +480,7 @@ struct VoiceCatalog {
       provider: .system,
       traits: [.female, .australian, .builtin],
       previewURL: nil
-    ),
+    )
   ]
 
     // Both platform pickers project from the canonical SpeakCore Deepgram catalogue.
@@ -520,6 +524,7 @@ struct VoiceCatalog {
     switch provider {
     case .elevenlabs: return elevenlabsVoices
     case .openai: return openaiVoices
+    case .openrouter: return []
     case .azure: return azureVoices
     case .deepgram: return deepgramVoices
     case .soniox: return sonioxVoices
@@ -529,6 +534,9 @@ struct VoiceCatalog {
   }
 
   static func voice(forID id: String) -> TTSVoice? {
+    if let selection = OpenRouterSpeechSelection(id: id) {
+      return openRouterVoice(selection)
+    }
     // Try direct match first
     if let voice = allVoices.first(where: { $0.id == id }) {
       return voice
@@ -544,7 +552,7 @@ struct VoiceCatalog {
     let legacyMappings: [String: String] = [
       "elevenlabs/rachel": "elevenlabs/21m00Tcm4TlvDq8ikWAM",
       "elevenlabs/adam": "elevenlabs/pNInz6obpgDQGcFmaJgB",
-      "elevenlabs/bella": "elevenlabs/EXAVITQu4vr4xnSDxMaL",
+      "elevenlabs/bella": "elevenlabs/EXAVITQu4vr4xnSDxMaL"
     ]
     return legacyMappings[id] ?? id
   }

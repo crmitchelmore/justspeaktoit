@@ -1,3 +1,4 @@
+// swiftlint:disable file_length
 import Foundation
 import XCTest
 
@@ -8,7 +9,6 @@ import XCTest
 /// resumable Files API upload with its ACTIVE-state poll. The client moved out
 /// of the Mac app so iOS uploads through the same code, so this coverage lives
 /// beside it in SpeakCore.
-// Keep file-transfer and polling scenarios beside their shared transport fixture.
 final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:this type_body_length
     // MARK: - transcribeFile guards
 
@@ -257,7 +257,6 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path), "Uploading must not delete the source")
     }
 
-    // swiftlint:disable:next function_body_length
     func testPollingCadenceAndOverallDeadlineAreBounded() async throws {
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
@@ -298,7 +297,6 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         XCTAssertThrowsError(try GeminiInteractionsClient.processingBudget(for: .greatestFiniteMagnitude))
     }
 
-    // swiftlint:disable:next function_body_length
     func testDeadlineCancelsAnInFlightStatusRequest() async throws {
         let cancelled = expectation(description: "Status request work was cancelled")
         let recorder = GeminiRequestLog()

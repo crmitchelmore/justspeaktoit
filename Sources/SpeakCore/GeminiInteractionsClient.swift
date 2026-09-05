@@ -18,7 +18,7 @@ import Foundation
 /// upstream limit is 30 minutes of audio rather than the unannotated 1 hour.
 ///
 /// Never logs audio, transcript text or the API key.
-public struct GeminiInteractionsClient: Sendable {
+public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this type_body_length
     private let session: URLSession
     private let inlineAudioByteLimit: Int
     private let filePollInterval: TimeInterval

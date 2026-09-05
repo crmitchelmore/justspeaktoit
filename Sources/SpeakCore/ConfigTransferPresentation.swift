@@ -20,7 +20,7 @@ public struct ConfigTransferPresentation: Equatable, Sendable {
 
     public static let revealButtonTitle = "I’ve scanned the QR"
     public static let captureNotice = "Keep screen sharing and screen recording off during transfer."
-    public static let expiryNotice = "The receiving app accepts this transfer for 10 minutes."
+    public static let expiryNotice = "Transfer timing depends on both devices’ clocks."
     public static let receiverInstruction =
         "On the source device, tap “I’ve scanned the QR”, then enter the revealed code here."
 }

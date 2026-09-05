@@ -132,6 +132,7 @@ struct ConfigTransferView: View {
     }
 
     private func generateQRCode() async {
+        guard !isGenerating else { return }
         isGenerating = true
         error = nil
         qrImage = nil
@@ -142,6 +143,7 @@ struct ConfigTransferView: View {
             // both platforms use the same key list and payload format.
             let manager = ConfigTransferManager.shared
             let secrets = try await manager.gatherSecrets(storage: secureStorage.coreStorage())
+            try Task.checkCancellation()
             let settings = manager.gatherSettings(liveModelDefaultsKey: "liveTranscriptionModel")
 
             secretCount = secrets.count

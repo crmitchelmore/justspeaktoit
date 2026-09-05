@@ -97,6 +97,7 @@ struct QRCodeGeneratorView: View {
     }
 
     private func generateQRCode() async {
+        guard !isGenerating else { return }
         isGenerating = true
         error = nil
         qrImage = nil
@@ -108,6 +109,7 @@ struct QRCodeGeneratorView: View {
             // the canonical credential store the rest of the app uses.
             let manager = ConfigTransferManager.shared
             let secrets = try await manager.gatherSecrets(storage: AppSettings.canonicalCredentialStorage)
+            try Task.checkCancellation()
             let settings = manager.gatherSettings()
 
             guard !secrets.isEmpty || !settings.isEmpty else {

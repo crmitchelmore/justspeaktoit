@@ -198,6 +198,10 @@ material and a fresh code. Neither source UI offers a combined share sheet.
 
 This prevents a single screenshot or photograph of one step from collecting both
 factors. It does **not** protect a recording, screen share, or separate photographs
-of both steps. Keep screen sharing and recording off during transfer. The receiver
-checks an authenticated ten-minute timestamp; this acceptance window does not
-prevent offline decryption by someone who has already captured both factors.
+of both steps. Keep screen sharing and recording off during transfer. New encrypted transfers authenticate the creation timestamp. The receiver
+requires that timestamp to differ from its own clock by less than ten minutes
+in either direction. Clock skew can reject a fresh transfer or extend its apparent
+real-time lifetime. Legacy imports instead check an unauthenticated payload
+timestamp and do not provide the encrypted format’s security guarantees. These
+client-side time checks do not prevent offline decryption after both factors
+have been captured.

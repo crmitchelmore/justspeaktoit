@@ -60,5 +60,7 @@ The macOS and iOS source screens use `ConfigTransferPresentation`: scanning and
 unlock-code display are mutually exclusive, one-way steps without cross-fading.
 A QR-only capture lacks the unlock factor. A screen recording or multiple captures
 of both steps still expose it; the UI asks users to stop screen sharing/recording.
-The authenticated ten-minute acceptance window is enforced by the receiving app,
-not a cryptographic expiry after both factors are captured. See `Docs/PRIVACY.md`.
+For new encrypted transfers, the authenticated timestamp must be less than ten
+minutes from the receiving clock in either direction; clock skew changes the
+apparent lifetime. Legacy imports use an unauthenticated payload timestamp.
+Neither check is cryptographic expiry after both factors are captured. See `Docs/PRIVACY.md`.

@@ -95,6 +95,31 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "Muse Voice")
     }
 
+    @MainActor
+    func testTranscriptionKeywords_honourLegacyOnlyEditsAfterMigration() {
+        defaults.set("Original", forKey: "assemblyAIKeyterms")
+        _ = AppSettings(defaults: defaults)
+
+        // An old macOS build only knows this key. Its edit and subsequent
+        // clear must win over the unchanged canonical mirror we created.
+        defaults.set("Replacement", forKey: "assemblyAIKeyterms")
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "Replacement")
+        defaults.set("", forKey: "assemblyAIKeyterms")
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "")
+
+        defaults.set("Canonical edit", forKey: "transcriptionKeywords")
+        XCTAssertEqual(AppSettings(defaults: defaults).assemblyAIKeyterms, "Canonical edit")
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_preserveIndependentEditsToBothMirrors() {
+        let settings = AppSettings(defaults: defaults)
+        settings.transcriptionKeywords = "Original"
+        defaults.set("Canonical edit", forKey: "transcriptionKeywords")
+        defaults.set("Legacy edit", forKey: "assemblyAIKeyterms")
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "Canonical edit, Legacy edit")
+    }
+
     // MARK: - Core Settings
 
     @MainActor

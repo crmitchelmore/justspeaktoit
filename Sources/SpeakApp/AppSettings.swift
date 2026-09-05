@@ -337,6 +337,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case recordingSoundVolume
     case assemblyAIKeyterms
     case transcriptionKeywords
+    case transcriptionKeywordsLastReconciled
     case assemblyAIIgnoredPronunciationTerms
     case modulateSpeakerDiarization
     case modulateEmotionSignal
@@ -562,6 +563,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if transcriptionKeywords != assemblyAIKeyterms {
         transcriptionKeywords = assemblyAIKeyterms
       }
+      store(assemblyAIKeyterms, key: .transcriptionKeywordsLastReconciled)
     }
   }
 
@@ -571,6 +573,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if assemblyAIKeyterms != transcriptionKeywords {
         assemblyAIKeyterms = transcriptionKeywords
       }
+      store(transcriptionKeywords, key: .transcriptionKeywordsLastReconciled)
     }
   }
 
@@ -1119,7 +1122,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // with canonical entries first, instead of guessing which edit is newer.
     let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
     let storedKeyterms = defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
-    let keywords = Self.mergedTranscriptionKeywords(canonical: storedKeywords, legacy: storedKeyterms)
+    let lastReconciled = defaults.string(forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
+    let keywords = Self.mergedTranscriptionKeywords(
+      canonical: storedKeywords, legacy: storedKeyterms, lastReconciled: lastReconciled
+    )
     assemblyAIKeyterms = keywords
     transcriptionKeywords = keywords
     // Initial assignments do not invoke didSet. Persist the reconciliation
@@ -1129,6 +1135,9 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
     if storedKeyterms != keywords {
       defaults.set(keywords, forKey: DefaultsKey.assemblyAIKeyterms.rawValue)
+    }
+    if lastReconciled != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
     }
     assemblyAIIgnoredPronunciationTerms =
       defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
@@ -1370,8 +1379,16 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     NSApplication.shared.setActivationPolicy(policy)
   }
 
-  private static func mergedTranscriptionKeywords(canonical: String, legacy: String) -> String {
+  private static func mergedTranscriptionKeywords(
+    canonical: String, legacy: String, lastReconciled: String?
+  ) -> String {
     if canonical == legacy { return canonical }
+    // After a downgrade or a write from another platform, an unchanged mirror
+    // must not override a deliberate edit (including clearing) on the other side.
+    if let lastReconciled {
+      if canonical == lastReconciled { return legacy }
+      if legacy == lastReconciled { return canonical }
+    }
     if canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return legacy }
     if legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return canonical }
     var seen: Set<String> = []

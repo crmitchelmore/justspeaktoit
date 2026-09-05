@@ -42,6 +42,7 @@ final class PrivacyDisclosureTests: XCTestCase {
         let summary = PrivacyWorkflowSummary.make(inputs(liveModel: AppleLocalModels.speechTranscriberModelID))
 
         XCTAssertEqual(summary.transcription.destination, .onDevice)
+        XCTAssertFalse(summary.transcription.isConditionalCloud)
         XCTAssertEqual(summary.transcription.destinationLabel, "On device")
         XCTAssertFalse(summary.transcription.destination.leavesDevice)
         XCTAssertTrue(
@@ -53,7 +54,8 @@ final class PrivacyDisclosureTests: XCTestCase {
     func testLegacyAppleSpeechDisclosesConditionalCloudFallback() {
         let summary = PrivacyWorkflowSummary.make(inputs(liveModel: AppleLocalModels.legacySpeechModelID))
 
-        XCTAssertEqual(summary.transcription.destination, .conditionalCloud(providerName: "Apple"))
+        XCTAssertEqual(summary.transcription.destination, .cloud(providerName: "Apple"))
+        XCTAssertTrue(summary.transcription.isConditionalCloud)
         XCTAssertEqual(summary.transcription.destinationLabel, "On device or Apple")
         XCTAssertTrue(summary.transcription.destination.leavesDevice)
         XCTAssertEqual(summary.activeRecipients, ["Apple"])
@@ -81,7 +83,7 @@ final class PrivacyDisclosureTests: XCTestCase {
     func testLiveSpeechAnalyzerDisclosesItsPermittedLegacyFallback() {
         for model in [AppleLocalModels.speechTranscriberModelID, AppleLocalModels.dictationTranscriberModelID] {
             let summary = PrivacyWorkflowSummary.make(inputs(liveModel: model, analyzerFallbackAllowed: true))
-            XCTAssertEqual(summary.transcription.destination, .conditionalCloud(providerName: "Apple"))
+            XCTAssertEqual(summary.transcription.destination, .cloud(providerName: "Apple"))
             XCTAssertEqual(summary.activeRecipients, ["Apple"])
         }
     }
@@ -255,7 +257,7 @@ final class PrivacyDisclosureTests: XCTestCase {
             voiceOutputEnabled: false,
             voiceOutputProvider: .soniox
         )
-        XCTAssertEqual(summary.transcription.destination, .conditionalCloud(providerName: "Apple"))
+        XCTAssertEqual(summary.transcription.destination, .cloud(providerName: "Apple"))
         XCTAssertEqual(summary.postProcessing.destination, .disabled)
 
         settings.selectedModel = "deepgram/nova-3-streaming"

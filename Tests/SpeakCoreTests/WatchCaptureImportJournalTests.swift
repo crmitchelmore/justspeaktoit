@@ -290,6 +290,71 @@ final class WatchCaptureImportJournalTests: XCTestCase {
         XCTAssertEqual(journal.purgeExpired(now: .distantFuture).map(\.captureID), [captureID])
     }
 
+    func testMismatchedCompletion_rejectsWithoutChangingMemoryOrDisk() throws {
+        let journal = makeJournal()
+        let captureID = UUID()
+        let otherID = UUID()
+        journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 5)
+        journal.parkJob(captureID: otherID, fileExtension: "m4a", createdAt: Date(), duration: 5)
+        let originalJobs = journal.pendingJobs()
+        let journalURL = directory.appendingPathComponent("import-journal.json")
+        let originalData = try Data(contentsOf: journalURL)
+
+        XCTAssertFalse(journal.completeJobReportingDurability(
+            captureID: captureID,
+            acknowledgement: WatchCaptureAckRecord(captureID: otherID, outcome: .transcribed)
+        ))
+
+        XCTAssertEqual(journal.pendingJobs(), originalJobs)
+        XCTAssertTrue(journal.pendingAcks().isEmpty)
+        XCTAssertNil(journal.completedAcknowledgement(captureID: otherID))
+        XCTAssertEqual(try Data(contentsOf: journalURL), originalData)
+        XCTAssertEqual(Set(makeJournal().pendingJobs().map(\.captureID)), [captureID, otherID])
+    }
+
+    func testInitialization_prunesExpiredReceiptsWithoutAnotherMutationButKeepsOwedAcks() throws {
+        let expiredID = UUID()
+        let owedID = UUID()
+        let expiredDate = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-15 * 24 * 60 * 60))
+        // Model a journal left untouched while the app was not running.
+        let fixture = """
+        {"jobs":[],"pendingAcks":[{"captureID":"\(owedID)",
+        "outcome":"transcribed","recordedAt":"\(expiredDate)"}],
+        "completedAcks":[{"captureID":"\(expiredID)",
+        "outcome":"transcribed","recordedAt":"\(expiredDate)"}]}
+        """
+        let journalURL = directory.appendingPathComponent("import-journal.json")
+        try Data(fixture.utf8).write(to: journalURL)
+
+        let relaunched = makeJournal()
+        XCTAssertNil(relaunched.completedAcknowledgement(captureID: expiredID))
+        XCTAssertEqual(relaunched.pendingAcks().map(\.captureID), [owedID])
+        let persisted = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: journalURL)) as? [String: Any]
+        )
+        XCTAssertEqual((persisted["completedAcks"] as? [Any])?.count, 0)
+        XCTAssertEqual((persisted["pendingAcks"] as? [Any])?.count, 1)
+    }
+
+    func testReceiptCleanupWriteFailure_preservesReceiptUntilReconciliationCanPersist() throws {
+        let journal = makeJournal()
+        let captureID = UUID()
+        XCTAssertTrue(journal.completeJobReportingDurability(
+            captureID: captureID,
+            acknowledgement: WatchCaptureAckRecord(captureID: captureID, outcome: .transcribed)
+        ))
+        journal.confirmAckDelivered(captureID: captureID)
+        let afterExpiry = Date().addingTimeInterval(15 * 24 * 60 * 60)
+
+        try withBlockedJournal {
+            XCTAssertFalse(journal.pruneExpiredCompletedAcknowledgements(now: afterExpiry))
+            XCTAssertNotNil(journal.completedAcknowledgement(captureID: captureID))
+        }
+        XCTAssertNotNil(makeJournal().completedAcknowledgement(captureID: captureID))
+        XCTAssertTrue(journal.pruneExpiredCompletedAcknowledgements(now: afterExpiry))
+        XCTAssertNil(makeJournal().completedAcknowledgement(captureID: captureID))
+    }
+
     func testAckRecord_bridgesToTheWireAck() {
         let captureID = UUID()
         let record = WatchCaptureAckRecord(captureID: captureID, outcome: .failed, message: "why")

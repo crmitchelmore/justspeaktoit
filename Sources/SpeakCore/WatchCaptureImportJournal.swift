@@ -76,7 +76,8 @@ public struct WatchCaptureAckRecord: Codable, Equatable, Sendable {
 public final class WatchCaptureImportJournal: @unchecked Sendable {
     /// One import may run at a time; retries use bounded attempts.
     public static let defaultMaximumAttempts = 5
-    /// Failed captures are kept for a fortnight before being reclaimed.
+    /// Failed captures become eligible for cleanup after a fortnight.
+    /// Physical cleanup waits for the next reconciliation while the app runs.
     public static let defaultRetentionInterval: TimeInterval = 14 * 24 * 60 * 60
 
     private struct State: Codable {
@@ -103,6 +104,7 @@ public final class WatchCaptureImportJournal: @unchecked Sendable {
         } else {
             self.state = State()
         }
+        pruneExpiredCompletedAcknowledgements()
     }
 
     // MARK: - Jobs
@@ -193,7 +195,10 @@ public final class WatchCaptureImportJournal: @unchecked Sendable {
         captureID: UUID,
         acknowledgement: WatchCaptureAckRecord? = nil
     ) -> Bool {
-        withState { state in
+        // Reject mismatched identity before changing state or writing disk.
+        // Otherwise one capture loses its job while another receives its ack.
+        guard acknowledgement == nil || acknowledgement?.captureID == captureID else { return false }
+        return withState { state in
             if let acknowledgement {
                 state.pendingAcks.removeAll { $0.captureID == captureID }
                 state.pendingAcks.append(acknowledgement)
@@ -263,8 +268,11 @@ public final class WatchCaptureImportJournal: @unchecked Sendable {
 
     /// Success receipts survive transport confirmation, so a watch recovering
     /// a lost callback can request its acknowledgement without retranscription.
-    /// Retained for the same fortnight as retryable imports; older redeliveries
-    /// may be imported again under the existing stable history UUID.
+    /// Confirmed receipts are eligible for cleanup after a fortnight. Cleanup
+    /// runs on initialization, reconciliation, and subsequent mutations; an
+    /// inactive app cannot physically remove expired records until it runs.
+    /// Unconfirmed acknowledgements remain owed until delivery is confirmed.
+    /// Older redeliveries may be imported again under the stable history UUID.
     public func completedAcknowledgement(captureID: UUID) -> WatchCaptureAckRecord? {
         lock.lock()
         defer { lock.unlock() }
@@ -275,6 +283,18 @@ public final class WatchCaptureImportJournal: @unchecked Sendable {
         let cutoff = Date().addingTimeInterval(-defaultRetentionInterval)
         return state.pendingAcks.first { $0.captureID == captureID && $0.outcome == .transcribed }
             ?? state.completedAcks?.first { $0.captureID == captureID && $0.recordedAt >= cutoff }
+    }
+
+    /// Removes expired confirmed success receipts at an execution opportunity.
+    /// Failed writes preserve the old durable state and retry on reconciliation.
+    @discardableResult
+    public func pruneExpiredCompletedAcknowledgements(now: Date = Date()) -> Bool {
+        let cutoff = now.addingTimeInterval(-Self.defaultRetentionInterval)
+        lock.lock()
+        let hasExpired = state.completedAcks?.contains { $0.recordedAt < cutoff } ?? false
+        lock.unlock()
+        guard hasExpired else { return true }
+        return withState(now: now) { _ in }
     }
 
     /// Acknowledgements not yet confirmed delivered, oldest first.
@@ -294,11 +314,11 @@ public final class WatchCaptureImportJournal: @unchecked Sendable {
     // MARK: - Persistence
 
     @discardableResult
-    private func withState(_ mutate: (inout State) -> Void) -> Bool {
+    private func withState(now: Date = Date(), _ mutate: (inout State) -> Void) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         var candidate = state
-        let cutoff = Date().addingTimeInterval(-Self.defaultRetentionInterval)
+        let cutoff = now.addingTimeInterval(-Self.defaultRetentionInterval)
         candidate.completedAcks?.removeAll { $0.recordedAt < cutoff }
         mutate(&candidate)
         do {

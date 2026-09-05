@@ -29,9 +29,19 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     /// `handleAckTransferFinished`.
     nonisolated(unsafe) public var sendAck: (@Sendable (WatchCaptureAck) -> Void)?
 
-    private let journal: WatchCaptureImportJournal
+    let journal: WatchCaptureImportJournal
     private let inboxDirectory: URL
     private var isProcessing = false
+    private var anotherPassRequested = false
+    // Internal seams keep pass scheduling tests independent of networking and
+    // UIKit background allowances while exercising the production coordinator.
+    var importJobExecutor: (@MainActor (WatchCaptureImportJob) async -> Void)?
+    var scheduleNextPass: @MainActor (@escaping @MainActor () async -> Void) -> Void = { operation in
+        Task { @MainActor in
+            await Task.yield()
+            await operation()
+        }
+    }
     private var activeImportTask: Task<Void, Error>?
 
     public convenience init() {
@@ -100,21 +110,37 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     /// acknowledgements, and runs every retryable pending import serially.
     /// Call on activation and on foreground entry; safe to call repeatedly.
     public func processPendingImports() async {
-        guard !isProcessing else { return }
+        guard !isProcessing else {
+            anotherPassRequested = true
+            return
+        }
         isProcessing = true
-        defer { isProcessing = false }
+        defer {
+            isProcessing = false
+            if anotherPassRequested {
+                anotherPassRequested = false
+                scheduleNextPass { [weak self] in
+                    await self?.processPendingImports()
+                }
+            }
+        }
 
+        journal.pruneExpiredCompletedAcknowledgements()
         purgeExpiredJobs()
         replayPendingAcks()
 
-        var attempted = Set<UUID>()
-        // Re-read after each suspension: a second delivered capture may have
-        // arrived while this pass was awaiting transcription. Retry a failure
-        // at most once per pass while still draining newly arrived jobs.
-        while let job = journal.pendingJobs().first(where: { !attempted.contains($0.captureID) }) {
-            attempted.insert(job.captureID)
+        // Freeze this pass before the first suspension. A stream of arrivals
+        // cannot extend its work or retained identities indefinitely. Delivery
+        // callbacks request one later pass, which starts with fresh cleanup and
+        // acknowledgement replay instead of joining this snapshot.
+        let jobs = journal.pendingJobs()
+        for job in jobs {
             guard journal.isRetryable(captureID: job.captureID) else { continue }
-            await runImport(for: job)
+            if let importJobExecutor {
+                await importJobExecutor(job)
+            } else {
+                await runImport(for: job)
+            }
         }
     }
 

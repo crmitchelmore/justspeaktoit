@@ -66,6 +66,14 @@ enrichment and capability controls, and full real-provider/device qualification.
 This change delivers discovery, explicit testing, selection, and normal STT/TTS
 routing on both platforms without claiming those remaining checks are complete.
 
+## Swift client migration
+
+This is a declared major release because the public `VoiceOutputProvider` enum
+adds `.openrouter`. External Swift clients must add that case to exhaustive
+switches (or handle an appropriate default) before recompiling. Existing
+provider raw values and saved preferences are retained. The original public
+`VoiceOutputRouter.speak` method remains as a forwarding overload.
+
 ## API references
 
 - [Models API](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)

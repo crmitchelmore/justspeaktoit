@@ -73,7 +73,8 @@ public struct OpenRouterAudioModel: Identifiable, Codable, Equatable, Sendable {
         try container.encode(name, forKey: .name)
         try container.encode(description, forKey: .description)
         try container.encode(
-            OpenRouterAudioArchitecture(inputModalities: inputModalities, outputModalities: outputModalities), forKey: .architecture
+            OpenRouterAudioArchitecture(inputModalities: inputModalities, outputModalities: outputModalities),
+            forKey: .architecture
         )
         try container.encode(pricing, forKey: .pricing)
         try container.encode(supportedParameters, forKey: .supportedParameters)

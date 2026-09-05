@@ -12,7 +12,9 @@ final class LaunchUITests: XCTestCase {
     func testProductionBootstrap_survivesFixtureFocusRoundTrip() throws {
         let identifier = UUID()
         let suiteName = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
-        let app = XCUIApplication()
+        // This UI test target also depends on the fixture app, so Xcode's
+        // inferred default application is not necessarily the production app.
+        let app = XCUIApplication(bundleIdentifier: "com.justspeaktoit.mac")
         let fixture = XCUIApplication(bundleIdentifier: "com.justspeaktoit.core-journey-fixture")
         app.launchEnvironment["SPEAK_CORE_JOURNEY_PROFILE"] = identifier.uuidString
         // AppStorage reads these through UserDefaults' typed boolean accessor.
@@ -22,13 +24,13 @@ final class LaunchUITests: XCTestCase {
 
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+        let originalProcess = try XCTUnwrap(NSWorkspace.shared.frontmostApplication)
+        XCTAssertEqual(originalProcess.bundleIdentifier, "com.justspeaktoit.mac")
+        let originalPID = originalProcess.processIdentifier
         // This existing production control is built by MainView only after
         // WireUp has created and published the real AppEnvironment.
         let recordingControl = app.buttons["toolbarRecordToggleButton"]
         XCTAssertTrue(recordingControl.waitForExistence(timeout: 15), "Speak must finish production bootstrap")
-        let originalProcess = try XCTUnwrap(NSWorkspace.shared.frontmostApplication)
-        XCTAssertEqual(originalProcess.bundleIdentifier, "com.justspeaktoit.mac")
-        let originalPID = originalProcess.processIdentifier
 
         fixture.launch()
         let target = fixture.textViews["coreJourneyTargetField"]
@@ -53,14 +55,13 @@ final class LaunchUITests: XCTestCase {
 
     private func registerCleanup(app: XCUIApplication, fixture: XCUIApplication, suiteName: String) {
         addTeardownBlock {
-            for (application, name) in [(app, "Speak bootstrap"), (fixture, "Focus target")] {
-                if application.state != .notRunning {
-                    let screenshot = XCTAttachment(screenshot: application.screenshot())
-                    screenshot.name = name
-                    screenshot.lifetime = .keepAlways
-                    self.add(screenshot)
-                    application.terminate()
-                }
+            for (application, name) in [(app, "Speak bootstrap"), (fixture, "Focus target")]
+                where application.state != .notRunning {
+                let screenshot = XCTAttachment(screenshot: application.screenshot())
+                screenshot.name = name
+                screenshot.lifetime = .keepAlways
+                self.add(screenshot)
+                application.terminate()
             }
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)

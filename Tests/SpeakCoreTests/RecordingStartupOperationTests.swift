@@ -42,10 +42,7 @@ final class RecordingStartupOperationTests: XCTestCase {
         await fulfillment(of: [entered], timeout: 2)
         lifecycle.retireStartRun()
         lifecycle.retireStartRun()
-        let stop = Task { @MainActor in
-            await lifecycle.awaitStartSettled()
-            stopped.fulfill()
-        }
+        let stop = makeStopTask(lifecycle: lifecycle, completion: stopped)
         await fulfillment(of: [stopped], timeout: 2)
         XCTAssertFalse(activated)
         XCTAssertFalse(resourceOwned)
@@ -58,6 +55,16 @@ final class RecordingStartupOperationTests: XCTestCase {
         await start.value
         await stop.value
         XCTAssertFalse(activated)
+    }
+
+    private func makeStopTask(
+        lifecycle: RecordingLifecycleCoordinator,
+        completion: XCTestExpectation
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
+            await lifecycle.awaitStartSettled()
+            completion.fulfill()
+        }
     }
 
     func testCancellation_waitsForAsynchronousCleanupBeforeReleasingOwnership() async {

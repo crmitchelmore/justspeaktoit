@@ -231,7 +231,11 @@ final class WatchCaptureImportJournalTests: XCTestCase {
         try Data("blocked".utf8).write(to: directory)
         try body()
     }
+}
 
+// MARK: - Durable completion receipts and journal migration
+
+extension WatchCaptureImportJournalTests {
     func testRedeliveryAfterConfirmedAckAndRelaunch_replaysReceiptWithoutRetranscription() {
         let journal = makeJournal()
         let captureID = UUID()

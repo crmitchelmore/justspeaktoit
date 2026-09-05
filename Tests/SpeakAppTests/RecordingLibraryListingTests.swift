@@ -16,7 +16,7 @@ final class RecordingLibraryListingTests: XCTestCase {
     XCTAssertEqual(recordings.count, 1)
     let listed = try XCTUnwrap(recordings.first)
     XCTAssertEqual(listed.id, recordingID)
-    XCTAssertEqual(listed.url, recording)
+    XCTAssertEqual(listed.url, recording.resolvingSymlinksInPath())
     XCTAssertEqual(listed.fileSize, Int64(partialFile.count))
     XCTAssertEqual(listed.duration, 0, "Management listings must not decode audio for unused durations")
   }
@@ -39,7 +39,7 @@ final class RecordingLibraryListingTests: XCTestCase {
 
     let recordings = AudioFileManager.listRecordings(in: directory)
 
-    XCTAssertEqual(recordings.map(\.url), [recording])
+    XCTAssertEqual(recordings.map(\.url), [recording.resolvingSymlinksInPath()])
   }
 
   func testCleanupSnapshot_excludesCaptureEvenIfItStopsBeforeDeletion() throws {

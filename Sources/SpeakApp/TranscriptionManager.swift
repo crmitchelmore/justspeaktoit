@@ -303,6 +303,10 @@ final class TranscriptionManager: ObservableObject {
     liveController.markControllersStale()
   }
 
+}
+
+/// Batch routing and model/credential selection are separate from live session ownership.
+extension TranscriptionManager {
   func transcribeFile(at url: URL) async throws -> TranscriptionResult {
     let model = offlineTranscriptionModel
     if AppleLocalModels.isSpeechAnalyzerModel(model) {

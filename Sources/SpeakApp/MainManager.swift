@@ -450,7 +450,7 @@ final class MainManager: ObservableObject {
       await startSession(trigger: .doubleTap, triggerTiming: triggerTiming)
     }
   }
-
+  // swiftlint:disable:next function_body_length
   private func configureHotKeys() {
     #if DEBUG
     if CoreJourneyLaunchProfile.isRequested { return }

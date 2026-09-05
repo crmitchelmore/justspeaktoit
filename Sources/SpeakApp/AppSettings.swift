@@ -337,6 +337,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case recordingSoundVolume
     case assemblyAIKeyterms
     case transcriptionKeywords
+    case transcriptionKeywordsLastReconciled
+    case recoveredTranscriptionKeywords
     case assemblyAIIgnoredPronunciationTerms
     case modulateSpeakerDiarization
     case modulateEmotionSignal
@@ -562,6 +564,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if transcriptionKeywords != assemblyAIKeyterms {
         transcriptionKeywords = assemblyAIKeyterms
       }
+      store(assemblyAIKeyterms, key: .transcriptionKeywordsLastReconciled)
     }
   }
 
@@ -571,7 +574,26 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if assemblyAIKeyterms != transcriptionKeywords {
         assemblyAIKeyterms = transcriptionKeywords
       }
+      store(transcriptionKeywords, key: .transcriptionKeywordsLastReconciled)
     }
+  }
+
+  /// Competing edits preserved when a deliberate clear wins reconciliation.
+  /// They stay recoverable until the user restores or discards them in Settings.
+  @Published private(set) var recoveredTranscriptionKeywords: [String] {
+    didSet { store(recoveredTranscriptionKeywords, key: .recoveredTranscriptionKeywords) }
+  }
+
+  func restoreTranscriptionKeywords(_ recovered: String) {
+    guard recoveredTranscriptionKeywords.contains(recovered) else { return }
+    transcriptionKeywords = Self.mergedTranscriptionKeywords(
+      canonical: transcriptionKeywords, legacy: recovered, lastReconciled: nil
+    ).active
+    discardRecoveredTranscriptionKeywords(recovered)
+  }
+
+  func discardRecoveredTranscriptionKeywords(_ recovered: String) {
+    recoveredTranscriptionKeywords.removeAll { $0 == recovered }
   }
 
   @Published var assemblyAIIgnoredPronunciationTerms: [String] {
@@ -1115,13 +1137,35 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     )
     postProcessingTemperature =
       defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
-    // One list, two keys: whichever side an existing install wrote is the
-    // seed, so upgrading from either platform's spelling keeps the words.
+    // Without timestamps, preserve competing nonempty edits. A deliberate clear
+    // after migration wins over a conflicting edit, which remains recoverable.
     let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
     let storedKeyterms = defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
-    let keywords = storedKeywords.isEmpty ? storedKeyterms : storedKeywords
+    let lastReconciled = defaults.string(forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
+    let reconciliation = Self.mergedTranscriptionKeywords(
+      canonical: storedKeywords, legacy: storedKeyterms, lastReconciled: lastReconciled
+    )
+    var recovered = defaults.stringArray(forKey: DefaultsKey.recoveredTranscriptionKeywords.rawValue) ?? []
+    if let conflict = reconciliation.recovered, !recovered.contains(conflict) {
+      recovered.append(conflict)
+      // Preserve the other edit before replacing either defaults mirror.
+      defaults.set(recovered, forKey: DefaultsKey.recoveredTranscriptionKeywords.rawValue)
+    }
+    recoveredTranscriptionKeywords = recovered
+    let keywords = reconciliation.active
     assemblyAIKeyterms = keywords
     transcriptionKeywords = keywords
+    // Initial assignments do not invoke didSet. Persist the reconciliation
+    // explicitly so the next launch cannot resurrect an old conflicting list.
+    if storedKeywords != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.transcriptionKeywords.rawValue)
+    }
+    if storedKeyterms != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.assemblyAIKeyterms.rawValue)
+    }
+    if lastReconciled != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
+    }
     assemblyAIIgnoredPronunciationTerms =
       defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
     modulateSpeakerDiarizationEnabled =
@@ -1360,6 +1404,34 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   func applyAppVisibility() {
     let policy: NSApplication.ActivationPolicy = appVisibility.showInDock ? .regular : .accessory
     NSApplication.shared.setActivationPolicy(policy)
+  }
+
+  private static func mergedTranscriptionKeywords(
+    canonical: String, legacy: String, lastReconciled: String?
+  ) -> (active: String, recovered: String?) {
+    if canonical == legacy { return (canonical, nil) }
+    let canonicalIsEmpty = canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let legacyIsEmpty = legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    // After a downgrade or a write from another platform, an unchanged mirror
+    // must not override a deliberate edit (including clearing) on the other side.
+    if let lastReconciled {
+      if canonical == lastReconciled { return (legacy, nil) }
+      if legacy == lastReconciled { return (canonical, nil) }
+      // Both mirrors changed independently. Do not silently undo a clear, and
+      // do not destroy the competing edit: Settings exposes it for recovery.
+      if canonicalIsEmpty || legacyIsEmpty {
+        let recovered = canonicalIsEmpty ? legacy : canonical
+        return ("", recovered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : recovered)
+      }
+    }
+    if canonicalIsEmpty { return (legacy, nil) }
+    if legacyIsEmpty { return (canonical, nil) }
+    var seen: Set<String> = []
+    let merged = (canonical + "," + legacy).components(separatedBy: ",")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty && seen.insert($0).inserted }
+      .joined(separator: ", ")
+    return (merged, nil)
   }
 
   private static func normalizedBatchModel(_ identifier: String?) -> String {

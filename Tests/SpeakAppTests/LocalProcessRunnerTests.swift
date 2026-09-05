@@ -148,7 +148,6 @@ final class LocalProcessRunnerTests: XCTestCase {
     """
 
     // Fixture controls keep readiness, cancellation and subprocess setup in one helper.
-    // swiftlint:disable:next function_parameter_count
     private func start(
         script: String,
         arguments: [String] = [],
@@ -157,7 +156,7 @@ final class LocalProcessRunnerTests: XCTestCase {
         timeout: TimeInterval,
         cancelBeforeRunning: Bool = false,
         executableURL: URL = URL(fileURLWithPath: "/bin/sh")
-    ) -> (task: Task<Void, Never>, result: ProcessTestResult, finished: XCTestExpectation) {
+    ) -> ProcessTestRun {
         let result = ProcessTestResult()
         let finished = expectation(description: "bounded subprocess finishes")
         let task = Task {
@@ -173,7 +172,7 @@ final class LocalProcessRunnerTests: XCTestCase {
             }
             finished.fulfill()
         }
-        return (task, result, finished)
+        return ProcessTestRun(task: task, result: result, finished: finished)
     }
 
     private func markerURL() throws -> URL {
@@ -203,6 +202,12 @@ final class LocalProcessRunnerTests: XCTestCase {
         }
         XCTFail("Owned helper process \(identifier) survived teardown")
     }
+}
+
+private struct ProcessTestRun {
+    let task: Task<Void, Never>
+    let result: ProcessTestResult
+    let finished: XCTestExpectation
 }
 
 private final class ProcessTestResult: @unchecked Sendable {

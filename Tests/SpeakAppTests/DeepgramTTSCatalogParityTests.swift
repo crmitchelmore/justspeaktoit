@@ -3,10 +3,19 @@ import XCTest
 @testable import SpeakApp
 
 final class DeepgramTTSCatalogParityTests: XCTestCase {
+    func testFluxPricing_unknownWhileAuraRetainsItsRate() {
+        XCTAssertNil(TTSProvider.deepgram.estimatedCost(
+            characterCount: 1000, quality: .high, voiceID: "deepgram/flux-kit-en"
+        ))
+        XCTAssertEqual(TTSProvider.deepgram.estimatedCost(
+            characterCount: 1000, quality: .high, voiceID: "deepgram/aura-2-asteria-en"
+        ), DeepgramTTSAPI.costPerThousandCharacters)
+    }
+
     func testMacVoiceProjection_MatchesEverySharedDeepgramVoice() {
         XCTAssertEqual(
             Set(VoiceCatalog.deepgramVoices.map(\.id)),
-            Set(DeepgramTTSCatalog.voices.map(\.providerVoiceID))
+            Set(DeepgramSpeechCatalog.voices.map(\.providerVoiceID))
         )
     }
 

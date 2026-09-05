@@ -170,19 +170,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             throw err
         }
 
-        // Configure audio session
-        do {
-            ownsAudioSession = true
-            try await audioSessionManager.configureForRecording()
-            try Task.checkCancellation()
-            SpeakLogger.audio.info("Audio session configured for recording")
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            SpeakLogger.logError(error, context: "Audio session setup", logger: SpeakLogger.audio)
-            throw iOSTranscriptionError.audioSessionFailed(error)
-        }
-
+        try await configureAudioSession()
         resetState()
 
         if AppleLocalModels.isSpeechAnalyzerModel(modelID) {
@@ -229,6 +217,20 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         isRunning = true
         logger.info("Started")
+    }
+
+    private func configureAudioSession() async throws {
+        do {
+            ownsAudioSession = true
+            try await audioSessionManager.configureForRecording()
+            try Task.checkCancellation()
+            SpeakLogger.audio.info("Audio session configured for recording")
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            SpeakLogger.logError(error, context: "Audio session setup", logger: SpeakLogger.audio)
+            throw iOSTranscriptionError.audioSessionFailed(error)
+        }
     }
 
     @available(iOS 26.0, *)

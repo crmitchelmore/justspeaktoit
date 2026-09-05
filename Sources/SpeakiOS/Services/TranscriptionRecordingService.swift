@@ -117,24 +117,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.recordingStartTime = startTime
 
         if !usesBatchTranscription && keyboardProfile == nil {
-            let requestedModel = currentModel
-            let route = LiveTranscriptionRouting.route(for: currentModel)
-            currentModel = LiveTranscriptionRouting.resolvedModelID(
-                for: currentModel,
-                apiKey: route.map { settings.liveAPIKey(for: $0) }
-            )
-            if currentModel != requestedModel {
-                // Make the silent on-device fallback visible: publish it for
-                // the UI and log it so a "worse than usual" session is
-                // diagnosable.
-                providerFallbackNotice = "Using \(modelDisplayName) (no API key)"
-                SpeakLogger.transcription.warning(
-                    """
-                    No API key for \(requestedModel, privacy: .public); \
-                    falling back to \(self.currentModel, privacy: .public)
-                    """
-                )
-            }
+            resolveLiveModel(settings: settings)
         }
 
         // A Live Activity is required to record in the *background* via an
@@ -213,6 +196,27 @@ public final class TranscriptionRecordingService: ObservableObject {
             startedSession?.cancel()
             unwindCancelledStart()
             throw error
+        }
+    }
+
+    private func resolveLiveModel(settings: AppSettings) {
+        let requestedModel = currentModel
+        let route = LiveTranscriptionRouting.route(for: currentModel)
+        currentModel = LiveTranscriptionRouting.resolvedModelID(
+            for: currentModel,
+            apiKey: route.map { settings.liveAPIKey(for: $0) }
+        )
+        if currentModel != requestedModel {
+            // Make the silent on-device fallback visible: publish it for
+            // the UI and log it so a "worse than usual" session is
+            // diagnosable.
+            providerFallbackNotice = "Using \(modelDisplayName) (no API key)"
+            SpeakLogger.transcription.warning(
+                """
+                No API key for \(requestedModel, privacy: .public); \
+                falling back to \(self.currentModel, privacy: .public)
+                """
+            )
         }
     }
 

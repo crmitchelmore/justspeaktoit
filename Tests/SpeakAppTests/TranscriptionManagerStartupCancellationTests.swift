@@ -4,7 +4,7 @@ import XCTest
 @testable import SpeakApp
 
 @MainActor
-final class TranscriptionManagerStartupCancellationTests: XCTestCase {
+final class TranscriptionStartupCancellationTests: XCTestCase {
   /// Models providers that acquire capture only after a permission/device await,
   /// and cannot interrupt that await even when their task has been cancelled.
   private final class SuspendedStartController: LiveTranscriptionController {

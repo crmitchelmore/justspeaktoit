@@ -762,6 +762,7 @@ public final class AppSettings: ObservableObject {
                 || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
+                || option.id == CartesiaBatchClient.catalogID
         }
 
     // MARK: - Legacy migration
@@ -945,7 +946,7 @@ public struct SettingsView: View {
                 .accessibilityIdentifier("transcriptionLocationPicker")
 
                 if transcriptionLocationBinding.wrappedValue == .local {
-                    Picker("Apple On-Device Model", selection: selectedModelBinding) {
+                    Picker("Apple Speech Model", selection: selectedModelBinding) {
                         ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
                             HStack {
                                 Text(option.displayName)
@@ -966,7 +967,10 @@ public struct SettingsView: View {
                     .accessibilityIdentifier("appleOnDeviceModelPicker")
 
                     if !usesInlineDensityLayout {
-                        Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+                        Text(
+                            "Uses Apple's on-device speech engines when available. "
+                                + "If recognition is unavailable or fails, audio may be sent to Apple."
+                        )
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -2207,7 +2211,7 @@ struct PrivacyView: View {
             Text(
                 summary.activeRecipients.isEmpty
                     ? "With your current settings nothing is sent to a cloud provider."
-                    : "With your current settings your content reaches "
+                    : "With your current settings your content can be sent to "
                         + PrivacyWorkflowSummary.formattedList(summary.activeRecipients) + "."
             )
             .font(.caption)

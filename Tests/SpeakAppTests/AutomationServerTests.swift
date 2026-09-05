@@ -60,7 +60,9 @@ final class AutomationServerTests: XCTestCase {
 
     func testCommandFailure_isReplayedAndTheNextRequestRecovers() async throws {
         self.handler.responseError = AutomationError(code: .transcriptionFailed, message: "Fixture provider failure")
-        let request = AutomationRequest(id: "req-failure", command: .transcribeFile)
+        let fixture = self.directory.appendingPathComponent("provider-input.wav")
+        try Data([0x00]).write(to: fixture)
+        let request = AutomationRequest(id: "req-failure", command: .transcribeFile, path: fixture.path)
 
         let failed = try await self.sendWithProductionClient(request)
         XCTAssertFalse(failed.ok)
@@ -71,7 +73,7 @@ final class AutomationServerTests: XCTestCase {
         XCTAssertEqual(replayed, failed, "Retrying a failed command must preserve its original outcome")
 
         let recovered = try await self.sendWithProductionClient(
-            AutomationRequest(id: "req-recovered", command: .transcribeFile)
+            AutomationRequest(id: "req-recovered", command: .transcribeFile, path: fixture.path)
         )
         XCTAssertTrue(recovered.ok, "A prior failure must not poison the listener or its command queue")
         XCTAssertEqual(recovered.result?.text, "handled-transcribe_file")

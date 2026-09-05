@@ -20,7 +20,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .elevenlabs: return "ElevenLabs"
     case .openai: return "OpenAI"
     case .azure: return "Azure Cognitive Services"
-    case .deepgram: return "Deepgram Aura"
+    case .deepgram: return "Deepgram"
     case .soniox: return "Soniox"
     case .cartesia: return "Cartesia Sonic"
     case .system: return "macOS System"
@@ -479,16 +479,16 @@ struct VoiceCatalog {
     ),
   ]
 
-  // Both platform pickers project from the canonical SpeakCore Deepgram catalogue.
-  static let deepgramVoices: [TTSVoice] = DeepgramTTSCatalog.voices.map { voice in
-    TTSVoice(
-      id: voice.providerVoiceID,
-      name: "\(voice.name) · \(voice.model.displayName)",
-      provider: .deepgram,
-      traits: deepgramTraits(for: voice),
-      previewURL: nil
-    )
-  }
+    // Both platform pickers project from the canonical SpeakCore Deepgram catalogue.
+    static let deepgramVoices: [TTSVoice] = DeepgramSpeechCatalog.voices.map { voice in
+        TTSVoice(
+            id: voice.providerVoiceID,
+            name: "\(voice.name) · \(voice.model.displayName)",
+            provider: .deepgram,
+            traits: deepgramTraits(for: voice),
+            previewURL: nil
+        )
+    }
 
   // Both platform pickers project from the canonical SpeakCore Soniox catalogue.
   static let sonioxVoices: [TTSVoice] = SonioxTTSCatalog.voices.map { voice in
@@ -549,7 +549,7 @@ struct VoiceCatalog {
     return legacyMappings[id] ?? id
   }
 
-  private static func deepgramTraits(for voice: DeepgramTTSVoice) -> [TTSVoice.VoiceTrait] {
+  private static func deepgramTraits(for voice: DeepgramSpeechCatalog.Voice) -> [TTSVoice.VoiceTrait] {
     let gender: TTSVoice.VoiceTrait = voice.gender == .female ? .female : .male
     return [gender, deepgramAccent(voice.accent), deepgramStyle(voice.style), .lowLatency]
   }

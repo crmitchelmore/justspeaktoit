@@ -25,6 +25,10 @@ extension SettingsView {
         localTranscriptionModelsCard
       }
 
+      if !settings.recoveredTranscriptionKeywords.isEmpty {
+        transcriptionKeywordRecoveryCard
+      }
+
       // 3. Options that depend on the chosen model.
       if isRemoteStreamingTranscriptionSelected {
         processingSpeedCard

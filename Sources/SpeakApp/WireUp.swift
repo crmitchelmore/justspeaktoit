@@ -613,7 +613,7 @@ enum WireUp {
   }
 
   // MARK: - Service Configuration
-
+  // swiftlint:disable:next function_body_length
   private static func configureServices(
     environment: AppEnvironment,
     settings: AppSettings,

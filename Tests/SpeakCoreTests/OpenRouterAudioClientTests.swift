@@ -81,7 +81,11 @@ final class OpenRouterAudioClientTests: XCTestCase {
         XCTAssertEqual(result.audioURL.pathExtension, "mp3")
         XCTAssertEqual(try Data(contentsOf: result.audioURL), mp3)
         XCTAssertNil(result.cost)
-        XCTAssertEqual(try files(), [result.audioURL])
+        // macOS temporary directories can be returned through the /var → /private/var symlink.
+        XCTAssertEqual(
+            try files().map { $0.resolvingSymlinksInPath() },
+            [result.audioURL.resolvingSymlinksInPath()]
+        )
     }
 
     func testSpeech_ForwardsExplicitVoiceAndSpeed() async throws {

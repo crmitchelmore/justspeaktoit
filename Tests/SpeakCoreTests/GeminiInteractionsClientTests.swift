@@ -260,7 +260,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
     func testPollingCadenceAndOverallDeadlineAreBounded() async throws {
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        for interval in [0.0, -1.0, 100.0] {
+        for interval in [0.0, -1.0, 100.0, .greatestFiniteMagnitude] {
             let recorder = GeminiRequestLog()
             GeminiMockURLProtocol.requestHandler = { request in
                 let url = try XCTUnwrap(request.url)

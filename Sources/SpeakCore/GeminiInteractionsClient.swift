@@ -255,7 +255,9 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
             group.addTask {
                 try await self.pollUntilActive(
                     at: statusURL, apiKey: apiKey, uri: uri,
-                    interval: interval, deadline: deadline, clock: clock
+                    // Bound before constructing Duration: even a finite Double
+                    // can overflow its integer representation and trap.
+                    interval: min(interval, max(0.01, timeout)), deadline: deadline, clock: clock
                 )
             }
             defer { group.cancelAll() }

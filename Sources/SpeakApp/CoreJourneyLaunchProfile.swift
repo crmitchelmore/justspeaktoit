@@ -9,6 +9,7 @@ import SpeakHotKeys
 @MainActor
 final class CoreJourneyLaunchProfile {
     nonisolated static let environmentKey = "SPEAK_CORE_JOURNEY_PROFILE"
+    nonisolated static let directoryKey = "SPEAK_CORE_JOURNEY_DIRECTORY"
     nonisolated static let batchJourneyKey = "SPEAK_CORE_JOURNEY_BATCH"
     nonisolated static let hotKeyProbeKey = "SPEAK_CORE_JOURNEY_HOTKEY_PROBE"
 
@@ -23,10 +24,33 @@ final class CoreJourneyLaunchProfile {
         }
         return CoreJourneyLaunchProfile(
             identifier: identifier,
+            temporaryDirectory: launchDirectory(for: identifier).deletingLastPathComponent(),
             probesHotKey: ProcessInfo.processInfo.environment[hotKeyProbeKey] == "1",
             runsBatchJourney: ProcessInfo.processInfo.environment[batchJourneyKey] == "1"
         )
     }()
+
+    /// XCTest and its launched app may have different process-specific TMPDIRs.
+    /// An explicit shared path is restricted to this launch's UUID under /tmp.
+    nonisolated static func launchDirectory(for identifier: UUID) -> URL {
+        guard let path = ProcessInfo.processInfo.environment[directoryKey] else {
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent("com.justspeaktoit.tests.core-journey.\(identifier.uuidString)")
+        }
+        guard let directory = validatedSharedDirectory(path, identifier: identifier) else {
+            preconditionFailure("SPEAK_CORE_JOURNEY_DIRECTORY must be the UUID-scoped directory under /tmp")
+        }
+        return directory
+    }
+
+    nonisolated static func validatedSharedDirectory(_ path: String, identifier: UUID) -> URL? {
+        guard path.hasPrefix("/") else { return nil }
+        let directory = URL(fileURLWithPath: path, isDirectory: true).resolvingSymlinksInPath()
+        let expected = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .appendingPathComponent("com.justspeaktoit.tests.core-journey.\(identifier.uuidString)", isDirectory: true)
+        return directory == expected ? directory : nil
+    }
 
     let defaults: UserDefaults
     let settings: AppSettings

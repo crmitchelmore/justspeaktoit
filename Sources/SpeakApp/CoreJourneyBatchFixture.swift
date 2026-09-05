@@ -150,8 +150,7 @@ private final class CoreJourneyBatchHTTPDiagnostics: @unchecked Sendable {
               let identifier = UUID(uuidString: rawID) else {
             preconditionFailure("Batch HTTP fixture requires an isolated launch profile")
         }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("com.justspeaktoit.tests.core-journey.\(identifier.uuidString)")
+        let directory = CoreJourneyLaunchProfile.launchDirectory(for: identifier)
         let payload = ["acceptedRequests": acceptedRequests, "rejectedRequests": rejectedRequests]
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

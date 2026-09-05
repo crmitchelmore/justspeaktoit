@@ -25,12 +25,13 @@ final class CoreJourneyHotKeyUITests: XCTestCase {
     func testSupportedGlobalChord_reachesBackgroundSpeakThroughCarbonTwice() throws {
         let identifier = UUID()
         let suiteName = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
+        let directory = URL(fileURLWithPath: "/tmp", isDirectory: true).appendingPathComponent(suiteName)
         let diagnosticsURL = directory.appendingPathComponent("hotkey-probe.json")
         let app = XCUIApplication(bundleIdentifier: "com.justspeaktoit.mac")
         let fixtureBundleID = "com.justspeaktoit.core-journey-fixture"
         let fixture = XCUIApplication(bundleIdentifier: fixtureBundleID)
         app.launchEnvironment["SPEAK_CORE_JOURNEY_PROFILE"] = identifier.uuidString
+        app.launchEnvironment["SPEAK_CORE_JOURNEY_DIRECTORY"] = directory.path
         app.launchEnvironment["SPEAK_CORE_JOURNEY_HOTKEY_PROBE"] = "1"
         app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
         registerCleanup(app: app, fixture: fixture, suiteName: suiteName, directory: directory)

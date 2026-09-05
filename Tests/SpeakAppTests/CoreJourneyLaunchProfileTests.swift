@@ -5,6 +5,17 @@ import XCTest
 
 @MainActor
 final class CoreJourneyLaunchProfileTests: XCTestCase {
+    func testSharedDirectory_requiresMatchingUUIDUnderSystemTemporaryRoot() {
+        let identifier = UUID()
+        let name = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
+        let expected = URL(fileURLWithPath: "/tmp/\(name)", isDirectory: true).resolvingSymlinksInPath()
+        XCTAssertEqual(CoreJourneyLaunchProfile.validatedSharedDirectory("/tmp/\(name)", identifier: identifier), expected)
+        XCTAssertEqual(CoreJourneyLaunchProfile.validatedSharedDirectory(expected.path, identifier: identifier), expected)
+        for path in ["/tmp", name, "/Users/Shared/\(name)", "/tmp/another-launch", "/tmp/\(name)/nested"] {
+            XCTAssertNil(CoreJourneyLaunchProfile.validatedSharedDirectory(path, identifier: identifier), path)
+        }
+    }
+
     func testProfile_disablesCaptureAndExternalActionsWithTypedDefaults() {
         let profile = makeProfile()
 

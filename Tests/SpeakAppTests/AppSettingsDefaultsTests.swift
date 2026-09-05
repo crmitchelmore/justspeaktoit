@@ -65,6 +65,153 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(settings.assemblyAIKeyterms, "Muse Voice")
     }
 
+    @MainActor
+    func testTranscriptionKeywords_preserveBothConflictingListsOnce() {
+        defaults.set("Muse, JustSpeakToIt", forKey: "transcriptionKeywords")
+        defaults.set(" Deepgram, Muse , Gladia ", forKey: "assemblyAIKeyterms")
+
+        let settings = AppSettings(defaults: defaults)
+        let expected = "Muse, JustSpeakToIt, Deepgram, Gladia"
+        XCTAssertEqual(settings.transcriptionKeywords, expected)
+        XCTAssertEqual(settings.assemblyAIKeyterms, expected)
+        XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), expected)
+        XCTAssertEqual(defaults.string(forKey: "assemblyAIKeyterms"), expected)
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, expected)
+
+        // Deliberate edits and clearing after migration must survive relaunch.
+        settings.transcriptionKeywords = "Muse"
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "Muse")
+        settings.assemblyAIKeyterms = ""
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "")
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_whitespaceCanonicalValuePreservesLegacyWords() {
+        defaults.set(" \n\t", forKey: "transcriptionKeywords")
+        defaults.set("Muse Voice", forKey: "assemblyAIKeyterms")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.transcriptionKeywords, "Muse Voice")
+        XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "Muse Voice")
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_honourLegacyOnlyEditsAfterMigration() {
+        defaults.set("Original", forKey: "assemblyAIKeyterms")
+        _ = AppSettings(defaults: defaults)
+
+        // An old macOS build only knows this key. Its edit and subsequent
+        // clear must win over the unchanged canonical mirror we created.
+        defaults.set("Replacement", forKey: "assemblyAIKeyterms")
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "Replacement")
+        defaults.set("", forKey: "assemblyAIKeyterms")
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "")
+
+        defaults.set("Canonical edit", forKey: "transcriptionKeywords")
+        XCTAssertEqual(AppSettings(defaults: defaults).assemblyAIKeyterms, "Canonical edit")
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_preserveIndependentEditsToBothMirrors() {
+        let settings = AppSettings(defaults: defaults)
+        settings.transcriptionKeywords = "Original"
+        defaults.set("Canonical edit", forKey: "transcriptionKeywords")
+        defaults.set("Legacy edit", forKey: "assemblyAIKeyterms")
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "Canonical edit, Legacy edit")
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_canonicalClearWinsIndependentLegacyEditWithRecovery() {
+        let settings = AppSettings(defaults: defaults)
+        settings.transcriptionKeywords = "Original"
+        defaults.set("", forKey: "transcriptionKeywords")
+        defaults.set("Legacy edit", forKey: "assemblyAIKeyterms")
+
+        let reloaded = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(reloaded.transcriptionKeywords, "")
+        XCTAssertEqual(reloaded.assemblyAIKeyterms, "")
+        XCTAssertEqual(defaults.string(forKey: "transcriptionKeywordsLastReconciled"), "")
+        XCTAssertEqual(reloaded.recoveredTranscriptionKeywords, ["Legacy edit"])
+        let relaunched = AppSettings(defaults: defaults)
+        XCTAssertEqual(relaunched.transcriptionKeywords, "")
+        XCTAssertEqual(relaunched.recoveredTranscriptionKeywords, ["Legacy edit"])
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_legacyClearWinsIndependentCanonicalEditWithRecovery() {
+        let settings = AppSettings(defaults: defaults)
+        settings.transcriptionKeywords = "Original"
+        defaults.set("Canonical edit", forKey: "transcriptionKeywords")
+        defaults.set(" \n\t", forKey: "assemblyAIKeyterms")
+
+        let reloaded = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(reloaded.transcriptionKeywords, "")
+        XCTAssertEqual(reloaded.assemblyAIKeyterms, "")
+        XCTAssertEqual(reloaded.recoveredTranscriptionKeywords, ["Canonical edit"])
+        XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "")
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_firstMigrationDoesNotTreatAnEmptyMirrorAsAConflictingClear() {
+        defaults.set("", forKey: "transcriptionKeywords")
+        defaults.set("Legacy edit", forKey: "assemblyAIKeyterms")
+
+        let settings = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.transcriptionKeywords, "Legacy edit")
+        XCTAssertTrue(settings.recoveredTranscriptionKeywords.isEmpty)
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_unchangedMirrorDoesNotBecomeARecoveryConflict() {
+        let settings = AppSettings(defaults: defaults)
+        settings.transcriptionKeywords = "Original"
+        defaults.set("", forKey: "assemblyAIKeyterms")
+
+        let reloaded = AppSettings(defaults: defaults)
+
+        XCTAssertEqual(reloaded.transcriptionKeywords, "")
+        XCTAssertTrue(reloaded.recoveredTranscriptionKeywords.isEmpty)
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_recoveryPreservesDistinctConflictsAndMergesWithCurrentEdits() {
+        for competingEdit in ["Legacy edit", "Second edit", "Legacy edit"] {
+            let settings = AppSettings(defaults: defaults)
+            settings.transcriptionKeywords = "Original"
+            defaults.set("", forKey: "transcriptionKeywords")
+            defaults.set(competingEdit, forKey: "assemblyAIKeyterms")
+            XCTAssertEqual(AppSettings(defaults: defaults).transcriptionKeywords, "")
+        }
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.recoveredTranscriptionKeywords, ["Legacy edit", "Second edit"])
+        settings.transcriptionKeywords = "Current edit"
+
+        settings.restoreTranscriptionKeywords("Legacy edit")
+
+        let relaunched = AppSettings(defaults: defaults)
+        XCTAssertEqual(relaunched.transcriptionKeywords, "Current edit, Legacy edit")
+        XCTAssertEqual(relaunched.assemblyAIKeyterms, "Current edit, Legacy edit")
+        XCTAssertEqual(relaunched.recoveredTranscriptionKeywords, ["Second edit"])
+    }
+
+    @MainActor
+    func testTranscriptionKeywords_discardingRecoveryDoesNotReactivateWords() {
+        let settings = AppSettings(defaults: defaults)
+        settings.transcriptionKeywords = "Original"
+        defaults.set("", forKey: "transcriptionKeywords")
+        defaults.set("Legacy edit", forKey: "assemblyAIKeyterms")
+        let reloaded = AppSettings(defaults: defaults)
+
+        reloaded.discardRecoveredTranscriptionKeywords("Legacy edit")
+
+        let relaunched = AppSettings(defaults: defaults)
+        XCTAssertEqual(relaunched.transcriptionKeywords, "")
+        XCTAssertTrue(relaunched.recoveredTranscriptionKeywords.isEmpty)
+    }
+
     // MARK: - Core Settings
 
     @MainActor

@@ -196,6 +196,7 @@ public enum ModelCredentialResolver {
     )
 
     private static let directBatchProviderIdentifiers: Set<String> = [
+        "cartesia",
         "assemblyai",
         "deepgram",
         "elevenlabs",

@@ -209,9 +209,11 @@ public struct ConfigTransfer: Equatable, Sendable {
 ///
 /// Uses Crockford Base32, whose alphabet omits `I`, `L`, `O` and `U`, so the
 /// characters a user is most likely to mistype have a single defined meaning
-/// (`I`/`l` → `1`, `O` → `0`). Eight characters give 40 bits of entropy, which
-/// combined with PBKDF2 stretching and the 10-minute expiry keeps an offline
-/// attack on a captured QR code impractical.
+/// (`I`/`l` → `1`, `O` → `0`). Eight characters give 40 bits of entropy, and
+/// PBKDF2 stretching slows a brute-force attempt, but neither prevents offline
+/// decryption once both factors have been captured. The source UI therefore
+/// shows the code only after the QR has left the screen
+/// (see `ConfigTransferPresentation`).
 public enum ConfigTransferCode {
     static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
     public static let length = 8
@@ -384,7 +386,7 @@ public final class ConfigTransferManager: Sendable {
     // MARK: - Export
 
     /// Builds an encrypted QR payload together with the one-time code that
-    /// unlocks it. The exporting device displays the code beside the QR; it is
+    /// unlocks it. The exporting device reveals the code after removing the QR; it is
     /// never encoded into the QR, so scanning the image alone reveals nothing.
     public func makeTransfer(
         secrets: [String: String],
@@ -715,6 +717,12 @@ extension ConfigTransferManager {
         for (key, value) in payload.settings {
             let localKey = key == "selectedModel" ? liveModelDefaultsKey : key
             defaults.set(value, forKey: localKey)
+            if key == Self.transcriptionKeywordsKey {
+                // An import is an intentional write, even when its text equals
+                // an earlier migration. Keep the legacy macOS mirror in sync.
+                defaults.set(value, forKey: "assemblyAIKeyterms")
+                defaults.set(value, forKey: "transcriptionKeywordsLastReconciled")
+            }
         }
     }
 

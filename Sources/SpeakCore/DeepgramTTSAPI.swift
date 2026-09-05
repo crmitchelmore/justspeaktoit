@@ -23,6 +23,7 @@ public enum DeepgramTTSAPIError: Error, Sendable, Equatable {
 public struct DeepgramTTSAPI: Sendable {
     /// Synthesis endpoint; callers append `model` and format query items.
     public static let speakEndpoint = URL(string: "https://api.deepgram.com/v1/speak")!
+    static let fluxSpeakEndpoint = URL(string: "https://api.deepgram.com/v2/speak")!
     /// Cheap authenticated endpoint used to validate API keys.
     public static let projectsEndpoint = URL(string: "https://api.deepgram.com/v1/projects")!
     /// Deepgram Aura pricing: $0.0135 per 1000 characters.
@@ -34,7 +35,7 @@ public struct DeepgramTTSAPI: Sendable {
         self.session = session
     }
 
-    /// POSTs `text` to `/v1/speak` and returns the synthesized audio bytes.
+    /// POSTs `text` to `/v2/speak` for Flux voices, or `/v1/speak` for Aura, and returns the synthesized audio bytes.
     ///
     /// - Parameters:
     ///   - text: Text to synthesize.
@@ -46,7 +47,9 @@ public struct DeepgramTTSAPI: Sendable {
         apiKey: String,
         queryItems: [URLQueryItem]
     ) async throws -> Data {
-        var components = URLComponents(url: Self.speakEndpoint, resolvingAgainstBaseURL: false)!
+        let model = queryItems.first { $0.name == "model" }?.value ?? ""
+        let endpoint = model.hasPrefix("flux-") ? Self.fluxSpeakEndpoint : Self.speakEndpoint
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = queryItems
         guard let url = components.url else {
             throw DeepgramTTSAPIError.invalidURL

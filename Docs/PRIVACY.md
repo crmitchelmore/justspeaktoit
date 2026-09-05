@@ -180,10 +180,30 @@ Speak to It does not set a Sentry user name or email address. Diagnostic data is
 not linked to a known identity and is not used for advertising or cross-app
 tracking.
 
+## Configuration transfer captures
+
+On both macOS and iOS, the source first displays only the encrypted QR. After
+scanning on the receiver, choose **I’ve scanned the QR** on the source. The QR is
+removed before the unlock code appears, with transition animations disabled.
+There is no back step for the same transfer; regenerating creates fresh encrypted
+material and a fresh code. Neither source UI offers a combined share sheet.
+
+This prevents a single screenshot or photograph of one step from collecting both
+factors. It does **not** protect a recording, screen share, or separate photographs
+of both steps. Keep screen sharing and recording off during transfer.
+
+New encrypted transfers authenticate the creation timestamp. The receiver
+requires that timestamp to differ from its own clock by less than ten minutes
+in either direction. Clock skew can reject a fresh transfer or extend its apparent
+real-time lifetime. Legacy imports instead check an unauthenticated payload
+timestamp and do not provide the encrypted format’s security guarantees. These
+client-side time checks do not prevent offline decryption after both factors
+have been captured.
+
 ## Questions?
 
 For privacy questions, contact: [hello@justspeaktoit.com](mailto:hello@justspeaktoit.com)
 
 ---
 
-*Last updated: August 2026*
+*Last updated: September 2026*

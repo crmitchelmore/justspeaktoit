@@ -116,7 +116,7 @@ public struct OpenClawSettingsView: View {
 
                     if settings.ttsProvider == .deepgram {
                         Picker("Voice", selection: $settings.ttsVoice) {
-                            ForEach(DeepgramTTSCatalog.voices(forModelID: settings.ttsModel)) { voice in
+                            ForEach(DeepgramSpeechCatalog.voices(forModelID: settings.ttsModel)) { voice in
                                 voiceLabel(voice.displayName, credentialID: "deepgram/\(voice.id)")
                                     .tag(voice.id)
                             }
@@ -126,7 +126,7 @@ public struct OpenClawSettingsView: View {
                         }
 
                         Picker("Model", selection: $settings.ttsModel) {
-                            ForEach(DeepgramTTSCatalog.models) { model in
+                            ForEach(DeepgramSpeechCatalog.models) { model in
                                 voiceLabel(model.displayName, credentialID: "deepgram/\(model.id)")
                                     .tag(model.id)
                             }

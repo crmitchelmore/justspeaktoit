@@ -123,6 +123,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case appleSpeechAnalyzer
     case openAI
     case metaMuse
+    case cartesia
     /// Google's own Interactions API, through the shared
     /// `GeminiInteractionsClient`. Matched on the direct-batch identifiers
     /// only: the `google/gemini-2.0-flash-*` catalogue entries share the
@@ -134,6 +135,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         if AppleLocalModels.isSpeechAnalyzerModel(model) { return .appleSpeechAnalyzer }
         if AppSettings.openAIBatchModelIDs.contains(model) { return .openAI }
+        if model == CartesiaBatchClient.catalogID { return .cartesia }
         if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
         return .openRouter
@@ -163,6 +165,12 @@ private struct IOSBatchTranscriptionClient {
             return try await transcribeWithOpenAI(
                 at: url,
                 model: model,
+                language: language,
+                apiKey: try requireAPIKey()
+            )
+        case .cartesia:
+            return try await transcribeWithCartesia(
+                at: url,
                 language: language,
                 apiKey: try requireAPIKey()
             )
@@ -274,6 +282,33 @@ private struct IOSBatchTranscriptionClient {
         }
     }
 
+    /// Ink Whisper through the shared `CartesiaBatchClient`. Errors are mapped
+    /// onto the same vocabulary as the sibling routes so the keyboard and the
+    /// app show the provider name, and a silent recording is reported instead
+    /// of inserting nothing.
+    private func transcribeWithCartesia(
+        at url: URL,
+        language: String?,
+        apiKey: String
+    ) async throws -> TranscriptionResult {
+        let result: TranscriptionResult
+        do {
+            result = try await CartesiaBatchClient(session: session).transcribeFile(
+                at: url, apiKey: apiKey, language: language
+            )
+        } catch TranscriptionProviderError.apiKeyMissing {
+            throw IOSBatchTranscriptionError.apiKeyMissing
+        } catch TranscriptionProviderError.invalidResponse {
+            throw IOSBatchTranscriptionError.invalidResponse
+        } catch let TranscriptionProviderError.httpError(statusCode, body) {
+            throw IOSBatchTranscriptionError.httpError("Cartesia", statusCode, body)
+        }
+        guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw IOSBatchTranscriptionError.emptyTranscript
+        }
+        return result
+    }
+
     private func transcribeWithOpenRouter(
         at url: URL,
         model: String,
@@ -336,27 +371,6 @@ private struct OpenAIResponse: Decodable {
 private struct OpenAIResponseSegment: Decodable {
     let text: String
     let speaker: String?
-}
-
-public enum IOSBatchTranscriptionError: LocalizedError {
-    case apiKeyMissing
-    case missingRecording
-    case audioTooLarge
-    case invalidResponse
-    case emptyTranscript
-    case httpError(String, Int, String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .apiKeyMissing: return "The selected batch model needs an API key."
-        case .missingRecording: return "The audio recording could not be saved."
-        case .audioTooLarge: return "This recording is too large for OpenRouter's 50 MB upload limit."
-        case .invalidResponse: return "The transcription service returned an invalid response."
-        case .emptyTranscript: return "The transcription service returned an empty transcript."
-        case .httpError(let service, let status, let body):
-            return "\(service) returned HTTP \(status): \(body)"
-        }
-    }
 }
 
 private extension Data {

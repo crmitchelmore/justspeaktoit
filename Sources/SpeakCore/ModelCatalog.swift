@@ -114,6 +114,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     ]
 
     public static let batchTranscription: [Option] = appleBatchTranscriptionOptions + [
+        Option(
+            id: CartesiaBatchClient.catalogID, displayName: "Cartesia Ink Whisper (Batch)",
+            description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",
+            estimatedLatencyMs: nil, latencyTier: .medium),
         // Dedicated transcription providers (OpenAI, Rev.ai, etc.)
         Option(
             id: OpenAITranscriptionModels.gptTranscribeCatalogID,

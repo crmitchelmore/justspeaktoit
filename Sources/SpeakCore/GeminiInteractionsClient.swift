@@ -92,13 +92,18 @@ public struct GeminiInteractionsClient: Sendable {
         mimeType: String,
         apiKey: String
     ) async throws -> GeminiAudioSource {
-        let audioData = try Data(contentsOf: url)
-        guard audioData.count > self.inlineAudioByteLimit else {
-            return .inline(audioData)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let fileSize = attributes[.size] as? NSNumber else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        let byteCount = fileSize.int64Value
+        guard byteCount > self.inlineAudioByteLimit else {
+            return .inline(try Data(contentsOf: url))
         }
         return .fileURI(
             try await self.uploadFile(
-                data: audioData,
+                at: url,
+                byteCount: byteCount,
                 mimeType: mimeType,
                 apiKey: apiKey,
                 displayName: url.lastPathComponent
@@ -127,7 +132,8 @@ public struct GeminiInteractionsClient: Sendable {
     /// Resumable upload used when the recording is too large to inline. Returns
     /// the `file.uri` the Interactions request references.
     private func uploadFile(
-        data: Data,
+        at url: URL,
+        byteCount: Int64,
         mimeType: String,
         apiKey: String,
         displayName: String
@@ -137,7 +143,7 @@ public struct GeminiInteractionsClient: Sendable {
         start.setValue(apiKey, forHTTPHeaderField: GeminiTranscribeModels.apiKeyHeader)
         start.setValue("resumable", forHTTPHeaderField: "X-Goog-Upload-Protocol")
         start.setValue("start", forHTTPHeaderField: "X-Goog-Upload-Command")
-        start.setValue(String(data.count), forHTTPHeaderField: "X-Goog-Upload-Header-Content-Length")
+        start.setValue(String(byteCount), forHTTPHeaderField: "X-Goog-Upload-Header-Content-Length")
         start.setValue(mimeType, forHTTPHeaderField: "X-Goog-Upload-Header-Content-Type")
         start.setValue("application/json", forHTTPHeaderField: "Content-Type")
         start.httpBody = try JSONSerialization.data(
@@ -161,12 +167,13 @@ public struct GeminiInteractionsClient: Sendable {
 
         var upload = URLRequest(url: uploadURL)
         upload.httpMethod = "POST"
-        upload.setValue(String(data.count), forHTTPHeaderField: "Content-Length")
+        upload.setValue(String(byteCount), forHTTPHeaderField: "Content-Length")
+        upload.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         upload.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
         upload.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
-        upload.httpBody = data
-
-        let (uploadBody, uploadResponse) = try await self.session.data(for: upload)
+        // URLSession reads the recording from disk as it uploads. Keeping it out
+        // of httpBody avoids retaining a full recording (and copies) in memory.
+        let (uploadBody, uploadResponse) = try await self.session.upload(for: upload, fromFile: url)
         guard let uploadHTTP = uploadResponse as? HTTPURLResponse else {
             throw TranscriptionProviderError.invalidResponse
         }

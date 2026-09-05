@@ -178,6 +178,57 @@ final class GeminiInteractionsClientTests: XCTestCase {
         )
     }
 
+    func testLargeRecordingUsesFileUploadWithItsExactLength() async throws {
+        let recorder = GeminiRequestLog()
+        let audioURL = try Self.makeTemporaryAudioFile()
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+        // A sparse file exercises the real large-file route without allocating
+        // a recording-sized Data value in either the fixture or the client.
+        let byteCount: UInt64 = 32 * 1_024 * 1_024
+        let handle = try FileHandle(forWritingTo: audioURL)
+        try handle.truncate(atOffset: byteCount)
+        try handle.close()
+
+        GeminiMockURLProtocol.requestHandler = { request in
+            let url = try XCTUnwrap(request.url)
+            _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
+            var headers: [String: String] = [:]
+            let body: String
+            switch url.path {
+            case "/upload/v1beta/files":
+                XCTAssertEqual(
+                    request.value(forHTTPHeaderField: "X-Goog-Upload-Header-Content-Length"), String(byteCount)
+                )
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-Goog-Upload-Protocol"), "resumable")
+                headers["x-goog-upload-url"] = "https://generativelanguage.googleapis.com/upload/session"
+                body = "{}"
+            case "/upload/session":
+                XCTAssertNil(request.httpBody, "The upload must not retain the recording as Data")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Length"), String(byteCount))
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-Goog-Upload-Offset"), "0")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-Goog-Upload-Command"), "upload, finalize")
+                body = #"{"file":{"name":"files/abc123","uri":"\#(Self.fileURI)","state":"ACTIVE"}}"#
+            case "/v1beta/interactions":
+                body = #"{"status":"completed","output_text":"Large recording"}"#
+            default:
+                throw URLError(.unsupportedURL)
+            }
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: url, statusCode: 200, httpVersion: nil, headerFields: headers
+            ))
+            return (response, Data(body.utf8))
+        }
+        defer { GeminiMockURLProtocol.requestHandler = nil }
+
+        let result = try await GeminiInteractionsClient(session: self.makeMockSession()).transcribeFile(
+            at: audioURL, apiKey: "k", language: nil
+        )
+        XCTAssertEqual(result.text, "Large recording")
+        let calls = await recorder.calls
+        XCTAssertEqual(calls, ["POST /upload/v1beta/files", "POST /upload/session", "POST /v1beta/interactions"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audioURL.path), "Uploading must not delete the source")
+    }
+
     func testUploadedFile_failedProcessingSurfacesAnUploadFailure() async throws {
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }

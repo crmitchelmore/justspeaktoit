@@ -69,6 +69,9 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
       selectedVoice = settings.defaultTTSVoice
       await loadAvailableVoices()
     }
+    .onChange(of: selectedVoice) { _, _ in
+        updateEstimatedCost()
+    }
     .fileImporter(
       isPresented: $isImportingFile,
       allowedContentTypes: [.plainText, .text, .utf8PlainText],

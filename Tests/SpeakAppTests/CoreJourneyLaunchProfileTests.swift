@@ -9,8 +9,12 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         let identifier = UUID()
         let name = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
         let expected = URL(fileURLWithPath: "/tmp/\(name)", isDirectory: true).resolvingSymlinksInPath()
-        XCTAssertEqual(CoreJourneyLaunchProfile.validatedSharedDirectory("/tmp/\(name)", identifier: identifier), expected)
-        XCTAssertEqual(CoreJourneyLaunchProfile.validatedSharedDirectory(expected.path, identifier: identifier), expected)
+        XCTAssertEqual(
+            CoreJourneyLaunchProfile.validatedSharedDirectory("/tmp/\(name)", identifier: identifier), expected
+        )
+        XCTAssertEqual(
+            CoreJourneyLaunchProfile.validatedSharedDirectory(expected.path, identifier: identifier), expected
+        )
         for path in ["/tmp", name, "/Users/Shared/\(name)", "/tmp/another-launch", "/tmp/\(name)/nested"] {
             XCTAssertNil(CoreJourneyLaunchProfile.validatedSharedDirectory(path, identifier: identifier), path)
         }
@@ -66,7 +70,7 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         XCTAssertTrue(profile.settings.selectedHotKey.isSupportedForGlobalMonitoring)
         XCTAssertFalse(profile.settings.selectedHotKey.isFnKey)
         XCTAssertEqual(profile.settings.selectedHotKey.displayString, "⌃⌥⇧K")
-        XCTAssertEqual(profile.settings.holdThreshold, 5)
+        XCTAssertEqual(profile.settings.holdThreshold, 20)
         XCTAssertEqual(profile.settings.doubleTapWindow, 0.1)
         let permissions = profile.bootstrapOptions().permissionsOverride
         XCTAssertEqual(permissions?.status(for: .microphone), .denied)
@@ -85,6 +89,7 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         XCTAssertFalse(profile.settings.recordingSoundsEnabled)
         XCTAssertFalse(profile.settings.silenceDetectionEnabled)
         XCTAssertEqual(profile.settings.hotKeyActivationStyle, .doubleTapToggle)
+        XCTAssertEqual(profile.settings.doubleTapWindow, 15)
         let permissions = profile.bootstrapOptions().permissionsOverride
         let actualPermissions = PermissionsManager()
         for permission in PermissionType.allCases {

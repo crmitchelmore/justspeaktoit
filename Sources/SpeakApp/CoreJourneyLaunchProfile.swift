@@ -92,7 +92,9 @@ final class CoreJourneyLaunchProfile {
         settings = AppSettings(defaults: defaults)
         if probesHotKey || runsBatchJourney {
             settings.selectedHotKey = .custom(keyCode: UInt16(kVK_ANSI_K), modifiers: [.control, .option, .shift])
-            settings.holdThreshold = 5
+            // XCTest may hold a globally consumed key for about five seconds
+            // while awaiting synthesis acknowledgement from the foreground app.
+            settings.holdThreshold = 20
             settings.doubleTapWindow = 0.1
         }
         if runsBatchJourney {
@@ -108,7 +110,8 @@ final class CoreJourneyLaunchProfile {
             settings.voiceCommandsEnabled = false
             settings.postRecordingTailDuration = 0
             settings.historyFlushInterval = 0.2
-            settings.doubleTapWindow = 4
+            // Consecutive XCUI typeKey calls can be ten seconds apart on macOS.
+            settings.doubleTapWindow = 15
         }
     }
 

@@ -77,6 +77,13 @@ The batch variant described below uses genuine system permission status; the boo
 typed opt-outs and per-launch settings/storage boundaries; native CI execution
 is required to validate the launched-app test itself.
 
+Launched-app tests also pass `SPEAK_CORE_JOURNEY_DIRECTORY` explicitly because
+XCTest and its child app can have different process-specific temporary roots.
+The shared directory must be the matching `com.justspeaktoit.tests.core-journey.<UUID>`
+directly under canonical `/tmp`; the Debug resolver rejects other paths. Profile
+state, hotkey evidence and HTTP diagnostics use that same directory, and teardown
+attaches the evidence before removing it.
+
 ### Native global-hotkey prerequisite
 
 `CoreJourneyHotKeyUITests` opts into `SPEAK_CORE_JOURNEY_HOTKEY_PROBE=1`

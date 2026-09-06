@@ -211,7 +211,7 @@ jobs:
 
       - name: Test Speak bootstrap, global hotkey, and launched fixture
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p .artifacts/core-journey-fixture-ui
           xcodebuild test \
             -workspace "Just Speak to It.xcworkspace" \

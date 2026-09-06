@@ -59,12 +59,12 @@ final class CoreJourneyBatchUITests: XCTestCase {
         }
         XCTAssertEqual(target.value as? String, initialField)
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), initialClipboard)
-        // Wait out the configured four-second double-tap window so the stop is
+        // Wait out the configured fifteen-second double-tap window so the stop is
         // a distinct single tap. This is a gesture timing assertion, not a retry.
         waitForSnapshot(at: diagnosticsURL, message: "Recording must survive until the stop gesture") {
             guard let lastEvent = $0.events.last else { return false }
             return $0.states.last == "recording"
-                && ProcessInfo.processInfo.systemUptime - lastEvent.uptime > 4.2
+                && ProcessInfo.processInfo.systemUptime - lastEvent.uptime > 15.2
         }
         XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, fixtureBundleID)
         fixture.typeKey("k", modifierFlags: [.control, .option, .shift])
@@ -157,7 +157,7 @@ final class CoreJourneyBatchUITests: XCTestCase {
             return matches(snapshot)
         }
         XCTAssertEqual(XCTWaiter.wait(
-            for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 15
+            for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 30
         ), .completed, message)
     }
 

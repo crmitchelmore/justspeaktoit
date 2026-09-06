@@ -8,7 +8,7 @@ import XCTest
 
 @MainActor
 final class OpenRouterAudioSettingsTests: XCTestCase {
-    func testDynamicTranscriptionSelectionUsesNormalBatchPreferences() {
+    func testDynamicTranscriptionSelection_UsesNormalBatchPreferences() {
         let settings = AppSettings.shared
         let original = settings.batchTranscriptionModel
         let originalMode = settings.transcriptionMode
@@ -28,7 +28,7 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
         XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: identifier), .openRouter)
     }
 
-    func testDynamicSpeechSelectionPersistsAndIsNeverReplacedByValidation() {
+    func testDynamicSpeechSelection_PersistsAndIsNeverReplacedByValidation() {
         let settings = OpenClawSettings.shared
         let originalProvider = settings.ttsProvider
         let originalModel = settings.ttsModel
@@ -55,12 +55,12 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
         XCTAssertEqual(settings.ttsProvider, .openrouter)
     }
 
-    func testSpeechSelectionWithoutVoiceKeepsProviderDefault() {
+    func testSpeechSelectionWithoutVoice_KeepsProviderDefault() {
         let selection = OpenRouterSpeechSelection(modelID: "example/default-voice")
         XCTAssertNil(OpenRouterSpeechSelection(id: selection.id)?.voice)
     }
 
-    func testOnlyDisruptiveAudioSessionEventsInterruptPlayback() {
+    func testAudioSessionEvents_OnlyDisruptiveChangesInterruptPlayback() {
         let cases: [AudioSessionCase] = [
             .init(name: AVAudioSession.interruptionNotification, key: AVAudioSessionInterruptionTypeKey,
              value: AVAudioSession.InterruptionType.began.rawValue, expected: true),
@@ -84,7 +84,7 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
         ))
     }
 
-    func testPlaybackRateRejectsNonfiniteValuesAndClampsFiniteValues() {
+    func testPlaybackRate_RejectsNonfiniteValuesAndClampsFiniteValues() {
         XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: .nan), 1)
         XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: .infinity), 1)
         XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: -.infinity), 1)
@@ -93,7 +93,7 @@ final class OpenRouterAudioSettingsTests: XCTestCase {
         XCTAssertEqual(OpenRouterIOSAudioPlayback.playbackRate(for: 10), Float(range.upperBound))
     }
 
-    func testMissingKeyAndInvalidSelectionReportActionableErrors() async throws {
+    func testMissingKeyAndInvalidSelection_ReportActionableErrors() async throws {
         let client = OpenRouterIOSVoiceOutputClient()
         do {
             try await client.speak(text: "Hello", apiKey: " ", selectionID: "", speed: 1)

@@ -86,10 +86,10 @@ final class HotKeyManager: ObservableObject {
 		}
 	}
 
-	func startMonitoring() {
-		monitoringRequested = true
-		installMonitoring(requestPermission: true)
-	}
+    func startMonitoring(requestPermission: Bool = true) {
+        monitoringRequested = true
+        installMonitoring(requestPermission: requestPermission)
+    }
 
 	private func installMonitoring(requestPermission: Bool) {
 		guard !engine.isMonitoring, localMonitor == nil else {

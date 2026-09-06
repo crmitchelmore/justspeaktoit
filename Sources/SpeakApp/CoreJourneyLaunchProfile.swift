@@ -1,12 +1,17 @@
 #if DEBUG
+import Carbon
 import Foundation
+import SpeakHotKeys
 
-/// Explicit opt-in for the launched-app bootstrap check, never a release mode.
-/// The real managers/views are built; recording and external startup work stay
-/// disabled until native capture/permission coverage is implemented separately.
+/// Explicit opt-in for isolated launched-app checks, never a release mode.
+/// The batch variant drives production recording orchestration with a prerecorded
+/// file source and HTTP fixture. Other variants leave recording disabled.
 @MainActor
 final class CoreJourneyLaunchProfile {
     nonisolated static let environmentKey = "SPEAK_CORE_JOURNEY_PROFILE"
+    nonisolated static let directoryKey = "SPEAK_CORE_JOURNEY_DIRECTORY"
+    nonisolated static let batchJourneyKey = "SPEAK_CORE_JOURNEY_BATCH"
+    nonisolated static let hotKeyProbeKey = "SPEAK_CORE_JOURNEY_HOTKEY_PROBE"
 
     nonisolated static var isRequested: Bool {
         ProcessInfo.processInfo.environment[environmentKey] != nil
@@ -17,16 +22,53 @@ final class CoreJourneyLaunchProfile {
         guard let identifier = UUID(uuidString: value) else {
             preconditionFailure("SPEAK_CORE_JOURNEY_PROFILE must contain a UUID")
         }
-        return CoreJourneyLaunchProfile(identifier: identifier)
+        return CoreJourneyLaunchProfile(
+            identifier: identifier,
+            temporaryDirectory: launchDirectory(for: identifier).deletingLastPathComponent(),
+            probesHotKey: ProcessInfo.processInfo.environment[hotKeyProbeKey] == "1",
+            runsBatchJourney: ProcessInfo.processInfo.environment[batchJourneyKey] == "1"
+        )
     }()
+
+    /// XCTest and its launched app may have different process-specific TMPDIRs.
+    /// An explicit shared path is restricted to this launch's UUID under /tmp.
+    nonisolated static func launchDirectory(for identifier: UUID) -> URL {
+        guard let path = ProcessInfo.processInfo.environment[directoryKey] else {
+            return FileManager.default.temporaryDirectory
+                .appendingPathComponent("com.justspeaktoit.tests.core-journey.\(identifier.uuidString)")
+        }
+        guard let directory = validatedSharedDirectory(path, identifier: identifier) else {
+            preconditionFailure("SPEAK_CORE_JOURNEY_DIRECTORY must be the UUID-scoped directory under /tmp")
+        }
+        return directory
+    }
+
+    nonisolated static func validatedSharedDirectory(_ path: String, identifier: UUID) -> URL? {
+        guard path.hasPrefix("/") else { return nil }
+        let directory = URL(fileURLWithPath: path, isDirectory: true).resolvingSymlinksInPath()
+        let expected = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .appendingPathComponent("com.justspeaktoit.tests.core-journey.\(identifier.uuidString)", isDirectory: true)
+        return directory == expected ? directory : nil
+    }
 
     let defaults: UserDefaults
     let settings: AppSettings
     let fileManager: FileManager
     let directory: URL
     let suiteName: String
+    let probesHotKey: Bool
+    let runsBatchJourney: Bool
+    private var hotKeyProbe: CoreJourneyHotKeyProbe?
 
-    init(identifier: UUID, temporaryDirectory: URL = FileManager.default.temporaryDirectory) {
+    init(
+        identifier: UUID,
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        probesHotKey: Bool = false,
+        runsBatchJourney: Bool = false
+    ) {
+        self.probesHotKey = probesHotKey
+        self.runsBatchJourney = runsBatchJourney
         let suiteName = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
         let directory = temporaryDirectory.appendingPathComponent(suiteName, isDirectory: true)
         guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -48,12 +90,44 @@ final class CoreJourneyLaunchProfile {
         }
         defaults.set(directory.appendingPathComponent("Recordings").path, forKey: "recordingsDirectory")
         settings = AppSettings(defaults: defaults)
+        if probesHotKey || runsBatchJourney {
+            settings.selectedHotKey = .custom(keyCode: UInt16(kVK_ANSI_K), modifiers: [.control, .option, .shift])
+            // XCTest may hold a globally consumed key for about five seconds
+            // while awaiting synthesis acknowledgement from the foreground app.
+            settings.holdThreshold = 20
+            settings.doubleTapWindow = 0.1
+        }
+        if runsBatchJourney {
+            settings.transcriptionMode = .batchRemote
+            settings.batchTranscriptionModel = CoreJourneyBatchFixture.model
+            settings.postProcessingEnabled = false
+            settings.textOutputMethod = .clipboardOnly
+            settings.restoreClipboardAfterPaste = false
+            settings.recordingSoundsEnabled = false
+            settings.silenceDetectionEnabled = false
+            settings.hotKeyActivationStyle = .doubleTapToggle
+            settings.showHUDDuringSessions = false
+            settings.voiceCommandsEnabled = false
+            settings.postRecordingTailDuration = 0
+            settings.historyFlushInterval = 0.2
+            // Consecutive XCUI typeKey calls can be ten seconds apart on macOS.
+            settings.doubleTapWindow = 15
+        }
+    }
+
+    func startHotKeyProbe(manager: HotKeyManager, main: MainManager) {
+        guard probesHotKey || runsBatchJourney else { return }
+        precondition(hotKeyProbe == nil, "Core journey hotkey probe must start once")
+        hotKeyProbe = CoreJourneyHotKeyProbe(
+            manager: manager, directory: directory, main: runsBatchJourney ? main : nil
+        )
     }
 
     func bootstrapOptions() -> WireUp.BootstrapOptions {
         WireUp.BootstrapOptions(
             settingsOverride: settings,
-            permissionsOverride: PermissionsManager(statusProvider: { _ in .denied }),
+            permissionsOverride: runsBatchJourney
+                ? PermissionsManager() : PermissionsManager(statusProvider: { _ in .denied }),
             keychainServiceOverride: suiteName,
             sweepsStagedLeftovers: false
         )

@@ -145,6 +145,7 @@ jobs:
               - 'Tests/SpeakHotKeysTests/**'
               - 'scripts/run-core-journey-e2e.sh'
               - 'scripts/run-core-journey-e2e.py'
+              - 'scripts/verify-core-journey-ui.py'
               - 'scripts/tests/test_core_journey_gate.py'
               - '.github/workflows/ci.yml'
 
@@ -208,9 +209,9 @@ jobs:
       - name: Generate macOS project
         run: tuist generate --no-open
 
-      - name: Test Speak bootstrap and launched fixture
+      - name: Test Speak bootstrap, global hotkey, and launched fixture
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p .artifacts/core-journey-fixture-ui
           xcodebuild test \
             -workspace "Just Speak to It.xcworkspace" \
@@ -219,12 +220,15 @@ jobs:
             -destination "platform=macOS" \
             -only-testing:SpeakAppUITests/LaunchUITests \
             -only-testing:SpeakAppUITests/CoreJourneyFixtureUITests \
+            -only-testing:SpeakAppUITests/CoreJourneyHotKeyUITests \
+            -only-testing:SpeakAppUITests/CoreJourneyBatchUITests \
             -resultBundlePath .artifacts/core-journey-fixture-ui/CoreJourneyFixture.xcresult \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="-" \
             DEVELOPMENT_TEAM="" \
             CODE_SIGN_STYLE=Manual \
             | tee .artifacts/core-journey-fixture-ui/xcodebuild.log
+          python3 scripts/verify-core-journey-ui.py .artifacts/core-journey-fixture-ui/xcodebuild.log
 
       - name: Upload launched-app diagnostics
         if: always()

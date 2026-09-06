@@ -130,7 +130,8 @@ extension SettingsView {
         statusIcon: isOpenRouterKeyStored ? "checkmark.seal.fill" : "key.fill",
         statusTint: .green,
         isStored: isOpenRouterKeyStored,
-        descriptionText: "Stored securely in your macOS Keychain. We only use it when calling OpenRouter.",
+        descriptionText: "Stored securely in your macOS Keychain. Shared by OpenRouter transcription, "
+          + "voice output and post-processing.",
         keyFieldLabel: "OpenRouter API Key",
         keyBinding: $newAPIKeyValue,
         onSave: saveAPIKey,
@@ -216,6 +217,7 @@ extension SettingsView {
       switch provider {
       case .elevenlabs: return .brandAccent
       case .openai: return .green
+      case .openrouter: return .indigo
       case .azure: return .brandLagoonDeep
       case .deepgram: return .brandAccentWarm
       case .soniox: return .brandLagoon
@@ -227,6 +229,7 @@ extension SettingsView {
       switch provider {
       case .elevenlabs: return "waveform.circle"
       case .openai: return "brain"
+      case .openrouter: return "waveform"
       case .azure: return "cloud"
       case .deepgram: return "bolt.circle"
       case .soniox: return "globe"
@@ -238,6 +241,7 @@ extension SettingsView {
       switch provider {
       case .elevenlabs: return "https://elevenlabs.io"
       case .openai: return "https://platform.openai.com"
+      case .openrouter: return "https://openrouter.ai"
       case .azure: return "https://azure.microsoft.com/en-us/services/cognitive-services/text-to-speech/"
       case .deepgram: return "https://deepgram.com"
       case .soniox: return "https://soniox.com"
@@ -334,6 +338,8 @@ extension SettingsView {
     )
   }
 
+  // Existing shared card accepts explicit actions for each credential state.
+  // swiftlint:disable:next function_parameter_count
   private func apiKeyCard(
     title: String,
     systemImage: String,
@@ -723,6 +729,8 @@ extension SettingsView {
       .foregroundStyle(displayColor)
   }
 
+  // This switch maps the existing provider display palette.
+  // swiftlint:disable:next cyclomatic_complexity
   private func colorFromString(_ name: String) -> Color {
     switch name.lowercased() {
     case "green": return .green

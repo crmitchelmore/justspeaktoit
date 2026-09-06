@@ -805,6 +805,7 @@ struct DashboardView: View {
     switch provider {
     case .elevenlabs: return .brandAccent
     case .openai: return .green
+    case .openrouter: return .indigo
     case .azure: return .brandLagoonDeep
     case .deepgram: return .brandAccentWarm
     case .soniox: return .brandLagoon

@@ -1,5 +1,9 @@
 # Product Analytics Plan
 
+For source implementation status and the later decisions recorded on #776,
+see the [5 September implementation audit](analytics-implementation-audit.md).
+The presence of transport code does not establish that the rollout gates below have passed.
+
 **Status:** Accepted; foundation implementation in progress
 **Scope:** The typed, vendor-neutral foundation implements the consent and payload boundary first. Vendor transport,
 production credentials, UI consent surfaces, disclosures, and event call sites remain gated by the go/no-go checklist.

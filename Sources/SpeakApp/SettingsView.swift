@@ -184,7 +184,7 @@ struct SettingsView: View {
         entry: APIKeyListEntry(
           id: "general-openrouter",
           title: "OpenRouter",
-          category: "Post-processing",
+          category: "Transcription, Voice Output & Post-processing",
           isStored: isOpenRouterKeyStored
         ),
         source: .openRouter
@@ -748,7 +748,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
             Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
-              ForEach(VoiceCatalog.allVoices) { voice in
+              ForEach(VoiceCatalog.includingSelection(settings.defaultTTSVoice, in: VoiceCatalog.allVoices)) { voice in
                 HStack {
                   Text(voice.displayName)
                   Spacer()
@@ -766,6 +766,8 @@ struct SettingsView: View {
             }
             .settingsMenuPicker()
             .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
+
+            OpenRouterSpeechPickerButton(selectedVoice: settingsBinding(\AppSettings.defaultTTSVoice))
 
             Text("Your default voice for converting text to speech")
               .font(.caption)

@@ -1009,6 +1009,12 @@ public struct SettingsView: View {
                         .accessibilityIdentifier("remoteStreamingModelPicker")
                     } else {
                         Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
+                            if let modelID = OpenRouterTranscriptionSelection.modelID(
+                                from: settings.batchTranscriptionModel
+                            ) {
+                                Text("OpenRouter · \(modelID)")
+                                    .tag(settings.batchTranscriptionModel)
+                            }
                             ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
                                 Section(group.title) {
                                     ForEach(group.options) { option in
@@ -1031,6 +1037,7 @@ public struct SettingsView: View {
                         }
                         .pickerStyle(.navigationLink)
                         .accessibilityIdentifier("remoteBatchModelPicker")
+                        IOSOpenRouterAudioSettingsLink()
                     }
 
                     if !usesInlineDensityLayout {

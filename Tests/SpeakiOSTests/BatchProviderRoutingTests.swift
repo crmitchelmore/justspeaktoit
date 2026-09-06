@@ -19,7 +19,8 @@ final class BatchProviderRoutingTests: XCTestCase {
 
         let cases = [
             (GeminiTranscribeModels.batchCatalogID, "generativelanguage.googleapis.com", "google-test-key"),
-            ("google/gemini-2.0-flash-001", "openrouter.ai", "openrouter-test-key")
+            ("google/gemini-2.0-flash-001", "openrouter.ai", "openrouter-test-key"),
+            ("openrouter/transcription/openai/gpt-transcribe", "openrouter.ai", "openrouter-test-key")
         ]
         for (model, host, key) in cases {
             let received = expectation(description: "Request reached " + host)

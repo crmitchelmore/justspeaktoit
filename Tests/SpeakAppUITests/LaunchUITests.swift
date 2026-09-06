@@ -12,11 +12,13 @@ final class LaunchUITests: XCTestCase {
     func testProductionBootstrap_survivesFixtureFocusRoundTrip() throws {
         let identifier = UUID()
         let suiteName = "com.justspeaktoit.tests.core-journey.\(identifier.uuidString)"
+        let directory = URL(fileURLWithPath: "/tmp", isDirectory: true).appendingPathComponent(suiteName)
         // This UI test target also depends on the fixture app, so Xcode's
         // inferred default application is not necessarily the production app.
         let app = XCUIApplication(bundleIdentifier: "com.justspeaktoit.mac")
         let fixture = XCUIApplication(bundleIdentifier: "com.justspeaktoit.core-journey-fixture")
         app.launchEnvironment["SPEAK_CORE_JOURNEY_PROFILE"] = identifier.uuidString
+        app.launchEnvironment["SPEAK_CORE_JOURNEY_DIRECTORY"] = directory.path
         // AppStorage reads these through UserDefaults' typed boolean accessor.
         // AppSettings' typed defaults are supplied by the DEBUG launch profile.
         app.launchArguments = ["-hasCompletedOnboarding", "YES", "-hasAnsweredAnalyticsConsent", "YES"]
@@ -64,7 +66,7 @@ final class LaunchUITests: XCTestCase {
                 application.terminate()
             }
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
+            let directory = URL(fileURLWithPath: "/tmp", isDirectory: true).appendingPathComponent(suiteName)
             try? FileManager.default.removeItem(at: directory)
         }
     }

@@ -39,7 +39,7 @@ extension TTSProvider {
       // Billed one credit per character; the shared API exposes the plan rate
       // as a character estimate.
       return CartesiaTTSAPI.estimatedCostPerThousandCharacters
-    case .system:
+    case .system, .openrouter:
       return nil
     }
   }

@@ -7,6 +7,7 @@ import NaturalLanguage
 public enum VoiceOutputProvider: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
     case deepgram
     case soniox
+    case openrouter
 
     public var id: String { rawValue }
 
@@ -14,6 +15,7 @@ public enum VoiceOutputProvider: String, CaseIterable, Codable, Hashable, Identi
         switch self {
         case .deepgram: "Deepgram"
         case .soniox: "Soniox"
+        case .openrouter: "OpenRouter"
         }
     }
 
@@ -21,6 +23,7 @@ public enum VoiceOutputProvider: String, CaseIterable, Codable, Hashable, Identi
         switch self {
         case .deepgram: "deepgram.apiKey"
         case .soniox: "soniox.apiKey"
+        case .openrouter: "openrouter.apiKey"
         }
     }
 
@@ -28,10 +31,12 @@ public enum VoiceOutputProvider: String, CaseIterable, Codable, Hashable, Identi
         switch self {
         case .deepgram: 0.5...2.0
         case .soniox: SonioxTTSAPI.speedRange
+        case .openrouter: 0.5...2.0
         }
     }
 
     public static func inferred(modelID: String?, voiceID: String?) -> VoiceOutputProvider {
+        if modelID?.hasPrefix("openrouter/speech/") == true { return .openrouter }
         if modelID?.lowercased().hasPrefix("tts-rt-") == true
             || voiceID?.lowercased().hasPrefix("soniox/") == true {
             return .soniox

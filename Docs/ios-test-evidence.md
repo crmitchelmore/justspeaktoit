@@ -28,6 +28,10 @@ stops emitting recognized module-qualified completion records, the gate fails
 closed and retains diagnostics; it does not infer success from source files or
 the test command's exit status alone.
 
+The verifier reads at most 64 MiB plus one byte from the full log. A larger log
+fails closed and produces a summary without parsing its prefix: a truncated
+transcript cannot prove that all required tests ran without failures or skips.
+
 Portable regression checks:
 
 ```sh

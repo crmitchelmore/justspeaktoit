@@ -14,11 +14,20 @@ REQUIRED_SUITES = {
     "SpeakiOSTests": ("OpenRouterAudioSettingsTests", "OpenRouterVoiceCancellationTests"),
 }
 STATUSES = ("passed", "failed", "skipped")
+MAX_LOG_BYTES = 64 * 1024 * 1024
 
 
 def counts(statuses):
     counter = collections.Counter(statuses)
     return {status: counter[status] for status in STATUSES}
+
+
+def read_log(path):
+    with path.open("rb") as log:
+        data = log.read(MAX_LOG_BYTES + 1)
+    if len(data) > MAX_LOG_BYTES:
+        raise ValueError(f"iOS test log exceeds {MAX_LOG_BYTES}-byte limit; execution evidence not parsed")
+    return data.decode("utf-8", errors="replace")
 
 
 def summarize(output, test_outcome):
@@ -73,8 +82,8 @@ def main():
     args = parser.parse_args()
     read_error = None
     try:
-        output = args.log.read_text(encoding="utf-8", errors="replace")
-    except OSError as error:
+        output = read_log(args.log)
+    except (OSError, ValueError) as error:
         output = ""
         read_error = f"Cannot read iOS test log: {error}"
     summary = summarize(output, args.test_outcome)

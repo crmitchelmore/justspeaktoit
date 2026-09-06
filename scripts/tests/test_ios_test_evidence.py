@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Exercise iOS evidence gates without an Apple toolchain."""
 
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "verify-ios-test-evidence.py"
 SPEC = importlib.util.spec_from_file_location("ios_test_evidence", SCRIPT)
@@ -125,6 +128,25 @@ class IOSCoverageTests(unittest.TestCase):
                     saved = json.loads(summary.read_text())
                     self.assertEqual(bool(saved["errors"]), code != 0)
                     self.assertNotIn("testSelection", summary.read_text(), "Summary must omit raw case/log content")
+
+    def test_cli_accepts_exact_byte_limit_but_rejects_oversize_without_parsing_prefix(self):
+        passing = passing_log().encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "ios-tests.log"
+            summary = Path(directory) / "summary.json"
+            argv = [str(SCRIPT), str(log), "--test-outcome", "success", "--output", str(summary)]
+            for extra, expected in ((b"", 0), (b"x", 1)):
+                with self.subTest(extra=extra):
+                    log.write_bytes(passing + extra)
+                    with mock.patch.object(gate, "MAX_LOG_BYTES", len(passing)), mock.patch.object(sys, "argv", argv):
+                        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                            self.assertEqual(gate.main(), expected)
+                    saved = json.loads(summary.read_text())
+                    self.assertEqual(saved["unique_cases"], 4 if expected == 0 else 0)
+                    self.assertEqual(bool(saved["errors"]), expected != 0)
+                    if extra:
+                        self.assertTrue(any("exceeds" in error for error in saved["errors"]))
+                        self.assertLess(summary.stat().st_size, 4096)
 
 
 class WorkflowEvidenceTests(unittest.TestCase):

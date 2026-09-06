@@ -34,19 +34,30 @@ REQUIRED_SUITES = (
 # 'Module.Suite.method' or 'Suite.method'. Match case completion, never a suite
 # heading or the unrelated Swift Testing runner's "0 tests passed" summary.
 CASE_RESULT = re.compile(
-    r"^Test Case '(?:-\[(?:\w+\.)?(?P<apple>\w+) [^\]]+\]"
-    r"|(?:\w+\.)?(?P<portable>\w+)\.\w+)' "
+    r"^Test Case '(?:-\[(?:(?P<apple_module>\w+)\.)?(?P<apple>\w+) (?P<apple_case>[^\]]+)\]"
+    r"|(?:(?P<portable_module>\w+)\.)?(?P<portable>\w+)\.(?P<portable_case>\w+))' "
     r"(?P<status>passed|failed|skipped)\b",
     re.MULTILINE,
 )
 
 
+def case_results(output):
+    """Yield completed XCTest cases, retaining module identity when emitted."""
+    for match in CASE_RESULT.finditer(output):
+        yield {
+            "module": match.group("apple_module") or match.group("portable_module"),
+            "suite": match.group("apple") or match.group("portable"),
+            "case": match.group("apple_case") or match.group("portable_case"),
+            "status": match.group("status"),
+        }
+
+
 def coverage_errors(output, required_suites):
     counts = {suite: collections.Counter() for suite in required_suites}
-    for match in CASE_RESULT.finditer(output):
-        suite = match.group("apple") or match.group("portable")
+    for result in case_results(output):
+        suite = result["suite"]
         if suite in counts:
-            counts[suite][match.group("status")] += 1
+            counts[suite][result["status"]] += 1
     errors = []
     for suite, results in counts.items():
         if not results["passed"]:

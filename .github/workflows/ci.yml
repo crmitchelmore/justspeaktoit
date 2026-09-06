@@ -290,6 +290,7 @@ jobs:
         run: tuist generate --no-open
 
       - name: Test iOS App and Action Button Settings
+        id: ios-tests
         # The full log is kept: `tail` only shows the closing summary, which
         # names a failed test without the assertion that failed (issue #793).
         run: |
@@ -302,8 +303,23 @@ jobs:
             -only-testing:SpeakiOSUITests \
             -resultBundlePath "$RUNNER_TEMP/SpeakiOS.xcresult" \
             -skipPackagePluginValidation \
-            -quiet \
             2>&1 | tee "$RUNNER_TEMP/ios-tests.log" | tail -50
+
+      - name: Verify iOS XCTest execution evidence
+        if: ${{ always() }}
+        run: |
+          python3 scripts/verify-ios-test-evidence.py "$RUNNER_TEMP/ios-tests.log" \
+            --test-outcome "${{ steps.ios-tests.outcome }}" \
+            --output "$RUNNER_TEMP/ios-test-summary.json"
+
+      - name: Upload iOS test execution summary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-test-summary-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-test-summary.json
+          retention-days: 7
+          if-no-files-found: error
 
       # Both diagnostics also run when the job is cancelled (a superseded push
       # cancels in-progress runs): a partial log still names the assertion

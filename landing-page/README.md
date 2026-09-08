@@ -21,6 +21,8 @@ Check desktop and mobile layouts, all three demo examples (including changing ex
 
 ## Content maintenance
 
+Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. The old `_routes.json` is deliberately excluded: it contains a `routes`/`headers` shape, but Cloudflare uses that filename for Functions `include`/`exclude` routing, not static response headers. This site has no Functions. See [Cloudflare routing](https://developers.cloudflare.com/pages/functions/routing/) and [headers](https://developers.cloudflare.com/pages/configuration/headers/).
+
 - `index.html`: content, release highlights, roadmap disclosures and download links.
 - `site.css`: responsive layout, design tokens, typography and reduced-motion support.
 - `site.js`: illustrative dictation examples; no microphone access or provider requests.
@@ -31,4 +33,4 @@ The updates area is deliberately small and static: it works without a GitHub req
 
 Roadmap entries link to the current work in issues #661 (keyboard), #657 (Watch), #655 (CLI) and #656 (MCP). Recheck their labels, comments and release/device evidence before changing statuses. Implementation or an open issue is not proof of general availability; avoid promised dates. Verify App Store availability before adding store badges or replacing the iOS release-information link.
 
-The design uses the locally available official Claude `frontend-design` skill: expressive Cabinet Grotesk typography, plum/blush/lavender, and one interactive speech-to-text composition, with quiet supporting sections.
+The design uses the locally available official Claude `frontend-design` skill: expressive Cabinet Grotesk typography, the app’s charcoal, orange and lagoon palette from `Sources/SpeakCore/BrandColors.swift`, and one interactive speech-to-text composition, with quiet supporting sections.

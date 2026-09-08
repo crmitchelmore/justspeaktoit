@@ -13,7 +13,7 @@ npm run build                   # complete deployable site in dist/
 
 Without Bun, `python3 -m http.server 3000 --directory landing-page` serves the source from the repository root. Python's server does not emulate Cloudflare's extensionless `/privacy` route or `_redirects`; use `/privacy.html` locally.
 
-Check desktop and mobile layouts, all three demo examples (including changing examples during playback), reduced motion, keyboard-operated provider/roadmap disclosures, images and the console. Verify explicit Apple Silicon/Intel links and automatic architecture selection. With JavaScript disabled, the sample and all release/roadmap content remain readable; automatic downloads default safely to the universal build.
+Check desktop and mobile layouts, full-size screenshot links, reduced motion, keyboard-operated provider/roadmap disclosures, images and the console. Verify explicit Apple Silicon/Intel links and automatic architecture selection. With JavaScript disabled, screenshots and all release/roadmap content remain readable; automatic downloads default safely to the universal build.
 
 ## Deployment
 
@@ -25,7 +25,6 @@ Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. T
 
 - `index.html`: content, release highlights, roadmap disclosures and download links.
 - `site.css`: responsive layout, design tokens, typography and reduced-motion support.
-- `site.js`: illustrative dictation examples; no microphone access or provider requests.
 - `download-architecture.js`: existing architecture detection and safe universal fallback.
 - `images/`: actual Mac and iPhone app screenshots.
 
@@ -33,4 +32,6 @@ The updates area is deliberately small and static: it works without a GitHub req
 
 Roadmap entries link to the current work in issues #661 (keyboard), #657 (Watch), #655 (CLI) and #656 (MCP). Recheck their labels, comments and release/device evidence before changing statuses. Implementation or an open issue is not proof of general availability; avoid promised dates. Verify App Store availability before adding store badges or replacing the iOS release-information link.
 
-The design uses the locally available official Claude `frontend-design` skill: expressive Cabinet Grotesk typography, the app’s charcoal, orange and lagoon palette from `Sources/SpeakCore/BrandColors.swift`, and one interactive speech-to-text composition, with quiet supporting sections.
+The design uses the locally available official Claude `frontend-design` skill: expressive Cabinet Grotesk typography, the app’s charcoal, orange and lagoon palette from `Sources/SpeakCore/BrandColors.swift`, and real native app captures, with quiet supporting sections. Screenshots open as ordinary full-size image links without requiring JavaScript. Capture provenance is recorded in `images/README.md`.
+
+All brand icons come from `scripts/generate-icon.swift`. See `Resources/Brand/README.md` for native sizes, appearance variants and regeneration. The SVG favicon is also used as the header/footer and privacy-page mark; PNG fallbacks, an Apple touch icon and a web manifest cover browser and Home Screen surfaces.

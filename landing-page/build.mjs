@@ -7,7 +7,8 @@ await mkdir(output, { recursive: true });
 // _routes.json is intentionally excluded: its legacy "routes"/"headers" shape
 // is not Cloudflare's Functions routing schema. Static cache policy is in _headers.
 for (const asset of [
-  'index.html', 'privacy.html', 'site.css', 'site.js', 'favicon.svg',
+  'index.html', 'privacy.html', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
+  'icon-192.png', 'icon-512.png', 'site.webmanifest',
   'download-architecture.js', 'images', '.well-known', '_headers', '_redirects',
 ]) {
   await cp(new URL(asset, import.meta.url), new URL(asset, output), { recursive: true });

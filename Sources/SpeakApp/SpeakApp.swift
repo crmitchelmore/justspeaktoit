@@ -277,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         NSApp.setActivationPolicy(.regular)
+        // Keep SwiftPM runs and packaged apps on the same multi-resolution artwork.
         NSApp.applicationIconImage = AppIconProvider.applicationIcon()
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)

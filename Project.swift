@@ -145,6 +145,7 @@ let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled
     ])
 
 var watchAppSettings: [String: SettingValue] = [
+    "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
 ]
@@ -351,6 +352,7 @@ let watchAppTarget: Target = .target(
         "Sources/SpeakCore/WatchRecordingToggleSerialiser.swift",
         "Sources/SpeakCore/WatchSharedContainer.swift"
     ],
+    resources: ["JustSpeakWatch/Assets.xcassets"],
     entitlements: .file(path: "JustSpeakWatch/JustSpeakWatch.entitlements"),
     dependencies: [
         .target(name: "JustSpeakWatchWidgetExtension")

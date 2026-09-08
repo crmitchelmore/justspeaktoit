@@ -23,6 +23,7 @@ const playLabel = play.querySelector('.play-label');
 const status = document.querySelector('#demo-status');
 let selected = 'message';
 let timer;
+/** Cancel any pending playback and show the currently selected example in full. */
 function finish() {
   clearTimeout(timer);
   result.textContent = examples[selected].result;

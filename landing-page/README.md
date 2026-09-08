@@ -1,59 +1,36 @@
-# JustSpeakToIt Landing Page
+# Just Speak to It website
 
-A beautiful, performant landing page for the JustSpeakToIt voice transcription app.
+Static HTML, CSS and JavaScript for [justspeaktoit.com](https://justspeaktoit.com). No framework or runtime dependencies. Typography uses Cabinet Grotesk and General Sans from Fontshare, with local fallbacks.
 
-## Development
+## Development and checks
 
-```bash
-# Install dependencies
-bun install
-
-# Start development server
-bun run dev
-# Open http://localhost:3000
+```sh
+cd landing-page
+bun run dev                     # http://localhost:3000
+npm test                        # architecture-aware download behaviour
+npm run build                   # complete deployable site in dist/
 ```
 
-## Deployment to Cloudflare Pages
+Without Bun, `python3 -m http.server 3000 --directory landing-page` serves the source from the repository root. Python's server does not emulate Cloudflare's extensionless `/privacy` route or `_redirects`; use `/privacy.html` locally.
 
-### Option 1: Direct Upload (Recommended for quick deploys)
+Check desktop and mobile layouts, all three demo examples (including changing examples during playback), reduced motion, keyboard-operated provider/roadmap disclosures, images and the console. Verify explicit Apple Silicon/Intel links and automatic architecture selection. With JavaScript disabled, the sample and all release/roadmap content remain readable; automatic downloads default safely to the universal build.
 
-1. Go to [Cloudflare Pages Dashboard](https://dash.cloudflare.com/?to=/:account/pages)
-2. Click "Create a project" → "Direct Upload"
-3. Drag and drop the `index.html` file (or the entire landing-page folder)
-4. Configure custom domain: `justspeaktoit.com`
+## Deployment
 
-### Option 2: Git Integration
+`.github/workflows/deploy-landing-page.yml` tests and builds the site, then publishes `landing-page/dist/` to the existing Cloudflare Pages project `justspeaktoit` when website changes merge to `main`. Normal repository PR/review gates apply. Cloudflare serves `privacy.html` at `/privacy`; `_redirects` preserves the Mac downloads and Sparkle feeds. `.well-known/` contains the existing Apple association and Tesla public-key files. `npm run build` copies the complete set of public assets for standalone deployments.
 
-1. Push this repo to GitHub
-2. Go to Cloudflare Pages Dashboard
-3. Click "Create a project" → "Connect to Git"
-4. Select the repository
-5. Configure build settings:
-   - **Build command:** leave empty (static site)
-   - **Build output directory:** `landing-page`
-   - **Root directory:** `landing-page`
-6. Deploy and configure custom domain
+## Content maintenance
 
-### Custom Domain Setup
+Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. The old `_routes.json` is deliberately excluded: it contains a `routes`/`headers` shape, but Cloudflare uses that filename for Functions `include`/`exclude` routing, not static response headers. This site has no Functions. See [Cloudflare routing](https://developers.cloudflare.com/pages/functions/routing/) and [headers](https://developers.cloudflare.com/pages/configuration/headers/).
 
-1. In Cloudflare Pages project settings, go to "Custom domains"
-2. Add `justspeaktoit.com`
-3. If domain is already on Cloudflare:
-   - It will auto-configure DNS
-4. If domain is elsewhere:
-   - Add CNAME record pointing to `<project>.pages.dev`
+- `index.html`: content, release highlights, roadmap disclosures and download links.
+- `site.css`: responsive layout, design tokens, typography and reduced-motion support.
+- `site.js`: illustrative dictation examples; no microphone access or provider requests.
+- `download-architecture.js`: existing architecture detection and safe universal fallback.
+- `images/`: actual Mac and iPhone app screenshots.
 
-## Files
+The updates area is deliberately small and static: it works without a GitHub request, JavaScript or API quota. Update it during a website/release editorial pass, using **published** GitHub releases (exclude drafts). The September 2026 selection is sourced from `mac-v3.0.0`, `mac-v2.72.1` and `mac-v2.71.0`. Dates and version labels link directly to those releases. Mac and iOS delivery remain separate tracks.
 
-- `index.html` - The complete landing page (single file, no build needed)
-- `serve.ts` - Bun development server
-- `wrangler.toml` - Cloudflare Pages configuration
-- `_redirects` - Routes the stable Sparkle feed URL to the latest GitHub release, then applies SPA routing
+Roadmap entries link to the current work in issues #661 (keyboard), #657 (Watch), #655 (CLI) and #656 (MCP). Recheck their labels, comments and release/device evidence before changing statuses. Implementation or an open issue is not proof of general availability; avoid promised dates. Verify App Store availability before adding store badges or replacing the iOS release-information link.
 
-## Tech Stack
-
-- Pure HTML/CSS/JS (no framework)
-- Custom fonts from Fontshare (Satoshi + General Sans)
-- CSS animations and scroll reveal effects
-- Responsive design
-- ~34KB total (uncompressed)
+The design uses the locally available official Claude `frontend-design` skill: expressive Cabinet Grotesk typography, the app’s charcoal, orange and lagoon palette from `Sources/SpeakCore/BrandColors.swift`, and one interactive speech-to-text composition, with quiet supporting sections.

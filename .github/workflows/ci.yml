@@ -17,7 +17,8 @@ concurrency:
 
 jobs:
   build-macos:
-    name: Build & Test (macOS Debug)
+    # Keep this context aligned with the required main-branch status check.
+    name: Build & Test (macOS)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:

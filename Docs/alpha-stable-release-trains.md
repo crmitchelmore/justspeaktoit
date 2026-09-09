@@ -11,6 +11,8 @@ The previous automatic Stable publisher is disabled. `Config/ReleasePipeline.jso
 keeps automatic Alpha allocation disabled until provisioning and archive/device
 verification are complete. This is an explicit commissioning gate, not a working
 production release claim. Existing Stable downloads remain available.
+The repository owner may manually dispatch a successful main SHA while this gate
+is off to commission the first Alpha; automatic allocation remains off.
 
 Apple Alpha records: iOS `6810300888`, macOS `6810302118`. Both have an external
 Public Alpha group. Existing Stable TestFlight groups remain untouched. Public

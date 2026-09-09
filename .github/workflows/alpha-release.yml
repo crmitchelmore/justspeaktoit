@@ -50,8 +50,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE: ${{ github.event.workflow_run.head_sha || inputs.source }}
           REBUILD: ${{ inputs.rebuild || false }}
+          OWNER_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner }}
         run: |
-          if ! node -e 'process.exit(require("./Config/ReleasePipeline.json").enabled ? 0 : 1)'; then
+          if ! node -e 'process.exit(require("./Config/ReleasePipeline.json").enabled || process.env.OWNER_VALIDATION === "true" ? 0 : 1)'; then
             echo 'Alpha remains in validation mode.'
             exit 0
           fi

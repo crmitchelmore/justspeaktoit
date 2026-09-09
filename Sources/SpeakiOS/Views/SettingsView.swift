@@ -1845,27 +1845,23 @@ struct HardwareTriggerSettingsView: View {
                 nativeControlSetupSection
             }
 
-            Section("Shortcuts & Automations") {
+            Section("Set Up a Shortcut") {
                 Text(
-                    "Use a shortcut for Back Tap or your existing automations. On an iPhone with an Action Button, "
-                        + "Shortcuts also works on iOS 17."
+                    "Toggle Recording requires iOS 18 or iPadOS 18 or later. Create one shortcut for the "
+                        + "options below or for your existing automations. Back Tap on a supported iPhone and "
+                        + "Apple Pencil Pro squeeze on a compatible iPad do not require an Action Button."
                 )
                     .font(.callout)
 
                 StepRow(number: 1, text: "Open the Shortcuts app and tap the + button.")
                 StepRow(
                     number: 2,
-                    text: "Search for JustSpeakToIt and choose Toggle Recording for a single-button flow. "
-                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt uses the destination "
-                        + "selected above when you stop. Use Start Recording only if you also create a separate "
-                        + "Stop Recording shortcut."
+                    text: "Search for JustSpeakToIt and add Toggle Recording as the only action. "
+                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt uses the "
+                        + "destination selected above when you stop. Use Start Recording only if you also "
+                        + "create a separate Stop Recording shortcut."
                 )
                 StepRow(number: 3, text: "Name the shortcut and tap Done.")
-                StepRow(
-                    number: 4,
-                    text: "To use it with an Action Button, open Settings → Action Button, swipe to Shortcut, "
-                        + "and choose your shortcut. Press and hold the Action Button to run it."
-                )
 
                 Button {
                     if let url = URL(string: "shortcuts://") {
@@ -1886,6 +1882,12 @@ struct HardwareTriggerSettingsView: View {
 
             Section("Other Trigger Options") {
                 BulletRow(
+                    icon: "button.programmable",
+                    title: "Action Button Shortcut",
+                    detail: "On an iPhone with an Action Button, open Settings → Action Button → Shortcut "
+                        + "and choose your saved shortcut. Press and hold the Action Button to run it."
+                )
+                BulletRow(
                     icon: "mic.fill",
                     title: "Siri",
                     detail: "Say \"Toggle Recording with JustSpeakToIt\" or \"Start Recording with JustSpeakToIt\"."
@@ -1898,8 +1900,37 @@ struct HardwareTriggerSettingsView: View {
                 BulletRow(
                     icon: "hand.tap.fill",
                     title: "Back Tap",
-                    detail: "Settings → Accessibility → Touch → Back Tap. "
-                        + "Assign your shortcut to a double or triple tap."
+                    detail: "On a supported iPhone, open Settings → Accessibility → Touch → Back Tap → "
+                        + "Double Tap or Triple Tap. Under Shortcuts, choose the shortcut saved above."
+                )
+                BulletRow(
+                    icon: "applepencil",
+                    title: "Apple Pencil Pro Squeeze",
+                    detail: "On a compatible iPad with Apple Pencil Pro, open Settings → Apple Pencil → "
+                        + "Squeeze → Shortcut and choose the shortcut saved above."
+                )
+                if let url = URL(string: "https://support.apple.com/guide/shortcuts/apdbe445a3a2/ios") {
+                    Link("Apple Pencil Pro Shortcut Setup Guide", destination: url)
+                }
+            }
+
+            Section("Try Your Shortcut") {
+                StepRow(
+                    number: 1,
+                    text: "Open JustSpeakToIt and complete initial setup and permissions. "
+                        + "The destination above is shared by hardware triggers; it is not a separate "
+                        + "setting for each gesture."
+                )
+                StepRow(
+                    number: 2,
+                    text: "For your first test, keep the screen awake and the device unlocked. "
+                        + "Run your assigned gesture, check that recording has started, then speak. "
+                        + "Opening or unlocking the app may be required."
+                )
+                StepRow(
+                    number: 3,
+                    text: "Run the same gesture again to stop with Toggle Recording, or use the "
+                        + "Live Activity stop control. Check History for the result."
                 )
             }
 

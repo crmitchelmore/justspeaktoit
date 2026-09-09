@@ -10,12 +10,9 @@ extension SettingsView {
       SettingsCard(title: "Just Speak to It", systemImage: "info.circle", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 16) {
           HStack(alignment: .top, spacing: 16) {
-            if let appIcon = NSImage(named: "AppIcon") {
-              Image(nsImage: appIcon)
-                .resizable()
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
+            Image(nsImage: AppIconProvider.applicationIcon())
+              .resizable()
+              .frame(width: 64, height: 64)
             VStack(alignment: .leading, spacing: 4) {
               Text("Just Speak to It")
                 .font(.title2.bold())
@@ -97,7 +94,9 @@ extension SettingsView {
             }
             .buttonStyle(.bordered)
 
-            Link(destination: URL(string: "https://github.com/crmitchelmore/justspeaktoit/issues/new?template=feature_request.md")!) {
+            Link(destination:
+              URL(string: "https://github.com/crmitchelmore/justspeaktoit/issues/new?template=feature_request.md")!
+            ) {
               Label("Request Feature", systemImage: "lightbulb")
             }
             .buttonStyle(.bordered)
@@ -187,8 +186,14 @@ extension SettingsView {
                 description: "Auto-update framework"
               )
             }
-            dependencyRow(name: "SwiftLint", version: "0.55.0+", url: "https://github.com/realm/SwiftLint", description: "Swift linting tool")
-            dependencyRow(name: "SwiftFormat", version: "0.53.6+", url: "https://github.com/nicklockwood/SwiftFormat", description: "Code formatting")
+            dependencyRow(
+              name: "SwiftLint", version: "0.55.0+", url: "https://github.com/realm/SwiftLint",
+              description: "Swift linting tool"
+            )
+            dependencyRow(
+              name: "SwiftFormat", version: "0.53.6+", url: "https://github.com/nicklockwood/SwiftFormat",
+              description: "Code formatting"
+            )
           }
         }
       }

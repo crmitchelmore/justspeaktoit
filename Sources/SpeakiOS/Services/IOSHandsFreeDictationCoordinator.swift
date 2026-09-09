@@ -113,6 +113,10 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     @discardableResult
     func sceneActivityChanged(isActive: Bool) -> Task<Void, Never>? {
         sceneIsActive = isActive
+        if !isActive, ownsLiveActivity {
+            activityManager.endActivity()
+            ownsLiveActivity = false
+        }
         guard !isActive, beginControlledStop(reason: .sceneInactive) else { return nil }
         let id = sessionID
         return Task { [weak self] in

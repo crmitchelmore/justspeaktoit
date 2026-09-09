@@ -73,6 +73,33 @@ final class HandsFreeCaptureFinalisationTests: XCTestCase {
         drain?.resume(returning: result(""))
     }
 
+    func testExplicitCancellation_releasesProviderWithoutWaitingForItsResult() async {
+        var drain: CheckedContinuation<TranscriptionResult, Never>?
+        var cancellations = 0
+        let started = expectation(description: "provider draining")
+        let owner = HandsFreeCaptureFinalisation(makeAssertion: {
+            BackgroundTaskAssertion(name: "test", begin: { _, _ in .init(rawValue: 42) }, end: { _ in })
+        })
+        let task = Task {
+            try await owner.run(operation: {
+                await withCheckedContinuation { continuation in
+                    drain = continuation
+                    started.fulfill()
+                }
+            }, cancelCapture: { cancellations += 1 })
+        }
+        await fulfillment(of: [started], timeout: 2)
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Explicit cancellation must not return a result")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(cancellations, 1)
+        drain?.resume(returning: result("Late words"))
+    }
+
     private func result(_ text: String) -> TranscriptionResult {
         TranscriptionResult(text: text, segments: [], confidence: nil, duration: 1,
                             modelIdentifier: "test", cost: nil, rawPayload: nil, debugInfo: nil)

@@ -54,6 +54,7 @@ final class HandsFreeCaptureFinalisation {
                 }
                 operationTask = Task { [weak self] in
                     do {
+                        try Task.checkCancellation()
                         let result = try await operation()
                         self?.complete(.success(result))
                     } catch {

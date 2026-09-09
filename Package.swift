@@ -99,7 +99,8 @@ let package = Package(
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")
-            ]
+            ],
+            resources: [.copy("Resources/AppIcon.icns")]
         ),
         .executableTarget(
             name: "SpeakHotKeysDemo",

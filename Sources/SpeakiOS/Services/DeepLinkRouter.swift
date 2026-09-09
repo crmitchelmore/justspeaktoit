@@ -40,18 +40,25 @@ public final class DeepLinkRouter: ObservableObject {
     /// Handles an incoming deep link URL. Returns `true` if handled.
     @discardableResult
     public func handle(_ url: URL) -> Bool {
-        guard url.scheme == "justspeaktoit" else { return false }
+        // Case-insensitive to match `CaptureDeepLink.parse`, which lowercases
+        // the scheme: otherwise JUSTSPEAKTOIT://start parses as a command and
+        // is then dropped here.
+        guard url.scheme?.lowercased() == CaptureDeepLink.scheme else { return false }
 
         // Capture verbs are checked first: `transcribe?action=start` is both a
         // tab link and a command, and the command is the point of it.
         if let capture = CaptureDeepLink.parse(url) {
             selectedTab = 0
             pendingConversationId = nil
+            // Latest wins. Two capture links can only race inside the cold-launch
+            // window before the scene is active, and the newer one is the better
+            // guess at what the user last asked for; queueing both would replay a
+            // superseded command seconds later.
             pendingCaptureAction = capture
             return true
         }
 
-        switch url.host {
+        switch url.host?.lowercased() {
         case "openclaw":
             selectedTab = 1
             // Check for /conversation/<id> path

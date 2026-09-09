@@ -96,16 +96,13 @@ Notes:
    - Transcript chunks are received
    - Text is automatically inserted into active macOS app using existing `LiveTextInserter`
 
-### On iOS (already built):
+### On iOS: removed
 
-1. Settings → Send to Mac → Configure
-2. Discovers Mac via Bonjour
-3. User enters pairing code from Mac
-4. Authentication succeeds → connection established
-5. During transcription:
-   - `TranscriberCoordinator` captures speech
-   - Final transcript chunks sent to Mac
-   - Mac inserts text where cursor is
+The phone half described here (Settings → Send to Mac → Configure, pair, then
+have `TranscriberCoordinator` send final chunks) never existed in the form
+written. The pairing screen was real; the sending was not — no code path ever
+called `MacConnection.sendTranscript`, and `TranscriberCoordinator` has no
+such code. The screen has been removed rather than left as a dead end.
 
 ## User Experience
 
@@ -146,27 +143,22 @@ User: Text appears in email instantly
 ✅ **All targets** - SpeakCore, SpeakiOSLib, SpeakApp  
 ✅ **Zero errors** - Clean build  
 
-## Testing Checklist
+## Testing the Mac server
 
-To test the complete flow:
+The end-to-end checklist that used to live here ("Settings → Send to Mac →
+Configure", then dictate on the phone and watch text appear on the Mac)
+described the removed iOS client and is not runnable. It has been deleted
+rather than left as a procedure nobody can follow.
 
-1. **macOS Setup**:
-   - `make run` or open in Xcode
-   - Settings → General → Enable "Send to Mac"
-   - Note the 6-digit pairing code
+What can be tested today:
 
-2. **iOS Setup** (requires Xcode):
-    - Run `tuist generate` and open `"Just Speak to It.xcworkspace"`
-   - Build and run on physical iPhone (same Wi-Fi as Mac)
-   - Settings → Send to Mac → Configure
-   - Should discover your Mac
-   - Enter pairing code
-
-3. **Test Transcription**:
-   - On Mac: Open any text app (Notes, Mail, etc.)
-   - Place cursor where you want text
-   - On iPhone: Tap microphone, speak
-   - Text should appear on Mac instantly
+- `TransportLoopbackTests` drives the shipping `MacConnection` against the
+  shipping `TransportServer` over a loopback socket and covers the handshake,
+  the pairing-code authentication, the frame ceilings and the protocol-version
+  mismatch. That is the wire protocol's real coverage.
+- On the Mac, Settings → General → Enable "Send to Mac" starts the server and
+  shows the pairing code. The `speak` automation CLI (#655) is the client that
+  exercises it in practice.
 
 ## What's next
 

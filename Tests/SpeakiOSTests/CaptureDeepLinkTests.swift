@@ -118,5 +118,34 @@ final class CaptureDeepLinkTests: XCTestCase {
         XCTAssertFalse(router.handle(URL(string: "otherapp://start")!))
         XCTAssertNil(router.pendingCaptureAction)
     }
+
+    @MainActor
+    func testRouterAcceptsTheSchemeCaseInsensitivelyLikeTheParser() {
+        // The parser lowercases the scheme, so the router must too or an
+        // uppercase link parses as a command and is then silently dropped.
+        let router = DeepLinkRouter()
+        XCTAssertTrue(router.handle(URL(string: "JUSTSPEAKTOIT://toggle")!))
+        XCTAssertEqual(router.pendingCaptureAction?.action, .toggle)
+    }
+
+    @MainActor
+    func testRouterKeepsTheLatestOfTwoQueuedCommands() {
+        // Two capture links can only race inside the cold-launch window; the
+        // newer one is what the user last asked for.
+        let router = DeepLinkRouter()
+        router.handle(URL(string: "justspeaktoit://start?destination=history")!)
+        router.handle(URL(string: "justspeaktoit://stop")!)
+
+        let pending = router.consumePendingCaptureAction()
+        XCTAssertEqual(pending?.action, .stop)
+        XCTAssertNil(pending?.destination)
+    }
+
+    @MainActor
+    func testTabLinkHostIsCaseInsensitive() {
+        let router = DeepLinkRouter()
+        XCTAssertTrue(router.handle(URL(string: "justspeaktoit://OpenClaw")!))
+        XCTAssertEqual(router.selectedTab, 1)
+    }
 }
 #endif

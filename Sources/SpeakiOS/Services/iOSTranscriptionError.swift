@@ -8,6 +8,7 @@ public enum iOSTranscriptionError: LocalizedError {
     case recognizerUnavailable
     case audioSessionFailed(Error)
     case recognitionFailed(Error)
+    case microphoneChanged
     case interrupted
     case liveActivityUnavailable
 
@@ -28,6 +29,8 @@ public enum iOSTranscriptionError: LocalizedError {
             return "Failed to configure audio: \(error.localizedDescription)"
         case .recognitionFailed(let error):
             return "Recognition failed: \(error.localizedDescription)"
+        case .microphoneChanged:
+            return "The microphone changed and recording stopped."
         case .interrupted:
             return "Transcription was interrupted (e.g., by a phone call)."
         case .liveActivityUnavailable:

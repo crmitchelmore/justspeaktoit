@@ -226,7 +226,11 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                 retainBatchRecording: false,
                 sharesLiveTranscript: false,
                 requiresLiveActivity: false,
-                keyboardProfile: profile
+                keyboardProfile: profile,
+                destination: .historyOnly,
+                onCaptureDisruption: { [weak self] in
+                    await self?.finishRecording(for: requestID)
+                }
             )
             try handoffStore.markRecording(requestID: requestID)
             observePartialTranscript(for: requestID)

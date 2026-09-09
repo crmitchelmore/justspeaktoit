@@ -112,6 +112,53 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
     }
 
     #if DEBUG && targetEnvironment(simulator)
+    func testDisruption_preservesHistoryOnlyDestinationAndKeyboardCompletionOwner() async throws {
+        let suiteName = "CaptureDisruption.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let sharedState = SharedTranscriptionState(defaults: defaults)
+        let history = iOSHistoryManager(
+            fileURL: directory.appendingPathComponent("history.json"), syncEnabled: false, userDefaults: defaults
+        )
+        let pasteboard = RecordingTestPasteboard()
+        pasteboard.string = "User clipboard"
+        let service = TranscriptionRecordingService(
+            sharedState: sharedState, historyManager: history,
+            polishClipboard: PolishClipboard(pasteboard: pasteboard, now: { 100 }, isActive: { true }),
+            hasPolishingKey: { false }, polish: { text, _, _ in text }
+        )
+        defaults.set("Saved before microphone changed", forKey: "simulatorValidationTranscript")
+        try await service.startRecording(requiresLiveActivity: false, destination: .historyOnly)
+        await service.finishCaptureAfterDisruption()
+        await service.finishCaptureAfterDisruption()
+        XCTAssertFalse(service.isRunning)
+        XCTAssertEqual(history.items.count, 1)
+        XCTAssertEqual(pasteboard.string, "User clipboard")
+
+        var keyboardResults: [String] = []
+        defaults.set("Owned keyboard transcript", forKey: "simulatorValidationTranscript")
+        try await service.startRecording(
+            sharesLiveTranscript: false, requiresLiveActivity: false, destination: .historyOnly,
+            onCaptureDisruption: { [weak service] in
+                guard let service else { return }
+                let result = await service.stopRecording(destination: .historyOnly, saveToHistory: false)
+                keyboardResults.append(result.text)
+            }
+        )
+        await service.finishCaptureAfterDisruption()
+        await service.finishCaptureAfterDisruption()
+        XCTAssertEqual(keyboardResults, ["Owned keyboard transcript"])
+        XCTAssertFalse(service.isRunning)
+        XCTAssertEqual(history.items.count, 1, "Keyboard owner controls its own history")
+        XCTAssertEqual(pasteboard.string, "User clipboard")
+        XCTAssertNotEqual(sharedState.lastCompletedTranscript, "Owned keyboard transcript")
+    }
+
     func testCancellingRecordingBPreservesRecordingAPolishAndHistory() async throws {
         let suiteName = "TranscriptionRecordingServiceTextTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

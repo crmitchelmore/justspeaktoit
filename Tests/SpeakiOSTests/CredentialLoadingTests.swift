@@ -141,13 +141,29 @@ final class CredentialLoadingTests: XCTestCase {
     func testWatchImport_unavailableCredentialsDoNotSpendRetryBudget() async throws {
         let fixture = Fixture()
         defer { fixture.cleanUp() }
-        let settings = fixture.settings(permissions: RetryPermissions())
+        try await SecureStorage(configuration: .init(service: fixture.service))
+            .storeSecret("synthetic-openai", identifier: AppSettings.openAIKeyID)
+        let permissions = RetryPermissions()
+        let settings = fixture.settings(permissions: permissions)
         settings.batchTranscriptionModel = "openai/gpt-4o-transcribe"
+        settings.autoPostProcess = false
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let pipeline = WatchCaptureImportPipeline(inboxDirectory: directory)
         pipeline.credentialSettings = settings
+        pipeline.beginBackgroundTask = { _ in .invalid }
+        var imports = 0
+        var historyIDs: [UUID] = []
+        pipeline.transcribeAudio = { _ in
+            imports += 1
+            XCTAssertEqual(settings.batchAPIKey, "synthetic-openai")
+            return TranscriptionResult(
+                text: "Recovered", segments: [], confidence: nil, duration: 1,
+                modelIdentifier: settings.batchTranscriptionModel, cost: nil, rawPayload: nil, debugInfo: nil
+            )
+        }
+        pipeline.persistHistory = { historyIDs.append($0.id); return true }
         let captureID = UUID()
         let audioURL = directory.appendingPathComponent("\(captureID).m4a")
         let audio = Data("synthetic audio must not be submitted".utf8)
@@ -155,7 +171,6 @@ final class CredentialLoadingTests: XCTestCase {
         pipeline.journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 1)
         pipeline.journal.recordAttemptFailure(captureID: captureID, message: "Earlier transcription failure")
         let job = try XCTUnwrap(pipeline.journal.pendingJobs().first)
-        XCTAssertEqual(job.attempts, 1)
         // Exercise the production runImport catch and the next pass's purge.
         // More unavailable passes than the retry limit must not retire audio.
         for _ in 0...WatchCaptureImportJournal.defaultMaximumAttempts {
@@ -165,6 +180,45 @@ final class CredentialLoadingTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: audioURL), audio)
             XCTAssertTrue(pipeline.journal.pendingAcks().isEmpty)
         }
+        XCTAssertEqual(imports, 0)
+        await permissions.allow()
+        await pipeline.processPendingImports()
+        XCTAssertEqual(imports, 1)
+        XCTAssertEqual(historyIDs, [captureID])
+        XCTAssertEqual(settings.batchTranscriptionModel, "openai/gpt-4o-transcribe")
+        XCTAssertTrue(pipeline.journal.pendingJobs().isEmpty)
+        XCTAssertEqual(pipeline.journal.pendingAcks().first?.outcome, .transcribed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path))
+        await pipeline.processPendingImports()
+        XCTAssertEqual(imports, 1)
+    }
+
+    func testWatchImport_genuinelyMissingKeyStillUsesBoundedFailurePolicy() async throws {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let permissions = RetryPermissions()
+        await permissions.allow()
+        let settings = fixture.settings(permissions: permissions)
+        settings.batchTranscriptionModel = "openai/gpt-4o-transcribe"
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pipeline = WatchCaptureImportPipeline(inboxDirectory: directory)
+        pipeline.credentialSettings = settings
+        pipeline.beginBackgroundTask = { _ in .invalid }
+        let captureID = UUID()
+        let audioURL = directory.appendingPathComponent("\(captureID).m4a")
+        try Data("synthetic audio never uploaded without a key".utf8).write(to: audioURL)
+        pipeline.journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 1)
+        for attempt in 1...5 {
+            await pipeline.processPendingImports()
+            XCTAssertEqual(pipeline.journal.pendingJobs().first?.attempts, attempt)
+            XCTAssertNil(pipeline.journal.pendingJobs().first?.nextRetryAt)
+        }
+        await pipeline.processPendingImports()
+        XCTAssertTrue(settings.credentialsAvailable)
+        XCTAssertTrue(pipeline.journal.pendingJobs().isEmpty)
+        XCTAssertEqual(pipeline.journal.pendingAcks().first?.outcome, .failed)
     }
 
     func testSharedImport_unavailableCredentialsKeepInboxAndAttemptsUntouched() async throws {

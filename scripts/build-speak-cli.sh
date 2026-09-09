@@ -12,6 +12,12 @@
 # embeds a universal one. The default is universal.
 
 set -euo pipefail
+TRAIN_SWIFT_FLAGS=()
+case "${TUIST_RELEASE_TRAIN:-stable}" in
+  alpha) TRAIN_SWIFT_FLAGS=(-Xswiftc -DALPHA) ;;
+  stable) ;;
+  *) echo "Invalid release train" >&2; exit 1 ;;
+esac
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="${1:-}"
@@ -48,15 +54,15 @@ cd "$ROOT_DIR"
 # swiftformat)") because the SwiftFormat plugin dependency is modelled once
 # per architecture (issue #759).
 echo "==> Building speak (release, arm64)"
-swift build --product speak --configuration release --arch arm64
-ARM64_BINARY="$(swift build --product speak --configuration release \
+xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch arm64
+ARM64_BINARY="$(xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release \
     --arch arm64 --show-bin-path)/speak"
 
 BINARY_PATH="$(mktemp -d)/speak"
 if [[ "$VARIANT" == "universal" ]]; then
     echo "==> Building speak (release, x86_64)"
-    swift build --product speak --configuration release --arch x86_64
-    X86_64_BINARY="$(swift build --product speak --configuration release \
+    xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch x86_64
+    X86_64_BINARY="$(xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release \
         --arch x86_64 --show-bin-path)/speak"
 
     for slice in "$ARM64_BINARY" "$X86_64_BINARY"; do

@@ -1,47 +1,25 @@
 name: Release iOS (TestFlight)
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      version:
-        description: 'Required iOS version, e.g. 2.29.2. For manual releases, check App Store Connect first.'
+      manifest:
         required: true
         type: string
-      release_notes_source_tag:
-        description: 'Required Git tag whose changes describe this iOS build, e.g. mac-v2.29.2 or ios-v0.9.1.'
-        required: true
-        type: string
-      build_number:
-        description: 'Build number (auto-increments if empty)'
-        required: false
-      include_keyboard:
-        description: 'Include the custom keyboard extension (persistent release default; disable only for build rollback)'
-        required: false
-        default: true
-        type: boolean
-      enable_direct_capture:
-        description: 'Device-matrix only: let the keyboard request microphone/Speech permission and capture directly'
-        required: false
-        default: false
-        type: boolean
 
-# Serialise runs so overlapping dispatches cannot race App Store Connect
-# portal mutation (bundle ID / capability / profile bootstrap in
-# scripts/create-ios-app-store-profile.rb). cancel-in-progress stays false:
-# a newer dispatch queues behind the in-flight release instead of aborting
-# its upload. GitHub keeps at most one queued run per group, so rapid
-# re-dispatches supersede the previously queued (not running) run.
 concurrency:
-  group: release-ios-portal
+  group: release-ios
+  queue: max
   cancel-in-progress: false
 
 env:
+  GH_TOKEN: ${{ github.token }}
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
   # The extension now ships by default, while direct capture remains an
   # independent, default-off rollout. Handoff-only builds never attempt the
   # keyboard-process microphone or Speech permission path.
-  TUIST_IOS_KEYBOARD: ${{ inputs.include_keyboard && '1' || '0' }}
-  TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: ${{ inputs.include_keyboard && inputs.enable_direct_capture && '1' || '0' }}
+  TUIST_IOS_KEYBOARD: "1"
+  TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
 
 jobs:
   build-and-upload:
@@ -51,11 +29,20 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ inputs.manifest }}
+
+      - name: Load frozen release manifest
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+        run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface ios
+
+      - name: Stamp immutable app metadata
+        run: python3 scripts/stamp-release-train.py ios
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "26.2"
 
       - name: Install Tuist
         run: brew install tuist
@@ -67,14 +54,21 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
 
+      - name: Reuse an already uploaded manifest build
+        id: preflight
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: ruby scripts/release-apple.rb upload-status "$RUNNER_TEMP/release-manifest.json" ios
+
       - name: Install iOS Signing Certificate & Profiles
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
           IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
-          IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
-          IOS_WIDGET_APPSTORE_PROFILE: ${{ secrets.IOS_WIDGET_APPSTORE_PROFILE }}
-          IOS_KEYBOARD_APPSTORE_PROFILE: ${{ secrets.IOS_KEYBOARD_APPSTORE_PROFILE }}
+          IOS_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_APPSTORE_PROFILE || secrets.IOS_APPSTORE_PROFILE }}
+          IOS_WIDGET_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_WIDGET_APPSTORE_PROFILE || secrets.IOS_WIDGET_APPSTORE_PROFILE }}
+          IOS_KEYBOARD_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_KEYBOARD_APPSTORE_PROFILE || secrets.IOS_KEYBOARD_APPSTORE_PROFILE }}
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/ios-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -100,16 +94,16 @@ jobs:
             echo -n "$IOS_APPSTORE_PROFILE" | base64 --decode -o "$APP_PROFILE_PATH"
             APP_PROFILE_UUID=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract UUID raw -)
             APP_PROFILE_NAME=$(security cms -D -i "$APP_PROFILE_PATH" | plutil -extract Name raw -)
-            echo "APP_PROFILE_UUID=$APP_PROFILE_UUID" >> $GITHUB_ENV
-            echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> $GITHUB_ENV
+            echo "APP_PROFILE_UUID=$APP_PROFILE_UUID" >> "$GITHUB_ENV"
+            echo "APP_PROFILE_NAME=$APP_PROFILE_NAME" >> "$GITHUB_ENV"
           fi
           if [ -n "$IOS_WIDGET_APPSTORE_PROFILE" ]; then
             WIDGET_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-widget-appstore.provisionprofile
             echo -n "$IOS_WIDGET_APPSTORE_PROFILE" | base64 --decode -o "$WIDGET_PROFILE_PATH"
             WIDGET_PROFILE_UUID=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract UUID raw -)
             WIDGET_PROFILE_NAME=$(security cms -D -i "$WIDGET_PROFILE_PATH" | plutil -extract Name raw -)
-            echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> $GITHUB_ENV
-            echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> $GITHUB_ENV
+            echo "WIDGET_PROFILE_UUID=$WIDGET_PROFILE_UUID" >> "$GITHUB_ENV"
+            echo "WIDGET_PROFILE_NAME=$WIDGET_PROFILE_NAME" >> "$GITHUB_ENV"
           fi
           if [ "$TUIST_IOS_KEYBOARD" = "1" ]; then
             KEYBOARD_PROFILE_PATH=~/Library/MobileDevice/Provisioning\ Profiles/ios-keyboard-appstore.provisionprofile
@@ -118,7 +112,7 @@ jobs:
             else
               APP_STORE_CONNECT_KEY_PATH=~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 \
                 ruby scripts/create-ios-app-store-profile.rb \
-                  --bundle-id com.justspeaktoit.ios.keyboard \
+                  --bundle-id "$BUNDLE_ID.keyboard" \
                   --bundle-name "JustSpeakToIt Keyboard" \
                   --capability APP_GROUPS \
                   --certificate-serial "$IOS_DISTRIBUTION_CERT_SERIAL" \
@@ -128,17 +122,22 @@ jobs:
             KEYBOARD_PROFILE_PLIST=$RUNNER_TEMP/ios-keyboard-appstore.plist
             security cms -D -i "$KEYBOARD_PROFILE_PATH" > "$KEYBOARD_PROFILE_PLIST"
             plutil -extract Entitlements xml1 -o - "$KEYBOARD_PROFILE_PLIST" \
-              | grep -Fq '<string>group.com.justspeaktoit.ios</string>' || {
+              | grep -Fq "<string>$IOS_APP_GROUP</string>" || {
               echo "::error::Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios. Associate that App Group with com.justspeaktoit.ios.keyboard in the Apple Developer portal, then rerun this workflow."
               exit 1
             }
             KEYBOARD_PROFILE_UUID=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract UUID raw -)
             KEYBOARD_PROFILE_NAME=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract Name raw -)
-            echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> $GITHUB_ENV
-            echo "KEYBOARD_PROFILE_NAME=$KEYBOARD_PROFILE_NAME" >> $GITHUB_ENV
+            echo "KEYBOARD_PROFILE_UUID=$KEYBOARD_PROFILE_UUID" >> "$GITHUB_ENV"
+            echo "KEYBOARD_PROFILE_NAME=$KEYBOARD_PROFILE_NAME" >> "$GITHUB_ENV"
           fi
 
+      - name: Validate installed profile identities
+        if: steps.preflight.outputs.skip_upload != 'true'
+        run: python3 scripts/verify-train-profiles.py ios
+
       - name: Generate Xcode Project
+        if: steps.preflight.outputs.skip_upload != 'true'
         run: |
           tuist generate --no-open
           {
@@ -149,6 +148,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       
       - name: Patch iOS Signing Settings
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           APP_PROFILE_NAME: ${{ env.APP_PROFILE_NAME }}
           WIDGET_PROFILE_NAME: ${{ env.WIDGET_PROFILE_NAME }}
@@ -204,11 +204,11 @@ jobs:
               )
               def repl(match):
                   settings = match.group("settings")
-                  if "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios.JustSpeakToItWidgetExtension;" in settings:
+                  if f"PRODUCT_BUNDLE_IDENTIFIER = {os.environ['BUNDLE_ID']}.JustSpeakToItWidgetExtension;" in settings:
                       settings = patch_release_block(settings, widget_profile)
-                  elif include_keyboard and "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios.keyboard;" in settings:
+                  elif include_keyboard and f"PRODUCT_BUNDLE_IDENTIFIER = {os.environ['BUNDLE_ID']}.keyboard;" in settings:
                       settings = patch_release_block(settings, keyboard_profile)
-                  elif "PRODUCT_BUNDLE_IDENTIFIER = com.justspeaktoit.ios;" in settings:
+                  elif f"PRODUCT_BUNDLE_IDENTIFIER = {os.environ['BUNDLE_ID']};" in settings:
                       settings = patch_release_block(settings, app_profile)
                   return "{}{}{}".format(match.group("prefix"), settings, match.group("suffix"))
               return pattern.sub(repl, text)
@@ -217,75 +217,10 @@ jobs:
           pbx_path.write_text(updated)
           PY
 
-      - name: Determine Version
-        id: version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          VERSION=$(printf '%s' "$INPUT_VERSION" | xargs)
-          if [ -z "$VERSION" ]; then
-            echo "::error::iOS release version is required. Check App Store Connect and enter the intended iOS version; VERSION is not authoritative for TestFlight."
-            exit 1
-          fi
-          VERSION_PATTERN='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-          if [[ ! "$VERSION" =~ $VERSION_PATTERN ]]; then
-            echo "::error::iOS release version must be semantic version text such as 2.29.2 (without a leading v)."
-            exit 1
-          fi
-          COMMIT_SHA="${{ github.sha }}"
-          SHORT_SHA="${COMMIT_SHA:0:7}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
-          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
-          echo "Building iOS version: $VERSION (commit $SHORT_SHA)"
-
-      - name: Bundle iOS release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          RELEASE_NOTES_MODEL: gpt-5.6-luna
-          RELEASE_NOTES_REASONING_EFFORT: medium
-          SOURCE_TAG: ${{ inputs.release_notes_source_tag }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if [[ ! "$SOURCE_TAG" =~ ^(mac|ios)-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Release-note source must be an existing mac-v* or ios-v* semantic-version tag."
-            exit 1
-          fi
-          git rev-parse --verify "refs/tags/$SOURCE_TAG^{commit}" >/dev/null
-          if ! git diff --quiet "$SOURCE_TAG^{commit}" HEAD -- . ':(exclude)VERSION'; then
-            echo "::error::$SOURCE_TAG does not describe the checked-out iOS source."
-            echo "Tag this release commit (normally ios-v$VERSION) or select its matching mac-v* tag."
-            exit 1
-          fi
-          node scripts/generate-release-notes.mjs \
-            --tag "$SOURCE_TAG" \
-            --output "$RUNNER_TEMP/release-notes.md"
-          node scripts/update-release-notes-catalogue.mjs --backfill --platform ios \
-            || echo "::warning::iOS release-note backfill failed; keeping the checked-in history"
-          node scripts/update-release-notes-catalogue.mjs \
-            --platform ios \
-            --version "$VERSION" \
-            --tag "$SOURCE_TAG" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
-          node scripts/update-release-notes-catalogue.mjs \
-            --verify --platform ios --version "$VERSION"
-
-      - name: Determine Build Number
-        id: build_number
-        env:
-          INPUT_BUILD_NUMBER: ${{ github.event.inputs.build_number }}
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          if [ -n "$INPUT_BUILD_NUMBER" ]; then
-            echo "build=$INPUT_BUILD_NUMBER" >> $GITHUB_OUTPUT
-          else
-            echo "build=$RUN_NUMBER" >> $GITHUB_OUTPUT
-          fi
-
       - name: Stamp Git Commit into Info.plist
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
-          COMMIT_SHA: ${{ steps.version.outputs.commit_sha }}
+          COMMIT_SHA: ${{ env.RELEASE_SOURCE }}
         run: |
           # Tuist generates the Info.plist from the Project.swift extendingDefault.
           # We inject GitCommitSHA via a build-phase-generated file instead.
@@ -302,9 +237,10 @@ jobs:
           cat Sources/SpeakiOS/Services/BuildInfo.swift
 
       - name: Build and Archive
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-          BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
+          VERSION: ${{ env.RELEASE_VERSION }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           xcodebuild archive \
@@ -317,10 +253,12 @@ jobs:
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
       - name: Verify archived release notes
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ env.RELEASE_VERSION }}
         run: |
-          APP_PATH="build/SpeakiOS.xcarchive/Products/Applications/JustSpeakToIt.app"
+          APP_PATH="build/SpeakiOS.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          python3 scripts/verify-release-train-archive.py "$APP_PATH" "$RUNNER_TEMP/release-manifest.json" ios
           CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
           if [ -z "$CATALOGUE_PATH" ]; then
             echo "::error::Archived iOS app does not contain ReleaseNotes.json"
@@ -330,11 +268,12 @@ jobs:
             --verify --platform ios --version "$VERSION" --catalogue "$CATALOGUE_PATH"
 
       - name: Verify Archived App Metadata
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-          BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
+          VERSION: ${{ env.RELEASE_VERSION }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
         run: |
-          APP_PATH="build/SpeakiOS.xcarchive/Products/Applications/JustSpeakToIt.app"
+          APP_PATH="build/SpeakiOS.xcarchive/Products/Applications/$PRODUCT_NAME.app"
           WIDGET_PATH="$APP_PATH/PlugIns/JustSpeakToItWidgetExtension.appex"
           KEYBOARD_PATH="$APP_PATH/PlugIns/JustSpeakKeyboard.appex"
 
@@ -383,22 +322,23 @@ jobs:
             -c 'Print :com.apple.developer.icloud-container-identifiers:0' \
             "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null || true)
 
-          [ "$APP_GROUP" = "group.com.justspeaktoit.ios" ] \
+          [ "$APP_GROUP" = "$IOS_APP_GROUP" ] \
             || { echo "App group mismatch: expected 'group.com.justspeaktoit.ios', got '${APP_GROUP:-missing}'"; exit 1; }
-          [ "$WIDGET_GROUP" = "group.com.justspeaktoit.ios" ] \
+          [ "$WIDGET_GROUP" = "$IOS_APP_GROUP" ] \
             || { echo "Widget group mismatch: expected 'group.com.justspeaktoit.ios', got '${WIDGET_GROUP:-missing}'"; exit 1; }
           if [ "$TUIST_IOS_KEYBOARD" = "1" ]; then
             codesign -d --entitlements - --xml "$KEYBOARD_PATH" > "$RUNNER_TEMP/keyboard-entitlements.plist"
             KEYBOARD_GROUP=$(/usr/libexec/PlistBuddy \
               -c 'Print :com.apple.security.application-groups:0' \
               "$RUNNER_TEMP/keyboard-entitlements.plist" 2>/dev/null || true)
-            [ "$KEYBOARD_GROUP" = "group.com.justspeaktoit.ios" ] \
+            [ "$KEYBOARD_GROUP" = "$IOS_APP_GROUP" ] \
               || { echo "Keyboard group mismatch: expected 'group.com.justspeaktoit.ios', got '${KEYBOARD_GROUP:-missing}'"; exit 1; }
           fi
-          [ "$APP_ICLOUD_CONTAINER" = "iCloud.com.justspeaktoit.ios" ] \
+          [ "$APP_ICLOUD_CONTAINER" = "$IOS_CLOUD_CONTAINER" ] \
             || { echo "iCloud container mismatch: expected 'iCloud.com.justspeaktoit.ios', got '${APP_ICLOUD_CONTAINER:-missing}'"; exit 1; }
 
       - name: Export IPA
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -433,13 +373,14 @@ jobs:
           </plist>
           PLIST
 
+          sed -i '' "s/com.justspeaktoit.ios/${BUNDLE_ID}/g" ExportOptions.plist
           sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" ExportOptions.plist
           sed -i '' "s/APP_PROFILE_UUID_PLACEHOLDER/${APP_PROFILE_UUID}/g" ExportOptions.plist
           sed -i '' "s/WIDGET_PROFILE_UUID_PLACEHOLDER/${WIDGET_PROFILE_UUID}/g" ExportOptions.plist
           if [ "$TUIST_IOS_KEYBOARD" = "1" ]; then
             KEYBOARD_PROFILE_UUID=$(security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/ios-keyboard-appstore.provisionprofile" | plutil -extract UUID raw -)
             /usr/libexec/PlistBuddy \
-              -c "Add :provisioningProfiles:com.justspeaktoit.ios.keyboard string $KEYBOARD_PROFILE_UUID" \
+              -c "Add :provisioningProfiles:$BUNDLE_ID.keyboard string $KEYBOARD_PROFILE_UUID" \
               ExportOptions.plist
           fi
           
@@ -453,3 +394,10 @@ jobs:
           
           echo "✅ Build exported and uploaded to App Store Connect"
           echo "The build will appear in TestFlight after Apple's processing (5-30 minutes)"
+
+      - name: Record upload and reconcile TestFlight
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_PATH: /Users/runner/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8
+        run: |
+          ruby scripts/release-apple.rb distribute "$RUNNER_TEMP/release-manifest.json" ios

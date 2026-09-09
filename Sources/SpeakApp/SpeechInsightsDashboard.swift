@@ -26,7 +26,7 @@ final class SpeechInsightsModel: ObservableObject {
       fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
     let folder = supportURL
-      .appendingPathComponent("SpeakApp", isDirectory: true)
+      .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
       .appendingPathComponent("Insights", isDirectory: true)
     if !fileManager.fileExists(atPath: folder.path) {
       try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true)

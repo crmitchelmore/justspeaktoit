@@ -1,12 +1,13 @@
 import CryptoKit
 import Foundation
 import Security
+import SpeakCore
 
 /// Recovery credentials use a separate, device-only Keychain item. They never
 /// enter the exportable credential registry or the readable recovery ZIP.
 struct MigrationRecovery {
     let root: URL
-    private let service = "com.justspeaktoit.migration-recovery"
+    private let service = ReleaseTrain.current.namespace("com.justspeaktoit.migration-recovery")
     var directory: URL { root.appendingPathComponent("MigrationRecovery") }
     var exists: Bool {
         FileManager.default.fileExists(atPath: directory.appendingPathComponent("recovery.zip").path) }

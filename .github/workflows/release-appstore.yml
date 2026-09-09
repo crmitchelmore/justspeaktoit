@@ -14,13 +14,19 @@ name: Release to Mac App Store
 # the working iOS release lane; it does not need provisioning-resource access.
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      version:
-        description: 'Version to release (e.g., 0.1.0)'
+      manifest:
         required: true
+        type: string
+
+concurrency:
+  group: release-mac-store
+  queue: max
+  cancel-in-progress: false
 
 env:
+  GH_TOKEN: ${{ github.token }}
   SCHEME: SpeakApp
   # Deliberately distinct from the direct/Sparkle app so both bundles and
   # processes can coexist on one Mac and TestFlight opens the correct binary.
@@ -41,11 +47,20 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ inputs.manifest }}
+
+      - name: Load frozen release manifest
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+        run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface mac-store
+
+      - name: Stamp immutable app metadata
+        run: python3 scripts/stamp-release-train.py mac-store
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "26.2"
 
       - name: Install Tuist
         run: brew install tuist
@@ -61,7 +76,14 @@ jobs:
           mkdir -p ~/.appstoreconnect/private_keys
           echo "$APP_STORE_CONNECT_API_KEY" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8
 
+      - name: Reuse an already uploaded manifest build
+        id: preflight
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: ruby scripts/release-apple.rb upload-status "$RUNNER_TEMP/release-manifest.json" mac-store
+
       - name: Import Code Signing Certificates
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           APPLE_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
           APPLE_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
@@ -109,9 +131,10 @@ jobs:
           echo "MAC_INSTALLER_IDENTITY_HASH=$MAC_INSTALLER_IDENTITY_HASH" >> "$GITHUB_ENV"
 
       - name: Install Mac App Store Provisioning Profile
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          MAC_APP_STORE_PROFILE: ${{ secrets.MAC_APP_STORE_PROFILE }}
+          MAC_APP_STORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_MAC_APP_STORE_PROFILE || secrets.MAC_APP_STORE_PROFILE }}
         run: |
           if [ -z "$APPLE_TEAM_ID" ]; then
             echo "::error::APPLE_TEAM_ID secret is required"
@@ -137,15 +160,20 @@ jobs:
           fi
           if ! /usr/libexec/PlistBuddy \
             -c "Print :Entitlements:com.apple.developer.icloud-container-identifiers" \
-            "$PROFILE_PLIST" | awk \
-              '{$1=$1} $0 == "iCloud.com.justspeaktoit" { found = 1 } END { exit found ? 0 : 1 }'; then
+            "$PROFILE_PLIST" | awk -v container="$MAC_CLOUD_CONTAINER" \
+              '{$1=$1} $0 == container { found = 1 } END { exit found ? 0 : 1 }'; then
             echo "::error::Provisioning profile does not allow the production iCloud container"
             exit 1
           fi
           echo "MAC_PROFILE_UUID=$MAC_PROFILE_UUID" >> "$GITHUB_ENV"
           echo "MAC_PROFILE_NAME=$MAC_PROFILE_NAME" >> "$GITHUB_ENV"
 
+      - name: Validate installed profile identities
+        if: steps.preflight.outputs.skip_upload != 'true'
+        run: python3 scripts/verify-train-profiles.py mac-store
+
       - name: Generate Xcode Project
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           TUIST_APP_STORE: "1"
         run: |
@@ -155,46 +183,8 @@ jobs:
           export TUIST_MAC_PROFILE_NAME="$MAC_PROFILE_NAME"
           tuist generate --no-open
 
-      - name: Update Version
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ github.event.inputs.version }}
-        run: |
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Version must use X.Y.Z format"
-            exit 1
-          fi
-
-          LATEST_TAG="$(gh release list \
-            --repo "${{ github.repository }}" \
-            --exclude-drafts \
-            --limit 100 \
-            --json tagName \
-            --jq '[.[] | select(.tagName | startswith("mac-v"))][0].tagName // empty')"
-          if [ -z "$LATEST_TAG" ]; then
-            echo "::error::No published mac-v* GitHub release found"
-            exit 1
-          fi
-          if [ "$LATEST_TAG" != "mac-v$VERSION" ]; then
-            echo "::error::Version $VERSION does not match latest macOS release $LATEST_TAG"
-            exit 1
-          fi
-
-          echo "$VERSION" > VERSION
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.AppStore.plist
-          BUILD_NUMBER=${{ github.run_number }}
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.AppStore.plist
-
-      - name: Bundle published macOS release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ github.event.inputs.version }}
-        run: |
-          node scripts/update-release-notes-catalogue.mjs --backfill --platform mac
-          node scripts/update-release-notes-catalogue.mjs \
-            --verify --platform mac --version "$VERSION"
-
       - name: Build Release Archive
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -216,10 +206,12 @@ jobs:
             OTHER_CODE_SIGN_FLAGS="--keychain $RUNNER_TEMP/app-signing.keychain-db"
 
       - name: Verify archived release notes
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
-          VERSION: ${{ github.event.inputs.version }}
+          VERSION: ${{ env.RELEASE_VERSION }}
         run: |
           APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
+          python3 scripts/verify-release-train-archive.py "$APP_PATH" "$RUNNER_TEMP/release-manifest.json" mac-store
           CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
           if [ -z "$CATALOGUE_PATH" ]; then
             echo "::error::Archived App Store build does not contain ReleaseNotes.json"
@@ -229,6 +221,7 @@ jobs:
             --verify --platform mac --version "$VERSION" --catalogue "$CATALOGUE_PATH"
 
       - name: Validate App Store Archive
+        if: steps.preflight.outputs.skip_upload != 'true'
         run: |
           APP_PATH="$RUNNER_TEMP/$PRODUCT_NAME.xcarchive/Products/Applications/$PRODUCT_NAME.app"
           INFO_PLIST="$APP_PATH/Contents/Info.plist"
@@ -282,8 +275,8 @@ jobs:
           expect_entitlement_absent com.apple.security.cs.disable-library-validation
           expect_info_value CFBundleIdentifier "$BUNDLE_ID"
           expect_info_value CFBundleExecutable "$PRODUCT_NAME"
-          expect_info_value CFBundleDisplayName "Just Speak to It (App Store)"
-          expect_info_value NSBonjourServices:0 "_speaktransport._tcp"
+          expect_info_value CFBundleDisplayName "$([[ "$RELEASE_TRAIN" == alpha ]] && echo "$TRAIN_DISPLAY_NAME" || echo "Just Speak to It (App Store)")"
+          expect_info_value NSBonjourServices:0 "$TRANSPORT_SERVICE"
           expect_info_value NSLocalNetworkUsageDescription \
             "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer."
 
@@ -307,6 +300,7 @@ jobs:
           fi
 
       - name: Export and Upload to App Store Connect
+        if: steps.preflight.outputs.skip_upload != 'true'
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
@@ -340,7 +334,7 @@ jobs:
               <string>MAC_INSTALLER_IDENTITY_HASH_PLACEHOLDER</string>
               <key>provisioningProfiles</key>
               <dict>
-                  <key>com.justspeaktoit.mac.appstore</key>
+                  <key>BUNDLE_ID_PLACEHOLDER</key>
                   <string>MAC_PROFILE_UUID_PLACEHOLDER</string>
               </dict>
               <key>uploadSymbols</key>
@@ -351,6 +345,7 @@ jobs:
           </plist>
           PLIST
 
+          sed -i '' "s/BUNDLE_ID_PLACEHOLDER/${BUNDLE_ID}/g" build/ExportOptions-AppStore.plist
           sed -i '' "s/APPLE_TEAM_ID_PLACEHOLDER/${APPLE_TEAM_ID}/g" build/ExportOptions-AppStore.plist
           sed -i '' "s/MAC_PROFILE_UUID_PLACEHOLDER/${MAC_PROFILE_UUID}/g" build/ExportOptions-AppStore.plist
           sed -i '' "s/MAC_INSTALLER_IDENTITY_HASH_PLACEHOLDER/${MAC_INSTALLER_IDENTITY_HASH}/g" build/ExportOptions-AppStore.plist
@@ -366,6 +361,13 @@ jobs:
           echo "✅ Build exported and uploaded to App Store Connect"
 
       - name: Cleanup Keychain
-        if: always()
+        if: always() && steps.preflight.outputs.skip_upload != 'true'
         run: |
           security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+
+      - name: Record upload and reconcile TestFlight
+        env:
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_PATH: /Users/runner/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8
+        run: |
+          ruby scripts/release-apple.rb distribute "$RUNNER_TEMP/release-manifest.json" mac-store

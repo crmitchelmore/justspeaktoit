@@ -21,7 +21,7 @@ import Foundation
 /// never written back. Every mutation validates the request identity, so a
 /// suspended old process cannot affect a replacement request.
 public final class KeyboardHandoffStore: @unchecked Sendable {
-    public static let appGroupIdentifier = "group.com.justspeaktoit.ios"
+    public static let appGroupIdentifier = ReleaseTrain.current.iosAppGroup
     public static let shared = KeyboardHandoffStore()
 
     public static let requestLifetime: TimeInterval = 3 * 60

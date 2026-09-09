@@ -88,7 +88,7 @@ runs:
           CODE_SIGN_STYLE=Manual \
           CODE_SIGN_IDENTITY="-" \
           CODE_SIGNING_ALLOWED=NO \
-          PRODUCT_BUNDLE_IDENTIFIER=com.justspeaktoit.mac \
+          PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
           ENABLE_HARDENED_RUNTIME=YES \
           ARCHS="${{ steps.paths.outputs.archs }}" \
           ONLY_ACTIVE_ARCH=NO
@@ -97,6 +97,7 @@ runs:
       shell: bash
       run: |
         APP_PATH="${{ steps.paths.outputs.archive-path }}/Products/Applications/$PRODUCT_NAME.app"
+        python3 scripts/verify-release-train-archive.py "$APP_PATH" "$RUNNER_TEMP/release-manifest.json" mac-direct
         CATALOGUE_PATH=$(find "$APP_PATH" -name ReleaseNotes.json -print -quit)
         if [ -z "$CATALOGUE_PATH" ]; then
           echo "::error::Archived app does not contain ReleaseNotes.json"
@@ -170,13 +171,13 @@ runs:
         # Re-sign the main binary with runtime, then refresh app bundle signature.
         codesign --force --timestamp --options runtime \
           --sign "Developer ID Application" \
-          --entitlements Config/SpeakMacOS.entitlements \
+          --entitlements "${TRAIN_ENTITLEMENTS:-Config/SpeakMacOS.entitlements}" \
           "$MAIN_BINARY"
 
         codesign --force --timestamp \
           --sign "Developer ID Application" \
           --options runtime \
-          --entitlements Config/SpeakMacOS.entitlements \
+          --entitlements "${TRAIN_ENTITLEMENTS:-Config/SpeakMacOS.entitlements}" \
           "$APP_PATH"
 
         CODESIGN_INFO=$(codesign -dv --verbose=4 "$MAIN_BINARY" 2>&1)

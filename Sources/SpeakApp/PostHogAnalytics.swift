@@ -195,6 +195,7 @@ extension PostHogProductAnalyticsSink {
     properties["distinct_id"] = event.distinctID
     properties["$lib"] = "just-speak-to-it"
     properties["$lib_version"] = "1"
+    properties["release_train"] = ReleaseTrain.current.rawValue
     properties["timestamp"] = ISO8601DateFormatter().string(from: event.createdAt)
     let body: [String: Any] = [
       "api_key": configuration.projectKey,

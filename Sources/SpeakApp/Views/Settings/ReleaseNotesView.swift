@@ -40,7 +40,7 @@ struct ReleaseNotesView: View {
               .foregroundStyle(.secondary)
           }
         }
-        .tag(entry.version)
+        .tag(entry.selectionKey)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(browser.title(for: entry))
       }

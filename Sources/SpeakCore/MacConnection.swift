@@ -128,6 +128,10 @@ public final class MacConnection: ObservableObject {
 
         switch try await channel.receive() {
         case .authResult(let result) where result.success:
+            guard ReleaseTrain.current.acceptsPeer(result.releaseTrain) else {
+                self.fail(with: "Connect to a Mac running the same release train")
+                return
+            }
             guard let token = result.sessionToken else {
                 self.fail(with: "The Mac accepted the pairing code without issuing a session token")
                 return

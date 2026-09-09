@@ -73,7 +73,7 @@ final class SherpaOnnxRuntimeManager: ObservableObject {
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
     baseDirectory = base
-      .appendingPathComponent("SpeakApp", isDirectory: true)
+      .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
       .appendingPathComponent("LocalModels", isDirectory: true)
       .appendingPathComponent("SherpaOnnx", isDirectory: true)
     virtualEnvironmentURL = baseDirectory.appendingPathComponent("venv", isDirectory: true)

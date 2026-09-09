@@ -397,10 +397,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             for volume in volumes {
                 let volumePath = "/Volumes/\(volume)"
-                let appPath = "\(volumePath)/JustSpeakToIt.app"
+                let appPath = "\(volumePath)/\(Bundle.main.bundleURL.lastPathComponent)"
 
                 // Check if this looks like our DMG
-                if volume.contains("Just Speak") || fileManager.fileExists(atPath: appPath) {
+                if fileManager.fileExists(atPath: appPath) {
                     // Skip if we've already asked about this volume
                     if askedVolumes.contains(volume) {
                         return

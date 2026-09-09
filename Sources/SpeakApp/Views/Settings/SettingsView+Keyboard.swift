@@ -16,7 +16,9 @@ extension SettingsView {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Trigger Key", systemImage: "keyboard", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("Choose which key triggers recording.")
+          Text(settings.hasConfiguredGlobalHotKey
+            ? "Choose which key triggers recording."
+            : "Alpha has no global shortcut yet. Choose one different from Stable to avoid recording twice.")
             .font(.caption)
             .foregroundStyle(.secondary)
 

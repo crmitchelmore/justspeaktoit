@@ -192,7 +192,9 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
 public enum KeyboardHandoffSignal {
     // Stored as String (Sendable) and bridged to CFString at each use site,
     // so the shared static needs no concurrency escape hatch.
-    private static let requestChangedName = "com.justspeaktoit.keyboardHandoff.requestChanged"
+    private static let requestChangedName = ReleaseTrain.current.namespace(
+        "com.justspeaktoit.keyboardHandoff.requestChanged"
+    )
 
     public static func postRequestChanged() {
         CFNotificationCenterPostNotification(

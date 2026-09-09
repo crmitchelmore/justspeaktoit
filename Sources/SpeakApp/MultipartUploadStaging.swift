@@ -25,7 +25,7 @@ final class MultipartUploadStaging: @unchecked Sendable {
 
   init(
     directory: URL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("speak-multipart-uploads", isDirectory: true),
+      .appendingPathComponent(ReleaseTrain.current.namespace("speak-multipart-uploads"), isDirectory: true),
     stalenessThreshold: TimeInterval = MultipartUploadStaging.defaultStalenessThreshold,
     fileManager: FileManager = .default
   ) {

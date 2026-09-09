@@ -93,12 +93,13 @@ public struct SecureStorageConfiguration: Sendable {
         masterAccount: String = "speak-app-secrets",
         legacyServices: [String] = [],
         accessGroup: String? = nil,
-        synchronizable: Bool = false
+        synchronizable: Bool = false,
+        releaseTrain: ReleaseTrain = .current
     ) {
-        self.service = service
+        self.service = releaseTrain.namespace(service)
         self.masterAccount = masterAccount
-        self.legacyServices = legacyServices
-        self.accessGroup = accessGroup
+        self.legacyServices = legacyServices.map { releaseTrain.namespace($0) }
+        self.accessGroup = accessGroup.map { releaseTrain.namespace($0) }
         self.synchronizable = synchronizable
     }
 

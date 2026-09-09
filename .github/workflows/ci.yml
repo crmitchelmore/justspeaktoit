@@ -12,8 +12,8 @@ on:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-macos:
@@ -434,7 +434,8 @@ jobs:
 
       - name: Test CI and release gates
         run: |
-          node --test scripts/tests/*.test.mjs
+          node --test scripts/tests/*.test.mjs scripts/release-train.test.mjs
+          python3 scripts/generate-release-train-config.py --check
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Test release-notes generator

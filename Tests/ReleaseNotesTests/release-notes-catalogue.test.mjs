@@ -61,6 +61,7 @@ test("entries default their tag and reject empty notes", () => {
     const entry = catalogueEntry({ version: "2.46.0", publishedAt: "2026-08-09T00:00:00Z", markdown: "## Overview\n\nNew." });
     assert.deepEqual(entry, {
         platform: "mac",
+        train: "stable",
         version: "2.46.0",
         tag: "mac-v2.46.0",
         publishedAt: "2026-08-09T00:00:00Z",
@@ -105,7 +106,7 @@ test("catalogue round-trips through the shipped JSON shape", () => {
     });
     const parsed = parseCatalogue(serialiseCatalogue(catalogue));
 
-    assert.equal(parsed.schemaVersion, 2);
+    assert.equal(parsed.schemaVersion, 3);
     assert.equal(parsed.generatedAt, "2026-08-09T00:00:00Z");
     assert.deepEqual(parsed.entries.map((entry) => entry.version), ["2.45.0"]);
     assert.deepEqual(parseCatalogue(null).entries, []);

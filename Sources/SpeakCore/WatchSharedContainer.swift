@@ -20,7 +20,7 @@ public struct WatchSharedContainer: Sendable {
     /// `com.justspeaktoit.ios.watchkitapp.complication`. Distinct from the
     /// iOS group (`group.com.justspeaktoit.ios`): App Group containers are
     /// per-device, so the watch pair needs its own registration.
-    public static let appGroupIdentifier = "group.com.justspeaktoit.watch"
+    public static let appGroupIdentifier = ReleaseTrain.current.watchAppGroup
 
     /// The container every watch process uses.
     public static let shared = WatchSharedContainer()

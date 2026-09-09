@@ -17,7 +17,7 @@ final class MigrationStore {
         self.defaults = defaults
         self.support = support ?? FileManager.default.urls(for: .applicationSupportDirectory,
                                                            in: .userDomainMask)[0].appendingPathComponent(
-            "SpeakApp"
+            ReleaseTrain.current.supportDirectory
         )
         self.history = history
         self.secrets = secrets

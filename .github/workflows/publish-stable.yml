@@ -1,0 +1,63 @@
+name: Publish Stable
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Validated stable-candidate-N
+        required: true
+        type: string
+      approved_manifest_sha256:
+        description: SHA-256 from the reviewed candidate packet; binds versions, source and exact notes
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: publish-stable
+  queue: max
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Approve frozen candidate and publish verified direct Mac artefacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          CANDIDATE: ${{ inputs.candidate }}
+          APPROVED_HASH: ${{ inputs.approved_manifest_sha256 }}
+        run: node scripts/release-train.mjs publish --tag "$CANDIDATE" --approved-hash "$APPROVED_HASH"
+  submit-apple:
+    needs: publish
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [ios, mac-store]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Download approved manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: gh release download "$CANDIDATE" --pattern release-manifest.json --dir "$RUNNER_TEMP"
+      - name: Install existing Apple API key
+        env:
+          KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          umask 077
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "$KEY_DATA" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8"
+      - name: Submit approved Stable Apple builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          ruby scripts/release-apple.rb submit "$RUNNER_TEMP/release-manifest.json" "${{ matrix.surface }}"

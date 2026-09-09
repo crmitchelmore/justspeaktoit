@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Transport Protocol
 
 /// Service type for Bonjour discovery
-public let SpeakTransportServiceType = "_speaktransport._tcp"
+public let SpeakTransportServiceType = ReleaseTrain.current.bonjourService // swiftlint:disable:this identifier_name
 
 /// Protocol version for compatibility checking
 public let SpeakTransportProtocolVersion = 1
@@ -104,11 +104,16 @@ public struct HelloMessage: Codable {
     public var protocolVersion: Int
     public var deviceName: String
     public var deviceId: String
+    public var releaseTrain: ReleaseTrain?
 
-    public init(protocolVersion: Int = SpeakTransportProtocolVersion, deviceName: String, deviceId: String) {
+    public init(
+        protocolVersion: Int = SpeakTransportProtocolVersion, deviceName: String, deviceId: String,
+        releaseTrain: ReleaseTrain? = .current
+    ) {
         self.protocolVersion = protocolVersion
         self.deviceName = deviceName
         self.deviceId = deviceId
+        self.releaseTrain = releaseTrain
     }
 
     /// Whether this hello's protocol version is compatible with the running build.
@@ -134,11 +139,16 @@ public struct AuthResultMessage: Codable {
     public var success: Bool
     public var sessionToken: String?
     public var errorMessage: String?
+    public var releaseTrain: ReleaseTrain?
 
-    public init(success: Bool, sessionToken: String? = nil, errorMessage: String? = nil) {
+    public init(
+        success: Bool, sessionToken: String? = nil, errorMessage: String? = nil,
+        releaseTrain: ReleaseTrain? = .current
+    ) {
         self.success = success
         self.sessionToken = sessionToken
         self.errorMessage = errorMessage
+        self.releaseTrain = releaseTrain
     }
 }
 
@@ -320,7 +330,9 @@ public struct DeviceIdentity {
             // Prefer identifierForVendor: stable while any app from the same
             // vendor remains installed, unlike a random UUID. Either way the
             // value is captured once and then served from the Keychain.
-            makeDeviceId: { UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString }
+            makeDeviceId: {
+                ReleaseTrain.current.namespace(UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString)
+            }
         )
         #else
         // On macOS, use hardware UUID
@@ -336,7 +348,7 @@ public struct DeviceIdentity {
             kCFAllocatorDefault,
             0
         )?.takeRetainedValue() as? String {
-            return serialNumber
+            return ReleaseTrain.current.namespace(serialNumber)
         }
         return UUID().uuidString
         #endif

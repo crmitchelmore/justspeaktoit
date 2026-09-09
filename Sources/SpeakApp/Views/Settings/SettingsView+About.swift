@@ -150,8 +150,10 @@ extension SettingsView {
             .font(.callout)
             .foregroundStyle(.secondary)
 
-          TipJarView()
-            .frame(maxWidth: .infinity)
+          if ReleaseTrain.current == .stable {
+            TipJarView()
+              .frame(maxWidth: .infinity)
+          }
 
           // In-app StoreKit tips work in App Store builds; external donation
           // links are only shown where cross-channel messaging is permitted.

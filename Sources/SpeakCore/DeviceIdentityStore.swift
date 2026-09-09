@@ -28,7 +28,7 @@ public struct KeychainDeviceIdentityStore: DeviceIdentityStoring {
         service: String = "com.speak.ios.device-identity",
         account: String = "speak-device-id"
     ) {
-        self.service = service
+        self.service = ReleaseTrain.current.namespace(service)
         self.account = account
     }
 

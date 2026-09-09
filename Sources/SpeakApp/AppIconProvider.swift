@@ -1,14 +1,16 @@
 import AppKit
+import SpeakCore
 
 /// Onboarding uses the same multi-resolution artwork as Finder and the Dock.
 enum AppIconProvider {
     private static let cachedIcon: NSImage = {
-        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+        let iconName = ReleaseTrain.current == .alpha ? "AppIconAlpha" : "AppIcon"
+        if let url = Bundle.main.url(forResource: iconName, withExtension: "icns"),
            let image = NSImage(contentsOf: url) {
             return image
         }
         #if SWIFT_PACKAGE
-        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "icns"),
+        if let url = Bundle.module.url(forResource: iconName, withExtension: "icns"),
            let image = NSImage(contentsOf: url) {
             return image
         }

@@ -753,6 +753,10 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(doubleTapWindow, key: .doubleTapWindow) }
   }
 
+  var hasConfiguredGlobalHotKey: Bool {
+    ReleaseTrain.current == .stable || defaults.data(forKey: DefaultsKey.selectedHotKey.rawValue) != nil
+  }
+
   @Published var selectedHotKey: HotKey {
     didSet {
       do {
@@ -1565,7 +1569,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     let base =
       FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? FileManager.default.homeDirectoryForCurrentUser
-    let appFolder = base.appendingPathComponent("SpeakApp", isDirectory: true)
+    let appFolder = base.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
     let recordings = appFolder.appendingPathComponent("Recordings", isDirectory: true)
     if !FileManager.default.fileExists(atPath: recordings.path) {
       try? FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)

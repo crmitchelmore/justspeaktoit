@@ -86,6 +86,15 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             latencyTier: .fast,
             tags: [.fast, .leading]),
         Option(
+            id: XAISpeechToText.liveCatalogID,
+            displayName: "xAI Speech-to-Text (Streaming)",
+            description: "xAI's dedicated realtime speech-to-text endpoint: interim captions, "
+                + "chunk finals as speech locks, and one authoritative transcript at the end of "
+                + "the stream. Reuses your xAI API key.",
+            estimatedLatencyMs: 200,
+            latencyTier: .fast,
+            tags: [.fast]),
+        Option(
             id: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
             displayName: "OpenAI GPT Live Transcribe (Streaming)",
             description: "OpenAI's recommended low-latency speech-to-text model with live transcript "
@@ -172,6 +181,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Google's Gemini Interactions API for recorded audio, with word-level "
                 + "timestamps and speaker attribution. Public preview — opt-in, never a default.",
             estimatedLatencyMs: 900, latencyTier: .fast),
+        Option(
+            id: XAISpeechToText.batchCatalogID,
+            displayName: "xAI Speech-to-Text",
+            description: "xAI's dedicated file transcription endpoint, with word timings, "
+                + "keyterm biasing and inverse text normalisation when a language is chosen.",
+            estimatedLatencyMs: 700, latencyTier: .fast),
         Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",

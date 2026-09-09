@@ -207,7 +207,8 @@ public enum ModelCredentialResolver {
         "modulate",
         "revai",
         "soniox",
-        "speechmatics"
+        "speechmatics",
+        "xai"
     ]
 
     /// Every API-key identifier the canonical catalogues can require, derived

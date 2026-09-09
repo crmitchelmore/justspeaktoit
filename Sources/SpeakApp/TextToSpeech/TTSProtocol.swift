@@ -16,6 +16,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case gemini = "google"
   case mistral
   case speechmatics
+  case xai
   case system
 
   var id: String { rawValue }
@@ -33,6 +34,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .gemini: return GeminiTranscribeModels.providerDisplayName
     case .mistral: return "Mistral Voxtral"
     case .speechmatics: return "Speechmatics"
+    case .xai: return "xAI"
     case .system: return "macOS System"
     }
   }
@@ -62,6 +64,9 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .gemini: return "google.apiKey"
     case .mistral: return "mistral.apiKey"
     case .speechmatics: return "speechmatics.apiKey"
+    // One xAI key covers Grok Voice transcription, dedicated speech to text
+    // and speech generation.
+    case .xai: return "xai.apiKey"
     case .system: return ""
     }
   }
@@ -73,7 +78,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   var sharesTranscriptionCredential: Bool {
     switch self {
     case .elevenlabs, .soniox, .cartesia, .openrouter,
-         .groq, .gemini, .mistral, .speechmatics: return true
+         .groq, .gemini, .mistral, .speechmatics, .xai: return true
     case .openai, .azure, .deepgram, .system: return false
     }
   }
@@ -91,6 +96,9 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     GeminiTTSCatalog.voiceIDPrefix,
     MistralTTSCatalog.voiceIDPrefix,
     SpeechmaticsTTSCatalog.voiceIDPrefix,
+    // xAI hosts more voices than it documents, so an account voice the
+    // catalogue cannot name must still survive validation.
+    XAITTSCatalog.voiceIDPrefix,
     "system/"
   ]
 
@@ -108,6 +116,7 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     if voiceID.hasPrefix(GeminiTTSCatalog.voiceIDPrefix) { return .gemini }
     if voiceID.hasPrefix(MistralTTSCatalog.voiceIDPrefix) { return .mistral }
     if voiceID.hasPrefix(SpeechmaticsTTSCatalog.voiceIDPrefix) { return .speechmatics }
+    if voiceID.hasPrefix(XAITTSCatalog.voiceIDPrefix) { return .xai }
     if voiceID.hasPrefix("system/") { return .system }
     return .system
   }
@@ -300,6 +309,30 @@ protocol TextToSpeechClient {
 
   func listVoices() async throws -> [TTSVoice]
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult
+}
+
+/// A client that can hand back audio while the rest is still being generated.
+///
+/// Opt-in: `TextToSpeechManager` uses this path only when the client conforms
+/// *and* auto-play is on, so a provider with no streaming route keeps the
+/// existing synthesize-then-play behaviour untouched. The returned `TTSResult`
+/// is the same as the batch path's — one complete file — so history, cost, the
+/// recordings directory and replay need no special case.
+protocol ProgressiveTextToSpeechClient: TextToSpeechClient {
+  /// Linear PCM sample rate the chunks passed to `onAudioChunk` carry.
+  var progressiveSampleRate: Int { get }
+
+  /// Synthesizes `text`, calling `onAudioChunk` with headerless little-endian
+  /// 16-bit mono PCM as each chunk arrives.
+  ///
+  /// Cancelling the calling task must stop the stream and discard the partial
+  /// audio.
+  func synthesizeProgressively(
+    text: String,
+    voice: String,
+    settings: TTSSettings,
+    onAudioChunk: @escaping @Sendable (Data) -> Void
+  ) async throws -> TTSResult
 }
 
 // The provider lists form one static catalogue and are easier to audit as a single type.
@@ -599,6 +632,17 @@ struct VoiceCatalog {
     )
   }
 
+  // Both platform pickers project from the canonical SpeakCore xAI catalogue.
+  static let xaiVoices: [TTSVoice] = XAITTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .xai,
+      traits: [.neutral, .multilingual, .lowLatency],
+      previewURL: nil
+    )
+  }
+
   /// Mistral publishes no preset voice identifiers, so there is no offline
   /// list to fall back on. `MistralTTSClient.listVoices()` fills the picker
   /// from the account's own listing once a key is stored.
@@ -606,7 +650,8 @@ struct VoiceCatalog {
 
   static let allVoices: [TTSVoice] =
     elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + sonioxVoices
-      + cartesiaVoices + groqVoices + geminiVoices + speechmaticsVoices + systemVoices
+      + cartesiaVoices + groqVoices + geminiVoices + speechmaticsVoices + xaiVoices
+      + systemVoices
 
   // One branch per provider; the catalogue is the whole body.
   // swiftlint:disable:next cyclomatic_complexity
@@ -623,6 +668,7 @@ struct VoiceCatalog {
     case .gemini: return geminiVoices
     case .mistral: return mistralVoices
     case .speechmatics: return speechmaticsVoices
+    case .xai: return xaiVoices
     case .system: return systemVoices
     }
   }

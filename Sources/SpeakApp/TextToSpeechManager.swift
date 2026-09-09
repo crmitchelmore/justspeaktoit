@@ -1,3 +1,6 @@
+// The manager owns synthesis, playback control and the usage ledger for every
+// provider; the streaming player it drives lives in TextToSpeech/TTSProgressivePlayer.swift.
+// swiftlint:disable file_length
 import Foundation
 import AVFoundation
 import SpeakCore
@@ -26,6 +29,7 @@ final class TextToSpeechManager: ObservableObject {
   private let recordingSaver: (@MainActor (TTSResult) async throws -> Void)?
   let clients: [TTSProvider: TextToSpeechClient]
   private var audioPlayer: AVAudioPlayer?
+  private let progressivePlayer = TTSProgressivePlayer()
   private var synthesisTask: Task<TTSResult, Error>?
   private var playbackTask: Task<Void, Never>?
   private var synthesisID = UUID()
@@ -88,7 +92,20 @@ final class TextToSpeechManager: ObservableObject {
     let settings = synthesisSettings(useSSML: useSSML)
     let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
     synthesisProgress = 0.5
-    let task = Task { try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings) }
+    // A provider that can stream speaks while the rest is still generating.
+    // Everything after this point is identical either way, because the
+    // progressive task answers with the same complete result.
+    let progressive = appSettings.ttsAutoPlay ? client as? any ProgressiveTextToSpeechClient : nil
+    let player = progressivePlayer
+    let task = progressive.map { streaming in
+      Task { @MainActor in
+        stopPlayback()
+        isPlaying = true
+        return try await player.speak(
+          text: processedText, voice: effectiveVoice, settings: settings, using: streaming
+        )
+      }
+    } ?? Task { try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings) }
     synthesisTask = task
     let result: TTSResult
     do {
@@ -98,14 +115,16 @@ final class TextToSpeechManager: ObservableObject {
         task.cancel()
       }
     } catch {
+      if progressive != nil { stopPlayback() }
       if task.isCancelled || Task.isCancelled { throw CancellationError() }
       throw error
     }
+    if progressive != nil { isPlaying = false }
     guard synthesisID == requestID, !Task.isCancelled, !task.isCancelled else {
       if result.provider == .openrouter { try? FileManager.default.removeItem(at: result.audioURL) }
       throw CancellationError()
     }
-    stopPlayback()
+    if progressive == nil { stopPlayback() }
     openRouterOutput.replace(with: result)
     lastResult = result
     usageHistory.append(result)
@@ -113,7 +132,7 @@ final class TextToSpeechManager: ObservableObject {
     if appSettings.ttsSaveToDirectory { try? await saveToRecordingsDirectory(result: result) }
     try ensureSynthesisActive(task: task, requestID: requestID)
     synthesisProgress = 1
-    if appSettings.ttsAutoPlay { try await play(url: result.audioURL) }
+    if appSettings.ttsAutoPlay, progressive == nil { try await play(url: result.audioURL) }
     try ensureSynthesisActive(task: task, requestID: requestID)
     return result
   }
@@ -160,16 +179,27 @@ final class TextToSpeechManager: ObservableObject {
     playbackTask = nil
     audioPlayer?.stop()
     audioPlayer = nil
+    progressivePlayer.stop()
     isPlaying = false
   }
 
   func pause() {
+    if progressivePlayer.isActive {
+      progressivePlayer.pause()
+      isPlaying = false
+      return
+    }
     playbackTask?.cancel()
     audioPlayer?.pause()
     isPlaying = false
   }
 
   func resume() {
+    if progressivePlayer.isActive {
+      progressivePlayer.resume()
+      isPlaying = true
+      return
+    }
     guard let audioPlayer else { return }
     isPlaying = audioPlayer.play()
     if isPlaying { monitorPlayback(audioPlayer) }

@@ -59,7 +59,12 @@ public final class AudioSessionManager: ObservableObject {
     /// Registers a route-change handler. Same multicast semantics as
     /// `addInterruptionObserver(owner:_:)`.
     @discardableResult
-    public func addRouteChangeObserver(
+    public func addRouteChangeObserver(owner: AnyObject, _ handler: @escaping () -> Void) -> UUID {
+        addRouteChangeObserver(owner: owner) { _ in handler() }
+    }
+
+    @discardableResult
+    func addRouteChangeObserver(
         owner: AnyObject,
         _ handler: @escaping (AVAudioSession.RouteChangeReason) -> Void
     ) -> UUID {

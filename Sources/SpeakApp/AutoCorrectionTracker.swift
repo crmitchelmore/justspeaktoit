@@ -156,3 +156,7 @@ final class AutoCorrectionTracker: ObservableObject {
     }
   }
 }
+
+extension AutoCorrectionTracker {
+    func reloadAfterMigration() async { await engine.reloadAfterMigration() }
+}

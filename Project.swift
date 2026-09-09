@@ -200,6 +200,7 @@ if isAppStoreBuild {
 // (issue #757; Dependabot only edits Package.swift). `ManifestParityTests`
 // enforces this.
 var projectPackages: [Package] = [
+    .remote(url: "https://github.com/weichsel/ZIPFoundation.git", requirement: .exact("0.9.20")),
     .package(path: .relativeToRoot(".")),
     .remote(url: "https://github.com/getsentry/sentry-cocoa.git", requirement: .upToNextMajor(from: "9.3.0")),
     .remote(url: "https://github.com/argmaxinc/argmax-oss-swift.git", requirement: .upToNextMajor(from: "1.1.0")),
@@ -214,6 +215,7 @@ if !isAppStoreBuild {
 }
 
 var macAppDependencies: [TargetDependency] = [
+    .package(product: "ZIPFoundation"),
     .package(product: "SpeakCore"),
     .package(product: "SpeakSync"),
     .package(product: "SpeakHotKeys"),

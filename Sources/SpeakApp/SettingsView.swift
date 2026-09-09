@@ -448,6 +448,8 @@ struct SettingsView: View {
       keyboardSettings
     case .permissions:
       permissionsSettings
+    case .dataMigration:
+      DataMigrationView()
     case .about:
       aboutSettings
     }

@@ -330,6 +330,8 @@ private extension SettingsTab {
       return .openTranscriptionSettings
     case .postProcessing:
       return .openPostProcessingSettings
+    case .dataMigration:
+      return .openDataMigrationSettings
     case .profiles:
       return .openProfilesSettings
     case .voiceOutput:

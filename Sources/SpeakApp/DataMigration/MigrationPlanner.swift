@@ -6,10 +6,11 @@ enum MigrationPlanner {
                           modes: [MigrationCategory: MigrationMode]) -> [MigrationConflict] {
         var result: [MigrationConflict] = []
         for category in incoming.manifest.categories where modes[category] == .merge {
-            let currentRecords = current.records[category] ?? []
+            let currentRecords = Dictionary((current.records[category] ?? []).map { ($0.identity, $0) },
+                                            uniquingKeysWith: { _, last in last })
             for record in incoming.records[category] ?? []
                 where record.kind != "history" && record.kind != "audio" {
-                if let old = currentRecords.first(where: { $0.identity == record.identity }),
+                if let old = currentRecords[record.identity],
                    old.value != record.value {
                     result.append(.init(category: category, existing: old, imported: record))
                 }
@@ -40,9 +41,12 @@ enum MigrationPlanner {
                         ? scope.contains(id: record.id, date: record.date) : true
                 }
             }
+            var indexes = Dictionary(records.enumerated().map { ($0.element.identity, $0.offset) },
+                                     uniquingKeysWith: { _, last in last })
             for record in imported {
-                merge(record, into: &records, category: category, mode: modes[category] ?? .merge,
-                      useImported: useImported)
+                merge(record, into: &records, indexes: &indexes,
+                      overwrite: modes[category] == .replace
+                        || useImported.contains(category.rawValue + ":" + record.identity))
             }
             if hasInvalidItems && modes[category] == .replace {
                 output.notices
@@ -57,13 +61,43 @@ enum MigrationPlanner {
                 )
             output.records[category] = records
         }
+        reconnectVariants(current: current, incoming: incoming, modes: modes, output: &output)
         return output
     }
 
+    private static func reconnectVariants(current: MigrationSnapshot, incoming: MigrationSnapshot,
+                                          modes: [MigrationCategory: MigrationMode],
+                                          output: inout MigrationSnapshot) {
+        for category in [MigrationCategory.history, .recordings] where modes[category] == .merge {
+            let counterpart: MigrationCategory = category == .history ? .recordings : .history
+            let counterpartIDs = Set(output.records[counterpart, default: []].map(\.id))
+            var ownIDs = Set(output.records[category, default: []].map(\.id))
+            let currentIDs = Set(current.records[category, default: []].map(\.identity))
+            var removeIDs = Set<String>()
+            for original in incoming.records[category] ?? []
+                where original.kind == "history" || original.kind == "audio" {
+                guard let revision = original.revision else { continue }
+                let variantID = MigrationCoding.variantID(id: original.id, revision: revision)
+                guard counterpartIDs.contains(variantID) else { continue }
+                if ownIDs.insert(variantID).inserted {
+                    var linked = original
+                    linked.id = variantID
+                    output.records[category, default: []].append(linked)
+                }
+                // Do not attach a newly imported counterpart to the older conflicting session.
+                if !currentIDs.contains(original.identity) {
+                    removeIDs.insert(original.identity)
+                }
+            }
+            output.records[category]?.removeAll { removeIDs.contains($0.identity) }
+        }
+    }
+
     private static func merge(_ incoming: MigrationRecord, into records: inout [MigrationRecord],
-                              category: MigrationCategory, mode: MigrationMode, useImported: Set<String>) {
+                              indexes: inout [String: Int],
+                              overwrite: Bool) {
         var record = incoming
-        if let index = records.firstIndex(where: { $0.identity == record.identity }) {
+        if let index = indexes[record.identity] {
             let old = records[index]
             if equivalent(old, record) {
                 return
@@ -83,15 +117,19 @@ enum MigrationPlanner {
                                                       revision: record.revision ?? MigrationCoding
                                                           .digest((try? MigrationCoding.encoder
                                                                   .encode(record.value)) ?? Data()))
-                if records
-                    .contains(where: { $0.identity == record.identity && equivalent($0, record) }) {
-                    return }
+                if let variant = indexes[record.identity] {
+                    if equivalent(records[variant], record) { return }
+                    record.id = MigrationCoding.variantID(id: record.id, revision: MigrationCoding
+                        .digest((try? MigrationCoding.encoder.encode(record.value)) ?? Data()))
+                    if let existing = indexes[record.identity], equivalent(records[existing], record) { return }
+                }
+                indexes[record.identity] = records.count
                 records.append(record)
-            } else if mode == .replace || useImported
-                .contains(category.rawValue + ":" + record.identity) {
+            } else if overwrite {
                 records[index] = record
             }
         } else {
+            indexes[record.identity] = records.count
             records.append(record)
         }
     }

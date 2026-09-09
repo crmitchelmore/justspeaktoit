@@ -60,6 +60,8 @@ for each included category. Review the preview before confirming the import.
 - Unknown archive versions are rejected. ZIP entries are bounded, duplicate paths
   rejected, and audio checksums verified before applying data. Imported archive
   paths cannot choose arbitrary filesystem destinations or executable file types.
+  Repeated recording paths are rejected; installation reserves destination space,
+  verifies existing digest-named files, and removes new copies after failed writes.
 
 Changes made while a preview is open cause a refresh/review before import.
 Recording starts are blocked during the transaction; history mutations queue
@@ -88,6 +90,6 @@ also exposed as a configurable navigation shortcut, initially unassigned.
 
 The first full local run stopped in an existing performance test without an
 assertion failure. That test passed in isolation, and the next full run passed
-2,520 tests (11 skipped). The isolated app bundle launched and exposed the sidebar
+2,523 tests (11 skipped). The isolated app bundle launched and exposed the sidebar
 entry; computer-control transport failed before the interactive panel walkthrough
 could finish. That walkthrough remains a review check, not a claimed pass.

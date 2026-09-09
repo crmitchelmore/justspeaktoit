@@ -1378,6 +1378,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     reloadMigrationPreferences(restored)
     reloadMigrationAudioPreferences(restored)
     reloadMigrationBehaviour(restored)
+    liveTranscriptionSelection = restored.liveTranscriptionSelection
   }
 
   private func reloadMigrationPreferences(_ restored: AppSettings) {

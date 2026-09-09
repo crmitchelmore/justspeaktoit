@@ -103,6 +103,9 @@ enum MigrationArchive {
               audio.type == .file, audio.uncompressedSize <= 20_000_000_000 else {
             throw MigrationError.invalid("Recording missing or unsupported")
         }
+        guard snapshot.files[path] == nil else {
+            throw MigrationError.invalid("Duplicate recording path")
+        }
         let target = directory
             .appendingPathComponent(UUID().uuidString + "." + (path as NSString)
                 .pathExtension)

@@ -43,8 +43,8 @@ final class MigrationStore {
             try addInstalledModelReferences(to: &snapshot)
         }
         let recordingItems = categories.contains(.recordings) ? try self.recordingItems() : []
-        let all = history.allItems + recordingItems
-            .filter { audio in !history.allItems.contains { $0.id == audio.id } }
+        let historyIDs = Set(history.allItems.map(\.id))
+        let all = history.allItems + recordingItems.filter { !historyIDs.contains($0.id) }
         for item in all {
             let revision = MigrationCoding.digest(try MigrationCoding.encoder.encode(item.migrationValue()))
             try collectHistory(item, revision: revision, into: &snapshot)
@@ -86,11 +86,11 @@ final class MigrationStore {
             try applyCollections(records, category: category)
             try await applyCredentials(records, category: category)
         }
-        if categories.contains(.history) || categories.contains(.recordings) {
-            try await applyHistory(snapshot, categories: categories)
-        }
         guard defaults.synchronize() else {
             throw MigrationError.invalid("Preferences could not be saved.")
+        }
+        if categories.contains(.history) || categories.contains(.recordings) {
+            try await applyHistory(snapshot, categories: categories)
         }
     }
 
@@ -146,16 +146,27 @@ final class MigrationStore {
 
     private func applyHistory(_ snapshot: MigrationSnapshot,
                               categories: Set<MigrationCategory>) async throws {
-        let text = snapshot.records[.history, default: []].filter { $0.kind == "history" }
-        let audio = snapshot.records[.recordings, default: []].filter { $0.kind == "audio" }
+        let text = Dictionary(snapshot.records[.history, default: []].filter { $0.kind == "history" }
+            .map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let audio = Dictionary(snapshot.records[.recordings, default: []].filter { $0.kind == "audio" }
+            .map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         var result: [UUID: HistoryItem] = [:]
         let old = Dictionary(uniqueKeysWithValues: history.allItems.map { ($0.id.uuidString, $0) })
-        let ids = Set(text.map(\.id)).union(audio.map(\.id))
+        let ids = Set(text.keys).union(audio.keys)
         let folder = support.appendingPathComponent("ImportedRecordings")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let installation = MigrationAudioInstallation(folder: folder)
+        if categories.contains(.recordings) {
+            try installation.checkSpace(records: audio.values.filter { record in
+                guard let path = record.file else { return false }
+                return old[record.id]?.audioFileURL != snapshot.files[path]
+            }, files: snapshot.files)
+        }
+        var committed = false
+        defer { if !committed { installation.rollback() } }
         for id in ids {
-            let textRecord = text.first { $0.id == id }
-            let audioRecord = audio.first { $0.id == id }
+            let textRecord = text[id]
+            let audioRecord = audio[id]
             guard let base = textRecord ?? audioRecord else {
                 continue
             }
@@ -170,11 +181,7 @@ final class MigrationStore {
                 if let existing = old[id]?.audioFileURL, existing == source {
                     audioURL = existing
                 } else {
-                    if !FileManager.default.fileExists(atPath: destination.path) {
-                        try await Task
-                            .detached { try FileManager.default.copyItem(at: source, to: destination) }
-                            .value
-                    }
+                    try await installation.install(source: source, destination: destination, digest: digest)
                     audioURL = destination
                 }
             }
@@ -185,5 +192,6 @@ final class MigrationStore {
             result[item.id] = item
         }
         try await history.applyMigrationSnapshot(Array(result.values))
+        committed = true
     }
 }

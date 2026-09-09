@@ -134,6 +134,31 @@ final class DataMigrationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(restored.files[record.file!])), bytes)
         XCTAssertTrue(restored.notices.isEmpty)
     }
+    func testArchive_RepeatedRecordingPathDoesNotMaterialiseExtraFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = root.appendingPathComponent("source.wav")
+        let bytes = Data("shared bytes".utf8)
+        try bytes.write(to: audio)
+        var record = text()
+        record.kind = "audio"
+        record.file = "recordings/shared.wav"
+        record.digest = MigrationCoding.digest(bytes)
+        var other = record
+        other.id = UUID().uuidString
+        var source = snapshot(.recordings, [record, other])
+        source.files[record.file!] = audio
+        let archive = root.appendingPathComponent("export.zip")
+        try MigrationArchive.write(source, to: archive)
+        let restored = try MigrationArchive.read(archive)
+        let directory = try XCTUnwrap(restored.directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertEqual(restored.records[.recordings]?.count, 1)
+        XCTAssertEqual(restored.notices.count, 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
+    }
+
     func testArchive_CorruptRecordingIsSkippedAndReported() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

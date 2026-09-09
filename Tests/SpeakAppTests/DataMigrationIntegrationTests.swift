@@ -98,6 +98,31 @@ final class DataMigrationIntegrationTests: XCTestCase {
             ["Existing", "Imported"]
         )
     }
+    func testConflictingText_IdenticalAudioRemainsAttachedToBothVersions() async throws {
+        for existingHasAudio in [false, true] {
+        let source = try Fixture()
+        let destination = try Fixture()
+        defer { source.clean(); destination.clean() }
+        let audio = source.root.appendingPathComponent("recording.wav")
+        try Data("same audio".utf8).write(to: audio)
+        let id = UUID()
+        await source.history.append(try item(id: id, text: "Imported", audio: audio))
+        await destination.history.append(try item(id: id, text: "Existing", audio: existingHasAudio ? audio : nil))
+        let exported = try await source.store.snapshot(categories: [.history, .recordings])
+        for _ in 0..<2 {
+            try await importSnapshot(exported, into: destination, modes: [.history: .merge, .recordings: .merge])
+            XCTAssertEqual(destination.history.allItems.count, 2)
+            for entry in destination.history.allItems {
+                if entry.rawTranscription == "Imported" || existingHasAudio {
+                    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(entry.audioFileURL)), Data("same audio".utf8))
+                } else {
+                    XCTAssertNil(entry.audioFileURL)
+                }
+            }
+        }
+        }
+    }
+
     func testExplicitImport_RestoresDeletedHistory() async throws {
         let source = try Fixture()
         defer { source.clean() }
@@ -224,6 +249,34 @@ final class DataMigrationIntegrationTests: XCTestCase {
         let restored = try recovery.load()
         defer { if let directory = restored.directory { try? FileManager.default.removeItem(at: directory) } }
         XCTAssertEqual(restored.files.count, 1)
+    }
+
+}
+
+extension DataMigrationIntegrationTests {
+    func testAudioInstallation_VerifiesExistingBytesAndRollsBackNewFiles() async throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        let folder = fixture.root.appendingPathComponent("ImportedRecordings")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let source = fixture.root.appendingPathComponent("source.wav")
+        let bytes = Data("complete recording".utf8)
+        try bytes.write(to: source)
+        let existing = folder.appendingPathComponent("existing.wav")
+        try Data("partial".utf8).write(to: existing)
+        let installation = MigrationAudioInstallation(folder: folder)
+        try await installation.install(source: source, destination: existing, digest: MigrationCoding.digest(bytes))
+        XCTAssertEqual(try Data(contentsOf: existing), bytes)
+        let added = folder.appendingPathComponent("new.wav")
+        try await installation.install(source: source, destination: added, digest: MigrationCoding.digest(bytes))
+        installation.rollback()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: added.path))
+        XCTAssertEqual(try Data(contentsOf: existing), bytes)
+        do {
+            try await installation.install(source: source, destination: added, digest: "invalid")
+            XCTFail("Expected checksum rejection")
+        } catch { }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["existing.wav"])
     }
 
 }

@@ -25,6 +25,10 @@ final class DictationProfileStore: ObservableObject {
     }
   }
 
+  func reloadAfterMigration() {
+    profiles = defaults.data(forKey: Self.defaultsKey).flatMap { try? DictationProfile.decodeList($0) } ?? []
+  }
+
   func upsert(_ profile: DictationProfile) {
     if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
       profiles[index] = profile

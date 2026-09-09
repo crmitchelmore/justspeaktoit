@@ -358,3 +358,7 @@ public final class PronunciationManager: ObservableObject { // swiftlint:disable
         }
     }
 }
+
+extension PronunciationManager {
+    public func reloadAfterMigration() { loadEntries() }
+}

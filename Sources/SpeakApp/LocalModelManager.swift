@@ -811,7 +811,7 @@ struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
 }
 #endif
 
-private struct ImportedModelRecord: Codable {
+struct ImportedModelRecord: Codable {
   let id: String
   let displayName: String
   let modelName: String
@@ -845,4 +845,16 @@ private struct ImportedModelRecord: Codable {
       supportsLiveStreaming: supportsLiveStreaming
     )
   }
+}
+
+extension LocalModelManager {
+    func reloadAfterMigration() {
+        importedModels = []
+        loadImportedModels()
+        #if !APP_STORE
+        streamingModelSources = []
+        loadStreamingModelSources()
+        #endif
+        refreshInstallStates()
+    }
 }

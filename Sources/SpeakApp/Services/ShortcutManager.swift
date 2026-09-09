@@ -20,6 +20,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case openTroubleshooting
     case openTranscriptionSettings
     case openPostProcessingSettings
+    case openDataMigrationSettings
     case openProfilesSettings
     case openVoiceOutputSettings
     case openPronunciationSettings
@@ -50,6 +51,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openTroubleshooting: return "Open Troubleshooting"
         case .openTranscriptionSettings: return "Open Transcription Settings"
         case .openPostProcessingSettings: return "Open Post-processing Settings"
+        case .openDataMigrationSettings: return "Open Data & Migration"
         case .openProfilesSettings: return "Open Profiles Settings"
         case .openVoiceOutputSettings: return "Open Voice Output Settings"
         case .openPronunciationSettings: return "Open Pronunciation Settings"
@@ -95,6 +97,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return KeyBinding(keyCode: 19, modifiers: [.command], isGlobal: false)  // ⌘2
         case .openPostProcessingSettings:
             return KeyBinding(keyCode: 20, modifiers: [.command], isGlobal: false)  // ⌘3
+        case .openDataMigrationSettings:
+            return KeyBinding(keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false)
         case .openProfilesSettings:
             return KeyBinding(keyCode: 29, modifiers: [.command], isGlobal: false)  // ⌘0
         case .openVoiceOutputSettings:
@@ -680,4 +684,8 @@ final class ShortcutManager: ObservableObject {
 
         conflicts = newConflicts
     }
+}
+
+extension ShortcutManager {
+    func reloadAfterMigration() { loadBindings() }
 }

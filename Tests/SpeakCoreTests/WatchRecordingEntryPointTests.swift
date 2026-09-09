@@ -46,13 +46,25 @@ final class WatchRecordingEntryPointTests: XCTestCase {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
-        let output = Pipe()
+        // A file avoids blocking on pipe EOF if a stalled compiler child keeps
+        // an inherited output descriptor open after its parent is terminated.
+        let log = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let output = try FileHandle(forWritingTo: log)
+        defer {
+            try? output.close()
+            try? FileManager.default.removeItem(at: log)
+        }
         process.standardOutput = output
         process.standardError = output
+        let finished = XCTestExpectation(description: "Subprocess exited: \(executable)")
+        process.terminationHandler = { _ in finished.fulfill() }
         try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "Non-UTF8 process output")
+        guard XCTWaiter.wait(for: [finished], timeout: 60) == .completed else {
+            if process.isRunning { process.terminate() }
+            return (-1, "Subprocess exceeded its 60-second deadline: \(executable)")
+        }
+        return (process.terminationStatus, try String(contentsOf: log, encoding: .utf8))
     }
 
     private static let connectivityDouble = """

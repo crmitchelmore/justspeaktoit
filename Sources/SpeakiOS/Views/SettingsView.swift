@@ -1326,14 +1326,6 @@ public struct SettingsView: View {
                 }
             }
 
-            Section("Send to Mac") {
-                NavigationLink {
-                    SendToMacView()
-                } label: {
-                    Label("Configure Mac Connection", systemImage: "desktopcomputer")
-                }
-            }
-
             Section("Privacy & Debugging") {
                 NavigationLink {
                     PrivacyView()

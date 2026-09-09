@@ -1,6 +1,24 @@
-# macOS Receiver Implementation - Complete
+# macOS transport receiver
 
-The "Send to Mac" feature is now fully implemented on both sides.
+> **Status (2026-09-09): the iOS "Send to Mac" client has been removed.**
+> An audit found that no code on the phone ever called
+> `MacConnection.sendTranscript`, so a user could discover the Bonjour service,
+> enter the pairing code, connect, dictate — and receive nothing on the Mac,
+> with no error. The pairing UI (`MacDiscovery`, `SendToMacView`, `PairingSheet`)
+> and its Settings entry are gone.
+>
+> What remains and still ships:
+> - the **Mac-side `TransportServer`** described below, which backs the `speak`
+>   automation CLI (#655) and the MCP server (#656);
+> - **`MacConnection`** in `SpeakCore`, now purely the client that
+>   `TransportLoopbackTests` drives against that server to keep the wire protocol
+>   covered.
+>
+> The sections below describe the wire protocol and the Mac server, which are
+> accurate. Sections describing the iOS client, its Settings screen and the
+> end-to-end "dictate on the phone, text appears on the Mac" flow describe
+> behaviour that no longer exists. Cross-device delivery today is CloudKit
+> history sync.
 
 ## Wire Protocol
 
@@ -150,22 +168,16 @@ To test the complete flow:
    - On iPhone: Tap microphone, speak
    - Text should appear on Mac instantly
 
-## What's Next
+## What's next
 
-The iOS migration is **100% complete** from a code perspective:
+The Mac transport server is in use by the automation CLI. The iOS client is
+removed; see the status note at the top of this file.
 
-✅ All 10 tasks completed  
-✅ macOS receiver implemented  
-✅ Full "Send to Mac" working  
-✅ Live Activity support  
-✅ QR config transfer  
-✅ iCloud sync  
-✅ Privacy & logging  
+If phone-to-Mac delivery is revisited, the open questions the audit recorded are:
 
-**Remaining work is Xcode configuration only** (see `Docs/XCODE_SETUP.md`):
-- Add Widget Extension target
-- Configure entitlements  
-- Add Info.plist permissions
-- Test on physical device
-
-Ready for production! 🎉
+- a connection has to outlive the Settings screen (the old one was a
+  `@StateObject` on the view, so it was torn down on navigation);
+- a sleeping Mac needs Wake on Demand and a sleep proxy, and mDNS is blocked on
+  many networks, so a local-network lane needs a fallback;
+- CloudKit history sync already reaches the Mac and works when the Mac is
+  asleep, so it is the cheaper lane to make live.

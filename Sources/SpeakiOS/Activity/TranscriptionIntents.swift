@@ -394,6 +394,11 @@ public final class SharedTranscriptionState {
         #endif
     }
 
+    /// Allows tests to isolate shared state from the real App Group.
+    init(defaults: UserDefaults?) {
+        self.defaults = defaults
+    }
+
     #if DEBUG && targetEnvironment(simulator)
     /// Deterministic transcript used only by Simulator UX validation. App Intent
     /// execution does not reliably inherit launchd environment variables, so the

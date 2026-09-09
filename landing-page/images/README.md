@@ -1,6 +1,8 @@
 # Screenshot provenance
 
 These files show native app UI, not HTML reproductions or generated mockups.
+Capture dates use Europe/London (BST, UTC+01:00): the captures made shortly after
+midnight on 9 September are dated 8 September in UTC.
 
 - mac-history-current.png: 1920 × 971 lossless PNG exported directly from the
   running native Mac window on 9 September 2026. Current Debug app, using the

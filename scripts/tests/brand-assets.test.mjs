@@ -8,7 +8,9 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const read = name => readFileSync(path.join(root, name));
 function png(name) {
   const data = read(name);
-  assert.equal(data.subarray(1, 4).toString(), 'PNG', name);
+  assert.deepEqual(data.subarray(0, 8), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), name);
+  assert.equal(data.readUInt32BE(8), 13, name);
+  assert.equal(data.subarray(12, 16).toString(), 'IHDR', name);
   return { width: data.readUInt32BE(16), height: data.readUInt32BE(20), depth: data[24], colourType: data[25] };
 }
 test('Mac iconset pixels match point sizes and Retina scale', () => {
@@ -53,7 +55,10 @@ test('web and touch icon sizes match their declarations', () => {
     assert.equal(png('landing-page/' + name).width, size);
     assert.equal(png('landing-page/' + name).height, size);
   }
-  for (const icon of JSON.parse(read('landing-page/site.webmanifest')).icons) {
+  const icons = JSON.parse(read('landing-page/site.webmanifest')).icons;
+  assert.deepEqual(icons.map(icon => icon.src).sort(), ['/icon-192.png', '/icon-512.png'],
+    'Manifest icons must name the deployed web exports');
+  for (const icon of icons) {
     const asset = png('landing-page' + icon.src);
     assert.equal(icon.sizes, asset.width + 'x' + asset.height);
   }

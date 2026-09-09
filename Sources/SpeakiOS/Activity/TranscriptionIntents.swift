@@ -379,8 +379,14 @@ public final class SharedTranscriptionState {
     public static let appGroupIdentifier = KeyboardHandoffStore.appGroupIdentifier
 
     private let defaults: UserDefaults?
+    /// Whether writes should push a reload to the widget and the Control Center
+    /// control. Only the App Group singleton does: a test-injected instance
+    /// writes to its own suite, which no surface reads, so refreshing from one
+    /// would be a side effect with nothing behind it.
+    private let refreshesSurfaces: Bool
 
     private init() {
+        refreshesSurfaces = true
         // Verified centrally so a missing effective entitlement fails the same
         // way here as in every other App Group store: a logged fault and an
         // unavailable, no-op store.
@@ -397,6 +403,7 @@ public final class SharedTranscriptionState {
     /// Allows tests to isolate shared state from the real App Group.
     init(defaults: UserDefaults?) {
         self.defaults = defaults
+        self.refreshesSurfaces = false
     }
 
     #if DEBUG && targetEnvironment(simulator)
@@ -447,8 +454,9 @@ public final class SharedTranscriptionState {
             defaults?.set(newValue, forKey: "isRecording")
             // The widget and the Control Center control read this value from the
             // App Group and are not observing it, so they stay stale until they
-            // are told. Only push on a real transition.
-            guard changed else { return }
+            // are told. Only push on a real transition, and only from the real
+            // shared store.
+            guard changed, refreshesSurfaces else { return }
             Task { @MainActor in
                 CaptureSurfaceRefresher.recordingStateChanged()
             }

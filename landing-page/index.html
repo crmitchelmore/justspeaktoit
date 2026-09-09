@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Just Speak to It — Your voice. Your words.</title>
-  <meta name="description" content="Turn your voice into useful text on Mac, iPhone and iPad. Choose local models or your own cloud providers, with live dictation and optional text clean-up.">
+  <title>Just Speak to It — Say it. Use it.</title>
+  <meta name="description" content="Turn speech into text on Mac, iPhone and iPad. Dictate, clean up and copy. Choose local models or bring your own cloud providers.">
   <meta name="theme-color" content="#181b1d">
-  <meta property="og:title" content="Just Speak to It — Your voice. Your words.">
-  <meta property="og:description" content="Native dictation for Mac, iPhone and iPad. Your voice, your choice of model, your words.">
+  <meta property="og:title" content="Just Speak to It — Say it. Use it.">
+  <meta property="og:description" content="Less typing. Words ready to use. Native dictation for Mac, iPhone and iPad.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://justspeaktoit.com/">
   <link rel="canonical" href="https://justspeaktoit.com/">
@@ -22,6 +22,7 @@
   <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/site.css">
   <script type="module" src="/download-architecture.js"></script>
+  <script type="module" src="/voice-motion.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -33,64 +34,68 @@
   <main id="main">
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy"><div class="hero-heading">
-        <a class="release-note" href="#updates"><span class="status-dot" aria-hidden="true"></span>New in 3.0: more ways to find your voice <span aria-hidden="true">↗</span></a>
-        <h1 id="hero-title">Your voice.<br>Your words.</h1></div><div class="hero-intro">
-        <p class="lede">For the thought that’s easier said than typed.<br class="desktop-break"> Speak naturally. Get useful text. Keep moving.</p>
-        <div class="hero-actions"><a class="button" href="/download/mac-intel" data-auto-mac-download><span aria-hidden="true">↓</span>Download for Mac</a><a class="quiet-link" href="#apps">Meet the iOS app</a></div>
+        <a class="release-note" href="#updates"><span class="status-dot" aria-hidden="true"></span>New in 3.0: more models &amp; voices <span aria-hidden="true">↗</span></a>
+        <h1 id="hero-title">Say it.<br>Use it.</h1></div><div class="hero-intro">
+        <p class="lede">Turn speech into text, ready for the apps you use.</p>
+        <div class="voice-demo" aria-label="Voice-to-text example">
+          <div class="voice-demo-heading"><span>Thought → text</span><button class="voice-replay" type="button" aria-label="Replay voice-to-text animation" hidden><span aria-hidden="true">↻</span> Replay</button></div>
+          <div class="voice-demo-line"><span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><p class="voice-words"><span class="sr-only">Let’s pick this up tomorrow.</span><span aria-hidden="true">Let’s</span> <span aria-hidden="true">pick</span> <span aria-hidden="true">this</span> <span aria-hidden="true">up</span> <span aria-hidden="true">tomorrow.</span></p><span class="voice-done" aria-hidden="true">✓</span></div>
+        </div>
+        <div class="hero-actions"><a class="button" href="/download/mac-intel" data-auto-mac-download><span aria-hidden="true">↓</span>Download for Mac</a><a class="quiet-link" href="#apps">For iPhone &amp; iPad</a></div>
         <p class="download-caption">macOS 14+ <span aria-hidden="true">/</span> <span data-download-architecture>Universal compatible</span></p>
         <p class="manual-downloads">Or choose <a href="/download/mac">Apple Silicon</a> or <a href="/download/mac-intel">Intel</a>.</p>
       </div></div>
       <figure class="product-capture">
         <div class="capture-heading"><span><span class="status-dot" aria-hidden="true"></span> Just Speak to It on Mac</span><a href="/images/mac-history-current.png" aria-label="Open the full-size Mac app screenshot">View full size ↗</a></div>
         <a class="capture-image" href="/images/mac-history-current.png" aria-label="Open the full-size Mac History screenshot"><img src="/images/mac-history-current.png" alt="The current native Mac app: browse saved transcriptions and open a session to copy the original words, shown with sample entries." width="1920" height="971" fetchpriority="high" decoding="async"></a>
-        <figcaption>Your words, ready when you need them. Captured in the Mac app with sample entries.</figcaption>
+        <figcaption>The real Mac app. Sample history.</figcaption>
       </figure>
     </section>
-    <div class="essentials wrap" role="group" aria-label="At a glance"><span>Made for Mac, iPhone &amp; iPad</span><span>Local or cloud. You choose.</span><a href="https://github.com/crmitchelmore/justspeaktoit">Open source, down to the last word <span aria-hidden="true">↗</span></a></div>
+    <div class="essentials wrap" role="group" aria-label="At a glance"><span>Made for Mac, iPhone &amp; iPad</span><span>Local or cloud. You choose.</span><a href="https://github.com/crmitchelmore/justspeaktoit">Open source <span aria-hidden="true">↗</span></a></div>
     <section class="workflow wrap section-space" id="how-it-works" aria-labelledby="workflow-title">
-      <div class="section-intro"><h2 id="workflow-title">Keep the thought.<br>Skip the typing.</h2><p>A reply, a rough idea, a note before it disappears. Get it out of your head and into the place you need it.</p></div>
+      <div class="section-intro"><h2 id="workflow-title">Less typing.<br>More doing.</h2><p>From a quick thought to a finished reply.</p></div>
       <div class="steps">
-        <article><span class="step-number">1</span><h3>Make a little room.</h3><p>Start with your Mac shortcut, the iPhone Action Button, Shortcuts or the app.</p><div class="key-example"><kbd>fn</kbd><span>Your shortcut. Your muscle memory.</span></div></article>
-        <article><span class="step-number">2</span><h3>Say it your way.</h3><p>Watch words arrive with a live model, or transcribe a recording when you’re finished.</p><div class="word-example" aria-hidden="true">I’ve been thinking about this<span>▎</span></div></article>
-        <article><span class="step-number">3</span><h3>Put it to work.</h3><p>Keep the original or clean it up with your own instructions. Copy it, or paste into other apps with the direct Mac download.</p><div class="ready-example"><span aria-hidden="true">✓</span>Ready for your next sentence.</div></article>
+        <article><span class="step-number">1</span><h3>Press.</h3><p>Start with a shortcut or the app.</p><div class="key-example"><kbd>fn</kbd><span>One shortcut away.</span></div></article>
+        <article><span class="step-number">2</span><h3>Speak.</h3><p>Dictate live or transcribe a recording.</p><div class="word-example" aria-hidden="true">Let’s pick this up tomorrow.<span>▎</span></div></article>
+        <article><span class="step-number">3</span><h3>Use it.</h3><p>Clean up, copy or paste into your next task.</p><div class="ready-example"><span aria-hidden="true">✓</span>Paste from the direct Mac app.</div></article>
       </div>
     </section>
     <section class="models-section" id="models" aria-labelledby="models-title">
       <div class="wrap models-layout">
-        <div class="models-copy"><span class="choice-symbol" aria-hidden="true">↔</span><h2 id="models-title">Your voice.<br> Your choice.</h2><p>Some days, staying on-device matters most. Other days, a specialist speech model is the right fit. You can change your mind without changing your app.</p><a class="quiet-link" href="/privacy">See how your data is handled</a></div>
+        <div class="models-copy"><span class="choice-symbol" aria-hidden="true">↔</span><h2 id="models-title">Your words.<br> Your rules.</h2><p>Stay local or bring your favourite cloud model.</p><a class="quiet-link" href="/privacy">Your data &amp; privacy</a></div>
         <div class="model-options">
-          <article><div class="option-heading"><h3>Keep it local.</h3><span class="model-tag">On your device</span></div><p>Apple Speech, downloaded WhisperKit models and Parakeet on Mac. Add a local text model for clean-up, too.</p><p class="option-note">For a local workflow, choose local transcription and clean-up, and keep cloud sync off. Availability varies by device and app edition.</p></article>
-          <article><div class="option-heading"><h3>Bring your favourites.</h3><span class="model-tag">Your API keys</span></div><p>Use providers like OpenAI, Deepgram, Soniox, AssemblyAI and ElevenLabs. Choose live dictation or recorded audio, then pick how to polish the words.</p><details class="provider-details"><summary>Explore the provider options</summary><div><p><strong>Live speech</strong><br>Apple Speech, Deepgram, Cartesia, AssemblyAI, Soniox, ElevenLabs, Modulate, Meta, Google and OpenAI.</p><p><strong>Recorded audio</strong><br>Local models and cloud options including OpenAI, Groq, Mistral, Rev.ai, Gemini and OpenRouter.</p><p><strong>Text clean-up &amp; spoken output</strong><br>Local text models or OpenRouter for clean-up; system and supported provider voices for spoken replies.</p><p>Features depend on the selected model and platform. Cloud providers may charge for usage.</p><a href="https://github.com/crmitchelmore/justspeaktoit#transcription-providers">Full provider details on GitHub</a></div></details></article>
-          <article class="openrouter-note"><span aria-hidden="true">↗</span><p><strong>More choice in 3.0.</strong> Discover OpenRouter audio models and voices directly in settings. <a href="#updates">See the highlights</a></p></article>
+          <article><div class="option-heading"><h3>Keep it local.</h3><span class="model-tag">On your device</span></div><p>Downloaded models for speech and text clean-up.</p><details class="provider-details"><summary>Local models &amp; privacy</summary><div><p>WhisperKit and Parakeet on Mac, plus local text models for clean-up. Availability varies by device and app edition.</p><p>Apple Speech is a separate option and may use Apple’s servers when on-device recognition is unavailable.</p><p>Cloud sync, cloud voices and connected services can send your words off-device. Keep those off for local dictation.</p></div></details></article>
+          <article><div class="option-heading"><h3>Go with cloud.</h3><span class="model-tag">Your API keys</span></div><p>OpenAI, Deepgram, Soniox and more. Your keys, your choice.</p><details class="provider-details"><summary>Explore providers</summary><div><p><strong>Live speech</strong><br>Apple Speech, Deepgram, Cartesia, AssemblyAI, Soniox, ElevenLabs, Modulate, Meta, Google and OpenAI.</p><p><strong>Recorded audio</strong><br>Local models and cloud options including OpenAI, Groq, Mistral, Rev.ai, Gemini and OpenRouter.</p><p><strong>Text clean-up &amp; spoken output</strong><br>Local text models or OpenRouter for clean-up; system and supported provider voices for spoken replies.</p><p>Features vary by model and platform.</p><a href="https://github.com/crmitchelmore/justspeaktoit#transcription-providers">Full provider details on GitHub</a></div></details><p class="option-note">Cloud providers may charge for usage.</p></article>
+          <article class="openrouter-note"><span aria-hidden="true">↗</span><p><strong>More choice in 3.0.</strong> Discover OpenRouter audio models and voices in settings. <a href="#updates">See the highlights</a></p></article>
         </div>
       </div>
     </section>
     <section class="apps-section apps-layout wrap section-space" id="apps" aria-labelledby="apps-title">
-      <div class="apps-copy"><span class="eyebrow">On iPhone &amp; iPad, too</span><h2 id="apps-title">Feels at home.<br>Wherever you think.</h2><p>Catch an idea on a walk. Talk through a reply. Come back to the words when you have a moment.</p><dl class="mobile-features"><div><dt>A shortcut to your next thought.</dt><dd>Start from the Action Button, Shortcuts or the app.</dd></div><div><dt>Your words, ready to return to.</dt><dd>Browse, search and copy your saved transcriptions.</dd></div><div><dt>Familiar from the first tap.</dt><dd>Native controls, your choice of model, and settings that travel with your workflow.</dd></div></dl></div>
-      <figure class="ios-showcase"><a class="ios-image" href="/images/ios-history-current.png" aria-label="Open the full-size iPhone app screenshot"><img src="/images/ios-history-current.png" alt="The current Just Speak to It iPhone app, showing native History with five sample transcriptions and orange controls" width="1320" height="2868" loading="lazy" decoding="async"></a><figcaption>Captured in the iPhone app with sample entries.<br><a href="/images/ios-history-current.png">View full size ↗</a></figcaption></figure>
+      <div class="apps-copy"><span class="eyebrow">On iPhone &amp; iPad, too</span><h2 id="apps-title">Ideas travel.<br>Take them along.</h2><p>Dictate on the go. Find the words later.</p><ul class="mobile-features"><li>Action Button &amp; Shortcuts</li><li>Searchable transcription history</li><li>Native iPhone &amp; iPad app</li></ul></div>
+      <figure class="ios-showcase"><a class="ios-image" href="/images/ios-history-current.png" aria-label="Open the full-size iPhone app screenshot"><img src="/images/ios-history-current.png" alt="The current Just Speak to It iPhone app, showing native History with five sample transcriptions and orange controls" width="1320" height="2868" loading="lazy" decoding="async"></a><figcaption>The real iPhone app. Sample history.<br><a href="/images/ios-history-current.png">View full size ↗</a></figcaption></figure>
     </section>
     <section class="updates-section wrap" id="updates" aria-labelledby="updates-title">
-      <div class="updates-heading"><div><h2 id="updates-title">A little better, release by release.</h2><p>Recent additions, and a look at what’s taking shape.</p></div><a class="quiet-link" href="https://github.com/crmitchelmore/justspeaktoit/releases">All release notes <span aria-hidden="true">↗</span></a></div>
+      <div class="updates-heading"><div><h2 id="updates-title">Freshly spoken.</h2><p>What’s new. What’s next.</p></div><a class="quiet-link" href="https://github.com/crmitchelmore/justspeaktoit/releases">All release notes <span aria-hidden="true">↗</span></a></div>
       <div class="updates-columns">
         <div class="release-highlights">
           <div class="column-heading"><h3>Recently added</h3><span>September 2026</span></div>
-          <article class="release-entry"><div class="release-meta"><a href="https://github.com/crmitchelmore/justspeaktoit/releases/tag/mac-v3.0.0">3.0</a><time datetime="2026-09-06">6 Sep</time></div><div><h4>More models. More voices.</h4><p>OpenRouter audio model discovery, transcription and voice selection in native settings. Plus safer cancellation and tighter analytics consent handling.</p></div></article>
-          <article class="release-entry"><div class="release-meta"><a href="https://github.com/crmitchelmore/justspeaktoit/releases/tag/mac-v2.72.1">2.72.1</a><time datetime="2026-09-05">5 Sep</time></div><div><h4>Better care for your recordings.</h4><p>Safer recording cancellation, protected model files and more dependable recovery for audio captured on Apple Watch.</p></div></article>
-          <article class="release-entry"><div class="release-meta"><a href="https://github.com/crmitchelmore/justspeaktoit/releases/tag/mac-v2.71.0">2.71</a><time datetime="2026-09-03">3 Sep</time></div><div><h4>Gemini transcription on iOS.</h4><p>Gemini 3.5 Transcribe for recordings, with speaker labels and word timings. Live transcription also keeps more of those last syllables.</p></div></article>
-          <p class="updates-note">Highlights from published Mac releases; iOS delivery follows its own release track.</p>
+          <article class="release-entry"><div class="release-meta"><a href="https://github.com/crmitchelmore/justspeaktoit/releases/tag/mac-v3.0.0">3.0</a><time datetime="2026-09-06">6 Sep</time></div><div><h4>More models. More voices.</h4><p>Discover OpenRouter audio models and voices in settings.</p></div></article>
+          <article class="release-entry"><div class="release-meta"><a href="https://github.com/crmitchelmore/justspeaktoit/releases/tag/mac-v2.72.1">2.72.1</a><time datetime="2026-09-05">5 Sep</time></div><div><h4>Better care for your recordings.</h4><p>Safer cancellation, protected models and Watch audio recovery.</p></div></article>
+          <article class="release-entry"><div class="release-meta"><a href="https://github.com/crmitchelmore/justspeaktoit/releases/tag/mac-v2.71.0">2.71</a><time datetime="2026-09-03">3 Sep</time></div><div><h4>Gemini transcription on iOS.</h4><p>Transcribe recordings with speaker labels and word timings.</p></div></article>
+          <p class="updates-note">Mac release highlights. iOS has its own release track.</p>
         </div>
         <div class="roadmap">
           <div class="column-heading"><h3>Taking shape</h3><span>Roadmap</span></div>
-          <p class="roadmap-intro">A few things we’re working towards. These are plans and validation work, with no promised release dates.</p>
-          <details><summary><span>Dictation from the iOS keyboard</span><span class="roadmap-status">Device testing</span></summary><div class="roadmap-body"><p>Refining the keyboard-to-app recording handoff and checking the complete flow on physical iPhones before wider availability.</p><a href="https://github.com/crmitchelmore/justspeaktoit/issues/661">Follow keyboard progress</a></div></details>
-          <details><summary><span>Capture from your watch face</span><span class="roadmap-status">Verification</span></summary><div class="roadmap-body"><p>Complication and Smart Stack entry points, alongside more dependable wrist-down recording. Watch availability still depends on release and device verification.</p><a href="https://github.com/crmitchelmore/justspeaktoit/issues/657">Follow Apple Watch progress</a></div></details>
-          <details><summary><span>More ways to automate</span><span class="roadmap-status">Verification</span></summary><div class="roadmap-body"><p>A command-line tool and MCP dictation tools are implemented, with installed-app and distribution checks still to complete.</p><a href="https://github.com/crmitchelmore/justspeaktoit/issues/655">Follow the command-line tool</a><a href="https://github.com/crmitchelmore/justspeaktoit/issues/656">Follow MCP support</a></div></details>
-          <a class="roadmap-all" href="https://github.com/crmitchelmore/justspeaktoit/issues">Browse the open work or suggest an idea <span aria-hidden="true">↗</span></a>
+          <p class="roadmap-intro">In progress. No promised release dates.</p>
+          <details><summary><span>Dictation from the iOS keyboard</span><span class="roadmap-status">Device testing</span></summary><div class="roadmap-body"><p>Testing the keyboard-to-app recording handoff on physical iPhones.</p><a href="https://github.com/crmitchelmore/justspeaktoit/issues/661">Follow keyboard progress</a></div></details>
+          <details><summary><span>Capture from your watch face</span><span class="roadmap-status">Verification</span></summary><div class="roadmap-body"><p>Complications, Smart Stack and wrist-down recording. Release and device checks are still in progress.</p><a href="https://github.com/crmitchelmore/justspeaktoit/issues/657">Follow Apple Watch progress</a></div></details>
+          <details><summary><span>More ways to automate</span><span class="roadmap-status">Verification</span></summary><div class="roadmap-body"><p>Command-line and MCP dictation tools. Availability depends on app and distribution checks.</p><a href="https://github.com/crmitchelmore/justspeaktoit/issues/655">Follow the command-line tool</a><a href="https://github.com/crmitchelmore/justspeaktoit/issues/656">Follow MCP support</a></div></details>
+          <a class="roadmap-all" href="https://github.com/crmitchelmore/justspeaktoit/issues">Follow the roadmap <span aria-hidden="true">↗</span></a>
         </div>
       </div>
     </section>
-    <section class="download-section wrap" id="download" aria-labelledby="download-title"><div class="download-well"><div><h2 id="download-title">Give your next thought<br> somewhere to go.</h2><p>Start with the direct Mac download. Bring a voice and a little curiosity.</p></div><div class="download-actions"><a class="button" href="/download/mac-intel" data-auto-mac-download>Download for Mac <span aria-hidden="true">↓</span></a><p><a href="/download/mac">Apple Silicon</a><span aria-hidden="true"> / </span><a href="/download/mac-intel">Intel (universal)</a></p><a class="ios-release-link" href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/ios-testflight-release.md">iPhone &amp; iPad release information</a></div></div></section>
+    <section class="download-section wrap" id="download" aria-labelledby="download-title"><div class="download-well"><div><h2 id="download-title">Got a thought?<br> Say it.</h2><p>Your next sentence starts here.</p></div><div class="download-actions"><a class="button" href="/download/mac-intel" data-auto-mac-download>Download for Mac <span aria-hidden="true">↓</span></a><p><a href="/download/mac">Apple Silicon</a><span aria-hidden="true"> / </span><a href="/download/mac-intel">Intel (universal)</a></p><a class="ios-release-link" href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/ios-testflight-release.md">iOS release information</a></div></div></section>
   </main>
-  <footer class="wrap"><div class="footer-top"><div><a class="brand" href="#top"><img class="brand-mark" src="/favicon.svg?v=20260909" width="40" height="40" alt=""><span>Just Speak to It</span></a><p>Made with care by <a href="https://mitchelmore.uk">Chris Mitchelmore</a>.</p></div><nav aria-label="Footer"><a href="https://github.com/crmitchelmore/justspeaktoit">GitHub</a><a href="/privacy">Privacy</a><a href="mailto:hello@justspeaktoit.com">Say hello</a></nav></div><div class="footer-bottom"><span>© 2026 Chris Mitchelmore</span><span>Also making <a href="https://pasta-app.com">Pasta</a>, a calmer home for your clipboard.</span><a href="#top">Back to top ↑</a></div></footer>
+  <footer class="wrap"><div class="footer-top"><div><a class="brand" href="#top"><img class="brand-mark" src="/favicon.svg?v=20260909" width="40" height="40" alt=""><span>Just Speak to It</span></a><p>Made with care by <a href="https://mitchelmore.uk">Chris Mitchelmore</a>.</p></div><nav aria-label="Footer"><a href="https://github.com/crmitchelmore/justspeaktoit">GitHub</a><a href="/privacy">Privacy</a><a href="mailto:hello@justspeaktoit.com">Say hello</a></nav></div><div class="footer-bottom"><span>© 2026 Chris Mitchelmore</span><span>Also making <a href="https://pasta-app.com">Pasta</a> for your clipboard.</span><a href="#top">Back to top ↑</a></div></footer>
 </body>
 </html>

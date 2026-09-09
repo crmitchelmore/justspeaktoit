@@ -89,6 +89,32 @@ final class CartesiaBatchClientTests: XCTestCase {
         XCTAssertEqual(silent.text, "")
     }
 
+    func testAuthenticationAndQuotaFailuresAreNamedRatherThanBareStatusCodes() async throws {
+        for (status, expected) in [
+            (401, BatchTranscriptionJobError.authenticationFailed("Cartesia")),
+            (403, .authenticationFailed("Cartesia")),
+            (402, .quotaExceeded("Cartesia")),
+            (429, .quotaExceeded("Cartesia"))
+        ] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).wav")
+            try Data([0, 1, 2, 3]).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            var client = CartesiaBatchClient()
+            client.uploadRecording = { request, _ in
+                (
+                    Data("denied".utf8),
+                    HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+                )
+            }
+            do {
+                _ = try await client.transcribeFile(at: url, apiKey: "fixture", language: nil)
+                XCTFail("Expected \(status) to fail")
+            } catch {
+                XCTAssertEqual(error as? BatchTranscriptionJobError, expected)
+            }
+        }
+    }
+
     func testCatalogueAndCredentialStayOnCartesiaBatchRoute() {
         XCTAssertTrue(ModelCatalog.batchTranscription.contains { $0.id == CartesiaBatchClient.catalogID })
         XCTAssertFalse(ModelCatalog.liveTranscription.contains { $0.id == CartesiaBatchClient.catalogID })

@@ -58,7 +58,7 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
 /// the diagnostics report. Keep the established wording. `httpError` keeps the
 /// status code and the response body, because that context is what makes a
 /// provider failure diagnosable.
-public enum TranscriptionProviderError: LocalizedError {
+public enum TranscriptionProviderError: LocalizedError, Equatable {
     case apiKeyMissing
     case invalidResponse
     case httpError(Int, String)

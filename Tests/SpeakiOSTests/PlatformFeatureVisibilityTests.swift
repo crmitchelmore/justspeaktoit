@@ -38,7 +38,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // listed whenever the runtime supports one of the analyzer engines
         // (SpeechTranscriber needs Apple Intelligence; DictationTranscriber
         // needs OS 26), so the expected provider set depends on the runtime.
-        var expectedProviders: Set<String> = ["cartesia", "google", "meta", "openai"]
+        var expectedProviders: Set<String> = ["cartesia", "gladia", "google", "meta", "openai"]
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }
@@ -66,6 +66,40 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == CartesiaBatchClient.catalogID })
         XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: CartesiaBatchClient.catalogID), .cartesia)
         XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " cartesia/ink-whisper "), .cartesia)
+    }
+
+    /// Gladia batch reuses the `gladia.apiKey` this app already stores for live
+    /// Solaria, so it is selectable and resolves that credential rather than
+    /// falling back to the OpenRouter key.
+    func testGladiaBatchIsSelectableAndResolvesTheGladiaKey() {
+        XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == GladiaBatchClient.catalogID })
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: GladiaBatchClient.catalogID), .gladia)
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " gladia/solaria-1 "), .gladia)
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: GladiaBatchClient.catalogID, purpose: .batchTranscription),
+            .apiKey(identifier: AppSettings.gladiaKeyID, providerName: "Gladia"))
+    }
+
+    /// Documented platform restriction: Speechmatics batch is macOS-only.
+    /// iOS has no Speechmatics credential field, so the entry is hidden rather
+    /// than offered as a model that could never resolve a key — the same
+    /// treatment the Speechmatics live entry already gets.
+    /// See Docs/batch-transcription-providers.md.
+    func testSpeechmaticsBatchIsHiddenOnIOSBecauseThereIsNoCredentialField() {
+        XCTAssertTrue(ModelCatalog.batchTranscription.contains {
+            SpeechmaticsBatchClient.catalogIDs.contains($0.id)
+        })
+        XCTAssertFalse(AppSettings.supportedBatchModels.contains {
+            SpeechmaticsBatchClient.catalogIDs.contains($0.id)
+        })
+        // The credential the catalogue asks for is one this app never stores,
+        // which is exactly why the entry stays hidden here.
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: SpeechmaticsBatchClient.enhancedCatalogID, purpose: .batchTranscription),
+            .apiKey(identifier: "speechmatics.apiKey", providerName: "Speechmatics"))
+        XCTAssertFalse(AppSettings.shared.storedAPIKeyIdentifiers.contains("speechmatics.apiKey"))
     }
 
     func testBatchRouting_sendsGemini35ToItsOwnClientAndLeavesOpenRouterModelsAlone() {

@@ -763,6 +763,13 @@ public final class AppSettings: ObservableObject {
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
                 || option.id == CartesiaBatchClient.catalogID
+                // Gladia's pre-recorded job API uploads through the shared
+                // `GladiaBatchClient` with the `gladia.apiKey` this app already
+                // stores for live Solaria. Speechmatics batch stays macOS-only
+                // for now: iOS has no Speechmatics credential field, and a
+                // model that can never resolve a key is hidden rather than
+                // shown failing (see Docs/batch-transcription-providers.md).
+                || option.id == GladiaBatchClient.catalogID
         }
 
     // MARK: - Legacy migration

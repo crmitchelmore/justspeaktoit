@@ -118,6 +118,15 @@ final class PermissionGuidanceTests: XCTestCase {
         }
     }
 
+    func testFinderReveal_keepsBlockingWorkspaceWorkOffTheMainThread() async {
+        let appURL = URL(fileURLWithPath: "/Applications/Just Speak to It Alpha.app")
+        let identity = RunningAppIdentity(bundleURL: appURL)
+        let result = await identity.revealInFinder { url in
+            !Thread.isMainThread && url == appURL
+        }
+        XCTAssertTrue(result)
+    }
+
     func testRestrictedAndReducedMotionPermissions_useNativeExplanations() {
         for permission in [PermissionType.accessibility, .inputMonitoring] {
             XCTAssertFalse(permission.usesDragGuide(status: .restricted, reduceMotion: false))

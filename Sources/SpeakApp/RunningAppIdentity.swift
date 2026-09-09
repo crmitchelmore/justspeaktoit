@@ -1,8 +1,8 @@
-import Foundation
+import AppKit
 
 /// Use the same name and bundle as Finder and the permission guide's drag card.
 /// Alpha, App Store and development builds must never direct users to another copy.
-struct RunningAppIdentity {
+struct RunningAppIdentity: Sendable {
     let bundleURL: URL
     let name: String
 
@@ -13,6 +13,17 @@ struct RunningAppIdentity {
     init(bundleURL: URL) {
         self.bundleURL = bundleURL
         name = FileManager.default.displayName(atPath: bundleURL.path)
+    }
+
+    func revealInFinder(
+        using reveal: @escaping @Sendable (URL) -> Bool = { url in
+            NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+        }
+    ) async -> Bool {
+        let url = bundleURL
+        // Finder may block while resolving a bundle on an external volume.
+        // Never let its synchronous workspace API block our permission UI.
+        return await Task.detached(priority: .userInitiated) { reveal(url) }.value
     }
 
     var recoveryInstructions: String {

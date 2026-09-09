@@ -21,9 +21,7 @@ struct PermissionRecoveryHelp: View {
                         .accessibilityIdentifier("permissions.recheckResult")
                 }
                 HStack {
-                    Button("Show App") {
-                        NSWorkspace.shared.activateFileViewerSelecting([identity.bundleURL])
-                    }
+                    ShowRunningAppButton()
                     Button("Check Again") {
                         permissions.refreshAll()
                         didCheck = true

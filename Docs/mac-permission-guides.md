@@ -65,3 +65,8 @@ All permission copy and the onboarding app name use the current bundle's Finder
 name, retaining Alpha/Dev suffixes. Recovery help reveals that exact bundle and
 reports the result of Check Again, with toggle/relaunch instructions for a stale
 OS grant. No TCC reset or automatic relaunch is performed.
+
+Finder reveal runs off the main thread: a runtime sample of an external-volume
+preview found the synchronous URL-reveal API blocked in pasteboard sandbox
+extension creation. The helper uses the path-selection API and shows an opening
+state, keeping permission checks and navigation responsive while Finder works.

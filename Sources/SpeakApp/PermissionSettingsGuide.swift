@@ -183,7 +183,7 @@ struct PermissionToggleGuideView: View {
             HStack {
                 Button("Open Settings") { NSWorkspace.shared.open(permission.settingsURL) }
                 if permission.dragGuidancePane != nil {
-                    Button("Show App") { NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL]) }
+                    ShowRunningAppButton()
                 }
                 Spacer()
                 Button("Done", action: onClose)

@@ -68,6 +68,8 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable { // swiftlint:di
     private let makeSocket: (URLRequest) -> any OpenAIRealtimeSocket
     private let logger = SpeakLogger.logger(category: "OpenAIRealtimeWebSocket")
     private let stateLock = NSLock()
+    /// Serialises bounded prefix flushing with live append submission, without queueing more PCM.
+    private let audioSubmissionLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
 
     private var webSocketTask: (any OpenAIRealtimeSocket)?
@@ -170,38 +172,42 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable { // swiftlint:di
     }
 
     func sendAudio(_ pcmData: Data) {
-        let action: AudioSendAction = withStateLock {
-            if isStopping || didOverflow || pcmData.isEmpty { return .drop }
-            if !sessionReady {
-                if preReadyAudioBufferBytes + pcmData.count <= Self.preReadyAudioByteLimit {
-                    preReadyAudioBuffer.append(pcmData)
-                    preReadyAudioBufferBytes += pcmData.count
-                    return .buffer
+        let action: AudioSendAction = audioSubmissionLock.withLock {
+            let action: AudioSendAction = withStateLock {
+                if isStopping || didOverflow || pcmData.isEmpty { return .drop }
+                if !sessionReady {
+                    if preReadyAudioBufferBytes + pcmData.count <= Self.preReadyAudioByteLimit {
+                        preReadyAudioBuffer.append(pcmData)
+                        preReadyAudioBufferBytes += pcmData.count
+                        return .buffer
+                    }
+                    // Keep the accepted prefix for normal finalisation, but admit no
+                    // more audio after a gap, even if the acknowledgement races us.
+                    didOverflow = true
+                    return .overflow(onError)
                 }
-                // Keep the accepted prefix for normal finalisation, but admit no
-                // more audio after a gap, even if the acknowledgement races us.
-                didOverflow = true
-                return .overflow(onError)
+                guard let task = webSocketTask, task.state == .running else {
+                    return .drop
+                }
+                return .send(task)
             }
-            guard let task = webSocketTask, task.state == .running else {
-                return .drop
+            if case .send(let task) = action {
+                sendJSONOnTask([
+                    "type": "input_audio_buffer.append",
+                    "audio": pcmData.base64EncodedString()
+                ], task: task)
             }
-            return .send(task)
+            return action
         }
 
         switch action {
-        case .drop, .buffer:
+        case .drop, .buffer, .send:
             return
         case .overflow(let callback):
             logger.error(
                 "OpenAI pre-ready audio overflow: limit=\(Self.preReadyAudioByteLimit) rejected=\(pcmData.count) bytes"
             )
             callback?(OpenAIRealtimeError.preReadyAudioOverflow)
-        case .send(let task):
-            sendJSONOnTask([
-                "type": "input_audio_buffer.append",
-                "audio": pcmData.base64EncodedString()
-            ], task: task)
         }
     }
 
@@ -285,7 +291,9 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable { // swiftlint:di
         task.send(.string(text)) { [weak self] error in
             self?.pendingSendGroup.leave()
             if let error {
-                self?.deliverError(error, task: task)
+                DispatchQueue.global().async { [weak self] in
+                    self?.deliverError(error, task: task)
+                }
             }
         }
     }
@@ -326,21 +334,22 @@ final class OpenAIRealtimeWebSocketClient: @unchecked Sendable { // swiftlint:di
         switch outcome {
         case .event(let event):
             if case .sessionReady = event {
-                let shouldFlush = withStateLock {
-                    guard !isStopping, !sessionReady else { return false }
-                    sessionReady = true
-                    isFlushingPreReadyAudio = true
-                    return true
-                }
-                guard shouldFlush else { return }
-                flushPreReadyAudio()
-                // Stop may observe readiness concurrently with the acknowledgement.
-                // Do not release it until the accepted prefix has entered the send group.
-                let tokensToFire: [WaitToken] = withStateLock {
-                    isFlushingPreReadyAudio = false
-                    let tokens = readyWaitTokens
-                    readyWaitTokens.removeAll()
-                    return tokens
+                let tokensToFire: [WaitToken] = audioSubmissionLock.withLock {
+                    let shouldFlush = withStateLock {
+                        guard !isStopping, !sessionReady else { return false }
+                        sessionReady = true
+                        isFlushingPreReadyAudio = true
+                        return true
+                    }
+                    guard shouldFlush else { return [] }
+                    flushPreReadyAudio()
+                    // Release Stop only after the entire prefix entered the send group.
+                    return withStateLock {
+                        isFlushingPreReadyAudio = false
+                        let tokens = readyWaitTokens
+                        readyWaitTokens.removeAll()
+                        return tokens
+                    }
                 }
                 for token in tokensToFire {
                     token.signal(true)

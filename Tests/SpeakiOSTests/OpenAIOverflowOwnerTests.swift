@@ -21,13 +21,17 @@ final class OpenAIOverflowOwnerTests: XCTestCase {
         let originalURL = try XCTUnwrap(fixture.transcriber.audioRecorder.currentFileURL)
         await fixture.deliverPartial()
         fixture.overflow()
+        fixture.socket.emit(["type": "error", "error": ["message": "Synthetic finalisation failure"]])
         fixture.socket.acknowledge()
         await settle { fixture.finalResults == 1 && fixture.history.items.count == 1 }
         XCTAssertEqual(ownerStops, 1)
         XCTAssertFalse(coordinator.isRunning)
         XCTAssertEqual(coordinator.partialText, "Retained synthetic words")
         XCTAssertEqual(fixture.history.items.count, 1)
-        XCTAssertNotNil(coordinator.error as? OpenAIRealtimeError)
+        XCTAssertEqual(
+            coordinator.error?.localizedDescription,
+            OpenAIRealtimeError.preReadyAudioOverflow.localizedDescription
+        )
         try fixture.assertRetainedAudio(at: originalURL)
         XCTAssertEqual(fixture.socket.audio.count, 1)
     }

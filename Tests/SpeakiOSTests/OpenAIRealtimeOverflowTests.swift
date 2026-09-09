@@ -146,6 +146,47 @@ final class OpenAIRealtimeOverflowTests: XCTestCase {
         client.stop()
     }
 
+    func testLiveAudioCannotOvertakePrefixDuringAcknowledgementFlush() async {
+        let (client, socket) = makeClient()
+        let enteredPrefix = expectation(description: "Prefix submission paused")
+        let acknowledged = expectation(description: "Acknowledgement handled")
+        let liveSubmitted = expectation(description: "Live audio submitted")
+        let liveAttempted = expectation(description: "Live append attempted during flush")
+        let liveFinished = DispatchSemaphore(value: 0)
+        let releasePrefix = DispatchSemaphore(value: 0)
+        let submissions = LockedOverflowCounter()
+        socket.beforeAudioSend = {
+            submissions.increment()
+            if submissions.count == 1 {
+                enteredPrefix.fulfill()
+                _ = releasePrefix.wait(timeout: .now() + 5)
+            }
+        }
+        client.start(onEvent: { _ in }, onError: { _ in XCTFail("Healthy startup failed") })
+        let first = Data(repeating: 1, count: 4_800)
+        let second = Data(repeating: 2, count: 4_800)
+        let live = Data(repeating: 3, count: 4_800)
+        client.sendAudio(first)
+        client.sendAudio(second)
+        DispatchQueue.global().async {
+            socket.acknowledge()
+            acknowledged.fulfill()
+        }
+        await fulfillment(of: [enteredPrefix], timeout: 2)
+        DispatchQueue.global().async {
+            liveAttempted.fulfill()
+            client.sendAudio(live)
+            liveFinished.signal()
+            liveSubmitted.fulfill()
+        }
+        await fulfillment(of: [liveAttempted], timeout: 2)
+        XCTAssertEqual(liveFinished.wait(timeout: .now() + 0.05), .timedOut)
+        releasePrefix.signal()
+        await fulfillment(of: [acknowledged, liveSubmitted], timeout: 2)
+        XCTAssertEqual(socket.audio, [first, second, live])
+        client.stop()
+    }
+
     private func makeClient() -> (OpenAIRealtimeWebSocketClient, OverflowTestSocket) {
         let socket = OverflowTestSocket()
         let client = OpenAIRealtimeWebSocketClient(

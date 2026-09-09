@@ -1,11 +1,13 @@
+import Foundation
+
 #if os(iOS)
 import ActivityKit
-import Foundation
 import os.log
+#endif
 
 /// ActivityKit attributes for live transcription sessions.
 /// Defines the static and dynamic content shown in Live Activities and Dynamic Island.
-public struct TranscriptionActivityAttributes: ActivityAttributes {
+public struct TranscriptionActivityAttributes {
 
     /// Static content that doesn't change during the activity.
     public struct ContentState: Codable, Hashable {
@@ -21,6 +23,8 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
         public var provider: String
         /// Optional error message
         public var errorMessage: String?
+        /// Only describes confirmed completion effects; older payloads remain neutral.
+        public var completionOutcome: TranscriptionCompletionOutcome
 
         public init(
             status: TranscriptionStatus = .idle,
@@ -28,7 +32,8 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
             wordCount: Int = 0,
             duration: Int = 0,
             provider: String = "Apple Speech",
-            errorMessage: String? = nil
+            errorMessage: String? = nil,
+            completionOutcome: TranscriptionCompletionOutcome = .ready
         ) {
             self.status = status
             self.lastSnippet = lastSnippet
@@ -36,6 +41,24 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
             self.duration = duration
             self.provider = provider
             self.errorMessage = errorMessage
+            self.completionOutcome = completionOutcome
+        }
+
+        private enum CodingKeys: String, CodingKey { // swiftlint:disable:this nesting
+            case status, lastSnippet, wordCount, duration, provider, errorMessage, completionOutcome
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.status = try container.decode(TranscriptionStatus.self, forKey: .status)
+            self.lastSnippet = try container.decode(String.self, forKey: .lastSnippet)
+            self.wordCount = try container.decode(Int.self, forKey: .wordCount)
+            self.duration = try container.decode(Int.self, forKey: .duration)
+            self.provider = try container.decode(String.self, forKey: .provider)
+            self.errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+            self.completionOutcome = try container.decodeIfPresent(
+                TranscriptionCompletionOutcome.self, forKey: .completionOutcome
+            ) ?? .ready
         }
     }
 
@@ -63,6 +86,9 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
         self.startTime = startTime
     }
 }
+
+#if os(iOS)
+extension TranscriptionActivityAttributes: ActivityAttributes {}
 
 // MARK: - Activity Manager
 
@@ -193,14 +219,35 @@ public final class TranscriptionActivityManager: ObservableObject {
         primedMessage: String = "Ready for the Action Button",
         primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle
     ) {
+        completeActivity(
+            finalWordCount: finalWordCount,
+            duration: duration,
+            keepPrimed: keepPrimed,
+            primedMessage: primedMessage,
+            primedStatus: primedStatus,
+            completionOutcome: .ready
+        )
+    }
+
+    /// Explicit outcome variant; the original entry point remains neutral and source-compatible.
+    public func completeActivity(
+        finalWordCount: Int,
+        duration: Int,
+        keepPrimed: Bool = false,
+        primedMessage: String = "Ready for the Action Button",
+        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
+        completionOutcome: TranscriptionCompletionOutcome
+    ) {
         guard let activity = currentActivity else { return }
 
+        let outcome: TranscriptionCompletionOutcome = finalWordCount == 0 ? .noSpeech : completionOutcome
         let finalState = TranscriptionActivityAttributes.ContentState(
             status: .completed,
-            lastSnippet: "Transcription complete",
+            lastSnippet: outcome.message,
             wordCount: finalWordCount,
             duration: duration,
-            provider: activity.content.state.provider
+            provider: activity.content.state.provider,
+            completionOutcome: outcome
         )
 
         Task {

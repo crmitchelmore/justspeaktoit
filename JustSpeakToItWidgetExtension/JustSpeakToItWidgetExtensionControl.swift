@@ -32,7 +32,7 @@ struct JustSpeakToItWidgetExtensionControl: ControlWidget {
             }
         }
         .displayName("Transcribe Voice")
-        .description("Start or stop voice transcription. Copies result to clipboard.")
+        .description("Start or stop voice transcription.")
     }
 }
 

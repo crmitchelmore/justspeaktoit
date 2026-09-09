@@ -39,7 +39,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.center) {
                     if context.state.status == .completed {
-                        Text("✓ \(context.state.wordCount) words copied to clipboard")
+                        Text(context.state.completionOutcome.message)
                             .font(.caption)
                             .foregroundStyle(.green)
                     } else {
@@ -61,13 +61,13 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                         if context.state.status == .recording || context.state.status == .listening {
                             if #available(iOS 18, *) {
                                 Button(intent: StopTranscriptionRecordingIntent()) {
-                                    Label("Stop & Copy", systemImage: "stop.circle.fill")
+                                    Label("Stop", systemImage: "stop.circle.fill")
                                         .font(.caption2)
                                 }
                                 .tint(.red)
                             }
                         } else if context.state.status == .completed {
-                            Text("Copied ✓")
+                            Text(context.state.completionOutcome.message)
                                 .font(.caption2)
                                 .foregroundStyle(.green)
                         }
@@ -179,7 +179,7 @@ struct LockScreenTranscriptionView: View {
                 }
 
                 if state.status == .completed {
-                    Text("✓ \(state.wordCount) words copied to clipboard")
+                    Text(state.completionOutcome.message)
                         .font(.subheadline)
                         .foregroundStyle(.green)
                 } else if let error = state.errorMessage {
@@ -207,6 +207,7 @@ struct LockScreenTranscriptionView: View {
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Stop recording")
                 }
             }
         }
@@ -233,4 +234,22 @@ struct LockScreenTranscriptionView: View {
         duration: 300,
         provider: "Deepgram"
     )
+}
+
+#Preview("Completion outcomes", as: .dynamicIsland(.expanded), using: TranscriptionActivityAttributes()) {
+    JustSpeakToItWidgetExtensionLiveActivity()
+} contentStates: {
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .ready)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .copied)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .savedToHistory)
+    TranscriptionActivityAttributes.ContentState(status: .completed, completionOutcome: .noSpeech)
+}
+
+#Preview("Completion outcomes", as: .content, using: TranscriptionActivityAttributes()) {
+    JustSpeakToItWidgetExtensionLiveActivity()
+} contentStates: {
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .ready)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .copied)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .savedToHistory)
+    TranscriptionActivityAttributes.ContentState(status: .completed, completionOutcome: .noSpeech)
 }

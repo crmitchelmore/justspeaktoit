@@ -52,6 +52,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let hasPolishingKey: @MainActor () -> Bool
     private let polish: @MainActor (String, String, String) async throws -> String
     private var latestCompletionID: UUID?
+    typealias ActivityCompletion = @MainActor (Int, Int, String, TranscriptionCompletionOutcome) -> Void
+    private let completeActivity: ActivityCompletion
 
     private convenience init() {
         self.init(
@@ -71,13 +73,23 @@ public final class TranscriptionRecordingService: ObservableObject {
         historyManager: iOSHistoryManager,
         polishClipboard: PolishClipboard,
         hasPolishingKey: @escaping @MainActor () -> Bool,
-        polish: @escaping @MainActor (String, String, String) async throws -> String
+        polish: @escaping @MainActor (String, String, String) async throws -> String,
+        completeActivity: @escaping ActivityCompletion = { wordCount, duration, primedMessage, outcome in
+            TranscriptionActivityManager.shared.completeActivity(
+                finalWordCount: wordCount,
+                duration: duration,
+                keepPrimed: true,
+                primedMessage: primedMessage,
+                completionOutcome: outcome
+            )
+        }
     ) {
         self.sharedState = sharedState
         self.historyManager = historyManager
         self.polishClipboard = polishClipboard
         self.hasPolishingKey = hasPolishingKey
         self.polish = polish
+        self.completeActivity = completeActivity
     }
 
     /// Picks the first non-blank candidate, else the fallback. Extracted as a
@@ -365,8 +377,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
-        // Complete Live Activity with clipboard confirmation
-        completeRecordingActivity(duration: duration, primedMessage: primedActivityMessage)
+        // Replacement ownership is not a delivery receipt, and recordTranscription
+        // does not confirm durable persistence. Keyboard callers have not yet saved
+        // or inserted their result. Keep all of these completions neutral.
+        completeRecordingActivity(
+            duration: duration,
+            primedMessage: primedActivityMessage,
+            outcome: .unconfirmed(transcript: text)
+        )
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. Polished text stays in History; the raw clipboard
@@ -396,13 +414,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         return result
     }
 
-    private func completeRecordingActivity(duration: Int, primedMessage: String) {
-        activityManager.completeActivity(
-            finalWordCount: wordCount,
-            duration: duration,
-            keepPrimed: true,
-            primedMessage: primedMessage
-        )
+    private func completeRecordingActivity(
+        duration: Int,
+        primedMessage: String,
+        outcome: TranscriptionCompletionOutcome
+    ) {
+        completeActivity(wordCount, duration, primedMessage, outcome)
     }
 
     /// Cancels recording without saving. During startup this retires the

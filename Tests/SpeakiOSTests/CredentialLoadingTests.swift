@@ -138,7 +138,7 @@ final class CredentialLoadingTests: XCTestCase {
         ))
     }
 
-    func testWatchImport_unavailableCredentialsRetainAudioAndPendingJob() async throws {
+    func testWatchImport_unavailableCredentialsDoNotSpendRetryBudget() async throws {
         let fixture = Fixture()
         defer { fixture.cleanUp() }
         let settings = fixture.settings(permissions: RetryPermissions())
@@ -153,16 +153,18 @@ final class CredentialLoadingTests: XCTestCase {
         let audio = Data("synthetic audio must not be submitted".utf8)
         try audio.write(to: audioURL)
         pipeline.journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 1)
+        pipeline.journal.recordAttemptFailure(captureID: captureID, message: "Earlier transcription failure")
         let job = try XCTUnwrap(pipeline.journal.pendingJobs().first)
-        do {
-            try await pipeline.importOne(job)
-            XCTFail("Unavailable credentials must prevent transcription")
-        } catch {
-            XCTAssertTrue(error is AppSettings.CredentialLoadingError)
+        XCTAssertEqual(job.attempts, 1)
+        // Exercise the production runImport catch and the next pass's purge.
+        // More unavailable passes than the retry limit must not retire audio.
+        for _ in 0...WatchCaptureImportJournal.defaultMaximumAttempts {
+            await pipeline.processPendingImports()
+            XCTAssertEqual(pipeline.journal.pendingJobs(), [job])
+            XCTAssertTrue(pipeline.journal.isRetryable(captureID: captureID))
+            XCTAssertEqual(try Data(contentsOf: audioURL), audio)
+            XCTAssertTrue(pipeline.journal.pendingAcks().isEmpty)
         }
-        XCTAssertEqual(try Data(contentsOf: audioURL), audio)
-        XCTAssertEqual(pipeline.journal.pendingJobs().map(\.captureID), [captureID])
-        XCTAssertTrue(pipeline.journal.pendingAcks().isEmpty)
     }
 
     func testGenuinelyMissingKeys_reportMissingAfterSuccessfulLoad() async {

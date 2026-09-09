@@ -179,6 +179,10 @@ public final class WatchCaptureImportPipeline: ObservableObject {
                 captureID: job.captureID,
                 message: "Import interrupted by background expiration"
             )
+        } catch AppSettings.CredentialLoadingError.unavailable {
+            // Loading failed before transcription began. Keep the existing
+            // job and retry budget intact until Keychain access recovers.
+            return
         } catch {
             SpeakLogger.logError(error, context: "WatchCaptureImportPipeline.import")
             journal.recordAttemptFailure(
@@ -188,7 +192,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         }
     }
 
-    func importOne(_ job: WatchCaptureImportJob) async throws {
+    private func importOne(_ job: WatchCaptureImportJob) async throws {
         let audioURL = inboxDirectory
             .appendingPathComponent(job.captureID.uuidString)
             .appendingPathExtension(job.fileExtension)

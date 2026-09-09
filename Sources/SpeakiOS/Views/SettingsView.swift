@@ -1608,10 +1608,23 @@ struct HardwareTriggerSettingsView: View {
                 }
             }
 
-            Section("Set Up the Action Button") {
+            Section("Before You Start") {
                 Text(
-                    "On iPhone 15 Pro and later you can map the Action Button to start recording in one press — "
-                        + "even from the Lock Screen."
+                    "Open JustSpeakToIt before first use and grant the requested permissions, "
+                        + "including microphone access. You may need to unlock your iPhone or open the app "
+                        + "to start recording."
+                )
+                    .font(.callout)
+            }
+
+            if #available(iOS 18.0, *) {
+                nativeControlSetupSection
+            }
+
+            Section("Shortcuts & Automations") {
+                Text(
+                    "Use a shortcut for Back Tap or your existing automations. On an iPhone with an Action Button, "
+                        + "Shortcuts also works on iOS 17."
                 )
                     .font(.callout)
 
@@ -1619,14 +1632,15 @@ struct HardwareTriggerSettingsView: View {
                 StepRow(
                     number: 2,
                     text: "Search for JustSpeakToIt and choose Toggle Recording for a single-button flow. "
-                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt copies the transcript "
-                        + "when you stop. Use Start Recording only if you also create a separate Stop Recording "
-                        + "shortcut."
+                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt uses the destination "
+                        + "selected above when you stop. Use Start Recording only if you also create a separate "
+                        + "Stop Recording shortcut."
                 )
                 StepRow(number: 3, text: "Name the shortcut and tap Done.")
                 StepRow(
                     number: 4,
-                    text: "Open Settings → Action Button, swipe to Shortcut, and pick the shortcut you just made."
+                    text: "To use it with an Action Button, open Settings → Action Button, swipe to Shortcut, "
+                        + "and choose your shortcut. Press and hold the Action Button to run it."
                 )
 
                 Button {
@@ -1647,13 +1661,8 @@ struct HardwareTriggerSettingsView: View {
                 )
                 BulletRow(
                     icon: "square.grid.2x2.fill",
-                    title: "Control Center",
-                    detail: "On iOS 18 and later add the Shortcut control via Customise Controls → Add a Control."
-                )
-                BulletRow(
-                    icon: "lock.iphone",
-                    title: "Lock Screen / Home Screen widget",
-                    detail: "Add a Shortcuts widget and pick your Toggle Recording shortcut."
+                    title: "Home Screen Shortcuts Widget",
+                    detail: "Add a Shortcuts widget to the Home Screen and pick your Toggle Recording shortcut."
                 )
                 BulletRow(
                     icon: "hand.tap.fill",
@@ -1679,9 +1688,38 @@ struct HardwareTriggerSettingsView: View {
         .navigationTitle("Action Button & Shortcuts")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    @available(iOS 18.0, *)
+    private var nativeControlSetupSection: some View {
+        Section("Set Up Transcribe Voice") {
+            Text("On iOS 18 and later, add JustSpeakToIt’s Transcribe Voice control directly.")
+                .font(.callout)
+            BulletRow(
+                icon: "button.programmable",
+                title: "Action Button",
+                detail: "On an iPhone with an Action Button, open Settings → Action Button → Controls. "
+                    + "Tap the control picker and choose Transcribe Voice. Press and hold the Action Button "
+                    + "to start or stop dictation."
+            )
+            BulletRow(
+                icon: "square.grid.2x2.fill",
+                title: "Control Center",
+                detail: "Open Control Center, tap the + at the top left, then tap Add a Control. "
+                    + "Find JustSpeakToIt and choose Transcribe Voice."
+            )
+            BulletRow(
+                icon: "lock.iphone",
+                title: "Lock Screen Control",
+                detail: "Touch and hold the Lock Screen, unlock if asked, then tap Customise → Lock Screen. "
+                    + "Remove a bottom control with the minus button, tap the + in that slot, and choose "
+                    + "Transcribe Voice. Tap Done. This is a bottom control, separate from the widgets below the clock."
+            )
+        }
+    }
 }
 
 private struct StepRow: View {
+    @ScaledMetric(relativeTo: .headline) private var badgeSize = 24.0
     let number: Int
     let text: String
 
@@ -1689,12 +1727,13 @@ private struct StepRow: View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(number)")
                 .font(.headline)
-                .frame(width: 24, height: 24)
+                .frame(width: badgeSize, height: badgeSize)
                 .background(Color.accentColor.opacity(0.15), in: Circle())
                 .foregroundStyle(Color.accentColor)
             Text(text)
                 .font(.callout)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

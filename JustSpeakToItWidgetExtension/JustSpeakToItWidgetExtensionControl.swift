@@ -29,6 +29,8 @@ struct JustSpeakToItWidgetExtensionControl: ControlWidget {
                     isRecording ? "Recording..." : "Transcribe",
                     systemImage: isRecording ? "stop.circle.fill" : "mic.fill"
                 )
+                // The hint describes the action that enters the represented state.
+                .controlWidgetActionHint(isRecording ? "Start dictation" : "Stop dictation")
             }
         }
         .displayName("Transcribe Voice")

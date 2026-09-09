@@ -6,9 +6,12 @@ import ZIPFoundation
 /// No archive path is ever used as a destination path on the receiving Mac.
 enum MigrationArchive {
     static func write(_ snapshot: MigrationSnapshot, to destination: URL) throws {
-        let temporary = destination.deletingLastPathComponent()
-            .appendingPathComponent(".\(UUID().uuidString).zip")
-        defer { try? FileManager.default.removeItem(at: temporary) }
+        let scoped = destination.startAccessingSecurityScopedResource()
+        defer { if scoped { destination.stopAccessingSecurityScopedResource() } }
+        let staging = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                                  appropriateFor: destination, create: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        let temporary = staging.appendingPathComponent("export.zip")
         do {
             let archive = try Archive(url: temporary, accessMode: .create)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)

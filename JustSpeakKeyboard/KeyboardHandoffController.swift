@@ -85,12 +85,14 @@ final class KeyboardHandoffController: ObservableObject {
     func deactivate() {
         if let requestID,
            let phase = store.record(matching: requestID)?.phase,
-           phase == .requested || phase == .recording
-               || phase == .finishRequested || phase == .transcribing {
+           phase == .requested || phase == .recording {
             _ = try? store.cancel(requestID: requestID)
             KeyboardHandoffSignal.postRequestChanged()
             self.requestID = nil
         }
+        // Stop has committed the app-owned finalisation. Keep its nonce for
+        // recovery on return, but never retain an inactive document callback.
+        insertText = nil
         pollTask?.cancel()
         pollTask = nil
         autoStartWhenReady = false
@@ -98,7 +100,7 @@ final class KeyboardHandoffController: ObservableObject {
         presentation = .idle
     }
 
-    func updateDocumentContext(documentIdentifier: UUID, selectionChanged: Bool) {
+    func updateDocumentContext(documentIdentifier: UUID, selectionChanged _: Bool) {
         currentDocumentIdentifier = documentIdentifier
 
         guard let requestID,
@@ -107,7 +109,7 @@ final class KeyboardHandoffController: ObservableObject {
                   || record.phase == .recording
                   || record.phase == .finishRequested
                   || record.phase == .transcribing,
-              selectionChanged || record.targetDocumentIdentifier != documentIdentifier else {
+              record.targetDocumentIdentifier != documentIdentifier else {
             return
         }
         _ = try? store.cancel(requestID: requestID)

@@ -67,7 +67,12 @@ Primary sources:
 8. The keyboard consumes the result only if the current document identifier
    still matches, inserts it exactly once through `textDocumentProxy`, and
    clears the shared copy. A target change cancels rather than inserting into
-   the wrong app or field.
+   the wrong app or field. After **Stop & Insert**, dismissing the keyboard or
+   switching keyboards lets finalisation continue. No text is inserted while
+   the keyboard is inactive; returning to the matching document consumes the
+   still-valid result once at its current caret. Moving the caret within that
+   document does not cancel app-owned handoff. Dismissal before Stop still
+   cancels capture. Existing nonce, document and expiry checks remain in force.
 9. The app immediately returns to the discard-only readiness tap for the next
    keyboard appearance.
 
@@ -117,7 +122,13 @@ background microphone or custom-keyboard lifecycle. On a real iPhone:
   normal streaming latency.
 - Tap **Stop & Insert** and verify one insertion at the original cursor plus one
   History item.
-- Repeat in Messages, Safari, Mail, and a third-party editor without reopening
+- After Stop, dismiss or globe-switch during finalisation; verify no insertion
+  while inactive, one History item, and one insertion on return to the same
+  document. Repeat during provider drain and post-processing.
+- Move the caret within the same document before and after Stop; verify the
+  final text inserts once at the current caret. Switch to another field during
+  finalisation and confirm it never receives the old transcript.
+- Repeat in Messages, WhatsApp, Safari, Mail, and a third-party editor without reopening
   Just Speak.
 - Change apps or text documents during recording and confirm the request cancels
   without inserting into the new destination.

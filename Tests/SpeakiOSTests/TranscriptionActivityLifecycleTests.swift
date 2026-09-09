@@ -109,6 +109,18 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         manager.endActivity()
     }
 
+    func testCompletionRejectsInactiveActivityBeforeObserverDeliversState() {
+        for state in [ActivityState.stale, .ended, .dismissed] {
+            let activity = FakeActivity()
+            let manager = makeManager(activity)
+            XCTAssertTrue(manager.startActivity(provider: "Test"))
+            activity.activityState = state
+            manager.completeActivity(finalWordCount: 2, duration: 1, keepPrimed: true)
+            XCTAssertFalse(manager.isActivityRunning)
+            XCTAssertTrue(activity.updates.isEmpty)
+        }
+    }
+
     func testUninterruptedPrimedCompletionReturnsToIdle() async {
         let activity = FakeActivity()
         let sleeper = SuspendedSleep()

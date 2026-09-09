@@ -208,6 +208,10 @@ public final class TranscriptionActivityManager: ObservableObject {
     ) {
         guard let activity else { return }
         beginRun()
+        guard activity.activityState == .active else {
+            clearActivity()
+            return
+        }
         let finalState = TranscriptionActivityAttributes.ContentState(
             status: .completed, lastSnippet: "Transcription complete", wordCount: finalWordCount,
             duration: duration, provider: activity.transcriptionState.provider

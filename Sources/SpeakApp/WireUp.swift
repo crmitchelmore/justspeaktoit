@@ -316,6 +316,7 @@ final class AppEnvironment: ObservableObject {
       .openSettings: .settings(.general),
       .openTranscriptionSettings: .settings(.transcription),
       .openPostProcessingSettings: .settings(.postProcessing),
+      .openDataMigrationSettings: .settings(.dataMigration),
       .openProfilesSettings: .settings(.profiles),
       .openVoiceOutputSettings: .settings(.voiceOutput),
       .openPronunciationSettings: .settings(.pronunciation),

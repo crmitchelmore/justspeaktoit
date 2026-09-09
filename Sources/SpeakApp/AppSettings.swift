@@ -262,7 +262,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
-  enum DefaultsKey: String {
+  enum DefaultsKey: String, CaseIterable {
     case appearance
     case visualDensity
     case transcriptionMode
@@ -1052,6 +1052,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
+  var migrationDefaults: UserDefaults { defaults }
   private let defaults: UserDefaults
   private let log = SpeakLogger.logger(category: "AppSettings")
 
@@ -1368,6 +1369,111 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     // stays empty until the user chooses there.
     liveTranscriptionSelection.rememberIfMissing(liveTranscriptionModel)
     persistLiveTranscriptionSelection()
+  }
+
+  func reloadAfterMigration() {
+    let restored = AppSettings(defaults: defaults)
+    suppressesPersistence = true
+    defer { suppressesPersistence = false }
+    reloadMigrationPreferences(restored)
+    reloadMigrationAudioPreferences(restored)
+    reloadMigrationBehaviour(restored)
+    liveTranscriptionSelection = restored.liveTranscriptionSelection
+    // Restore dependent values after model and speed-mode observers have settled.
+    postProcessingEnabled = restored.postProcessingEnabled
+  }
+
+  private func reloadMigrationPreferences(_ restored: AppSettings) {
+    self.appearance = restored.appearance
+    self.visualDensity = restored.visualDensity
+    self.transcriptionMode = restored.transcriptionMode
+    self.liveTranscriptionModel = restored.liveTranscriptionModel
+    self.rememberedLocalTranscriptionSource = restored.rememberedLocalTranscriptionSource
+    self.rememberedRemoteTranscriptionMode = restored.rememberedRemoteTranscriptionMode
+    self.batchTranscriptionModel = restored.batchTranscriptionModel
+    self.localTranscriptionModel = restored.localTranscriptionModel
+    self.localTranscriptionMode = restored.localTranscriptionMode
+    self.preferredLocaleIdentifier = restored.preferredLocaleIdentifier
+    self.preferredAudioInputUID = restored.preferredAudioInputUID
+    self.postProcessingEnabled = restored.postProcessingEnabled
+    self.postProcessingModel = restored.postProcessingModel
+    self.postProcessingTemperature = restored.postProcessingTemperature
+    self.assemblyAIKeyterms = restored.assemblyAIKeyterms
+    self.transcriptionKeywords = restored.transcriptionKeywords
+    self.recoveredTranscriptionKeywords = restored.recoveredTranscriptionKeywords
+    self.assemblyAIIgnoredPronunciationTerms = restored.assemblyAIIgnoredPronunciationTerms
+    self.modulateSpeakerDiarizationEnabled = restored.modulateSpeakerDiarizationEnabled
+    self.modulateEmotionSignalEnabled = restored.modulateEmotionSignalEnabled
+    self.modulateAccentSignalEnabled = restored.modulateAccentSignalEnabled
+    self.modulatePIIPhiTaggingEnabled = restored.modulatePIIPhiTaggingEnabled
+    self.postProcessingOutputLanguage = restored.postProcessingOutputLanguage
+    self.postProcessingIncludeLexiconDirectives = restored.postProcessingIncludeLexiconDirectives
+    self.postProcessingIncludeContextTags = restored.postProcessingIncludeContextTags
+    self.textOutputMethod = restored.textOutputMethod
+    self.accessibilityInsertionMode = restored.accessibilityInsertionMode
+    self.restoreClipboardAfterPaste = restored.restoreClipboardAfterPaste
+    self.showHUDDuringSessions = restored.showHUDDuringSessions
+    self.showLiveTranscriptInHUD = restored.showLiveTranscriptInHUD
+  }
+
+  private func reloadMigrationAudioPreferences(_ restored: AppSettings) {
+    self.showCompactHUD = restored.showCompactHUD
+    self.shortenErrorDisplay = restored.shortenErrorDisplay
+    self.showSidebarShortcutHints = restored.showSidebarShortcutHints
+    self.appVisibility = restored.appVisibility
+    self.showStatusBarIconInDockOnly = restored.showStatusBarIconInDockOnly
+    self.compactStatusBarIcon = restored.compactStatusBarIcon
+    self.runAtLogin = restored.runAtLogin
+    self.recordingsDirectory = restored.recordingsDirectory
+    self.hotKeyActivationStyle = restored.hotKeyActivationStyle
+    self.holdThreshold = restored.holdThreshold
+    self.doubleTapWindow = restored.doubleTapWindow
+    self.selectedHotKey = restored.selectedHotKey
+    self.postRecordingTailDuration = restored.postRecordingTailDuration
+    self.liveStopGracePeriod = restored.liveStopGracePeriod
+    self.trackedAPIKeyIdentifiers = restored.trackedAPIKeyIdentifiers
+    self.defaultTTSVoice = restored.defaultTTSVoice
+    self.ttsLanguageIdentifier = restored.ttsLanguageIdentifier
+    self.sonioxTTSRegion = restored.sonioxTTSRegion
+    self.ttsSpeed = restored.ttsSpeed
+    self.ttsPitch = restored.ttsPitch
+    self.ttsQuality = restored.ttsQuality
+    self.ttsOutputFormat = restored.ttsOutputFormat
+    self.ttsAutoPlay = restored.ttsAutoPlay
+    self.ttsSaveToDirectory = restored.ttsSaveToDirectory
+    self.ttsUseSSML = restored.ttsUseSSML
+    self.ttsFavoriteVoices = restored.ttsFavoriteVoices
+    self.ttsPronunciationDictionary = restored.ttsPronunciationDictionary
+    self.historyFlushInterval = restored.historyFlushInterval
+    self.silenceDetectionEnabled = restored.silenceDetectionEnabled
+    self.handsFreeDictationEnabled = restored.handsFreeDictationEnabled
+  }
+
+  private func reloadMigrationBehaviour(_ restored: AppSettings) {
+    self.silenceThreshold = restored.silenceThreshold
+    self.silenceDuration = restored.silenceDuration
+    self.connectionPreWarmingEnabled = restored.connectionPreWarmingEnabled
+    self.audioPreWarmingEnabled = restored.audioPreWarmingEnabled
+    self.postProcessingStreamingEnabled = restored.postProcessingStreamingEnabled
+    self.hudSizePreference = restored.hudSizePreference
+    self.speedMode = restored.speedMode
+    self.livePolishModel = restored.livePolishModel
+    self.livePolishDebounceMs = restored.livePolishDebounceMs
+    self.livePolishMinDeltaChars = restored.livePolishMinDeltaChars
+    self.livePolishTailWindowChars = restored.livePolishTailWindowChars
+    self.skipPostProcessingWithLivePolish = restored.skipPostProcessingWithLivePolish
+    self.voiceCommandsEnabled = restored.voiceCommandsEnabled
+    self.streamingInsertionEnabled = restored.streamingInsertionEnabled
+    self.clipboardInsertionTriggers = restored.clipboardInsertionTriggers
+    self.enableSendToMac = restored.enableSendToMac
+    self.enableAutomationServer = restored.enableAutomationServer
+    self.analyticsEnabled = restored.analyticsEnabled
+    self.autoCorrectionsEnabled = restored.autoCorrectionsEnabled
+    self.autoCorrectionsPromotionThreshold = restored.autoCorrectionsPromotionThreshold
+    self.recordingSoundsEnabled = restored.recordingSoundsEnabled
+    self.recordingSoundProfile = restored.recordingSoundProfile
+    self.recordingSoundVolume = restored.recordingSoundVolume
+    self.localStreamingModelSource = restored.localStreamingModelSource
   }
 
   func registerAPIKeyIdentifier(_ identifier: String) {

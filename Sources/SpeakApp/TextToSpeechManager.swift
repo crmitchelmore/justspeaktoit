@@ -371,11 +371,15 @@ extension TextToSpeechManager {
 
 // MARK: - Usage Record (for persistence)
 
-private struct TTSUsageRecord: Codable {
+struct TTSUsageRecord: Codable {
   let provider: TTSProvider
   let voice: String
   let duration: TimeInterval
   let characterCount: Int
   let cost: Decimal?
   let timestamp: Date
+}
+
+extension TextToSpeechManager {
+    func reloadAfterMigration() { loadUsageHistory() }
 }

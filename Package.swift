@@ -22,6 +22,7 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
         // SwiftLint intentionally lives in Tooling/Package.swift, not here: it
         // pins an exact swift-syntax version that conflicts with
         // swift-snapshot-testing's constraint, and sharing one graph let a test
@@ -95,6 +96,7 @@ let package = Package(
                 "SpeakCore",
                 "SpeakSync",
                 "SpeakHotKeys",
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),

@@ -336,6 +336,9 @@ final class MainManager: ObservableObject {
     )
   }
 
+  var migrationInProgress = false
+  private(set) var captureStarting = false
+
   var isBusy: Bool {
     switch state {
     case .idle, .completed, .failed:
@@ -572,7 +575,9 @@ final class MainManager: ObservableObject {
     preRollBuffers: [AVAudioPCMBuffer] = [],
     triggerTiming: SessionTriggerTiming = .nonHotKey()
   ) async -> HandsFreeCaptureStartOutcome {
-    guard activeSession == nil else { return .rejected(.captureFailed) }
+    guard !migrationInProgress, !captureStarting, activeSession == nil else { return .rejected(.captureFailed) }
+    captureStarting = true
+    defer { captureStarting = false }
     captureWarmer?.sessionWillBegin()
 
     // Per-app dictation profile: resolve the frontmost app and apply its

@@ -262,3 +262,10 @@ public final class AutoCorrectionEngine: ObservableObject {
     }
   }
 }
+
+extension AutoCorrectionEngine {
+    public func reloadAfterMigration() async {
+        await operationTail?.value
+        await loadCandidates()
+    }
+}

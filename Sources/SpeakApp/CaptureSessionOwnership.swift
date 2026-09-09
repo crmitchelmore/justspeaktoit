@@ -14,6 +14,7 @@ final class CaptureSessionOwnership {
   enum Owner: Equatable, Sendable {
     case dictation
     case voiceEdit
+    case migration
   }
 
   private(set) var owner: Owner?

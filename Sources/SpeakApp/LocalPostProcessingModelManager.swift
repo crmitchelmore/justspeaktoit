@@ -688,3 +688,13 @@ private struct LocalPostProcessingResponse: Codable {
   let text: String
   let truncated: Bool?
 }
+
+extension LocalPostProcessingModelManager {
+    func reloadAfterMigration() {
+        #if !APP_STORE
+        importedModels = []
+        loadImportedModels()
+        #endif
+        refresh()
+    }
+}

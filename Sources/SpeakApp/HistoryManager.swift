@@ -176,6 +176,8 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
 
   /// Flag to track if we're currently flushing
   private var isFlushing = false
+  private var migrationInProgress = false
+  private var migrationWaiters: [CheckedContinuation<Void, Never>] = []
 
   /// Observer for app termination notification
   private var terminationObserver: NSObjectProtocol?
@@ -280,13 +282,13 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
 
   /// Flush pending writes if there are any
   private func flushIfNeeded() async {
-    guard !pendingWrites.isEmpty, !isFlushing else { return }
+    guard !pendingWrites.isEmpty, !isFlushing, !migrationInProgress else { return }
     await flushImmediately()
   }
 
   /// Sync wrapper for timer callback - timer already runs on main thread
   private func flushIfNeededSync() {
-    guard !pendingWrites.isEmpty, !isFlushing else { return }
+    guard !pendingWrites.isEmpty, !isFlushing, !migrationInProgress else { return }
     Task { [weak self] in
       await self?.flushImmediately()
     }
@@ -305,7 +307,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
     // persisted history; writing it here would replace a valid snapshot with
     // only the newest items (issue #695).
     guard loadState.isReady else { return }
-    guard !pendingWrites.isEmpty, !isFlushing else { return }
+    guard !pendingWrites.isEmpty, !isFlushing, !migrationInProgress else { return }
     isFlushing = true
     defer { isFlushing = false }
 
@@ -328,7 +330,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
     await waitUntilLoaded()
     // Never replace the on-disk snapshot from a state that failed to load it.
     guard loadState.isReady else { return }
-    guard !isFlushing else { return }
+    guard !isFlushing, !migrationInProgress else { return }
     isFlushing = true
     defer { isFlushing = false }
     guard !pendingWrites.isEmpty else { return }
@@ -442,6 +444,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
 
   func append(_ item: HistoryItem) async {
     await waitUntilLoaded()
+    await waitForMigration()
     allItemsOnDisk.insert(item, at: 0)
     itemsByIDOnDisk[item.id] = item
 
@@ -460,6 +463,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
 
   func update(_ item: HistoryItem) async {
     await waitUntilLoaded()
+    await waitForMigration()
     var oldItem: HistoryItem?
     if let diskIndex = allItemsOnDisk.firstIndex(where: { $0.id == item.id }) {
       oldItem = allItemsOnDisk[diskIndex]
@@ -489,6 +493,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
 
   func remove(id: UUID) async {
     await waitUntilLoaded()
+    await waitForMigration()
     let diskItem = allItemsOnDisk.first(where: { $0.id == id })
     allItemsOnDisk.removeAll { $0.id == id }
     itemsByIDOnDisk.removeValue(forKey: id)
@@ -509,6 +514,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
 
   func removeAll() async {
     await waitUntilLoaded()
+    await waitForMigration()
     allItemsOnDisk = []
     itemsByIDOnDisk = [:]
     items = []
@@ -661,6 +667,59 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
     )
     cachedStatistics = updated
     statistics = updated
+  }
+}
+
+extension HistoryManager {
+  var migrationSupportDirectory: URL { storageURL.deletingLastPathComponent().deletingLastPathComponent() }
+
+  private func waitForMigration() async {
+    if migrationInProgress {
+      await withCheckedContinuation { migrationWaiters.append($0) }
+    }
+  }
+
+  func beginDataMigration() async throws {
+    await waitUntilLoaded()
+    guard loadState.isReady, !migrationInProgress, !isFlushing else {
+      throw MigrationError.invalid("History is saving or another import is running. Please retry.")
+    }
+    migrationInProgress = true
+  }
+
+  func endDataMigration() {
+    migrationInProgress = false
+    let waiters = migrationWaiters
+    migrationWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+  }
+
+  func applyMigrationSnapshot(_ snapshot: [HistoryItem]) async throws {
+    await waitUntilLoaded()
+    guard loadState.isReady, !isFlushing else {
+      throw MigrationError.invalid("History is currently saving. Please retry the import.")
+    }
+    let ownsLock = !migrationInProgress
+    migrationInProgress = true
+    isFlushing = true
+    defer {
+      isFlushing = false
+      if ownsLock { endDataMigration() }
+    }
+    let previous = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+    let oldIDs = Set(previous.keys)
+    try await walStore.commitSnapshot(snapshot, flushing: pendingWrites)
+    pendingWrites.removeAll()
+    allItemsOnDisk = snapshot.sorted { $0.createdAt > $1.createdAt }
+    itemsByIDOnDisk = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })
+    items = Array(allItemsOnDisk.prefix(pageSize))
+    hasMoreItems = allItemsOnDisk.count > items.count
+    statistics = Self.calculateStatistics(for: snapshot)
+    cachedStatistics = statistics
+    persistenceError = nil
+    contentRevision &+= 1
+    for id in oldIDs.subtracting(snapshot.map(\.id)) { onItemRemoved?(id) }
+    for item in snapshot where previous[item.id] != item { onItemAppended?(item) }
   }
 }
 

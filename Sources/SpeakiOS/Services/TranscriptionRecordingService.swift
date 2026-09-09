@@ -33,7 +33,8 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
-    private let sharedState = SharedTranscriptionState.shared
+    private let sharedState: SharedTranscriptionState
+    private let historyManager: iOSHistoryManager
 
     private var transcriptionSession: IOSTranscriptionSession?
     private var startTime: Date?
@@ -47,11 +48,37 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
 
-    private let polishClipboard = PolishClipboard()
+    private let polishClipboard: PolishClipboard
+    private let hasPolishingKey: @MainActor () -> Bool
+    private let polish: @MainActor (String, String, String) async throws -> String
     private var latestCompletionID: UUID?
-    private var latestPolishOperation: AutomaticPolishOperation?
 
-    private init() {}
+    private convenience init() {
+        self.init(
+            sharedState: .shared,
+            historyManager: .shared,
+            polishClipboard: PolishClipboard(),
+            hasPolishingKey: { AppSettings.shared.hasOpenRouterKey },
+            polish: { text, model, apiKey in
+                try await iOSPostProcessingManager.shared.polish(text: text, model: model, apiKey: apiKey)
+            }
+        )
+    }
+
+    /// Keeps recording lifecycle tests isolated from the real clipboard, History and provider.
+    init(
+        sharedState: SharedTranscriptionState,
+        historyManager: iOSHistoryManager,
+        polishClipboard: PolishClipboard,
+        hasPolishingKey: @escaping @MainActor () -> Bool,
+        polish: @escaping @MainActor (String, String, String) async throws -> String
+    ) {
+        self.sharedState = sharedState
+        self.historyManager = historyManager
+        self.polishClipboard = polishClipboard
+        self.hasPolishingKey = hasPolishingKey
+        self.polish = polish
+    }
 
     /// Picks the first non-blank candidate, else the fallback. Extracted as a
     /// pure function so the stop-time text-selection priority
@@ -318,7 +345,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // Specialized callers may opt out when their result is intentionally transient.
         let historyItem = saveToHistory
-            ? iOSHistoryManager.shared.recordTranscription(
+            ? historyManager.recordTranscription(
                 text: text,
                 model: currentModel,
                 duration: result.duration
@@ -348,7 +375,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
             && !text.isEmpty {
             if let historyItem {
-                iOSHistoryManager.shared.beginPostProcessing(for: historyItem.id)
+                historyManager.beginPostProcessing(for: historyItem.id)
             }
             startPostProcessing(
                 text: text,
@@ -384,8 +411,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// pending run and cancels its allocated provider immediately. The owned
     /// startup task unwinds before another run can begin (issues #701, #786).
     public func cancelRecording() {
-        latestPolishOperation?.cancel()
-        latestCompletionID = nil
+        // A completed recording's polish has its own lifetime. Cancelling a
+        // subsequent capture must not cancel that work or invalidate its result.
+        if lifecycle.state == .stopping { latestCompletionID = nil }
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return
@@ -456,6 +484,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         let settings = AppSettings.shared
         let model = settings.postProcessingModel
         let apiKey = settings.openRouterAPIKey
+        let historyManager = self.historyManager
+        let polish = self.polish
         let operation = AutomaticPolishOperation(
             clipboard: polishClipboard,
             receipt: receipt,
@@ -465,24 +495,23 @@ public final class TranscriptionRecordingService: ObservableObject {
                     self?.sharedState.lastCompletedTranscript = polished
                 }
                 if let historyItemID {
-                    iOSHistoryManager.shared.setPostProcessed(polished, for: historyItemID)
+                    historyManager.setPostProcessed(polished, for: historyItemID)
                 }
             },
             failure: { error in
                 if let historyItemID {
-                    iOSHistoryManager.shared.setError(error.localizedDescription, for: historyItemID)
+                    historyManager.setError(error.localizedDescription, for: historyItemID)
                 }
             },
             completion: {
                 if let historyItemID {
-                    iOSHistoryManager.shared.endPostProcessing(for: historyItemID)
+                    historyManager.endPostProcessing(for: historyItemID)
                 }
                 assertion.end()
             }
         )
-        latestPolishOperation = operation
         operation.start(under: assertion, isActive: UIApplication.shared.applicationState == .active) {
-            try await iOSPostProcessingManager.shared.polish(text: text, model: model, apiKey: apiKey)
+            try await polish(text, model, apiKey)
         }
     }
 }
@@ -613,9 +642,9 @@ private extension TranscriptionRecordingService {
         let settings = AppSettings.shared
         switch destination {
         case .clipboardAndPostProcess:
-            return settings.hasOpenRouterKey
+            return hasPolishingKey()
         case .clipboard:
-            return isLegacyCaller && settings.autoPostProcess && settings.hasOpenRouterKey
+            return isLegacyCaller && settings.autoPostProcess && hasPolishingKey()
         case .historyOnly:
             return false
         }

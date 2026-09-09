@@ -111,6 +111,61 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         XCTAssertEqual(text, "fallback")
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+    func testCancellingRecordingBPreservesRecordingAPolishAndHistory() async throws {
+        let suiteName = "TranscriptionRecordingServiceTextTests.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let sharedState = SharedTranscriptionState(defaults: defaults)
+        let history = iOSHistoryManager(
+            fileURL: directory.appendingPathComponent("history.json"),
+            syncEnabled: false,
+            userDefaults: defaults
+        )
+        let pasteboard = RecordingTestPasteboard()
+        var continuation: CheckedContinuation<String, Error>?
+        let service = TranscriptionRecordingService(
+            sharedState: sharedState,
+            historyManager: history,
+            polishClipboard: PolishClipboard(pasteboard: pasteboard, now: { 100 }, isActive: { true }),
+            hasPolishingKey: { true },
+            polish: { _, _, _ in
+                try await withCheckedThrowingContinuation { continuation = $0 }
+            }
+        )
+
+        defaults.set("Recording A", forKey: "simulatorValidationTranscript")
+        try await service.startRecording(requiresLiveActivity: false)
+        let result = await service.stopRecording(destination: .clipboardAndPostProcess)
+        XCTAssertEqual(result.text, "Recording A")
+        let itemA = try XCTUnwrap(history.items.first)
+        for _ in 0..<1_000 where continuation == nil { await Task.yield() }
+        let pendingPolish = try XCTUnwrap(continuation)
+        XCTAssertTrue(history.reprocessingIDs.contains(itemA.id))
+
+        defaults.set("Recording B", forKey: "simulatorValidationTranscript")
+        try await service.startRecording(requiresLiveActivity: false)
+        XCTAssertTrue(service.isRunning)
+        service.cancelRecording()
+        XCTAssertFalse(service.isRunning)
+        XCTAssertEqual(history.items.count, 1)
+        XCTAssertTrue(history.reprocessingIDs.contains(itemA.id), "B must not end A's processing indicator")
+
+        pendingPolish.resume(returning: "Polished recording A")
+        for _ in 0..<1_000 where history.reprocessingIDs.contains(itemA.id) { await Task.yield() }
+        XCTAssertTrue(history.reprocessingIDs.isEmpty)
+        XCTAssertEqual(history.items.first?.id, itemA.id)
+        XCTAssertEqual(history.items.first?.postProcessedTranscription, "Polished recording A")
+        XCTAssertEqual(sharedState.lastCompletedTranscript, "Polished recording A")
+        XCTAssertEqual(pasteboard.string, "Polished recording A")
+    }
+    #endif
+
     /// A stop with no active session (e.g. the second of a rapid double
     /// Action Button press) must be a no-op: no history entry, no clipboard
     /// write, and an empty result rather than stale text.
@@ -125,6 +180,18 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         XCTAssertFalse(service.isRunning)
         XCTAssertEqual(service.partialText, "")
         XCTAssertEqual(service.wordCount, 0)
+    }
+}
+@MainActor
+private final class RecordingTestPasteboard: PolishPasteboard {
+    var changeCount = 0
+    var ownershipToken: String?
+    var string: String?
+
+    func write(_ text: String, token: String) {
+        string = text
+        ownershipToken = token
+        changeCount += 1
     }
 }
 #endif

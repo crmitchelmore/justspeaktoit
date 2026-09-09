@@ -10,19 +10,11 @@ import XCTest
 @MainActor
 final class TranscriptionRecordingServiceTextTests: XCTestCase {
 
-    func testPolishingPlaceholderDoesNotExposePreviousClipboardContent() {
-        XCTAssertEqual(
-            TranscriptionRecordingService.polishingClipboardPlaceholder,
-            "Polishing… please wait"
-        )
-    }
-
     func testClipboardDestinationCopiesTranscriptAtStop() {
         XCTAssertEqual(
             TranscriptionRecordingService.clipboardTextAtStop(
                 transcript: "Action button transcript",
-                destination: .clipboard,
-                canPostProcess: false
+                destination: .clipboard
             ),
             "Action button transcript"
         )
@@ -32,21 +24,19 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         XCTAssertEqual(
             TranscriptionRecordingService.clipboardTextAtStop(
                 transcript: "Action button transcript",
-                destination: .clipboardAndPostProcess,
-                canPostProcess: false
+                destination: .clipboardAndPostProcess
             ),
             "Action button transcript"
         )
     }
 
-    func testPolishWithAPIKeyUsesPlaceholderUntilReplacementLands() {
+    func testPolishCopiesRawTranscriptImmediately() {
         XCTAssertEqual(
             TranscriptionRecordingService.clipboardTextAtStop(
                 transcript: "Action button transcript",
-                destination: .clipboardAndPostProcess,
-                canPostProcess: true
+                destination: .clipboardAndPostProcess
             ),
-            TranscriptionRecordingService.polishingClipboardPlaceholder
+            "Action button transcript"
         )
     }
 
@@ -54,8 +44,7 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         XCTAssertNil(
             TranscriptionRecordingService.clipboardTextAtStop(
                 transcript: "Action button transcript",
-                destination: .historyOnly,
-                canPostProcess: false
+                destination: .historyOnly
             )
         )
     }

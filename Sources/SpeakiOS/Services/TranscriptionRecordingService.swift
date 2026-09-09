@@ -47,7 +47,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
 
-    static let polishingClipboardPlaceholder = "Polishing… please wait"
+    private let polishClipboard = PolishClipboard()
+    private var latestCompletionID: UUID?
+    private var latestPolishOperation: AutomaticPolishOperation?
 
     private init() {}
 
@@ -286,6 +288,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         state = lifecycle.state
         isRunning = false
         let duration = elapsedSeconds
+        let completionID = UUID()
+        latestCompletionID = completionID
 
         // Keep the (often headless / backgrounded) process alive long enough for
         // the clipboard write — and any post-processing — to actually commit.
@@ -324,7 +328,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
-        await applyDestinationSideEffects(text: text, destination: resolvedDestination)
+        let receipt = applyDestinationSideEffects(text: text, destination: resolvedDestination)
 
         // Update shared state. Live writes are throttled, so commit the
         // complete transcript exactly once at stop.
@@ -346,14 +350,13 @@ public final class TranscriptionRecordingService: ObservableObject {
             if let historyItem {
                 iOSHistoryManager.shared.beginPostProcessing(for: historyItem.id)
             }
-            Task { [resolvedDestination, assertion] in
-                await postProcess(
-                    text: text,
-                    historyItemID: historyItem?.id,
-                    replacingClipboard: resolvedDestination != .historyOnly
-                )
-                assertion.end()
-            }
+            startPostProcessing(
+                text: text,
+                historyItemID: historyItem?.id,
+                completionID: completionID,
+                receipt: receipt,
+                assertion: assertion
+            )
         } else {
             assertion.end()
         }
@@ -381,6 +384,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// pending run and cancels its allocated provider immediately. The owned
     /// startup task unwinds before another run can begin (issues #701, #786).
     public func cancelRecording() {
+        latestPolishOperation?.cancel()
+        latestCompletionID = nil
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return
@@ -441,37 +446,43 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
-    private func postProcess(
+    private func startPostProcessing(
         text: String,
         historyItemID: UUID?,
-        replacingClipboard: Bool = true
-    ) async {
+        completionID: UUID,
+        receipt: PolishClipboard.Receipt?,
+        assertion: BackgroundTaskAssertion
+    ) {
         let settings = AppSettings.shared
-        let processor = iOSPostProcessingManager.shared
-
-        do {
-            let polished = try await processor.polish(
-                text: text,
-                model: settings.postProcessingModel,
-                apiKey: settings.openRouterAPIKey
-            )
-            guard !polished.isEmpty else { throw PostProcessingError.emptyResult }
-            if replacingClipboard {
-                await Self.writeClipboardReliably(polished)
+        let model = settings.postProcessingModel
+        let apiKey = settings.openRouterAPIKey
+        let operation = AutomaticPolishOperation(
+            clipboard: polishClipboard,
+            receipt: receipt,
+            isCurrent: { [weak self] in self?.latestCompletionID == completionID },
+            success: { [weak self] polished, current in
+                if current {
+                    self?.sharedState.lastCompletedTranscript = polished
+                }
+                if let historyItemID {
+                    iOSHistoryManager.shared.setPostProcessed(polished, for: historyItemID)
+                }
+            },
+            failure: { error in
+                if let historyItemID {
+                    iOSHistoryManager.shared.setError(error.localizedDescription, for: historyItemID)
+                }
+            },
+            completion: {
+                if let historyItemID {
+                    iOSHistoryManager.shared.endPostProcessing(for: historyItemID)
+                }
+                assertion.end()
             }
-            sharedState.lastCompletedTranscript = polished
-            if let historyItemID {
-                iOSHistoryManager.shared.setPostProcessed(polished, for: historyItemID)
-            }
-        } catch {
-            // Never strand the user with the temporary polishing message.
-            if replacingClipboard {
-                await Self.writeClipboardReliably(text)
-            }
-            if let historyItemID {
-                iOSHistoryManager.shared.setError(error.localizedDescription, for: historyItemID)
-                iOSHistoryManager.shared.endPostProcessing(for: historyItemID)
-            }
+        )
+        latestPolishOperation = operation
+        operation.start(under: assertion, isActive: UIApplication.shared.applicationState == .active) {
+            try await iOSPostProcessingManager.shared.polish(text: text, model: model, apiKey: apiKey)
         }
     }
 }
@@ -480,20 +491,15 @@ public final class TranscriptionRecordingService: ObservableObject {
 
 @MainActor
 extension TranscriptionRecordingService {
-    /// The pasteboard value that should be committed synchronously when the
-    /// recording stops. Polishing gets a non-sensitive placeholder only when a
-    /// post-processor can actually replace it; without a key, the raw transcript
-    /// must be copied instead of leaving "Polishing… please wait" forever.
+    /// Raw text is usable immediately, including while polishing or without a key.
     static func clipboardTextAtStop(
         transcript: String,
-        destination: HardwareTriggerDestination,
-        canPostProcess: Bool
+        destination: HardwareTriggerDestination
     ) -> String? {
+        guard !transcript.isEmpty else { return nil }
         switch destination {
-        case .clipboard:
+        case .clipboard, .clipboardAndPostProcess:
             return transcript
-        case .clipboardAndPostProcess:
-            return canPostProcess ? polishingClipboardPlaceholder : transcript
         case .historyOnly:
             return nil
         }
@@ -552,14 +558,14 @@ private extension TranscriptionRecordingService {
         text: String,
         destination: HardwareTriggerDestination,
         sharesCompletedTranscript: Bool? = nil
-    ) async {
-        guard !text.isEmpty else { return }
+    ) -> PolishClipboard.Receipt? {
+        guard !text.isEmpty else { return nil }
+        var receipt: PolishClipboard.Receipt?
         if let clipboardText = Self.clipboardTextAtStop(
             transcript: text,
-            destination: destination,
-            canPostProcess: AppSettings.shared.hasOpenRouterKey
+            destination: destination
         ) {
-            await Self.writeClipboardReliably(clipboardText)
+            receipt = polishClipboard.copyRaw(clipboardText)
         }
 
         // Keyboard handoffs keep their result solely in the nonce-scoped store.
@@ -571,19 +577,7 @@ private extension TranscriptionRecordingService {
         ) {
             sharedState.lastCompletedTranscript = sharedTranscript
         }
-    }
-
-    /// Pasteboard writes from a background AppIntent can race process
-    /// suspension. Verify the value and retry briefly before reporting success.
-    static func writeClipboardReliably(_ text: String) async {
-        for attempt in 0..<3 {
-            UIPasteboard.general.string = text
-            await Task.yield()
-            if UIPasteboard.general.string == text { return }
-            if attempt < 2 {
-                try? await Task.sleep(for: .milliseconds(80))
-            }
-        }
+        return receipt
     }
 
     /// The most complete transcript we can produce at stop time. The transcriber
@@ -653,16 +647,43 @@ private extension TranscriptionResult {
 @MainActor
 final class BackgroundTaskAssertion {
     private var identifier: UIBackgroundTaskIdentifier = .invalid
+    private var ended = false
+    private var expired = false
+    private let endTask: @MainActor (UIBackgroundTaskIdentifier) -> Void
+    var isValid: Bool { !ended && identifier != .invalid }
+    var onExpiration: (() -> Void)? {
+        didSet {
+            if expired { onExpiration?() }
+        }
+    }
 
-    init(name: String) {
-        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
-            self?.end()
+    init(
+        name: String,
+        begin: @MainActor (String, @escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier = {
+            UIApplication.shared.beginBackgroundTask(withName: $0, expirationHandler: $1)
+        },
+        end: @escaping @MainActor (UIBackgroundTaskIdentifier) -> Void = { UIApplication.shared.endBackgroundTask($0) }
+    ) {
+        endTask = end
+        let allocated = begin(name) { [weak self] in
+            guard let self else { return }
+            self.expired = true
+            self.onExpiration?()
+            self.end()
+        }
+        // Expiration can arrive before begin returns its identifier.
+        if ended {
+            if allocated != .invalid { endTask(allocated) }
+        } else {
+            identifier = allocated
         }
     }
 
     func end() {
-        guard identifier != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(identifier)
+        guard !ended else { return }
+        ended = true
+        onExpiration = nil
+        if identifier != .invalid { endTask(identifier) }
         identifier = .invalid
     }
 }

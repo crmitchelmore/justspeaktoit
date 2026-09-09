@@ -47,8 +47,8 @@ public enum iOSTranscriptionError: LocalizedError {
         case .interrupted:
             return "Transcription was interrupted (e.g., by a phone call)."
         case .liveActivityUnavailable:
-            return "Turn on Live Activities for Just Speak to It in Settings to record with the "
-                + "Action Button."
+            return "A Live Activity could not be started. Open Just Speak to It to continue recording. "
+                + "If Live Activities are disabled, enable them in Settings."
         case .startTimedOut(let stage):
             guard let stage else {
                 return "Recording did not start in time and was cancelled before it got going."

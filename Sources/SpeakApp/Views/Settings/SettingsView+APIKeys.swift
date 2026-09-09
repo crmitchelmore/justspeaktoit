@@ -222,6 +222,10 @@ extension SettingsView {
       case .deepgram: return .brandAccentWarm
       case .soniox: return .brandLagoon
       case .cartesia: return .purple
+      case .groq: return .orange
+      case .gemini: return .blue
+      case .mistral: return .indigo
+      case .speechmatics: return .cyan
       case .system: return .gray
       }
     }()
@@ -234,6 +238,10 @@ extension SettingsView {
       case .deepgram: return "bolt.circle"
       case .soniox: return "globe"
       case .cartesia: return "waveform.and.person.filled"
+      case .groq: return "bolt.horizontal.circle"
+      case .gemini: return "sparkles"
+      case .mistral: return "waveform.circle"
+      case .speechmatics: return "waveform.and.magnifyingglass"
       case .system: return "speaker.wave.2"
       }
     }()
@@ -246,6 +254,10 @@ extension SettingsView {
       case .deepgram: return "https://deepgram.com"
       case .soniox: return "https://soniox.com"
       case .cartesia: return "https://cartesia.ai"
+      case .groq: return "https://console.groq.com"
+      case .gemini: return "https://aistudio.google.com/apikey"
+      case .mistral: return "https://console.mistral.ai"
+      case .speechmatics: return "https://www.speechmatics.com"
       case .system: return ""
       }
     }()
@@ -262,6 +274,20 @@ extension SettingsView {
       case .cartesia:
         return "Stored securely in your macOS Keychain. Used for Cartesia Ink transcription and for "
           + "Cartesia Sonic 3.6 voice output."
+      case .groq:
+        return "Stored securely in your macOS Keychain. Used for Groq Whisper transcription and for "
+          + "Orpheus voice output. Orpheus also needs your Groq organisation to accept the model "
+          + "terms in the console; a saved key alone does not grant access."
+      case .gemini:
+        return "Stored securely in your macOS Keychain. Used for Gemini transcription and for "
+          + "Gemini voice output, billed directly by Google rather than through OpenRouter."
+      case .mistral:
+        return "Stored securely in your macOS Keychain. Used for Mistral Voxtral transcription and "
+          + "for Voxtral voice output. Mistral publishes no preset voices, so the picker loads the "
+          + "voices your account can use once this key is saved."
+      case .speechmatics:
+        return "Stored securely in your macOS Keychain. Used for Speechmatics transcription and for "
+          + "Speechmatics voice output, which the vendor still labels a preview."
       default:
         return "Stored securely in your macOS Keychain. Used only for "
           + "\(provider.displayName) text-to-speech voice synthesis."

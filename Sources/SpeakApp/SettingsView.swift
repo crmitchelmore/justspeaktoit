@@ -208,7 +208,10 @@ struct SettingsView: View {
           source: .transcription(provider)
         )
       }
-    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia].map { provider in
+    items += [
+      TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia,
+      .groq, .gemini, .mistral, .speechmatics
+    ].map { provider in
       let isShared = provider.sharesTranscriptionCredential
       return MacAPIKeyItem(
         entry: APIKeyListEntry(

@@ -380,31 +380,7 @@ enum MetaMuseAudioPreparer {
     }
 
     static func wavData(pcm: Data, sampleRate: Int) -> Data {
-        var data = Data()
-        func appendASCII(_ value: String) { data.append(Data(value.utf8)) }
-        func appendUInt16(_ value: UInt16) {
-            var little = value.littleEndian
-            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
-        }
-        func appendUInt32(_ value: UInt32) {
-            var little = value.littleEndian
-            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
-        }
-        appendASCII("RIFF")
-        appendUInt32(UInt32(36 + pcm.count))
-        appendASCII("WAVE")
-        appendASCII("fmt ")
-        appendUInt32(16)
-        appendUInt16(1)
-        appendUInt16(1)
-        appendUInt32(UInt32(sampleRate))
-        appendUInt32(UInt32(sampleRate * 2))
-        appendUInt16(2)
-        appendUInt16(16)
-        appendASCII("data")
-        appendUInt32(UInt32(pcm.count))
-        data.append(pcm)
-        return data
+        PCMWaveWriter.wavData(pcm: pcm, sampleRate: sampleRate)
     }
 }
 

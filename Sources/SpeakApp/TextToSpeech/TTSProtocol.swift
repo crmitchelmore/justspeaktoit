@@ -12,6 +12,10 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case deepgram
   case soniox
   case cartesia
+  case groq
+  case gemini = "google"
+  case mistral
+  case speechmatics
   case system
 
   var id: String { rawValue }
@@ -25,6 +29,10 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .deepgram: return "Deepgram"
     case .soniox: return "Soniox"
     case .cartesia: return "Cartesia Sonic"
+    case .groq: return "Groq Orpheus"
+    case .gemini: return GeminiTranscribeModels.providerDisplayName
+    case .mistral: return "Mistral Voxtral"
+    case .speechmatics: return "Speechmatics"
     case .system: return "macOS System"
     }
   }
@@ -47,6 +55,13 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .soniox: return "soniox.apiKey"
     // One Cartesia key covers Ink transcription and Sonic speech generation.
     case .cartesia: return "cartesia.apiKey"
+    // These four each use one account key for transcription and for speech
+    // generation, so they reuse the identifier the transcription provider
+    // already writes.
+    case .groq: return "groq.apiKey"
+    case .gemini: return "google.apiKey"
+    case .mistral: return "mistral.apiKey"
+    case .speechmatics: return "speechmatics.apiKey"
     case .system: return ""
     }
   }
@@ -57,11 +72,14 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   /// separate transcription entry writing the same Keychain item.
   var sharesTranscriptionCredential: Bool {
     switch self {
-    case .elevenlabs, .soniox, .cartesia, .openrouter: return true
+    case .elevenlabs, .soniox, .cartesia, .openrouter,
+         .groq, .gemini, .mistral, .speechmatics: return true
     case .openai, .azure, .deepgram, .system: return false
     }
   }
 
+  // One provider per prefix: the branch count is the provider count.
+  // swiftlint:disable:next cyclomatic_complexity
   static func from(voiceID: String) -> TTSProvider {
     if voiceID.hasPrefix("elevenlabs/") { return .elevenlabs }
     if voiceID.hasPrefix("openai/") { return .openai }
@@ -70,6 +88,10 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     if voiceID.hasPrefix("deepgram/") { return .deepgram }
     if voiceID.hasPrefix("soniox/") { return .soniox }
     if voiceID.hasPrefix(CartesiaTTSCatalog.voiceIDPrefix) { return .cartesia }
+    if voiceID.hasPrefix(GroqTTSCatalog.voiceIDPrefix) { return .groq }
+    if voiceID.hasPrefix(GeminiTTSCatalog.voiceIDPrefix) { return .gemini }
+    if voiceID.hasPrefix(MistralTTSCatalog.voiceIDPrefix) { return .mistral }
+    if voiceID.hasPrefix(SpeechmaticsTTSCatalog.voiceIDPrefix) { return .speechmatics }
     if voiceID.hasPrefix("system/") { return .system }
     return .system
   }
@@ -215,6 +237,11 @@ struct TTSResult {
 enum TTSError: LocalizedError {
   case apiKeyMissing(TTSProvider)
   case providerNotAvailable(TTSProvider)
+  /// The credential is good but the account cannot reach the model yet — a
+  /// terms acceptance, an organisation permission or a plan that excludes it.
+  /// Distinct from a bad key, because sending the user to Settings would not
+  /// help.
+  case providerAccessRequired(TTSProvider, reason: String)
   case invalidVoice(String)
   case synthesisFailure(String)
   case audioPlaybackFailure
@@ -228,6 +255,8 @@ enum TTSError: LocalizedError {
       return "API key missing for \(provider.displayName)"
     case .providerNotAvailable(let provider):
       return "\(provider.displayName) is not available"
+    case .providerAccessRequired(let provider, let reason):
+      return "\(provider.displayName) is not available on this account: \(reason)"
     case .invalidVoice(let voice):
       return "Invalid voice: \(voice)"
     case .synthesisFailure(let message):
@@ -516,10 +545,55 @@ struct VoiceCatalog {
     )
   }
 
+  // Both platform pickers project from the canonical SpeakCore Groq catalogue.
+  static let groqVoices: [TTSVoice] = GroqTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .groq,
+      traits: [voice.gender == .female ? .female : .male, .lowLatency],
+      previewURL: nil
+    )
+  }
+
+  // Both platform pickers project from the canonical SpeakCore Gemini catalogue.
+  static let geminiVoices: [TTSVoice] = GeminiTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .gemini,
+      traits: [.neutral, .multilingual],
+      previewURL: nil
+    )
+  }
+
+  // Both platform pickers project from the canonical SpeakCore Speechmatics
+  // catalogue.
+  static let speechmaticsVoices: [TTSVoice] = SpeechmaticsTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .speechmatics,
+      traits: [
+        voice.gender == .female ? .female : .male,
+        voice.accent == .british ? .british : .american,
+        .lowLatency
+      ],
+      previewURL: nil
+    )
+  }
+
+  /// Mistral publishes no preset voice identifiers, so there is no offline
+  /// list to fall back on. `MistralTTSClient.listVoices()` fills the picker
+  /// from the account's own listing once a key is stored.
+  static let mistralVoices: [TTSVoice] = []
+
   static let allVoices: [TTSVoice] =
     elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + sonioxVoices
-      + cartesiaVoices + systemVoices
+      + cartesiaVoices + groqVoices + geminiVoices + speechmaticsVoices + systemVoices
 
+  // One branch per provider; the catalogue is the whole body.
+  // swiftlint:disable:next cyclomatic_complexity
   static func voices(for provider: TTSProvider) -> [TTSVoice] {
     switch provider {
     case .elevenlabs: return elevenlabsVoices
@@ -529,6 +603,10 @@ struct VoiceCatalog {
     case .deepgram: return deepgramVoices
     case .soniox: return sonioxVoices
     case .cartesia: return cartesiaVoices
+    case .groq: return groqVoices
+    case .gemini: return geminiVoices
+    case .mistral: return mistralVoices
+    case .speechmatics: return speechmaticsVoices
     case .system: return systemVoices
     }
   }

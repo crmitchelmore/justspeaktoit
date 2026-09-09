@@ -10,10 +10,18 @@ extension TTSProvider {
     /// is free or the selected model rate is unknown.
     func estimatedCost(characterCount: Int, quality: TTSQuality, voiceID: String? = nil) -> Decimal? {
         if self == .deepgram, voiceID?.hasPrefix("deepgram/flux-") == true { return nil }
+        // Orpheus prices English and Arabic differently, and the voice decides
+        // which model runs.
+        if self == .groq {
+            let model = GroqTTSCatalog.resolvedVoice(forID: voiceID ?? "").model
+            return Decimal(characterCount) * model.costPerThousandCharacters / 1000
+        }
         guard let rate = costPerThousandCharacters(quality: quality) else { return nil }
         return Decimal(characterCount) * rate / 1000
     }
 
+  // One branch per provider; the published rates are the whole body.
+  // swiftlint:disable:next cyclomatic_complexity
   private func costPerThousandCharacters(quality: TTSQuality) -> Decimal? {
     switch self {
     case .elevenlabs:
@@ -39,6 +47,19 @@ extension TTSProvider {
       // Billed one credit per character; the shared API exposes the plan rate
       // as a character estimate.
       return CartesiaTTSAPI.estimatedCostPerThousandCharacters
+    case .mistral:
+      // Billed per output character.
+      return MistralTTSAPI.estimatedCostPerThousandCharacters
+    case .speechmatics:
+      return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
+    case .gemini:
+      // Gemini bills the generated audio per token, not the submitted text, so
+      // there is no honest character estimate before synthesis. The actual
+      // charge is recorded from the measured duration.
+      return nil
+    case .groq:
+      // Handled above: the rate depends on which Orpheus model the voice names.
+      return nil
     case .system, .openrouter:
       return nil
     }

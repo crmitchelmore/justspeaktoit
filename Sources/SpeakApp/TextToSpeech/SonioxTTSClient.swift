@@ -40,7 +40,7 @@ actor SonioxTTSClient: TextToSpeechClient {
     // Soniox caps one request at 5,000 characters. Longer input becomes a
     // sequence of requests split at sentence ends, and the parts are joined
     // into the single file the caller expects.
-    let segments = SonioxTTSTextChunker.chunks(text)
+    let segments = TTSTextChunker.chunks(text)
     guard !segments.isEmpty else {
       throw TTSError.synthesisFailure("Text cannot be empty")
     }

@@ -772,6 +772,10 @@ enum WireUp {
       .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
       .soniox: SonioxTTSClient(secureStorage: secureStorage, appSettings: settings),
       .cartesia: CartesiaTTSClient(secureStorage: secureStorage),
+      .groq: GroqTTSClient(secureStorage: secureStorage),
+      .gemini: GeminiTTSClient(secureStorage: secureStorage),
+      .mistral: MistralTTSClient(secureStorage: secureStorage),
+      .speechmatics: SpeechmaticsTTSClient(secureStorage: secureStorage),
       .system: SystemTTSClient()
     ]
     return TextToSpeechManager(

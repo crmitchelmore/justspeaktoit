@@ -801,6 +801,8 @@ struct DashboardView: View {
     .speakTooltip("See which TTS providers you use most frequently.")
   }
 
+  // One branch per provider; the switch is the whole body.
+  // swiftlint:disable:next cyclomatic_complexity
   private func providerColor(_ provider: TTSProvider) -> Color {
     switch provider {
     case .elevenlabs: return .brandAccent
@@ -810,6 +812,10 @@ struct DashboardView: View {
     case .deepgram: return .brandAccentWarm
     case .soniox: return .brandLagoon
     case .cartesia: return .purple
+    case .groq: return .orange
+    case .gemini: return .blue
+    case .mistral: return .indigo
+    case .speechmatics: return .cyan
     case .system: return .gray
     }
   }

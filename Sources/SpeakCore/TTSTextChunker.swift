@@ -1,15 +1,16 @@
 import Foundation
 
-/// Splits long input into request-sized pieces for the batch speech endpoint.
+/// Splits long input into request-sized pieces for a batch speech endpoint.
 ///
-/// Soniox refuses a single request above ``SonioxTTSAPI/maxTextLength``, so a
-/// caller that must speak a long document sends a sequence of requests and
-/// joins the audio. A split prefers the end of a sentence, then a gap between
-/// words, and it always falls on a grapheme-cluster boundary. Joining the
-/// result returns the trimmed input, so the spoken order matches the written
-/// order.
-public enum SonioxTTSTextChunker {
-    /// Characters per request, kept below Soniox's hard limit for head-room.
+/// Every speech provider caps the text of a single request — Soniox at 5,000
+/// characters, Groq Orpheus at 200 — so a caller that must speak a long
+/// document sends a sequence of requests and joins the audio. A split prefers
+/// the end of a sentence, then a gap between words, and it always falls on a
+/// grapheme-cluster boundary. Joining the result returns the trimmed input, so
+/// the spoken order matches the written order.
+public enum TTSTextChunker {
+    /// Default characters per request, kept below Soniox's hard limit for
+    /// head-room. Callers with a tighter cap pass their own.
     public static let maximumChunkCharacters = 4500
 
     private static let sentenceTerminators: Set<Character> = [

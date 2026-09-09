@@ -92,13 +92,29 @@ final class KeyboardHandoffControllerTests: XCTestCase {
     func testCompletedWhileInactive_recreatedControllerRecoversMatchingResult() throws {
         let requestID = try startRecording()
         controller.finish()
+        controller.deactivate()
+        controller = nil
+
         _ = try app.markTranscribing(requestID: requestID)
         _ = try app.complete(requestID: requestID, transcript: "recover me")
-        controller.deactivate()
+        XCTAssertTrue(inserted.isEmpty)
+        XCTAssertEqual(keyboard.record(matching: requestID)?.phase, .completed)
         controller = makeController()
 
         activate()
         XCTAssertEqual(inserted, ["recover me"])
+        XCTAssertNil(app.activeRecord())
+    }
+
+    func testCompletedBeforeDismissal_retainedControllerRecoversMatchingResult() throws {
+        let requestID = try startRecording()
+        controller.finish()
+        _ = try app.markTranscribing(requestID: requestID)
+        _ = try app.complete(requestID: requestID, transcript: "already complete")
+        controller.deactivate()
+
+        activate()
+        XCTAssertEqual(inserted, ["already complete"])
         XCTAssertNil(app.activeRecord())
     }
 

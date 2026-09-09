@@ -65,14 +65,18 @@ Primary sources:
 7. **Stop & Insert** finalises the recording, saves one History item, and writes
    the final transcript to the same nonce-scoped record.
 8. The keyboard consumes the result only if the current document identifier
-   still matches, inserts it exactly once through `textDocumentProxy`, and
-   clears the shared copy. A target change cancels rather than inserting into
+   still matches, inserts it through `textDocumentProxy`, then clears the
+   shared copy. A target change cancels rather than inserting into
    the wrong app or field. After **Stop & Insert**, dismissing the keyboard or
    switching keyboards lets finalisation continue. No text is inserted while
    the keyboard is inactive; returning to the matching document consumes the
-   still-valid result once at its current caret. Moving the caret within that
+   still-valid result at its current caret. Moving the caret within that
    document does not cancel app-owned handoff. Dismissal before Stop still
    cancels capture. Existing nonce, document and expiry checks remain in force.
+   Insertion and clearing are not atomic: if the extension terminates after
+   the proxy accepts the text but before the shared copy is cleared, returning
+   to the matching document can insert it again. The retained result permits
+   recovery, but does not guarantee exactly-once delivery across termination.
 9. The app immediately returns to the discard-only readiness tap for the next
    keyboard appearance.
 

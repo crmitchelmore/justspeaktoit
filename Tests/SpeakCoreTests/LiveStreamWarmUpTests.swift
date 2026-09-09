@@ -9,7 +9,7 @@ final class LiveStreamWarmUpPolicyTests: XCTestCase {
     }
 
     func testEveryCloudProvider_DeclaresAStreamingHost() {
-        for provider in LiveTranscriptionProviderID.allCases where provider != .apple {
+        for provider in LiveTranscriptionProviderID.allCases where provider != .apple && provider != .azure {
             guard let host = provider.streamingHost else {
                 XCTFail("\(provider.rawValue) has no streaming host declared")
                 continue
@@ -35,6 +35,9 @@ final class LiveStreamWarmUpPolicyTests: XCTestCase {
     func testDedicatedSessionProviders_AreNotClaimedAsTransportWarm() {
         XCTAssertEqual(LiveTranscriptionProviderID.assemblyai.streamWarmUp, .unsupported)
         XCTAssertEqual(LiveTranscriptionProviderID.openai.streamWarmUp, .unsupported)
+        // Azure uses a user-configured resource hostname, not a global endpoint.
+        XCTAssertNil(LiveTranscriptionProviderID.azure.streamingHost)
+        XCTAssertEqual(LiveTranscriptionProviderID.azure.streamWarmUp, .unsupported)
     }
 }
 

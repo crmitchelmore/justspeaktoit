@@ -49,6 +49,7 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
 
     private static let liveProviderMapping: [LiveTranscriptionProviderID: AnalyticsProviderType] = [
         .apple: .apple,
+        .azure: .azure,
         .deepgram: .deepgram,
         .cartesia: .cartesia,
         .gladia: .gladia,

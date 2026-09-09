@@ -46,6 +46,12 @@ struct IOSBatchTranscriptionClient {
                 language: language,
                 apiKey: try requireAPIKey()
             )
+        case .azure:
+            return try await AzureBatchTranscriptionClient(session: session).transcribeFile(
+                at: url, credentials: try requireAPIKey(),
+                endpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? "",
+                model: model, language: language, keywords: keywords
+            )
         case .metaMuse:
             return try await MetaMuseBatchClient(session: session).transcribeFile(
                 at: url,

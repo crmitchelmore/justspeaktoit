@@ -78,8 +78,8 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   var sharesTranscriptionCredential: Bool {
     switch self {
     case .elevenlabs, .soniox, .cartesia, .openrouter,
-         .groq, .gemini, .mistral, .speechmatics, .xai: return true
-    case .openai, .azure, .deepgram, .system: return false
+         .groq, .gemini, .mistral, .speechmatics, .xai, .azure: return true
+    case .openai, .deepgram, .system: return false
     }
   }
 

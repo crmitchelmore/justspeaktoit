@@ -16,6 +16,7 @@ extension TTSProvider {
             let model = GroqTTSCatalog.resolvedVoice(forID: voiceID ?? "").model
             return Decimal(characterCount) * model.costPerThousandCharacters / 1000
         }
+        if self == .azure, voiceID?.contains(":MAI-Voice-") == true { return nil }
         guard let rate = costPerThousandCharacters(quality: quality) else { return nil }
         return Decimal(characterCount) * rate / 1000
     }

@@ -172,7 +172,8 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func makeClient() -> StreamingTranscriptionClient? {
         if let clientFactory { return clientFactory() }
         return LiveTranscriptionClientFactory.makeClient(
-            for: route, apiKey: apiKey, language: language, keywords: keywords
+            for: route, apiKey: apiKey, language: language, keywords: keywords,
+            azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
         )
     }
 

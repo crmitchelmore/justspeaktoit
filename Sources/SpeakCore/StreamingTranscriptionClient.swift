@@ -91,6 +91,7 @@ public extension FinalizingStreamingTranscriptionClient {
 /// of these providers.
 public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashable {
     case apple
+    case azure
     case deepgram
     case cartesia
     case gladia
@@ -113,6 +114,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         switch self {
         case .apple:
             return nil
+        case .azure:
+            return AzureSpeechConfiguration.credentialIdentifier
         case .openai:
             return "openai.apiKey"
         default:
@@ -123,7 +126,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// PCM sample rate (Hz) the provider's streaming client expects.
     public var expectedSampleRate: Int {
         switch self {
-        case .openai, .xai, .meta:
+        case .openai, .xai, .meta, .azure:
             // OpenAI, xAI and Meta realtime transcription ingest 24 kHz PCM16.
             return 24_000
         default:
@@ -145,7 +148,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var isSupportedOnIOS: Bool {
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
-             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral:
+             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral, .azure:
             return true
         }
     }
@@ -154,6 +157,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// model picker so the UI scales cleanly as models are added.
     public var displayName: String {
         switch self {
+        case .azure: return "Azure Speech"
         case .apple: return "Apple"
         case .deepgram: return "Deepgram"
         case .cartesia: return "Cartesia"
@@ -179,6 +183,7 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     public var apiKeyURL: URL? {
         let website: String
         switch self {
+        case .azure: website = "https://portal.azure.com"
         case .apple: return nil
         case .deepgram: website = "https://deepgram.com"
         case .cartesia: website = "https://cartesia.ai"

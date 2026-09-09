@@ -15,6 +15,9 @@ extension SettingsView {
           maximumColumns: 2
         ) {
           apiKeyListControls
+          SettingsCard(title: "Azure Speech resource", systemImage: "cloud", tint: .brandAccent) {
+            AzureSpeechEndpointField()
+          }
 
           if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
             CloudKitKeySyncSettingsCard(secureStorage: environment.secureStorage)
@@ -285,7 +288,7 @@ extension SettingsView {
     let descriptionText: String = {
       switch provider {
       case .azure:
-        return "For Azure Text-to-Speech, use format: 'your-api-key:your-region' (e.g., 'abc123:eastus')"
+        return "For Azure transcription and voice output, enter your key and region as key:region."
       case .soniox:
         return "Stored securely in your macOS Keychain. Used for Soniox transcription and for "
           + "Soniox TTS v2 voice output in 60+ languages."

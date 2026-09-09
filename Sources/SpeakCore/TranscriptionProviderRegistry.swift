@@ -33,11 +33,12 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
         displayName: String,
         systemImage: String = "network",
         tintColor: String = "blue",
-        website: String = ""
+        website: String = "",
+        apiKeyIdentifier: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
-        self.apiKeyIdentifier = "\(id).apiKey"
+        self.apiKeyIdentifier = apiKeyIdentifier ?? "\(id).apiKey"
         self.apiKeyLabel = "\(displayName) API Key"
         self.systemImage = systemImage
         self.tintColor = tintColor

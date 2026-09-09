@@ -1,0 +1,72 @@
+# Azure Speech in Just Speak to It
+
+Azure uses the existing `azure.speech.apiKey` Keychain entry (`key:region`).
+No additional paid subscription, credit purchase or automatic top-up is enabled
+by this integration. Access to a model depends on the resource's tier and region.
+
+## Available paths
+
+| Path | API | Platform |
+| --- | --- | --- |
+| Fast recorded-audio transcription | Speech `transcriptions:transcribe`, version `2025-10-15` | macOS and iOS |
+| MAI-Transcribe-2 / 1.5 recorded audio | Same API, with the explicit enhanced-mode model | macOS and iOS; resource access required |
+| Azure Speech / MAI live input | Voice Live, version `2026-04-10`, pre-deployed `gpt-4.1` session | macOS and iOS; resource endpoint required |
+| Azure neural and available MAI voices | Regional synthesis and voices-list APIs | macOS TTS; shared transport and voice descriptors in SpeakCore |
+
+MAI live input uses Azure's `mai-transcribe` identifier. It is intentionally not
+labelled MAI-Transcribe-2: the live API does not promise the same version as the
+file API. Voice Live assistant responses are disabled; the client never sends
+`response.create`. Live shutdown drains queued audio, disables automatic VAD
+commits, commits remaining audio and waits within a five-second overall budget.
+Timeouts return the best available transcript with an error, not a fabricated final.
+
+This does not add a bring-your-own Azure OpenAI deployment. That requires its own
+deployment endpoint and authentication contract; an ordinary OpenAI key is never
+silently reused for Azure.
+
+## Settings
+
+1. Save the Azure Speech key and region in API Keys. Existing key-only values
+   retain their previous `eastus` fallback; explicit regions are recommended.
+2. For Voice Live, paste the HTTPS resource origin from **Keys and Endpoint**
+   into **Azure resource endpoint**. Only the documented Azure custom-resource
+   hostnames are accepted. The endpoint is device-local configuration, not a secret.
+3. Recorded audio uses the regional Speech endpoint if the resource field is empty.
+4. Choose the Azure model under Remote → Batch or Remote → Streaming.
+5. On macOS, voice output loads the resource's regional voice list. MAI-Voice-2
+   and Flash appear only if returned by Azure. Conventional saved voice IDs are
+   preserved; the original neural voice list remains an offline fallback.
+
+MAI voice output currently requires normal speed and pitch. Unsupported changes
+produce an explicit message. MAI costs are shown as unknown rather than using the
+conventional neural-voice price. MP3 output requested through the M4A preference
+is saved with an MP3 extension, matching Azure's actual response container.
+Conventional voice prosody uses signed relative values (`+0%`, `+0st`);
+Azure rejects the unsigned zero values previously sent by the app.
+
+## Verification
+
+Contract tests cover endpoint validation, secret-free URLs, multipart model
+selection, timing conversion, empty input, SSML escaping, MAI voice identity,
+streaming transcript ordering/deduplication and shared routing/credentials.
+
+`AzureSpeechIntegrationTests` is opt-in: supply `JSTI_AZURE_TEST_CREDENTIAL` and
+`JSTI_AZURE_TEST_WAV` only in the test process environment, then run
+`swift test --filter AzureSpeechIntegrationTests`. CI does not read Keychain or
+spend provider credits. Use synthetic audio, never personal recordings.
+
+The September 2026 UK South account probe returned a successful Fast Transcription
+result. The compiled shared client also transcribed the fixture, and existing
+Sonia neural synthesis returned valid WAV audio after the prosody correction.
+The resource voice list contained 556 voices and no MAI voices. An explicit MAI-2
+file request returned HTTP 400 (`Enhanced mode with model is currently not supported yet`).
+This is an access/region limitation, not evidence of successful MAI inference.
+Voice Live and MAI synthesis still require credentialed qualification on a
+resource exposing those capabilities. No region/tier upgrade was performed.
+
+## Official contracts
+
+- [Fast transcription SDK and regional endpoint](https://learn.microsoft.com/en-us/dotnet/api/overview/azure/ai.speech.transcription-readme?view=azure-dotnet)
+- [MAI transcription](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe)
+- [Voice Live authentication, events and input transcription](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to)
+- [MAI voice names and synthesis](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-voices)

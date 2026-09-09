@@ -20,9 +20,13 @@ public enum LiveTranscriptionClientFactory {
         for route: LiveTranscriptionRoute,
         apiKey: String,
         language: String?,
-        keywords: [String] = []
+        keywords: [String] = [],
+        azureEndpoint: String = ""
     ) -> StreamingTranscriptionClient? {
         switch route.provider {
+        case .azure:
+            return AzureVoiceLiveClient(credentials: apiKey, endpoint: azureEndpoint,
+                                        model: route.apiModelName, language: language)
         case .deepgram:
             return DeepgramLiveClient(
                 apiKey: apiKey,

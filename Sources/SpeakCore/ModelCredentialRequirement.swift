@@ -95,6 +95,9 @@ public enum ModelCredentialResolver {
             )
         }
 
+        if AzureTranscriptionModels.batchIDs.contains(modelIdentifier) {
+            return .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure Speech")
+        }
         let provider = providerPrefix(in: modelIdentifier)
         if directBatchProviderIdentifiers.contains(provider) {
             return .apiKey(

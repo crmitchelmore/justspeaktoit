@@ -56,7 +56,7 @@ extension LiveTranscriptionProviderID {
     /// asserts every cloud provider declares one.
     public var streamingHost: String? {
         switch self {
-        case .apple:
+        case .apple, .azure:
             return nil
         case .deepgram:
             return "api.deepgram.com"
@@ -94,7 +94,7 @@ extension LiveTranscriptionProviderID {
     /// How far this provider's connection may be warmed ahead of a session.
     public var streamWarmUp: LiveStreamWarmUp {
         switch self {
-        case .apple, .assemblyai, .openai:
+        case .apple, .assemblyai, .openai, .azure:
             return .unsupported
         case .deepgram, .cartesia, .gladia, .google, .modulate, .soniox, .elevenlabs,
              .speechmatics, .xai, .meta, .revai, .mistral:

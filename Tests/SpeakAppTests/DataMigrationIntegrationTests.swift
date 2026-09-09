@@ -357,3 +357,43 @@ extension DataMigrationIntegrationTests {
         XCTAssertEqual(moved.rawTranscription, original.rawTranscription)
     }
 }
+
+extension DataMigrationIntegrationTests {
+    func testProfileReload_PreservesUndecodableDataAndCurrentProfiles() throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        let store = DictationProfileStore(defaults: fixture.defaults)
+        let profile = DictationProfile(name: "Keep me")
+        store.upsert(profile)
+        let corrupt = Data("invalid profile archive".utf8)
+        fixture.defaults.set(corrupt, forKey: DictationProfileStore.defaultsKey)
+        store.reloadAfterMigration()
+        XCTAssertEqual(store.profiles, [profile])
+        XCTAssertEqual(fixture.defaults.data(forKey: DictationProfileStore.defaultsKey), corrupt)
+    }
+
+    func testRecordingReplacement_PreservesUnownedFilesInCustomFolder() async throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        let folder = fixture.root.appendingPathComponent("Music")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        fixture.defaults.set(folder.path, forKey: "recordingsDirectory")
+        let unowned = folder.appendingPathComponent("song.wav")
+        try Data("unrelated audio".utf8).write(to: unowned)
+        let previous = try await fixture.store.snapshot(categories: [.history, .recordings])
+        XCTAssertEqual(previous.records[.recordings]?.count, 1)
+        XCTAssertEqual(fixture.store.removeReplacedRecordings(previous: previous, originalFolder: folder), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unowned.path))
+    }
+
+    func testDuplicateHistoryIDs_AreNormalisedWithoutCrashingMigration() async throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        let original = try item(text: "First")
+        let duplicate = try item(id: original.id, text: "Second")
+        await fixture.history.append(original)
+        await fixture.history.append(duplicate)
+        try await fixture.history.applyMigrationSnapshot([original, duplicate])
+        XCTAssertEqual(fixture.history.allItems, [original])
+    }
+}

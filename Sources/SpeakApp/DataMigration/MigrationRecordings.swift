@@ -53,12 +53,17 @@ extension MigrationStore {
     /// Run only after a successful import with its recovery backup already saved.
     func removeReplacedRecordings(previous: MigrationSnapshot, originalFolder: URL) -> [String] {
         let retained = Set(history.allItems.compactMap { $0.audioFileURL?.standardizedFileURL })
-        let folders = Set([originalFolder, support.appendingPathComponent("ImportedRecordings")]
+        let folders = Set([support.appendingPathComponent("Recordings"),
+                           support.appendingPathComponent("ImportedRecordings")]
             .map { $0.resolvingSymlinksInPath().standardizedFileURL })
+        let historyIDs = Set(previous.records[.history, default: []].map(\.id))
+        let knownFiles = Set(previous.records[.recordings, default: []].filter { historyIDs.contains($0.id) }
+            .compactMap { $0.file.flatMap { previous.files[$0]?.standardizedFileURL } })
         var notices: [String] = []
         for url in Set(previous.files.values) where !retained.contains(url.standardizedFileURL) {
-            guard folders.contains(url.deletingLastPathComponent().resolvingSymlinksInPath()
-                .standardizedFileURL) else { continue }
+            let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+            guard folders.contains(parent) || (parent == originalFolder.resolvingSymlinksInPath().standardizedFileURL
+                && knownFiles.contains(url.standardizedFileURL)) else { continue }
             do {
                 let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                 guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }

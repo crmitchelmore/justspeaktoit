@@ -687,5 +687,11 @@ final class ShortcutManager: ObservableObject {
 }
 
 extension ShortcutManager {
-    func reloadAfterMigration() { loadBindings() }
+    func reloadAfterMigration() {
+        loadBindings()
+        if isMonitoring {
+            unregisterCarbonHotkeys()
+            registerCarbonHotkeys()
+        }
+    }
 }

@@ -26,7 +26,10 @@ final class DictationProfileStore: ObservableObject {
   }
 
   func reloadAfterMigration() {
-    profiles = defaults.data(forKey: Self.defaultsKey).flatMap { try? DictationProfile.decodeList($0) } ?? []
+    guard let data = defaults.data(forKey: Self.defaultsKey) else { profiles = []; return }
+    do { profiles = try DictationProfile.decodeList(data) } catch {
+      log.error("Preserving profiles after failed migration reload: \(error.localizedDescription)")
+    }
   }
 
   func upsert(_ profile: DictationProfile) {

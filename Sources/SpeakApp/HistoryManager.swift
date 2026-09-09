@@ -706,12 +706,14 @@ extension HistoryManager {
       isFlushing = false
       if ownsLock { endDataMigration() }
     }
-    let previous = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+    let snapshot = Array(Dictionary(snapshot.map { ($0.id, $0) },
+                                    uniquingKeysWith: { first, _ in first }).values)
+    let previous = Dictionary(allItems.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let oldIDs = Set(previous.keys)
     try await walStore.commitSnapshot(snapshot, flushing: pendingWrites)
     pendingWrites.removeAll()
     allItemsOnDisk = snapshot.sorted { $0.createdAt > $1.createdAt }
-    itemsByIDOnDisk = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.id, $0) })
+    itemsByIDOnDisk = Dictionary(snapshot.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     items = Array(allItemsOnDisk.prefix(pageSize))
     hasMoreItems = allItemsOnDisk.count > items.count
     statistics = Self.calculateStatistics(for: snapshot)

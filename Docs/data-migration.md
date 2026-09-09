@@ -90,7 +90,7 @@ also exposed as a configurable navigation shortcut, initially unassigned.
 
 The first full local run stopped in an existing performance test without an
 assertion failure. That test passed in isolation, and the next full run passed
-2,528 tests (11 skipped). The isolated app bundle launched and exposed the sidebar
+2,531 tests (11 skipped). The isolated app bundle launched and exposed the sidebar
 entry; computer-control transport failed before the interactive panel walkthrough
 could finish. That walkthrough remains a review check, not a claimed pass.
 
@@ -101,3 +101,8 @@ placeholder handling, stale preview state, and combined rollback errors were fix
 
 No-op imports preserve local history diagnostics and do not cause sync uploads.
 Audio-only changes retain those local diagnostics while exports remain redacted.
+
+Late review hardening keeps filter controls derived from the retained export scope,
+stages archives inside the app temporary directory for sandboxed exports, preserves
+unowned audio in custom folders, retains unreadable profile data, normalises duplicate
+history IDs, and re-registers active global shortcuts after import.

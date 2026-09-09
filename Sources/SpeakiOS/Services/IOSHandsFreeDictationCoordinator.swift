@@ -14,7 +14,7 @@ import UIKit
 // swiftlint:disable:next type_body_length
 final class IOSHandsFreeDictationCoordinator: ObservableObject {
     typealias StartCapture = ([AVAudioPCMBuffer]) async -> HandsFreeCaptureStartOutcome
-    typealias StopCapture = () async -> HandsFreeCaptureEndOutcome
+    typealias StopCapture = (_ shouldRearm: @escaping @MainActor () -> Bool) async -> HandsFreeCaptureEndOutcome
     @Published private(set) var state: HandsFreeDictationMachine.State = .off
     @Published private(set) var failureMessage: String?
     private let audioSessionManager: AudioSessionManager
@@ -33,11 +33,18 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private var armTask: Task<Void, Never>?
     private var finalisationTask: Task<Void, Never>?
     private var sessionID: UUID?
+    private var armGeneration = 0
     private var interruptionToken: UUID?
     private var routeChangeToken: UUID?
     private var ownsLiveActivity = false
     private let configurationObserver = CaptureDisruptionObserver()
-    private var stoppingForDisruption = false
+    private enum StopReason {
+        case captureDisruption
+        case sceneInactive
+    }
+    private var stopReason: StopReason?
+    private var stoppingForDisruption: Bool { stopReason != nil }
+    private var sceneIsActive = true
     private var captureIsStarting = false
     // Injectable boundaries exercise route-to-owner behaviour without hardware.
     var inputIsUsable: () -> Bool = { !AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty }
@@ -47,6 +54,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     var captureIsProven: () -> Bool = { true }
     var detectorIsRunning: (() -> Bool)?
     var startDetectorCapture: (() async throws -> Void)?
+    var resumeDetectorCapture: (() throws -> Void)?
 
     init(
         audioSessionManager: AudioSessionManager,
@@ -66,7 +74,11 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         self.liveActivitiesEnabled = liveActivitiesEnabled
         interruptionToken = audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
             guard began else { return }
-            Task { @MainActor [weak self] in await self?.fail(.audioUnavailable) }
+            let id = self?.sessionID
+            Task { @MainActor [weak self] in
+                guard let self, self.sessionID == id, !self.stoppingForDisruption else { return }
+                await self.fail(.audioUnavailable)
+            }
         }
         routeChangeToken = audioSessionManager.addRouteChangeObserver(owner: self) { [weak self] reason in
             guard let self else { return }
@@ -96,13 +108,36 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         await stopForCaptureDisruption()
     }
 
+    /// Record scene intent synchronously, before another actor task can arm or
+    /// deliver detector activity. A return to active never resumes listening.
+    @discardableResult
+    func sceneActivityChanged(isActive: Bool) -> Task<Void, Never>? {
+        sceneIsActive = isActive
+        guard !isActive, beginControlledStop(reason: .sceneInactive) else { return nil }
+        let id = sessionID
+        return Task { [weak self] in
+            guard let self, self.sessionID == id else { return }
+            await self.continueControlledStop()
+        }
+    }
+
     func stopForCaptureDisruption() async {
-        guard machine.isArmed, !stoppingForDisruption else { return }
-        stoppingForDisruption = true
+        guard beginControlledStop(reason: .captureDisruption) else { return }
+        await continueControlledStop()
+    }
+
+    private func beginControlledStop(reason: StopReason) -> Bool {
+        guard machine.isArmed, !stoppingForDisruption else { return false }
+        stopReason = reason
         configurationObserver.stop()
         audioEngine?.stop()
-        // Finalise an owned utterance before detector teardown; cancelling the
-        // capture here would discard the result and bypass normal destinations.
+        if machine.state == .arming { armTask?.cancel() }
+        return true
+    }
+
+    private func continueControlledStop() async {
+        // Retain capture ownership through startup and finalisation. Neither a
+        // second phase change nor a Stop may cancel the result being drained.
         if machine.state == .recording {
             if !captureIsStarting { await apply(machine.handle(.silenceElapsed)) }
         } else if machine.state != .finalising {
@@ -111,9 +146,18 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     private func finishDisruption() async {
+        let reason = stopReason
+        let generation = armGeneration
         if machine.state == .finalising { _ = machine.handle(.captureFinished) }
-        await apply(machine.handle(.sessionFailed(.audioUnavailable)))
-        failureMessage = iOSTranscriptionError.microphoneChanged.localizedDescription
+        if reason == .captureDisruption {
+            await apply(machine.handle(.sessionFailed(.audioUnavailable)))
+            // Teardown can suspend; do not attach an old notice to a new arm.
+            if machine.state == .off, armGeneration == generation {
+                failureMessage = iOSTranscriptionError.microphoneChanged.localizedDescription
+            }
+        } else {
+            await apply(machine.handle(.userDisarmed))
+        }
     }
 
     func toggle() async {
@@ -125,7 +169,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     func disarm() async {
-        if stoppingForDisruption, machine.state == .finalising { return }
+        if stoppingForDisruption { return }
         armTask?.cancel()
         finalisationTask?.cancel()
         armTask = nil
@@ -134,28 +178,36 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     func finishCurrentUtterance() async {
+        guard !stoppingForDisruption else { return }
         await apply(machine.handle(.silenceElapsed))
     }
 
     private func arm() {
-        stoppingForDisruption = false
+        guard sceneIsActive else { return }
+        stopReason = nil
         let effects = machine.handle(.userArmed)
         publishState()
         guard effects.contains(.startDetector) else { return }
+        armGeneration += 1
+        let id = UUID()
+        sessionID = id
         guard captureIsSupported() else {
-            Task { [weak self] in await self?.fail(.unsupportedConfiguration) }
+            Task { [weak self] in
+                guard let self, self.armAttemptIsCurrent(id) else { return }
+                await self.fail(.unsupportedConfiguration)
+            }
             return
         }
         ownsLiveActivity = liveActivitiesEnabled()
             && activityManager.startActivity(provider: "Apple on-device", initialStatus: .arming)
-        let id = UUID()
-        sessionID = id
         armTask?.cancel()
         armTask = Task { [weak self] in await self?.startDetector(sessionID: id) }
     }
 
     private func apply(_ effects: [HandsFreeDictationMachine.Effect]) async {
+        let generation = armGeneration
         for effect in effects {
+            guard armGeneration == generation else { return }
             switch effect {
             case .startDetector:
                 break
@@ -200,60 +252,78 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         if !hasMicrophonePermission {
             hasMicrophonePermission = await audioSessionManager.requestMicrophonePermission()
         }
+        guard armAttemptIsCurrent(sessionID) else { return }
         guard hasMicrophonePermission else {
             await fail(.audioUnavailable)
             return
         }
-        guard armAttemptIsCurrent(sessionID) else { return }
 
         do {
             try await audioSessionManager.configureForRecording()
-            guard armAttemptIsCurrent(sessionID) else {
-                audioSessionManager.deactivate()
-                return
-            }
+            guard armAttemptIsCurrent(sessionID) else { return }
             if let startDetectorCapture {
                 try await startDetectorCapture()
             } else {
                 try await startDetectorSession(sessionID: sessionID)
             }
-            guard armAttemptIsCurrent(sessionID) else {
-                await stopDetector()
-                return
-            }
+            guard armAttemptIsCurrent(sessionID) else { return }
             armTask = nil
             await apply(machine.handle(.detectorStarted))
         } catch is CancellationError {
-            audioSessionManager.deactivate()
+            // The retiring session already released its own resources.
         } catch {
+            guard armAttemptIsCurrent(sessionID) else { return }
             await fail(HandsFreeDictationMachine.Failure(error))
         }
     }
 
     private func startFinalisation() {
-        finalisationTask?.cancel()
+        let id = sessionID
         finalisationTask = Task { [weak self] in
             guard let self else { return }
-            let outcome = await self.stopCapture()
-            guard !Task.isCancelled, self.machine.state == .finalising else { return }
-            self.finalisationTask = nil
+            let outcome = await self.stopCapture { [weak self] in
+                self?.sessionID == id && self?.sceneIsActive == true && self?.stopReason == nil
+            }
+            guard !Task.isCancelled, self.sessionID == id, self.machine.state == .finalising else { return }
             switch outcome {
             case .completed:
-                if self.stoppingForDisruption {
-                    await self.finishDisruption()
-                    return
-                }
-                do {
-                    try await self.resumeDetectorAfterCapture()
-                    self.tracker.reset()
-                    self.preRoll.reset()
-                    await self.apply(self.machine.handle(.captureFinished))
-                } catch {
-                    await self.apply(self.machine.handle(.sessionFailed(.audioUnavailable)))
-                }
+                await self.finishSuccessfulCapture(sessionID: id)
             case .failed(let failure):
-                if self.stoppingForDisruption { _ = self.machine.handle(.captureFinished) }
+                self.finalisationTask = nil
+                // The stop owner has already preserved its best available result.
+                _ = self.machine.handle(.captureFinished)
                 await self.apply(self.machine.handle(.sessionFailed(failure)))
+            }
+        }
+    }
+
+    private func finishSuccessfulCapture(sessionID id: UUID?) async {
+        if self.stoppingForDisruption {
+            self.finalisationTask = nil
+            await self.finishDisruption()
+            return
+        }
+        do {
+            try await self.resumeDetectorAfterCapture(sessionID: id)
+            guard self.sessionID == id, !Task.isCancelled else { return }
+            self.finalisationTask = nil
+            if self.stoppingForDisruption {
+                await self.finishDisruption()
+                return
+            }
+            self.tracker.reset()
+            self.preRoll.reset()
+            await self.apply(self.machine.handle(.captureFinished))
+        } catch {
+            guard self.sessionID == id, !Task.isCancelled else { return }
+            self.finalisationTask = nil
+            // The capture has already committed; failure to restart the
+            // detector must never clear its saved/shared result.
+            _ = self.machine.handle(.captureFinished)
+            if self.stoppingForDisruption {
+                await self.finishDisruption()
+            } else {
+                await self.apply(self.machine.handle(.sessionFailed(.audioUnavailable)))
             }
         }
     }
@@ -323,7 +393,8 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     func handleActivity(_ update: AppleSpeechActivityUpdate) async {
-        guard machine.state == .armed || machine.state == .recording else { return }
+        guard !stoppingForDisruption, sceneIsActive,
+              machine.state == .armed || machine.state == .recording else { return }
         let hold = HandsFreeDictationPolicy.silenceHoldSeconds(configured: silenceDuration())
         guard let event = tracker.observe(
             speechDetected: update.speechDetected,
@@ -345,15 +416,23 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
-        if #available(iOS 26.0, *), let session = detectorSession as? AppleSpeechDetectorSession {
+        let retiringDetector = detectorSession
+        detectorSession = nil
+        captureIsStarting = false
+        audioSessionManager.deactivate()
+        if #available(iOS 26.0, *), let session = retiringDetector as? AppleSpeechDetectorSession {
             await session.cancel()
         }
-        detectorSession = nil
-        audioSessionManager.deactivate()
     }
 
-    private func resumeDetectorAfterCapture() async throws {
+    private func resumeDetectorAfterCapture(sessionID id: UUID?) async throws {
+        guard sessionID == id, !stoppingForDisruption, sceneIsActive else { return }
         try await audioSessionManager.configureForRecording()
+        guard sessionID == id, !stoppingForDisruption, sceneIsActive, !Task.isCancelled else { return }
+        if let resumeDetectorCapture {
+            try resumeDetectorCapture()
+            return
+        }
         guard let audioEngine else {
             throw AppleLocalModelError.speechDetectorFailed
         }
@@ -410,7 +489,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     private func armAttemptIsCurrent(_ id: UUID) -> Bool {
-        sessionID == id && !Task.isCancelled && machine.state == .arming
+        sessionID == id && !Task.isCancelled && machine.state == .arming && !stoppingForDisruption && sceneIsActive
     }
 }
 #endif

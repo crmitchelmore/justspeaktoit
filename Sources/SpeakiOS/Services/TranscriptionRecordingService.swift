@@ -110,12 +110,28 @@ public final class TranscriptionRecordingService: ObservableObject {
     // MARK: - Public API
 
     /// Starts a headless recording session with Live Activity.
-    public func startRecording( // swiftlint:disable:this function_body_length
+    public func startRecording(
+        retainBatchRecording: Bool = true,
+        sharesLiveTranscript: Bool = true,
+        requiresLiveActivity: Bool = true,
+        keyboardProfile: KeyboardDictationProfileOption? = nil
+    ) async throws {
+        try await startRecording(
+            retainBatchRecording: retainBatchRecording,
+            sharesLiveTranscript: sharesLiveTranscript,
+            requiresLiveActivity: requiresLiveActivity,
+            keyboardProfile: keyboardProfile,
+            destination: nil
+        )
+    }
+
+    /// Internal callers can retain their destination and request ownership for an automatic stop.
+    func startRecording( // swiftlint:disable:this function_body_length
         retainBatchRecording: Bool = true,
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil,
-        destination: HardwareTriggerDestination? = nil,
+        destination: HardwareTriggerDestination?,
         onCaptureDisruption: (() async -> Void)? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }

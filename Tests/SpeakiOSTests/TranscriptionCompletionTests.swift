@@ -6,12 +6,12 @@ import XCTest
 
 @MainActor
 final class TranscriptionCompletionTests: XCTestCase {
-    func testClipboardWithReplacementOwnership_RemainsNeutral() async throws {
-        try await assertCompletion(destination: .clipboard, foregroundReceipt: true)
+    func testClipboardWriteWithoutDeliveryConfirmation_RemainsNeutral() async throws {
+        try await assertCompletion(destination: .clipboard, acceptsClipboardWrite: true)
     }
 
-    func testClipboardWithoutReplacementOwnership_RemainsNeutral() async throws {
-        try await assertCompletion(destination: .clipboard, foregroundReceipt: false)
+    func testDiscardedClipboardWrite_RemainsNeutral() async throws {
+        try await assertCompletion(destination: .clipboard, acceptsClipboardWrite: false)
     }
 
     func testPolishWithProvider_CompletesWithRawTextAndNeutralOutcome() async throws {
@@ -34,7 +34,7 @@ final class TranscriptionCompletionTests: XCTestCase {
         destination: HardwareTriggerDestination,
         saveToHistory: Bool = true,
         hasPolisher: Bool = false,
-        foregroundReceipt: Bool = true
+        acceptsClipboardWrite: Bool = true
     ) async throws {
         let suiteName = "TranscriptionCompletionTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -50,13 +50,13 @@ final class TranscriptionCompletionTests: XCTestCase {
             syncEnabled: false,
             userDefaults: defaults
         )
-        let pasteboard = CompletionTestPasteboard()
+        let pasteboard = CompletionTestPasteboard(acceptsWrites: acceptsClipboardWrite)
         var outcomes: [TranscriptionCompletionOutcome] = []
         var textAtCompletion: String?
         let service = TranscriptionRecordingService(
             sharedState: sharedState,
             historyManager: history,
-            polishClipboard: PolishClipboard(pasteboard: pasteboard, isActive: { foregroundReceipt }),
+            polishClipboard: PolishClipboard(pasteboard: pasteboard),
             hasPolishingKey: { hasPolisher },
             polish: { _, _, _ in "Polished transcript" },
             completeActivity: { count, _, _, outcome in
@@ -70,24 +70,30 @@ final class TranscriptionCompletionTests: XCTestCase {
         let result = await service.stopRecording(destination: destination, saveToHistory: saveToHistory)
         XCTAssertEqual(result.text, "Raw transcript")
         XCTAssertEqual(outcomes, [.ready])
-        XCTAssertEqual(textAtCompletion, destination == .historyOnly ? nil : "Raw transcript")
+        let expectedClipboard = destination == .historyOnly || !acceptsClipboardWrite ? nil : "Raw transcript"
+        XCTAssertEqual(textAtCompletion, expectedClipboard)
         XCTAssertEqual(history.items.count, saveToHistory ? 1 : 0)
         for _ in 0..<1_000 where !history.reprocessingIDs.isEmpty { await Task.yield() }
         XCTAssertEqual(outcomes, [.ready], "Polish must not schedule another completion UI update")
+        XCTAssertEqual(pasteboard.writes, destination == .historyOnly ? [] : ["Raw transcript"])
+        XCTAssertEqual(pasteboard.string, expectedClipboard, "Polish must never rewrite the clipboard")
         service.cancelRecording()
     }
 }
 
 @MainActor
 private final class CompletionTestPasteboard: PolishPasteboard {
-    var changeCount = 0
-    var ownershipToken: String?
+    let acceptsWrites: Bool
+    var writes: [String] = []
     var string: String?
 
-    func write(_ text: String, token: String) {
-        string = text
-        ownershipToken = token
-        changeCount += 1
+    init(acceptsWrites: Bool) {
+        self.acceptsWrites = acceptsWrites
+    }
+
+    func write(_ text: String) {
+        writes.append(text)
+        if acceptsWrites { string = text }
     }
 }
 #endif

@@ -377,7 +377,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
-        // Replacement ownership is not a delivery receipt, and recordTranscription
+        // A raw clipboard write is not a delivery receipt, and recordTranscription
         // does not confirm durable persistence. Keyboard callers have not yet saved
         // or inserted their result. Keep all of these completions neutral.
         completeRecordingActivity(

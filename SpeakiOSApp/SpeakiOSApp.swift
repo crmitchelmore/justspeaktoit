@@ -8,6 +8,9 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // A new app process cannot own the previous process's recording. Reset
+        // before launch actions can start a session, never on foreground entry.
+        SharedTranscriptionState.shared.clearRecordingState()
         application.registerForRemoteNotifications()
         // Watch file transfers launch the app in the background; the session
         // must be activated during launch so queued captures are delivered.

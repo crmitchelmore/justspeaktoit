@@ -13,7 +13,7 @@ import SpeakiOSLib
 
 @available(iOS 18.0, *)
 struct JustSpeakToItWidgetExtensionControl: ControlWidget {
-    static let kind: String = "com.justspeaktoit.ios.JustSpeakToItWidgetExtension"
+    static let kind = CaptureSurfaceKind.transcriptionControl
 
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(

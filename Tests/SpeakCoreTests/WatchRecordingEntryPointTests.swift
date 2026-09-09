@@ -7,6 +7,14 @@ final class WatchRecordingEntryPointTests: XCTestCase {
     /// exercises headless entry on the host without adding production injection
     /// seams or claiming to exercise WatchConnectivity on paired hardware.
     func testHeadlessRecording_delayedActivationRecoversRetainedAudio() throws {
+        try self.runScenario(failFirstActivation: false)
+    }
+
+    func testFailedActivation_laterRecordingEntryRetriesAndTransfersRetainedAudio() throws {
+        try self.runScenario(failFirstActivation: true)
+    }
+
+    private func runScenario(failFirstActivation: Bool) throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -37,7 +45,8 @@ final class WatchRecordingEntryPointTests: XCTestCase {
         ])
         XCTAssertEqual(compiler.status, 0, compiler.output)
         guard compiler.status == 0 else { return }
-        let result = try self.run(executable.path, arguments: [directory.path])
+        let scenario = failFirstActivation ? "failed-first" : "delayed-success"
+        let result = try self.run(executable.path, arguments: [directory.path, scenario])
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.output.trimmingCharacters(in: .whitespacesAndNewlines), "headless entry passed")
     }
@@ -93,9 +102,9 @@ final class WatchRecordingEntryPointTests: XCTestCase {
         public var outstandingFileTransfers: [WCSessionFileTransfer] = []
         // Deliberately withhold completion until after the recording is queued.
         public func activate() { activationCalls += 1 }
-        public func completeActivation() {
-            activationState = .activated
-            delegate?.session(self, activationDidCompleteWith: .activated, error: nil)
+        public func completeActivation(_ state: WCSessionActivationState, error: Error?) {
+            activationState = state
+            delegate?.session(self, activationDidCompleteWith: state, error: error)
         }
         public func transferFile(_ url: URL, metadata: [String: Any]?) {
             precondition(activationState == .activated)
@@ -127,16 +136,21 @@ final class WatchRecordingEntryPointTests: XCTestCase {
             let createdAt = Date()
             let duration: TimeInterval = 2
         }
-        let id = UUID()
+        var id = UUID()
         var toggleCount = 0
+        var expectedActivationCalls = 1
         static func fileURL(for id: UUID) -> URL {
             WatchSharedContainer.shared.url(named: id.uuidString + ".m4a")
         }
         func toggle() async {
-            precondition(WCSession.default.activationCalls == 1, "Recording entered before activation was requested")
+            precondition(
+                WCSession.default.activationCalls == expectedActivationCalls,
+                "Recording entered before activation was requested"
+            )
             precondition(WCSession.default.activationState == .notActivated)
             toggleCount += 1
-            if toggleCount == 1 {
+            if !toggleCount.isMultiple(of: 2) {
+                id = UUID()
                 try! Data("recorded audio".utf8).write(to: Self.fileURL(for: id))
             } else {
                 precondition(WatchCaptureStore.shared.enqueue(FinishedRecording(id: id)))
@@ -172,21 +186,59 @@ final class WatchRecordingEntryPointTests: XCTestCase {
             let queue = WatchSharedContainer.shared.url(named: "captures.json")
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let persisted = try! decoder.decode([WatchCapture].self, from: Data(contentsOf: queue))
+            let persistedData = try! Data(contentsOf: queue)
+            let persisted = try! decoder.decode([WatchCapture].self, from: persistedData)
             precondition(persisted.count == 1 && persisted[0].id == store.captures[0].id)
             precondition(persisted[0].status == .recorded)
 
-            session.completeActivation()
-            while store.captures[0].status != .transferring { await Task.yield() }
+            let failFirstActivation = CommandLine.arguments[2] == "failed-first"
+            if failFirstActivation {
+                await completeActivation(.notActivated, error: NSError(domain: "WatchEntryTests", code: 1))
+                precondition(session.activationCalls == 1, "Failure must not automatically retry")
+                precondition(session.outstandingFileTransfers.isEmpty)
+                precondition(store.captures[0].status == .recorded)
+                precondition(try! Data(contentsOf: queue) == persistedData)
+                precondition(FileManager.default.fileExists(atPath: audio.path))
+
+                // A later real recording entry starts a second attempt. Its new
+                // recording is unfinished; only the retained capture is queued.
+                coordinator.recorder.expectedActivationCalls = 2
+                await coordinator.toggleRecording()
+                precondition(session.activationCalls == 2)
+                precondition(store.captures.count == 1)
+                precondition(session.outstandingFileTransfers.isEmpty)
+                store.activate()
+                store.activate()
+                precondition(session.activationCalls == 2, "Pending retry must remain deduplicated")
+            }
+
+            await completeActivation(.activated)
+            precondition(store.captures[0].status == .transferring)
             precondition(!session.isReachable)
             precondition(session.outstandingFileTransfers.count == 1)
+            let submitted = WatchCaptureEnvelope.from(metadata: session.outstandingFileTransfers[0].file.metadata)
+            precondition(submitted?.id == persisted[0].id)
             // Later scene activation/recovery must not duplicate the transfer.
             store.activate()
             store.retryPending()
-            precondition(session.activationCalls == 1)
+            precondition(session.activationCalls == (failFirstActivation ? 2 : 1))
             precondition(session.outstandingFileTransfers.count == 1)
             precondition(FileManager.default.fileExists(atPath: audio.path))
             print("headless entry passed")
+        }
+
+        @MainActor
+        static func completeActivation(_ state: WCSessionActivationState, error: Error? = nil) async {
+            var observation: AnyCancellable?
+            // The real delegate publishes reachability from its MainActor task.
+            // Await that callback without sleeps or inspecting private state.
+            await withCheckedContinuation { continuation in
+                observation = WatchCaptureStore.shared.$isReachable.dropFirst().sink { _ in
+                    continuation.resume()
+                }
+                WCSession.default.completeActivation(state, error: error)
+            }
+            observation?.cancel()
         }
     }
     """

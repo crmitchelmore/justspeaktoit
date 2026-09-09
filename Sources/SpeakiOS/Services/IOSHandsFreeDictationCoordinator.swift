@@ -248,23 +248,20 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     private func startDetector(sessionID: UUID) async {
+        guard armAttemptIsCurrent(sessionID) else { return }
+        let generation = armGeneration
         guard #available(iOS 26.0, *) else {
             await fail(.detectorUnavailable)
             return
         }
-        var hasMicrophonePermission = audioSessionManager.hasMicrophonePermission()
-        if !hasMicrophonePermission {
-            hasMicrophonePermission = await audioSessionManager.requestMicrophonePermission()
-        }
-        guard armAttemptIsCurrent(sessionID) else { return }
-        guard hasMicrophonePermission else {
-            await fail(.audioUnavailable)
-            return
-        }
+        guard await prepareMicrophone(sessionID: sessionID) else { return }
 
         do {
             try await audioSessionManager.configureForRecording()
-            guard armAttemptIsCurrent(sessionID) else { return }
+            guard armAttemptIsCurrent(sessionID) else {
+                releaseRetiredArmConfiguration(generation: generation)
+                return
+            }
             if let startDetectorCapture {
                 try await startDetectorCapture()
             } else {
@@ -274,11 +271,35 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
             armTask = nil
             await apply(machine.handle(.detectorStarted))
         } catch is CancellationError {
-            // The retiring session already released its own resources.
+            releaseRetiredArmConfiguration(generation: generation)
         } catch {
-            guard armAttemptIsCurrent(sessionID) else { return }
+            guard armAttemptIsCurrent(sessionID) else {
+                releaseRetiredArmConfiguration(generation: generation)
+                return
+            }
             await fail(HandsFreeDictationMachine.Failure(error))
         }
+    }
+
+    private func prepareMicrophone(sessionID: UUID) async -> Bool {
+        var hasMicrophonePermission = audioSessionManager.hasMicrophonePermission()
+        if !hasMicrophonePermission {
+            hasMicrophonePermission = await audioSessionManager.requestMicrophonePermission()
+        }
+        guard armAttemptIsCurrent(sessionID) else { return false }
+        guard hasMicrophonePermission else {
+            await fail(.audioUnavailable)
+            return false
+        }
+
+        return true
+    }
+
+    private func releaseRetiredArmConfiguration(generation: Int) {
+        // Activation can finish after teardown while crossing an async boundary.
+        // Release that late activation only if no newer arm has taken ownership.
+        guard armGeneration == generation else { return }
+        audioSessionManager.deactivate()
     }
 
     private func startFinalisation() {

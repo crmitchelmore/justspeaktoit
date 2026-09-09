@@ -94,6 +94,41 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
         await assertRetiredArmDoesNotAffectNewSession(throwsError: true)
     }
 
+    func testLateAudioConfigurationAfterInactivity_releasesRetiredActivation() async {
+        await assertLateConfiguration(rearm: false)
+    }
+
+    func testLateAudioConfigurationAfterNewArm_doesNotDeactivateNewSession() async {
+        await assertLateConfiguration(rearm: true)
+    }
+
+    private func assertLateConfiguration(rearm: Bool) async {
+        let harness = Harness()
+        let configuring = expectation(description: "audio configuration suspended")
+        var configured: CheckedContinuation<Void, Never>?
+        harness.manager.configureRecording = {
+            await withCheckedContinuation { continuation in
+                configured = continuation
+                configuring.fulfill()
+            }
+        }
+        await harness.coordinator.toggle()
+        await fulfillment(of: [configuring], timeout: 2)
+        await harness.coordinator.sceneActivityChanged(isActive: false)?.value
+        let deactivations = harness.deactivations
+        if rearm {
+            harness.coordinator.sceneActivityChanged(isActive: true)
+            harness.manager.configureRecording = {}
+            await harness.arm()
+        }
+        configured?.resume()
+        await Task { @MainActor in }.value
+        XCTAssertEqual(harness.deactivations, deactivations + (rearm ? 0 : 1))
+        XCTAssertEqual(harness.coordinator.state, rearm ? .armed : .off)
+        XCTAssertNil(harness.coordinator.failureMessage)
+        if rearm { await harness.coordinator.disarm() }
+    }
+
     func testInactiveDuringCaptureStartup_finishesOnceAfterOwnedStartSettles() async {
         let harness = Harness()
         let starting = expectation(description: "capture starting")

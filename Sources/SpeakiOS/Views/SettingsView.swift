@@ -1152,6 +1152,13 @@ public struct SettingsView: View {
                     .pickerStyle(.navigationLink)
                     .accessibilityIdentifier("appleOnDeviceModelPicker")
 
+                    if #available(iOS 26.0, *), AppleLocalModels.isSpeechAnalyzerModel(settings.selectedModel) {
+                        AppleSpeechPreparationView(
+                            modelID: settings.selectedModel,
+                            localeIdentifier: settings.preferredModelLanguage ?? Locale.current.identifier
+                        )
+                    }
+
                     if !usesInlineDensityLayout {
                         Text(
                             "Uses Apple's on-device speech engines when available. "

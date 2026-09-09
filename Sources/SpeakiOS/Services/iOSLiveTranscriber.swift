@@ -96,6 +96,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     // Isolates permission/analyzer boundaries in cancellation tests.
     var permissionCheck: (() async -> Bool)?
     var analyzerStart: (() async throws -> Void)?
+    var legacyStart: (() throws -> Void)?
     private var activeModelID = AppleLocalModels.legacySpeechModelID
     private var startTime: Date?
     private var accumulatedSegments: [TranscriptionSegment] = []
@@ -206,21 +207,22 @@ public final class iOSLiveTranscriber: ObservableObject {
         try await configureAudioSession()
         resetState()
 
+        var analyzerAssetsMissing = false
         if AppleLocalModels.isSpeechAnalyzerModel(modelID) {
             if #available(iOS 26.0, *) {
                 do {
                     let engine = AppleSpeechAnalyzerEngine(modelID: modelID)
                     if let analyzerStart {
                         try await analyzerStart()
+                        activeModelID = engine.modelID
                     } else {
                         try await startSpeechAnalyzer(
                             engine: engine, preRollBuffers: preRollBuffers, captureID: captureID
                         )
                     }
                     try Task.checkCancellation()
-                    activeModelID = engine.modelID
                     isRunning = true
-                    logger.info("Started with SpeechAnalyzer (\(engine.modelID))")
+                    logger.info("Started with SpeechAnalyzer (\(self.activeModelID))")
                     return
                 } catch {
                     // Cancellation is a control action, never a reason to
@@ -231,12 +233,46 @@ public final class iOSLiveTranscriber: ObservableObject {
                         context: "SpeechAnalyzer setup; falling back to SFSpeechRecognizer",
                         logger: SpeakLogger.transcription
                     )
-                    if !analyzerFallbackAllowed { throw error }
+                    if case AppleLocalModelError.modelAssetsUnavailable = error {
+                        analyzerAssetsMissing = true
+                    }
+                    if !analyzerFallbackAllowed {
+                        throw analyzerAssetsMissing ? Self.modelPreparationError : error
+                    }
                 }
             }
         }
 
         activeModelID = AppleLocalModels.legacySpeechModelID
+        try startLegacyFallback(captureID: captureID, analyzerAssetsMissing: analyzerAssetsMissing)
+
+        isRunning = true
+        logger.info("Started")
+    }
+
+    private func startLegacyFallback(captureID: UUID, analyzerAssetsMissing: Bool) throws {
+        do {
+            if let legacyStart {
+                try legacyStart()
+            } else {
+                try startLegacyRecognition(captureID: captureID)
+            }
+        } catch {
+            if analyzerAssetsMissing, case iOSTranscriptionError.recognizerUnavailable = error {
+                throw Self.modelPreparationError
+            }
+            throw error
+        }
+    }
+
+    private static var modelPreparationError: NSError {
+        NSError(domain: "AppleSpeechPreparation", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Apple's on-device speech model is not ready. "
+                + "Open Settings and tap Prepare Apple model, then try again."
+        ])
+    }
+
+    private func startLegacyRecognition(captureID: UUID) throws {
         let (recognizer, request) = try setupRecognition()
         try startAudioEngine(request: request)
 
@@ -247,9 +283,6 @@ public final class iOSLiveTranscriber: ObservableObject {
                 self?.handleRecognitionResult(result, error: error)
             }
         }
-
-        isRunning = true
-        logger.info("Started")
     }
 
     private func configureAudioSession() async throws {
@@ -278,7 +311,8 @@ public final class iOSLiveTranscriber: ObservableObject {
     ) async throws {
         let session = try await AppleSpeechAnalyzerLiveSession(
             localeIdentifier: language,
-            engine: engine
+            engine: engine,
+            assetPolicy: .installedOnly
         ) { [weak self] update in
             Task { @MainActor [weak self] in
                 guard self?.activeCaptureID == captureID else { return }
@@ -319,6 +353,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             try audioEngine.start()
             reportAnalyzerEngineStarted()
             observeCaptureConfiguration()
+            activeModelID = session.modelIdentifier
             speechAnalyzerSession = session
             speechAnalyzerConverter = converter
         } catch {

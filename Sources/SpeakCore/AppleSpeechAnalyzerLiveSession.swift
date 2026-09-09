@@ -17,6 +17,7 @@ public struct AppleSpeechAnalyzerUpdate: Sendable {
 
 @available(macOS 26.0, iOS 26.0, *)
 public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
+    public let modelIdentifier: String
     public let audioFormat: AVAudioFormat
 
     private let analyzer: SpeechAnalyzer
@@ -27,13 +28,15 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
     public init(
         localeIdentifier: String?,
         engine: AppleSpeechAnalyzerEngine = .speechTranscriber,
+        assetPolicy: AppleSpeechAssetPolicy = .installIfNeeded,
         onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
     ) async throws {
         try Task.checkCancellation()
         let configuration = try await AppleSpeechAnalyzerTranscriber.makeModule(
             engine: engine,
             localeIdentifier: localeIdentifier,
-            progressive: true
+            progressive: true,
+            assetPolicy: assetPolicy
         )
         try Task.checkCancellation()
         let module = configuration.module
@@ -48,6 +51,7 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         let analyzer = SpeechAnalyzer(modules: [module.speechModule])
         let cancellation = SpeechAnalyzerCancellation(analyzer: analyzer)
         self.cancellation = cancellation
+        self.modelIdentifier = configuration.engine.modelID
         self.audioFormat = format
         self.analyzer = analyzer
         self.inputContinuation = continuation

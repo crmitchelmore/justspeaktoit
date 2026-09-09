@@ -118,6 +118,53 @@ final class CredentialLoadingTests: XCTestCase {
         }
     }
 
+    func testUnavailableCredentials_blockRemoteConsumersButAllowLocalModels() async throws {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let settings = fixture.settings(permissions: RetryPermissions())
+        _ = await settings.ensureKeysLoaded()
+        for purpose: ModelCredentialPurpose in [.batchTranscription, .postProcessing, .liveTranscription] {
+            XCTAssertThrowsError(try settings.requireAvailableCredentials(for: "openai/gpt-4o", purpose: purpose)) {
+                XCTAssertTrue($0 is AppSettings.CredentialLoadingError)
+                XCTAssertFalse($0.localizedDescription.contains("missing"))
+                XCTAssertFalse($0.localizedDescription.contains("unlock"))
+            }
+        }
+        XCTAssertNoThrow(try settings.requireAvailableCredentials(
+            for: AppleLocalModels.foundationModelID, purpose: .postProcessing
+        ))
+        XCTAssertNoThrow(try settings.requireAvailableCredentials(
+            for: AppleLocalModels.preferredSpeechModelID, purpose: .liveTranscription
+        ))
+    }
+
+    func testWatchImport_unavailableCredentialsRetainAudioAndPendingJob() async throws {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let settings = fixture.settings(permissions: RetryPermissions())
+        settings.batchTranscriptionModel = "openai/gpt-4o-transcribe"
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pipeline = WatchCaptureImportPipeline(inboxDirectory: directory)
+        pipeline.credentialSettings = settings
+        let captureID = UUID()
+        let audioURL = directory.appendingPathComponent("\(captureID).m4a")
+        let audio = Data("synthetic audio must not be submitted".utf8)
+        try audio.write(to: audioURL)
+        pipeline.journal.parkJob(captureID: captureID, fileExtension: "m4a", createdAt: Date(), duration: 1)
+        let job = try XCTUnwrap(pipeline.journal.pendingJobs().first)
+        do {
+            try await pipeline.importOne(job)
+            XCTFail("Unavailable credentials must prevent transcription")
+        } catch {
+            XCTAssertTrue(error is AppSettings.CredentialLoadingError)
+        }
+        XCTAssertEqual(try Data(contentsOf: audioURL), audio)
+        XCTAssertEqual(pipeline.journal.pendingJobs().map(\.captureID), [captureID])
+        XCTAssertTrue(pipeline.journal.pendingAcks().isEmpty)
+    }
+
     func testGenuinelyMissingKeys_reportMissingAfterSuccessfulLoad() async {
         let fixture = Fixture()
         defer { fixture.cleanUp() }
@@ -127,6 +174,9 @@ final class CredentialLoadingTests: XCTestCase {
         let loaded = await settings.ensureKeysLoaded()
         XCTAssertTrue(loaded)
         XCTAssertFalse(settings.hasDeepgramKey)
+        XCTAssertNoThrow(try settings.requireAvailableCredentials(
+            for: "deepgram/nova-3-streaming", purpose: .liveTranscription
+        ))
         XCTAssertEqual(settings.credentialFallbackReason, "no API key")
     }
 }

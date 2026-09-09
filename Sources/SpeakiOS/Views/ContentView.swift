@@ -251,6 +251,9 @@ private extension TranscriberCoordinator {
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
+        if settings.transcriptionMode == .batch {
+            try settings.requireAvailableCredentials(for: currentModel, purpose: .batchTranscription)
+        }
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast

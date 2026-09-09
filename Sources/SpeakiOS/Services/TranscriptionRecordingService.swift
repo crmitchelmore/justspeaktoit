@@ -357,6 +357,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
         let usesBatchTranscription = selection.usesBatch
         currentModel = selection.modelID
+        try validateCredentialAvailability(
+            settings: settings,
+            usesBatchTranscription: usesBatchTranscription,
+            keyboardProfile: keyboardProfile,
+            run: runID
+        )
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast
@@ -732,6 +738,25 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func completedTranscript(forRun runID: UUID) -> String? {
         guard let lastRunCompletion, lastRunCompletion.runID == runID else { return nil }
         return lastRunCompletion.text
+    }
+
+    private func validateCredentialAvailability(
+        settings: AppSettings,
+        usesBatchTranscription: Bool,
+        keyboardProfile: KeyboardDictationProfileOption?,
+        run: UUID
+    ) throws {
+        // Ordinary streaming retains its visible Apple Speech fallback.
+        guard usesBatchTranscription || keyboardProfile != nil else { return }
+        do {
+            try settings.requireAvailableCredentials(
+                for: currentModel,
+                purpose: usesBatchTranscription ? .batchTranscription : .liveTranscription
+            )
+        } catch {
+            unwindCancelledStart(outcome: .failed, run: run)
+            throw error
+        }
     }
 
     /// Reverts everything a cancelled startup run had published: timing,

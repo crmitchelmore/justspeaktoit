@@ -380,7 +380,19 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
             return
         }
-        await AppSettings.shared.ensureKeysLoaded()
+        let settings = AppSettings.shared
+        await settings.ensureKeysLoaded()
+        if let profile = record.profile {
+            do {
+                try settings.requireAvailableCredentials(
+                    for: profile.transcriptionModelIdentifier,
+                    purpose: profile.transcriptionMode == .batch ? .batchTranscription : .liveTranscription
+                )
+            } catch {
+                _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
+                return
+            }
+        }
         guard let profile = record.profile, profileIsAvailable(profile) else {
             _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
             return

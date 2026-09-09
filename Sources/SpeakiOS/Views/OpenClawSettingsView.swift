@@ -358,7 +358,7 @@ public struct OpenClawSettingsView: View {
         let discoveryID = sonioxDiscoveryID
         loadedSonioxDiscoveryID = nil
         guard settings.ttsProvider == .soniox else { return }
-        await appSettings.ensureKeysLoaded()
+        guard await appSettings.ensureKeysLoaded() else { return }
         guard !Task.isCancelled, discoveryID == sonioxDiscoveryID else { return }
         guard appSettings.hasSonioxKey else {
             sonioxAccountVoices = []

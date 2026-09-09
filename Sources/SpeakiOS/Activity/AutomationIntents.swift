@@ -197,6 +197,7 @@ struct TranscribeAudioFileIntent: AppIntent {
         await settings.ensureKeysLoaded()
         let overrides = try CaptureParameterResolution.resolve(language: language, model: model)
         let modelID = overrides.modelID ?? settings.batchTranscriptionModel
+        try settings.requireAvailableCredentials(for: modelID, purpose: .batchTranscription)
         // Only models with an iOS upload client may run. A retained direct-
         // provider identifier (for example a Soniox model configured on Mac)
         // would otherwise fall through to OpenRouter with the wrong credential.
@@ -337,6 +338,7 @@ struct PolishTextIntent: AppIntent {
         let settings = AppSettings.shared
         await settings.ensureKeysLoaded()
         let model = settings.postProcessingModel
+        try settings.requireAvailableCredentials(for: model, purpose: .postProcessing)
         guard model == AppleLocalModels.foundationModelID || settings.hasOpenRouterKey else {
             throw AutomationIntentError.openRouterKeyMissing
         }

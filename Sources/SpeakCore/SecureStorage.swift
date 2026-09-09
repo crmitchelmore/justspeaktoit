@@ -109,11 +109,11 @@ public struct SecureStorageConfiguration: Sendable {
         masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
         legacyServices: [String] = [],
         accessGroup: String? = nil,
-        synchronizable: Bool = false,
-        accessibility: Accessibility = .platformDefault
+        synchronizable: Bool = false
     ) {
         self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
-                  accessGroup: accessGroup, synchronizable: synchronizable, releaseTrain: .current)
+                  accessGroup: accessGroup, synchronizable: synchronizable,
+                  accessibility: .platformDefault, releaseTrain: .current)
     }
 
     public init(
@@ -122,6 +122,35 @@ public struct SecureStorageConfiguration: Sendable {
         legacyServices: [String] = [],
         accessGroup: String? = nil,
         synchronizable: Bool = false,
+        releaseTrain: ReleaseTrain
+    ) {
+        self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
+                  accessGroup: accessGroup, synchronizable: synchronizable,
+                  accessibility: .platformDefault, releaseTrain: releaseTrain)
+    }
+
+    public init(
+        service: String = "com.github.speakapp.credentials",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
+        legacyServices: [String] = [],
+        accessGroup: String? = nil,
+        synchronizable: Bool = false,
+        accessibility: Accessibility
+    ) {
+        self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
+                  accessGroup: accessGroup, synchronizable: synchronizable,
+                  accessibility: accessibility, releaseTrain: .current)
+    }
+
+    /// Designated initialiser. `accessibility` and `releaseTrain` are both
+    /// explicit here so neither policy can be dropped by a forwarding overload.
+    public init(
+        service: String = "com.github.speakapp.credentials",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
+        legacyServices: [String] = [],
+        accessGroup: String? = nil,
+        synchronizable: Bool = false,
+        accessibility: Accessibility,
         releaseTrain: ReleaseTrain
     ) {
         self.service = releaseTrain.namespace(service)

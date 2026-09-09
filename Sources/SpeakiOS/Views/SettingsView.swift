@@ -289,8 +289,16 @@ public final class AppSettings: ObservableObject {
     private var keyLoadTask: Task<Bool, Never>?
     @Published public private(set) var credentialsAvailable = false
 
+    enum CredentialLoadingError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            "API keys could not be loaded. Retry when Keychain access is available."
+        }
+    }
+
     var credentialFallbackReason: String {
-        credentialsAvailable ? "no API key" : "API keys unavailable — unlock to retry"
+        credentialsAvailable ? "no API key" : "API keys unavailable — retry when access is restored"
     }
 
     /// Persists (or clears when empty) an API key on the canonical secure store.
@@ -594,6 +602,14 @@ public final class AppSettings: ObservableObject {
         let success = await task.value
         keyLoadTask = nil
         return success
+    }
+
+    /// Remote consumers must not interpret a failed load as a missing key.
+    /// Local models can continue without Keychain access.
+    func requireAvailableCredentials(for model: String, purpose: ModelCredentialPurpose) throws {
+        guard !credentialsAvailable,
+              ModelCredentialResolver.requirement(for: model, purpose: purpose) != .notRequired else { return }
+        throw CredentialLoadingError.unavailable
     }
 
     /// Publishes one coherent, non-secret keyboard capability snapshot whenever

@@ -49,18 +49,27 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         }
     }
 
-    func testDisabledActivitiesNeverRequestAndClearCachedRunningState() {
+    func testDisabledActivitiesRetireOwnedPrimedActivityWithoutRequesting() async {
         var enabled = true
         var requests = 0
+        let activity = FakeActivity()
+        activity.suspendUpdates = true
         let manager = TranscriptionActivityManager(
-            activitiesEnabled: { enabled }, activities: { [FakeActivity()] },
+            activitiesEnabled: { enabled }, activities: { [activity] },
             request: { _ in requests += 1; return FakeActivity() }
         )
-        XCTAssertTrue(manager.startActivity(provider: "Test"))
+        XCTAssertTrue(manager.startActivity(provider: "Test", initialStatus: .idle))
+        await waitUntil { activity.updateWaiter != nil }
         enabled = false
         XCTAssertFalse(manager.startActivity(provider: "Test"))
         XCTAssertFalse(manager.isActivityRunning)
         XCTAssertEqual(requests, 0)
+        await waitUntil { activity.endCount == 1 }
+        XCTAssertEqual(activity.activityState, .ended)
+        activity.updateWaiter?.resume()
+        activity.updateWaiter = nil
+        await drainTasks()
+        XCTAssertTrue(activity.updates.isEmpty)
     }
 
     func testDismissalInvalidatesCurrentButOldObserverCannotClearReusedRun() {
@@ -98,7 +107,7 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         let manager = makeManager(activity, sleeper: sleeper)
         XCTAssertTrue(manager.startActivity(provider: "First"))
         manager.completeActivity(finalWordCount: 4, duration: 2, keepPrimed: true)
-        await waitUntil { sleeper.waiters.count == 1 }
+        await waitUntil { sleeper.waiters.count == 1 && activity.updates.last?.status == .completed }
         XCTAssertEqual(activity.updates.last?.status, .completed)
         XCTAssertTrue(manager.startActivity(provider: "Second"))
         await waitUntil { activity.updates.last?.provider == "Second" }
@@ -148,21 +157,6 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         await drainTasks()
         XCTAssertEqual(activity.updates.last?.status, .recording)
         XCTAssertFalse(activity.updates.contains { $0.lastSnippet == "old deferred" })
-        manager.endActivity()
-    }
-
-    func testInFlightUpdateFinishesBeforeRestartPublishesRecording() async {
-        let activity = FakeActivity()
-        activity.suspendUpdates = true
-        let manager = makeManager(activity)
-        XCTAssertTrue(manager.startActivity(provider: "First"))
-        await waitUntil { activity.updateWaiter != nil }
-        XCTAssertTrue(manager.startActivity(provider: "Second"))
-        activity.suspendUpdates = false
-        activity.updateWaiter?.resume()
-        activity.updateWaiter = nil
-        await waitUntil { activity.updates.last?.provider == "Second" }
-        XCTAssertEqual(activity.updates.map(\.provider), ["First", "Second"])
         manager.endActivity()
     }
 
@@ -217,6 +211,99 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
     }
 }
 
+extension TranscriptionActivityLifecycleTests {
+    func testTimestampedRestartPublishesBeforeStalledOldWriteCompletes() async {
+        let activity = FakeActivity()
+        activity.suspendUpdates = true
+        let manager = makeManager(activity)
+        XCTAssertTrue(manager.startActivity(provider: "First"))
+        await waitUntil { activity.updateWaiter != nil }
+        activity.suspendUpdates = false
+        XCTAssertTrue(manager.startActivity(provider: "Second"))
+        await waitUntil { activity.updates.last?.provider == "Second" }
+        activity.updateWaiter?.resume()
+        activity.updateWaiter = nil
+        await drainTasks()
+        XCTAssertEqual(activity.updates.map(\.provider), ["Second"])
+        manager.endActivity()
+    }
+
+    func testStalledWriteCoalescesPartialPublicationsToLatestPayload() async {
+        let activity = FakeActivity()
+        activity.suspendUpdates = true
+        let manager = makeManager(activity)
+        XCTAssertTrue(manager.startActivity(provider: "Test"))
+        await waitUntil { activity.updateWaiter != nil }
+        for index in 0..<100 { manager.reportError("Error \(index)") }
+        await drainTasks()
+        XCTAssertEqual(activity.updateCount, 1)
+        activity.suspendUpdates = false
+        activity.updateWaiter?.resume()
+        activity.updateWaiter = nil
+        await waitUntil { activity.updates.last?.errorMessage == "Error 99" }
+        XCTAssertEqual(activity.updateCount, 2)
+        manager.endActivity()
+    }
+
+    func testStalledWriteCannotBlockImmediateOrCompletedRetirement() async {
+        for complete in [true, false] {
+            let activity = FakeActivity()
+            activity.suspendUpdates = true
+            let manager = makeManager(activity)
+            XCTAssertTrue(manager.startActivity(provider: "Test"))
+            await waitUntil { activity.updateWaiter != nil }
+            if complete {
+                manager.completeActivity(finalWordCount: 1, duration: 1)
+            } else {
+                manager.endActivity()
+            }
+            await waitUntil { activity.endCount == 1 }
+            XCTAssertEqual(activity.activityState, .ended)
+            activity.updateWaiter?.resume()
+            activity.updateWaiter = nil
+            await drainTasks()
+            XCTAssertTrue(activity.updates.isEmpty)
+        }
+    }
+
+    func testLegacyPrimedCompletionRetiresUnfinishedWrite() async {
+        let activity = FakeActivity()
+        activity.supportsUpdateTimestamps = false
+        activity.suspendUpdates = true
+        let manager = makeManager(activity)
+        XCTAssertTrue(manager.startActivity(provider: "Test"))
+        await waitUntil { activity.updateWaiter != nil }
+        manager.completeActivity(finalWordCount: 1, duration: 1, keepPrimed: true)
+        XCTAssertFalse(manager.isActivityRunning)
+        await waitUntil { activity.endCount == 1 }
+        activity.updateWaiter?.resume()
+        activity.updateWaiter = nil
+        await drainTasks()
+        XCTAssertTrue(activity.updates.isEmpty)
+    }
+
+    func testLegacyRestartRetiresUnfinishedWriteAndPublishesReplacement() async {
+        let old = FakeActivity()
+        old.supportsUpdateTimestamps = false
+        old.suspendUpdates = true
+        let replacement = FakeActivity()
+        let manager = TranscriptionActivityManager(
+            activitiesEnabled: { true }, activities: { [old, replacement] }, request: { _ in FakeActivity() }
+        )
+        XCTAssertTrue(manager.startActivity(provider: "First"))
+        await waitUntil { old.updateWaiter != nil }
+        XCTAssertTrue(manager.startActivity(provider: "Second"))
+        await waitUntil { old.endCount == 1 && replacement.updates.last?.provider == "Second" }
+        old.updateWaiter?.resume()
+        old.updateWaiter = nil
+        await drainTasks()
+        XCTAssertTrue(old.updates.isEmpty)
+        XCTAssertTrue(manager.isActivityRunning)
+        manager.endActivity()
+    }
+
+}
+
 private enum TestError: Error { case unavailable }
 
 @MainActor
@@ -237,6 +324,9 @@ private final class SuspendedSleep {
 private final class FakeActivity: TranscriptionActivityHandle {
     let id = UUID().uuidString
     var nativeActivity: Activity<TranscriptionActivityAttributes>? { nil }
+    var supportsUpdateTimestamps = true
+    var updateCount = 0
+    var lastTimestamp = Date.distantPast
     var activityState: ActivityState
     var transcriptionState = TranscriptionActivityAttributes.ContentState()
     var updates: [TranscriptionActivityAttributes.ContentState] = []
@@ -249,15 +339,21 @@ private final class FakeActivity: TranscriptionActivityHandle {
 
     init(state: ActivityState = .active) { activityState = state }
 
-    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState) async {
+    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async {
+        updateCount += 1
         if suspendUpdates { await withCheckedContinuation { updateWaiter = $0 } }
+        // Mirror ActivityKit: ended activities and older timestamped payloads are ignored.
+        guard activityState != .ended, !supportsUpdateTimestamps || timestamp >= lastTimestamp else { return }
+        lastTimestamp = timestamp
         updates.append(state)
         transcriptionState = state
     }
 
-    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?) async {
+    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?, timestamp: Date) async {
         endCount += 1
         if suspendEnd { await withCheckedContinuation { endWaiter = $0 } }
+        guard !supportsUpdateTimestamps || timestamp >= lastTimestamp else { return }
+        lastTimestamp = timestamp
         activityState = .ended
         observers.forEach { $0(.ended) }
     }

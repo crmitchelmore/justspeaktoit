@@ -9,23 +9,38 @@ protocol TranscriptionActivityHandle: AnyObject {
     var nativeActivity: Activity<TranscriptionActivityAttributes>? { get }
     var id: String { get }
     var activityState: ActivityState { get }
+    var supportsUpdateTimestamps: Bool { get }
     var transcriptionState: TranscriptionActivityAttributes.ContentState { get }
-    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState) async
-    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?) async
+    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async
+    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?, timestamp: Date) async
     func observeState(_ handler: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never>
 }
 
 extension Activity: TranscriptionActivityHandle where Attributes == TranscriptionActivityAttributes {
     var nativeActivity: Activity<TranscriptionActivityAttributes>? { self }
     var transcriptionState: TranscriptionActivityAttributes.ContentState { content.state }
-
-    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState) async {
-        await update(.init(state: state, staleDate: nil))
+    var supportsUpdateTimestamps: Bool {
+        if #available(iOS 17.2, *) { return true }
+        return false
     }
 
-    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?) async {
-        await end(state.map { .init(state: $0, staleDate: nil) },
-                  dismissalPolicy: state == nil ? .immediate : .after(.now + 5))
+    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async {
+        if #available(iOS 17.2, *) {
+            // ActivityKit ignores a payload older than its last accepted update.
+            await update(.init(state: state, staleDate: nil), timestamp: timestamp)
+        } else {
+            await update(.init(state: state, staleDate: nil))
+        }
+    }
+
+    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?, timestamp: Date) async {
+        let content = state.map { ActivityContent(state: $0, staleDate: nil) }
+        let policy: ActivityUIDismissalPolicy = state == nil ? .immediate : .after(.now + 5)
+        if #available(iOS 17.2, *) {
+            await end(content, dismissalPolicy: policy, timestamp: timestamp)
+        } else {
+            await end(content, dismissalPolicy: policy)
+        }
     }
 
     func observeState(_ handler: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
@@ -52,6 +67,9 @@ public final class TranscriptionActivityManager: ObservableObject {
     private var completionTask: Task<Void, Never>?
     private var updateThrottleTask: Task<Void, Never>?
     private var updateTask: Task<Void, Never>?
+    private var pendingUpdate: (state: TranscriptionActivityAttributes.ContentState, timestamp: Date)?
+    private var inFlightUpdates: [String: Int] = [:]
+    private var lastPayloadTimestamp: Date = .distantPast
     private var retiringIDs: Set<String> = []
     private var lastUpdateTime: Date = .distantPast
     private let minimumUpdateInterval: TimeInterval = 1
@@ -92,15 +110,21 @@ public final class TranscriptionActivityManager: ObservableObject {
     ) -> Bool {
         beginRun()
         guard activitiesEnabled() else {
-            clearActivity()
+            if let activity { retire(activity, finalState: nil) } else { clearActivity() }
             SpeakLogger.activity.info("Live Activities not enabled")
             return false
+        }
+        // Before timestamp support, an unfinished write cannot safely cross runs
+        // on the same activity. Retire only this owned activity and use normal recovery.
+        if let activity, !activity.supportsUpdateTimestamps, inFlightUpdates[activity.id] != nil {
+            retire(activity, finalState: nil)
         }
         let state = TranscriptionActivityAttributes.ContentState(status: initialStatus, provider: provider)
         // A stale activity has outdated content, but is deliberately not reused
         // under our active-only policy. Inspect every candidate after rejecting the cache.
         if let candidate = ([activity].compactMap { $0 } + activities()).first(where: {
             $0.activityState == .active && !retiringIDs.contains($0.id)
+                && ($0.supportsUpdateTimestamps || inFlightUpdates[$0.id] == nil)
         }) {
             adopt(candidate)
             enqueueUpdate(state, activity: candidate, runID: runID)
@@ -126,6 +150,8 @@ public final class TranscriptionActivityManager: ObservableObject {
         updateThrottleTask?.cancel()
         updateThrottleTask = nil
         updateTask?.cancel()
+        updateTask = nil
+        pendingUpdate = nil
         observerTask?.cancel()
         observerTask = nil
         lastUpdateTime = .distantPast
@@ -156,19 +182,37 @@ public final class TranscriptionActivityManager: ObservableObject {
         self.runID == runID && activity?.id == candidate.id && candidate.activityState == .active
     }
 
-    /// Serialise ActivityKit writes: even an update already suspended inside
-    /// ActivityKit must finish before a replacement run publishes its first state.
+    /// Coalesce writes within a run to one in-flight call and one latest payload.
+    /// New runs never await old writes; timestamps protect reuse on iOS 17.2+.
+    /// Activity.request publishes its initial content independently of this queue.
     private func enqueueUpdate(
         _ state: TranscriptionActivityAttributes.ContentState,
         activity: any TranscriptionActivityHandle,
         runID: UUID
     ) {
-        let previous = updateTask
+        pendingUpdate = (state, nextPayloadTimestamp())
+        guard updateTask == nil else { return }
         updateTask = Task { [weak self] in
-            await previous?.value
-            guard !Task.isCancelled, let self, self.isCurrent(activity, runID: runID) else { return }
-            await activity.updateTranscription(state)
+            while !Task.isCancelled, self?.isCurrent(activity, runID: runID) == true,
+                  let next = self?.pendingUpdate {
+                self?.pendingUpdate = nil
+                self?.inFlightUpdates[activity.id, default: 0] += 1
+                await activity.updateTranscription(next.state, timestamp: next.timestamp)
+                self?.finishWrite(activity.id)
+            }
+            guard self?.runID == runID else { return }
+            self?.updateTask = nil
         }
+    }
+
+    private func nextPayloadTimestamp() -> Date {
+        lastPayloadTimestamp = max(Date(), lastPayloadTimestamp.addingTimeInterval(0.001))
+        return lastPayloadTimestamp
+    }
+
+    private func finishWrite(_ activityID: String) {
+        guard let count = inFlightUpdates[activityID] else { return }
+        inFlightUpdates[activityID] = count > 1 ? count - 1 : nil
     }
 
     public func updateActivity(
@@ -216,16 +260,14 @@ public final class TranscriptionActivityManager: ObservableObject {
             status: .completed, lastSnippet: "Transcription complete", wordCount: finalWordCount,
             duration: duration, provider: activity.transcriptionState.provider
         )
-        guard keepPrimed else {
+        guard keepPrimed, activity.supportsUpdateTimestamps || inFlightUpdates[activity.id] == nil else {
             retire(activity, finalState: finalState)
             return
         }
         adopt(activity)
         let completionRun = runID
         enqueueUpdate(finalState, activity: activity, runID: completionRun)
-        let finalUpdate = updateTask
         completionTask = Task { [weak self, sleep] in
-            await finalUpdate?.value
             do { try await sleep(5) } catch { return }
             guard !Task.isCancelled, let self, self.isCurrent(activity, runID: completionRun) else { return }
             let idleState = TranscriptionActivityAttributes.ContentState(
@@ -249,10 +291,9 @@ public final class TranscriptionActivityManager: ObservableObject {
         // The end task owns this retired activity only, and never clears a newer run.
         retiringIDs.insert(activity.id)
         clearActivity()
-        let previous = updateTask
+        let timestamp = nextPayloadTimestamp()
         Task { [weak self] in
-            await previous?.value
-            await activity.endTranscription(finalState)
+            await activity.endTranscription(finalState, timestamp: timestamp)
             self?.retiringIDs.remove(activity.id)
         }
     }

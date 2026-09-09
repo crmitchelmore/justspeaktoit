@@ -240,14 +240,13 @@ public final class TranscriptionActivityManager: ObservableObject {
     ) {
         guard let activity = currentActivity else { return }
 
-        let outcome: TranscriptionCompletionOutcome = finalWordCount == 0 ? .noSpeech : completionOutcome
         let finalState = TranscriptionActivityAttributes.ContentState(
             status: .completed,
-            lastSnippet: outcome.message,
+            lastSnippet: completionOutcome.message,
             wordCount: finalWordCount,
             duration: duration,
             provider: activity.content.state.provider,
-            completionOutcome: outcome
+            completionOutcome: completionOutcome
         )
 
         Task {

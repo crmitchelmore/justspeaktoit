@@ -44,8 +44,10 @@ final class TranscriptionCompletionOutcomeTests: XCTestCase {
     }
 
     func testLegacyInitialiser_DefaultsToNeutral() {
-        let state = TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12)
-        XCTAssertEqual(state.completionOutcome, .ready)
+        for wordCount in [0, 12] {
+            let state = TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: wordCount)
+            XCTAssertEqual(state.completionOutcome, .ready, "A count alone is not evidence of silence or delivery")
+        }
     }
 
     func testNewContent_RoundTripsEveryOutcome() throws {

@@ -34,7 +34,7 @@ final class AudioInputDeviceManager: ObservableObject {
 
   static let systemDefaultToken = "__system_default_input__"
   /// Shown when the system default input device cannot be resolved yet.
-  static let unknownSystemDefaultDisplayName = "System Default"
+  static let unknownSystemDefaultDisplayName = "Unavailable"
 
   @Published private(set) var devices: [Device] = []
   @Published private(set) var selectedDeviceUID: String?
@@ -104,22 +104,22 @@ final class AudioInputDeviceManager: ObservableObject {
     return device.displayName
   }
 
-  /// The label the settings UI shows for the microphone that is actually in use.
+  /// The preferred microphone, resolved against currently available devices.
   ///
-  /// A user who picked a specific device sees that device's name; a user who left
-  /// the picker on "System Default" sees the default named explicitly, so the two
-  /// cases can never be confused for one another (issue #852).
-  var activeDeviceLabel: String {
-    Self.activeDeviceLabel(
+  /// This describes a preference, not a measured recording route. A specific
+  /// choice takes effect when a new input session begins; otherwise macOS chooses
+  /// the microphone (issue #852).
+  var preferredDeviceLabel: String {
+    Self.preferredDeviceLabel(
       selectedUID: selectedDeviceUID,
       systemDefaultDisplayName: systemDefaultDisplayName,
       devices: devices
     )
   }
 
-  /// Pure form of ``activeDeviceLabel`` so the label text can be exercised without
+  /// Pure form of ``preferredDeviceLabel`` so the label text can be exercised without
   /// real Core Audio hardware.
-  nonisolated static func activeDeviceLabel(
+  nonisolated static func preferredDeviceLabel(
     selectedUID: String?,
     systemDefaultDisplayName: String,
     devices: [Device]
@@ -128,9 +128,9 @@ final class AudioInputDeviceManager: ObservableObject {
       return device.displayName
     }
     guard systemDefaultDisplayName != unknownSystemDefaultDisplayName else {
-      return unknownSystemDefaultDisplayName
+      return "macOS default (unavailable)"
     }
-    return "System Default (\(systemDefaultDisplayName))"
+    return "macOS default (\(systemDefaultDisplayName))"
   }
 
   var currentSelectionDetails: String? {

@@ -2,9 +2,8 @@ import XCTest
 
 @testable import SpeakApp
 
-/// The Microphone card's "Currently active" line used to print the system default
-/// device unconditionally, so a user who had picked another microphone was told the
-/// wrong device was live (issue #852).
+/// A microphone preference must distinguish a specific device from the macOS
+/// default without implying that either is a verified live recording route (#852).
 @MainActor
 final class AudioInputDeviceLabelTests: XCTestCase {
   private func device(id: String, name: String, isDefault: Bool = false) -> AudioInputDeviceManager.Device {
@@ -26,7 +25,7 @@ final class AudioInputDeviceLabelTests: XCTestCase {
     ]
 
     XCTAssertEqual(
-      AudioInputDeviceManager.activeDeviceLabel(
+      AudioInputDeviceManager.preferredDeviceLabel(
         selectedUID: "usb",
         systemDefaultDisplayName: "MacBook Pro Microphone",
         devices: devices
@@ -39,23 +38,23 @@ final class AudioInputDeviceLabelTests: XCTestCase {
     let devices = [device(id: "builtin", name: "MacBook Pro Microphone", isDefault: true)]
 
     XCTAssertEqual(
-      AudioInputDeviceManager.activeDeviceLabel(
+      AudioInputDeviceManager.preferredDeviceLabel(
         selectedUID: nil,
         systemDefaultDisplayName: "MacBook Pro Microphone",
         devices: devices
       ),
-      "System Default (MacBook Pro Microphone)"
+      "macOS default (MacBook Pro Microphone)"
     )
   }
 
   func testUnknownSystemDefault_isNotWrappedInItsOwnName() {
     XCTAssertEqual(
-      AudioInputDeviceManager.activeDeviceLabel(
+      AudioInputDeviceManager.preferredDeviceLabel(
         selectedUID: nil,
         systemDefaultDisplayName: AudioInputDeviceManager.unknownSystemDefaultDisplayName,
         devices: []
       ),
-      AudioInputDeviceManager.unknownSystemDefaultDisplayName
+      "macOS default (unavailable)"
     )
   }
 
@@ -63,12 +62,12 @@ final class AudioInputDeviceLabelTests: XCTestCase {
     let devices = [device(id: "builtin", name: "MacBook Pro Microphone", isDefault: true)]
 
     XCTAssertEqual(
-      AudioInputDeviceManager.activeDeviceLabel(
+      AudioInputDeviceManager.preferredDeviceLabel(
         selectedUID: "unplugged-usb",
         systemDefaultDisplayName: "MacBook Pro Microphone",
         devices: devices
       ),
-      "System Default (MacBook Pro Microphone)"
+      "macOS default (MacBook Pro Microphone)"
     )
   }
 
@@ -86,7 +85,7 @@ final class AudioInputDeviceLabelTests: XCTestCase {
     ]
 
     XCTAssertEqual(
-      AudioInputDeviceManager.activeDeviceLabel(
+      AudioInputDeviceManager.preferredDeviceLabel(
         selectedUID: "usb",
         systemDefaultDisplayName: "MacBook Pro Microphone",
         devices: devices

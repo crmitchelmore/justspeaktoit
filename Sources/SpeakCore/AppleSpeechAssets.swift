@@ -73,13 +73,22 @@ enum AppleSpeechAssetWaitPolicy {
 enum AppleSpeechAssets {
     static func ensure(
         policy: AppleSpeechAssetPolicy,
-        status: () async -> AppleSpeechAssetStatus,
-        install: () async throws -> Bool,
-        sleep: (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        onPreparing: () async -> Void = {}
+        status: @escaping @Sendable () async -> AppleSpeechAssetStatus,
+        install: @escaping @Sendable () async throws -> Bool,
+        sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        onPreparing: @Sendable () async -> Void = {},
+        inventoryTimeout: Duration? = nil,
+        deadlineSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) async throws {
         try Task.checkCancellation()
-        let initial = await status()
+        // Only installed-only startup and explicit foreground preparation opt into a deadline.
+        // Existing install-capable public callers keep their original wait policy.
+        let timeout = inventoryTimeout ?? (policy == .installedOnly ? AppleSpeechDependencyWait.inventoryTimeout : nil)
+        let query: () async throws -> AppleSpeechAssetStatus = {
+            guard let timeout else { return await status() }
+            return try await AppleSpeechDependencyWait.run(timeout: timeout, sleep: deadlineSleep, operation: status)
+        }
+        let initial = try await query()
         try Task.checkCancellation()
         if initial == .installed { return }
         guard policy == .installIfNeeded, initial != .unsupported else {
@@ -91,7 +100,7 @@ enum AppleSpeechAssets {
         var consecutiveSupportedPolls = 0
         for _ in 0 ..< AppleSpeechAssetWaitPolicy.maxPolls {
             try Task.checkCancellation()
-            let current = await status()
+            let current = try await query()
             try Task.checkCancellation()
             consecutiveSupportedPolls = current == .supported ? consecutiveSupportedPolls + 1 : 0
             switch AppleSpeechAssetWaitPolicy.step(

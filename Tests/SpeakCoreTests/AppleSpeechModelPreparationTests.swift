@@ -12,23 +12,24 @@ final class AppleSpeechModelPreparationTests: XCTestCase {
             let started = expectation(description: "Preparing")
             let joined = expectation(description: "Second caller resolved")
             var finish: CheckedContinuation<Void, Never>?
-            var resolutions = 0
             var installs = 0
             let resolved = first
-            let preparation = Preparation { _ in
-                resolutions += 1
-                if resolutions == 2 { joined.fulfill() }
-                return Preparation.Operation(configuration: resolved) { onPreparing in
+            let operations = AppleSpeechPreparationOperations { _ in
+
+                Preparation.Operation(configuration: resolved) { onPreparing in
                     installs += 1
                     onPreparing()
                     await withCheckedContinuation { finish = $0; started.fulfill() }
                 }
             }
+            let preparation = Preparation(operations: operations)
+            let other = Preparation(operations: operations)
+            let observation = other.$state.sink { if $0 == .preparing { joined.fulfill() } }
             let firstTask = Task { await preparation.prepare(first) }
             await fulfillment(of: [started], timeout: 2)
             XCTAssertEqual(preparation.state, .preparing)
             // A different requested engine/locale resolves to the same actual module configuration.
-            let secondTask = Task { await preparation.prepare(selection) }
+            let secondTask = Task { await other.prepare(selection) }
             await fulfillment(of: [joined], timeout: 2)
             XCTAssertEqual(preparation.state, .preparing)
             XCTAssertEqual(installs, 1)
@@ -36,7 +37,9 @@ final class AppleSpeechModelPreparationTests: XCTestCase {
             await firstTask.value
             await secondTask.value
             XCTAssertEqual(preparation.state, .ready(resolved))
-            XCTAssertEqual(preparation.selection, selection)
+            XCTAssertEqual(other.state, .ready(resolved))
+            XCTAssertEqual(other.selection, selection)
+            withExtendedLifetime(observation) {}
         }
     }
 
@@ -101,10 +104,12 @@ final class AppleSpeechModelPreparationTests: XCTestCase {
             await withCheckedContinuation { finish = $0; started.fulfill() }
             return Preparation.Operation(configuration: configuration) { _ in installs += 1 }
         }
-        let task = Task { await preparation.prepare(first) }
+        let cancelled = expectation(description: "Cancelled before resolution reply")
+        let task = Task { await preparation.prepare(first); cancelled.fulfill() }
         await fulfillment(of: [started], timeout: 2)
         XCTAssertEqual(preparation.state, .checking)
         preparation.cancel()
+        await fulfillment(of: [cancelled], timeout: 2)
         finish?.resume()
         await task.value
         XCTAssertEqual(installs, 0)

@@ -33,7 +33,7 @@ public enum AppleSpeechAnalyzerEngine: Sendable, Equatable {
 /// A SpeechAnalyzer module wrapped so the transcription pipeline can treat
 /// `SpeechTranscriber` and `DictationTranscriber` interchangeably.
 @available(macOS 26.0, iOS 26.0, *)
-enum AppleSpeechAnalyzerModule {
+enum AppleSpeechAnalyzerModule: Sendable {
     case speech(SpeechTranscriber)
     case dictation(DictationTranscriber)
 
@@ -98,7 +98,7 @@ struct AppleSpeechAnalyzerModuleResult: Sendable {
 }
 
 @available(macOS 26.0, iOS 26.0, *)
-struct AppleSpeechAnalyzerModuleConfiguration {
+struct AppleSpeechAnalyzerModuleConfiguration: Sendable {
     let engine: AppleSpeechAnalyzerEngine
     let module: AppleSpeechAnalyzerModule
     let localeIdentifier: String
@@ -174,9 +174,18 @@ public enum AppleSpeechAnalyzerTranscriber {
         progressive: Bool,
         assetPolicy: AppleSpeechAssetPolicy = .installIfNeeded
     ) async throws -> AppleSpeechAnalyzerModuleConfiguration {
-        let configuration = try await resolveModule(
-            engine: engine, localeIdentifier: localeIdentifier, progressive: progressive
-        )
+        let configuration: AppleSpeechAnalyzerModuleConfiguration
+        if assetPolicy == .installedOnly {
+            configuration = try await AppleSpeechDependencyWait.run(
+                timeout: AppleSpeechDependencyWait.inventoryTimeout
+            ) {
+                try await resolveModule(engine: engine, localeIdentifier: localeIdentifier, progressive: progressive)
+            }
+        } else {
+            configuration = try await resolveModule(
+                engine: engine, localeIdentifier: localeIdentifier, progressive: progressive
+            )
+        }
         try await ensureAssets(for: [configuration.module.speechModule], policy: assetPolicy)
         return configuration
     }
@@ -236,7 +245,8 @@ public enum AppleSpeechAnalyzerTranscriber {
     static func ensureAssets(
         for modules: [any SpeechModule],
         policy: AppleSpeechAssetPolicy = .installIfNeeded,
-        onPreparing: @Sendable () async -> Void = {}
+        onPreparing: @Sendable () async -> Void = {},
+        inventoryTimeout: Duration? = nil
     ) async throws {
         try await AppleSpeechAssets.ensure(
             policy: policy,
@@ -249,7 +259,8 @@ public enum AppleSpeechAnalyzerTranscriber {
                 try await request.downloadAndInstall()
                 return true
             },
-            onPreparing: onPreparing
+            onPreparing: onPreparing,
+            inventoryTimeout: inventoryTimeout
         )
     }
 

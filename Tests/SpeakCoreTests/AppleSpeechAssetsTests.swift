@@ -1,18 +1,45 @@
 import XCTest
 @testable import SpeakCore
 
+@MainActor
 final class AppleSpeechAssetsTests: XCTestCase {
+    @MainActor
+    private final class Inventory {
+        var states: [AppleSpeechAssetStatus]
+        var queries = 0
+        var installs = 0
+        var sleeps = 0
+        var preparing = 0
+        var failFirstInstall = false
+        var installCompletes = false
+
+        init(_ states: [AppleSpeechAssetStatus]) { self.states = states }
+
+        func recordSleep() { sleeps += 1 }
+        func recordPreparing() { preparing += 1 }
+
+        func status() -> AppleSpeechAssetStatus {
+            queries += 1
+            return states.count > 1 ? states.removeFirst() : states[0]
+        }
+
+        func install() throws -> Bool {
+            installs += 1
+            if failFirstInstall && installs == 1 { throw URLError(.notConnectedToInternet) }
+            if installCompletes { states = [.installed] }
+            return true
+        }
+    }
+
     func testInstalledOnly_allStatesNeverInstallOrPoll() async {
         for state in [AppleSpeechAssetStatus.supported, .downloading, .unsupported, .installed] {
-            var queries = 0
-            var installs = 0
-            var sleeps = 0
+            let inventory = Inventory([state])
             do {
                 try await AppleSpeechAssets.ensure(
                     policy: .installedOnly,
-                    status: { queries += 1; return state },
-                    install: { installs += 1; return true },
-                    sleep: { _ in sleeps += 1 },
+                    status: { await inventory.status() },
+                    install: { try await inventory.install() },
+                    sleep: { _ in await inventory.recordSleep() },
                     onPreparing: { XCTFail("Live startup must not prepare assets") }
                 )
                 XCTAssertEqual(state, .installed)
@@ -22,43 +49,36 @@ final class AppleSpeechAssetsTests: XCTestCase {
                 }
                 XCTAssertNotEqual(state, .installed)
             }
-            XCTAssertEqual(queries, 1)
-            XCTAssertEqual(installs, 0)
-            XCTAssertEqual(sleeps, 0)
+            XCTAssertEqual(inventory.queries, 1)
+            XCTAssertEqual(inventory.installs, 0)
+            XCTAssertEqual(inventory.sleeps, 0)
         }
     }
 
     func testPreparation_installsAndConfirmsInventoryAfterTransientStates() async throws {
-        var states: [AppleSpeechAssetStatus] = [.supported, .downloading, .supported, .installed]
-        var installs = 0
-        var sleeps = 0
-        var preparing = 0
+        let inventory = Inventory([.supported, .downloading, .supported, .installed])
         try await AppleSpeechAssets.ensure(
             policy: .installIfNeeded,
-            status: { states.removeFirst() },
-            install: { installs += 1; return true },
-            sleep: { _ in sleeps += 1 },
-            onPreparing: { preparing += 1 }
+            status: { await inventory.status() },
+            install: { try await inventory.install() },
+            sleep: { _ in await inventory.recordSleep() },
+            onPreparing: { await inventory.recordPreparing() }
         )
-        XCTAssertTrue(states.isEmpty)
-        XCTAssertEqual(installs, 1)
-        XCTAssertEqual(sleeps, 2)
-        XCTAssertEqual(preparing, 1)
+        XCTAssertEqual(inventory.queries, 4)
+        XCTAssertEqual(inventory.installs, 1)
+        XCTAssertEqual(inventory.sleeps, 2)
+        XCTAssertEqual(inventory.preparing, 1)
     }
 
     func testPreparation_installFailureCanRetryAndAlreadyInstalledNeedsNoRequest() async throws {
-        var state = AppleSpeechAssetStatus.supported
-        var attempts = 0
+        let inventory = Inventory([.supported])
+        inventory.failFirstInstall = true
+        inventory.installCompletes = true
         func prepare() async throws {
             try await AppleSpeechAssets.ensure(
                 policy: .installIfNeeded,
-                status: { state },
-                install: {
-                    attempts += 1
-                    if attempts == 1 { throw URLError(.notConnectedToInternet) }
-                    state = .installed
-                    return true
-                },
+                status: { await inventory.status() },
+                install: { try await inventory.install() },
                 sleep: { _ in XCTFail("No wait expected") }
             )
         }
@@ -68,15 +88,13 @@ final class AppleSpeechAssetsTests: XCTestCase {
         } catch { XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet) }
         try await prepare()
         try await prepare()
-        XCTAssertEqual(attempts, 2)
+        XCTAssertEqual(inventory.installs, 2)
     }
 
     func testPreparation_supportedWithoutRequestFailsWithoutSleep() async {
         do {
             try await AppleSpeechAssets.ensure(
-                policy: .installIfNeeded,
-                status: { .supported },
-                install: { false },
+                policy: .installIfNeeded, status: { .supported }, install: { false },
                 sleep: { _ in XCTFail("Nothing is being installed") }
             )
             XCTFail("Expected unavailable assets")
@@ -87,28 +105,68 @@ final class AppleSpeechAssetsTests: XCTestCase {
         }
     }
 
-    @MainActor
-    func testInstalledOnly_cancellationDuringInventoryWinsOverStatus() async {
-        for state in [AppleSpeechAssetStatus.supported, .installed] {
-            let checking = expectation(description: "Inventory query")
-            var reply: CheckedContinuation<AppleSpeechAssetStatus, Never>?
-            let task = Task {
-                try await AppleSpeechAssets.ensure(
-                    policy: .installedOnly,
-                    status: {
-                        await withCheckedContinuation { reply = $0; checking.fulfill() }
-                    },
-                    install: { XCTFail("Cancelled startup installed"); return false },
-                    sleep: { _ in XCTFail("Cancelled startup polled") }
-                )
-            }
-            await fulfillment(of: [checking], timeout: 2)
-            task.cancel()
-            reply?.resume(returning: state)
+    func testDefaultInstallCapableCaller_doesNotAdoptForegroundDeadline() async {
+        let inventory = SpeechDependencyGate<AppleSpeechAssetStatus>("Default caller query")
+        let task = Task {
+            try await AppleSpeechAssets.ensure(
+                policy: .installIfNeeded, status: { await inventory.wait() }, install: { false },
+                deadlineSleep: { _ in XCTFail("Existing install-capable caller must keep its default policy") }
+            )
+        }
+        await fulfillment(of: [inventory.entered], timeout: 2)
+        inventory.release(.installed)
+        do { try await task.value } catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testInstalledOnly_cancellationRecoversBeforeUncooperativeInventoryReplies() async throws {
+        let inventory = SpeechDependencyGate<AppleSpeechAssetStatus>("Inventory query")
+        let settled = expectation(description: "Caller cancelled without inventory reply")
+        let task = Task {
             do {
-                try await task.value
+                try await AppleSpeechAssets.ensure(
+                    policy: .installedOnly, status: { await inventory.wait() },
+                    install: { XCTFail("Cancelled startup installed"); return false }
+                )
                 XCTFail("Expected cancellation")
             } catch { XCTAssertTrue(error is CancellationError) }
+            settled.fulfill()
+        }
+        await fulfillment(of: [inventory.entered], timeout: 2)
+        task.cancel()
+        await fulfillment(of: [settled], timeout: 2)
+        // A replacement succeeds while the original system request is still suspended.
+        try await AppleSpeechAssets.ensure(policy: .installedOnly, status: { .installed }, install: { false })
+        inventory.release(.installed)
+        await task.value
+    }
+
+    func testInventoryDeadline_recoversWithoutReplyOrInstallation() async {
+        for policy in [AppleSpeechAssetPolicy.installedOnly, .installIfNeeded] {
+            let inventory = SpeechDependencyGate<AppleSpeechAssetStatus>("Inventory query")
+            let deadline = SpeechDependencyGate<Void>("Deadline armed")
+            let settled = expectation(description: "Timed out without inventory reply")
+            let task = Task {
+                do {
+                    try await AppleSpeechAssets.ensure(
+                        policy: policy, status: { await inventory.wait() },
+                        install: { XCTFail("Unanswered query must not install"); return false },
+                        sleep: { _ in XCTFail("Unanswered query must not poll") },
+                        inventoryTimeout: .seconds(2), deadlineSleep: { _ in await deadline.wait() }
+                    )
+                    XCTFail("Expected unavailable assets")
+                } catch {
+                    guard case AppleLocalModelError.modelAssetsUnavailable = error else {
+                        settled.fulfill()
+                        return XCTFail("Unexpected error: \(error)")
+                    }
+                }
+                settled.fulfill()
+            }
+            await fulfillment(of: [inventory.entered, deadline.entered], timeout: 2)
+            deadline.release(())
+            await fulfillment(of: [settled], timeout: 2)
+            inventory.release(.installed)
+            await task.value
         }
     }
 }

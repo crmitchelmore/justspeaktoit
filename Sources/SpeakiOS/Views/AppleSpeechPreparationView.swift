@@ -8,7 +8,7 @@ struct AppleSpeechPreparationView: View {
     let localeIdentifier: String
     @Environment(\.scenePhase) private var scenePhase
     @State private var preparationTask: Task<Void, Never>?
-    @ObservedObject private var preparation = AppleSpeechModelPreparation.shared
+    @StateObject private var preparation = AppleSpeechModelPreparation()
 
     private var configuration: AppleSpeechModelPreparation.Configuration {
         .init(modelID: modelID, localeIdentifier: localeIdentifier)

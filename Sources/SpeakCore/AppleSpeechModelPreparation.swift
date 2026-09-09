@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-/// Foreground Settings preparation. Only in-flight work is shared; capture always checks inventory again.
+/// One Settings presentation. Only its operation subscriptions are shared; its state and cancellation are local.
 @MainActor
 public final class AppleSpeechModelPreparation: ObservableObject {
     public struct Configuration: Hashable, Sendable {
@@ -22,18 +22,22 @@ public final class AppleSpeechModelPreparation: ObservableObject {
         case failed(String)
     }
 
-    struct Operation {
+    struct Operation: Sendable {
         let configuration: Configuration
-        let run: @MainActor (@escaping @MainActor @Sendable () -> Void) async throws -> Void
-    }
-
-    private struct Pending {
-        let task: Task<Void, Error>
-        var isPreparing = false
+        let run: @MainActor @Sendable (@escaping @MainActor @Sendable () -> Void) async throws -> Void
     }
 
     @available(macOS 26.0, iOS 26.0, *)
-    public static let shared = AppleSpeechModelPreparation(resolve: resolveLiveModule)
+    public static let shared = AppleSpeechModelPreparation()
+
+    @available(macOS 26.0, iOS 26.0, *)
+    private static let operations = AppleSpeechPreparationOperations { try await resolveLiveModule($0) }
+
+    /// Each Settings presentation has its own state but can share an explicitly requested installation.
+    @available(macOS 26.0, iOS 26.0, *)
+    public convenience init() {
+        self.init(operations: Self.operations)
+    }
 
     @available(macOS 26.0, iOS 26.0, *)
     private static func resolveLiveModule(_ selection: Configuration) async throws -> Operation {
@@ -46,7 +50,8 @@ public final class AppleSpeechModelPreparation: ObservableObject {
             configuration: Configuration(modelID: module.engine.modelID, localeIdentifier: module.localeIdentifier),
             run: { onPreparing in
                 try await AppleSpeechAnalyzerTranscriber.ensureAssets(
-                    for: [module.module.speechModule], onPreparing: { await onPreparing() }
+                    for: [module.module.speechModule], onPreparing: { await onPreparing() },
+                    inventoryTimeout: AppleSpeechDependencyWait.inventoryTimeout
                 )
             }
         )
@@ -55,68 +60,57 @@ public final class AppleSpeechModelPreparation: ObservableObject {
     @Published public private(set) var state: State = .idle
     @Published public private(set) var selection: Configuration?
     private var generation = UUID()
-    private var activeConfiguration: Configuration?
-    private var pending: [Configuration: Pending] = [:]
-    private let resolve: @MainActor (Configuration) async throws -> Operation
+    private var activeTask: Task<Configuration, Error>?
+    private let operations: AppleSpeechPreparationOperations
 
-    init(resolve: @escaping @MainActor (Configuration) async throws -> Operation) {
-        self.resolve = resolve
+    init(resolve: @escaping AppleSpeechPreparationOperations.Resolve) {
+        self.operations = AppleSpeechPreparationOperations(resolve: resolve)
     }
 
-    /// Selection changes invalidate presentation, including a late completion for a previous locale.
+    init(operations: AppleSpeechPreparationOperations) {
+        self.operations = operations
+    }
+
     public func select(_ configuration: Configuration) {
         guard selection != configuration else { return }
-        generation = UUID()
+        cancel()
         selection = configuration
-        activeConfiguration = nil
-        state = .idle
     }
 
     /// Called only by the explicit Prepare button, never by selection or view appearance.
     public func prepare(_ configuration: Configuration) async {
         guard !Task.isCancelled else { return }
         select(configuration)
-        generation = UUID()
+        cancel()
         let requestGeneration = generation
         state = .checking
-        do {
-            let operation = try await resolve(configuration)
-            try Task.checkCancellation()
-            guard generation == requestGeneration else { return }
-            let key = operation.configuration
-            activeConfiguration = key
-            let task: Task<Void, Error>
-            if let existing = pending[key] {
-                task = existing.task
-                state = existing.isPreparing ? .preparing : .checking
-            } else {
-                task = Task {
-                    // Remove before publishing completion so a retry rechecks authoritative inventory.
-                    defer { self.pending[key] = nil }
-                    try Task.checkCancellation()
-                    try await operation.run {
-                        self.pending[key]?.isPreparing = true
-                        if self.activeConfiguration == key { self.state = .preparing }
-                    }
-                    try Task.checkCancellation()
-                }
-                pending[key] = Pending(task: task)
+        let operations = self.operations
+        let task = Task {
+            try await operations.prepare(configuration) { [weak self] in
+                guard let self, self.generation == requestGeneration else { return }
+                self.state = .preparing
             }
-            try await task.value
+        }
+        activeTask = task
+        defer { if generation == requestGeneration { activeTask = nil } }
+        do {
+            let resolved = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: { task.cancel() }
             try Task.checkCancellation()
             guard generation == requestGeneration else { return }
-            state = .ready(key)
+            state = .ready(resolved)
         } catch {
             guard generation == requestGeneration else { return }
             state = error is CancellationError || Task.isCancelled ? .idle : .failed(error.localizedDescription)
         }
     }
 
-    /// Leaving foreground Settings withdraws app work; no background completion is promised.
+    /// Withdraw this presentation only. Other callers retain ownership of their preparation.
     public func cancel() {
         generation = UUID()
-        activeConfiguration = nil
-        for entry in pending.values { entry.task.cancel() }
+        activeTask?.cancel()
+        activeTask = nil
         state = .idle
     }
 }

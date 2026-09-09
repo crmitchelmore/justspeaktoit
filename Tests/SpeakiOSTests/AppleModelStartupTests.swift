@@ -1,5 +1,5 @@
 #if os(iOS)
-import SpeakCore
+@testable import SpeakCore
 import XCTest
 @testable import SpeakiOSLib
 
@@ -96,21 +96,24 @@ final class AppleModelStartupTests: XCTestCase {
         transcriber.permissionCheck = { true }
         transcriber.modelID = AppleLocalModels.speechTranscriberModelID
         let checking = expectation(description: "Asset check suspended")
-        var reply: CheckedContinuation<Void, Never>?
+        let inventory = SuspendedInventory(checking: checking)
         transcriber.analyzerStart = {
-            await withCheckedContinuation { reply = $0; checking.fulfill() }
-            throw AppleLocalModelError.modelAssetsUnavailable
+            try await AppleSpeechAssets.ensure(
+                policy: .installedOnly, status: { await inventory.status() }, install: { false }
+            )
         }
         transcriber.legacyStart = { XCTFail("Cancelled startup must never fall back") }
+        let cancelled = expectation(description: "Startup cancelled before inventory replies")
         let task = Task {
             do {
                 try await transcriber.start()
                 XCTFail("Cancelled startup unexpectedly succeeded")
             } catch { XCTAssertTrue(error is CancellationError) }
+            cancelled.fulfill()
         }
         await fulfillment(of: [checking], timeout: 2)
         transcriber.cancel()
-        reply?.resume()
+        await fulfillment(of: [cancelled], timeout: 2)
         await task.value
         XCTAssertEqual(releases, 1)
         XCTAssertFalse(transcriber.isRunning)
@@ -122,6 +125,19 @@ final class AppleModelStartupTests: XCTestCase {
         XCTAssertTrue(transcriber.isRunning)
         transcriber.cancel()
         XCTAssertEqual(releases, 2)
+        inventory.reply?.resume(returning: .installed)
+    }
+
+    @MainActor
+    private final class SuspendedInventory {
+        let checking: XCTestExpectation
+        var reply: CheckedContinuation<AppleSpeechAssetStatus, Never>?
+
+        init(checking: XCTestExpectation) { self.checking = checking }
+
+        func status() async -> AppleSpeechAssetStatus {
+            await withCheckedContinuation { reply = $0; checking.fulfill() }
+        }
     }
 }
 #endif

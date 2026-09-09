@@ -56,3 +56,17 @@ export function nextAllocation(manifests, train, now = Date.now()) {
     const build = String(Math.max(timestamp, ...manifests.map(m => Number(m.build) + 1)));
     return {ordinal, build};
 }
+
+// A fresh Stable version must advance the published semantic version. An
+// idempotent retry of the same version is checked separately against its source.
+export function assertStableVersionAdvance(next, published, retry = false) {
+    const compare = (a, b) => {
+        const left = a.split('.').map(BigInt), right = b.split('.').map(BigInt);
+        for (let i=0;i<3;i++) if(left[i] !== right[i]) return left[i] > right[i] ? 1 : -1;
+        return 0;
+    };
+    for (const version of published) {
+        const order = compare(next, version);
+        if (order < 0 || (order === 0 && !retry)) throw Error('Stable version must advance published releases');
+    }
+}

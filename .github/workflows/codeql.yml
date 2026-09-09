@@ -16,8 +16,8 @@ concurrency:
 jobs:
   analyze:
     name: Analyze
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     # CodeQL tracing slows the Swift build, so this gets more headroom than
     # the plain CI build jobs.
     timeout-minutes: 60

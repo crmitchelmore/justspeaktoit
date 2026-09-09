@@ -19,8 +19,8 @@ jobs:
   build-macos:
     # Keep this context aligned with the required main-branch status check.
     name: Build & Test (macOS)
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -172,8 +172,8 @@ jobs:
 
   core-journey-e2e:
     name: Core Dictation Journey (≤10m)
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -202,8 +202,8 @@ jobs:
 
   core-journey-fixture-ui:
     name: Core Journey Fixture UI
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -248,8 +248,8 @@ jobs:
 
   release-validation:
     name: Build & Test (Release)
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 45
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'
@@ -269,8 +269,8 @@ jobs:
 
   build-ios:
     name: Build iOS Library
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -383,8 +383,8 @@ jobs:
 
   build-ios-keyboard-direct-capture:
     name: Build iOS Keyboard (direct capture)
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -419,8 +419,8 @@ jobs:
 
   lint:
     name: Lint
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -451,8 +451,8 @@ jobs:
 
   api-compatibility:
     name: Public API compatibility
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:

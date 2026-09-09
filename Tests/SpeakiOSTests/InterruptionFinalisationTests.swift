@@ -44,15 +44,18 @@ final class InterruptionFinalisationTests: XCTestCase {
     }
 
     func testEmptyInterruption_keepsClipboardAndDoesNotInventText() async throws {
-        let harness = try Harness()
-        defer { harness.cleanUp() }
-        try await harness.start(destination: .clipboard)
-        harness.session.interrupt()
-        await settle()
-        XCTAssertEqual(harness.pasteboard.string, "Original")
-        XCTAssertEqual(harness.pasteboard.writes, 0)
-        XCTAssertTrue(harness.history.items.allSatisfy { $0.transcription.isEmpty })
-        XCTAssertNil(harness.service.lastSessionError)
+        for text in ["", " \n\t "] {
+            let harness = try Harness()
+            defer { harness.cleanUp() }
+            try await harness.start(destination: .clipboard)
+            harness.session.emitPartial(text)
+            harness.session.interrupt()
+            await settle()
+            XCTAssertEqual(harness.pasteboard.string, "Original")
+            XCTAssertEqual(harness.pasteboard.writes, 0)
+            XCTAssertTrue(harness.history.items.allSatisfy { $0.transcription.isEmpty })
+            XCTAssertNil(harness.service.lastSessionError)
+        }
     }
 
     func testKeyboardInterruption_delegatesToOriginalCompletionWithoutLegacyOutput() async throws {

@@ -171,8 +171,10 @@ final class SharedClientCleanupTests: XCTestCase {
         let draining = expectation(description: "provider draining")
         var finish: CheckedContinuation<String?, Never>?
         var notices = 0
+        var finalisations = 0
         client.finish = {
-            await withCheckedContinuation {
+            finalisations += 1
+            return await withCheckedContinuation {
                     finish = $0
                     draining.fulfill()
                 }
@@ -198,7 +200,7 @@ final class SharedClientCleanupTests: XCTestCase {
         let result = await stop.value
         XCTAssertEqual(result.text, "Preserved provider tail")
         XCTAssertEqual(notices, 1)
-        XCTAssertEqual(client.stops, 1)
+        XCTAssertEqual(finalisations, 1)
         XCTAssertFalse(transcriber.isRunning)
     }
 

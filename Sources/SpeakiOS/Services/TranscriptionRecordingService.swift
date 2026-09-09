@@ -1571,7 +1571,7 @@ private extension TranscriptionRecordingService {
     func bestAvailableText(from result: TranscriptionResult) -> String {
         TranscriptionRecordingService.bestTranscript(
             candidates: [result.text, partialText],
-            fallback: result.text
+            fallback: ""
         )
     }
 

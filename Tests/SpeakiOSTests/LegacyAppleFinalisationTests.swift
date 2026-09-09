@@ -37,13 +37,13 @@ final class LegacyAppleFinalisationTests: XCTestCase {
         let fixture = Fixture()
         try await fixture.transcriber.start()
         fixture.send("early", final: false)
-        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1))
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
         let recordingURL = try fixture.transcriber.audioRecorder.startRecording(format: format)
         defer { try? FileManager.default.removeItem(at: recordingURL) }
-        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1600))
-        buffer.frameLength = 1600
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4800))
+        buffer.frameLength = 4800
         let samples = try XCTUnwrap(buffer.floatChannelData?[0])
-        for index in 0..<1600 { samples[index] = 0.1 }
+        for index in 0..<4800 { samples[index] = 0.1 }
         fixture.transcriber.audioRecorder.writeBuffer(buffer)
         let stopping = Task { await fixture.transcriber.stop() }
         await fulfillment(of: [fixture.finishing], timeout: 2)

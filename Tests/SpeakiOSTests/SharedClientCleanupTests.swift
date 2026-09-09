@@ -163,6 +163,45 @@ final class SharedClientCleanupTests: XCTestCase {
         _ = await transcriber.stop()
     }
 
+    func testInterruptionAndEngineChange_ownerReceivesOneStopAndWaitsForProviderTail() async throws {
+        let transcriber = try makeTranscriber()
+        let client = CleanupTestClient()
+        transcriber.clientFactory = { client }
+        let interrupted = expectation(description: "owner interrupted")
+        let draining = expectation(description: "provider draining")
+        var finish: CheckedContinuation<String?, Never>?
+        var notices = 0
+        client.finish = {
+            await withCheckedContinuation {
+                    finish = $0
+                    draining.fulfill()
+                }
+        }
+        transcriber.onError = { error in
+            XCTAssertTrue((error as? iOSTranscriptionError)?.isControlledInterruption == true)
+            notices += 1
+            interrupted.fulfill()
+        }
+        try await transcriber.start()
+        InterruptionSession.post(.began)
+        await fulfillment(of: [interrupted], timeout: 2)
+        NotificationCenter.default.post(
+            name: .AVAudioEngineConfigurationChange, object: transcriber.configurationNotificationObject
+        )
+        InterruptionSession.post(.began)
+        InterruptionSession.post(.ended)
+        XCTAssertNil(transcriber.error)
+        XCTAssertEqual(client.stops, 0, "Provider must await its owner instead of competing to stop")
+        let stop = Task { await transcriber.stop() }
+        await fulfillment(of: [draining], timeout: 2)
+        finish?.resume(returning: "Preserved provider tail")
+        let result = await stop.value
+        XCTAssertEqual(result.text, "Preserved provider tail")
+        XCTAssertEqual(notices, 1)
+        XCTAssertEqual(client.stops, 1)
+        XCTAssertFalse(transcriber.isRunning)
+    }
+
     private func makeTranscriber() throws -> SharedClientLiveTranscriber {
         let manager = AudioSessionManager()
         manager.permissionStatus = { true }

@@ -65,6 +65,55 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
         XCTAssertEqual(coordinator.failureMessage, "The microphone changed and recording stopped.")
     }
 
+    func testInterruption_armedSessionDisarmsWithoutErrorAndDoesNotResume() async {
+        let coordinator = makeCoordinator()
+        await coordinator.toggle()
+        await settle()
+        InterruptionSession.post(.began)
+        InterruptionSession.post(.ended)
+        for _ in 0..<30 { await Task.yield() }
+        XCTAssertEqual(coordinator.state, .off)
+        XCTAssertNil(coordinator.failureMessage)
+        XCTAssertEqual(coordinator.captureStopNotice, iOSTranscriptionError.interrupted.localizedDescription)
+        InterruptionSession.post(.ended)
+        await settle()
+        XCTAssertEqual(coordinator.state, .off)
+    }
+
+    func testInterruption_activeUtteranceDrainsBeforeDisarmAndKeepsRealFailure() async {
+        for failure in [false, true] {
+            var finishes = 0
+            var finish: CheckedContinuation<HandsFreeCaptureEndOutcome, Never>?
+            let draining = expectation(description: "utterance drain")
+            let coordinator = makeCoordinator(stopCapture: {
+                finishes += 1
+                return await withCheckedContinuation {
+                    finish = $0
+                    draining.fulfill()
+                }
+            })
+            await coordinator.toggle()
+            await settle()
+            await coordinator.handleActivity(AppleSpeechActivityUpdate(speechDetected: true, seconds: 1))
+            InterruptionSession.post(.began)
+            await fulfillment(of: [draining], timeout: 2)
+            InterruptionSession.post(.began)
+            InterruptionSession.post(.ended)
+            await coordinator.stopForCaptureDisruption()
+            XCTAssertEqual(coordinator.state, .finalising)
+            XCTAssertEqual(finishes, 1)
+            finish?.resume(returning: failure ? .failed(.captureFailed) : .completed)
+            for _ in 0..<30 { await Task.yield() }
+            XCTAssertEqual(coordinator.state, .off)
+            if failure {
+                XCTAssertNotNil(coordinator.failureMessage)
+            } else {
+                XCTAssertNil(coordinator.failureMessage)
+                XCTAssertEqual(coordinator.captureStopNotice, iOSTranscriptionError.interrupted.localizedDescription)
+            }
+        }
+    }
+
     private func makeCoordinator(
         stopCapture: @escaping IOSHandsFreeDictationCoordinator.StopCapture = { _ in .completed }
     ) -> IOSHandsFreeDictationCoordinator {

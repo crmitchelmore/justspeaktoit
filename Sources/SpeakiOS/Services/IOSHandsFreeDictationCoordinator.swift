@@ -34,7 +34,9 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private var finalisationTask: Task<Void, Never>?
     private var sessionID: UUID?
     private var armGeneration = 0
-    private var interruptionToken: UUID?
+    private let captureInterruptionObserver = CaptureDisruptionObserver()
+    private var disruptionReason = iOSTranscriptionError.microphoneChanged
+    @Published private(set) var captureStopNotice: String?
     private var routeChangeToken: UUID?
     private var ownsLiveActivity = false
     private let configurationObserver = CaptureDisruptionObserver()
@@ -72,14 +74,6 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         self.silenceDuration = silenceDuration
         self.captureIsSupported = captureIsSupported
         self.liveActivitiesEnabled = liveActivitiesEnabled
-        interruptionToken = audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
-            guard began else { return }
-            let id = self?.sessionID
-            Task { @MainActor [weak self] in
-                guard let self, self.sessionID == id, !self.stoppingForDisruption else { return }
-                await self.fail(.audioUnavailable)
-            }
-        }
         routeChangeToken = audioSessionManager.addRouteChangeObserver(owner: self) { [weak self] reason in
             guard let self else { return }
             let id = self.sessionID
@@ -125,7 +119,8 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         }
     }
 
-    func stopForCaptureDisruption() async {
+    func stopForCaptureDisruption(reason: iOSTranscriptionError = .microphoneChanged) async {
+        disruptionReason = reason
         guard beginControlledStop(reason: .captureDisruption) else { return }
         await continueControlledStop()
     }
@@ -133,6 +128,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private func beginControlledStop(reason: StopReason) -> Bool {
         guard machine.isArmed, !stoppingForDisruption else { return false }
         stopReason = reason
+        captureInterruptionObserver.stop()
         configurationObserver.stop()
         audioEngine?.stop()
         if machine.state == .arming { armTask?.cancel() }
@@ -154,10 +150,20 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         let generation = armGeneration
         if machine.state == .finalising { _ = machine.handle(.captureFinished) }
         if reason == .captureDisruption {
-            await apply(machine.handle(.sessionFailed(.audioUnavailable)))
-            // Teardown can suspend; do not attach an old notice to a new arm.
-            if machine.state == .off, armGeneration == generation {
-                failureMessage = iOSTranscriptionError.microphoneChanged.localizedDescription
+            // A controlled interruption finalised normally through the owner,
+            // so it disarms with a neutral notice rather than a failure alert
+            // (issue #936). A real fault still surfaces as a failure.
+            if disruptionReason.isControlledInterruption {
+                await apply(machine.handle(.userDisarmed))
+                if machine.state == .off, armGeneration == generation {
+                    captureStopNotice = disruptionReason.localizedDescription
+                }
+            } else {
+                await apply(machine.handle(.sessionFailed(.audioUnavailable)))
+                // Teardown can suspend; do not attach an old notice to a new arm.
+                if machine.state == .off, armGeneration == generation {
+                    failureMessage = disruptionReason.localizedDescription
+                }
             }
         } else {
             await apply(machine.handle(.userDisarmed))
@@ -189,6 +195,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private func arm() {
         guard sceneIsActive else { return }
         stopReason = nil
+        captureStopNotice = nil
         let effects = machine.handle(.userArmed)
         publishState()
         guard effects.contains(.startDetector) else { return }
@@ -204,6 +211,12 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         }
         ownsLiveActivity = liveActivitiesEnabled()
             && activityManager.startActivity(provider: "Apple on-device", initialStatus: .arming)
+        captureInterruptionObserver.observeAudioInterruption { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.sessionID == id else { return }
+                await self.stopForCaptureDisruption(reason: .interrupted)
+            }
+        }
         armTask?.cancel()
         armTask = Task { [weak self] in await self?.startDetector(sessionID: id) }
     }
@@ -430,6 +443,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     private func stopDetector() async {
+        captureInterruptionObserver.stop()
         configurationObserver.stop()
         armTask?.cancel()
         armTask = nil

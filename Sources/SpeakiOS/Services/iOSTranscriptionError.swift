@@ -30,6 +30,18 @@ public enum iOSTranscriptionError: LocalizedError {
         case speechRecognition
     }
 
+    var isControlledInterruption: Bool {
+        if case .interrupted = self { return true }
+        return false
+    }
+
+    var endsCapture: Bool {
+        switch self {
+        case .interrupted, .microphoneChanged: return true
+        default: return false
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case .permissionDenied(.microphone):
@@ -45,7 +57,7 @@ public enum iOSTranscriptionError: LocalizedError {
         case .microphoneChanged:
             return "The microphone changed and recording stopped."
         case .interrupted:
-            return "Transcription was interrupted (e.g., by a phone call)."
+            return "Recording stopped because audio was interrupted."
         case .liveActivityUnavailable:
             return "A Live Activity could not be started. Open Just Speak to It to continue recording. "
                 + "If Live Activities are disabled, enable them in Settings."

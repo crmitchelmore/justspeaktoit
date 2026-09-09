@@ -10,6 +10,7 @@ private let logger = SpeakLogger.logger(category: "ContentView")
 /// Foreground recording coordinator backed by the shared iOS transcription factory.
 /// Integrates with Live Activity for lock screen presence.
 @MainActor
+// swiftlint:disable:next type_body_length
 final class TranscriberCoordinator: ObservableObject {
     private enum LifecycleError: LocalizedError {
         case sessionFinalising
@@ -32,8 +33,8 @@ final class TranscriberCoordinator: ObservableObject {
     private let historyManager: iOSHistoryManager
     private let sessionFactory: (() throws -> IOSTranscriptionSession)?
 
-    private var transcriptionSession: IOSTranscriptionSession?
-    private var stoppingSession: IOSTranscriptionSession?
+    private var transcriptionSession: (any IOSRecordingSession)?
+    private var stoppingSession: (any IOSRecordingSession)?
     private var stopWasCancelled = false
     var onCaptureDisruption: (() async -> Void)?
     /// Truthful capture presentation (issue #983): startup stays visibly
@@ -50,6 +51,8 @@ final class TranscriberCoordinator: ObservableObject {
 
     /// Whether active-capture presentation may be shown for the current run.
     var isPresentingCapture: Bool { presentation.isPresentingCapture }
+    var makeSession: (() throws -> any IOSRecordingSession)?
+    @Published private(set) var captureStopNotice: String?
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
@@ -64,6 +67,8 @@ final class TranscriberCoordinator: ObservableObject {
         self.historyManager = historyManager
         self.sessionFactory = sessionFactory
         self.audioSessionManager = AudioSessionManager()
+        self.sharedState = sharedState
+        self.historyManager = historyManager
     }
 
     var modelDisplayName: String {
@@ -133,7 +138,9 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     private static func requiresControlledStop(_ error: Error) -> Bool {
-        if case iOSTranscriptionError.microphoneChanged = error { return true }
+        // Interruption and microphone change both finalise through the owner
+        // (#936); a pre-ready startup overflow stops once (#949).
+        if (error as? iOSTranscriptionError)?.endsCapture == true { return true }
         if case OpenAIRealtimeError.preReadyAudioOverflow = error { return true }
         return false
     }
@@ -199,7 +206,7 @@ final class TranscriberCoordinator: ObservableObject {
     }
 
     private func stop(
-        session: IOSTranscriptionSession,
+        session: any IOSRecordingSession,
         duration: Int,
         rearmHandsFree: (@MainActor () -> Bool)?
     ) async -> TranscriptionResult? {
@@ -211,8 +218,8 @@ final class TranscriberCoordinator: ObservableObject {
                 stoppingSession = nil
             }
         }
+        let drained: TranscriptionResult
         do {
-            let drained: TranscriptionResult
             if rearmHandsFree != nil {
                 drained = try await HandsFreeCaptureFinalisation().run {
                     try await session.stop()
@@ -224,31 +231,28 @@ final class TranscriberCoordinator: ObservableObject {
             } else {
                 drained = try await session.stop()
             }
-            let result = drained.replacingText(TranscriptionRecordingService.bestTranscript(
-                candidates: [drained.text, partialText], fallback: ""
-            ))
-            guard !Task.isCancelled, !stopWasCancelled, stoppingSession === session else {
-                startTime = nil
-                return result
-            }
-            partialText = result.text
-            wordCount = result.text.split(whereSeparator: \.isWhitespace).count
-            updateActivityAfterStop(duration: duration, result: result, rearmHandsFree: rearmHandsFree)
-            return finishStop(with: result)
         } catch {
             guard !Task.isCancelled, !stopWasCancelled, stoppingSession === session else { return nil }
             handleError(error)
             // A hands-free drain failure must retain the same shared/History
             // outcome as Stop. Explicit Cancel still clears content above.
-            if rearmHandsFree != nil {
-                return finishStop(with: TranscriptionResult(
-                    text: partialText, segments: [], confidence: confidence,
-                    duration: TimeInterval(duration), modelIdentifier: currentModel,
-                    cost: nil, rawPayload: nil, debugInfo: nil
-                ))
-            }
-            return nil
+            guard rearmHandsFree != nil else { return nil }
+            drained = TranscriptionResult(
+                text: partialText, segments: [], confidence: confidence, duration: TimeInterval(duration),
+                modelIdentifier: currentModel, cost: nil, rawPayload: nil, debugInfo: nil
+            )
         }
+        let result = drained.replacingText(TranscriptionRecordingService.bestTranscript(
+            candidates: [drained.text, partialText], fallback: ""
+        ))
+        guard !Task.isCancelled, !stopWasCancelled, stoppingSession === session else {
+            startTime = nil
+            return result
+        }
+        partialText = result.text
+        wordCount = result.text.split(whereSeparator: \.isWhitespace).count
+        updateActivityAfterStop(duration: duration, result: result, rearmHandsFree: rearmHandsFree)
+        return finishStop(with: result)
     }
 
     private func updateActivityAfterStop(
@@ -265,8 +269,8 @@ final class TranscriberCoordinator: ObservableObject {
             activityManager.completeActivity(
                 finalWordCount: wordCount,
                 duration: duration,
-                keepPrimed: shouldRearm,
-                primedMessage: "Hands-free armed",
+                keepPrimed: shouldRearm && captureStopNotice == nil,
+                primedMessage: captureStopNotice ?? "Hands-free armed",
                 primedStatus: shouldRearm ? .armed : .idle,
                 completionOutcome: .unconfirmed(transcript: result.text),
                 resultPreview: TranscriptionResultRow.preview(for: result.text)
@@ -341,6 +345,7 @@ private extension TranscriberCoordinator {
         await settings.ensureKeysLoaded()
         diagnostics.note(.stage(.credentialsReady), run: runID)
         error = nil
+        captureStopNotice = nil
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
@@ -381,7 +386,9 @@ private extension TranscriberCoordinator {
         let mode: IOSTranscriptionSession.Mode = settings.transcriptionMode == .batch
             ? .batch(retainRecording: true)
             : .streaming
-        let session = try sessionFactory?() ?? IOSTranscriptionSession(
+        let session: any IOSRecordingSession = try makeSession?()
+            ?? sessionFactory?()
+            ?? IOSTranscriptionSession(
             modelID: currentModel,
             mode: mode,
             language: settings.preferredModelLanguage,
@@ -424,7 +431,7 @@ private extension TranscriberCoordinator {
 
 private extension TranscriberCoordinator {
     /// Routes this run's own first live buffer into the presentation gate.
-    func bindFirstInput(session: IOSTranscriptionSession, runID: UUID) {
+    func bindFirstInput(session: any IOSRecordingSession, runID: UUID) {
         session.onFirstInputBuffer = { [weak self, weak session] in
             guard let self, let session, self.transcriptionSession === session else { return }
             self.notePresentation(self.presentation.noteInputObserved(run: runID))
@@ -464,6 +471,12 @@ private extension TranscriberCoordinator {
 extension TranscriberCoordinator {
     /// Publishes a mid-session failure and mirrors it into the Live Activity.
     func handleError(_ error: Error) {
+        // An audio interruption is a controlled stop (issue #936): a notice,
+        // never an error banner or a Live Activity failure.
+        if (error as? iOSTranscriptionError)?.isControlledInterruption == true {
+            captureStopNotice = error.localizedDescription
+            return
+        }
         self.error = error
         if AppSettings.shared.liveActivitiesEnabled {
             activityManager.reportError(error.localizedDescription)
@@ -508,7 +521,7 @@ private extension TranscriberCoordinator {
 
     /// Wires this run to the session's existing observation boundary, and
     /// labels the backend when routing already settled it.
-    func bindStartupDiagnostics(session: IOSTranscriptionSession, runID: UUID) {
+    func bindStartupDiagnostics(session: any IOSRecordingSession, runID: UUID) {
         session.onStartupObservation = { [weak self] observation in
             self?.diagnostics.note(observation, run: runID)
         }
@@ -632,7 +645,9 @@ public struct ContentView: View {
         }
         coordinator.onCaptureDisruption = { [weak coordinator, weak handsFree] in
             if handsFree?.isArmed == true {
-                await handsFree?.stopForCaptureDisruption()
+                await handsFree?.stopForCaptureDisruption(
+                    reason: coordinator?.captureStopNotice == nil ? .microphoneChanged : .interrupted
+                )
             } else {
                 _ = await coordinator?.stop()
             }
@@ -644,6 +659,13 @@ public struct ContentView: View {
             ZStack {
                 // Content layer - transcript display (base plane, no glass)
                 VStack {
+                    if let notice = handsFree.captureStopNotice
+                        ?? coordinator.captureStopNotice ?? backgroundService.captureStopNotice {
+                        Text(notice)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("captureStopNotice")
+                    }
                     ScrollViewReader { proxy in
                         ScrollView {
                             VStack(

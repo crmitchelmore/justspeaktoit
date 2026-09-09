@@ -113,6 +113,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
     private let audioEngine = AVAudioEngine()
     private let configurationObserver = CaptureDisruptionObserver()
+    private let captureInterruptionObserver = CaptureDisruptionObserver()
     private var apiKey: String?
     private var makeClient: (() -> OpenAIRealtimeWebSocketClient)?
     private var startCaptureOverride: ((AudioRecordingPersistence) throws -> Void)?
@@ -137,6 +138,9 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private var hasFinishedStopping = false
     private var isStopping = false
     private var activeCaptureID: UUID?
+    // Injectable capture/transport boundaries; production owns the engine and socket.
+    var startCaptureAudio: (() throws -> Void)?
+    var connectRealtimeClient: ((String) -> Void)?
 
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
@@ -152,7 +156,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     public init(audioSessionManager: AudioSessionManager) {
         self.audioSessionManager = audioSessionManager
-        setupInterruptionHandling()
     }
 
     /// Allows lifecycle tests to supply PCM and acknowledgement timing without a microphone or network.
@@ -214,13 +217,18 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         try Task.checkCancellation()
         connectClient(apiKey: apiKey)
         do {
-            try startAudioEngine()
+            if let startCaptureAudio {
+                try startCaptureAudio()
+            } else {
+                try startAudioEngine()
+            }
         } catch {
             transcriber?.stop()
             transcriber = nil
             throw error
         }
         resetState()
+        observeCaptureConfiguration()
 
         logger.info("Started")
     }
@@ -229,16 +237,28 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
             self?.audioEngine.isRunning == true
         } onDisruption: { [weak self] in
-            guard let self, self.isRunning else { return }
-            self.audioEngine.stop()
-            self.removeInputTap()
-            self.error = iOSTranscriptionError.microphoneChanged
-            self.onError?(iOSTranscriptionError.microphoneChanged)
+            self?.handleCaptureDisruption(.microphoneChanged)
         }
+        captureInterruptionObserver.observeAudioInterruption { [weak self] in
+            self?.handleCaptureDisruption(.interrupted)
+        }
+    }
+
+    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
+        guard isRunning, !isStopping else { return }
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        audioEngine.stop()
+        removeInputTap()
+        // The owner drains the provider and recording once through its normal stop path.
+        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+        if !reason.isControlledInterruption { error = reason }
+        onError?(reason)
     }
 
     public func stop() async -> TranscriptionResult {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         guard isRunning, !hasFinishedStopping else {
             return emptyResult()
         }
@@ -372,12 +392,14 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     public func cancel() {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         startup.cancel()
         cleanupCapture()
     }
 
     private func cleanupCapture() {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         guard isRunning || ownsAudioSession || hasInputTap else { return }
 
         audioEngine.stop()
@@ -430,6 +452,10 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private func connectClient(apiKey: String) {
         let captureID = UUID()
         activeCaptureID = captureID
+        if let connectRealtimeClient {
+            connectRealtimeClient(apiKey)
+            return
+        }
         let realtimeName = Self.realtimeModelName(from: modelID)
         let client = makeClient?() ?? OpenAIRealtimeWebSocketClient(
             apiKey: apiKey,
@@ -491,7 +517,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         try audioEngine.start()
         // Only after the engine actually returned.
         onStartupObservation?(.stage(.engineStarted))
-        observeCaptureConfiguration()
     }
 
     private func createAudioConverter(
@@ -575,23 +600,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         hasFinishedStopping = false
         stopContinuation = nil
         isRunning = true
-    }
-
-    private func setupInterruptionHandling() {
-        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
-            Task { @MainActor in
-                if began { self?.handleInterruption() }
-            }
-        }
-    }
-
-    private func handleInterruption() {
-        guard isRunning else { return }
-        logger.info("Handling interruption")
-        let err = iOSTranscriptionError.interrupted
-        error = err
-        onError?(err)
-        Task { _ = await stop() }
     }
 
     private func handleEvent(_ event: OpenAIRealtimeWebSocketClient.Event) {

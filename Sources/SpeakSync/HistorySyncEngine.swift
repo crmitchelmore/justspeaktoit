@@ -20,6 +20,13 @@ public protocol HistorySyncDelegate: AnyObject {
     func didAcknowledgeSyncedEntries(ids: Set<UUID>) async
 }
 
+/// Optional platform durability boundary. Existing delegates retain their
+/// behaviour; adopting stores must commit before the fetch token advances.
+@MainActor
+public protocol HistorySyncDurabilityDelegate: HistorySyncDelegate {
+    func persistRemoteChanges() async throws
+}
+
 enum HistoryRemoteChange {
     case changed(SyncableHistoryEntry)
     case deleted(UUID)
@@ -189,7 +196,7 @@ public final class HistorySyncEngine: ObservableObject {
             throw syncError
         }
         let result = await transport.upload(entries: [entry])
-        await applyUploadResult(result)
+        try await applyUploadResult(result)
         state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
         if let error = result.failures[entry.id] {
             let syncError = SyncError.cloudKit(error)
@@ -304,6 +311,7 @@ public final class HistorySyncEngine: ObservableObject {
             state.pendingDownloadCount -= 1
         }
 
+        try await (delegate as? HistorySyncDurabilityDelegate)?.persistRemoteChanges()
         if let finalTokenData {
             defaults.set(finalTokenData, forKey: SyncConfiguration.syncTokenKey)
         }
@@ -320,7 +328,7 @@ public final class HistorySyncEngine: ObservableObject {
 
             let batch = Array(pending.prefix(SyncConfiguration.batchSize))
             let result = await transport.upload(entries: batch)
-            await applyUploadResult(result)
+            try await applyUploadResult(result)
             state.pendingUploadCount = delegate.pendingEntries().count
 
             if !result.failures.isEmpty {
@@ -332,10 +340,11 @@ public final class HistorySyncEngine: ObservableObject {
         }
     }
 
-    private func applyUploadResult(_ result: HistoryUploadResult) async {
+    private func applyUploadResult(_ result: HistoryUploadResult) async throws {
         for entry in result.remoteEntries {
             await delegate?.didReceiveRemoteEntry(entry)
         }
+        try await (delegate as? HistorySyncDurabilityDelegate)?.persistRemoteChanges()
         if !result.acknowledgedIDs.isEmpty {
             await delegate?.didAcknowledgeSyncedEntries(ids: result.acknowledgedIDs)
         }

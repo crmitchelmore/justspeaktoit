@@ -37,6 +37,7 @@ public final class iOSHistoryManager: ObservableObject {
     /// unloaded (empty) state — the root cause of background-recording history
     /// loss (see `loadHistoryFromDiskIfNeeded`).
     private var hasLoadedFromDisk = false
+    private var hasAttemptedDiskLoad = false
 
     /// IDs of entries that have been synced to CloudKit.
     @Published private(set) var syncedIDs: Set<UUID> = []
@@ -149,7 +150,7 @@ public final class iOSHistoryManager: ObservableObject {
     /// Forces the lazy disk load so out-of-UI readers (App Intents) see the
     /// persisted history instead of the empty pre-load state.
     public func ensureLoaded() {
-        loadHistoryFromDiskIfNeeded()
+        if !isStorageReady { retryPersistence() }
     }
 
     /// Persists any debounced remote sync changes immediately. Called from the
@@ -189,8 +190,21 @@ public final class iOSHistoryManager: ObservableObject {
     @discardableResult
     public func upsertReportingDurability(_ item: iOSHistoryItem) -> Bool {
         loadHistoryFromDiskIfNeeded()
-        items = IOSHistoryPersistence.merging(items, [item])
-        let current = items.first { $0.id == item.id } ?? item
+        let current: iOSHistoryItem
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            current = items[index].updatedAt > item.updatedAt ? items[index] : item
+            if items[index].createdAt == current.createdAt {
+                items[index] = current
+            } else {
+                items.remove(at: index)
+                let insertion = items.firstIndex { $0.createdAt < current.createdAt } ?? items.endIndex
+                items.insert(current, at: insertion)
+            }
+        } else {
+            current = item
+            let index = items.firstIndex { $0.createdAt < item.createdAt } ?? items.endIndex
+            items.insert(item, at: index)
+        }
         persistence.remember(current)
         syncedIDs.remove(item.id)
         saveSyncedIDs()
@@ -372,18 +386,21 @@ public final class iOSHistoryManager: ObservableObject {
     /// list and clobber the file. Called eagerly from `init` and defensively
     /// from `add`/`remove`/`clearAll`.
     private func loadHistoryFromDiskIfNeeded() {
-        guard !hasLoadedFromDisk else { return }
+        guard !hasAttemptedDiskLoad else { return }
+        hasAttemptedDiskLoad = true
         items = persistence.load(visible: items)
-        syncedIDs.subtract(persistence.recoveredIDs)
-        saveSyncedIDs()
         refreshPersistenceState()
-        pruneStaleSyncedIDs()
+        if isStorageReady {
+            syncedIDs.subtract(persistence.recoveredIDs)
+            pruneStaleSyncedIDs()
+            saveSyncedIDs()
+        }
         startSyncIfReady()
     }
 
     public func retryPersistence() {
         if !isStorageReady {
-            hasLoadedFromDisk = false
+            hasAttemptedDiskLoad = false
             loadHistoryFromDiskIfNeeded()
         } else {
             saveHistory()
@@ -425,16 +442,18 @@ public final class iOSHistoryManager: ObservableObject {
     }
 
     /// Sorts once and persists once for however many remote changes accumulated.
-    private func commitRemoteChangesNow() {
+    @discardableResult
+    private func commitRemoteChangesNow() -> Bool {
         pendingRemoteCommit?.cancel()
         pendingRemoteCommit = nil
-        guard hasPendingRemoteChanges else { return }
-        hasPendingRemoteChanges = false
+        guard hasPendingRemoteChanges else { return true }
 
         items.sort { $0.createdAt > $1.createdAt }
-        saveHistory()
+        guard saveHistoryReportingDurability() else { return false }
+        hasPendingRemoteChanges = false
         pruneStaleSyncedIDs()
         saveSyncedIDs()
+        return true
     }
 
     // MARK: - Synced IDs Tracking
@@ -463,7 +482,11 @@ public final class iOSHistoryManager: ObservableObject {
 
 // MARK: - HistorySyncDelegate
 
-extension iOSHistoryManager: HistorySyncDelegate {
+extension iOSHistoryManager: HistorySyncDurabilityDelegate {
+    public func persistRemoteChanges() async throws {
+        guard commitRemoteChangesNow() else { throw CocoaError(.fileWriteUnknown) }
+    }
+
     public func pendingEntries() -> [SyncableHistoryEntry] {
         pruneStaleSyncedIDs()
         return items
@@ -478,6 +501,7 @@ extension iOSHistoryManager: HistorySyncDelegate {
             let local = items[index]
             if entry.updatedAt > local.updatedAt {
                 items[index] = iOSHistoryItem.fromSyncable(entry)
+                persistence.remember(items[index])
                 syncedIDs.insert(entry.id)
             } else if entry.updatedAt == local.updatedAt {
                 // An already-present duplicate is an acknowledgement.
@@ -492,6 +516,7 @@ extension iOSHistoryManager: HistorySyncDelegate {
 
         let item = iOSHistoryItem.fromSyncable(entry)
         items.insert(item, at: 0)
+        persistence.remember(item)
         syncedIDs.insert(entry.id)
         scheduleRemoteCommit()
     }
@@ -501,15 +526,17 @@ extension iOSHistoryManager: HistorySyncDelegate {
         // the persisted acknowledgement set), so they bypass the debounced
         // remote-commit path used for entry bursts.
         items.removeAll { $0.id == id }
+        persistence.rememberDeletion(id)
         syncedIDs.remove(id)
-        saveHistory()
-        saveSyncedIDs()
+        hasPendingRemoteChanges = true
+        commitRemoteChangesNow()
         // Same rule as a local delete: the pointer cannot outlive its entry
         // (issue #1006). A remote tombstone is still a deliberate deletion.
         TranscriptHandoffPublisher.invalidateIfAdvertising(entryID: id)
     }
 
     public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
+        guard commitRemoteChangesNow() else { return }
         syncedIDs.formUnion(ids.intersection(currentItemIDs))
         pruneStaleSyncedIDs()
         saveSyncedIDs()

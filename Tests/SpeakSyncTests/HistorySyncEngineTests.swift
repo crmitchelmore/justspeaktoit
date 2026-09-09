@@ -157,6 +157,31 @@ final class HistorySyncEngineTests: XCTestCase {
         XCTAssertNil(engine.state.error)
     }
 
+    func testFailedDelegateDurabilityRetainsTokenUntilReplayCommits() async {
+        let oldToken = Data("old".utf8)
+        let nextToken = Data("next".utf8)
+        defaults.set(oldToken, forKey: SyncConfiguration.syncTokenKey)
+        let changed = makeEntry(text: "changed")
+        let deleted = makeEntry(text: "deleted")
+        let page = HistoryChangePage(changes: [.changed(changed), .deleted(deleted.id)],
+                                     serverChangeTokenData: nextToken, moreComing: false)
+        let transport = FakeHistorySyncTransport(pages: [page, page], uploads: [])
+        let delegate = FakeHistorySyncDelegate(entries: [deleted])
+        delegate.failDurability = true
+        let engine = makeEngine(transport: transport, delegate: delegate)
+
+        await engine.sync()
+        XCTAssertNotNil(engine.state.error)
+        XCTAssertEqual(defaults.data(forKey: SyncConfiguration.syncTokenKey), oldToken)
+        delegate.failDurability = false
+        await engine.sync()
+        XCTAssertNil(engine.state.error)
+        XCTAssertEqual(transport.requestedTokens, [oldToken, oldToken])
+        XCTAssertEqual(defaults.data(forKey: SyncConfiguration.syncTokenKey), nextToken)
+        XCTAssertEqual(delegate.acknowledgedIDs, [changed.id])
+        XCTAssertTrue(delegate.pendingEntries().isEmpty)
+    }
+
     private func makeEngine(
         transport: FakeHistorySyncTransport,
         delegate: FakeHistorySyncDelegate
@@ -226,7 +251,13 @@ private final class FakeHistorySyncTransport: HistorySyncTransport {
 }
 
 @MainActor
-private final class FakeHistorySyncDelegate: HistorySyncDelegate {
+private final class FakeHistorySyncDelegate: HistorySyncDurabilityDelegate {
+    var failDurability = false
+
+    func persistRemoteChanges() async throws {
+        if failDurability { throw TestFailure() }
+    }
+
     private var entriesByID: [UUID: SyncableHistoryEntry]
     private(set) var acknowledgedIDs: Set<UUID> = []
     private(set) var receivedEntries: [SyncableHistoryEntry] = []

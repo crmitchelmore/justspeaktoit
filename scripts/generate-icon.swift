@@ -1,115 +1,114 @@
 #!/usr/bin/env swift
-// Generates AppIcon.icns from programmatic icon definition
-// Run with: swift scripts/generate-icon.swift
-
+// Canonical brand artwork; run from the repository root with Apple's Swift.
+// Explicit pixel buffers avoid lockFocus() inheriting the display's Retina scale.
 import AppKit
 
-let iconSizes = [16, 32, 64, 128, 256, 512, 1024]
-let outputDir = "Resources/AppIcon.iconset"
+let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+let heights: [CGFloat] = [208, 368, 544, 368, 208]
+let barWidth: CGFloat = 80
+let barStep: CGFloat = 124
+let firstBarX: CGFloat = 224
+enum Appearance { case standard, dark, tinted }
 
-func generateIcon(size: CGFloat) -> NSImage {
-    let image = NSImage(size: NSSize(width: size, height: size))
-    image.lockFocus()
-    defer { image.unlockFocus() }
-
-    let rect = NSRect(origin: .zero, size: NSSize(width: size, height: size))
-    let outerRadius = size * 0.18
-    let outerPath = NSBezierPath(roundedRect: rect, xRadius: outerRadius, yRadius: outerRadius)
-    outerPath.addClip()
-
-    // Orange gradient background
-    let backgroundGradient = NSGradient(
-        colors: [
-            NSColor(calibratedRed: 1.00, green: 0.42, blue: 0.24, alpha: 1.0),
-            NSColor(calibratedRed: 1.00, green: 0.61, blue: 0.29, alpha: 1.0),
-            NSColor(calibratedRed: 1.00, green: 0.48, blue: 0.36, alpha: 1.0),
-        ]
-    )
-    backgroundGradient?.draw(in: rect, angle: 220)
-
-    // Subtle highlight
-    let highlightPath = NSBezierPath()
-    let highlightStart = NSPoint(x: rect.minX, y: rect.maxY * 0.55)
-    highlightPath.move(to: highlightStart)
-    highlightPath.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
-    highlightPath.line(to: NSPoint(x: rect.minX, y: rect.maxY))
-    highlightPath.close()
-    NSColor.white.withAlphaComponent(0.14).setFill()
-    highlightPath.fill()
-
-    // White rounded rectangle
-    let innerRect = rect.insetBy(dx: size * 0.23, dy: size * 0.25)
-    let innerRadius = size * 0.082
-    let innerPath = NSBezierPath(roundedRect: innerRect, xRadius: innerRadius, yRadius: innerRadius)
-    NSColor.white.withAlphaComponent(0.85).setFill()
-    innerPath.fill()
-
-    // Sound wave bars
-    let waveRect = innerRect.insetBy(dx: innerRect.width * 0.18, dy: innerRect.height * 0.34)
-    let barCount = 5
-    let barSpacing = waveRect.width / CGFloat(barCount * 2 - 1)
-    let barWidth = barSpacing
-    let maxBarHeight = waveRect.height
-    let heights: [CGFloat] = [0.45, 0.8, 1.0, 0.72, 0.5]
-    let barColor = NSColor(calibratedRed: 0.35, green: 0.18, blue: 0.12, alpha: 1.0)
-    
-    for index in 0..<barCount {
-        let heightFactor = index < heights.count ? heights[index] : 0.6
-        let barHeight = maxBarHeight * heightFactor
-        let xOffset = waveRect.minX + CGFloat(index * 2) * barSpacing
-        let barRect = NSRect(
-            x: xOffset,
-            y: waveRect.midY - barHeight / 2,
-            width: barWidth,
-            height: barHeight
-        )
-        let barPath = NSBezierPath(roundedRect: barRect, xRadius: barWidth / 2, yRadius: barWidth / 2)
-        barColor.setFill()
-        barPath.fill()
-    }
-
-    // Outer glow
-    let glowPath = NSBezierPath(ovalIn: innerRect.insetBy(dx: -size * 0.047, dy: -size * 0.047))
-    NSColor.white.withAlphaComponent(0.08).setStroke()
-    glowPath.lineWidth = size * 0.035
-    glowPath.stroke()
-
-    image.isTemplate = false
-    return image
+func colour(_ hex: String) -> NSColor {
+    let value = UInt32(hex, radix: 16)!
+    return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
+                   green: CGFloat((value >> 8) & 255) / 255,
+                   blue: CGFloat(value & 255) / 255, alpha: 1)
 }
-
-// Create iconset directory
-let fileManager = FileManager.default
-try? fileManager.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
-
-// Generate all icon sizes
-for size in iconSizes {
-    let image = generateIcon(size: CGFloat(size))
-    
-    // Save 1x
-    if size <= 512 {
-        let filename = "icon_\(size)x\(size).png"
-        let path = "\(outputDir)/\(filename)"
-        if let tiffData = image.tiffRepresentation,
-           let bitmap = NSBitmapImageRep(data: tiffData),
-           let pngData = bitmap.representation(using: .png, properties: [:]) {
-            try? pngData.write(to: URL(fileURLWithPath: path))
-            print("Generated: \(filename)")
-        }
-    }
-    
-    // Save @2x (use double-size image for half the dimension name)
-    if size >= 32 {
-        let halfSize = size / 2
-        let filename = "icon_\(halfSize)x\(halfSize)@2x.png"
-        let path = "\(outputDir)/\(filename)"
-        if let tiffData = image.tiffRepresentation,
-           let bitmap = NSBitmapImageRep(data: tiffData),
-           let pngData = bitmap.representation(using: .png, properties: [:]) {
-            try? pngData.write(to: URL(fileURLWithPath: path))
-            print("Generated: \(filename)")
-        }
+func palette(_ appearance: Appearance) -> (String, String, String) {
+    switch appearance {
+    case .standard: return ("FF6B3D", "FF9C4A", "181B1D")
+    case .dark: return ("20292C", "181B1D", "FF6B3D")
+    case .tinted: return ("242424", "121212", "EAEAEA")
     }
 }
-
-print("\nNow run: iconutil -c icns \(outputDir) -o Resources/AppIcon.icns")
+func write(_ data: Data, to relativePath: String) throws {
+    let url = root.appendingPathComponent(relativePath)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try data.write(to: url)
+}
+func png(size: Int, appearance: Appearance = .standard, mac: Bool = false) -> Data {
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
+    let alpha = mac ? CGImageAlphaInfo.premultipliedLast : CGImageAlphaInfo.noneSkipLast
+    let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8,
+                            bytesPerRow: size * 4, space: space, bitmapInfo: alpha.rawValue)!
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+    context.clear(CGRect(x: 0, y: 0, width: size, height: size))
+    context.scaleBy(x: CGFloat(size) / 1024, y: CGFloat(size) / 1024)
+    if mac {
+        // macOS inset; iOS/watchOS supply their mask and require opaque corners.
+        context.translateBy(x: 64, y: 64)
+        context.scaleBy(x: 0.875, y: 0.875)
+        NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: 1024, height: 1024),
+                     xRadius: 224, yRadius: 224).addClip()
+    }
+    let (top, bottom, ink) = palette(appearance)
+    NSGradient(starting: colour(bottom), ending: colour(top))!
+        .draw(in: NSRect(x: 0, y: 0, width: 1024, height: 1024), angle: 90)
+    for (index, height) in heights.enumerated() {
+        let rect = NSRect(x: firstBarX + CGFloat(index) * barStep,
+                          y: (1024 - height) / 2, width: barWidth, height: height)
+        colour(ink).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
+    }
+    return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+}
+func svg(appearance: Appearance = .standard, rounded: Bool = true) -> String {
+    let (top, bottom, ink) = palette(appearance)
+    let bars = heights.enumerated().map { index, height in
+        "<rect x=\"\(Int(firstBarX + CGFloat(index) * barStep))\" y=\"\(Int((1024 - height) / 2))\" width=\"80\" height=\"\(Int(height))\" rx=\"40\"/>"
+    }.joined(separator: "\n    ")
+    return """
+    <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+      <defs><linearGradient id="surface" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#\(top)"/><stop offset="1" stop-color="#\(bottom)"/></linearGradient></defs>
+      <rect width="1024" height="1024" rx="\(rounded ? 224 : 0)" fill="url(#surface)"/>
+      <g fill="#\(ink)">
+        \(bars)
+      </g>
+    </svg>
+    """
+}
+for points in [16, 32, 64, 128, 256, 512] {
+    for scale in [1, 2] {
+        let suffix = scale == 2 ? "@2x" : ""
+        try write(png(size: points * scale, mac: true),
+                  to: "Resources/AppIcon.iconset/icon_\(points)x\(points)\(suffix).png")
+    }
+}
+let iconutil = Process()
+iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+iconutil.arguments = ["-c", "icns", "Resources/AppIcon.iconset", "-o", "Resources/AppIcon.icns"]
+try iconutil.run()
+iconutil.waitUntilExit()
+guard iconutil.terminationStatus == 0 else { fatalError("iconutil failed") }
+try write(Data(contentsOf: root.appendingPathComponent("Resources/AppIcon.icns")),
+          to: "Sources/SpeakApp/Resources/AppIcon.icns")
+for (appearance, name) in [(Appearance.standard, "AppIcon"), (.dark, "AppIcon-dark"), (.tinted, "AppIcon-tinted")] {
+    try write(png(size: 1024, appearance: appearance), to: "SpeakiOSApp/Assets.xcassets/AppIcon.appiconset/\(name).png")
+    try write(Data(svg(appearance: appearance, rounded: false).utf8), to: "Resources/Brand/\(name).svg")
+}
+try write(png(size: 1024), to: "JustSpeakWatch/Assets.xcassets/AppIcon.appiconset/AppIcon.png")
+try write(Data(svg().utf8), to: "landing-page/favicon.svg")
+for (size, name) in [(32, "favicon-32.png"), (180, "apple-touch-icon.png"), (192, "icon-192.png"), (512, "icon-512.png")] {
+    try write(png(size: size), to: "landing-page/\(name)")
+}
+// Launch marks retain an adaptive circular field and the same waveform proportions.
+for (appearance, name) in [(Appearance.standard, "LaunchMark.svg"), (.dark, "LaunchMark-dark.svg")] {
+    let (_, _, ink) = palette(appearance)
+    let background = appearance == .standard ? "FF6B3D" : "181B1D"
+    let bars = heights.enumerated().map { index, height in
+        "<rect x=\"\(30 + index * 11)\" y=\"\(56 - Int(height * 0.11) / 2)\" width=\"8\" height=\"\(Int(height * 0.11))\" rx=\"4\"/>"
+    }.joined(separator: "\n    ")
+    try write(Data("""
+    <svg xmlns="http://www.w3.org/2000/svg" width="112" height="112" viewBox="0 0 112 112">
+      <circle cx="56" cy="56" r="52" fill="#\(background)"/>
+      <g fill="#\(ink)">
+        \(bars)
+      </g>
+    </svg>
+    """.utf8), to: "SpeakiOSApp/Assets.xcassets/LaunchMark.imageset/\(name)")
+}
+print("Generated Mac iconset/ICNS, iOS appearances, watch icon, web icons and launch marks.")

@@ -18,5 +18,8 @@
 /site.css
   Cache-Control: public, max-age=0, must-revalidate
 
-/site.js
+/favicon.svg
+  Cache-Control: public, max-age=0, must-revalidate
+
+/site.webmanifest
   Cache-Control: public, max-age=0, must-revalidate

@@ -22,19 +22,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSExtension</key>
 	<dict>
-		<key>NSExtensionAttributes</key>
-		<dict>
-			<key>WidgetFamily</key>
-			<array>
-				<string>systemSmall</string>
-				<string>systemMedium</string>
-				<string>systemLarge</string>
-				<string>systemExtraLarge</string>
-				<string>accessoryCircular</string>
-				<string>accessoryInline</string>
-				<string>accessoryRectangular</string>
-			</array>
-		</dict>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.widgetkit-extension</string>
 	</dict>

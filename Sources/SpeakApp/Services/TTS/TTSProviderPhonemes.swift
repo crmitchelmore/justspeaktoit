@@ -11,7 +11,7 @@ extension TTSProvider: PronunciationPhonemeCapable {
     switch self {
     case .azure, .system: return true
     case .elevenlabs, .openai, .deepgram, .soniox, .cartesia, .openrouter,
-         .groq, .gemini, .mistral, .speechmatics: return false
+         .groq, .gemini, .mistral, .speechmatics, .xai: return false
     }
   }
 

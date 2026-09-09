@@ -118,6 +118,14 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 3.0
         ),
+        // xAI's dedicated speech-to-text stream locks chunks of speech during
+        // the session, which the incremental tail rewrite can polish. The
+        // authoritative transcript only arrives after `audio.done`, so the
+        // budget stays non-zero to capture that frame before teardown.
+        XAISpeechToText.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 2.0
+        ),
 
         // AssemblyAI Universal-3.5 Pro Streaming emits incremental turns and
         // one formatted final turn. Keep a non-zero post-stop budget so the

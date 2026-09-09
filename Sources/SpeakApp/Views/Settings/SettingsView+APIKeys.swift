@@ -226,6 +226,7 @@ extension SettingsView {
       case .gemini: return .blue
       case .mistral: return .indigo
       case .speechmatics: return .cyan
+      case .xai: return .black
       case .system: return .gray
       }
     }()
@@ -242,6 +243,7 @@ extension SettingsView {
       case .gemini: return "sparkles"
       case .mistral: return "waveform.circle"
       case .speechmatics: return "waveform.and.magnifyingglass"
+      case .xai: return "waveform.badge.mic"
       case .system: return "speaker.wave.2"
       }
     }()
@@ -258,6 +260,7 @@ extension SettingsView {
       case .gemini: return "https://aistudio.google.com/apikey"
       case .mistral: return "https://console.mistral.ai"
       case .speechmatics: return "https://www.speechmatics.com"
+      case .xai: return "https://console.x.ai"
       case .system: return ""
       }
     }()

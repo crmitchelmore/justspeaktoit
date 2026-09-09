@@ -52,6 +52,9 @@ extension TTSProvider {
       return MistralTTSAPI.estimatedCostPerThousandCharacters
     case .speechmatics:
       return SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters
+    case .xai:
+      // Billed per submitted character.
+      return XAITTSAPI.estimatedCostPerThousandCharacters
     case .gemini:
       // Gemini bills the generated audio per token, not the submitted text, so
       // there is no honest character estimate before synthesis. The actual

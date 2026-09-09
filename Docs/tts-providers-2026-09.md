@@ -1,19 +1,24 @@
-# Groq, Gemini, Mistral and Speechmatics voice output
+# September 2026 speech providers
 
-Four speech-generation providers added in September 2026. Each reuses the
+Groq, Gemini, Mistral, Speechmatics and xAI. The first four add voice output
+only; xAI also completes its speech-to-text side, and its section below covers
+both directions because one Keychain entry serves them.
+
+Five speech-generation providers added in September 2026. Each reuses the
 Keychain entry its transcription provider already writes, so there is one
 combined credential card per provider in **Settings → API Keys** rather than a
 second entry pointing at the same secret. No additional paid subscription,
 credit purchase or automatic top-up is enabled by this integration.
 
-All four are macOS-only, matching every other entry in
+All five are macOS-only for voice output, matching every other entry in
 `Sources/SpeakApp/TextToSpeech/`. The iOS voice-output route
 (`VoiceOutputProvider`) still carries Deepgram, Soniox and OpenRouter only;
 `TTSProviderPlatformTests` asserts that restriction so it cannot drift silently.
 
-None of the four exposes a speaking-rate or pitch parameter. Rather than drop
-those settings silently, a non-default speed or pitch returns an explicit
-message naming what the provider ignores.
+None of the first four exposes a speaking-rate or pitch parameter, and xAI
+exposes rate but not pitch. Rather than drop those settings silently, a
+non-default value the provider cannot honour returns an explicit message naming
+what is ignored.
 
 ## Groq Orpheus
 
@@ -127,22 +132,123 @@ is. The speech host rejects at its edge proxy and returns an **HTML** body on
 401, so the error reader treats a failed JSON decode as expected and never
 echoes the body.
 
+## xAI
+
+xAI is the one provider here that gains speech in both directions, because a
+single `xai.apiKey` covers all of it: the Grok Voice realtime route that was
+already shipping, the dedicated speech-to-text service, and speech generation.
+
+### Speech to text (issue #1055)
+
+| | |
+| --- | --- |
+| Credential | `xai.apiKey`, already written by the Grok Voice transcription provider |
+| Batch | `POST https://api.x.ai/v1/stt`, multipart `file`, `Authorization: Bearer` |
+| Streaming | `wss://api.x.ai/v1/stt`, binary PCM frames up |
+| Catalogue ids | `xai/speech-to-text` (Batch picker), `xai/speech-to-text-streaming` (Streaming picker) |
+| Platforms | macOS and iOS for both; the batch upload is the shared `XAIBatchTranscriptionClient` |
+| Price | $0.10 / hr of audio (REST), $0.20 / hr (streaming) |
+
+**There is no model identifier.** Neither request accepts a `model` field, and
+the models page prices the capability as "Speech to Text" rather than naming a
+model. The catalogue ids are therefore named after the capability, so the app
+never advertises a model id that does not exist. `grok-transcribe`, which the
+Grok Voice session names as its input-transcription model, is a different thing
+and stays where it is.
+
+**Grok Voice keeps its own entry.** It is speech-to-speech used in
+transcription-only mode and has no file endpoint, so selecting it for a
+recording reports that rather than uploading to an endpoint that would reject
+it. Only the dedicated identifier appears in the Batch picker.
+
+**Realtime semantics.** `is_final` and `speech_final` are separate signals:
+`false/false` is an interim, `true/false` is a chunk final locking roughly three
+seconds of speech, and `true/true` is an utterance final. A locked chunk is
+never restated, so chunk finals are folded as standalone segments. After the
+client sends `audio.done`, one `transcript.done` carries the authoritative
+transcript for the whole session and *replaces* the folded chunks — which is
+what `finishAndWait()` returns. Audio captured before `transcript.created`
+arrives is held in the preroll rather than dropped.
+
+**Inverse text normalisation travels with a language.** `format=true` is
+rejected without `language`, so the two are sent together or not at all, and
+`language` is only sent when the user's selection resolves to one of the 25
+codes xAI documents. Otherwise the request omits it and xAI reports what it
+detected. Recognition keywords become repeated `keyterm` fields, bounded to the
+documented 100 terms of 50 characters.
+
+### Text to speech (issue #1056)
+
+| | |
+| --- | --- |
+| Credential | `xai.apiKey`, the same entry |
+| Batch | `POST https://api.x.ai/v1/tts` |
+| Streaming | `wss://api.x.ai/v1/tts` |
+| Preset voices | `eve` (default) and `ara` |
+| Output | MP3 / WAV / PCM, 24 kHz by default; M4A falls back to MP3, which xAI does serve |
+| Limits | 15,000 characters per request; speaking rate 0.7–1.5 |
+| Price | $15.00 / 1M characters of submitted text |
+
+**Only two preset voices ship.** xAI hosts more, but the capability page names
+`eve` and `ara` and then points at the playground and at `GET /v1/tts/voices`
+rather than enumerating the rest. Guessing identifiers would not fail safely —
+an unrecognised `voice_id` is an HTTP 404 — so `listVoices()` fills the picker
+from the account's own listing once a key is stored, exactly as Mistral's does.
+An identifier the presets do not know is passed through unchanged rather than
+rewritten to `eve`, which would speak in the wrong voice.
+
+**There is no speech model identifier either**, so none is sent. `language` is
+a required field, and a selection xAI does not document becomes `auto`, which
+is the value it provides for that case. Pitch is not a parameter at all, and a
+speaking rate outside 0.7–1.5 is reported rather than clamped into a speed the
+user did not choose.
+
+**Progressive playback.** When auto-play is on, xAI's client takes the
+WebSocket route: text goes up as `text.delta` frames closed by `text.done`, and
+base64 `audio.delta` frames come back as headerless 24 kHz PCM which is
+scheduled on an `AVAudioPlayerNode` as it arrives, so speech starts before the
+document has finished generating. The finished result is still one complete WAV
+file (`PCMWaveWriter` adds the header), so history, cost, the recordings
+directory and replay need no special case.
+
+This is opt-in by conformance to `ProgressiveTextToSpeechClient`: a provider
+without a streaming route keeps the existing synthesize-then-play path
+unchanged, and so does xAI itself when auto-play is off. Cancelling — the
+manager's `stop()`, or a new utterance — sends `text.clear` so xAI stops
+generating audio nobody will hear, and discards the partial samples.
+
+**A stored key is never read as access.** HTTP 402 is reported as an account
+state to fix at console.x.ai, not as a bad key; 401/403 sends the user to
+Settings; 404 is reported as an unknown voice. Key validation probes
+`GET /v1/tts/voices`, which proves the key is live and can reach the speech
+routes — it is not evidence of remaining credit, and the code does not claim
+it is.
+
 ## Verification
 
 Contract tests cover request shape, endpoint and headers, credential sharing,
 voice-identifier routing, catalogue parity with the picker, empty text,
 cancellation, and the auth / quota / rate-limit / access-gate classification for
-each provider. They run against a stubbed `URLProtocol` and spend no credit.
+each provider. For xAI they also cover the batch multipart body and its
+language/`format` pairing, an unsupported container, an empty recording, the
+`is_final` / `speech_final` pairs, the `audio.done` → `transcript.done`
+finalisation, a session with no speech, and the streaming speech frames. They
+run against stubbed transports and spend no credit.
 
-**Live provider responses are not verified.** No Groq, Google, Mistral or
-Speechmatics key was available in this environment, and no credit was bought to
-obtain one. Before this is called done, a human with existing credit should, for
-each provider, save the key, confirm the picker lists the expected voices, speak
-a short phrase and confirm the audio plays. Two things in particular can only be
-settled that way:
+**Live provider responses are not verified.** No Groq, Google, Mistral,
+Speechmatics or xAI key was available in this environment, and no credit was
+bought to obtain one. Before this is called done, a human with existing credit
+should, for each provider, save the key, confirm the picker lists the expected
+voices, speak a short phrase and confirm the audio plays. Four things in
+particular can only be settled that way:
 
 - The Groq model-terms gate, which is invisible until the first synthesis.
 - Mistral's preset voice list, whose identifiers are not published anywhere.
+- xAI's full voice list from `GET /v1/tts/voices`, and whether the two preset
+  identifiers behave as documented.
+- xAI's realtime speech-to-text frames — the exact `transcript.partial` and
+  `transcript.done` payloads are described narratively in the documentation
+  rather than shown as complete examples, so the decoder is built to the prose.
 
 ## Official contracts
 
@@ -152,3 +258,6 @@ settled that way:
 - [Gemini Interactions API reference](https://ai.google.dev/api/interactions-api)
 - [Mistral text to speech](https://docs.mistral.ai/studio/audio/text_to_speech) and [audio/speech endpoint](https://docs.mistral.ai/api/endpoint/audio/speech)
 - [Speechmatics text to speech quickstart](https://docs.speechmatics.com/text-to-speech/quickstart)
+- [xAI speech to text](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text)
+- [xAI text to speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)
+- [xAI voice REST reference](https://docs.x.ai/developers/rest-api-reference/inference/voice) and [models and pricing](https://docs.x.ai/docs/models)

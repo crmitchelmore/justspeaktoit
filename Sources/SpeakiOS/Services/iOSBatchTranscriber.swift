@@ -167,6 +167,11 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     /// only: the `google/gemini-2.0-flash-*` catalogue entries share the
     /// `google/` prefix but are OpenRouter-routed.
     case gemini
+    /// xAI's dedicated speech-to-text endpoint, through the shared
+    /// `XAIBatchTranscriptionClient`. The Grok Voice streaming identifier
+    /// shares the `xai/` prefix but has no file mode, so this matches on the
+    /// batch identifier alone.
+    case xai
     case openRouter
 
     static func route(for model: String) -> IOSBatchTranscriptionRoute {
@@ -176,6 +181,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         if model == CartesiaBatchClient.catalogID { return .cartesia }
         if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
+        if model == XAISpeechToText.batchCatalogID { return .xai }
         return .openRouter
     }
 }

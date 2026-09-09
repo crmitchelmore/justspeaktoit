@@ -763,6 +763,9 @@ public final class AppSettings: ObservableObject {
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
                 || option.id == CartesiaBatchClient.catalogID
+                // xAI's dedicated speech-to-text endpoint uploads through the
+                // shared `XAIBatchTranscriptionClient` with the xAI key.
+                || option.id == XAISpeechToText.batchCatalogID
         }
 
     // MARK: - Legacy migration
@@ -887,6 +890,22 @@ enum IOSTranscriptionLocation: String, CaseIterable, Identifiable {
 
 // swiftlint:disable:next type_body_length
 public struct SettingsView: View {
+    /// Names the provider whose key the selected batch model needs, read from
+    /// the same canonical resolver `batchAPIKey(for:)` uses. Deriving it means
+    /// a provider added to the batch catalogue cannot silently inherit the
+    /// OpenRouter wording while its request goes somewhere else.
+    static func batchAPIKeyPrompt(for modelIdentifier: String) -> String {
+        switch ModelCredentialResolver.requirement(
+            for: modelIdentifier,
+            purpose: .batchTranscription
+        ) {
+        case .notRequired:
+            return "This model runs on device and needs no API key."
+        case .apiKey(_, let providerName):
+            return "Add your \(providerName) API key below to use this model."
+        }
+    }
+
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
     @Environment(\.openClawEnabled) private var openClawEnabled
@@ -1068,11 +1087,7 @@ public struct SettingsView: View {
                    !AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel),
                    settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label(
-                        AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
-                            ? "Add an OpenAI API key below to use this model."
-                            : settings.batchTranscriptionModel == MetaMuseVoiceTranscribe.batchCatalogID
-                                ? "Add a Meta Model API key below to use this model."
-                                : "Add an OpenRouter API key below to use this model.",
+                        Self.batchAPIKeyPrompt(for: settings.batchTranscriptionModel),
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.orange)

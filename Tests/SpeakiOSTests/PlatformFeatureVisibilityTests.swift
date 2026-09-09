@@ -27,6 +27,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         XCTAssertFalse(visibleIDs.contains { $0.hasPrefix("speechmatics/") })
         XCTAssertTrue(visibleIDs.contains(OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID))
         XCTAssertTrue(visibleIDs.contains(XAIVoiceModels.thinkFast2CatalogID))
+        XCTAssertTrue(visibleIDs.contains(XAISpeechToText.liveCatalogID))
     }
 
     func testRemoteBatchPicker_omitsProvidersWithoutAnIOSUploadPath() {
@@ -38,7 +39,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // listed whenever the runtime supports one of the analyzer engines
         // (SpeechTranscriber needs Apple Intelligence; DictationTranscriber
         // needs OS 26), so the expected provider set depends on the runtime.
-        var expectedProviders: Set<String> = ["cartesia", "google", "meta", "openai"]
+        var expectedProviders: Set<String> = ["cartesia", "google", "meta", "openai", "xai"]
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }
@@ -66,6 +67,36 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == CartesiaBatchClient.catalogID })
         XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: CartesiaBatchClient.catalogID), .cartesia)
         XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " cartesia/ink-whisper "), .cartesia)
+    }
+
+    /// xAI's dedicated speech-to-text endpoint uploads through the shared
+    /// client with the xAI key; the Grok Voice streaming identifier shares the
+    /// `xai/` prefix but has no file mode at all.
+    func testXAIBatchIsSelectableAndUsesItsOwnUploadRouteAndKey() {
+        XCTAssertTrue(
+            AppSettings.supportedBatchModels.contains { $0.id == XAISpeechToText.batchCatalogID }
+        )
+        XCTAssertEqual(
+            IOSBatchTranscriptionRoute.route(for: XAISpeechToText.batchCatalogID),
+            .xai
+        )
+        XCTAssertEqual(
+            IOSBatchTranscriptionRoute.route(for: " xai/speech-to-text "),
+            .xai
+        )
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: XAISpeechToText.batchCatalogID,
+                purpose: .batchTranscription
+            ),
+            .apiKey(identifier: "xai.apiKey", providerName: "xAI")
+        )
+        // The prompt is derived from that requirement, so it names xAI rather
+        // than inheriting the OpenRouter wording.
+        XCTAssertEqual(
+            SettingsView.batchAPIKeyPrompt(for: XAISpeechToText.batchCatalogID),
+            "Add your xAI API key below to use this model."
+        )
     }
 
     func testBatchRouting_sendsGemini35ToItsOwnClientAndLeavesOpenRouterModelsAlone() {

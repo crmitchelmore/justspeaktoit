@@ -8,6 +8,9 @@ struct IOSBatchTranscriptionClient {
     let keywords: [String]
     let session: URLSession
 
+    // One case per upload route is the point of this dispatch, so its length
+    // grows with the provider list rather than with any logic.
+    // swiftlint:disable:next function_body_length
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
         // Credential resolution uses the trimmed ID. Use the same ID for both
         // route selection and the provider request, including file-only callers.
@@ -47,6 +50,12 @@ struct IOSBatchTranscriptionClient {
             return try await transcribeWithGemini(
                 at: url,
                 model: model,
+                language: language,
+                apiKey: try requireAPIKey()
+            )
+        case .xai:
+            return try await transcribeWithXAI(
+                at: url,
                 language: language,
                 apiKey: try requireAPIKey()
             )
@@ -168,6 +177,35 @@ struct IOSBatchTranscriptionClient {
             throw IOSBatchTranscriptionError.emptyTranscript
         }
         return result
+    }
+
+    /// xAI's dedicated speech-to-text endpoint through the shared
+    /// `XAIBatchTranscriptionClient`, so iPhone and Mac send the same request
+    /// and read the same response. Its errors are mapped onto the vocabulary
+    /// the keyboard already reports, so the provider name reaches the user.
+    private func transcribeWithXAI(
+        at url: URL,
+        language: String?,
+        apiKey: String
+    ) async throws -> TranscriptionResult {
+        do {
+            return try await XAIBatchTranscriptionClient(session: session).transcribeFile(
+                at: url,
+                apiKey: apiKey,
+                language: language,
+                keywords: keywords
+            )
+        } catch TranscriptionProviderError.apiKeyMissing {
+            throw IOSBatchTranscriptionError.apiKeyMissing
+        } catch XAISpeechToTextError.emptyTranscript {
+            throw IOSBatchTranscriptionError.emptyTranscript
+        } catch XAISpeechToTextError.fileTooLarge {
+            throw IOSBatchTranscriptionError.audioTooLarge
+        } catch XAISpeechToTextError.invalidResponse {
+            throw IOSBatchTranscriptionError.invalidResponse
+        } catch let XAISpeechToTextError.httpError(statusCode, message) {
+            throw IOSBatchTranscriptionError.httpError("xAI", statusCode, message)
+        }
     }
 
     private func transcribeWithOpenRouter(

@@ -776,6 +776,7 @@ enum WireUp {
       .gemini: GeminiTTSClient(secureStorage: secureStorage),
       .mistral: MistralTTSClient(secureStorage: secureStorage),
       .speechmatics: SpeechmaticsTTSClient(secureStorage: secureStorage),
+      .xai: XAITTSClient(secureStorage: secureStorage),
       .system: SystemTTSClient()
     ]
     return TextToSpeechManager(

@@ -210,7 +210,7 @@ struct SettingsView: View {
       }
     items += [
       TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia,
-      .groq, .gemini, .mistral, .speechmatics
+      .groq, .gemini, .mistral, .speechmatics, .xai
     ].map { provider in
       let isShared = provider.sharesTranscriptionCredential
       return MacAPIKeyItem(

@@ -280,3 +280,60 @@ extension DataMigrationIntegrationTests {
     }
 
 }
+
+extension DataMigrationIntegrationTests {
+    func testMigrationSync_OnlyNotifiesNewChangedAndRemovedItems() async throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        let unchanged = try item(text: "Unchanged")
+        let edited = try item(text: "Before")
+        let removed = try item(text: "Removed")
+        for entry in [unchanged, edited, removed] { await fixture.history.append(entry) }
+        var uploads: [UUID] = []
+        var deletions: [UUID] = []
+        fixture.history.onItemAppended = { uploads.append($0.id) }
+        fixture.history.onItemRemoved = { deletions.append($0) }
+        let changed = try item(id: edited.id, text: "After")
+        let added = try item(text: "New")
+        let imported = [unchanged, changed, added]
+        try await fixture.history.applyMigrationSnapshot(imported)
+        XCTAssertEqual(Set(uploads), [changed.id, added.id])
+        XCTAssertEqual(deletions, [removed.id])
+        uploads.removeAll()
+        deletions.removeAll()
+        try await fixture.history.applyMigrationSnapshot(imported)
+        XCTAssertTrue(uploads.isEmpty)
+        XCTAssertTrue(deletions.isEmpty)
+    }
+
+    func testSettingsReload_RestoresPostProcessingAfterLeavingLivePolish() throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        let settings = AppSettings(defaults: fixture.defaults)
+        settings.liveTranscriptionModel = "deepgram/nova-3-streaming"
+        settings.speedMode = .livePolish
+        XCTAssertEqual(settings.speedMode, .livePolish)
+        fixture.defaults.set("instant", forKey: "speedMode")
+        fixture.defaults.set(true, forKey: "postProcessingEnabled")
+        settings.reloadAfterMigration()
+        XCTAssertEqual(settings.speedMode, .instant)
+        XCTAssertTrue(settings.postProcessingEnabled)
+        XCTAssertTrue(fixture.defaults.bool(forKey: "postProcessingEnabled"))
+    }
+
+    func testSettingsReload_CoversEveryPublishedPreference() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Sources/SpeakApp/AppSettings.swift"),
+                                encoding: .utf8)
+        let pattern = #"@Published\s+(?:private\(set\)\s+)?var\s+(\w+)"#
+        let regex = try NSRegularExpression(pattern: pattern)
+        let names = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+            .compactMap { Range($0.range(at: 1), in: source).map { String(source[$0]) } }
+        XCTAssertFalse(names.isEmpty)
+        for name in names {
+            XCTAssertTrue(source.contains("\(name) = restored.\(name)"),
+                          "New preference \(name) must participate in migration runtime reload")
+        }
+    }
+}

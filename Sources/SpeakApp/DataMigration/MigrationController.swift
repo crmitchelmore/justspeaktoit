@@ -142,14 +142,19 @@ final class MigrationController: ObservableObject {
             return
         }
         await perform("Saving recovery and importing…") {
-            guard !self.environment.main.isBusy, !self.environment.main.migrationInProgress,
+            guard !self.environment.main.isBusy, !self.environment.main.captureStarting,
+                  !self.environment.main.migrationInProgress,
                   let incoming = self.incoming else {
                 throw MigrationError.invalid("Finish the active recording before importing.")
             }
-            try await self.environment.history.beginDataMigration()
-            defer { self.environment.history.endDataMigration() }
+            guard self.environment.main.captureOwnership.reserve(.migration) else {
+                throw MigrationError.invalid("Finish voice edit or recording before importing.")
+            }
+            defer { self.environment.main.captureOwnership.release(.migration) }
             self.environment.main.migrationInProgress = true
             defer { self.environment.main.migrationInProgress = false }
+            try await self.environment.history.beginDataMigration()
+            defer { self.environment.history.endDataMigration() }
             self.environment.autoCorrectionTracker.stopMonitoring()
             let originalFolder = self.store.recordingFolder
             let categories = Set(self.modes.filter { $0.value != .skip }.map(\.key))
@@ -182,7 +187,7 @@ final class MigrationController: ObservableObject {
             self.importedModels = categories.contains(.models)
             self.modelReferences = self.references(in: plan)
             self.recordingItems = (try? self.store.recordingItems()) ?? []
-            self.discardPreview()
+            self.discardPreview(preserveResult: true)
         }
     }
     private func saveRecovery(_ latest: MigrationSnapshot, categories: Set<MigrationCategory>) async throws {
@@ -213,7 +218,7 @@ final class MigrationController: ObservableObject {
                 throw MigrationError
                     .invalid(
                         "Import did not complete. Restore the retained recovery backup. "
-                            + error.localizedDescription
+                            + "Import: \(importError.localizedDescription) Recovery: \(error.localizedDescription)"
                     )
             }
             throw MigrationError
@@ -277,11 +282,21 @@ extension MigrationController {
     func showModelDownloads() {
         showingModelDownloads = true
     }
-    func discardPreview() {
+    func discardPreview(preserveResult: Bool = false) {
         if let directory = incoming?.directory {
             try? FileManager.default.removeItem(at: directory)
         }
         incoming = nil
         current = nil
+        modes = [:]
+        conflictChoices = [:]
+        isRecoveryPreview = false
+        if !preserveResult {
+            report = []
+            status = ""
+            importedModels = false
+            modelReferences = []
+            showingModelDownloads = false
+        }
     }
 }

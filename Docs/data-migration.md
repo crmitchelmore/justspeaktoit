@@ -90,6 +90,11 @@ also exposed as a configurable navigation shortcut, initially unassigned.
 
 The first full local run stopped in an existing performance test without an
 assertion failure. That test passed in isolation, and the next full run passed
-2,523 tests (11 skipped). The isolated app bundle launched and exposed the sidebar
+2,527 tests (11 skipped). The isolated app bundle launched and exposed the sidebar
 entry; computer-control transport failed before the interactive panel walkthrough
 could finish. That walkthrough remains a review check, not a claimed pass.
+
+Claude ultrareview was independently verified. Regression coverage now includes
+selective sync notifications, post-processing reload ordering, capture/import
+exclusivity across suspension, and published-settings reload coverage. Conflict
+placeholder handling, stale preview state, and combined rollback errors were fixed.

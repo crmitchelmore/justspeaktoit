@@ -1379,6 +1379,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     reloadMigrationAudioPreferences(restored)
     reloadMigrationBehaviour(restored)
     liveTranscriptionSelection = restored.liveTranscriptionSelection
+    // Restore dependent values after model and speed-mode observers have settled.
+    postProcessingEnabled = restored.postProcessingEnabled
   }
 
   private func reloadMigrationPreferences(_ restored: AppSettings) {

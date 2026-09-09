@@ -706,7 +706,8 @@ extension HistoryManager {
       isFlushing = false
       if ownsLock { endDataMigration() }
     }
-    let oldIDs = Set(allItems.map(\.id))
+    let previous = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+    let oldIDs = Set(previous.keys)
     try await walStore.commitSnapshot(snapshot, flushing: pendingWrites)
     pendingWrites.removeAll()
     allItemsOnDisk = snapshot.sorted { $0.createdAt > $1.createdAt }
@@ -718,7 +719,7 @@ extension HistoryManager {
     persistenceError = nil
     contentRevision &+= 1
     for id in oldIDs.subtracting(snapshot.map(\.id)) { onItemRemoved?(id) }
-    for item in snapshot { onItemAppended?(item) }
+    for item in snapshot where previous[item.id] != item { onItemAppended?(item) }
   }
 }
 

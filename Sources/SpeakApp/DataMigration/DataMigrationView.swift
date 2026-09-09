@@ -198,7 +198,7 @@ private struct MigrationImportPreview: View {
                     Text("Imported: \(conflict.summary(conflict.imported))").font(.caption)
                     Picker("Use", selection: Binding<Int>(
                         get: { controller.conflictChoices[conflict.id].map { $0 ? 1 : 0 } ?? -1 },
-                        set: { controller.conflictChoices[conflict.id] = $0 == 1 }
+                        set: { controller.conflictChoices[conflict.id] = $0 == -1 ? nil : $0 == 1 }
                     )) {
                         Text("Choose…").tag(-1)
                         Text("Existing").tag(0)

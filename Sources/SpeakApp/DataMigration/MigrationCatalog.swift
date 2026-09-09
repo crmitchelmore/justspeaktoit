@@ -113,8 +113,7 @@ enum MigrationCatalog {
             }
             try MigrationPreferenceSchema.validate(record)
         case "secret":
-            guard category == .credentials, record.value.value is String,
-                  !record.id.hasPrefix("migration.recovery")
+            guard category == .credentials, record.value.value is String
             else {
                 throw MigrationError.invalid("Invalid credential")
             }

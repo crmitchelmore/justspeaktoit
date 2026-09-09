@@ -67,11 +67,13 @@ jobs:
         if: steps.receipt.outputs.status != 'verified'
         run: |
           tuist generate --no-open
+          mkdir -p "Just Speak to It.xcworkspace/xcshareddata/swiftpm"
+          cp Package.resolved "Just Speak to It.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 
       - name: Resolve Swift Package Dependencies
         if: steps.receipt.outputs.status != 'verified'
         run: |
-          xcodebuild -resolvePackageDependencies \
+          xcodebuild -resolvePackageDependencies -onlyUsePackageVersionsFromResolvedFile \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME"
 
@@ -185,10 +187,8 @@ jobs:
             echo "LEGACY_ARCHIVE_PATH=${{ steps.universal.outputs.archive-path }}"
           } >> "$GITHUB_ENV"
 
-      # Standalone speak CLI assets (issue #775): arm64 and x86_64 archives plus
-      # the signed manifest the in-app installer reads. Optional by design — a
-      # failure here must not block the app release, so it is surfaced below and
-      # retried with the publish-speak-cli workflow.
+      # The candidate includes both standalone CLI architectures and its signed
+      # installer manifest. All eight direct assets must verify before promotion.
       - name: Build, notarise and verify speak CLI assets
         if: steps.receipt.outputs.status != 'verified'
         id: cli
@@ -305,18 +305,3 @@ jobs:
         run: |
           security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
           rm -f ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 || true
-
-  # Install the release we just published, for real, on a clean machine.
-  #
-  # Until now nothing ever exercised a Sparkle update: the artefacts were
-  # inspected, never installed. A broken feed, a mis-signed enclosure or an
-  # installer that cannot replace the bundle would have been found by a user
-  # first (2026-09-02). This job downloads the published arm64 DMG and its
-  # appcast, and makes a throw-away copy of the app update *itself* headlessly
-  # from a synthetic feed that re-uses the real signed enclosure — see the
-  # header of scripts/sparkle-update-smoke.sh for what that does and does not
-  # prove.
-  #
-  # Meaningful only from the first release that contains the headless smoke mode:
-  # the script prints SKIPPED and exits 0 for an app whose Info.plist has no
-  # SpeakSparkleSmokeSupported marker.

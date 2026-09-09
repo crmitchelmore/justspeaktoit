@@ -9,9 +9,14 @@ export function validateManifest(manifest) {
     if (!/^(alpha-build|stable-candidate)-[1-9][0-9]*$/.test(manifest.tag)) throw Error('Invalid release tag');
     if (!manifest.tag.startsWith(manifest.train === 'alpha' ? 'alpha-build-' : 'stable-candidate-')) throw Error('Release tag/train mismatch');
     if (!/^\d+$/.test(manifest.build)) throw Error('Invalid upload build');
+    if (!Number.isSafeInteger(manifest.ordinal) || manifest.ordinal < 1 || !manifest.tag.endsWith(`-${manifest.ordinal}`)) throw Error('Invalid allocation ordinal');
+    if (!/^[a-f0-9]{64}$/.test(manifest.dependenciesHash)) throw Error('Missing frozen dependency hash');
     for (const surface of surfaces) {
         const item = manifest.surfaces[surface];
         if (!/^\d+(?:\.\d+){0,2}$/.test(item.build)) throw Error("Missing per-surface build number");
+        if (surface === 'mac-direct' && item.build !== manifest.build) throw Error('Direct build does not match allocation');
+        if (surface !== 'mac-direct' && !/^[1-9]\d{0,3}(?:\.\d{1,2}){0,2}$/.test(item.build)) throw Error('Invalid Apple upload build components');
+        if (item.storeNotes.length > 4000) throw Error('Store notes exceed the frozen Apple text limit');
         if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(item.version)) throw Error('Apple marketing versions must be numeric X.Y.Z');
         if (!/^[a-f0-9]{40}$/.test(item.baseline)) throw Error('Missing published baseline');
         if (digest(item.notes) !== item.notesHash) throw Error(`Notes hash mismatch: ${surface}`);

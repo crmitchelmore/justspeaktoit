@@ -140,6 +140,8 @@ jobs:
         if: steps.preflight.outputs.skip_upload != 'true'
         run: |
           tuist generate --no-open
+          mkdir -p "Just Speak to It.xcworkspace/xcshareddata/swiftpm"
+          cp Package.resolved "Just Speak to It.xcworkspace/xcshareddata/swiftpm/Package.resolved"
           {
             echo "### Keyboard rollout policy"
             echo "- Extension included: $TUIST_IOS_KEYBOARD"
@@ -243,7 +245,7 @@ jobs:
           BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          xcodebuild archive \
+          xcodebuild archive -onlyUsePackageVersionsFromResolvedFile \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme SpeakiOS \
             -configuration Release \

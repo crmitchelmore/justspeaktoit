@@ -47,6 +47,7 @@ module AppleRelease
       @client, @manifest, @surface, @repo = client, manifest, surface, repo
       @item = manifest.fetch('surfaces').fetch(surface)
       raise 'Notes changed after approval' unless Digest::SHA256.hexdigest(@item.fetch('notes')) == @item.fetch('notesHash')
+      raise 'Store notes changed after approval' unless Digest::SHA256.hexdigest(@item.fetch('storeNotes')) == @item.fetch('storeNotesHash')
       @train = manifest.fetch('train')
       @pipeline = JSON.parse(File.read('Config/ReleasePipeline.json'))
       @app = @pipeline.fetch('apple').fetch(@train).fetch(surface)
@@ -68,6 +69,9 @@ module AppleRelease
     def receipt(status, build, extra = {})
       data = {source: @manifest.fetch('source'), build: @item.fetch('build'), notesHash: @item.fetch('notesHash'),
         status: status, assets: {}, appleBuildID: build&.fetch('id'), checkedAt: Time.now.utc.iso8601}.merge(extra)
+      expiry = build&.dig('attributes', 'expirationDate')
+      data[:expirationDate] = expiry
+      data[:expiresSoon] = !!(expiry && Time.parse(expiry) <= Time.now + 7 * 86_400)
       Dir.mktmpdir('apple-release-') do |dir|
         path = File.join(dir, "#{@surface}-receipt.json")
         File.write(path, JSON.pretty_generate(data) + "\n")
@@ -113,6 +117,10 @@ module AppleRelease
       raise 'Expected tester group is missing; do not move existing testers' if targets.empty?
       detail = @client.get("/v1/builds/#{id}/buildBetaDetail").fetch('data')
       state = detail.dig('attributes', @train == 'alpha' ? 'externalBuildState' : 'internalBuildState')
+      if @train == 'alpha' && %w[BETA_REJECTED INVALID_BINARY].include?(state)
+        receipt('beta_rejected', found, betaState: state)
+        raise 'Apple beta review rejected this build; inspect the review feedback before rebuilding'
+      end
       if @train == 'alpha' && !%w[IN_BETA_TESTING READY_FOR_BETA_TESTING BETA_APPROVED].include?(state)
         if state == 'READY_FOR_BETA_SUBMISSION'
           query = URI.encode_www_form('filter[app]' => @app, 'filter[betaAppReviewSubmission.betaReviewState]' => 'WAITING_FOR_REVIEW,IN_REVIEW', 'limit' => 200)
@@ -145,7 +153,7 @@ module AppleRelease
       state = detail.dig('attributes', @train == 'alpha' ? 'externalBuildState' : 'internalBuildState')
       ready = %w[IN_BETA_TESTING READY_FOR_BETA_TESTING].include?(state)
       receipt(ready ? 'verified' : 'beta_processing', found, betaState: state,
-        groups: targets.map { |g| g['id'] }, publicLinks: targets.filter_map { |g| g.dig('attributes', 'publicLink') }, expirationDate: found.dig('attributes', 'expirationDate'))
+        groups: targets.map { |g| g['id'] }, publicLinks: targets.map { |g| g.dig('attributes', 'publicLink') }.compact, expirationDate: found.dig('attributes', 'expirationDate'))
     end
 
     def observe_publication

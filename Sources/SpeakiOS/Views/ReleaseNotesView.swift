@@ -55,7 +55,7 @@ public struct ReleaseNotesView: View {
 
     private func versionRow(_ entry: ReleaseNoteEntry) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Version \(entry.version)")
+            Text(entry.displayTitle)
             if let published = entry.publishedDate {
                 Text(published.formatted(date: .abbreviated, time: .omitted))
                     .font(.caption)
@@ -81,7 +81,7 @@ public struct ReleaseNoteDetailView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
         }
-        .navigationTitle("Version \(entry.version)")
+        .navigationTitle(entry.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
     }
 }

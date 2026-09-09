@@ -50,4 +50,17 @@ final class ReleaseTrainTests: XCTestCase {
         )
         XCTAssertEqual(ReleaseTrain.resolve(metadata: nil, bundleIdentifier: "com.justspeaktoit.ios"), .stable)
     }
+    func testAlphaNotesDistinguishBuildsOfSameVersion() {
+        let entries = [1, 2].map { build in
+            ReleaseNoteEntry(version: "3.2.0", tag: "alpha-build-\(build)", publishedAt: "2026-09-09",
+                             markdown: "Build \(build)", platform: .mac, train: .alpha, build: "1000.0.\(build)")
+        }
+        var browser = ReleaseNotesBrowser(catalog: .init(entries: entries), installedVersion: "3.2.0",
+                                          platform: .mac, train: .alpha)
+        XCTAssertTrue(browser.isShowingInstalledVersion)
+        XCTAssertNotEqual(entries[0].displayTitle, entries[1].displayTitle)
+        browser.select(version: entries[0].selectionKey)
+        XCTAssertFalse(browser.isShowingInstalledVersion)
+        XCTAssertEqual(browser.selectedEntry?.build, "1000.0.1")
+    }
 }

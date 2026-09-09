@@ -182,6 +182,8 @@ jobs:
           # Config/AppInfo.AppStore.plist, and no Sparkle target dependency.
           export TUIST_MAC_PROFILE_NAME="$MAC_PROFILE_NAME"
           tuist generate --no-open
+          mkdir -p "Just Speak to It.xcworkspace/xcshareddata/swiftpm"
+          cp Package.resolved "Just Speak to It.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 
       - name: Build Release Archive
         if: steps.preflight.outputs.skip_upload != 'true'
@@ -196,7 +198,7 @@ jobs:
             echo "::error::Installed Mac App Store provisioning profile name is required"
             exit 1
           fi
-          xcodebuild archive \
+          xcodebuild archive -onlyUsePackageVersionsFromResolvedFile \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \

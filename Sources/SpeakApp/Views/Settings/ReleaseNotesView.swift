@@ -32,7 +32,7 @@ struct ReleaseNotesView: View {
     List(selection: selectionBinding) {
       ForEach(browser.entries) { entry in
         VStack(alignment: .leading, spacing: 2) {
-          Text("Version \(entry.version)")
+          Text(entry.displayTitle)
             .font(.body)
           if let published = entry.publishedDate {
             Text(published.formatted(date: .abbreviated, time: .omitted))

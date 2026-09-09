@@ -124,6 +124,17 @@ if(command === 'allocate' || command === 'prepare') {
     writeFileSync('VERSION',item.version+'\n');
     const cataloguePath='Sources/SpeakCore/Resources/ReleaseNotes.json';
     const existing=json(cataloguePath).entries.filter(e=>(e.train??'stable') === manifest.train);
+    if(manifest.train === 'alpha') {
+        const published=new Set(releases().filter(r=>!r.draft && r.tag_name.startsWith('alpha-build-')).map(r=>r.tag_name));
+        const history=git('tag','--list','alpha-build-*').split('\n').filter(tag=>published.has(tag))
+            .map(manifestFor).filter(m=>m.ordinal < manifest.ordinal).sort((a,b)=>b.ordinal-a.ordinal).slice(0,12);
+        for(const prior of history) {
+            try { git('merge-base','--is-ancestor',prior.source,manifest.source); } catch { continue; }
+            const previous=prior.surfaces[surface];
+            existing.push({platform:surface==='ios'?'ios':'mac',train:'alpha',build:previous.build,version:previous.version,
+                tag:prior.tag,publishedAt:prior.createdAt,markdown:previous.notes});
+        }
+    }
     const entry={platform:surface==='ios'?'ios':'mac',train:manifest.train,build:item.build,version:item.version,tag:manifest.tag,publishedAt:manifest.createdAt,markdown:item.notes};
     writeFileSync(cataloguePath,JSON.stringify(buildCatalogue({entries:mergeEntries(existing,[entry])}),null,2)+'\n');
     writeFileSync(join(process.env.RUNNER_TEMP,'release-notes.md'),item.notes);
@@ -208,6 +219,8 @@ if(command === 'allocate' || command === 'prepare') {
     if(!adoption) throw Error('Cannot determine Alpha adoption boundary');
     const runs=JSON.parse(gh('api','--paginate','--slurp',`repos/${repo}/actions/workflows/ci.yml/runs?event=push&branch=main&status=success&per_page=100`)).flatMap(p=>p.workflow_runs);
     const existing=releases();
+    const pointerAsset=existing.find(r=>r.tag_name==='alpha-latest')?.assets.find(a=>a.name==='alpha-pointer.json');
+    const pointer=pointerAsset ? JSON.parse(gh('api',`repos/${repo}/releases/assets/${pointerAsset.id}`,'-H','Accept: application/octet-stream')) : null;
     const allocated=new Map(existing.filter(r=>r.tag_name.startsWith('alpha-build-')).sort((a,b)=>Number(a.tag_name.split('-').at(-1))-Number(b.tag_name.split('-').at(-1))).map(r=>[git('rev-parse',`${r.tag_name}^{commit}`),r]));
     const active=api(`repos/${repo}/actions/workflows/alpha-release.yml/runs?per_page=100`).workflow_runs.filter(r=>r.status !== 'completed');
     const seen=new Set();
@@ -218,14 +231,16 @@ if(command === 'allocate' || command === 'prepare') {
         if(active.some(a=>a.display_title === `Alpha ${r.head_sha}`)) continue;
         const allocatedRelease=allocated.get(r.head_sha);
         if(allocatedRelease) {
+            const allocatedManifest=manifestFor(allocatedRelease.tag_name);
             let complete=true;
             for(const surface of surfaces) {
                 const asset=allocatedRelease.assets.find(a=>a.name===`${surface}-receipt.json`);
                 if(!asset) {complete=false;break;}
                 const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
-                if(receipt.status !== 'verified') {complete=false;break;}
+                const item=allocatedManifest.surfaces[surface];
+                if(receipt.status !== 'verified' || receipt.source !== allocatedManifest.source || receipt.build !== item.build || receipt.notesHash !== item.notesHash) {complete=false;break;}
             }
-            if(complete) continue;
+            if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) continue;
         }
         gh('workflow','run','alpha-release.yml','--repo',repo,'--ref','main','-f',`source=${r.head_sha}`);
     }

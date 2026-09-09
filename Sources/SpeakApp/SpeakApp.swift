@@ -29,7 +29,7 @@ struct SpeakApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Just Speak to It", id: "main") {
+        WindowGroup(ReleaseTrain.current.displayName, id: "main") {
             Group {
                 if SparkleSmokeSession.isActive {
                     // A zero-size placeholder: SwiftUI still needs a scene, but

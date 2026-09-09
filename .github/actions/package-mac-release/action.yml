@@ -79,7 +79,7 @@ runs:
         # Distribution signing and profile resolution happens at export time.
         # ARCHS selects the slices this variant ships; ONLY_ACTIVE_ARCH=NO keeps
         # the universal variant universal on an arm64 runner.
-        xcodebuild archive \
+        xcodebuild archive -onlyUsePackageVersionsFromResolvedFile \
           -workspace "$WORKSPACE" \
           -scheme "$SCHEME" \
           -configuration Release \

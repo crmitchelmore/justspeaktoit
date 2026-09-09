@@ -135,6 +135,9 @@ public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
             : "\(platform.rawValue):alpha:\(version):\(build ?? tag)"
     }
     public var selectionKey: String { train == .stable ? version : id }
+    public var displayTitle: String {
+        train == .alpha ? "Version \(version) Alpha \(build ?? tag)" : "Version \(version)"
+    }
 
     public init(
         version: String,
@@ -300,11 +303,14 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     public init(
         catalog: ReleaseNotesCatalog = .bundled,
         installedVersion: String = ReleaseNotesCatalog.installedVersion(),
-        platform: ReleaseNotesPlatform = .current
+        platform: ReleaseNotesPlatform = .current,
+        train: ReleaseTrain = .current
     ) {
-        self.entries = catalog.entries(for: platform)
+        self.entries = catalog.entries(for: platform, train: train)
         self.installedVersion = ReleaseNotesVersion.normalised(installedVersion)
-        self.selectedVersion = catalog.entry(forVersion: installedVersion, platform: platform)?.selectionKey
+        self.selectedVersion = self.entries.first {
+            $0.version == ReleaseNotesVersion.normalised(installedVersion)
+        }?.selectionKey
             ?? self.entries.first?.selectionKey
     }
 
@@ -348,7 +354,7 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     }
 
     public var isShowingInstalledVersion: Bool {
-        selectedEntry != nil && selectedEntry?.version == installedVersion
+        selectedEntry != nil && selectedEntry?.id == installedEntry?.id
     }
 
     /// Versions other than the one on screen, newest first.
@@ -362,7 +368,7 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
 
     public func title(for entry: ReleaseNoteEntry) -> String {
         entry.train == .alpha
-            ? "Version \(entry.version) Alpha \(entry.build ?? entry.tag)"
+            ? entry.displayTitle
             : entry.version == installedVersion
             ? "Version \(entry.version) (installed)"
             : "Version \(entry.version)"

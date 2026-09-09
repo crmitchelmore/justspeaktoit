@@ -578,23 +578,14 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(tapScript.contains("speak-#{version}-arm64.zip"))
         XCTAssertTrue(tapScript.contains("speak-#{version}-x86_64.zip"))
 
-        // The retry workflow reads the DMG digests back out of that two-line
-        // cask by label, not by layout, and refuses to proceed without them.
+        // Published candidate assets cannot be replaced by the legacy repair lane.
         let retryWorkflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/publish-speak-cli.yml"),
             encoding: .utf8
         )
-        XCTAssertTrue(retryWorkflow.contains("grep -oE 'arm: *\"[0-9a-f]{64}\"'"))
-        XCTAssertTrue(retryWorkflow.contains("grep -oE 'intel: *\"[0-9a-f]{64}\"'"))
-        XCTAssertTrue(retryWorkflow.contains("Could not read the DMG digests"))
-        // It builds the CLI from the tag but runs the pipeline files from
-        // main, fetched into the remote-tracking ref it then checks out from.
-        XCTAssertTrue(retryWorkflow.contains("ref: refs/tags/mac-v${{ github.event.inputs.version }}"))
-        XCTAssertTrue(retryWorkflow.contains(
-            "git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main"
-        ))
-        XCTAssertTrue(retryWorkflow.contains("git checkout origin/main -- \\\n            scripts/"))
-        XCTAssertTrue(retryWorkflow.contains("            .github/actions/publish-speak-cli\n"))
+        XCTAssertTrue(retryWorkflow.contains("CLI assets are frozen with release-train candidates"))
+        XCTAssertTrue(retryWorkflow.contains("exit 1"))
+        XCTAssertFalse(retryWorkflow.contains("gh release upload"))
 
         // Signing tools never arrive through an unverified download while the
         // private key is on disk.

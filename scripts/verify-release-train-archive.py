@@ -24,8 +24,25 @@ if surface == 'mac-direct' and info.get('SUFeedURL') != config['feedURL']:
     raise SystemExit('Wrong Sparkle release train')
 if surface == 'mac-store' and any(key.startswith('SU') for key in info):
     raise SystemExit('App Store archive contains Sparkle configuration')
+def signed_entitlements(bundle):
+    result = subprocess.run(['codesign', '-d', '--entitlements', ':-', str(bundle)],
+                            check=True, capture_output=True)
+    return plistlib.loads(result.stdout)
+
+if surface != 'mac-direct':
+    entitlements = signed_entitlements(app)
+    cloud = config['iosCloudContainer' if surface == 'ios' else 'macCloudContainer']
+    if entitlements.get('com.apple.developer.icloud-container-identifiers') != [cloud]:
+        raise SystemExit('Signed archive has the wrong CloudKit containers')
+    kv = config['iosKVStoreIdentifier' if surface == 'ios' else 'macKVStoreIdentifier']
+    if entitlements.get('com.apple.developer.ubiquity-kvstore-identifier', '').split('.', 1)[-1] != kv:
+        raise SystemExit('Signed archive has the wrong iCloud key-value store')
+    if surface == 'ios' and entitlements.get('com.apple.security.application-groups') != [config['iosAppGroup']]:
+        raise SystemExit('Signed archive has the wrong App Groups')
 for extension in app.rglob('*.appex'):
     ext = plistlib.loads((extension / 'Info.plist').read_bytes())
+    if surface == 'ios' and signed_entitlements(extension).get('com.apple.security.application-groups') != [config['iosAppGroup']]:
+        raise SystemExit('Signed extension has the wrong App Groups')
     if not ext['CFBundleIdentifier'].startswith(expected_id + '.'):
         raise SystemExit('Extension belongs to another app identity')
     for key in ['SpeakReleaseTrain', 'CFBundleShortVersionString', 'CFBundleVersion']:

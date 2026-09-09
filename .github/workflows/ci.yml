@@ -87,10 +87,10 @@ jobs:
             EXEC_PATH="$XCTEST_PATH/Contents/MacOS/$(basename "$XCTEST_PATH" .xctest)"
             COV_DIR=$(swift test --show-codecov-path 2>/dev/null || echo "")
             if [ -n "$COV_DIR" ] && [ -f "$COV_DIR" ]; then
-              echo "### Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+              echo "### Test Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
               xcrun llvm-cov report "$EXEC_PATH" \
                 --instr-profile="$(dirname "$COV_DIR")/default.profdata" \
-                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY || true
+                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> "$GITHUB_STEP_SUMMARY" || true
             fi
           fi
 
@@ -436,6 +436,7 @@ jobs:
         run: |
           node --test scripts/tests/*.test.mjs scripts/release-train.test.mjs
           python3 scripts/generate-release-train-config.py --check
+          ruby scripts/tests/release_apple_test.rb
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Test release-notes generator

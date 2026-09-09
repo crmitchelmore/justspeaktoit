@@ -176,6 +176,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     typealias ActivityCompletion =
         @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String, String?, String) -> Void
     private let completeActivity: ActivityCompletion
+    private let sessionFactory: (() throws -> IOSTranscriptionSession)?
 
     private convenience init() {
         self.init(
@@ -196,8 +197,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         polishClipboard: PolishClipboard,
         hasPolishingKey: @escaping @MainActor () -> Bool,
         polish: @escaping @MainActor (String, String, String) async throws -> String,
-        completeActivity: @escaping ActivityCompletion = TranscriptionRecordingService.completeSharedActivity
+        completeActivity: @escaping ActivityCompletion = TranscriptionRecordingService.completeSharedActivity,
+        sessionFactory: (() throws -> IOSTranscriptionSession)? = nil
     ) {
+        self.sessionFactory = sessionFactory
         self.sharedState = sharedState
         self.historyManager = historyManager
         self.polishClipboard = polishClipboard
@@ -446,7 +449,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             let languageIdentifier = keyboardProfile?.languageIdentifier
                 ?? runParameters.languageIdentifier
                 ?? settings.preferredLocaleIdentifier
-            let session = try IOSTranscriptionSession(
+            let session = try sessionFactory?() ?? IOSTranscriptionSession(
                 modelID: currentModel,
                 mode: mode,
                 language: TranscriptionLanguageCatalog.providerLanguage(for: languageIdentifier),

@@ -28,7 +28,9 @@ final class TranscriberCoordinator: ObservableObject {
 
     let audioSessionManager: AudioSessionManager
     private let activityManager = TranscriptionActivityManager.shared
-    private let sharedState = SharedTranscriptionState.shared
+    private let sharedState: SharedTranscriptionState
+    private let historyManager: iOSHistoryManager
+    private let sessionFactory: (() throws -> IOSTranscriptionSession)?
 
     private var transcriptionSession: IOSTranscriptionSession?
     private var stoppingSession: IOSTranscriptionSession?
@@ -53,7 +55,14 @@ final class TranscriberCoordinator: ObservableObject {
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
 
-    init() {
+    init(
+        sharedState: SharedTranscriptionState = .shared,
+        historyManager: iOSHistoryManager = .shared,
+        sessionFactory: (() throws -> IOSTranscriptionSession)? = nil
+    ) {
+        self.sharedState = sharedState
+        self.historyManager = historyManager
+        self.sessionFactory = sessionFactory
         self.audioSessionManager = AudioSessionManager()
     }
 
@@ -111,7 +120,7 @@ final class TranscriberCoordinator: ObservableObject {
             guard let self, let session,
                   self.ownsSession(session) else { return }
             self.handleError(error)
-            guard case iOSTranscriptionError.microphoneChanged = error else { return }
+            guard Self.requiresControlledStop(error) else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.transcriptionSession === session, self.isRunning else { return }
                 if let onCaptureDisruption = self.onCaptureDisruption {
@@ -121,6 +130,12 @@ final class TranscriberCoordinator: ObservableObject {
                 }
             }
         }
+    }
+
+    private static func requiresControlledStop(_ error: Error) -> Bool {
+        if case iOSTranscriptionError.microphoneChanged = error { return true }
+        if case OpenAIRealtimeError.preReadyAudioOverflow = error { return true }
+        return false
     }
 
     private func ownsSession(_ session: IOSTranscriptionSession) -> Bool {
@@ -266,7 +281,7 @@ final class TranscriberCoordinator: ObservableObject {
         // Onboarding progress is only ever earned by a transcript that really
         // arrived; a blank one is ignored by the policy.
         CaptureOnboardingStore.shared.recordDictation(trigger: .inApp, transcript: result.text)
-        iOSHistoryManager.shared.recordTranscription(
+        historyManager.recordTranscription(
             text: result.text,
             model: currentModel,
             duration: result.duration
@@ -366,7 +381,7 @@ private extension TranscriberCoordinator {
         let mode: IOSTranscriptionSession.Mode = settings.transcriptionMode == .batch
             ? .batch(retainRecording: true)
             : .streaming
-        let session = try IOSTranscriptionSession(
+        let session = try sessionFactory?() ?? IOSTranscriptionSession(
             modelID: currentModel,
             mode: mode,
             language: settings.preferredModelLanguage,

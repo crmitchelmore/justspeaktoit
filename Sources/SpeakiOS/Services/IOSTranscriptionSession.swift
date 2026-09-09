@@ -141,6 +141,13 @@ final class IOSTranscriptionSession {
         bindCallbacks()
     }
 
+    init(openAI transcriber: OpenAIRealtimeLiveTranscriber) throws {
+        resolution = try Self.resolve(modelID: "openai/gpt-live-transcribe-streaming", mode: .streaming)
+        language = nil
+        backend = .openAI(transcriber)
+        bindCallbacks()
+    }
+
     nonisolated static func resolve(modelID: String, mode: Mode) throws -> Resolution {
         let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         if case .batch = mode {

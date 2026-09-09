@@ -754,7 +754,16 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   var hasConfiguredGlobalHotKey: Bool {
-    ReleaseTrain.current == .stable || defaults.data(forKey: DefaultsKey.selectedHotKey.rawValue) != nil
+    isGlobalHotKeyConfigured(for: ReleaseTrain.current)
+  }
+
+  func isGlobalHotKeyConfigured(for train: ReleaseTrain) -> Bool {
+    train == .stable || defaults.bool(forKey: "alphaGlobalHotKeyExplicitlyChosen")
+  }
+
+  func chooseGlobalHotKey(_ hotKey: HotKey) {
+    defaults.set(true, forKey: "alphaGlobalHotKeyExplicitlyChosen")
+    selectedHotKey = hotKey
   }
 
   @Published var selectedHotKey: HotKey {

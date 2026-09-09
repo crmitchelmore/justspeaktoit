@@ -31,7 +31,7 @@ extension SettingsView {
               hotKey: Binding(
                 get: { self.settings.selectedHotKey },
                 set: { newKey in
-                  self.settings.selectedHotKey = newKey
+                  self.settings.chooseGlobalHotKey(newKey)
                   self.environment.hotKeys.restartWithCurrentHotKey()
                 }
               )

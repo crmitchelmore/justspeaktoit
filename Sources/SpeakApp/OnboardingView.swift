@@ -430,7 +430,7 @@ struct OnboardingView: View {
     private func saveHotKeySelection() {
         // Alpha must not claim Stable's default shortcut just by pressing Next.
         guard ReleaseTrain.current == .stable || state.hotKeyWasChosen else { return }
-        state.settings.selectedHotKey = state.selectedHotKey
+        state.settings.chooseGlobalHotKey(state.selectedHotKey)
         state.hotKeyManager.restartWithCurrentHotKey()
     }
 

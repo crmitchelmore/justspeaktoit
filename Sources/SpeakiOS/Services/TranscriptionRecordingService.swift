@@ -355,7 +355,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
-        let receipt = applyDestinationSideEffects(text: text, destination: resolvedDestination)
+        applyDestinationSideEffects(text: text, destination: resolvedDestination)
 
         // Update shared state. Live writes are throttled, so commit the
         // complete transcript exactly once at stop.
@@ -369,9 +369,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         completeRecordingActivity(duration: duration, primedMessage: primedActivityMessage)
 
         // Kick off background post-processing if the chosen destination + user
-        // settings call for it. The polished clipboard write must also survive
-        // process suspension, so the background assertion is released only once
-        // post-processing has finished.
+        // settings call for it. Polished text stays in History; the raw clipboard
+        // write is final. Release the assertion when post-processing finishes.
         if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
             && !text.isEmpty {
             if let historyItem {
@@ -381,7 +380,6 @@ public final class TranscriptionRecordingService: ObservableObject {
                 text: text,
                 historyItemID: historyItem?.id,
                 completionID: completionID,
-                receipt: receipt,
                 assertion: assertion
             )
         } else {
@@ -478,7 +476,6 @@ public final class TranscriptionRecordingService: ObservableObject {
         text: String,
         historyItemID: UUID?,
         completionID: UUID,
-        receipt: PolishClipboard.Receipt?,
         assertion: BackgroundTaskAssertion
     ) {
         let settings = AppSettings.shared
@@ -487,8 +484,6 @@ public final class TranscriptionRecordingService: ObservableObject {
         let historyManager = self.historyManager
         let polish = self.polish
         let operation = AutomaticPolishOperation(
-            clipboard: polishClipboard,
-            receipt: receipt,
             isCurrent: { [weak self] in self?.latestCompletionID == completionID },
             success: { [weak self] polished, current in
                 if current {
@@ -587,14 +582,13 @@ private extension TranscriptionRecordingService {
         text: String,
         destination: HardwareTriggerDestination,
         sharesCompletedTranscript: Bool? = nil
-    ) -> PolishClipboard.Receipt? {
-        guard !text.isEmpty else { return nil }
-        var receipt: PolishClipboard.Receipt?
+    ) {
+        guard !text.isEmpty else { return }
         if let clipboardText = Self.clipboardTextAtStop(
             transcript: text,
             destination: destination
         ) {
-            receipt = polishClipboard.copyRaw(clipboardText)
+            polishClipboard.copyRaw(clipboardText)
         }
 
         // Keyboard handoffs keep their result solely in the nonce-scoped store.
@@ -606,7 +600,6 @@ private extension TranscriptionRecordingService {
         ) {
             sharedState.lastCompletedTranscript = sharedTranscript
         }
-        return receipt
     }
 
     /// The most complete transcript we can produce at stop time. The transcriber

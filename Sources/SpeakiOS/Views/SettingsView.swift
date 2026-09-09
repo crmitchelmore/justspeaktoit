@@ -21,9 +21,8 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
     case clipboard
 
     /// Copy to clipboard and run the configured post-processor (OpenRouter)
-    /// asynchronously. Raw text is copied first; a timely polish may replace
-    /// it while the foreground app still owns the clipboard. Without a key,
-    /// the raw copy remains available.
+    /// asynchronously. Raw text is copied once and polished text is saved in
+    /// History. Without a key, the raw copy remains available.
     case clipboardAndPostProcess
 
     /// Save to history only — don't touch the clipboard, don't post-process.
@@ -46,8 +45,7 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
         case .clipboard:
             return "Transcript is copied to the clipboard immediately when recording stops."
         case .clipboardAndPostProcess:
-            return "Raw transcript is copied immediately. While the app is active and the clipboard stays unchanged, "
-                + "the polished version may replace it within 20 seconds. Polished text is also saved in History."
+            return "Raw transcript is copied immediately. Polished text is saved in History."
         case .historyOnly:
             return "Transcript is saved to history. Clipboard and post-processing are skipped."
         }

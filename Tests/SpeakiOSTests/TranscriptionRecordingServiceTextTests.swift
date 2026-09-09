@@ -132,7 +132,7 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         let service = TranscriptionRecordingService(
             sharedState: sharedState,
             historyManager: history,
-            polishClipboard: PolishClipboard(pasteboard: pasteboard, now: { 100 }, isActive: { true }),
+            polishClipboard: PolishClipboard(pasteboard: pasteboard),
             hasPolishingKey: { true },
             polish: { _, _, _ in
                 try await withCheckedThrowingContinuation { continuation = $0 }
@@ -162,7 +162,7 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         XCTAssertEqual(history.items.first?.id, itemA.id)
         XCTAssertEqual(history.items.first?.postProcessedTranscription, "Polished recording A")
         XCTAssertEqual(sharedState.lastCompletedTranscript, "Polished recording A")
-        XCTAssertEqual(pasteboard.string, "Polished recording A")
+        XCTAssertEqual(pasteboard.string, "Recording A")
     }
     #endif
 
@@ -182,16 +182,95 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         XCTAssertEqual(service.wordCount, 0)
     }
 }
+#if DEBUG && targetEnvironment(simulator)
+@MainActor
+extension TranscriptionRecordingServiceTextTests {
+    func testAutomaticDestinationsNeverWritePolishOrRestoreRaw() async throws {
+        let settings = AppSettings.shared
+        let previous = settings.autoPostProcess
+        settings.autoPostProcess = true
+        defer { settings.autoPostProcess = previous }
+
+        let copies: [(changed: Bool, text: String?)] = [
+            (false, nil), (true, "Different copy"), (true, "Raw transcript"), (true, nil)
+        ]
+        for destination in [HardwareTriggerDestination.clipboardAndPostProcess, nil] {
+            for fails in [false, true] {
+                for copy in copies {
+                    try await assertRawOnly(destination: destination, keyAvailable: true, fails: fails, copy: copy)
+                }
+            }
+            try await assertRawOnly(destination: destination, keyAvailable: false, fails: false, copy: (false, nil))
+        }
+    }
+
+    private func assertRawOnly(
+        destination: HardwareTriggerDestination?,
+        keyAvailable: Bool,
+        fails: Bool,
+        copy: (changed: Bool, text: String?)
+    ) async throws {
+        let suite = "RawOnlyClipboardTest.\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let history = iOSHistoryManager(
+            fileURL: directory.appendingPathComponent("history.json"), syncEnabled: false, userDefaults: defaults
+        )
+        let shared = SharedTranscriptionState(defaults: defaults)
+        let board = RecordingTestPasteboard()
+        var continuation: CheckedContinuation<String, Error>?
+        let service = TranscriptionRecordingService(
+            sharedState: shared,
+            historyManager: history,
+            polishClipboard: PolishClipboard(pasteboard: board),
+            hasPolishingKey: { keyAvailable },
+            polish: { _, _, _ in try await withCheckedThrowingContinuation { continuation = $0 } }
+        )
+        defer { service.cancelRecording() }
+        defaults.set("Raw transcript", forKey: "simulatorValidationTranscript")
+        try await service.startRecording(requiresLiveActivity: false)
+        await service.stopRecording(destination: destination)
+        XCTAssertEqual(board.writes, ["Raw transcript"], "Stop must make raw text immediately available")
+        if keyAvailable {
+            for _ in 0..<1_000 where continuation == nil { await Task.yield() }
+            let pending = try XCTUnwrap(continuation)
+            if copy.changed { board.string = copy.text }
+            if fails {
+                pending.resume(throwing: URLError(.timedOut))
+            } else {
+                pending.resume(returning: "Polished transcript")
+            }
+            for _ in 0..<1_000 where !history.reprocessingIDs.isEmpty { await Task.yield() }
+        } else {
+            XCTAssertNil(continuation, "Missing key must leave the initial raw copy intact")
+        }
+        XCTAssertTrue(history.reprocessingIDs.isEmpty)
+        XCTAssertEqual(board.writes, ["Raw transcript"], "No second write, even if clipboard is unchanged")
+        XCTAssertEqual(board.string, copy.changed ? copy.text : "Raw transcript")
+        XCTAssertEqual(history.items.count, 1)
+        XCTAssertEqual(
+            history.items.first?.postProcessedTranscription, keyAvailable && !fails ? "Polished transcript" : nil
+        )
+        XCTAssertEqual(
+            shared.lastCompletedTranscript, keyAvailable && !fails ? "Polished transcript" : "Raw transcript"
+        )
+    }
+}
+#endif
+
 @MainActor
 private final class RecordingTestPasteboard: PolishPasteboard {
-    var changeCount = 0
-    var ownershipToken: String?
     var string: String?
+    var writes: [String] = []
 
-    func write(_ text: String, token: String) {
+    func write(_ text: String) {
         string = text
-        ownershipToken = token
-        changeCount += 1
+        writes.append(text)
     }
 }
 #endif

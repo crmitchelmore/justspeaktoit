@@ -11,7 +11,7 @@ import SwiftUI
 @main
 struct JustSpeakToItWidgetExtensionBundle: WidgetBundle {
     var body: some Widget {
-        JustSpeakToItWidgetExtension()
+        TranscribeWidget()
         if #available(iOS 18.0, *) {
             JustSpeakToItWidgetExtensionControl()
         }

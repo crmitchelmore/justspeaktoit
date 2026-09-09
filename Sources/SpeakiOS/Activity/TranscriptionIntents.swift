@@ -437,7 +437,17 @@ public final class SharedTranscriptionState {
     /// Whether a headless recording session is currently active.
     public var isRecording: Bool {
         get { defaults?.bool(forKey: "isRecording") ?? false }
-        set { defaults?.set(newValue, forKey: "isRecording") }
+        set {
+            let changed = defaults?.bool(forKey: "isRecording") != newValue
+            defaults?.set(newValue, forKey: "isRecording")
+            // The widget and the Control Center control read this value from the
+            // App Group and are not observing it, so they stay stale until they
+            // are told. Only push on a real transition.
+            guard changed else { return }
+            Task { @MainActor in
+                CaptureSurfaceRefresher.recordingStateChanged()
+            }
+        }
     }
 
     /// Start time of the current recording session.

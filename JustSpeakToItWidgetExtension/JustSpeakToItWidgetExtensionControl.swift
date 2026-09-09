@@ -13,7 +13,9 @@ import SpeakiOSLib
 
 @available(iOS 18.0, *)
 struct JustSpeakToItWidgetExtensionControl: ControlWidget {
-    static let kind: String = "com.justspeaktoit.ios.JustSpeakToItWidgetExtension"
+    // Shared with the app so a rename cannot orphan a placed control or leave
+    // the app reloading a kind that no longer exists.
+    static let kind: String = CaptureSurfaceKind.transcriptionControl
 
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(

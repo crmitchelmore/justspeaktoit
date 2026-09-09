@@ -15,7 +15,7 @@ No new entitlements or privacy usage descriptions are needed.
 | Permission | First request / recovery |
 | --- | --- |
 | Accessibility (direct distribution) | Open the floating drag guide; avoid an additional trust alert covering Settings. |
-| Input Monitoring | Keep the native request; show the drag guide if access remains missing. |
+| Input Monitoring | Open the drag guide directly; repeated native requests may show no UI. |
 | Microphone | Keep the native first request; denied access opens a floating switch guide. |
 | Speech Recognition | Keep the native first request and timeout; denial or timeout opens a floating switch guide. |
 | Restricted permissions | Explain Screen Time / administrator restrictions instead of suggesting another prompt. |
@@ -55,3 +55,13 @@ identity when checking real grants.
 
 A guide being visible proves its UI; a real TCC grant and working recording or
 hotkey/text insertion remain separate checks.
+
+Onboarding subscribes to the manager's published status snapshots; the dashboard
+permission section observes the manager directly. Polling and app activation
+refreshes therefore update all permission surfaces. Checks never infer a grant
+from a confirmation click. Silent Accessibility checks use the public
+`AXIsProcessTrustedWithOptions(nil)` API; a denied result still remains denied.
+All permission copy and the onboarding app name use the current bundle's Finder
+name, retaining Alpha/Dev suffixes. Recovery help reveals that exact bundle and
+reports the result of Check Again, with toggle/relaunch instructions for a stale
+OS grant. No TCC reset or automatic relaunch is performed.

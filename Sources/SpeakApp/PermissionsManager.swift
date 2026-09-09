@@ -27,7 +27,7 @@ enum PermissionRequestIssue: Equatable {
     switch self {
     case .timedOut:
       return "macOS did not finish the \(permission.displayName) request. Open System Settings, "
-        + "choose a permission state, then refresh Speak."
+        + "choose a permission state, then refresh \(RunningAppIdentity.current.name)."
     }
   }
 }
@@ -158,10 +158,10 @@ final class PermissionsManager: ObservableObject {
     guard PermissionType.availablePermissions(for: DistributionChannel.current).contains(type) else {
       return current
     }
-    // Accessibility can be added by dragging the app. Avoid a second macOS alert
-    // covering the guide. Denied/restricted prompt-based permissions cannot re-prompt.
-    if type == .accessibility || current == .restricted
-      || (current == .denied && type != .inputMonitoring) {
+    // Both manual permissions can be added by dragging the running app.
+    // CGRequestListenEventAccess can return without any visible UI after denial;
+    // an explicit Grant action must always lead to an actionable Settings guide.
+    if type.dragGuidancePane != nil || current == .restricted || current == .denied {
       openSettings(for: type)
       return current
     }
@@ -219,11 +219,11 @@ final class PermissionsManager: ObservableObject {
     case .speechRecognition:
       return speechRecognitionStatus()
     case .accessibility:
-      return AXIsProcessTrusted() ? .granted : .denied
+      return AXIsProcessTrustedWithOptions(nil) ? .granted : .denied
     case .inputMonitoring:
       return inputMonitoringStatus(
         hasListenAccess: CGPreflightListenEventAccess(),
-        hasAccessibilityAccess: AXIsProcessTrusted()
+        hasAccessibilityAccess: AXIsProcessTrustedWithOptions(nil)
       )
     }
   }
@@ -316,7 +316,7 @@ final class PermissionsManager: ObservableObject {
     } else {
       // The App Store sandbox cannot present the Accessibility prompt. It can
       // only observe a grant the user made manually in System Settings.
-      trusted = AXIsProcessTrusted()
+      trusted = AXIsProcessTrustedWithOptions(nil)
     }
     return trusted ? .granted : .denied
   }
@@ -325,7 +325,7 @@ final class PermissionsManager: ObservableObject {
     let granted = CGRequestListenEventAccess()
     return Self.inputMonitoringStatus(
       hasListenAccess: granted,
-      hasAccessibilityAccess: AXIsProcessTrusted()
+      hasAccessibilityAccess: AXIsProcessTrustedWithOptions(nil)
     )
   }
 

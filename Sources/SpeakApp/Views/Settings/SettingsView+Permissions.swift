@@ -67,14 +67,16 @@ struct PermissionsSettingsContent: View {
             }
           }
 
+          PermissionRecoveryHelp(permissions: permissions)
+
           Button("Refresh Statuses") {
             permissions.refreshAll()
           }
           .buttonStyle(.borderedProminent)
-          .speakTooltip("Re-check what the system currently allows without leaving Speak.")
+          .speakTooltip("Re-check access for \(RunningAppIdentity.current.name).")
         }
       }
-      .speakTooltip("Review and refresh the macOS permissions Speak depends on.")
+      .speakTooltip("Review and refresh the macOS permissions \(RunningAppIdentity.current.name) depends on.")
     }
     .task {
       while !Task.isCancelled {

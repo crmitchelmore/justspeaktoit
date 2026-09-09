@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import PermissionFlow
 import SwiftUI
 
@@ -8,18 +9,30 @@ final class PermissionSettingsGuide: NSObject, NSWindowDelegate {
     private let flow = PermissionFlowController(configuration: .init(promptForAccessibilityTrust: false))
     private var panel: NSPanel?
     private var refreshTask: Task<Void, Never>?
+    private var dragPanelCloseObserver: AnyCancellable?
 
     func show(_ permission: PermissionType, permissions: PermissionsManager) {
         close()
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if let pane = permission.dragGuidancePane,
-           Bundle.main.bundleURL.pathExtension == "app", !reduceMotion {
+           permission.usesDragGuide(status: permissions.status(for: permission), reduceMotion: reduceMotion),
+           Bundle.main.bundleURL.pathExtension == "app" {
+            let existingWindows = Set(NSApp.windows.map(ObjectIdentifier.init))
             let mouse = NSEvent.mouseLocation
             flow.authorize(
                 pane: pane,
                 suggestedAppURLs: [Bundle.main.bundleURL],
                 sourceFrameInScreen: CGRect(x: mouse.x - 16, y: mouse.y - 16, width: 32, height: 32)
             )
+            // PermissionFlow 2.11.2 creates its panel synchronously but exposes
+            // no dismissal callback. Observe only the panel this call created.
+            if let dragPanel = NSApp.windows.first(where: {
+                $0 is NSPanel && !existingWindows.contains(ObjectIdentifier($0))
+            }) {
+                dragPanelCloseObserver = NotificationCenter.default.publisher(
+                    for: NSWindow.willCloseNotification, object: dragPanel
+                ).sink { [weak self] _ in self?.stopPolling() }
+            }
         } else {
             NSWorkspace.shared.open(permission.settingsURL)
             showToggleGuide(permission, permissions: permissions)
@@ -48,9 +61,14 @@ final class PermissionSettingsGuide: NSObject, NSWindowDelegate {
         }
     }
 
-    func close() {
+    private func stopPolling() {
         refreshTask?.cancel()
         refreshTask = nil
+        dragPanelCloseObserver = nil
+    }
+
+    func close() {
+        stopPolling()
         flow.closePanel()
         panel?.orderOut(nil)
         panel = nil
@@ -89,6 +107,10 @@ final class PermissionSettingsGuide: NSObject, NSWindowDelegate {
 }
 
 extension PermissionType {
+    func usesDragGuide(status: PermissionStatus, reduceMotion: Bool) -> Bool {
+        dragGuidancePane != nil && status != .restricted && !reduceMotion
+    }
+
     var dragGuidancePane: PermissionFlowPane? {
         switch self {
         case .accessibility: return .accessibility
@@ -105,10 +127,15 @@ extension PermissionType {
         if dragGuidancePane != nil {
             return "Turn on \(appName) in the app list. If it is missing, click + and select the running app. "
                 + "Unlock with your password or Touch ID if asked. "
-                + "If macOS requests a restart, quit and reopen the app."
+                + "If this exact app is already enabled but access is still not detected, "
+                + "turn its switch off and on, then quit and reopen \(appName)."
         }
-        return "Turn on the switch next to \(appName). If the app is missing, return to Speak and choose Request "
-            + "to show the macOS prompt. If macOS requests a restart, quit and reopen the app."
+        if status == .notDetermined {
+            return "Turn on the switch next to \(appName). If the app is missing, return to \(appName) "
+                + "and choose Request to show the macOS prompt."
+        }
+        return "Turn on the switch next to \(appName). If it is missing, quit and reopen \(appName), "
+            + "then check this pane again. macOS will not repeat a permission prompt after a denial."
     }
 }
 
@@ -121,7 +148,7 @@ struct PermissionToggleGuideView: View {
 
     private var appName: String {
         // Match Finder/System Settings and the library's drag card, including Dev/Alpha bundles.
-        FileManager.default.displayName(atPath: Bundle.main.bundlePath)
+        RunningAppIdentity.current.name
     }
 
     var body: some View {

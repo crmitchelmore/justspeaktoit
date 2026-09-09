@@ -42,15 +42,16 @@ enum PermissionType: CaseIterable, Identifiable {
   }
 
   var guidanceText: String {
+    let appName = RunningAppIdentity.current.name
     switch self {
     case .microphone:
-      return "Allow Speak to access your microphone so we can capture your words the moment you press record."
+      return "Allow \(appName) to use your microphone when you record."
     case .speechRecognition:
-      return "Grant macOS speech recognition so Speak can turn your recordings into on-screen text in real time."
+      return "Allow \(appName) to transcribe recordings with Apple Speech."
     case .accessibility:
-      return "Enable Accessibility so Speak can insert transcribed text into other apps."
+      return "Enable Accessibility so \(appName) can insert transcribed text into other apps."
     case .inputMonitoring:
-      return "Permit hotkey monitoring so Speak notices only the shortcuts you assign—nothing more."
+      return "Permit hotkey monitoring so \(appName) notices only the shortcuts you assign—nothing more."
     }
   }
 
@@ -72,9 +73,9 @@ enum PermissionType: CaseIterable, Identifiable {
     case .accessibility, .inputMonitoring:
       return [
         "Open \(displayName) settings.",
-        "Drag the app from the guide into the list, or click + to select it.",
+        "Drag \(RunningAppIdentity.current.name) from the guide into the list, or use Show App to locate it.",
         "Enable the app’s switch and unlock with your password or Touch ID if asked.",
-        "Quit and reopen the app only if macOS asks you to."
+        RunningAppIdentity.current.recoveryInstructions
       ]
     case .microphone, .speechRecognition:
       return nil

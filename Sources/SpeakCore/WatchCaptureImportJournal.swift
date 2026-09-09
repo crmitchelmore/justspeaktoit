@@ -198,8 +198,16 @@ public final class WatchCaptureImportJournal: @unchecked Sendable {
     /// Whether the job has attempts left and its persisted delay has elapsed.
     public func isRetryable(
         captureID: UUID,
+        maximumAttempts: Int = WatchCaptureImportJournal.defaultMaximumAttempts
+    ) -> Bool {
+        isRetryable(captureID: captureID, maximumAttempts: maximumAttempts, now: Date())
+    }
+
+    /// Clock-injected eligibility check; retains the original overload for API compatibility.
+    public func isRetryable(
+        captureID: UUID,
         maximumAttempts: Int = WatchCaptureImportJournal.defaultMaximumAttempts,
-        now: Date = Date()
+        now: Date
     ) -> Bool {
         lock.lock()
         defer { lock.unlock() }

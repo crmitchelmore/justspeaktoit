@@ -21,7 +21,7 @@ Check desktop and mobile layouts, full-size screenshot links, reduced motion, ke
 
 ## Content maintenance
 
-Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. The old `_routes.json` is deliberately excluded: it contains a `routes`/`headers` shape, but Cloudflare uses that filename for Functions `include`/`exclude` routing, not static response headers. This site has no Functions. See [Cloudflare routing](https://developers.cloudflare.com/pages/functions/routing/) and [headers](https://developers.cloudflare.com/pages/configuration/headers/).
+Cache policy lives in `_headers`, including explicit HTML/CSS/JS revalidation. Production builds also fingerprint the stylesheet filename and rewrite its HTML reference, so a cached older CSS response cannot break a newly deployed layout. The old `_routes.json` is deliberately excluded: it contains a `routes`/`headers` shape, but Cloudflare uses that filename for Functions `include`/`exclude` routing, not static response headers. This site has no Functions. See [Cloudflare routing](https://developers.cloudflare.com/pages/functions/routing/) and [headers](https://developers.cloudflare.com/pages/configuration/headers/).
 
 - `index.html`: content, release highlights, roadmap disclosures and download links.
 - `site.css`: responsive layout, design tokens, typography and reduced-motion support.

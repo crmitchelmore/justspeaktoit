@@ -29,6 +29,7 @@ let package = Package(
         // dependency silently downgrade the linter (issue #677). Run it via
         // `make lint` / scripts/swiftlint.sh.
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6"),
+        .package(url: "https://github.com/jaywcjlove/PermissionFlow.git", exact: "2.11.2"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),
         // Mirrored in Project.swift (`projectPackages`): Xcode resolves both
@@ -97,6 +98,7 @@ let package = Package(
                 "SpeakSync",
                 "SpeakHotKeys",
                 .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "PermissionFlow", package: "PermissionFlow"),
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),

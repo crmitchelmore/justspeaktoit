@@ -8,87 +8,6 @@ import Speech
 
 // @Implement This class manages system permissions. It knows how to request the following permissions when asked and also surface the current status of permissions as per the system
 
-enum PermissionType: CaseIterable, Identifiable {
-  case microphone
-  case speechRecognition
-  case accessibility
-  case inputMonitoring
-
-  var id: String { displayName }
-
-  static func availablePermissions(for channel: DistributionChannel) -> [PermissionType] {
-    allCases.filter { permission in
-      permission != .accessibility || channel.supportsAccessibilityTextInsertion
-    }
-  }
-
-  var displayName: String {
-    switch self {
-    case .microphone:
-      return "Microphone"
-    case .speechRecognition:
-      return "Speech Recognition"
-    case .accessibility:
-      return "Accessibility"
-    case .inputMonitoring:
-      return "Input Monitoring"
-    }
-  }
-
-  var systemIconName: String {
-    switch self {
-    case .microphone:
-      return "mic"
-    case .speechRecognition:
-      return "waveform"
-    case .accessibility:
-      return "accessibility"
-    case .inputMonitoring:
-      return "keyboard"
-    }
-  }
-
-  var guidanceText: String {
-    switch self {
-    case .microphone:
-      return "Allow Speak to access your microphone so we can capture your words the moment you press record."
-    case .speechRecognition:
-      return "Grant macOS speech recognition so Speak can turn your recordings into on-screen text in real time."
-    case .accessibility:
-      return "Enable accessibility controls so Speak can show helpful overlays and respond to your shortcuts respectfully."
-    case .inputMonitoring:
-      return "Permit hotkey monitoring so Speak notices only the shortcuts you assign—nothing more."
-    }
-  }
-
-  var settingsURL: URL {
-    switch self {
-    case .microphone:
-      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
-    case .speechRecognition:
-      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")!
-    case .accessibility:
-      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-    case .inputMonitoring:
-      return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
-    }
-  }
-
-  var manualSetupSteps: [String]? {
-    switch self {
-    case .accessibility, .inputMonitoring:
-      return [
-        "Open \(displayName) settings.",
-        "Click the + button at the bottom of the app list, or unlock first if macOS asks.",
-        "Navigate to Applications → JustSpeakToIt.",
-        "Click Open, then enable the toggle."
-      ]
-    case .microphone, .speechRecognition:
-      return nil
-    }
-  }
-}
-
 enum PermissionStatus: Equatable {
   case notDetermined
   case granted
@@ -159,6 +78,8 @@ final class PermissionsManager: ObservableObject {
   private let speechAuthorizationTimeout: TimeInterval
   private let notificationCenter: NotificationCenter
   private var lifecycleObservers: [NSObjectProtocol] = []
+  private lazy var settingsGuide = PermissionSettingsGuide()
+  private let guidePresenter: ((PermissionType) -> Void)?
 
   init(
     statusProvider: @escaping (PermissionType) -> PermissionStatus = PermissionsManager.systemStatus,
@@ -166,12 +87,14 @@ final class PermissionsManager: ObservableObject {
       SFSpeechRecognizer.requestAuthorization(callback)
     },
     speechAuthorizationTimeout: TimeInterval = 8,
-    notificationCenter: NotificationCenter = .default
+    notificationCenter: NotificationCenter = .default,
+    guidePresenter: ((PermissionType) -> Void)? = nil
   ) {
     self.statusProvider = statusProvider
     self.speechAuthorizationRequester = speechAuthorizationRequester
     self.speechAuthorizationTimeout = speechAuthorizationTimeout
     self.notificationCenter = notificationCenter
+    self.guidePresenter = guidePresenter
     refreshAll()
     registerLifecycleObservers()
   }
@@ -225,6 +148,35 @@ final class PermissionsManager: ObservableObject {
 
     statuses[type] = status
     return status
+  }
+
+  /// Explicit user actions get Settings guidance; background permission checks never open windows.
+  func requestWithGuidance(_ type: PermissionType) async -> PermissionStatus {
+    refresh(type)
+    let current = status(for: type)
+    guard !current.isGranted else { return current }
+    guard PermissionType.availablePermissions(for: DistributionChannel.current).contains(type) else {
+      return current
+    }
+    // Accessibility can be added by dragging the app. Avoid a second macOS alert
+    // covering the guide. Denied/restricted prompt-based permissions cannot re-prompt.
+    if type == .accessibility || current == .restricted
+      || (current == .denied && type != .inputMonitoring) {
+      openSettings(for: type)
+      return current
+    }
+    let result = await request(type)
+    if !result.isGranted { openSettings(for: type) }
+    return result
+  }
+
+  func openSettings(for type: PermissionType) {
+    guard PermissionType.availablePermissions(for: DistributionChannel.current).contains(type) else { return }
+    if let guidePresenter {
+      guidePresenter(type)
+    } else {
+      settingsGuide.show(type, permissions: self)
+    }
   }
 
   func ensureGranted(_ type: PermissionType) async -> PermissionStatus {

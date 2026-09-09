@@ -540,8 +540,6 @@ struct FeatureRow: View {
 
 struct PermissionsStepView: View {
     @ObservedObject var state: OnboardingState
-    @State private var showAccessibilityHelper = false
-    @State private var accessibilityAttempted = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -564,7 +562,7 @@ struct PermissionsStepView: View {
                     isGranted: state.permissionsGranted.contains(.microphone),
                     onRequest: {
                         Task {
-                            _ = await state.permissionsManager.request(.microphone)
+                            _ = await state.permissionsManager.requestWithGuidance(.microphone)
                             state.refreshPermissions()
                         }
                     }
@@ -577,28 +575,9 @@ struct PermissionsStepView: View {
                         description: "To type text into other apps",
                         isGranted: state.permissionsGranted.contains(.accessibility),
                         onRequest: {
-                            accessibilityAttempted = true
                             Task {
-                                _ = await state.permissionsManager.request(.accessibility)
-                                // Wait a moment then check if it worked
-                                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                                _ = await state.permissionsManager.requestWithGuidance(.accessibility)
                                 state.refreshPermissions()
-                                // If still not granted after attempt, show helper
-                                if !state.permissionsGranted.contains(.accessibility) {
-                                    showAccessibilityHelper = true
-                                }
-                            }
-                        }
-                    )
-                }
-                
-                // Show manual add helper if accessibility wasn't auto-added
-                if showAccessibilityHelper && !state.permissionsGranted.contains(.accessibility) {
-                    AccessibilityManualHelper(
-                        onComplete: {
-                            state.refreshPermissions()
-                            if state.permissionsGranted.contains(.accessibility) {
-                                showAccessibilityHelper = false
                             }
                         }
                     )
@@ -612,7 +591,7 @@ struct PermissionsStepView: View {
                     isOptional: true,
                     onRequest: {
                         Task {
-                            _ = await state.permissionsManager.request(.inputMonitoring)
+                            _ = await state.permissionsManager.requestWithGuidance(.inputMonitoring)
                             state.refreshPermissions()
                         }
                     }
@@ -621,18 +600,10 @@ struct PermissionsStepView: View {
             .padding(.horizontal, 40)
             .padding(.top, 10)
             
-            if !showAccessibilityHelper {
-                Text("If permissions don't appear in System Settings, restart the app")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 10)
-                
-                Button("Open System Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")!)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
-            }
+            Text("A guide stays visible while you enable access in System Settings.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 10)
         }
         .task {
             // Accessibility and Input Monitoring are granted in System Settings
@@ -643,79 +614,6 @@ struct PermissionsStepView: View {
                 state.refreshPermissions()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
-        }
-    }
-}
-
-// MARK: - Accessibility Manual Helper
-
-struct AccessibilityManualHelper: View {
-    let onComplete: () -> Void
-    @State private var currentStep = 0
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text("App not appearing? Add it manually:")
-                    .font(.headline)
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                ManualStep(number: 1, text: "Click the button below to open Accessibility settings", isActive: currentStep == 0)
-                ManualStep(number: 2, text: "Click the + button at the bottom of the app list", isActive: currentStep == 1)
-                ManualStep(number: 3, text: "Navigate to Applications → JustSpeakToIt", isActive: currentStep == 2)
-                ManualStep(number: 4, text: "Click Open, then enable the toggle", isActive: currentStep == 3)
-            }
-            
-            HStack(spacing: 12) {
-                Button("Open Accessibility Settings") {
-                    // Open directly to Accessibility pane
-                    NSWorkspace.shared.open(PermissionType.accessibility.settingsURL)
-                    currentStep = 1
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                
-                Button("I've Added It") {
-                    onComplete()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                
-                Button("Show App in Finder") {
-                    // Reveal the app in Finder
-                    let appPath = Bundle.main.bundlePath
-                    NSWorkspace.shared.selectFile(appPath, inFileViewerRootedAtPath: "")
-                }
-                .buttonStyle(.plain)
-                .controlSize(.small)
-                .foregroundColor(.accentColor)
-            }
-        }
-        .padding()
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(8)
-    }
-}
-
-struct ManualStep: View {
-    let number: Int
-    let text: String
-    let isActive: Bool
-    
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(number).")
-                .font(.caption)
-                .fontWeight(isActive ? .bold : .regular)
-                .foregroundColor(isActive ? .accentColor : .secondary)
-                .frame(width: 16)
-            
-            Text(text)
-                .font(.caption)
-                .foregroundColor(isActive ? .primary : .secondary)
         }
     }
 }

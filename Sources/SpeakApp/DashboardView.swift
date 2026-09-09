@@ -467,7 +467,9 @@ struct DashboardView: View {
     status: PermissionStatus
   ) -> some View {
     if environment.permissions.requestIssue(for: permission) != nil {
-      Link(destination: permission.settingsURL) {
+      Button {
+        environment.permissions.openSettings(for: permission)
+      } label: {
         Label("Open Settings", systemImage: "gear")
           .labelStyle(.iconOnly)
       }
@@ -510,7 +512,9 @@ struct DashboardView: View {
         Text(issue.guidance(for: permission))
           .font(.caption)
           .foregroundStyle(.orange)
-        Link("Open Settings", destination: permission.settingsURL)
+        Button("Open Settings") {
+          environment.permissions.openSettings(for: permission)
+        }
           .buttonStyle(.bordered)
           .controlSize(.small)
       } else {
@@ -534,7 +538,7 @@ struct DashboardView: View {
   }
 
   private func request(_ permission: PermissionType) async {
-    _ = await environment.permissions.request(permission)
+    _ = await environment.permissions.requestWithGuidance(permission)
     await MainActor.run {
       requestingPermission = nil
     }

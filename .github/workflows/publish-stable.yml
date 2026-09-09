@@ -12,6 +12,7 @@ on:
         type: string
 permissions:
   contents: write
+  actions: read
 concurrency:
   group: publish-stable
   queue: max
@@ -31,6 +32,12 @@ jobs:
           CANDIDATE: ${{ inputs.candidate }}
           APPROVED_HASH: ${{ inputs.approved_manifest_sha256 }}
         run: node scripts/release-train.mjs publish --tag "$CANDIDATE" --approved-hash "$APPROVED_HASH"
+      - name: Withdraw failed Stable publication
+        if: always() && (failure() || cancelled())
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: node scripts/release-train.mjs withdraw --tag "$CANDIDATE"
   submit-apple:
     needs: publish
     runs-on: macos-15

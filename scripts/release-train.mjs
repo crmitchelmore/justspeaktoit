@@ -157,6 +157,11 @@ if(command === 'allocate' || command === 'prepare') {
     upload(manifest.tag,`${surface}-receipt.json`,receipt,true);
 } else if(command === 'publish-alpha') {
     const manifest=manifestFor(required('tag')); if(manifest.train !== 'alpha') throw Error('Alpha only');
+    ci(manifest.source);
+    const receiptAsset=releases().find(r=>r.tag_name===manifest.tag)?.assets.find(a=>a.name==='mac-direct-receipt.json');
+    if(!receiptAsset) throw Error('No verified direct Alpha receipt');
+    const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${receiptAsset.id}`,'-H','Accept: application/octet-stream'));
+    if(receipt.status !== 'verified' || receipt.source !== manifest.source || receipt.build !== manifest.surfaces['mac-direct'].build || receipt.notesHash !== manifest.surfaces['mac-direct'].notesHash) throw Error('Direct Alpha is not verified');
     gh('release','edit',manifest.tag,'--repo',repo,'--draft=false','--prerelease','--latest=false');
     // Mutable pointer uses an explicit prerelease, never GitHub Latest.
     const all=releases(); const pointer=all.find(r=>r.tag_name==='alpha-latest');
@@ -178,6 +183,7 @@ if(command === 'allocate' || command === 'prepare') {
     if(manifest.train !== 'stable') throw Error('Stable candidate required');
     const bytes=JSON.stringify(manifest,null,2)+'\n';
     if(required('approved-hash') !== digest(bytes)) throw Error('Approval does not match the frozen manifest');
+    ci(manifest.source);
     const all=releases();
     for(const release of all.filter(r=>r.tag_name.startsWith('stable-candidate-'))) {
         const newer=manifestFor(release.tag_name);
@@ -199,19 +205,32 @@ if(command === 'allocate' || command === 'prepare') {
     const tag=`mac-v${manifest.surfaces['mac-direct'].version}`;
     const prior=all.find(r=>r.tag_name===tag);
     if(prior && git('rev-parse',`${tag}^{commit}`) !== manifest.source) throw Error('Stable version already belongs to different source');
+    upload(manifest.tag,'approval.json',{manifestHash:digest(bytes),actor:process.env.GITHUB_ACTOR,run:process.env.GITHUB_RUN_ID,approvedAt:new Date().toISOString()},true);
     if(!prior) {
-        git('tag',tag,manifest.source); git('push','origin',`refs/tags/${tag}`);
+        const existingTag=git('tag','--list',tag);
+        if(existingTag && git('rev-parse',`${tag}^{commit}`) !== manifest.source) throw Error('Stable tag belongs to different source');
+        if(!existingTag) git('tag',tag,manifest.source);
+        git('push','origin',`refs/tags/${tag}`);
         gh('release','create',tag,...Object.keys(direct.assets).map(a=>join(directory,a)),save('release-manifest.json',manifest),
             '--repo',repo,'--draft','--latest=false','--title',tag,'--notes-file',save('notes.md',manifest.surfaces['mac-direct'].notes));
     }
     gh('release','edit',tag,'--repo',repo,'--draft=false','--prerelease=false','--latest=true');
-    upload(manifest.tag,'approval.json',{manifestHash:digest(bytes),actor:process.env.GITHUB_ACTOR,run:process.env.GITHUB_RUN_ID,approvedAt:new Date().toISOString()},true);
     writeFileSync(join(process.env.RUNNER_TEMP,'release-manifest.json'),bytes);
     const assets=Object.keys(direct.assets);
     const arm=assets.find(a=>a.endsWith('-arm64.dmg')), universal=assets.find(a=>a.endsWith('-universal.dmg'));
     const cliArm=assets.find(a=>a.endsWith('-arm64.zip')), cliIntel=assets.find(a=>a.endsWith('-x86_64.zip'));
     execFileSync('bash',['scripts/update-homebrew-tap.sh',manifest.surfaces['mac-direct'].version,direct.assets[arm],direct.assets[universal],direct.assets[cliArm],direct.assets[cliIntel]],{stdio:'inherit',env:{...process.env,GH_TOKEN:process.env.HOMEBREW_TOKEN}});
     console.log(`Published verified Stable ${tag}; Apple review follows independently`);
+ } else if(command === 'withdraw') {
+    const manifest=manifestFor(required('tag'));
+    if(manifest.train !== 'stable') throw Error('Stable only');
+    const all=releases();
+    const approvalAsset=all.find(r=>r.tag_name===manifest.tag)?.assets.find(a=>a.name==='approval.json');
+    if(!approvalAsset) process.exit(0);
+    const approval=JSON.parse(gh('api',`repos/${repo}/releases/assets/${approvalAsset.id}`,'-H','Accept: application/octet-stream'));
+    if(approval.run !== process.env.GITHUB_RUN_ID || approval.manifestHash !== digest(JSON.stringify(manifest,null,2)+'\n')) process.exit(0);
+    const tag=`mac-v${manifest.surfaces['mac-direct'].version}`;
+    if(all.some(r=>r.tag_name===tag && !r.draft)) gh('release','edit',tag,'--draft=true','--repo',repo);
 } else if(command === 'reconcile') {
     const config=json('Config/ReleasePipeline.json');
     if(!config.enabled) { console.log('Alpha activation awaits archive/device verification'); process.exit(0); }

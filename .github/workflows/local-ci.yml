@@ -1,0 +1,47 @@
+name: Local CI
+run-name: Local CI / ${{ inputs.mode }} / ${{ inputs.ref }}
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Verify the runner or build without UI tests'
+        type: choice
+        options: [verify, build]
+        default: build
+      ref:
+        description: 'Trusted branch, tag or commit in this repository'
+        type: string
+        default: main
+permissions:
+  contents: read
+concurrency:
+  group: local-ci-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  local:
+    name: Local CI
+    runs-on: [bravo-mini-local, macOS, ARM64]
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - name: Verify the persistent runner
+        shell: bash
+        run: |
+          test "$RUNNER_OS" = macOS
+          test "$(uname -m)" = arm64
+          echo "Runner: $RUNNER_NAME"
+          xcodebuild -version
+          git --version
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        if: inputs.mode != 'verify'
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build and non-UI checks
+        if: inputs.mode == 'build'
+        shell: bash
+        run: |
+          swift build --jobs 2

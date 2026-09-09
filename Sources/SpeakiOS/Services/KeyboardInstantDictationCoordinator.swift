@@ -22,20 +22,59 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
     @Published public private(set) var session: KeyboardInstantDictationSession?
     @Published public private(set) var errorMessage: String?
 
-    private let sessionStore = KeyboardInstantDictationStore.shared
-    private let handoffStore = KeyboardHandoffStore.shared
-    private let recordingService = TranscriptionRecordingService.shared
-    private let readinessAudio = KeyboardReadinessAudioSession()
+    private let sessionStore: KeyboardInstantDictationStore
+    private let handoffStore: KeyboardHandoffStore
+    private lazy var recordingService = TranscriptionRecordingService.shared
+    private lazy var readinessAudio = KeyboardReadinessAudioSession()
 
     private var signalObservation: KeyboardHandoffSignalObservation?
     private var partialTranscriptObservation: AnyCancellable?
     private var heartbeatTask: Task<Void, Never>?
-    private var requestTask: Task<Void, Never>?
+    private(set) var requestTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
     private var activeRequestID: UUID?
     private var activeProfile: KeyboardDictationProfileOption?
 
-    private init() {}
+    private var finalisingRequestIDs: Set<UUID> = []
+
+    /// Injectable effects keep coordinator ordering tests independent of microphones and providers.
+    struct FinalisationOperations {
+        var isRunning: @MainActor () -> Bool
+        var partialText: @MainActor () -> String
+        var stop: @MainActor () async -> TranscriptionResult
+        var cancel: @MainActor () -> Void
+        var polish: @MainActor (String, KeyboardDictationProfileOption) async throws -> String
+        var save: @MainActor (String, TranscriptionResult) -> Void
+        var resumeReadiness: @MainActor () async -> Void
+    }
+
+    lazy var finalisation = FinalisationOperations(
+        isRunning: { [unowned self] in self.recordingService.isRunning },
+        partialText: { [unowned self] in self.recordingService.partialText },
+        stop: { [unowned self] in
+            await self.recordingService.stopRecording(
+                destination: .historyOnly, saveToHistory: false, primedActivityMessage: "Keyboard ready"
+            )
+        },
+        cancel: { [unowned self] in self.recordingService.cancelRecording() },
+        polish: { [unowned self] in try await self.polish($0, with: $1) },
+        save: { [unowned self] in self.saveToHistory($0, result: $1) },
+        resumeReadiness: { [unowned self] in await self.resumeReadinessAfterRequest() }
+    )
+
+    private convenience init() {
+        self.init(sessionStore: .shared, handoffStore: .shared)
+    }
+
+    init(sessionStore: KeyboardInstantDictationStore, handoffStore: KeyboardHandoffStore) {
+        self.sessionStore = sessionStore
+        self.handoffStore = handoffStore
+    }
+
+    func claimRecording(for record: KeyboardHandoffRecord) {
+        activeRequestID = record.requestID
+        activeProfile = record.profile
+    }
 
     public var isReady: Bool {
         session?.phase == .ready && sessionStore.activeSession(clearingStaleRecord: true) != nil
@@ -177,7 +216,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         }
     }
 
-    private func handleRequestChange() {
+    func handleRequestChange() {
         guard requestTask == nil else { return }
         guard sessionStore.activeSession(clearingStaleRecord: true) != nil,
               let record = handoffStore.activeRecord() else { return }
@@ -217,8 +256,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         // Mark the audio mode transition before stopping the readiness engine.
         // Provider setup can take longer than one heartbeat; without this the
         // liveness loop would mistake a healthy engine swap for interruption.
-        activeRequestID = requestID
-        activeProfile = profile
+        claimRecording(for: record)
         session = sessionStore.heartbeat(phase: .recording)
         readinessAudio.stop(deactivateAudioSession: false)
         do {
@@ -244,66 +282,81 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         }
     }
 
-    private func finishRecording(for requestID: UUID) async {
-        guard activeRequestID == requestID, recordingService.isRunning else {
+    func finishRecording(for requestID: UUID) async {
+        // Claim before the running guard: stop() clears isRunning while its provider drains.
+        // A queued keyboard Finish must preserve the disruption's outcome, never write invalidRequest.
+        guard finalisingRequestIDs.insert(requestID).inserted else { return }
+        defer { finalisingRequestIDs.remove(requestID) }
+        guard activeRequestID == requestID, finalisation.isRunning() else {
             _ = try? handoffStore.fail(requestID: requestID, code: .invalidRequest)
             return
         }
 
         partialTranscriptObservation = nil
-        _ = try? handoffStore.updateInterim(
-            requestID: requestID,
-            transcript: recordingService.partialText
-        )
+        _ = try? handoffStore.updateInterim(requestID: requestID, transcript: finalisation.partialText())
         do {
             try handoffStore.markTranscribing(requestID: requestID)
         } catch {
-            recordingService.cancelRecording()
+            finalisation.cancel()
             _ = try? handoffStore.fail(requestID: requestID, code: .invalidRequest)
-            activeRequestID = nil
-            activeProfile = nil
-            await resumeReadinessAfterRequest()
+            await releaseRecording(for: requestID)
             return
         }
 
         let profile = activeProfile
-        let result = await recordingService.stopRecording(
-            destination: .historyOnly,
-            saveToHistory: false,
-            primedActivityMessage: "Keyboard ready"
-        )
-        activeRequestID = nil
-        activeProfile = nil
+        let result = await finalisation.stop()
+        guard canComplete(requestID) else {
+            await releaseRecording(for: requestID)
+            return
+        }
         var transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let profile, profile.polishes, !transcript.isEmpty {
             do {
-                transcript = try await polish(transcript, with: profile)
+                transcript = try await finalisation.polish(transcript, profile)
             } catch {
-                saveToHistory(result.text, result: result)
-                _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
-                await resumeReadinessAfterRequest()
+                if canComplete(requestID) {
+                    finalisation.save(result.text, result)
+                    _ = try? handoffStore.fail(requestID: requestID, code: .profileUnavailable)
+                }
+                await releaseRecording(for: requestID)
                 return
             }
+        }
+        guard canComplete(requestID) else {
+            await releaseRecording(for: requestID)
+            return
         }
         if transcript.isEmpty {
             _ = try? handoffStore.fail(requestID: requestID, code: .noSpeech)
         } else {
-            saveToHistory(transcript, result: result)
+            finalisation.save(transcript, result)
             _ = try? handoffStore.complete(requestID: requestID, transcript: transcript)
         }
-        await resumeReadinessAfterRequest()
+        await releaseRecording(for: requestID)
     }
 
-    private func cancelRecording(for requestID: UUID) {
+    private func canComplete(_ requestID: UUID) -> Bool {
+        !Task.isCancelled && activeRequestID == requestID
+            && handoffStore.record(matching: requestID)?.phase == .transcribing
+    }
+
+    private func releaseRecording(for requestID: UUID) async {
+        guard activeRequestID == requestID else { return }
+        activeRequestID = nil
+        activeProfile = nil
+        await finalisation.resumeReadiness()
+    }
+
+    func cancelRecording(for requestID: UUID) {
         guard activeRequestID == requestID else { return }
         partialTranscriptObservation = nil
-        if recordingService.isRunning {
-            recordingService.cancelRecording()
+        if finalisation.isRunning() {
+            finalisation.cancel()
         }
         activeRequestID = nil
         activeProfile = nil
         Task {
-            await resumeReadinessAfterRequest()
+            await finalisation.resumeReadiness()
         }
     }
 

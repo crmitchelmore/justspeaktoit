@@ -404,7 +404,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         let appIsActive = UIApplication.shared.applicationState == .active
         let activityProvider = providerFallbackNotice == nil
             ? modelDisplayName
-            : "\(modelDisplayName) (no API key)"
+            : "\(modelDisplayName) (\(settings.credentialFallbackReason))"
         let activityStarted = (requiresLiveActivity || appIsActive)
             ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)
             : false
@@ -668,10 +668,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             // Make the silent on-device fallback visible: publish it for
             // the UI and log it so a "worse than usual" session is
             // diagnosable.
-            providerFallbackNotice = "Using \(modelDisplayName) (no API key)"
+            providerFallbackNotice = "Using \(modelDisplayName) (\(settings.credentialFallbackReason))"
             SpeakLogger.transcription.warning(
                 """
-                No API key for \(requestedModel, privacy: .public); \
+                \(settings.credentialFallbackReason, privacy: .public) for \(requestedModel, privacy: .public); \
                 falling back to \(self.currentModel, privacy: .public)
                 """
             )

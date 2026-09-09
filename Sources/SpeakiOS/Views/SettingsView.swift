@@ -269,7 +269,8 @@ public final class AppSettings: ObservableObject {
         configuration: SecureStorageConfiguration(
             service: "com.github.speakapp.credentials",
             masterAccount: "speak-app-secrets",
-            legacyServices: ["com.justspeaktoit.credentials"]
+            legacyServices: ["com.justspeaktoit.credentials"],
+            accessibility: .afterFirstUnlock
         )
     )
 
@@ -282,9 +283,15 @@ public final class AppSettings: ObservableObject {
     private static let logger = SpeakLogger.logger(category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
     private var syncedKeyReloadDepth = 0
-    /// The async keychain load kicked off by `init`. `ensureKeysLoaded()`
-    /// awaits it so cold-start callers never read the placeholder empty keys.
-    private var initialKeyLoadTask: Task<Void, Never>?
+    private let credentials: SecureStorage
+    private let migratesLegacyCredentials: Bool
+    private var protectedDataObserver: NSObjectProtocol?
+    private var keyLoadTask: Task<Bool, Never>?
+    @Published public private(set) var credentialsAvailable = false
+
+    var credentialFallbackReason: String {
+        credentialsAvailable ? "no API key" : "API keys unavailable — unlock to retry"
+    }
 
     /// Persists (or clears when empty) an API key on the canonical secure store.
     /// Keychain failures are logged rather than silently dropped so a key that
@@ -294,9 +301,9 @@ public final class AppSettings: ObservableObject {
         Task {
             do {
                 if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    try await Self.credentialStorage.removeSecret(identifier: identifier)
+                    try await credentials.removeSecret(identifier: identifier)
                 } else {
-                    try await Self.credentialStorage.storeSecret(value, identifier: identifier)
+                    try await credentials.storeSecret(value, identifier: identifier)
                 }
             } catch {
                 Self.logger.error(
@@ -418,9 +425,12 @@ public final class AppSettings: ObservableObject {
     ///     selection are skipped. Tests use this to exercise persistence in isolation.
     init( // swiftlint:disable:this function_body_length
         defaults: UserDefaults = .standard,
-        loadsSecureStorage: Bool = true
+        loadsSecureStorage: Bool = true,
+        credentialStorage: SecureStorage? = nil
     ) {
         self.defaults = defaults
+        self.credentials = credentialStorage ?? Self.credentialStorage
+        self.migratesLegacyCredentials = credentialStorage == nil
         let storedSelectedRaw = defaults.string(forKey: "selectedModel")
             ?? AppleLocalModels.preferredSpeechModelID
         let selectedRaw = ModelCatalog.normalizedLiveTranscriptionModel(storedSelectedRaw)
@@ -550,23 +560,40 @@ public final class AppSettings: ObservableObject {
         defaults.set(self.rememberedRemoteTranscriptionMode.rawValue, forKey: Self.rememberedRemoteModeKey)
 
         guard loadsSecureStorage else { return }
-        initialKeyLoadTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await Self.migrateLegacyKeysIfNeeded()
-            await self.reloadSyncedAPIKeys()
-            self.observeSecureStorageChanges()
-            self.configureDefaultProviderIfNeeded()
+        observeSecureStorageChanges()
+        protectedDataObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.ensureKeysLoaded()
+            }
+        }
+        Task { @MainActor [weak self] in
+            await self?.ensureKeysLoaded()
         }
     }
 
     private let defaults: UserDefaults
 
-    /// Waits until the initial keychain load kicked off by `init` has finished.
-    /// Idempotent and cheap once loaded. Recording paths await this before
-    /// reading API keys so a cold launch (e.g. from the Action Button) doesn't
-    /// see the placeholder empty keys and silently fall back to Apple Speech.
-    public func ensureKeysLoaded() async {
-        await initialKeyLoadTask?.value
+    /// Coalesces bootstrap and recording callers; a failed read remains retryable.
+    /// Never use placeholder empty keys to make persistent provider decisions.
+    @discardableResult
+    public func ensureKeysLoaded() async -> Bool {
+        if let keyLoadTask { return await keyLoadTask.value }
+        if credentialsAvailable { return true }
+        let task = Task { @MainActor in
+            guard await self.credentials.preloadAndReportSuccess() else { return false }
+            if self.migratesLegacyCredentials { await Self.migrateLegacyKeysIfNeeded() }
+            guard await self.reloadSyncedAPIKeys() else { return false }
+            self.configureDefaultProviderIfNeeded()
+            return true
+        }
+        keyLoadTask = task
+        let success = await task.value
+        keyLoadTask = nil
+        return success
     }
 
     /// Publishes one coherent, non-secret keyboard capability snapshot whenever
@@ -586,6 +613,9 @@ public final class AppSettings: ObservableObject {
     }
 
     deinit {
+        if let protectedDataObserver {
+            NotificationCenter.default.removeObserver(protectedDataObserver)
+        }
         if let keyChangeObserver {
             NotificationCenter.default.removeObserver(keyChangeObserver)
         }
@@ -673,74 +703,78 @@ public final class AppSettings: ObservableObject {
         return identifiers
     }
 
-    public func reloadSyncedAPIKeys() async {
+    @discardableResult
+    public func reloadSyncedAPIKeys() async -> Bool {
+        guard await credentials.preloadAndReportSuccess() else { return false }
         syncedKeyReloadDepth += 1
         defer { syncedKeyReloadDepth -= 1 }
         await reloadCoreAPIKeys()
         await reloadStreamingProviderAPIKeys()
+        credentialsAvailable = true
+        return true
     }
 
     private func reloadCoreAPIKeys() async {
-        deepgramAPIKey = await Self.syncedAPIKeyValue(
+        deepgramAPIKey = await syncedAPIKeyValue(
             identifier: Self.deepgramKeyID,
             currentValue: deepgramAPIKey
         )
-        openRouterAPIKey = await Self.syncedAPIKeyValue(
+        openRouterAPIKey = await syncedAPIKeyValue(
             identifier: Self.openRouterKeyID,
             currentValue: openRouterAPIKey
         )
-        openAIAPIKey = await Self.syncedAPIKeyValue(
+        openAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.openAIKeyID,
             currentValue: openAIAPIKey
         )
-        elevenLabsAPIKey = await Self.syncedAPIKeyValue(
+        elevenLabsAPIKey = await syncedAPIKeyValue(
             identifier: Self.elevenLabsKeyID,
             currentValue: elevenLabsAPIKey
         )
-        cartesiaAPIKey = await Self.syncedAPIKeyValue(
+        cartesiaAPIKey = await syncedAPIKeyValue(
             identifier: Self.cartesiaKeyID,
             currentValue: cartesiaAPIKey
         )
-        sonioxAPIKey = await Self.syncedAPIKeyValue(
+        sonioxAPIKey = await syncedAPIKeyValue(
             identifier: Self.sonioxKeyID,
             currentValue: sonioxAPIKey
         )
-        modulateAPIKey = await Self.syncedAPIKeyValue(
+        modulateAPIKey = await syncedAPIKeyValue(
             identifier: Self.modulateKeyID,
             currentValue: modulateAPIKey
         )
-        assemblyAIAPIKey = await Self.syncedAPIKeyValue(
+        assemblyAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.assemblyAIKeyID,
             currentValue: assemblyAIAPIKey
         )
-        gladiaAPIKey = await Self.syncedAPIKeyValue(
+        gladiaAPIKey = await syncedAPIKeyValue(
             identifier: Self.gladiaKeyID,
             currentValue: gladiaAPIKey
         )
-        googleAPIKey = await Self.syncedAPIKeyValue(
+        googleAPIKey = await syncedAPIKeyValue(
             identifier: Self.googleKeyID,
             currentValue: googleAPIKey
         )
     }
 
     private func reloadStreamingProviderAPIKeys() async {
-        xAIAPIKey = await Self.syncedAPIKeyValue(
+        xAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.xAIKeyID,
             currentValue: xAIAPIKey
         )
-        metaAPIKey = await Self.syncedAPIKeyValue(
+        metaAPIKey = await syncedAPIKeyValue(
             identifier: Self.metaKeyID,
             currentValue: metaAPIKey
         )
-        speechmaticsAPIKey = await Self.syncedAPIKeyValue(
+        speechmaticsAPIKey = await syncedAPIKeyValue(
             identifier: Self.speechmaticsKeyID,
             currentValue: speechmaticsAPIKey
         )
-        revAIAPIKey = await Self.syncedAPIKeyValue(
+        revAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.revAIKeyID,
             currentValue: revAIAPIKey
         )
-        mistralAPIKey = await Self.syncedAPIKeyValue(
+        mistralAPIKey = await syncedAPIKeyValue(
             identifier: Self.mistralKeyID,
             currentValue: mistralAPIKey
         )
@@ -762,9 +796,9 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    private static func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
+    private func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
         do {
-            return try await credentialStorage.secret(identifier: identifier)
+            return try await credentials.secret(identifier: identifier)
         } catch SecureStorageError.valueNotFound {
             return ""
         } catch {

@@ -151,7 +151,7 @@ final class MigrationStore {
         let audio = Dictionary(snapshot.records[.recordings, default: []].filter { $0.kind == "audio" }
             .map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         var result: [UUID: HistoryItem] = [:]
-        let old = Dictionary(uniqueKeysWithValues: history.allItems.map { ($0.id.uuidString, $0) })
+        let old = Dictionary(history.allItems.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
         let ids = Set(text.keys).union(audio.keys)
         let folder = support.appendingPathComponent("ImportedRecordings")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

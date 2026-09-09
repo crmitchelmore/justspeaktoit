@@ -297,6 +297,10 @@ private struct SystemShortcut {
 final class ShortcutManager: ObservableObject {
     @Published private(set) var bindings: [ShortcutAction: KeyBinding] = [:]
     @Published private(set) var conflicts: [ShortcutConflict] = []
+    private var carbonRegistrationConflicts: [ShortcutConflict] = []
+    var migrationWarnings: [String] {
+        carbonRegistrationConflicts.map { "\($0.action.displayName): \($0.description)" }
+    }
     @Published private(set) var isRecordingShortcut: Bool = false
     @Published private(set) var recordingAction: ShortcutAction?
     @Published private(set) var recordingError: String?
@@ -511,6 +515,7 @@ final class ShortcutManager: ObservableObject {
     }
 
     private func registerCarbonHotkeys() {
+        carbonRegistrationConflicts.removeAll()
         installCarbonEventHandler()
         for (action, binding) in bindings {
             guard binding.isEnabled && binding.isGlobal, action.isAvailable(in: .current) else { continue }
@@ -535,8 +540,14 @@ final class ShortcutManager: ObservableObject {
             if status == noErr, let ref = hotKeyRef {
                 carbonHotKeys[carbonID] = ref
                 carbonHotKeyActions[carbonID] = action
+            } else {
+                carbonRegistrationConflicts.append(ShortcutConflict(
+                    action: action, conflictSource: "macOS registration",
+                    description: "Shortcut unavailable (\(status)). Choose another binding in Keyboard settings."
+                ))
             }
         }
+        detectConflicts()
     }
 
     private func unregisterCarbonHotkeys() {
@@ -682,10 +693,16 @@ final class ShortcutManager: ObservableObject {
             }
         }
 
-        conflicts = newConflicts
+        conflicts = newConflicts + carbonRegistrationConflicts
     }
 }
 
 extension ShortcutManager {
-    func reloadAfterMigration() { loadBindings() }
+    func reloadAfterMigration() {
+        loadBindings()
+        if isMonitoring {
+            unregisterCarbonHotkeys()
+            registerCarbonHotkeys()
+        }
+    }
 }

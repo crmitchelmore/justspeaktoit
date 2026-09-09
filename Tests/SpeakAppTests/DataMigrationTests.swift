@@ -208,4 +208,19 @@ final class DataMigrationTests: XCTestCase {
         }
         XCTAssertEqual(result.records[.history], [])
     }
+    func testArchive_OverwritesDestinationUsingReplacementStorageOnItsVolume() throws {
+        let parent = ProcessInfo.processInfo.environment["MIGRATION_TEST_VOLUME"]
+            .map { URL(fileURLWithPath: $0) } ?? FileManager.default.temporaryDirectory
+        let root = parent.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let destination = root.appendingPathComponent("export.zip")
+        try MigrationArchive.write(snapshot(.history, [text(value: "Before")]), to: destination)
+        let updated = text(value: "After")
+        try MigrationArchive.write(snapshot(.history, [updated]), to: destination)
+        let restored = try MigrationArchive.read(destination)
+        defer { if let directory = restored.directory { try? FileManager.default.removeItem(at: directory) } }
+        XCTAssertEqual(restored.records[.history], [updated])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["export.zip"])
+    }
 }

@@ -232,21 +232,29 @@ private struct MigrationScopeView: View {
     let title: String
     @Binding var scope: MigrationScope
     let items: [HistoryItem]
-    @State private var selection = "all"
-    @State private var from = Calendar.current.startOfDay(for: Date())
-    @State private var through = Date()
+    private var selection: String {
+        scope.selectedIDs != nil ? "selected" : scope.start != nil || scope.end != nil ? "dates" : "all"
+    }
+    private var from: Date { scope.start ?? Calendar.current.startOfDay(for: Date()) }
+    private var through: Date {
+        scope.end.flatMap { Calendar.current.date(byAdding: .day, value: -1, to: $0) } ?? Date()
+    }
     var body: some View {
         DisclosureGroup(
             "\(title): \(selection == "all" ? "All entries" : selection == "dates" ? "Date range" : "Selected entries")"
         ) {
-            Picker("Include", selection: $selection) {
+            Picker("Include", selection: Binding(get: { selection }, set: { updateScope($0) })) {
                 Text("All").tag("all")
                 Text("Date range").tag("dates")
                 Text("Selected entries").tag("selected")
             }.pickerStyle(.segmented)
             if selection == "dates" {
-                DatePicker("From", selection: $from, displayedComponents: .date)
-                DatePicker("Through", selection: $through, in: from..., displayedComponents: .date)
+                DatePicker("From", selection: Binding(get: { from },
+                           set: { updateDates(from: $0, through: max($0, through)) }),
+                           displayedComponents: .date)
+                DatePicker("Through", selection: Binding(get: { through },
+                           set: { updateDates(from: from, through: $0) }),
+                           in: from..., displayedComponents: .date)
             }
             if selection == "selected" {
                 ScrollView {
@@ -277,21 +285,17 @@ private struct MigrationScopeView: View {
                 }.frame(height: 180)
             }
         }
-        .onChange(of: selection) { _, _ in updateScope() }
-        .onChange(of: from) { _, _ in updateScope() }
-        .onChange(of: through) { _, _ in updateScope() }
     }
-    private func updateScope() {
+    private func updateScope(_ selection: String) {
         switch selection {
-        case "dates":
-            scope = MigrationScope(start: Calendar.current.startOfDay(for: from),
-                                   end: Calendar.current.date(
-                                       byAdding: .day,
-                                       value: 1,
-                                       to: Calendar.current.startOfDay(for: max(from, through))
-                                   ))
+        case "dates": updateDates(from: from, through: through)
         case "selected": scope = MigrationScope(selectedIDs: scope.selectedIDs ?? [])
         default: scope = MigrationScope()
         }
+    }
+    private func updateDates(from: Date, through: Date) {
+        scope = MigrationScope(start: Calendar.current.startOfDay(for: from),
+                               end: Calendar.current.date(byAdding: .day, value: 1,
+                                   to: Calendar.current.startOfDay(for: max(from, through))))
     }
 }

@@ -6,50 +6,53 @@ import os.log
 /// `UserDefaults`, following the AppSettings storage convention.
 @MainActor
 final class DictationProfileStore: ObservableObject {
-  static let defaultsKey = "dictationProfiles"
+    static let defaultsKey = "dictationProfiles"
 
-  @Published var profiles: [DictationProfile] {
-    didSet { persist() }
-  }
-
-  private let defaults: UserDefaults
-  private let log = SpeakLogger.logger(category: "DictationProfileStore")
-
-  init(defaults: UserDefaults = .standard) {
-    self.defaults = defaults
-    if let data = defaults.data(forKey: Self.defaultsKey),
-      let decoded = try? DictationProfile.decodeList(data) {
-      profiles = decoded
-    } else {
-      profiles = []
+    @Published var profiles: [DictationProfile] {
+        didSet { persist() }
     }
-  }
 
-  func reloadAfterMigration() {
-    profiles = defaults.data(forKey: Self.defaultsKey).flatMap { try? DictationProfile.decodeList($0) } ?? []
-  }
+    private let defaults: UserDefaults
+    private let log = SpeakLogger.logger(category: "DictationProfileStore")
 
-  func upsert(_ profile: DictationProfile) {
-    if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
-      profiles[index] = profile
-    } else {
-      profiles.append(profile)
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.defaultsKey),
+            let decoded = try? DictationProfile.decodeList(data) {
+            profiles = decoded
+        } else {
+            profiles = []
+        }
     }
-  }
 
-  func remove(id: UUID) {
-    profiles.removeAll { $0.id == id }
-  }
+    func reloadAfterMigration() {
+        guard let data = defaults.data(forKey: Self.defaultsKey) else { profiles = []; return }
+        do { profiles = try DictationProfile.decodeList(data) } catch {
+            log.error("Preserving profiles after failed migration reload: \(error.localizedDescription)")
+        }
+    }
 
-  private func persist() {
-    if profiles.isEmpty {
-      defaults.removeObject(forKey: Self.defaultsKey)
-      return
+    func upsert(_ profile: DictationProfile) {
+        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+            profiles[index] = profile
+        } else {
+            profiles.append(profile)
+        }
     }
-    do {
-      defaults.set(try DictationProfile.encodeList(profiles), forKey: Self.defaultsKey)
-    } catch {
-      log.error("Failed to persist dictation profiles: \(error.localizedDescription)")
+
+    func remove(id: UUID) {
+        profiles.removeAll { $0.id == id }
     }
-  }
+
+    private func persist() {
+        if profiles.isEmpty {
+            defaults.removeObject(forKey: Self.defaultsKey)
+            return
+        }
+        do {
+            defaults.set(try DictationProfile.encodeList(profiles), forKey: Self.defaultsKey)
+        } catch {
+            log.error("Failed to persist dictation profiles: \(error.localizedDescription)")
+        }
+    }
 }

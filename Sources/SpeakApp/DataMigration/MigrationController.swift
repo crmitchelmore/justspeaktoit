@@ -178,7 +178,7 @@ final class MigrationController: ObservableObject {
             )
             try await self.saveRecovery(latest, categories: categories)
             try await self.applyWithRollback(plan, previous: latest, categories: categories)
-            self.report = plan.notices
+            self.report = plan.notices + self.environment.shortcuts.migrationWarnings
             if categories.contains(.recordings) {
                 self.report += self.store.removeReplacedRecordings(previous: latest,
                                                                    originalFolder: originalFolder)

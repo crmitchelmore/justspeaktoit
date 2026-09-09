@@ -167,9 +167,7 @@ final class MigrationStore {
         for id in ids {
             let textRecord = text[id]
             let audioRecord = audio[id]
-            guard let base = textRecord ?? audioRecord else {
-                continue
-            }
+            guard let base = textRecord ?? audioRecord else { continue }
             var item = try MigrationCoding.decode(HistoryItem.self, base.value)
             var audioURL: URL?
             if !categories.contains(.recordings) {
@@ -184,6 +182,10 @@ final class MigrationStore {
                     try await installation.install(source: source, destination: destination, digest: digest)
                     audioURL = destination
                 }
+            }
+            if let existing = old[id], textRecord?.value == (try existing.migrationValue()) {
+                result[existing.id] = try existing.replacingMigrationAudio(audioURL)
+                continue
             }
             item = try MigrationCoding.decode(
                 HistoryItem.self,

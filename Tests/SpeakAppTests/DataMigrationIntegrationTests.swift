@@ -336,4 +336,24 @@ extension DataMigrationIntegrationTests {
                           "New preference \(name) must participate in migration runtime reload")
         }
     }
+    func testNoOpImport_PreservesLocalDiagnosticsAndDoesNotSyncAgain() async throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        var object = try XCTUnwrap(MigrationCoding.value(item(text: "Unchanged")).value as? [String: Any])
+        let exchange = HistoryNetworkExchange(url: URL(string: "https://example.com")!, method: "POST",
+                                              requestHeaders: [:], requestBodyPreview: "local diagnostics",
+                                              responseCode: 200, responseHeaders: [:], responseBodyPreview: "ok")
+        object["networkExchanges"] = try MigrationCoding.value([exchange]).value
+        let original = try MigrationCoding.decode(HistoryItem.self, AnyCodable(object))
+        await fixture.history.append(original)
+        let exported = try await fixture.store.snapshot(categories: [.history])
+        var uploads = 0
+        fixture.history.onItemAppended = { _ in uploads += 1 }
+        try await importSnapshot(exported, into: fixture, modes: [.history: .merge])
+        XCTAssertEqual(fixture.history.allItems, [original])
+        XCTAssertEqual(uploads, 0)
+        let moved = try original.replacingMigrationAudio(fixture.root.appendingPathComponent("moved.wav"))
+        XCTAssertEqual(moved.networkExchanges, original.networkExchanges)
+        XCTAssertEqual(moved.rawTranscription, original.rawTranscription)
+    }
 }

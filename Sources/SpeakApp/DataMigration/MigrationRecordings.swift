@@ -94,3 +94,13 @@ extension MigrationStore {
     }
 
 }
+
+extension HistoryItem {
+    /// Preserve local diagnostics when only the recording changes; exports remain redacted.
+    func replacingMigrationAudio(_ url: URL?) throws -> HistoryItem {
+        if audioFileURL == url { return self }
+        var object = try MigrationCoding.value(self).value as? [String: Any] ?? [:]
+        object["audioFileURL"] = url?.absoluteString
+        return try MigrationCoding.decode(HistoryItem.self, AnyCodable(object))
+    }
+}

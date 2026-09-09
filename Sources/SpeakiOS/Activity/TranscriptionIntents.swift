@@ -210,7 +210,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent
         if isActive {
             return .result(dialog: "Recording already in progress.")
         }
-        if SharedTranscriptionState.shared.isRecording {
+        if await ForegroundRecordingOwnership.shared.isOwned || SharedTranscriptionState.shared.isRecording {
             return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         }
         // A refused parameter is reported as itself. Folding it into the
@@ -334,7 +334,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
                 keyboardDeliverySource: .hardwareTrigger
             )
             return .result()
-        } else if SharedTranscriptionState.shared.isRecording {
+        } else if await ForegroundRecordingOwnership.shared.isOwned || SharedTranscriptionState.shared.isRecording {
             throw ToggleRecordingError.alreadyRecordingInApp
         } else {
             let parameters = try resolvedRunParameters(
@@ -403,7 +403,7 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
         }
 
         guard isActive else {
-            if SharedTranscriptionState.shared.isRecording {
+            if await ForegroundRecordingOwnership.shared.isOwned || SharedTranscriptionState.shared.isRecording {
                 return .result(dialog: "A recording is active in the app. Use the in-app stop button.")
             }
             return .result(dialog: "No active recording.")
@@ -458,6 +458,14 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
     public func perform() async throws -> some IntentResult {
         let entry = StartupEntry(origin: .controlToggleIntent)
         let service = TranscriptionRecordingService.shared
+        // Both desired values must report a foreign owner truthfully (#943):
+        // the in-app recorder holds process-local ownership from before its
+        // first suspension until its teardown settles, while the App Group
+        // flag the classifier also reads is false during startup and the stop
+        // drain. This guard precedes the classifier for that reason; a desired
+        // `false` neither cancels the foreground finalisation nor claims to
+        // have stopped it.
+        try ForegroundRecordingOwnership.shared.requireUnowned()
         let action = try RecordingControlRequest.action(
             desiredValue: value,
             serviceState: service.state,

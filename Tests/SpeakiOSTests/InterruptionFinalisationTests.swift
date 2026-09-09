@@ -180,7 +180,7 @@ final class InterruptionFinalisationTests: XCTestCase {
         XCTAssertTrue(coordinator.error is TestFailure)
         XCTAssertEqual(coordinator.captureStopNotice, iOSTranscriptionError.interrupted.localizedDescription)
         XCTAssertEqual(harness.pasteboard.writes, 0)
-        coordinator.cancel()
+        await coordinator.cancelAndWait()
     }
 
     func testForegroundSuccess_hasNoErrorAndIgnoresRetiredOwnerCallbacks() async throws {
@@ -207,7 +207,7 @@ final class InterruptionFinalisationTests: XCTestCase {
         XCTAssertTrue(coordinator.isRunning)
         XCTAssertEqual(coordinator.partialText, "")
         XCTAssertNil(coordinator.captureStopNotice)
-        coordinator.cancel()
+        await coordinator.cancelAndWait()
     }
 
     private func settle() async {
@@ -294,6 +294,8 @@ final class InterruptionSession: IOSRecordingSession {
         return Self.result(partialText)
     }
     func cancel() { observer.stop() }
+    /// This double drains nothing after cancellation, so it settles at once.
+    func awaitCancellationSettled() async {}
     func resetInputLevel() {}
     @discardableResult
     func discardTemporaryRecording() -> Bool {

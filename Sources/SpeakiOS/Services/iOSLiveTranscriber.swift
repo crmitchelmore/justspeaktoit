@@ -87,8 +87,25 @@ public final class iOSLiveTranscriber: ObservableObject {
     private let configurationObserver = CaptureDisruptionObserver()
     private var isStopping = false
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private var latestResult: SFSpeechRecognitionResult?
+    private var recognitionTask: LegacyAppleRecognitionTask?
+    private var latestResult: LegacyAppleRecognitionUpdate?
+    private var activeRecognitionID: UUID?
+    private var legacyStopTask: Task<TranscriptionResult, Never>?
+    private var legacyFinalisationContinuation: CheckedContinuation<Void, Never>?
+    private var cancelLegacyDeadline: (() -> Void)?
+    var legacyRecognitionStart: ((@escaping (LegacyAppleRecognitionUpdate?, Error?) -> Void)
+        -> LegacyAppleRecognitionTask)?
+    /// Cap the recognizer wait at two seconds after queued audio drains, keeping
+    /// an unresponsive framework from holding Stop indefinitely. Return early on
+    /// a terminal callback; this ceiling still needs device latency validation.
+    /// Device latency/trailing-word coverage is tracked in issue #948.
+    var scheduleLegacyDeadline: (@escaping () -> Void) -> (() -> Void) = { completion in
+        let task = Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            completion()
+        }
+        return { task.cancel() }
+    }
     private var speechAnalyzerSession: Any?
     private var analyzerCancellationTask: Task<Void, Never>?
     private var activeCaptureID: UUID?
@@ -100,7 +117,6 @@ public final class iOSLiveTranscriber: ObservableObject {
     private var activeModelID = AppleLocalModels.legacySpeechModelID
     private var startTime: Date?
     private var accumulatedSegments: [TranscriptionSegment] = []
-    private var segments: [TranscriptionSegment] = []
     private var isShuttingDownRecognitionTask = false
     /// Accumulated text from recognition segments finalised mid-session (on pause).
     private var committedText: String = ""
@@ -273,15 +289,12 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     private func startLegacyRecognition(captureID: UUID) throws {
-        let (recognizer, request) = try setupRecognition()
-        try startAudioEngine(request: request)
-
-        // Start recognition
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor in
-                guard self?.activeCaptureID == captureID else { return }
-                self?.handleRecognitionResult(result, error: error)
-            }
+        if legacyRecognitionStart != nil {
+            beginRecognitionTask(captureID: captureID)
+        } else {
+            let (recognizer, request) = try setupRecognition()
+            try startAudioEngine(request: request)
+            beginRecognitionTask(captureID: captureID, recognizer: recognizer, request: request)
         }
     }
 
@@ -449,7 +462,6 @@ public final class iOSLiveTranscriber: ObservableObject {
         error = nil
         latestResult = nil
         accumulatedSegments = []
-        segments = []
         isShuttingDownRecognitionTask = false
         committedText = ""
         lastFormattedString = ""
@@ -471,18 +483,8 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     public func stop() async -> TranscriptionResult {
         configurationObserver.stop()
-        guard isRunning, !isStopping else {
-            return TranscriptionResult(
-                text: partialText,
-                segments: segments,
-                confidence: confidence,
-                duration: 0,
-                modelIdentifier: activeModelID,
-                cost: nil,
-                rawPayload: nil,
-                debugInfo: nil
-            )
-        }
+        if let legacyStopTask { return await legacyStopTask.value }
+        guard isRunning, !isStopping else { return buildFinalResult(duration: 0) }
 
         isStopping = true
         defer { isStopping = false }
@@ -491,6 +493,15 @@ public final class iOSLiveTranscriber: ObservableObject {
             return await stopSpeechAnalyzer(session)
         }
 
+        let captureID = activeCaptureID
+        let task = Task { await self.stopLegacyRecognition(captureID: captureID) }
+        legacyStopTask = task
+        let result = await task.value
+        legacyStopTask = nil
+        return result
+    }
+
+    private func stopLegacyRecognition(captureID: UUID?) async -> TranscriptionResult {
         isShuttingDownRecognitionTask = true
 
         // Stop audio engine first, then let the buffers already queued on the
@@ -500,17 +511,19 @@ public final class iOSLiveTranscriber: ObservableObject {
         removeInputTap()
         await audioProcessingQueue.drainPendingWork()
 
-        // Signal end of audio
-        recognitionRequest?.endAudio()
-
-        // Cancel recognition task
+        guard activeCaptureID == captureID, captureID != nil else { return cancelledStopResult() }
+        let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
+        recognitionTask?.endAudio()
+        await awaitLegacyFinalisation()
+        // Cancel may have discarded this capture while the actor was suspended.
+        guard activeCaptureID == captureID else { return cancelledStopResult() }
+        activeRecognitionID = nil
         recognitionTask?.cancel()
 
         // Stop persistent recording
         _ = audioRecorder.stopRecording()
 
         // Build final result
-        let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let result = buildFinalResult(duration: duration)
 
         // Cleanup
@@ -526,6 +539,38 @@ public final class iOSLiveTranscriber: ObservableObject {
         onFinalResult?(result)
 
         return result
+    }
+
+    private func awaitLegacyFinalisation() async {
+        // A terminal callback may already have arrived during the buffer drain.
+        guard let recognitionID = activeRecognitionID, let recognitionTask else { return }
+        let captureID = activeCaptureID
+        let beganWaiting = Date()
+        await withCheckedContinuation { continuation in
+            legacyFinalisationContinuation = continuation
+            cancelLegacyDeadline = scheduleLegacyDeadline { [weak self] in
+                guard let self, self.activeCaptureID == captureID,
+                      self.activeRecognitionID == recognitionID else { return }
+                logger.warning("Legacy Apple finalisation deadline reached; retaining the latest usable result")
+                self.completeLegacyFinalisation()
+            }
+            recognitionTask.finish()
+        }
+        let elapsed = Date().timeIntervalSince(beganWaiting)
+        logger.info("Legacy Apple finalisation wait: \(elapsed, privacy: .public)s")
+    }
+
+    private func completeLegacyFinalisation() {
+        cancelLegacyDeadline?()
+        cancelLegacyDeadline = nil
+        let continuation = legacyFinalisationContinuation
+        legacyFinalisationContinuation = nil
+        continuation?.resume()
+    }
+
+    private func cancelledStopResult() -> TranscriptionResult {
+        TranscriptionResult(text: "", segments: [], confidence: nil, duration: 0,
+                            modelIdentifier: activeModelID, cost: nil, rawPayload: nil, debugInfo: nil)
     }
 
     @available(iOS 26.0, *)
@@ -590,6 +635,8 @@ public final class iOSLiveTranscriber: ObservableObject {
     private func cleanupCapture() {
         configurationObserver.stop()
         activeCaptureID = nil
+        activeRecognitionID = nil
+        completeLegacyFinalisation()
         guard isRunning || ownsAudioSession || hasInputTap else { return }
 
         SpeakLogger.transcription.info("Cancelling transcription")
@@ -605,10 +652,10 @@ public final class iOSLiveTranscriber: ObservableObject {
         removeInputTap()
         audioProcessingQueue.sync {}
 
-        recognitionRequest?.endAudio()
+        recognitionTask?.endAudio()
         recognitionTask?.cancel()
 
-        // Cancel persistent recording (keeps partial file by default)
+        // Explicit cancellation discards the partial recording.
         audioRecorder.cancelRecording()
 
         if #available(iOS 26.0, *),
@@ -660,60 +707,62 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
     }
 
-    private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
-        if let error = error {
+    private func beginRecognitionTask(
+        captureID: UUID,
+        recognizer: SFSpeechRecognizer? = nil,
+        request: SFSpeechAudioBufferRecognitionRequest? = nil
+    ) {
+        let recognitionID = UUID()
+        activeRecognitionID = recognitionID
+        isShuttingDownRecognitionTask = false
+        let receive: (LegacyAppleRecognitionUpdate?, Error?) -> Void = { [weak self] result, error in
+            guard let self, self.activeCaptureID == captureID,
+                  self.activeRecognitionID == recognitionID else { return }
+            self.handleRecognitionResult(result, error: error)
+        }
+        if let legacyRecognitionStart {
+            recognitionTask = legacyRecognitionStart(receive)
+        } else if let recognizer, let request {
+            let task = recognizer.recognitionTask(with: request) { result, error in
+                let update = result.map(LegacyAppleRecognitionUpdate.init)
+                Task { @MainActor in receive(update, error) }
+            }
+            recognitionTask = LegacyAppleRecognitionTask(
+                endAudio: request.endAudio, finish: task.finish, cancel: task.cancel
+            )
+        }
+    }
+
+    private func handleRecognitionResult(_ result: LegacyAppleRecognitionUpdate?, error: Error?) {
+        let captureID = activeCaptureID
+        let terminal = result?.isFinal == true || error != nil
+        if terminal { activeRecognitionID = nil }
+        // Empty terminal payloads must not erase a usable preceding partial.
+        if let result, !terminal || !result.text.isEmpty || lastFormattedString.isEmpty {
+            commitIfImplicitReset(currentText: result.text, isFinal: result.isFinal)
+            latestResult = result
+            lastFormattedString = result.text
+            partialText = [committedText, result.text].filter { !$0.isEmpty }.joined(separator: " ")
+            isFinal = result.isFinal
+            confidence = result.confidence
+            if result.isFinal {
+                committedText = partialText
+                lastFormattedString = ""
+            }
+            onPartialResult?(partialText, result.isFinal)
+        }
+        // Callbacks can synchronously Cancel; never resume/restart that capture.
+        guard activeCaptureID == captureID else { return }
+        if terminal { completeLegacyFinalisation() }
+        if let error {
             let nsError = error as NSError
             if nsError.domain == Self.assistantErrorDomain,
                nsError.code == Self.cancelledTaskErrorCode,
-               isShuttingDownRecognitionTask || !isRunning {
-                return
-            }
-            // Commit any in-progress text before propagating the error so a
-            // silence-timeout error doesn't silently drop the user's dictation.
-            if !isShuttingDownRecognitionTask, !lastFormattedString.isEmpty {
-                committedText = [committedText, lastFormattedString]
-                    .filter { !$0.isEmpty }.joined(separator: " ")
-                lastFormattedString = ""
-            }
+               isShuttingDownRecognitionTask || !isRunning { return }
             logger.error("Recognition error: \(error.localizedDescription, privacy: .public)")
             self.error = iOSTranscriptionError.recognitionFailed(error)
             onError?(self.error!)
-            return
-        }
-        guard let result = result else { return }
-
-        isShuttingDownRecognitionTask = false
-        latestResult = result
-        let currentText = result.bestTranscription.formattedString
-        let resultIsFinal = result.isFinal
-
-        // Detect implicit text reset (Apple silently clears after a pause)
-        commitIfImplicitReset(currentText: currentText, isFinal: resultIsFinal)
-        lastFormattedString = currentText
-
-        // Build display text from committed + current
-        let displayText = [committedText, currentText]
-            .filter { !$0.isEmpty }.joined(separator: " ")
-
-        // Calculate confidence
-        let avgConfidence: Double? = result.bestTranscription.segments.isEmpty
-            ? nil
-            : result.bestTranscription.segments.map {
-                Double($0.confidence)
-            }.reduce(0, +) / Double(result.bestTranscription.segments.count)
-
-        // Update state
-        partialText = displayText
-        self.isFinal = resultIsFinal
-        self.confidence = avgConfidence
-
-        // Callback
-        onPartialResult?(displayText, resultIsFinal)
-
-        if resultIsFinal {
-            logger.info("Mid-session isFinal – committing \(displayText.count) chars, restarting")
-            committedText = displayText
-            lastFormattedString = ""
+        } else if result?.isFinal == true, !isStopping {
             restartRecognitionTask()
         }
     }
@@ -729,12 +778,14 @@ public final class iOSLiveTranscriber: ObservableObject {
         logger.info("Implicit text reset – committing \(self.lastFormattedString.count) chars")
         committedText = [committedText, lastFormattedString]
             .filter { !$0.isEmpty }.joined(separator: " ")
+        appendLatestSegments()
     }
 
     /// Restart recognition after a mid-session `isFinal` so continued speech
     /// is captured without losing previously committed text.
     private func restartRecognitionTask() {
-        guard isRunning, !isStopping, let recognizer = speechRecognizer else { return }
+        guard isRunning, !isStopping, let captureID = activeCaptureID,
+              speechRecognizer != nil || legacyRecognitionStart != nil else { return }
 
         isShuttingDownRecognitionTask = true
         appendLatestSegments()
@@ -749,6 +800,13 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         recognitionTask?.cancel()
         recognitionTask = nil
+        latestResult = nil
+        lastFormattedString = ""
+        if legacyRecognitionStart != nil {
+            beginRecognitionTask(captureID: captureID)
+            return
+        }
+        guard let recognizer = speechRecognizer else { return }
 
         let newRequest = SFSpeechAudioBufferRecognitionRequest()
         newRequest.shouldReportPartialResults = true
@@ -756,47 +814,30 @@ public final class iOSLiveTranscriber: ObservableObject {
             newRequest.requiresOnDeviceRecognition = true
         }
         recognitionRequest = newRequest
-        latestResult = nil
-        lastFormattedString = ""
 
         // Reinstall the tap so its closure captures the new request; the old
         // tap holds the previous (cancelled) request immutably.
         removeInputTap()
         installTap(appendingTo: newRequest)
 
-        let captureID = activeCaptureID
-        recognitionTask = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
-            Task { @MainActor in
-                guard let captureID, self?.activeCaptureID == captureID else { return }
-                self?.handleRecognitionResult(result, error: error)
-            }
-        }
+        beginRecognitionTask(captureID: captureID, recognizer: recognizer, request: newRequest)
     }
     private func appendLatestSegments() {
         guard let latestResult else { return }
-        accumulatedSegments.append(contentsOf: mappedSegments(from: latestResult))
+        accumulatedSegments.append(contentsOf: latestResult.segments)
     }
 
-    private func mappedSegments(from result: SFSpeechRecognitionResult) -> [TranscriptionSegment] {
-        result.bestTranscription.segments.map { segment in
-            TranscriptionSegment(
-                startTime: segment.timestamp,
-                endTime: segment.timestamp + segment.duration,
-                text: segment.substring,
-                isFinal: true,
-                confidence: Double(segment.confidence)
-            )
-        }
-    }
     private func buildFinalResult(duration: TimeInterval) -> TranscriptionResult {
-        let latestSegments = latestResult.map(mappedSegments(from:)) ?? []
+        let latestSegments = latestResult?.segments ?? []
         let finalSegments = accumulatedSegments + latestSegments
+        let confidences = finalSegments.compactMap(\.confidence)
+        let finalConfidence = confidences.isEmpty ? confidence : confidences.reduce(0, +) / Double(confidences.count)
 
         // partialText already includes committedText from previous segments
         return TranscriptionResult(
             text: partialText,
             segments: finalSegments,
-            confidence: confidence,
+            confidence: finalConfidence,
             duration: duration,
             modelIdentifier: activeModelID,
             cost: nil,

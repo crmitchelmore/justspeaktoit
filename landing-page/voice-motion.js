@@ -42,7 +42,11 @@ if (replay && typeof Element.prototype.animate === 'function') {
     replay.hidden = reducedMotion.matches;
   };
   syncPreference();
-  reducedMotion.addEventListener('change', syncPreference);
+  if (typeof reducedMotion.addEventListener === 'function') {
+    reducedMotion.addEventListener('change', syncPreference);
+  } else if (typeof reducedMotion.addListener === 'function') {
+    reducedMotion.addListener(syncPreference);
+  }
   replay.addEventListener('click', play);
   // One short sequence on arrival, never a background loop.
   play();

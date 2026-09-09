@@ -126,13 +126,11 @@ final class GladiaBatchClientTests: XCTestCase {
         XCTAssertThrowsError(try GladiaBatchClient.decodeStatus(Data(#"{}"#.utf8)))
     }
 
-    func testAuthenticationAndQuotaFailuresAreNamedRatherThanBareStatusCodes() async throws {
-        for (status, expected) in [
-            (401, BatchTranscriptionJobError.authenticationFailed("Gladia")),
-            (403, .authenticationFailed("Gladia")),
-            (402, .quotaExceeded("Gladia")),
-            (429, .quotaExceeded("Gladia"))
-        ] {
+    /// Authentication (401, 403) and quota (402, 429) rejections keep the
+    /// provider's status and body so the app and the keyboard can render the
+    /// provider's own message, on the upload leg and on the polling leg alike.
+    func testAuthenticationAndQuotaFailuresKeepTheProviderStatusAndBody() async throws {
+        for status in [401, 403, 402, 429] {
             let audio = try Self.fixture(extension: "wav")
             defer { try? FileManager.default.removeItem(at: audio) }
             var client = GladiaBatchClient(baseURL: baseURL)
@@ -142,8 +140,26 @@ final class GladiaBatchClientTests: XCTestCase {
             await assertThrowsAsync(
                 try await client.transcribeFile(
                     at: audio, apiKey: "key", model: GladiaBatchClient.catalogID, language: nil)
-            ) { XCTAssertEqual($0 as? BatchTranscriptionJobError, expected) }
+            ) { XCTAssertEqual($0 as? TranscriptionProviderError, .httpError(status, "denied")) }
         }
+
+        let audio = try Self.fixture(extension: "wav")
+        defer { try? FileManager.default.removeItem(at: audio) }
+        var client = GladiaBatchClient(baseURL: baseURL)
+        client.pollInterval = 0
+        client.sleep = { _ in }
+        client.upload = { request, _ in
+            (Data(#"{"audio_url":"https://gladia.test/file/9"}"#.utf8), Self.ok(request))
+        }
+        client.send = { request in
+            request.httpMethod == "POST"
+                ? (Data(#"{"id":"abc"}"#.utf8), Self.ok(request))
+                : (Data("quota".utf8), Self.response(request, status: 429))
+        }
+        await assertThrowsAsync(
+            try await client.transcribeFile(
+                at: audio, apiKey: "key", model: GladiaBatchClient.catalogID, language: nil)
+        ) { XCTAssertEqual($0 as? TranscriptionProviderError, .httpError(429, "quota")) }
     }
 
     func testCancellationDuringPollingDeletesTheJobAndSurfacesACancellationError() async throws {

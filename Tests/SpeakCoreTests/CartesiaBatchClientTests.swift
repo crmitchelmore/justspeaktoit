@@ -89,13 +89,11 @@ final class CartesiaBatchClientTests: XCTestCase {
         XCTAssertEqual(silent.text, "")
     }
 
-    func testAuthenticationAndQuotaFailuresAreNamedRatherThanBareStatusCodes() async throws {
-        for (status, expected) in [
-            (401, BatchTranscriptionJobError.authenticationFailed("Cartesia")),
-            (403, .authenticationFailed("Cartesia")),
-            (402, .quotaExceeded("Cartesia")),
-            (429, .quotaExceeded("Cartesia"))
-        ] {
+    /// Cartesia now rejects a non-2xx response through the same shared helper
+    /// as the Gladia and Speechmatics job clients; the status and body reach
+    /// the iOS route unchanged, so its `httpError("Cartesia", …)` mapping holds.
+    func testAuthenticationAndQuotaFailuresKeepTheProviderStatusAndBody() async throws {
+        for status in [401, 403, 402, 429] {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).wav")
             try Data([0, 1, 2, 3]).write(to: url)
             defer { try? FileManager.default.removeItem(at: url) }
@@ -110,7 +108,7 @@ final class CartesiaBatchClientTests: XCTestCase {
                 _ = try await client.transcribeFile(at: url, apiKey: "fixture", language: nil)
                 XCTFail("Expected \(status) to fail")
             } catch {
-                XCTAssertEqual(error as? BatchTranscriptionJobError, expected)
+                XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, "denied"))
             }
         }
     }

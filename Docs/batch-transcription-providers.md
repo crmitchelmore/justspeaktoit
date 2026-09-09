@@ -23,9 +23,14 @@ an account without batch access surfaces the provider's own rejection.
 `Sources/SpeakCore/BatchTranscriptionJob.swift` holds what the asynchronous job
 APIs share: the on-disk multipart snapshot (the recording is copied in 64 KiB
 chunks and never held in memory), the polling loop, cancellation checks, and the
-HTTP failure vocabulary (`authenticationFailed`, `quotaExceeded`, `jobFailed`,
-`timedOut`). Cartesia's `/stt` endpoint answers in one round trip and keeps its
-own single-shot client.
+non-2xx rejection. Cartesia's `/stt` endpoint answers in one round trip and keeps
+its own single-shot client.
+
+A non-2xx response becomes `TranscriptionProviderError.httpError(status, body)`,
+which is the vocabulary the rest of the app already renders: the iOS routes
+re-map it to `IOSBatchTranscriptionError.httpError` with the provider name.
+Authentication (401, 403) and quota (402, 429) failures therefore reach the user
+as the provider's own message rather than a flattened generic string.
 
 ### Cartesia — `CartesiaBatchClient`
 

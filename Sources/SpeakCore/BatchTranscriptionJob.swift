@@ -105,22 +105,19 @@ public enum BatchTranscriptionJob {
         try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
     }
 
-    /// Maps a response onto the shared failure vocabulary so authentication and
-    /// quota problems are named rather than surfacing as a bare status code.
+    /// Rejects a non-2xx response as `TranscriptionProviderError.httpError`,
+    /// which is the vocabulary the rest of the app already renders: the iOS
+    /// routes re-map it to `IOSBatchTranscriptionError.httpError` with the
+    /// provider name, and macOS shows the status and body. Authentication (401,
+    /// 403) and quota (402, 429) failures therefore reach the user as the
+    /// provider's own message rather than being flattened into one string here.
     public static func validate(_ response: URLResponse, data: Data, provider: String) throws {
         guard let http = response as? HTTPURLResponse else {
             throw TranscriptionProviderError.invalidResponse
         }
         guard !(200..<300).contains(http.statusCode) else { return }
-        let body = String(data: data, encoding: .utf8) ?? ""
-        switch http.statusCode {
-        case 401, 403:
-            throw BatchTranscriptionJobError.authenticationFailed(provider)
-        case 402, 429:
-            throw BatchTranscriptionJobError.quotaExceeded(provider)
-        default:
-            throw TranscriptionProviderError.httpError(http.statusCode, body)
-        }
+        throw TranscriptionProviderError.httpError(
+            http.statusCode, String(data: data, encoding: .utf8) ?? "")
     }
 
     /// `URLError.cancelled` from a cancelled upload is a cancellation, not a
@@ -159,8 +156,6 @@ extension BatchTranscriptionJob.Poll: Equatable where Value: Equatable {}
 public enum BatchTranscriptionJobError: LocalizedError, Equatable {
     case unsupportedModel(String)
     case unsupportedAudioFormat(String)
-    case authenticationFailed(String)
-    case quotaExceeded(String)
     case jobFailed(String, String)
     case emptyTranscript(String)
     case timedOut
@@ -171,10 +166,6 @@ public enum BatchTranscriptionJobError: LocalizedError, Equatable {
             return "That model is not a \(provider) file-transcription model."
         case .unsupportedAudioFormat(let provider):
             return "\(provider) needs a WAV, M4A, MP3, MP4, AAC, Ogg, Opus, FLAC, or WebM recording."
-        case .authenticationFailed(let provider):
-            return "\(provider) rejected the API key. Check it in Settings → \(provider)."
-        case .quotaExceeded(let provider):
-            return "\(provider) reported no remaining quota or credit for this account."
         case .jobFailed(let provider, let message):
             return message.isEmpty
                 ? "\(provider) could not transcribe the recording."

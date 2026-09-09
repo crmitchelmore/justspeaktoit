@@ -116,13 +116,10 @@ final class SpeechmaticsBatchClientTests: XCTestCase {
         XCTAssertThrowsError(try SpeechmaticsBatchClient.decodeStatus(Data(#"{}"#.utf8)))
     }
 
-    func testAuthenticationAndQuotaFailuresAreNamedRatherThanBareStatusCodes() async throws {
-        for (status, expected) in [
-            (401, BatchTranscriptionJobError.authenticationFailed("Speechmatics")),
-            (403, .authenticationFailed("Speechmatics")),
-            (402, .quotaExceeded("Speechmatics")),
-            (429, .quotaExceeded("Speechmatics"))
-        ] {
+    /// Authentication (401, 403) and quota (402, 429) rejections keep the
+    /// provider's status and body, on job creation and on the transcript fetch.
+    func testAuthenticationAndQuotaFailuresKeepTheProviderStatusAndBody() async throws {
+        for status in [401, 403, 402, 429] {
             let audio = try Self.fixture(extension: "wav")
             defer { try? FileManager.default.removeItem(at: audio) }
             var client = SpeechmaticsBatchClient(baseURL: baseURL)
@@ -131,8 +128,24 @@ final class SpeechmaticsBatchClientTests: XCTestCase {
                 try await client.transcribeFile(
                     at: audio, apiKey: "key",
                     model: SpeechmaticsBatchClient.enhancedCatalogID, language: nil)
-            ) { XCTAssertEqual($0 as? BatchTranscriptionJobError, expected) }
+            ) { XCTAssertEqual($0 as? TranscriptionProviderError, .httpError(status, "denied")) }
         }
+
+        let audio = try Self.fixture(extension: "wav")
+        defer { try? FileManager.default.removeItem(at: audio) }
+        var client = SpeechmaticsBatchClient(baseURL: baseURL)
+        client.pollInterval = 0
+        client.sleep = { _ in }
+        client.upload = { request, _ in (Data(#"{"id":"job-7"}"#.utf8), Self.ok(request)) }
+        client.send = { request in
+            request.url?.path.hasSuffix("/transcript") == true
+                ? (Data("gone".utf8), Self.response(request, status: 403))
+                : (Data(#"{"job":{"status":"done"}}"#.utf8), Self.ok(request))
+        }
+        await assertThrowsAsync(
+            try await client.transcribeFile(
+                at: audio, apiKey: "key", model: SpeechmaticsBatchClient.standardCatalogID, language: nil)
+        ) { XCTAssertEqual($0 as? TranscriptionProviderError, .httpError(403, "gone")) }
     }
 
     func testCancellationDuringPollingDeletesTheJobAndSurfacesACancellationError() async throws {

@@ -31,7 +31,7 @@ public final class AudioSessionManager: ObservableObject {
     }
 
     private var interruptionObservers: [UUID: Observer<(Bool) -> Void>] = [:]
-    private var routeChangeObservers: [UUID: Observer<() -> Void>] = [:]
+    private var routeChangeObservers: [UUID: Observer<(AVAudioSession.RouteChangeReason) -> Void>] = [:]
 
     public init() {
         setupNotificationObservers()
@@ -61,7 +61,7 @@ public final class AudioSessionManager: ObservableObject {
     @discardableResult
     public func addRouteChangeObserver(
         owner: AnyObject,
-        _ handler: @escaping () -> Void
+        _ handler: @escaping (AVAudioSession.RouteChangeReason) -> Void
     ) -> UUID {
         let token = UUID()
         routeChangeObservers[token] = Observer(owner: owner, handler: handler)
@@ -309,13 +309,13 @@ public final class AudioSessionManager: ObservableObject {
         }
     }
 
-    private func notifyRouteChangeObservers() {
+    private func notifyRouteChangeObservers(reason: AVAudioSession.RouteChangeReason) {
         for (token, observer) in routeChangeObservers {
             guard observer.owner != nil else {
                 routeChangeObservers.removeValue(forKey: token)
                 continue
             }
-            observer.handler()
+            observer.handler(reason)
         }
     }
 
@@ -327,7 +327,7 @@ public final class AudioSessionManager: ObservableObject {
 
         logger.info("Route changed: \(String(describing: reason), privacy: .public)")
         updateCurrentRoute()
-        notifyRouteChangeObservers()
+        notifyRouteChangeObservers(reason: reason)
     }
 
     private func updateCurrentRoute() {

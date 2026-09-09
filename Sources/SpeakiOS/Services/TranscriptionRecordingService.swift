@@ -37,9 +37,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let historyManager: iOSHistoryManager
 
     private var transcriptionSession: IOSTranscriptionSession?
+    private var stoppingSession: IOSTranscriptionSession?
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
+    private var automaticStopDestination: HardwareTriggerDestination = .clipboard
+    private var onCaptureDisruption: (() async -> Void)?
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
@@ -111,7 +114,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         retainBatchRecording: Bool = true,
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
-        keyboardProfile: KeyboardDictationProfileOption? = nil
+        keyboardProfile: KeyboardDictationProfileOption? = nil,
+        destination: HardwareTriggerDestination? = nil,
+        onCaptureDisruption: (() async -> Void)? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
         state = lifecycle.state
@@ -141,6 +146,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         lastSharedStateWriteAt = .distantPast
         startTime = Date()
         self.sharesLiveTranscript = sharesLiveTranscript
+        self.automaticStopDestination = destination ?? settings.hardwareTriggerDestination
+        self.onCaptureDisruption = onCaptureDisruption
         sharedState.clear()
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
@@ -193,13 +200,15 @@ public final class TranscriptionRecordingService: ObservableObject {
             )
             session.onPartialResult = { [weak self, weak session] text, _ in
                 guard let self, let session,
-                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
+                        || self.stoppingSession === session else { return }
                 self.handlePartialResult(text: text)
             }
             session.onError = { [weak self, weak session] error in
                 guard let self, let session,
-                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
-                self.handleError(error)
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
+                        || self.stoppingSession === session else { return }
+                self.handleError(error, session: session)
             }
             startedSession = session
             guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
@@ -366,7 +375,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharesLiveTranscript = true
 
         // Complete Live Activity with clipboard confirmation
-        completeRecordingActivity(duration: duration, primedMessage: primedActivityMessage)
+        completeRecordingActivity(
+            duration: duration,
+            primedMessage: lastSessionError?.localizedDescription ?? primedActivityMessage
+        )
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. Polished text stays in History; the raw clipboard
@@ -411,7 +423,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func cancelRecording() {
         // A completed recording's polish has its own lifetime. Cancelling a
         // subsequent capture must not cancel that work or invalidate its result.
-        if lifecycle.state == .stopping { latestCompletionID = nil }
+        if lifecycle.state == .stopping {
+            latestCompletionID = nil
+            // The current finalisation keeps ownership until its drain ends.
+            // A replacement must not start while it can still publish output.
+            return
+        }
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return
@@ -455,21 +472,34 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
     }
 
-    private func handleError(_ error: Error) {
+    private func handleError(_ error: Error, session: IOSTranscriptionSession) {
         activityManager.reportError(error.localizedDescription)
 
         // A mid-session failure previously only updated the Live Activity —
         // the mic stayed hot while the user dictated into a dead session.
         // Tear the session down, preserving the accumulated transcript, and
         // publish the error so the app can surface it on next foreground.
-        guard lifecycle.state == .recording else { return }
+        guard lifecycle.state == .recording || stoppingSession === session else { return }
         lastSessionError = error
+        guard lifecycle.state == .recording else { return }
         Task { [weak self] in
-            guard let self, self.isRunning else { return }
-            await self.stopRecording(
-                primedActivityMessage: "Stopped: \(error.localizedDescription)"
-            )
+            guard let self, self.isRunning, self.transcriptionSession === session else { return }
+            await self.finishCaptureAfterDisruption()
         }
+    }
+
+    /// Finishes through the originating owner, which may own a keyboard nonce
+    /// rather than a clipboard destination. Stop's lifecycle guard claims once.
+    func finishCaptureAfterDisruption() async {
+        guard lifecycle.state == .recording else { return }
+        if let finishOwnedCapture = onCaptureDisruption {
+            await finishOwnedCapture()
+            return
+        }
+        await stopRecording(
+            destination: automaticStopDestination,
+            primedActivityMessage: lastSessionError?.localizedDescription ?? "Recording stopped"
+        )
     }
 
     private func startPostProcessing(
@@ -547,10 +577,12 @@ private extension TranscriptionRecordingService {
     func drainActiveTranscriber(duration: Int) async -> TranscriptionResult {
         if let session = transcriptionSession {
             transcriptionSession = nil
+            stoppingSession = session
+            defer { stoppingSession = nil }
             do {
                 return try await session.stop()
             } catch {
-                handleError(error)
+                handleError(error, session: session)
                 return TranscriptionResult(
                     text: "",
                     segments: [],
@@ -644,7 +676,7 @@ private extension TranscriptionRecordingService {
     }
 }
 
-private extension TranscriptionResult {
+extension TranscriptionResult {
     /// Returns a copy with `text` replaced, preserving all other metadata. Used
     /// so the returned result, history entry, clipboard, and spoken dialog all
     /// agree on the same best-available transcript.

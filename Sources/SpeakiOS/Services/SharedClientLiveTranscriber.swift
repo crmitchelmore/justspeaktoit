@@ -55,6 +55,8 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private var client: StreamingTranscriptionClient?
     private let audioEngine = AVAudioEngine()
+    private let configurationObserver = CaptureDisruptionObserver()
+    var configurationNotificationObject: AnyObject { audioEngine }
     private var startTime: Date?
     /// Finalised text so far, folded by the hosted client's declared final
     /// shape once `start()` knows which client is in use (issue #700).
@@ -150,6 +152,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             try startAudioEngine()
         }
         resetState()
+        observeCaptureConfiguration()
     }
 
     private func makeClient() -> StreamingTranscriptionClient? {
@@ -178,7 +181,20 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         )
     }
 
+    private func observeCaptureConfiguration() {
+        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
+            self?.audioEngine.isRunning == true
+        } onDisruption: { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.audioEngine.stop()
+            self.removeInputTap()
+            self.error = iOSTranscriptionError.microphoneChanged
+            self.onError?(iOSTranscriptionError.microphoneChanged)
+        }
+    }
+
     public func stop() async -> TranscriptionResult {
+        configurationObserver.stop()
         guard isRunning, !isStopping else {
             await cleanupTask?.value
             let text = partialText.isEmpty ? accumulated.text : partialText
@@ -229,11 +245,13 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
+        configurationObserver.stop()
         startup.cancel()
         _ = cleanupCapture()
     }
 
     private func cleanupCapture() -> Task<Void, Never>? {
+        configurationObserver.stop()
         if let cleanupTask { return cleanupTask }
         guard isRunning || ownsAudioSession || hasInputTap else { return nil }
         audioEngine.stop()

@@ -32,6 +32,8 @@ final class TranscriberCoordinator: ObservableObject {
 
     private var transcriptionSession: IOSTranscriptionSession?
     private var stoppingSession: IOSTranscriptionSession?
+    private var stopWasCancelled = false
+    var onCaptureDisruption: (() async -> Void)?
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
@@ -111,8 +113,19 @@ final class TranscriberCoordinator: ObservableObject {
             self?.handlePartialResult(text: text, isFinal: isFinal)
             self?.confidence = session?.confidence
         }
-        session.onError = { [weak self] error in
-            self?.handleError(error)
+        session.onError = { [weak self, weak session] error in
+            guard let self, let session,
+                  self.transcriptionSession === session || self.stoppingSession === session else { return }
+            self.handleError(error)
+            guard case iOSTranscriptionError.microphoneChanged = error else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.transcriptionSession === session, self.isRunning else { return }
+                if let onCaptureDisruption = self.onCaptureDisruption {
+                    await onCaptureDisruption()
+                } else {
+                    _ = await self.stop()
+                }
+            }
         }
         transcriptionSession = session
         do {
@@ -209,21 +222,23 @@ final class TranscriberCoordinator: ObservableObject {
     ) async -> TranscriptionResult? {
         transcriptionSession = nil
         stoppingSession = session
+        stopWasCancelled = false
         defer {
             if stoppingSession === session {
                 stoppingSession = nil
             }
         }
         do {
-            let result = try await session.stop()
-            guard !Task.isCancelled else {
+            let drained = try await session.stop()
+            let result = drained.replacingText(TranscriptionRecordingService.bestTranscript(
+                candidates: [drained.text, partialText], fallback: ""
+            ))
+            guard !Task.isCancelled, !stopWasCancelled, stoppingSession === session else {
                 startTime = nil
                 return result
             }
-            if session.isBatch {
-                partialText = result.text
-                wordCount = result.text.split(whereSeparator: \.isWhitespace).count
-            }
+            partialText = result.text
+            wordCount = result.text.split(whereSeparator: \.isWhitespace).count
             if AppSettings.shared.liveActivitiesEnabled {
                 activityManager.completeActivity(
                     finalWordCount: wordCount,
@@ -255,9 +270,10 @@ final class TranscriberCoordinator: ObservableObject {
 
     func cancel() {
         transcriptionSession?.cancel()
+        stopWasCancelled = stoppingSession != nil
         stoppingSession?.cancel()
         transcriptionSession = nil
-        stoppingSession = nil
+        // A stopping session retains ownership until its suspended drain returns.
         isRunning = false
         startTime = nil
         if AppSettings.shared.liveActivitiesEnabled {
@@ -294,44 +310,51 @@ public struct ContentView: View {
     public init() {
         let coordinator = TranscriberCoordinator()
         _coordinator = StateObject(wrappedValue: coordinator)
-        _handsFree = StateObject(
-            wrappedValue: IOSHandsFreeDictationCoordinator(
-                audioSessionManager: coordinator.audioSessionManager,
-                startCapture: { preRoll in
-                    let settings = AppSettings.shared
-                    guard HandsFreeDictationPolicy.supportsCapture(
-                        modelID: settings.selectedModel,
-                        isStreaming: settings.transcriptionMode == .streaming
+        let handsFree = IOSHandsFreeDictationCoordinator(
+            audioSessionManager: coordinator.audioSessionManager,
+            startCapture: { preRoll in
+                let settings = AppSettings.shared
+                guard HandsFreeDictationPolicy.supportsCapture(
+                    modelID: settings.selectedModel,
+                    isStreaming: settings.transcriptionMode == .streaming
+                )
+                else { return .rejected(.unsupportedConfiguration) }
+                do {
+                    try await coordinator.start(
+                        preRollBuffers: preRoll,
+                        analyzerFallbackAllowed: false
                     )
-                    else { return .rejected(.unsupportedConfiguration) }
-                    do {
-                        try await coordinator.start(
-                            preRollBuffers: preRoll,
-                            analyzerFallbackAllowed: false
-                        )
-                        return .started
-                    } catch {
-                        return .rejected(HandsFreeDictationMachine.Failure(error))
-                    }
-                },
-                stopCapture: {
-                    _ = await coordinator.stop(rearmHandsFree: true)
-                    return coordinator.error == nil ? .completed : .failed(.captureFailed)
-                },
-                cancelCapture: { coordinator.cancel() },
-                // iOS has no silence-hold setting, so the shared policy value is
-                // the only source. The macOS "silenceDuration" preference lives
-                // in the Mac app's own defaults and never reaches this app.
-                silenceDuration: { HandsFreeDictationPolicy.defaultSilenceHoldSeconds },
-                captureIsSupported: {
-                    HandsFreeDictationPolicy.supportsCapture(
-                        modelID: AppSettings.shared.selectedModel,
-                        isStreaming: AppSettings.shared.transcriptionMode == .streaming
-                    )
-                },
-                liveActivitiesEnabled: { AppSettings.shared.liveActivitiesEnabled }
-            )
+                    return .started
+                } catch {
+                    return .rejected(HandsFreeDictationMachine.Failure(error))
+                }
+            },
+            stopCapture: {
+                _ = await coordinator.stop(rearmHandsFree: true)
+                if case .microphoneChanged? = coordinator.error as? iOSTranscriptionError { return .completed }
+                return coordinator.error == nil ? .completed : .failed(.captureFailed)
+            },
+            cancelCapture: { coordinator.cancel() },
+            // iOS has no silence-hold setting, so the shared policy value is
+            // the only source. The macOS "silenceDuration" preference lives
+            // in the Mac app's own defaults and never reaches this app.
+            silenceDuration: { HandsFreeDictationPolicy.defaultSilenceHoldSeconds },
+            captureIsSupported: {
+                HandsFreeDictationPolicy.supportsCapture(
+                    modelID: AppSettings.shared.selectedModel,
+                    isStreaming: AppSettings.shared.transcriptionMode == .streaming
+                )
+            },
+            liveActivitiesEnabled: { AppSettings.shared.liveActivitiesEnabled }
         )
+        _handsFree = StateObject(wrappedValue: handsFree)
+        coordinator.onCaptureDisruption = { [weak coordinator, weak handsFree] in
+            if handsFree?.isArmed == true {
+                await handsFree?.stopForCaptureDisruption()
+            } else {
+                _ = await coordinator?.stop()
+            }
+        }
     }
 
     public var body: some View {

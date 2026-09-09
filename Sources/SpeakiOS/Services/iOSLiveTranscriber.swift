@@ -52,6 +52,8 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
     private var speechRecognizer: SFSpeechRecognizer?
     private let audioEngine = AVAudioEngine()
+    private let configurationObserver = CaptureDisruptionObserver()
+    private var isStopping = false
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var latestResult: SFSpeechRecognitionResult?
@@ -135,7 +137,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         preRollBuffers: [AVAudioPCMBuffer],
         analyzerFallbackAllowed: Bool = true
     ) async throws {
-        guard !isRunning, !startup.isStarting else { return }
+        guard !isRunning, !isStopping, !startup.isStarting else { return }
         do {
             try await startup.run({
                 await self.finishAnalyzerCancellation()
@@ -276,6 +278,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             }
             audioEngine.prepare()
             try audioEngine.start()
+            observeCaptureConfiguration()
             speechAnalyzerSession = session
             speechAnalyzerConverter = converter
         } catch {
@@ -322,6 +325,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         let recordingFormat = installTap(appendingTo: request)
         audioEngine.prepare()
         try audioEngine.start()
+        observeCaptureConfiguration()
         _ = try? audioRecorder.startRecording(format: recordingFormat)
     }
 
@@ -367,8 +371,21 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     /// Stop transcription and return final result.
+    private func observeCaptureConfiguration() {
+        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
+            self?.audioEngine.isRunning == true
+        } onDisruption: { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.audioEngine.stop()
+            self.removeInputTap()
+            self.error = iOSTranscriptionError.microphoneChanged
+            self.onError?(iOSTranscriptionError.microphoneChanged)
+        }
+    }
+
     public func stop() async -> TranscriptionResult {
-        guard isRunning else {
+        configurationObserver.stop()
+        guard isRunning, !isStopping else {
             return TranscriptionResult(
                 text: partialText,
                 segments: segments,
@@ -381,6 +398,8 @@ public final class iOSLiveTranscriber: ObservableObject {
             )
         }
 
+        isStopping = true
+        defer { isStopping = false }
         if #available(iOS 26.0, *),
            let session = speechAnalyzerSession as? AppleSpeechAnalyzerLiveSession {
             return await stopSpeechAnalyzer(session)
@@ -477,11 +496,13 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     /// Cancel transcription without returning result.
     public func cancel() {
+        configurationObserver.stop()
         startup.cancel()
         cleanupCapture()
     }
 
     private func cleanupCapture() {
+        configurationObserver.stop()
         activeCaptureID = nil
         guard isRunning || ownsAudioSession || hasInputTap else { return }
 
@@ -627,7 +648,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// Restart recognition after a mid-session `isFinal` so continued speech
     /// is captured without losing previously committed text.
     private func restartRecognitionTask() {
-        guard isRunning, let recognizer = speechRecognizer else { return }
+        guard isRunning, !isStopping, let recognizer = speechRecognizer else { return }
 
         isShuttingDownRecognitionTask = true
         appendLatestSegments()

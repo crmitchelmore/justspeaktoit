@@ -1,4 +1,5 @@
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 
 const output = new URL('./dist/', import.meta.url);
 await rm(output, { recursive: true, force: true });
@@ -13,3 +14,13 @@ for (const asset of [
 ]) {
   await cp(new URL(asset, import.meta.url), new URL(asset, output), { recursive: true });
 }
+
+// A new URL prevents an older CDN/browser stylesheet being paired with new HTML.
+// Keep source previews simple while making every production build cache-safe.
+const css = await readFile(new URL('site.css', output));
+const stylesheet = `site.${createHash('sha256').update(css).digest('hex').slice(0, 12)}.css`;
+await writeFile(new URL(stylesheet, output), css);
+const index = new URL('index.html', output);
+const html = await readFile(index, 'utf8');
+if (!html.includes('href="/site.css"')) throw new Error('Missing source stylesheet link');
+await writeFile(index, html.replace('href="/site.css"', `href="/${stylesheet}"`));

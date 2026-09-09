@@ -8,7 +8,7 @@
     "dev": "bun run serve.ts",
     "build": "node build.mjs",
     "preview": "bun run serve.ts",
-    "test": "node --test download-architecture.test.js"
+    "test": "node --test download-architecture.test.js build.test.js"
   },
   "devDependencies": {
     "@types/bun": "latest"

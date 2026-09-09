@@ -52,16 +52,11 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
                     application.endBackgroundTask(backgroundTask)
                 }
             }
-            let service = TranscriptionRecordingService.shared
-            if service.isRunning {
-                _ = await service.stopRecording()
-            } else {
-                do {
-                    try await service.startRecording()
-                } catch {
-                    print("[SpeakiOSAppDelegate] Quick action failed: \(error.localizedDescription)")
-                }
-            }
+            // Shared with capture deep links so the two cannot drift. This used
+            // to branch on `isRunning` (so a press during start-up silently did
+            // nothing instead of cancelling) and stop with no destination, which
+            // copied to the clipboard even for "Save to History Only" users.
+            await CaptureCommandRunner.perform(.toggle)
         }
         return true
     }
@@ -87,8 +82,12 @@ struct SpeakiOSApp: App {
                 )
                 .onOpenURL { url in
                     deepLinkRouter.handle(url)
+                    runPendingCaptureAction()
                 }
                 .task {
+                    // A link that cold-launched the app is queued before the
+                    // scene is active; drain it once the view is up.
+                    runPendingCaptureAction()
                     guard FeatureFlags.iOSKeyboardEnabled else {
                         KeyboardInstantDictationStore.shared.setEnabled(false)
                         return
@@ -97,6 +96,7 @@ struct SpeakiOSApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     guard newPhase == .active else { return }
+                    runPendingCaptureAction()
                     if FeatureFlags.iOSKeyboardEnabled {
                         keyboardInstantDictation.activate()
                     }
@@ -106,6 +106,20 @@ struct SpeakiOSApp: App {
                         WatchCaptureReceiver.shared.reconcilePendingWork()
                     }
                 }
+        }
+    }
+
+    /// Performs a capture deep link once the scene is actually active.
+    ///
+    /// A `justspeaktoit://start` link can cold-launch the app, and the URL
+    /// arrives before the scene is foreground enough to open a microphone, so
+    /// the router queues the command and this drains it from `onOpenURL`, the
+    /// first `task`, and every return to `.active`.
+    private func runPendingCaptureAction() {
+        guard scenePhase == .active else { return }
+        guard let link = deepLinkRouter.consumePendingCaptureAction() else { return }
+        Task { @MainActor in
+            await CaptureCommandRunner.perform(link.action, destinationOverride: link.destination)
         }
     }
 }

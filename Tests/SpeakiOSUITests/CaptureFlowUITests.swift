@@ -15,11 +15,12 @@ import XCTest
 /// **Simulator, not device.** The hook returns before any audio session is
 /// configured, so nothing here proves AVAudioSession behaviour, and ActivityKit
 /// renders in system UI that XCUITest cannot see, so nothing here proves Live
-/// Activity content either. Those two live on the manual device matrix
-/// (`.github/ISSUE_TEMPLATE/action_button_device_matrix.md`) and, for the
-/// activity status order, in `Tests/SpeakiOSTests`. What this class asserts is
-/// the user-visible status order the *app* owns: idle → recording → idle, with
-/// the transcript on screen and copy offered exactly once the session is over.
+/// Activity content either. Both belong on the manual device matrix
+/// (`.github/ISSUE_TEMPLATE/action_button_device_matrix.md`); the in-process
+/// activity lifecycle seam is separate work (#1029, #1047). What this class
+/// asserts is the user-visible status order the *app* owns: idle → recording
+/// → idle, with the transcript on screen and copy offered exactly once the
+/// session is over.
 ///
 /// Determinism is the whole point — the existing UI class in this bundle is
 /// flaky (issue #793), so every wait here is on a specific element, there are
@@ -38,6 +39,16 @@ final class CaptureFlowUITests: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
+        // The hook is compiled only into simulator Debug builds, so on a device
+        // — the opt-in `ios-device-matrix.yml` job runs this same bundle — these
+        // would drive the real microphone and the real provider, needing
+        // permissions and credentials and asserting nothing repeatable. Skip
+        // rather than fail: the device job's value is the tests that *are*
+        // device-meaningful.
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("The deterministic transcript hook exists only on the Simulator")
+        #endif
+
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_GB"]

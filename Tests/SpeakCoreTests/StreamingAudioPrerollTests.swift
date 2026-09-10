@@ -174,6 +174,11 @@ final class StreamingAudioPrerollTests: XCTestCase {
     /// | ElevenLabs | shared `StreamingAudioPreroll` | this table |
     /// | Soniox | shared `StreamingAudioPreroll` | this table |
     /// | Meta Muse | shared `StreamingAudioPreroll` | this table |
+    ///
+    /// `SonioxLiveTranscriber` in `SpeakApp` owns the same buffer but is a
+    /// macOS provider rather than a shared live client, so it is covered by
+    /// `Tests/SpeakAppTests/SonioxLivePrerollTests.swift` and stays out of this
+    /// table.
     /// | Gladia | bespoke `pendingAudio`, private, 5s inline cap | not asserted — no visible seam |
     /// | AssemblyAI | bespoke `preBeginAudio`, private, byte cap | not asserted — no visible seam |
     /// | Cartesia | bespoke `pendingAudio`, private, byte cap | not asserted — no visible seam |

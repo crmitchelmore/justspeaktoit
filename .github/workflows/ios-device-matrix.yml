@@ -64,7 +64,10 @@ jobs:
     runs-on: [self-hosted, macOS, ios-device]
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      # Pinned to an immutable revision: this runner holds a signing keychain
+      # and an attached provisioned device, so a moved tag must not be able to
+      # execute new code here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -80,10 +83,15 @@ jobs:
                  "or pass device_udid when dispatching."
             exit 1
           fi
+          # The UDID is a device identifier that ends up in every log line it
+          # is echoed into, so it is masked and never listed alongside the rest
+          # of the attached hardware.
+          echo "::add-mask::$UDID"
           echo "DEVICE_UDID=$UDID" >> "$GITHUB_ENV"
-          echo "::group::Attached devices"
-          xcrun xctrace list devices || true
-          echo "::endgroup::"
+          if ! xcrun xctrace list devices 2>/dev/null | grep -q "$UDID"; then
+            echo "::error::Device $UDID is not attached to this runner."
+            exit 1
+          fi
 
       - name: Install Tuist
         run: brew install tuist
@@ -111,17 +119,25 @@ jobs:
 
       - name: Label the run as device evidence
         if: ${{ always() }}
+        env:
+          # Empty when the job failed before the tests ran, which must not be
+          # reported as device evidence.
+          TEST_OUTCOME: ${{ steps.device-tests.outcome }}
         run: |
           {
             echo "### iOS tests — physical device"
             echo
-            echo "Device UDID: \`$DEVICE_UDID\`"
-            echo "Outcome: ${{ steps.device-tests.outcome }}"
-            echo
-            echo "Unlike the simulator job in \`ci.yml\`, this run used a real"
-            echo "AVAudioSession and a real ActivityKit activity. It still does"
-            echo "not cover the hardware Action Button, the Dynamic Island, or"
-            echo "interruptions — those stay on the manual device matrix."
+            if [ -z "$TEST_OUTCOME" ]; then
+              echo "The device test step never ran: the job failed during setup."
+              echo "**This run is not device evidence.**"
+            else
+              echo "Outcome: $TEST_OUTCOME"
+              echo
+              echo "Unlike the simulator job in \`ci.yml\`, this run used a real"
+              echo "AVAudioSession and a real ActivityKit activity. It still does"
+              echo "not cover the hardware Action Button, the Dynamic Island, or"
+              echo "interruptions — those stay on the manual device matrix."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Show failing assertions

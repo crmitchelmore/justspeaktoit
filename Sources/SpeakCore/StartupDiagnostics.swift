@@ -309,13 +309,31 @@ public struct StartupDiagnostics: Sendable {
         summaryEmitted = true
         emit(timeline.summaryLine(outcome: outcome))
         if outcome != .started || timeline.has(.firstPartial) {
-            retire()
+            drop()
         }
     }
 
-    /// Drops the current run. Used on stop, cancel and teardown so a late
+    /// Ends the current run. Used on stop, cancel and teardown so a late
     /// callback cannot report against a run that is over.
+    ///
+    /// A run whose outcome was never reported is reported as ``cancelled``
+    /// first. Teardown routinely runs *while the start is still suspended* — a
+    /// user cancelling during startup — and the cancelled start's own catch
+    /// block reaches the recorder only afterwards. Dropping the run outright
+    /// would lose the attempt's diagnostics entirely, so the boundaries it did
+    /// reach are emitted here. Because that is the run's one terminal outcome,
+    /// the later `finish(.cancelled, run:)` finds nothing and stays silent, and
+    /// no callback after it can be recorded.
     public mutating func retire() {
+        if let timeline, !summaryEmitted {
+            emit(timeline.summaryLine(outcome: .cancelled))
+        }
+        drop()
+    }
+
+    /// Drops the run without reporting it. Only valid once its summary has
+    /// been emitted.
+    private mutating func drop() {
         timeline = nil
         summaryEmitted = false
         partialEmitted = false

@@ -28,6 +28,14 @@ final class KeyboardHandoffController: ObservableObject {
     @Published private(set) var presentation: Presentation = .idle
     @Published private(set) var liveTranscript = ""
     @Published private(set) var isInstantReady = false
+    /// Why the most recent readiness session ended, when there is no live one.
+    ///
+    /// The keyboard is a separate process and never sees the containing app's
+    /// in-memory error message, so this persisted terminal reason is the only
+    /// way it can say *why* Instant Dictation is gone instead of offering the
+    /// same reconnect prompt for every cause (issue #995). `nil` whenever a
+    /// session is live, or when the last one was ended by the user.
+    @Published private(set) var instantEndReason: InstantDictationReadinessEndReason?
 
     private let store: KeyboardHandoffStore
     private let instantSessionStore: KeyboardInstantDictationStore
@@ -250,6 +258,8 @@ final class KeyboardHandoffController: ObservableObject {
     }
 
     private func refreshInstantSession() {
-        isInstantReady = instantSessionStore.activeSession() != nil
+        let session = instantSessionStore.activeSession()
+        isInstantReady = session != nil
+        instantEndReason = session == nil ? instantSessionStore.lastEndReason : nil
     }
 }

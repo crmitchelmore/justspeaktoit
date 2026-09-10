@@ -117,6 +117,63 @@ final class InstantDictationReadinessBoundsTests: XCTestCase {
         XCTAssertEqual(bounds.spentResumeAttempts, 0)
     }
 
+    /// The window binds a stopped session too. A delayed resume can carry a
+    /// session across the boundary, and the tick after it must report the
+    /// reason that actually applies rather than an unavailable microphone.
+    func testStoppedSessionPastItsWindowEndsForTheWindow() {
+        var bounds = monitor(window: 100)
+        XCTAssertEqual(bounds.observe(.stopped, atSeconds: 101), .end(.sessionWindowElapsed))
+    }
+
+    /// The exemption is for a dictation in progress, and only that.
+    func testAStoppedSessionInsideItsWindowStillResumes() {
+        var bounds = monitor(window: 100)
+        XCTAssertEqual(
+            bounds.observe(.stopped, atSeconds: 99),
+            .resume(afterSeconds: 0.5, attempt: 1)
+        )
+    }
+
+    // MARK: - Unattempted resumes
+
+    /// A restart preempted because a dictation took the microphone never ran,
+    /// so it is no evidence that readiness cannot restart. Charging it would
+    /// let ordinary handoffs exhaust the budget and end a healthy session.
+    func testAnUnattemptedResumeIsNotChargedToTheBudget() {
+        var bounds = monitor(attempts: 3)
+        for _ in 0..<10 {
+            XCTAssertEqual(
+                bounds.observe(.stopped, atSeconds: 1),
+                .resume(afterSeconds: 0.5, attempt: 1)
+            )
+            bounds.refundUnattemptedResume()
+            XCTAssertEqual(bounds.spentResumeAttempts, 0)
+        }
+    }
+
+    /// The refund is for a restart that never ran; it cannot undo one that did.
+    func testARefundCannotCreateBudgetOutOfNothing() {
+        var bounds = monitor(attempts: 3)
+        bounds.refundUnattemptedResume()
+        XCTAssertEqual(bounds.spentResumeAttempts, 0)
+        _ = bounds.observe(.stopped, atSeconds: 1)
+        bounds.noteResume(succeeded: true, atSeconds: 1)
+        bounds.refundUnattemptedResume()
+        XCTAssertEqual(bounds.spentResumeAttempts, 0)
+        bounds.refundUnattemptedResume()
+        XCTAssertEqual(bounds.spentResumeAttempts, 0)
+    }
+
+    /// Attempts that really ran still run out.
+    func testAttemptsThatRanStillExhaustTheBudget() {
+        var bounds = monitor(attempts: 2, reset: 120)
+        XCTAssertEqual(bounds.observe(.stopped, atSeconds: 1), .resume(afterSeconds: 0.5, attempt: 1))
+        bounds.noteResume(succeeded: true, atSeconds: 1)
+        XCTAssertEqual(bounds.observe(.stopped, atSeconds: 5), .resume(afterSeconds: 2, attempt: 2))
+        bounds.noteResume(succeeded: true, atSeconds: 5)
+        XCTAssertEqual(bounds.observe(.stopped, atSeconds: 9), .end(.audioUnavailable))
+    }
+
     // MARK: - Retirement
 
     func testRetiredMonitorDoesNothing() {
@@ -179,6 +236,20 @@ final class InstantDictationEndReasonStoreTests: XCTestCase {
         store.setEnabled(true)
         store.recordEndReason(.audioUnavailable)
         XCTAssertNotNil(store.start())
+        XCTAssertNil(store.lastEndReason)
+    }
+
+    /// A readiness failure recorded before the user turned Instant Dictation
+    /// off describes a session they have since replaced with a decision.
+    func testUserDisableClearsARecordedReason() throws {
+        let harness = try makeStore()
+        let store = harness.store
+        defer { harness.tearDown() }
+        store.setEnabled(true)
+        XCTAssertNotNil(store.start())
+        store.recordEndReason(.audioUnavailable)
+        XCTAssertEqual(store.lastEndReason, .audioUnavailable)
+        store.setEnabled(false)
         XCTAssertNil(store.lastEndReason)
     }
 

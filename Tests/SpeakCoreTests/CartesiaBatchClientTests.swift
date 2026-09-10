@@ -89,6 +89,30 @@ final class CartesiaBatchClientTests: XCTestCase {
         XCTAssertEqual(silent.text, "")
     }
 
+    /// Cartesia now rejects a non-2xx response through the same shared helper
+    /// as the Gladia and Speechmatics job clients; the status and body reach
+    /// the iOS route unchanged, so its `httpError("Cartesia", …)` mapping holds.
+    func testAuthenticationAndQuotaFailuresKeepTheProviderStatusAndBody() async throws {
+        for status in [401, 403, 402, 429] {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).wav")
+            try Data([0, 1, 2, 3]).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            var client = CartesiaBatchClient()
+            client.uploadRecording = { request, _ in
+                (
+                    Data("denied".utf8),
+                    HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+                )
+            }
+            do {
+                _ = try await client.transcribeFile(at: url, apiKey: "fixture", language: nil)
+                XCTFail("Expected \(status) to fail")
+            } catch {
+                XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, "denied"))
+            }
+        }
+    }
+
     func testCatalogueAndCredentialStayOnCartesiaBatchRoute() {
         XCTAssertTrue(ModelCatalog.batchTranscription.contains { $0.id == CartesiaBatchClient.catalogID })
         XCTAssertFalse(ModelCatalog.liveTranscription.contains { $0.id == CartesiaBatchClient.catalogID })

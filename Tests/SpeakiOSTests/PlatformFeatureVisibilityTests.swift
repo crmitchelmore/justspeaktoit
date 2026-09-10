@@ -42,7 +42,9 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // listed whenever the runtime supports one of the analyzer engines
         // (SpeechTranscriber needs Apple Intelligence; DictationTranscriber
         // needs OS 26), so the expected provider set depends on the runtime.
-        var expectedProviders: Set<String> = ["cartesia", "google", "meta", "openai", "xai"]
+        var expectedProviders: Set<String> = [
+            "cartesia", "gladia", "google", "meta", "openai", "xai"
+        ]
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
         }
@@ -100,6 +102,47 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             SettingsView.batchAPIKeyPrompt(for: XAISpeechToText.batchCatalogID),
             "Add your xAI API key below to use this model."
         )
+    }
+
+    /// Gladia batch reuses the `gladia.apiKey` this app already stores for live
+    /// Solaria, so it is selectable and resolves that credential rather than
+    /// falling back to the OpenRouter key.
+    func testGladiaBatchIsSelectableAndResolvesTheGladiaKey() {
+        XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == GladiaBatchClient.catalogID })
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: GladiaBatchClient.catalogID), .gladia)
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " gladia/solaria-1 "), .gladia)
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: GladiaBatchClient.catalogID, purpose: .batchTranscription),
+            .apiKey(identifier: AppSettings.gladiaKeyID, providerName: "Gladia"))
+    }
+
+    /// Documented platform restriction: Speechmatics batch stays macOS-only.
+    ///
+    /// This app now stores `speechmatics.apiKey` for the live provider, so the
+    /// original reason for hiding the batch entry (no credential field) no
+    /// longer holds. The remaining one does: `IOSBatchTranscriptionRoute` has
+    /// no Speechmatics case, so a selectable entry would fall through to the
+    /// OpenRouter route and upload to the wrong service. It is hidden until an
+    /// iOS upload path exists — the same treatment every other provider
+    /// without one gets.
+    /// See Docs/batch-transcription-providers.md.
+    func testSpeechmaticsBatchIsHiddenOnIOSBecauseThereIsNoUploadRoute() {
+        XCTAssertTrue(ModelCatalog.batchTranscription.contains {
+            SpeechmaticsBatchClient.catalogIDs.contains($0.id)
+        })
+        XCTAssertFalse(AppSettings.supportedBatchModels.contains {
+            SpeechmaticsBatchClient.catalogIDs.contains($0.id)
+        })
+        XCTAssertEqual(
+            ModelCredentialResolver.requirement(
+                for: SpeechmaticsBatchClient.enhancedCatalogID, purpose: .batchTranscription),
+            .apiKey(identifier: "speechmatics.apiKey", providerName: "Speechmatics"))
+        // No dedicated route exists, which is exactly why the entry stays
+        // hidden: routing it would send Speechmatics audio to OpenRouter.
+        for id in SpeechmaticsBatchClient.catalogIDs {
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: id), .openRouter)
+        }
     }
 
     func testBatchRouting_sendsGemini35ToItsOwnClientAndLeavesOpenRouterModelsAlone() {

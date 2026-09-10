@@ -8,8 +8,9 @@ struct IOSBatchTranscriptionClient {
     let keywords: [String]
     let session: URLSession
 
-    // One case per upload route is the point of this dispatch, so its length
-    // grows with the provider list rather than with any logic.
+    // A flat routing table: one `case` per upload path, each delegating to a
+    // named method. Its length grows with the provider list rather than with
+    // any logic, so it passes the default limit.
     // swiftlint:disable:next function_body_length
     func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
         // Credential resolution uses the trimmed ID. Use the same ID for both
@@ -35,6 +36,13 @@ struct IOSBatchTranscriptionClient {
         case .cartesia:
             return try await transcribeWithCartesia(
                 at: url,
+                language: language,
+                apiKey: try requireAPIKey()
+            )
+        case .gladia:
+            return try await transcribeWithGladia(
+                at: url,
+                model: model,
                 language: language,
                 apiKey: try requireAPIKey()
             )
@@ -206,6 +214,34 @@ struct IOSBatchTranscriptionClient {
         } catch let XAISpeechToTextError.httpError(statusCode, message) {
             throw IOSBatchTranscriptionError.httpError("xAI", statusCode, message)
         }
+    }
+
+    /// Solaria-1 through the shared `GladiaBatchClient`. Errors are mapped onto
+    /// the same vocabulary as the sibling routes so the keyboard and the app
+    /// name the provider, and a silent recording is reported rather than
+    /// inserting nothing.
+    private func transcribeWithGladia(
+        at url: URL,
+        model: String,
+        language: String?,
+        apiKey: String
+    ) async throws -> TranscriptionResult {
+        let result: TranscriptionResult
+        do {
+            result = try await GladiaBatchClient(session: session).transcribeFile(
+                at: url, apiKey: apiKey, model: model, language: language
+            )
+        } catch TranscriptionProviderError.apiKeyMissing {
+            throw IOSBatchTranscriptionError.apiKeyMissing
+        } catch TranscriptionProviderError.invalidResponse {
+            throw IOSBatchTranscriptionError.invalidResponse
+        } catch let TranscriptionProviderError.httpError(statusCode, body) {
+            throw IOSBatchTranscriptionError.httpError(GladiaBatchClient.providerName, statusCode, body)
+        }
+        guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw IOSBatchTranscriptionError.emptyTranscript
+        }
+        return result
     }
 
     private func transcribeWithOpenRouter(

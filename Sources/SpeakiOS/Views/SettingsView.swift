@@ -815,6 +815,13 @@ public final class AppSettings: ObservableObject {
                 // xAI's dedicated speech-to-text endpoint uploads through the
                 // shared `XAIBatchTranscriptionClient` with the xAI key.
                 || option.id == XAISpeechToText.batchCatalogID
+                // Gladia's pre-recorded job API uploads through the shared
+                // `GladiaBatchClient` with the `gladia.apiKey` this app already
+                // stores for live Solaria. Speechmatics batch stays macOS-only
+                // for now: iOS has no Speechmatics credential field, and a
+                // model that can never resolve a key is hidden rather than
+                // shown failing (see Docs/batch-transcription-providers.md).
+                || option.id == GladiaBatchClient.catalogID
         }
 
     // MARK: - Legacy migration

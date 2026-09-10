@@ -38,7 +38,14 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
     model: String,
     language: String?
   ) async throws -> TranscriptionResult {
-    throw SpeechmaticsLiveError.batchNotSupported
+    guard SpeechmaticsBatchClient.catalogIDs.contains(
+      model.trimmingCharacters(in: .whitespacesAndNewlines)
+    ) else {
+      throw SpeechmaticsLiveError.batchNotSupported
+    }
+    return try await SpeechmaticsBatchClient(session: session).transcribeFile(
+      at: url, apiKey: apiKey, model: model, language: language
+    )
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
@@ -57,5 +64,6 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
 
   func supportedModels() -> [ModelCatalog.Option] {
     ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
+      + ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 }

@@ -132,6 +132,19 @@ public struct HandsFreeVoiceActivityTracker: Equatable, Sendable {
         }
     }
 
+    /// How long the current run of silence has lasted at `seconds`, or `nil`
+    /// when the tracker is not inside one — nothing has been said yet, or the
+    /// speaker is still speaking.
+    ///
+    /// Exposed so `CaptureEndPointingMonitor` can raise its warning edge
+    /// partway through the hold without keeping a second copy of the debounce.
+    /// A copy is what would let end-pointing and hands-free drift apart on the
+    /// question this type exists to answer.
+    public func silenceHeld(atSeconds seconds: Double) -> Double? {
+        guard case .silent(let since) = phase else { return nil }
+        return max(0, seconds - since)
+    }
+
     /// Drops any part-observed utterance, e.g. when the session re-arms.
     public mutating func reset() {
         phase = .quiet

@@ -53,6 +53,29 @@ final class IOSTranscriptionSession {
         return transcriber.confidence
     }
 
+    /// The most recent microphone level, in dBFS, whichever backend is running.
+    ///
+    /// Batch is included deliberately. It publishes no partial results — see
+    /// `bindCallbacks`, where `.batch` binds nothing — so an end-pointing rule
+    /// written against the transcript could never fire for anyone whose
+    /// transcription mode is batch, and they would turn the setting on and
+    /// silently never get an auto-stop. The level is the one signal all four
+    /// backends produce.
+    var currentInputLevelDBFS: Float { audioRecorder.currentInputLevelDBFS }
+
+    /// Forgets the metered level, so a new capture never inherits the previous
+    /// one's last reading.
+    func resetInputLevel() { audioRecorder.resetInputLevel() }
+
+    private var audioRecorder: AudioRecordingPersistence {
+        switch backend {
+        case .batch(let transcriber): return transcriber.audioRecorder
+        case .apple(let transcriber): return transcriber.audioRecorder
+        case .openAI(let transcriber): return transcriber.audioRecorder
+        case .shared(let transcriber): return transcriber.audioRecorder
+        }
+    }
+
     private enum Backend {
         case batch(IOSBatchTranscriber)
         case apple(iOSLiveTranscriber)

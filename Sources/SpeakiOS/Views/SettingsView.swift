@@ -334,6 +334,30 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    /// Whether a headless capture (Control, Action Button, Siri, Shortcuts)
+    /// finishes itself after a run of silence (issue #1012).
+    ///
+    /// Off by default and staying that way. Auto-stop is a genuine improvement
+    /// for people who dictate in bursts and a genuine regression for people who
+    /// think mid-sentence, and there is no way to tell which someone is without
+    /// asking. Turning this on for everybody would cut some of them off.
+    @Published public var autoStopOnSilenceEnabled: Bool {
+        didSet { defaults.set(autoStopOnSilenceEnabled, forKey: "autoStopOnSilenceEnabled") }
+    }
+
+    /// How long silence must hold before an auto-stopping capture finishes.
+    /// Clamped into `CaptureEndPointingPolicy.silenceWindowRange`.
+    @Published public var autoStopSilenceSeconds: TimeInterval {
+        didSet {
+            let clamped = CaptureEndPointingPolicy.silenceWindow(configured: autoStopSilenceSeconds)
+            if clamped != autoStopSilenceSeconds {
+                autoStopSilenceSeconds = clamped
+            } else {
+                defaults.set(autoStopSilenceSeconds, forKey: "autoStopSilenceSeconds")
+            }
+        }
+    }
+
     // MARK: - Post-Processing Settings
 
     @Published public var postProcessingEnabled: Bool {
@@ -459,6 +483,15 @@ public final class AppSettings: ObservableObject {
         self.handsFreeDictationEnabled = handsFree
         self.preferredLocaleIdentifier = preferredLocale
         self.hardwareTriggerDestination = hardwareDest
+        // An install that has never seen this setting gets the default window,
+        // not the zero `double(forKey:)` returns for a missing key — which the
+        // clamp would raise to the floor anyway, but reading it explicitly
+        // keeps the stored value and the default from ever disagreeing.
+        self.autoStopOnSilenceEnabled = defaults.bool(forKey: "autoStopOnSilenceEnabled")
+        self.autoStopSilenceSeconds = CaptureEndPointingPolicy.silenceWindow(
+            configured: defaults.object(forKey: "autoStopSilenceSeconds") as? TimeInterval
+                ?? CaptureEndPointingPolicy.defaultSilenceWindowSeconds
+        )
         self.postProcessingEnabled = postEnabled
         self.postProcessingModel = postModel
         self.autoPostProcess = autoPost
@@ -1608,6 +1641,8 @@ struct HardwareTriggerSettingsView: View {
                 }
             }
 
+            autoStopSection
+
             Section("Before You Start") {
                 Text(
                     "Open JustSpeakToIt before first use and grant the requested permissions, "
@@ -1687,6 +1722,42 @@ struct HardwareTriggerSettingsView: View {
         }
         .navigationTitle("Action Button & Shortcuts")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Silence auto-stop (issue #1012). Deliberately explicit about the cost:
+    /// somebody who thinks in long pauses needs to know this will cut them off
+    /// before they turn it on, not after.
+    private var autoStopSection: some View {
+        Section("Stop On Silence") {
+            Toggle("Finish after a pause", isOn: $settings.autoStopOnSilenceEnabled)
+                .accessibilityIdentifier("autoStopOnSilenceToggle")
+
+            Text(
+                "Recordings started from a Control, the Action Button, Siri or a Shortcut finish "
+                    + "on their own once you stop speaking, so one press is the whole capture. "
+                    + "Recordings you start in the app or from the keyboard are unaffected."
+            )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if settings.autoStopOnSilenceEnabled {
+                Stepper(
+                    "Pause length: \(settings.autoStopSilenceSeconds, specifier: "%.0f")s",
+                    value: $settings.autoStopSilenceSeconds,
+                    in: CaptureEndPointingPolicy.silenceWindowRange,
+                    step: 1
+                )
+                    .accessibilityIdentifier("autoStopSilenceStepper")
+
+                Text(
+                    "Shorter finishes sooner but is likelier to cut you off while you are thinking. "
+                        + "A recording that never goes quiet still stops after "
+                        + "\(Int(CaptureEndPointingPolicy.defaultMaximumDurationSeconds / 60)) minutes."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     @available(iOS 18.0, *)

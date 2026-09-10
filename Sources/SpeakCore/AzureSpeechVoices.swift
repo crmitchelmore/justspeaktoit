@@ -27,7 +27,8 @@ public struct AzureSpeechVoiceAPI: Sendable {
         let config = try AzureSpeechConfiguration(credentials: credentials)
         var request = URLRequest(url: config.voicesURL, timeoutInterval: 30)
         request.setValue(config.apiKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
-        let (data, response) = try await session.data(for: request)
+        let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: config.voicesURL)
+        let (data, response) = try await session.data(for: request, delegate: redirects)
         guard let http = response as? HTTPURLResponse else { throw AzureSpeechError.invalidResponse }
         guard http.statusCode == 200 else { throw AzureSpeechError.service(http.statusCode) }
         return try JSONDecoder().decode([AzureSpeechVoice].self, from: data)

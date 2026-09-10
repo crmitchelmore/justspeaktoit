@@ -3,6 +3,9 @@ import AVFoundation
 import Foundation
 import SpeakCore
 
+// The routing table and one upload method per provider live together so the
+// iOS upload paths are auditable in one place; its length tracks the provider list.
+// swiftlint:disable:next type_body_length
 struct IOSBatchTranscriptionClient {
     let apiKey: String
     let keywords: [String]

@@ -23,7 +23,10 @@ public struct AzureBatchTranscriptionClient: Sendable {
             origin: origin, key: config.apiKey, audio: audio.data, model: model, language: language,
             keywords: keywords
         )
-        let (data, response) = try await session.data(for: request)
+        // `Ocp-Apim-Subscription-Key` is a custom header URLSession does not
+        // strip on a cross-origin hop, and the body is the user's recording.
+        let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: origin)
+        let (data, response) = try await session.data(for: request, delegate: redirects)
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse else { throw AzureSpeechError.invalidResponse }
         guard http.statusCode == 200 else { throw AzureSpeechError.service(http.statusCode) }

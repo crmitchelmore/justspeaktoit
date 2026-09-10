@@ -20,6 +20,12 @@ file API. Voice Live assistant responses are disabled; the client never sends
 then awaits a server acknowledgement and transcription finals within a five-second
 overall budget. Azure rejects disabling turn detection after a session has started.
 Timeouts return the best available transcript with an error, not a fabricated final.
+Leading audio is held in the shared `StreamingAudioPreroll` until Azure's first
+`session.updated`, outbound audio is bounded by the shared `StreamingAudioSendBudget`
+(a stalled socket is reported as a transport failure), and a stop that lands during
+the handshake waits the shared `StreamingSessionReadiness` budget before committing.
+A per-turn `input_audio_transcription.failed` event does not end the session; only a
+recording in which every turn failed is reported as a transcription failure.
 
 This does not add a bring-your-own Azure OpenAI deployment. That requires its own
 deployment endpoint and authentication contract; an ordinary OpenAI key is never

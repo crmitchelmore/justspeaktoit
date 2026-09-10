@@ -43,7 +43,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         // (SpeechTranscriber needs Apple Intelligence; DictationTranscriber
         // needs OS 26), so the expected provider set depends on the runtime.
         var expectedProviders: Set<String> = [
-            "cartesia", "gladia", "google", "meta", "openai", "xai"
+            "azure", "cartesia", "gladia", "google", "meta", "openai", "xai"
         ]
         if AppleLocalModels.supportsSpeechTranscriber || AppleLocalModels.supportsDictationTranscriber {
             expectedProviders.insert("apple")
@@ -101,6 +101,24 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
         XCTAssertEqual(
             SettingsView.batchAPIKeyPrompt(for: XAISpeechToText.batchCatalogID),
             "Add your xAI API key below to use this model."
+        )
+    }
+
+    /// Azure recorded-audio models upload through `AzureBatchTranscriptionClient`
+    /// with the `azure.speech.apiKey` entry voice output already stores, so all
+    /// three are selectable and none falls back to the OpenRouter route or key.
+    func testAzureBatchIsSelectableAndUsesItsOwnUploadRouteAndKey() {
+        for id in AzureTranscriptionModels.batchIDs {
+            XCTAssertTrue(AppSettings.supportedBatchModels.contains { $0.id == id }, id)
+            XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: " \(id) "), .azure, id)
+            XCTAssertEqual(
+                ModelCredentialResolver.requirement(for: id, purpose: .batchTranscription),
+                .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure Speech")
+            )
+        }
+        XCTAssertEqual(
+            SettingsView.batchAPIKeyPrompt(for: AzureTranscriptionModels.mai2),
+            "Add your Azure Speech API key below to use this model."
         )
     }
 

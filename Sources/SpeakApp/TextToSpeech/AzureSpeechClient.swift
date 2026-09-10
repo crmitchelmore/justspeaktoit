@@ -28,7 +28,9 @@ actor AzureSpeechClient: TextToSpeechClient {
       speed: settings.speed, pitch: settings.pitch, useSSML: settings.useSSML
     )
 
-    let (data, response) = try await session.data(for: request)
+    // Keep the subscription key inside the regional Azure origin on any redirect.
+    let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: request.url!)
+    let (data, response) = try await session.data(for: request, delegate: redirects)
 
     guard let httpResponse = response as? HTTPURLResponse else {
       throw TTSError.synthesisFailure("Invalid response")

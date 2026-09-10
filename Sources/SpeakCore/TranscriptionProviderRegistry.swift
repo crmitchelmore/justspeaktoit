@@ -33,12 +33,28 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
         displayName: String,
         systemImage: String = "network",
         tintColor: String = "blue",
+        website: String = ""
+    ) {
+        self.init(
+            id: id, displayName: displayName, systemImage: systemImage, tintColor: tintColor,
+            website: website, apiKeyIdentifier: "\(id).apiKey"
+        )
+    }
+
+    /// For providers whose Keychain item predates the `<id>.apiKey` convention:
+    /// Azure transcription reuses the `azure.speech.apiKey` entry voice output
+    /// already writes, so one saved key unlocks both.
+    public init(
+        id: String,
+        displayName: String,
+        systemImage: String = "network",
+        tintColor: String = "blue",
         website: String = "",
-        apiKeyIdentifier: String? = nil
+        apiKeyIdentifier: String
     ) {
         self.id = id
         self.displayName = displayName
-        self.apiKeyIdentifier = apiKeyIdentifier ?? "\(id).apiKey"
+        self.apiKeyIdentifier = apiKeyIdentifier
         self.apiKeyLabel = "\(displayName) API Key"
         self.systemImage = systemImage
         self.tintColor = tintColor

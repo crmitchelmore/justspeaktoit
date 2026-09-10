@@ -6,9 +6,19 @@ final class AzureSpeechTests: XCTestCase {
     func testCredentials_preserveLegacyAndRejectHostInjection() throws {
         XCTAssertEqual(try AzureSpeechConfiguration(credentials: "key").region, "eastus")
         XCTAssertEqual(try AzureSpeechConfiguration(credentials: " key: UKSouth ").region, "uksouth")
-        for value in ["", "key:", "key:evil.example/path", "key:uksouth@evil"] {
-            XCTAssertThrowsError(try AzureSpeechConfiguration(credentials: value))
+        for value in ["", "key:", "key:evil.example/path", "key:uksouth@evil",
+                      "key:" + String(repeating: "a", count: 64)] {
+            XCTAssertThrowsError(try AzureSpeechConfiguration(credentials: value), value)
         }
+    }
+
+    func testRegionalURLs_areBuiltFromComponentsNotInterpolation() throws {
+        let config = try AzureSpeechConfiguration(credentials: "key:UKSouth")
+        XCTAssertEqual(config.voicesURL.absoluteString,
+                       "https://uksouth.tts.speech.microsoft.com/cognitiveservices/voices/list")
+        XCTAssertEqual(config.synthesisURL.absoluteString,
+                       "https://uksouth.tts.speech.microsoft.com/cognitiveservices/v1")
+        XCTAssertEqual(config.transcriptionURL.absoluteString, "https://uksouth.api.cognitive.microsoft.com")
     }
 
     func testEndpoint_rejectsCredentialsPathsAndUntrustedHosts() throws {
@@ -220,4 +230,70 @@ final class AzureSpeechTests: XCTestCase {
                            ))
         }
     }
+}
+
+/// Voice Live event handling, driven through `ingest` without a socket.
+final class AzureVoiceLiveClientTests: XCTestCase {
+    /// Azure reports `input_audio_transcription.failed` per item. One failed
+    /// turn must not end the session (later utterances still arrive), but a
+    /// finish that yields nothing at all is reported rather than returned as
+    /// silence.
+    func testLiveFailedItem_keepsSessionAndReportsOnlyWhenNothingWasTranscribed() async {
+        let client = AzureVoiceLiveClient(credentials: "key", endpoint: "", model: "azure-speech", language: nil)
+        let errors = LockedBox<[Error]>([])
+        let partials = LockedBox<[String]>([])
+        client.beginSession(
+            onTranscript: { text, _ in partials.mutate { $0.append(text) } },
+            onError: { error in errors.mutate { $0.append(error) } }
+        )
+        client.ingest(#"{"type":"input_audio_buffer.committed","item_id":"a"}"#)
+        client.ingest(#"{"type":"conversation.item.input_audio_transcription.failed","item_id":"a"}"#)
+        client.ingest(#"{"type":"input_audio_buffer.committed","item_id":"b"}"#)
+        client.ingest(#"""
+        {
+          "type": "conversation.item.input_audio_transcription.completed",
+          "item_id": "b",
+          "transcript": "Still here."
+        }
+        """#)
+        XCTAssertEqual(partials.value, ["Still here."])
+        let text = await client.finishAndWait()
+        XCTAssertEqual(text, "Still here.")
+        XCTAssertTrue(errors.value.isEmpty, "A single failed turn must not surface as a session error")
+
+        let silent = AzureVoiceLiveClient(credentials: "key", endpoint: "", model: "azure-speech", language: nil)
+        let silentErrors = LockedBox<[Error]>([])
+        silent.beginSession(onTranscript: { _, _ in }, onError: { error in silentErrors.mutate { $0.append(error) } })
+        silent.ingest(#"{"type":"input_audio_buffer.committed","item_id":"a"}"#)
+        silent.ingest(#"{"type":"conversation.item.input_audio_transcription.failed","item_id":"a"}"#)
+        let nothing = await silent.finishAndWait()
+        XCTAssertNil(nothing)
+        XCTAssertEqual(silentErrors.value.count, 1)
+        XCTAssertEqual(
+            silentErrors.value.first?.localizedDescription,
+            AzureSpeechError.transcriptionFailed.localizedDescription
+        )
+    }
+
+    /// The first `session.updated` is the handshake the shared readiness gate
+    /// tracks; a later one (the finalisation barrier) must not re-arm it.
+    func testLiveHandshake_isTheFirstSessionUpdated() {
+        let client = AzureVoiceLiveClient(credentials: "key", endpoint: "", model: "azure-speech", language: nil)
+        client.beginSession(onTranscript: { _, _ in }, onError: { _ in })
+        XCTAssertFalse(client.readiness.isReady)
+        XCTAssertEqual(client.preroll.maximumByteCount, 24_000 * 2 * 5)
+        client.ingest(#"{"type":"session.updated","session":{}}"#)
+        XCTAssertTrue(client.readiness.isReady)
+        client.ingest(#"{"type":"session.updated","session":{}}"#)
+        XCTAssertTrue(client.readiness.isReady)
+    }
+}
+
+/// A minimal thread-safe box for callback capture in the tests above.
+private final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+    init(_ value: Value) { stored = value }
+    var value: Value { lock.withLock { stored } }
+    func mutate(_ body: (inout Value) -> Void) { lock.withLock { body(&stored) } }
 }

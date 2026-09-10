@@ -25,141 +25,20 @@ final class SpeechmaticsTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(capabilities.postStopFinalizeBudget, 2.0)
   }
 
-  func testStartRecognitionPayload_usesRawPCM16kPartialsAndLanguage() throws {
-    let payload = try SpeechmaticsLiveTranscriber.startRecognitionPayload(
-      language: "en_GB",
-      model: "enhanced",
-      sampleRate: 16000
+  /// The live path is now the shared SpeakCore client, which is what makes
+  /// Speechmatics work on iPhone. The protocol itself is covered by
+  /// `SpeechmaticsLiveClientTests`; this asserts the routing seam.
+  func testLiveStreamingRunsOnTheSharedSpeakCoreClient() throws {
+    let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: "speechmatics/enhanced-streaming"))
+
+    XCTAssertEqual(route.provider, .speechmatics)
+    XCTAssertEqual(route.apiModelName, "enhanced")
+    XCTAssertEqual(route.apiKeyIdentifier, "speechmatics.apiKey")
+    XCTAssertTrue(route.isSupportedOnIOS)
+    XCTAssertTrue(
+      LiveTranscriptionClientFactory.makeClient(for: route, apiKey: "k", language: nil)
+        is SpeechmaticsLiveClient
     )
-    let object = try XCTUnwrap(
-      JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
-    )
-
-    XCTAssertEqual(object["message"] as? String, "StartRecognition")
-    let audioFormat = try XCTUnwrap(object["audio_format"] as? [String: Any])
-    XCTAssertEqual(audioFormat["type"] as? String, "raw")
-    XCTAssertEqual(audioFormat["encoding"] as? String, "pcm_s16le")
-    XCTAssertEqual(audioFormat["sample_rate"] as? Int, 16000)
-
-    let config = try XCTUnwrap(object["transcription_config"] as? [String: Any])
-    XCTAssertEqual(config["language"] as? String, "en")
-    XCTAssertEqual(config["model"] as? String, "enhanced")
-    XCTAssertEqual(config["enable_partials"] as? Bool, true)
-    XCTAssertEqual(config["max_delay"] as? Double, 0.7)
-  }
-
-  func testStartRecognitionPayload_automaticLanguageUsesSystemLocale() throws {
-    let payload = try SpeechmaticsLiveTranscriber.startRecognitionPayload(
-      language: nil,
-      systemLocaleIdentifier: "fr_FR"
-    )
-
-    XCTAssertEqual(try Self.language(inPayload: payload), "fr")
-  }
-
-  func testStartRecognitionPayload_explicitLanguageIgnoresSystemLocale() throws {
-    let payload = try SpeechmaticsLiveTranscriber.startRecognitionPayload(
-      language: "de_DE",
-      systemLocaleIdentifier: "fr_FR"
-    )
-
-    XCTAssertEqual(try Self.language(inPayload: payload), "de")
-  }
-
-  func testStartRecognitionPayload_blankSystemLocaleFallsBackToEnglish() throws {
-    let payload = try SpeechmaticsLiveTranscriber.startRecognitionPayload(
-      language: nil,
-      systemLocaleIdentifier: "   "
-    )
-
-    XCTAssertEqual(try Self.language(inPayload: payload), "en")
-  }
-
-  private static func language(inPayload payload: String) throws -> String {
-    let object = try XCTUnwrap(
-      JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
-    )
-    let config = try XCTUnwrap(object["transcription_config"] as? [String: Any])
-    return try XCTUnwrap(config["language"] as? String)
-  }
-
-  func testTranscriptEvent_parsesPartialMetadataTranscript() throws {
-    let json = #"""
-    {
-      "message": "AddPartialTranscript",
-      "format": "2.1",
-      "metadata": {
-        "start_time": 0.0,
-        "end_time": 0.5,
-        "transcript": "hello wor"
-      },
-      "results": []
-    }
-    """#
-
-    let event = try XCTUnwrap(SpeechmaticsLiveTranscriber.transcriptEvent(from: json))
-
-    XCTAssertEqual(event.text, "hello wor")
-    XCTAssertFalse(event.isFinal)
-    XCTAssertTrue(event.segments.isEmpty)
-    XCTAssertNil(event.confidence)
-  }
-
-  func testEndOfStreamSequence_usesSentFrameCountWhenAcknowledgementsLag() {
-    XCTAssertEqual(
-      SpeechmaticsLiveTranscriber.endOfStreamLastSequenceNumber(lastAcknowledged: 2, sentFrameCount: 3),
-      3
-    )
-  }
-
-  func testEndOfStreamSequence_usesHighestAcknowledgement() {
-    XCTAssertEqual(
-      SpeechmaticsLiveTranscriber.endOfStreamLastSequenceNumber(lastAcknowledged: 4, sentFrameCount: 3),
-      4
-    )
-  }
-
-  func testTranscriptEvent_parsesFinalMetadataAndSegments() throws {
-    let json = #"""
-    {
-      "message": "AddTranscript",
-      "format": "2.1",
-      "metadata": {
-        "start_time": 0.0,
-        "end_time": 1.1,
-        "transcript": "Hello, world."
-      },
-      "results": [
-        {
-          "type": "word",
-          "start_time": 0.0,
-          "end_time": 0.4,
-          "alternatives": [{"content": "Hello", "confidence": 0.9, "speaker": "S1"}]
-        },
-        {
-          "type": "punctuation",
-          "start_time": 0.4,
-          "end_time": 0.4,
-          "alternatives": [{"content": ",", "confidence": 1.0}]
-        },
-        {
-          "type": "word",
-          "start_time": 0.6,
-          "end_time": 1.1,
-          "alternatives": [{"content": "world", "confidence": 0.8}]
-        }
-      ]
-    }
-    """#
-
-    let event = try XCTUnwrap(SpeechmaticsLiveTranscriber.transcriptEvent(from: json))
-
-    XCTAssertEqual(event.text, "Hello, world.")
-    XCTAssertTrue(event.isFinal)
-    XCTAssertEqual(event.startTime, 0.0)
-    XCTAssertEqual(event.endTime, 1.1)
-    XCTAssertEqual(event.segments.map(\.text), ["Hello", ",", "world"])
-    XCTAssertEqual(event.confidence ?? 0, 0.9, accuracy: 0.0001)
   }
 
   func testValidateAPIKey_sendsAuthorizationHeaderToSpeechmaticsJobsEndpoint() async throws {

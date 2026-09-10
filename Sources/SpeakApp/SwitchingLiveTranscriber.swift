@@ -211,7 +211,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       ("modulate/", controllers.modulate),
       ("elevenlabs/", controllers.elevenlabs),
       ("soniox/", controllers.soniox),
-      ("speechmatics/", controllers.speechmatics),
       ("cartesia/", controllers.cartesia),
       ("gladia/", controllers.gladia),
       // Gemini 3.5 Transcribe Live runs on the shared SpeakCore client, so it
@@ -220,7 +219,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       ("xai/", controllers.sharedClient),
       // Meta Muse Voice Transcribe streams through the shared SpeakCore client,
       // so it uses the same macOS capture controller as xAI.
-      ("meta/", controllers.sharedClient)
+      ("meta/", controllers.sharedClient),
+      // Speechmatics, Rev.ai and Mistral Voxtral all run on the shared
+      // SpeakCore clients, which is what makes them work on iPhone too.
+      ("speechmatics/", controllers.sharedClient),
+      ("revai/", controllers.sharedClient),
+      ("mistral/", controllers.sharedClient)
     ]
   }
 
@@ -380,7 +384,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let assemblyAI: AssemblyAILiveController
     let elevenlabs: ElevenLabsLiveController
     let soniox: SonioxLiveController
-    let speechmatics: SpeechmaticsLiveController
     let cartesia: CartesiaLiveController
     let gladia: GladiaLiveController
     let openAIRealtime: OpenAIRealtimeLiveController
@@ -434,12 +437,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         secureStorage: secureStorage
       )
       soniox = SonioxLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
-      speechmatics = SpeechmaticsLiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,
         audioDeviceManager: audioDeviceManager,
@@ -500,7 +497,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         assemblyAI,
         elevenlabs,
         soniox,
-        speechmatics,
         cartesia,
         gladia,
         openAIRealtime,

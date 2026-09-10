@@ -211,6 +211,18 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
     }
 
+    @Published public var speechmaticsAPIKey: String {
+        didSet { persistSecret(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
+    }
+
+    @Published public var revAIAPIKey: String {
+        didSet { persistSecret(revAIAPIKey, identifier: Self.revAIKeyID) }
+    }
+
+    @Published public var mistralAPIKey: String {
+        didSet { persistSecret(mistralAPIKey, identifier: Self.mistralKeyID) }
+    }
+
     @Published public var metaAPIKey: String {
         didSet { persistSecret(metaAPIKey, identifier: Self.metaKeyID) }
     }
@@ -237,6 +249,9 @@ public final class AppSettings: ObservableObject {
     static let googleKeyID = "google.apiKey"
     static let xAIKeyID = "xai.apiKey"
     static let metaKeyID = "meta.apiKey"
+    static let speechmaticsKeyID = "speechmatics.apiKey"
+    static let revAIKeyID = "revai.apiKey"
+    static let mistralKeyID = "mistral.apiKey"
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
@@ -452,6 +467,9 @@ public final class AppSettings: ObservableObject {
         self.googleAPIKey = ""
         self.xAIAPIKey = ""
         self.metaAPIKey = ""
+        self.speechmaticsAPIKey = ""
+        self.revAIAPIKey = ""
+        self.mistralAPIKey = ""
         self.transcriptionKeywords = defaults.string(forKey: "transcriptionKeywords") ?? ""
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
@@ -566,6 +584,11 @@ public final class AppSettings: ObservableObject {
     public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasSpeechmaticsKey: Bool {
+        !speechmaticsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    public var hasRevAIKey: Bool { !revAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasMistralKey: Bool { !mistralAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
     /// derived from the published key values, readiness badges refresh as soon
@@ -584,12 +607,20 @@ public final class AppSettings: ObservableObject {
         if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
         if hasMetaKey { identifiers.insert(Self.metaKeyID) }
+        if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
+        if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
+        if hasMistralKey { identifiers.insert(Self.mistralKeyID) }
         return identifiers
     }
 
     public func reloadSyncedAPIKeys() async {
         syncedKeyReloadDepth += 1
         defer { syncedKeyReloadDepth -= 1 }
+        await reloadCoreAPIKeys()
+        await reloadStreamingProviderAPIKeys()
+    }
+
+    private func reloadCoreAPIKeys() async {
         deepgramAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.deepgramKeyID,
             currentValue: deepgramAPIKey
@@ -630,6 +661,9 @@ public final class AppSettings: ObservableObject {
             identifier: Self.googleKeyID,
             currentValue: googleAPIKey
         )
+    }
+
+    private func reloadStreamingProviderAPIKeys() async {
         xAIAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.xAIKeyID,
             currentValue: xAIAPIKey
@@ -637,6 +671,18 @@ public final class AppSettings: ObservableObject {
         metaAPIKey = await Self.syncedAPIKeyValue(
             identifier: Self.metaKeyID,
             currentValue: metaAPIKey
+        )
+        speechmaticsAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.speechmaticsKeyID,
+            currentValue: speechmaticsAPIKey
+        )
+        revAIAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.revAIKeyID,
+            currentValue: revAIAPIKey
+        )
+        mistralAPIKey = await Self.syncedAPIKeyValue(
+            identifier: Self.mistralKeyID,
+            currentValue: mistralAPIKey
         )
     }
 
@@ -705,7 +751,10 @@ public final class AppSettings: ObservableObject {
             Self.gladiaKeyID: gladiaAPIKey,
             Self.googleKeyID: googleAPIKey,
             Self.xAIKeyID: xAIAPIKey,
-            Self.metaKeyID: metaAPIKey
+            Self.metaKeyID: metaAPIKey,
+            Self.speechmaticsKeyID: speechmaticsAPIKey,
+            Self.revAIKeyID: revAIAPIKey,
+            Self.mistralKeyID: mistralAPIKey
         ]
     }
 
@@ -1798,6 +1847,9 @@ struct APIKeysView: View {
     @State private var googleKey = ""
     @State private var xAIKey = ""
     @State private var metaKey = ""
+    @State private var speechmaticsKey = ""
+    @State private var revAIKey = ""
+    @State private var mistralKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -1819,6 +1871,10 @@ struct APIKeysView: View {
     }
 
     fileprivate static func entries(for settings: AppSettings) -> [APIKeyListEntry] {
+        coreEntries(for: settings) + streamingProviderEntries(for: settings)
+    }
+
+    private static func coreEntries(for settings: AppSettings) -> [APIKeyListEntry] {
         [
             APIKeyListEntry(
                 id: "deepgram", title: "Deepgram", category: "Transcription", isStored: settings.hasDeepgramKey
@@ -1853,12 +1909,28 @@ struct APIKeysView: View {
             APIKeyListEntry(
                 id: "google", title: GeminiTranscribeModels.providerDisplayName,
                 category: "Transcription", isStored: settings.hasGoogleKey
-            ),
+            )
+        ]
+    }
+
+    private static func streamingProviderEntries(for settings: AppSettings) -> [APIKeyListEntry] {
+        [
             APIKeyListEntry(
                 id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
             ),
             APIKeyListEntry(
                 id: "meta", title: "Meta", category: "Transcription", isStored: settings.hasMetaKey
+            ),
+            APIKeyListEntry(
+                id: "speechmatics", title: "Speechmatics", category: "Transcription & Voice Output",
+                isStored: settings.hasSpeechmaticsKey
+            ),
+            APIKeyListEntry(
+                id: "revai", title: "Rev.ai", category: "Transcription", isStored: settings.hasRevAIKey
+            ),
+            APIKeyListEntry(
+                id: "mistral", title: "Mistral", category: "Transcription & Voice Output",
+                isStored: settings.hasMistralKey
             )
         ]
     }
@@ -2041,6 +2113,21 @@ struct APIKeysView: View {
                 title: "Meta", systemImage: "waveform.badge.mic",
                 help: "Get your Model API key from llama.developer.meta.com."
             )
+        case "speechmatics":
+            return KeyPresentation(
+                title: "Speechmatics", systemImage: "waveform.and.magnifyingglass",
+                help: "Get your key from portal.speechmatics.com."
+            )
+        case "revai":
+            return KeyPresentation(
+                title: "Rev.ai", systemImage: "waveform.badge.mic",
+                help: "Get your access token from www.rev.ai."
+            )
+        case "mistral":
+            return KeyPresentation(
+                title: "Mistral", systemImage: "waveform.circle",
+                help: "Get your key from console.mistral.ai."
+            )
         default:
             return KeyPresentation(
                 title: "Gladia", systemImage: "waveform.badge.exclamationmark", help: "Get your key from gladia.io."
@@ -2062,6 +2149,9 @@ struct APIKeysView: View {
         case "google": return $googleKey
         case "xai": return $xAIKey
         case "meta": return $metaKey
+        case "speechmatics": return $speechmaticsKey
+        case "revai": return $revAIKey
+        case "mistral": return $mistralKey
         default: return $gladiaKey
         }
     }
@@ -2097,6 +2187,9 @@ struct APIKeysView: View {
         case "google": settings.googleAPIKey = ""
         case "xai": settings.xAIAPIKey = ""
         case "meta": settings.metaAPIKey = ""
+        case "speechmatics": settings.speechmaticsAPIKey = ""
+        case "revai": settings.revAIAPIKey = ""
+        case "mistral": settings.mistralAPIKey = ""
         default: settings.gladiaAPIKey = ""
         }
         reloadBalancesAfterCredentialChange()
@@ -2213,6 +2306,27 @@ struct APIKeysView: View {
                 case .failure(let message):
                     messages.append("✗ Meta: \(message)")
                 }
+            }
+
+            // Saved without a probe: Speechmatics, Rev.ai and Mistral all
+            // validate the credential when the realtime session connects, and
+            // a stored key is never read as entitlement.
+            if !speechmaticsKey.isEmpty {
+                settings.speechmaticsAPIKey = speechmaticsKey
+                speechmaticsKey = ""
+                messages.append("✓ Speechmatics key saved")
+            }
+
+            if !revAIKey.isEmpty {
+                settings.revAIAPIKey = revAIKey
+                revAIKey = ""
+                messages.append("✓ Rev.ai access token saved")
+            }
+
+            if !mistralKey.isEmpty {
+                settings.mistralAPIKey = mistralKey
+                mistralKey = ""
+                messages.append("✓ Mistral key saved")
             }
 
             isValidating = false

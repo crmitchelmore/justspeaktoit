@@ -60,7 +60,9 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
         .openai: .openAI,
         .speechmatics: .speechmatics,
         .xai: .xAI,
-        .meta: .meta
+        .meta: .meta,
+        .revai: .revAI,
+        .mistral: .mistral
     ]
 
     public init(liveProvider: LiveTranscriptionProviderID) {

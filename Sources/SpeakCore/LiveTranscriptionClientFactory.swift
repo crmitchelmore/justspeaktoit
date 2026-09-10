@@ -85,7 +85,26 @@ public enum LiveTranscriptionClientFactory {
                 keywords: keywords,
                 sampleRate: route.sampleRate
             )
-        case .apple, .openai, .speechmatics:
+        case .speechmatics:
+            return SpeechmaticsLiveClient(
+                apiKey: apiKey,
+                model: route.apiModelName,
+                language: language,
+                sampleRate: route.sampleRate
+            )
+        case .revai:
+            return RevAILiveClient(
+                accessToken: apiKey,
+                language: language,
+                sampleRate: route.sampleRate
+            )
+        case .mistral:
+            return MistralVoxtralLiveClient(
+                apiKey: apiKey,
+                model: route.apiModelName,
+                sampleRate: route.sampleRate
+            )
+        case .apple, .openai:
             return nil
         }
     }

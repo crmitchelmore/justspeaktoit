@@ -24,7 +24,10 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
                 .filter { LiveTranscriptionRouting.route(for: $0.id)?.isSupportedOnIOS == false }
                 .allSatisfy { !visibleIDs.contains($0.id) }
         )
-        XCTAssertFalse(visibleIDs.contains { $0.hasPrefix("speechmatics/") })
+        // Speechmatics moved to the shared SpeakCore client, so the iPhone can
+        // now stream every remote model the Mac can.
+        XCTAssertTrue(visibleIDs.contains(SpeechmaticsRealtime.liveCatalogID))
+        XCTAssertEqual(visibleIDs, Set(ModelCatalog.remoteLiveTranscription.map(\.id)))
         XCTAssertTrue(visibleIDs.contains(OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID))
         XCTAssertTrue(visibleIDs.contains(XAIVoiceModels.thinkFast2CatalogID))
         XCTAssertTrue(visibleIDs.contains(XAISpeechToText.liveCatalogID))

@@ -132,13 +132,13 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
 
     // MARK: - iOS availability
 
-    func testIsSupportedOnIOS_onlyPlatformWiredProvidersAreSelectable() {
-        // Speechmatics remains macOS-only until its shared client is moved to
-        // SpeakCore; every existing shared/native provider stays selectable.
-        for provider in LiveTranscriptionProviderID.allCases where provider != .speechmatics {
+    func testIsSupportedOnIOS_everyCataloguedProviderIsSelectable() {
+        // Every cloud provider is driven by a shared `StreamingTranscriptionClient`
+        // (or, for Apple and OpenAI, a native transcriber both platforms have),
+        // so there is nothing the Mac can stream that the iPhone cannot.
+        for provider in LiveTranscriptionProviderID.allCases {
             XCTAssertTrue(provider.isSupportedOnIOS, "\(provider) should be iOS-supported")
         }
-        XCTAssertFalse(LiveTranscriptionProviderID.speechmatics.isSupportedOnIOS)
     }
 
     func testIOSSupportedProviders_areDerivedFromCatalogueInFirstAppearanceOrder() {

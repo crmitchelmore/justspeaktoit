@@ -107,6 +107,21 @@ extension ModelCatalog {
         "soniox/stt-rt-v5-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        // Rev.ai finalises a segment as soon as its hypothesis stops changing,
+        // so the incremental tail rewrite can polish each one. `EOS` returns a
+        // trailing hypothesis, which the budget keeps room for.
+        RevAIStreaming.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 2.0
+        ),
+        // Voxtral Realtime streams append-only deltas and emits no
+        // per-utterance final: the authoritative transcript is the
+        // `transcription.done` frame that follows the flush, so the budget
+        // stays large enough to capture it before teardown.
+        MistralVoxtralRealtime.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 3.0
+        ),
         "speechmatics/enhanced-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 2.0

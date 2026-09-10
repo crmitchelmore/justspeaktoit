@@ -43,37 +43,5 @@ extension TranscriptionActivityManager {
         await activity.update(.init(state: state, staleDate: nil))
         return true
     }
-
-    /// Ends the current activity immediately.
-    public func endActivity() {
-        self.retireResultRow()
-        updateThrottleTask?.cancel()
-        updateThrottleTask = nil
-
-        guard let activity = currentActivity else { return }
-
-        // Clear state synchronously and end the captured activity, so a new
-        // activity started right after (e.g. `startActivity` calls this first)
-        // isn't orphaned when the async end completes and nils `currentActivity`.
-        order.retire()
-        latestState = nil
-        currentActivity = nil
-        isActivityRunning = false
-
-        enqueuePublication {
-            await activity.end(nil, dismissalPolicy: .immediate)
-        }
-    }
-
-    /// Reports an error to the Live Activity.
-    public func reportError(_ message: String) {
-        guard let activity = currentActivity else { return }
-
-        var state = latestState ?? activity.content.state
-        state.status = .error
-        state.errorMessage = message
-
-        publish(state, to: activity)
-    }
 }
 #endif

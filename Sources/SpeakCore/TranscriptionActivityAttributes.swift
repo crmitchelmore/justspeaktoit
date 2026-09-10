@@ -9,81 +9,6 @@ import os.log
 /// Defines the static and dynamic content shown in Live Activities and Dynamic Island.
 public struct TranscriptionActivityAttributes {
 
-    /// Static content that doesn't change during the activity.
-    public struct ContentState: Codable, Hashable {
-        /// Current transcription status
-        public var status: TranscriptionStatus
-        /// Most recent text snippet (last ~100 chars for compact display)
-        public var lastSnippet: String
-        /// Number of words transcribed so far
-        public var wordCount: Int
-        /// Duration in seconds
-        public var duration: Int
-        /// Provider being used
-        public var provider: String
-        /// Optional error message
-        public var errorMessage: String?
-        /// Only describes confirmed completion effects; older payloads remain neutral.
-        public var completionOutcome: TranscriptionCompletionOutcome
-        /// First line of the completed transcript, empty unless it was published
-        /// to the App Group and is therefore retrievable by the result actions.
-        public var resultPreview: String
-        /// Identifies the completion whose transcript this row is offering.
-        ///
-        /// A Live Activity is reused across sessions and a finished row stays on
-        /// screen for `TranscriptionActivityManager.resultRowDuration`, so "the
-        /// last completed transcript" is not the same thing as "the transcript
-        /// this row was rendered from". The row's Copy action carries this id and
-        /// the App Group stores it beside the published text, so a row can only
-        /// ever copy its own completion. Empty when nothing retrievable was
-        /// published, and absent from payloads written before this existed.
-        public var resultCompletionID: String
-
-        public init(
-            status: TranscriptionStatus = .idle,
-            lastSnippet: String = "",
-            wordCount: Int = 0,
-            duration: Int = 0,
-            provider: String = "Apple Speech",
-            errorMessage: String? = nil,
-            completionOutcome: TranscriptionCompletionOutcome = .ready,
-            resultPreview: String = "",
-            resultCompletionID: String = ""
-        ) {
-            self.status = status
-            self.lastSnippet = lastSnippet
-            self.wordCount = wordCount
-            self.duration = duration
-            self.provider = provider
-            self.errorMessage = errorMessage
-            self.completionOutcome = completionOutcome
-            self.resultPreview = resultPreview
-            self.resultCompletionID = resultCompletionID
-        }
-
-        private enum CodingKeys: String, CodingKey { // swiftlint:disable:this nesting
-            case status, lastSnippet, wordCount, duration, provider, errorMessage
-            case completionOutcome, resultPreview, resultCompletionID
-        }
-
-        public init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            self.status = try container.decode(TranscriptionStatus.self, forKey: .status)
-            self.lastSnippet = try container.decode(String.self, forKey: .lastSnippet)
-            self.wordCount = try container.decode(Int.self, forKey: .wordCount)
-            self.duration = try container.decode(Int.self, forKey: .duration)
-            self.provider = try container.decode(String.self, forKey: .provider)
-            self.errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
-            self.completionOutcome = try container.decodeIfPresent(
-                TranscriptionCompletionOutcome.self, forKey: .completionOutcome
-            ) ?? .ready
-            self.resultPreview = try container.decodeIfPresent(String.self, forKey: .resultPreview) ?? ""
-            self.resultCompletionID = try container.decodeIfPresent(
-                String.self, forKey: .resultCompletionID
-            ) ?? ""
-        }
-    }
-
     /// Transcription session status
     public enum TranscriptionStatus: String, Codable, Hashable {
         case idle
@@ -119,10 +44,13 @@ extension TranscriptionActivityAttributes: ActivityAttributes {}
 public final class TranscriptionActivityManager: ObservableObject {
     public static let shared = TranscriptionActivityManager()
 
-    @Published public private(set) var currentActivity: Activity<TranscriptionActivityAttributes>?
-    @Published public private(set) var isActivityRunning = false
+    @Published public internal(set) var currentActivity: Activity<TranscriptionActivityAttributes>?
+    @Published public internal(set) var isActivityRunning = false
 
-    private var updateThrottleTask: Task<Void, Never>?
+    /// Internal rather than private because the lifecycle methods that own it
+    /// (`endActivity`, `reportError`) live in this type's result-row extension,
+    /// in its own file. Still not settable from outside the module.
+    var updateThrottleTask: Task<Void, Never>?
     private var lastUpdateTime: Date = .distantPast
     private let minimumUpdateInterval: TimeInterval = 1.0 // Throttle to 1 update per second
 
@@ -379,6 +307,38 @@ public final class TranscriptionActivityManager: ObservableObject {
                 dismissalPolicy: .after(.now + Self.resultRowDuration)
             )
         }
+    }
+
+    /// Ends the current activity immediately.
+    public func endActivity() {
+        self.retireResultRow()
+        updateThrottleTask?.cancel()
+        updateThrottleTask = nil
+
+        guard let activity = currentActivity else { return }
+
+        // Clear state synchronously and end the captured activity, so a new
+        // activity started right after (e.g. `startActivity` calls this first)
+        // isn't orphaned when the async end completes and nils `currentActivity`.
+        order.retire()
+        latestState = nil
+        currentActivity = nil
+        isActivityRunning = false
+
+        enqueuePublication {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+    }
+
+    /// Reports an error to the Live Activity.
+    public func reportError(_ message: String) {
+        guard let activity = currentActivity else { return }
+
+        var state = latestState ?? activity.content.state
+        state.status = .error
+        state.errorMessage = message
+
+        publish(state, to: activity)
     }
 }
 #endif

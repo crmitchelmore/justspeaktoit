@@ -49,7 +49,9 @@ final class CoreJourneyLaunchProfile {
         let expected = URL(fileURLWithPath: "/tmp", isDirectory: true)
             .resolvingSymlinksInPath()
             .appendingPathComponent("com.justspeaktoit.tests.core-journey.\(identifier.uuidString)", isDirectory: true)
-        return directory == expected ? directory : nil
+        // URL directory hints differ for nonexistent paths on macOS 15.
+        // Compare the resolved filesystem paths, preserving symlink validation.
+        return directory.path == expected.path ? directory : nil
     }
 
     let defaults: UserDefaults

@@ -140,14 +140,6 @@ public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
     }
 
     public init(
-        version: String, tag: String, publishedAt: String, markdown: String,
-        platform: ReleaseNotesPlatform? = nil
-    ) {
-        self.init(version: version, tag: tag, publishedAt: publishedAt, markdown: markdown,
-                  platform: platform, train: .stable)
-    }
-
-    public init(
         version: String,
         tag: String,
         publishedAt: String,
@@ -269,10 +261,6 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
         )
     }
 
-    public func entries(for platform: ReleaseNotesPlatform) -> [ReleaseNoteEntry] {
-        entries(for: platform, train: .current)
-    }
-
     public func entries(for platform: ReleaseNotesPlatform, train: ReleaseTrain) -> [ReleaseNoteEntry] {
         entries.filter { $0.platform == platform && $0.train == train }
     }
@@ -316,14 +304,6 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     public let installedVersion: String
     public let installedBuild: String
     public private(set) var selectedVersion: String?
-
-    public init(
-        catalog: ReleaseNotesCatalog = .bundled,
-        installedVersion: String = ReleaseNotesCatalog.installedVersion(),
-        platform: ReleaseNotesPlatform = .current
-    ) {
-        self.init(catalog: catalog, installedVersion: installedVersion, platform: platform, train: .current)
-    }
 
     public init(
         catalog: ReleaseNotesCatalog = .bundled,

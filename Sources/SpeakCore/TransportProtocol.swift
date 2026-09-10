@@ -106,10 +106,6 @@ public struct HelloMessage: Codable {
     public var deviceId: String
     public var releaseTrain: ReleaseTrain?
 
-    public init(protocolVersion: Int = SpeakTransportProtocolVersion, deviceName: String, deviceId: String) {
-        self.init(protocolVersion: protocolVersion, deviceName: deviceName, deviceId: deviceId, releaseTrain: .current)
-    }
-
     public init(
         protocolVersion: Int = SpeakTransportProtocolVersion, deviceName: String, deviceId: String,
         releaseTrain: ReleaseTrain?
@@ -144,10 +140,6 @@ public struct AuthResultMessage: Codable {
     public var sessionToken: String?
     public var errorMessage: String?
     public var releaseTrain: ReleaseTrain?
-
-    public init(success: Bool, sessionToken: String? = nil, errorMessage: String? = nil) {
-        self.init(success: success, sessionToken: sessionToken, errorMessage: errorMessage, releaseTrain: .current)
-    }
 
     public init(
         success: Bool, sessionToken: String? = nil, errorMessage: String? = nil,

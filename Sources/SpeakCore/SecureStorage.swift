@@ -89,8 +89,8 @@ public struct SecureStorageConfiguration: Sendable {
     public let synchronizable: Bool
 
     public init(
-        service: String,
-        masterAccount: String = "speak-app-secrets",
+        service: String = "com.github.speakapp.credentials",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
         legacyServices: [String] = [],
         accessGroup: String? = nil,
         synchronizable: Bool = false
@@ -101,7 +101,7 @@ public struct SecureStorageConfiguration: Sendable {
 
     public init(
         service: String = "com.github.speakapp.credentials",
-        masterAccount: String = "speak-app-secrets",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
         legacyServices: [String] = [],
         accessGroup: String? = nil,
         synchronizable: Bool = false,

@@ -71,6 +71,19 @@ final class KeyboardViewController: UIInputViewController {
             },
             contextAfterInput: { [weak self] in
                 self?.textDocumentProxy.documentContextAfterInput
+            },
+            // Provisional text, as Apple dictation and CJK input use (#1004).
+            // The caret is placed at the end of the marked range so the user
+            // can keep speaking; `unmarkText()` is what commits it, and
+            // marking the empty string then unmarking is what removes it.
+            setMarkedText: { [weak self] text in
+                self?.textDocumentProxy.setMarkedText(
+                    text,
+                    selectedRange: NSRange(location: (text as NSString).length, length: 0)
+                )
+            },
+            unmarkText: { [weak self] in
+                self?.textDocumentProxy.unmarkText()
             }
         )
     }

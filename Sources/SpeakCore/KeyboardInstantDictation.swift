@@ -187,27 +187,53 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
     }
 }
 
-/// A payload-free Darwin notification used only as a wake-up hint. The actual
-/// command and nonce remain in the App Group record and are validated there.
+/// Payload-free Darwin notifications used only as wake-up hints. Darwin
+/// notifications carry no payload at all, so the command, nonce and text stay
+/// in the App Group records and are validated there; these say only "look
+/// again, now".
+///
+/// There are two, one per direction:
+/// * `requestChanged` — extension → app (issue #712).
+/// * `statusChanged` — app → extension (issue #990). Without it the keyboard
+///   learned about a phase change or a new interim only on its next poll tick.
 public enum KeyboardHandoffSignal {
     // Stored as String (Sendable) and bridged to CFString at each use site,
     // so the shared static needs no concurrency escape hatch.
     private static let requestChangedName = "com.justspeaktoit.keyboardHandoff.requestChanged"
+    private static let statusChangedName = "com.justspeaktoit.keyboardHandoff.statusChanged"
 
     public static func postRequestChanged() {
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(requestChangedName as CFString),
-            nil,
-            nil,
-            true
-        )
+        post(requestChangedName)
+    }
+
+    /// Posted by the containing app after every write the extension is waiting
+    /// on: a phase transition, an interim update, or a new pickup offer.
+    /// Fire-and-forget — a dropped notification costs only the poll interval,
+    /// which is why the safety-net poll remains.
+    public static func postStatusChanged() {
+        post(statusChangedName)
     }
 
     public static func observeRequestChanges(
         _ handler: @escaping @Sendable () -> Void
     ) -> KeyboardHandoffSignalObservation {
         KeyboardHandoffSignalObservation(name: requestChangedName as CFString, handler: handler)
+    }
+
+    public static func observeStatusChanges(
+        _ handler: @escaping @Sendable () -> Void
+    ) -> KeyboardHandoffSignalObservation {
+        KeyboardHandoffSignalObservation(name: statusChangedName as CFString, handler: handler)
+    }
+
+    private static func post(_ name: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(name as CFString),
+            nil,
+            nil,
+            true
+        )
     }
 }
 

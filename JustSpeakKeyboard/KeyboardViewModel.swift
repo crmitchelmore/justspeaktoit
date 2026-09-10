@@ -47,6 +47,9 @@ final class KeyboardViewModel: ObservableObject {
 
     private var currentDocumentIdentifier: UUID?
     private var proxyInsert: ((String) -> Void)?
+    private var proxySetMarkedText: ((String) -> Void)?
+    private var proxyUnmarkText: (() -> Void)?
+    private var statusObservation: KeyboardHandoffSignalObservation?
     private let deliveryStore: KeyboardDeliveryStore
     private var deliveryPreferences: KeyboardDeliveryPreferences = .default
     private var isSecureField = false
@@ -55,10 +58,11 @@ final class KeyboardViewModel: ObservableObject {
     private var pickupTask: Task<Void, Never>?
     private var isDelivering = false
 
-    /// Cadence for noticing an offer the app published while the keyboard was
-    /// already on screen, and for refreshing the open-target advertisement.
-    /// The store throttles the target rewrite, so this costs one small read
-    /// per tick. Issue #990 separately owns pushing this over Darwin.
+    /// Cadence for refreshing the open-target advertisement (which lapses
+    /// after 8 s) and as the safety net for noticing an offer. Since #990 the
+    /// app also posts a Darwin `statusChanged` when it publishes one, so a new
+    /// offer no longer waits for a tick; the target refresh still needs the
+    /// loop, and the store throttles that rewrite to one write per 2 s.
     private static let deliveryPollInterval = Duration.milliseconds(500)
 
     convenience init() {
@@ -170,7 +174,9 @@ final class KeyboardViewModel: ObservableObject {
         insertText: @escaping (String) -> Void,
         deleteBackward: @escaping () -> Void,
         contextBeforeInput: @escaping () -> String?,
-        contextAfterInput: @escaping () -> String?
+        contextAfterInput: @escaping () -> String?,
+        setMarkedText: ((String) -> Void)? = nil,
+        unmarkText: (() -> Void)? = nil
     ) {
         self.hasFullAccess = hasFullAccess
         self.currentDocumentIdentifier = documentIdentifier
@@ -178,6 +184,8 @@ final class KeyboardViewModel: ObservableObject {
         self.activeInputModeCount = activeInputModeCount
         self.handBack = handBack
         self.proxyInsert = insertText
+        self.proxySetMarkedText = setMarkedText
+        self.proxyUnmarkText = unmarkText
         self.documentSession = KeyboardDocumentSession(
             insertText: insertText,
             deleteBackward: deleteBackward,
@@ -194,6 +202,21 @@ final class KeyboardViewModel: ObservableObject {
         configureCaptureMode(autoStartHandoff: true)
         refreshDelivery()
         startDeliveryLoop()
+        observeStatusChanges()
+    }
+
+    /// The app wakes the keyboard when it publishes an offer (issue #990), so
+    /// a targeted insert lands as soon as the capture finishes instead of on
+    /// the next tick. The notification carries nothing: the offer, its nonce
+    /// and its document binding are still read and validated from the App
+    /// Group by `evaluatePickup`.
+    private func observeStatusChanges() {
+        guard statusObservation == nil else { return }
+        statusObservation = KeyboardHandoffSignal.observeStatusChanges { [weak self] in
+            Task { @MainActor in
+                self?.refreshDelivery()
+            }
+        }
     }
 
     private func configureCaptureMode(autoStartHandoff: Bool) {
@@ -221,11 +244,10 @@ final class KeyboardViewModel: ObservableObject {
             directState = machine.state
             liveText = ""
         case .handoff:
-            handoff.activate(
+            activateHandoff(
                 documentIdentifier: currentDocumentIdentifier,
-                profile: captureProfile,
-                autoStart: autoStartHandoff,
-                insertText: proxyInsert
+                proxyInsert: proxyInsert,
+                autoStart: autoStartHandoff
             )
             mode = .handoff
         case let .blocked(reason):
@@ -233,9 +255,30 @@ final class KeyboardViewModel: ObservableObject {
         }
     }
 
+    /// One place decides what the hand-off may do to the field, so the secure
+    /// rule and the user's streaming preference cannot diverge between the two
+    /// ways of entering hand-off mode.
+    private func activateHandoff(
+        documentIdentifier: UUID,
+        proxyInsert: @escaping (String) -> Void,
+        autoStart: Bool
+    ) {
+        handoff.activate(
+            documentIdentifier: documentIdentifier,
+            profile: captureProfile,
+            autoStart: autoStart,
+            streamsMarkedText: deliveryPreferences.streamsMarkedText,
+            isSecureField: isSecureField,
+            insertText: proxyInsert,
+            setMarkedText: proxySetMarkedText,
+            unmarkText: proxyUnmarkText
+        )
+    }
+
     func deactivate() {
         dispatch(.dismissed)
         handoff.deactivate()
+        statusObservation = nil
         pickupTask?.cancel()
         pickupTask = nil
         // Withdraw the open-target advertisement. Its short lifetime covers
@@ -243,6 +286,8 @@ final class KeyboardViewModel: ObservableObject {
         deliveryStore.clearTarget()
         pickupOffering = .none
         proxyInsert = nil
+        proxySetMarkedText = nil
+        proxyUnmarkText = nil
         handBack = nil
         documentSession?.invalidate()
         documentSession = nil
@@ -462,11 +507,10 @@ final class KeyboardViewModel: ObservableObject {
     private func enterHandoffMode(autoStart: Bool) {
         mode = .handoff
         guard let currentDocumentIdentifier, let proxyInsert else { return }
-        handoff.activate(
+        activateHandoff(
             documentIdentifier: currentDocumentIdentifier,
-            profile: captureProfile,
-            autoStart: autoStart,
-            insertText: proxyInsert
+            proxyInsert: proxyInsert,
+            autoStart: autoStart
         )
     }
 

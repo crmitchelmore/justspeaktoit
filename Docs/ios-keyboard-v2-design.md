@@ -43,6 +43,27 @@ physical-device matrix signs it off: first-run permission behaviour on real
 devices is a mandatory verification item, and the architecture keeps a full
 fallback for devices that refuse.
 
+> **Update, issue #991 (2026-09-10).** The assumption above has since been
+> answered, and the answer is no: Apple's Custom Keyboard guide states that
+> keyboard extensions have no microphone access, the runtime refuses the
+> activation with error 561145187, and the bug filed against it in 2025 is
+> still open. The direct path was already `.disabled` in every shipping build,
+> but `KeyboardDictationEngine` was still *compiled into* the appex along with
+> its `AVFoundation` and `Speech` imports. It is now inside
+> `#if IOS_KEYBOARD_DIRECT_CAPTURE`; a hand-off build compiles a stub that
+> reports every permission denied and refuses to start, which is what the
+> planner already assumed. The measured effect on the unsigned Debug arm64
+> appex: the keyboard binary shrinks by about 99 KB, and `Speech.framework`
+> drops from a strong to a weak load command. `AVFAudio`/`AVFoundation` remain,
+> because SpeakCore itself uses them — separating that is not in scope here.
+> Behaviour is unchanged, because nothing behind the flag was reachable.
+>
+> The flagged shape is kept, and CI still builds it (the `Build iOS Keyboard`
+> job, renamed from `Build iOS Keyboard (direct capture)`, now builds the
+> shipping hand-off shape *and* the flagged one), so the branches cannot rot
+> and the decision below stays reversible if Apple ever opens the microphone
+> to extensions. It is kept as a record, not as a roadmap.
+
 ## Decision
 
 Two capture paths behind one planner (`KeyboardCapturePlanner` in SpeakCore)

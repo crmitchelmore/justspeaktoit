@@ -202,6 +202,7 @@ final class KeyboardViewModel: ObservableObject {
         deliveryPreferences = deliveryStore.preferences()
         refreshChips()
 
+        isActiveAppearance = true
         configureCaptureMode(autoStartHandoff: true)
         refreshDelivery()
         startDeliveryLoop()
@@ -215,12 +216,26 @@ final class KeyboardViewModel: ObservableObject {
     /// Group by `evaluatePickup`.
     private func observeStatusChanges() {
         guard statusObservation == nil else { return }
+        // Delivered on the main queue, and coalesced to one outstanding
+        // wake-up by the observation, so this needs no main-actor task of its
+        // own — one per notification would let any process posting the
+        // payload-free Darwin name stack stale refreshes on this extension.
         statusObservation = KeyboardHandoffSignal.observeStatusChanges { [weak self] in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.refreshDelivery()
             }
         }
     }
+
+    /// Whether this appearance is still on screen.
+    ///
+    /// A status wake-up is a queued main-actor task, and dropping the
+    /// observation does not unschedule one that has already been dispatched.
+    /// Without this guard such a task could run after `deactivate()` and
+    /// re-advertise an open target for a keyboard that is no longer visible —
+    /// which the app would then treat as grounds for a targeted insert into a
+    /// document nobody is looking at.
+    private var isActiveAppearance = false
 
     private func configureCaptureMode(autoStartHandoff: Bool) {
         guard let currentDocumentIdentifier, let proxyInsert else { return }
@@ -279,8 +294,13 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     func deactivate() {
+        isActiveAppearance = false
         dispatch(.dismissed)
         handoff.deactivate()
+        // Not just dropped: a wake-up already queued on the main actor still
+        // runs otherwise, and it would find enough state left behind to
+        // republish a target for a dismissed keyboard.
+        statusObservation?.invalidate()
         statusObservation = nil
         pickupTask?.cancel()
         pickupTask = nil
@@ -292,6 +312,9 @@ final class KeyboardViewModel: ObservableObject {
         proxySetMarkedText = nil
         proxyUnmarkText = nil
         handBack = nil
+        // No document is open to this keyboard any more, so nothing can be
+        // advertised or aimed at even if a late callback does arrive.
+        currentDocumentIdentifier = nil
         documentSession?.invalidate()
         documentSession = nil
     }
@@ -559,6 +582,12 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     private func refreshDelivery() {
+        guard isActiveAppearance else {
+            // A delayed callback from an appearance that has ended may neither
+            // advertise a target nor evaluate an offer.
+            pickupOffering = .none
+            return
+        }
         if case .blocked = mode {
             // Without Full Access there is no shared container to advertise
             // into and nothing to offer; the blocked strip already says so.

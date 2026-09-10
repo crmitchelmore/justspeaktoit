@@ -131,12 +131,18 @@ public final class KeyboardDeliveryStore: @unchecked Sendable {
 
     /// Removes the offer entirely. Used when the app decides the transcript is
     /// no longer on the table at all.
+    ///
+    /// Announced for the same reason a publish is: retracting an offer changes
+    /// what the extension may present just as much as adding one, and a chip
+    /// for a withdrawn offer should not stay on screen until the safety-net
+    /// poll notices.
     public func clearOffer() {
         lock.withLock {
             defaults?.removeObject(forKey: Self.offerKey)
             defaults?.removeObject(forKey: Self.claimKey)
             defaults?.synchronize()
         }
+        announceStatusChange()
     }
 
     /// The current offer, or `nil` if there is none or it has aged out.

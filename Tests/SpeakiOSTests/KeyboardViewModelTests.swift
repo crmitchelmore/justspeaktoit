@@ -529,6 +529,36 @@ final class KeyboardViewModelTests: XCTestCase {
         XCTAssertNil(harness.deliveryStore.openTarget())
     }
 
+    /// Dropping the Darwin observation does not unschedule a wake-up already
+    /// on the main actor. Such a callback must not put the advertisement back,
+    /// or the app would treat a dismissed keyboard as a live target and route
+    /// a targeted insert at a document nobody is looking at.
+    func testCallbacksArrivingAfterDismissal_cannotReAdvertiseTheKeyboard() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "")
+        activate(harness.model, document: document)
+        XCTAssertNotNil(harness.deliveryStore.openTarget())
+
+        harness.model.deactivate()
+        XCTAssertNil(harness.deliveryStore.openTarget())
+
+        harness.deliveryStore.publishOffer(
+            offer(mode: .targetedInsert, origin: Self.documentID, text: "too late")
+        )
+        // A host callback (or a queued status wake-up) from the appearance
+        // that has already ended.
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
+
+        XCTAssertNil(harness.deliveryStore.openTarget())
+        XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
+        XCTAssertEqual(document.text, "", "a dismissed keyboard inserts nothing")
+        XCTAssertNil(harness.deliveryStore.claim())
+    }
+
     func testTargetedInsert_landsInTheFieldItWasAimedAtAndIsClaimedOnce() {
         let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
         let document = DocumentProxy(before: "Hi ")

@@ -63,6 +63,16 @@ final class KeyboardMarkedTextStreamingTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    /// Test-owned monotonic time, so an echo window can be crossed without
+    /// sleeping.
+    private final class TestClock {
+        private let base = ContinuousClock().now
+        var offset: Duration = .zero
+        var now: ContinuousClock.Instant { base.advanced(by: offset) }
+    }
+
+    private var clock = TestClock()
+
     private func makeController(
         proxy: Proxy,
         streamsMarkedText: Bool,
@@ -71,7 +81,12 @@ final class KeyboardMarkedTextStreamingTests: XCTestCase {
         // The request exists before the keyboard appears, which is what
         // `activate` recovers from the shared record.
         _ = try ext.createRequest(targetDocumentIdentifier: document)
-        let controller = KeyboardHandoffController(store: ext, instantSessionStore: instantStore)
+        let clock = clock
+        let controller = KeyboardHandoffController(
+            store: ext,
+            instantSessionStore: instantStore,
+            now: { clock.now }
+        )
         controller.activate(
             documentIdentifier: document,
             profile: KeyboardProfileSelection.directOnly.selectedProfile,
@@ -257,6 +272,68 @@ final class KeyboardMarkedTextStreamingTests: XCTestCase {
         controller.refresh()
         XCTAssertEqual(proxy.inserted, ["Hello there."])
         XCTAssertEqual(proxy.visible, "Hello there.")
+    }
+
+    /// A host that never reports a selection callback for `setMarkedText`
+    /// leaves the expectation standing. It must expire, or the user's next
+    /// genuine caret move — however much later — is the one swallowed, and
+    /// streaming carries on writing at a caret that has moved.
+    func testAnEchoThatNeverArrives_doesNotSwallowALaterRealCaretMove() throws {
+        let proxy = Proxy()
+        let controller = try makeController(proxy: proxy, streamsMarkedText: true)
+        let request = try requestID()
+
+        _ = try app.markRecording(requestID: request)
+        _ = try app.updateInterim(requestID: request, transcript: "hello")
+        controller.refresh()
+        XCTAssertEqual(proxy.visible, "hello")
+
+        // No echo came back. Long after the write, the user moves the caret.
+        clock.offset = KeyboardHandoffController.selectionEchoWindow + .milliseconds(1)
+        controller.updateDocumentContext(documentIdentifier: document, selectionChanged: true)
+
+        XCTAssertEqual(proxy.visible, "", "an unattributable selection change abandons the stream")
+
+        _ = try app.markTranscribing(requestID: request)
+        _ = try app.complete(requestID: request, transcript: "Hello there.")
+        controller.refresh()
+        XCTAssertEqual(proxy.inserted, ["Hello there."])
+    }
+
+    /// The proxy already addresses the new field by the time the extension is
+    /// told the document changed, so no marked-text call may be made here: it
+    /// would land on a composition that belongs to someone else.
+    func testSwitchingDocument_makesNoMarkedTextCallOnTheNewlyFocusedProxy() throws {
+        let proxy = Proxy()
+        let controller = try makeController(proxy: proxy, streamsMarkedText: true)
+        let request = try requestID()
+
+        _ = try app.markRecording(requestID: request)
+        _ = try app.updateInterim(requestID: request, transcript: "hello")
+        controller.refresh()
+        let marksBefore = proxy.marked.count
+        let unmarksBefore = proxy.unmarks
+
+        controller.updateDocumentContext(documentIdentifier: UUID(), selectionChanged: false)
+
+        XCTAssertEqual(proxy.marked.count, marksBefore, "no setMarkedText on the new document")
+        XCTAssertEqual(proxy.unmarks, unmarksBefore, "no unmarkText on the new document")
+    }
+
+    /// Abandoning through the old, still-current proxy — a dismissal — must
+    /// keep clearing, so the change above is scoped to a document switch only.
+    func testDismissalStillClearsThroughTheProxyThatOwnsTheText() throws {
+        let proxy = Proxy()
+        let controller = try makeController(proxy: proxy, streamsMarkedText: true)
+        let request = try requestID()
+
+        _ = try app.markRecording(requestID: request)
+        _ = try app.updateInterim(requestID: request, transcript: "hello")
+        controller.refresh()
+        XCTAssertEqual(proxy.visible, "hello")
+
+        controller.deactivate()
+        XCTAssertEqual(proxy.visible, "", "the dismissing proxy still owns the marked range")
     }
 }
 #endif

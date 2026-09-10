@@ -287,7 +287,9 @@ extension SettingsView {
           + "voices your account can use once this key is saved."
       case .speechmatics:
         return "Stored securely in your macOS Keychain. Used for Speechmatics transcription and for "
-          + "Speechmatics voice output, which the vendor still labels a preview."
+          + "Speechmatics voice output, which the vendor still labels a preview. During that "
+          + "preview Speechmatics stores the text you send for voice output and the audio it "
+          + "generates, to improve their service."
       default:
         return "Stored securely in your macOS Keychain. Used only for "
           + "\(provider.displayName) text-to-speech voice synthesis."

@@ -44,36 +44,66 @@ actor GeminiTTSClient: TextToSpeechClient {
       languageIdentifier: settings.language
     )
 
-    var partURLs: [URL] = []
-    var duration: TimeInterval = 0
-    do {
-      for segment in segments {
-        let audio = try await api.synthesize(input: segment, apiKey: apiKey, request: request)
-        let partURL = try saveAudioData(audio.playableData)
-        partURLs.append(partURL)
-        duration += try await getAudioDuration(url: partURL)
-      }
-    } catch let error as GeminiTTSAPIError {
-      TTSAudioJoiner.discard(partURLs)
-      throw Self.ttsError(for: error)
-    } catch {
-      TTSAudioJoiner.discard(partURLs)
-      throw error
-    }
+    let parts = try await synthesizeParts(
+      segments: segments,
+      apiKey: apiKey,
+      request: request
+    )
 
-    let outputURL = try TTSAudioJoiner.join(partURLs, format: .wav)
-    // Gemini bills the generated audio per token, not the submitted text, so
-    // the charge is derived from the measured duration.
-    let cost = Decimal(duration) * GeminiTTSCatalog.defaultModel.costPerSecondOfSpeech
+    let outputURL = try TTSAudioJoiner.join(parts.urls, format: .wav)
+    // Gemini bills both halves: the generated audio per token, derived from
+    // the measured duration, and the submitted text per input token. The
+    // input side uses the reported usage where the response carried one and
+    // the documented characters-per-token estimate where it did not.
+    let audioCost = Decimal(parts.duration) * GeminiTTSCatalog.defaultModel.costPerSecondOfSpeech
+    let spokenCharacters = segments.reduce(0) { $0 + $1.count }
 
     return TTSResult(
       audioURL: outputURL,
       provider: provider,
       voice: resolved.providerVoiceID,
-      duration: duration,
-      characterCount: text.count,
-      cost: cost
+      duration: parts.duration,
+      characterCount: spokenCharacters,
+      cost: audioCost + parts.inputCost
     )
+  }
+
+  private struct SynthesizedParts {
+    var urls: [URL] = []
+    var duration: TimeInterval = 0
+    var inputCost: Decimal = 0
+  }
+
+  /// Speaks every segment, discarding any part already written when one fails
+  /// so a half-finished synthesis leaves nothing in the temporary directory.
+  private func synthesizeParts(
+    segments: [String],
+    apiKey: String,
+    request: GeminiTTSRequest
+  ) async throws -> SynthesizedParts {
+    var parts = SynthesizedParts()
+    do {
+      for segment in segments {
+        let audio = try await api.synthesize(input: segment, apiKey: apiKey, request: request)
+        guard let playable = audio.playableData else {
+          throw GeminiTTSAPIError.invalidResponse
+        }
+        let partURL = try saveAudioData(playable)
+        parts.urls.append(partURL)
+        parts.duration += try await getAudioDuration(url: partURL)
+        parts.inputCost += GeminiTTSCatalog.defaultModel.inputCost(
+          characterCount: segment.count,
+          reportedTokens: audio.inputTokens
+        )
+      }
+    } catch let error as GeminiTTSAPIError {
+      TTSAudioJoiner.discard(parts.urls)
+      throw Self.ttsError(for: error)
+    } catch {
+      TTSAudioJoiner.discard(parts.urls)
+      throw error
+    }
+    return parts
   }
 
   func listVoices() async throws -> [TTSVoice] {

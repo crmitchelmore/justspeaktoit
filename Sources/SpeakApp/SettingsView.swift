@@ -36,6 +36,8 @@ struct SettingsView: View {
   @State var apiKeyValidationState: ValidationViewState = .idle
   @State var isDeletingRecordings: Bool = false
   @State private var transcriptionProviders: [TranscriptionProviderMetadata] = []
+  /// Voices only a keyed account lists — Mistral publishes no presets.
+  @State private var accountListedVoices: [TTSVoice] = []
   @State var providerAPIKeys: [String: String] = [:]
   @State var providerValidationStates: [String: ValidationViewState] = [:]
   @State var ttsProviderAPIKeys: [String: String] = [:]
@@ -747,13 +749,23 @@ struct SettingsView: View {
     }
   }
 
+  /// The Default Voice list: the offline catalogue plus whatever the stored
+  /// keys' accounts list, so a Mistral voice can be made the default here and
+  /// not only chosen ad hoc in Voice Output.
+  private var defaultVoicePickerOptions: [TTSVoice] {
+    VoiceCatalog.includingSelection(
+      settings.defaultTTSVoice,
+      in: VoiceCatalog.allVoices + accountListedVoices
+    )
+  }
+
   private var voiceOutputSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
             Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
-              ForEach(VoiceCatalog.includingSelection(settings.defaultTTSVoice, in: VoiceCatalog.allVoices)) { voice in
+              ForEach(defaultVoicePickerOptions) { voice in
                 HStack {
                   Text(voice.displayName)
                   Spacer()
@@ -797,6 +809,9 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Select which voice to use by default when generating speech from text.")
+      .task {
+        accountListedVoices = await environment.tts.accountListedVoices()
+      }
 
       SettingsCard(title: "Audio Quality & Performance", systemImage: "waveform.circle", tint: Color.green) {
         VStack(alignment: .leading, spacing: 16) {

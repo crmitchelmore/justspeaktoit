@@ -78,6 +78,22 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     }
   }
 
+  /// Every prefix `from(voiceID:)` routes, in the same order.
+  ///
+  /// Providers whose voices exist only in an account listing (Mistral) have no
+  /// offline catalogue entry to validate a stored identifier against, so this
+  /// is the single list callers test a dynamic identifier with. Keeping it
+  /// beside `from(voiceID:)` stops the two drifting apart.
+  static let knownVoiceIDPrefixes: [String] = [
+    "elevenlabs/", "openai/", "openrouter/", "azure/", "deepgram/", "soniox/",
+    CartesiaTTSCatalog.voiceIDPrefix,
+    GroqTTSCatalog.voiceIDPrefix,
+    GeminiTTSCatalog.voiceIDPrefix,
+    MistralTTSCatalog.voiceIDPrefix,
+    SpeechmaticsTTSCatalog.voiceIDPrefix,
+    "system/"
+  ]
+
   // One provider per prefix: the branch count is the provider count.
   // swiftlint:disable:next cyclomatic_complexity
   static func from(voiceID: String) -> TTSProvider {
@@ -622,7 +638,24 @@ struct VoiceCatalog {
 
     // Try migrating legacy voice IDs
     let migratedID = migrateLegacyVoiceID(id)
-    return allVoices.first { $0.id == migratedID }
+    if let voice = allVoices.first(where: { $0.id == migratedID }) {
+      return voice
+    }
+    return accountListedVoice(forID: id)
+  }
+
+  /// A stand-in for a voice that only exists in a provider account listing.
+  ///
+  /// Mistral publishes no presets, so a saved Voxtral selection has no
+  /// catalogue entry. Without this the picker silently drops the user's own
+  /// choice whenever the listing is unavailable — offline, or between launches
+  /// before the account list has loaded.
+  static func accountListedVoice(forID id: String) -> TTSVoice? {
+    let prefix = MistralTTSCatalog.voiceIDPrefix
+    guard id.hasPrefix(prefix) else { return nil }
+    let name = String(id.dropFirst(prefix.count))
+    guard !name.isEmpty else { return nil }
+    return TTSVoice(id: id, name: name, provider: .mistral, traits: [], previewURL: nil)
   }
 
   // Migrate old voice IDs to new ones

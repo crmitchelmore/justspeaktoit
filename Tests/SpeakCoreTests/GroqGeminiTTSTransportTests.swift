@@ -186,7 +186,7 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
     func testGeminiAudio_wrapsHeaderlessPCMAndPassesAContainerThrough() throws {
         let pcm = Data(repeating: 0x01, count: 64)
         let raw = GeminiTTSAudio(data: pcm, mimeType: "audio/l16", sampleRate: 24_000, channels: 1)
-        let wrapped = raw.playableData
+        let wrapped = try XCTUnwrap(raw.playableData)
         XCTAssertEqual(wrapped.count, pcm.count + 44)
         XCTAssertEqual(String(bytes: wrapped.prefix(4), encoding: .ascii), "RIFF")
         XCTAssertEqual(String(bytes: wrapped[8..<12], encoding: .ascii), "WAVE")
@@ -198,6 +198,55 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
             channels: 1
         )
         XCTAssertEqual(contained.playableData, contained.data)
+    }
+
+    func testGeminiAudio_rejectsPCMMetadataAWAVHeaderCannotDescribe() {
+        // `sample_rate` and `channels` are provider-supplied, so a hostile or
+        // corrupt value must produce an error rather than trap the writer.
+        for (rate, channels) in [(-1, 1), (0, 1), (Int.max, 1), (24_000, -2), (24_000, 0)] {
+            let audio = GeminiTTSAudio(
+                data: Data(repeating: 0x01, count: 8),
+                mimeType: "audio/l16",
+                sampleRate: rate,
+                channels: channels
+            )
+            XCTAssertFalse(audio.isPlayableFormat, "\(rate) Hz / \(channels) ch must be refused")
+            XCTAssertNil(audio.playableData)
+        }
+    }
+
+    func testGeminiResponse_withUnusablePCMMetadata_isAnInvalidResponseNotACrash() {
+        let body = Data("""
+        {"steps":[{"content":[{"type":"audio","data":"AAAA","mime_type":"audio/l16",\
+        "sample_rate":-48000,"channels":1}]}]}
+        """.utf8)
+        XCTAssertThrowsError(try GeminiTTSAPI.audio(from: body, requestedSampleRate: 24_000)) { error in
+            XCTAssertEqual(error as? GeminiTTSAPIError, .invalidResponse)
+        }
+    }
+
+    func testGeminiCost_chargesReportedInputTokensAndFallsBackToTheEstimate() {
+        let model = GeminiTTSCatalog.defaultModel
+        // 1,000 reported tokens at $1 per million.
+        XCTAssertEqual(
+            model.inputCost(characterCount: 10, reportedTokens: 1_000),
+            Decimal(string: "0.001")
+        )
+        // No usage block: four characters per token, rounded up.
+        XCTAssertEqual(
+            model.inputCost(characterCount: 4_001, reportedTokens: nil),
+            Decimal(1_001) * model.costPerInputToken
+        )
+        XCTAssertEqual(model.inputCost(characterCount: 0, reportedTokens: nil), 0)
+    }
+
+    func testGeminiUsage_isReadFromTheInteractionResponse() throws {
+        let body = Data("""
+        {"usage":{"input_tokens":42},"steps":[{"content":[{"type":"audio","data":"AAAA",\
+        "mime_type":"audio/l16","sample_rate":24000,"channels":1}]}]}
+        """.utf8)
+        let audio = try GeminiTTSAPI.audio(from: body, requestedSampleRate: 24_000)
+        XCTAssertEqual(audio.inputTokens, 42)
     }
 
     func testGeminiErrors_readTheInteractionsCodeAndTheLegacyEnvelope() {

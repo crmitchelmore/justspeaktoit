@@ -34,6 +34,9 @@ actor GroqTTSClient: TextToSpeechClient {
     guard !segments.isEmpty else {
       throw TTSError.synthesisFailure("There is no text to speak")
     }
+    if let overLong = Self.excessiveFanOutMessage(segmentCount: segments.count) {
+      throw TTSError.synthesisFailure(overLong)
+    }
     if let unsupported = Self.unsupportedSettingsMessage(settings) {
       throw TTSError.synthesisFailure(unsupported)
     }
@@ -64,14 +67,17 @@ actor GroqTTSClient: TextToSpeechClient {
     }
 
     let outputURL = try TTSAudioJoiner.join(partURLs, format: .wav)
-    let cost = Decimal(text.count) * resolved.model.costPerThousandCharacters / 1000
+    // Only what was actually submitted is billed: the chunker drops the
+    // surrounding whitespace, so `text.count` would over-report usage.
+    let spokenCharacters = segments.reduce(0) { $0 + $1.count }
+    let cost = Decimal(spokenCharacters) * resolved.model.costPerThousandCharacters / 1000
 
     return TTSResult(
       audioURL: outputURL,
       provider: provider,
       voice: resolved.providerVoiceID,
       duration: duration,
-      characterCount: text.count,
+      characterCount: spokenCharacters,
       cost: cost
     )
   }
@@ -99,6 +105,18 @@ actor GroqTTSClient: TextToSpeechClient {
     guard !ignored.isEmpty else { return nil }
     return "Groq Orpheus voices do not support \(ignored.joined(separator: " or ")) control. "
       + "Reset it to the default, or choose another provider."
+  }
+
+  /// Refuses a request that would fan out into more billable Orpheus calls
+  /// than the operation budget allows. Each chunk is its own charge, its own
+  /// temporary file and its own round trip, so an unbounded paste is a cost
+  /// surprise rather than a slow success.
+  static func excessiveFanOutMessage(segmentCount: Int) -> String? {
+    guard segmentCount > GroqTTSAPI.maxRequestsPerSynthesis else { return nil }
+    return "Groq Orpheus speaks at most \(GroqTTSAPI.maxInputCharacters) characters per "
+      + "request, so this text would cost \(segmentCount) separate requests. Speak at most "
+      + "\(GroqTTSAPI.maxSynthesisCharacters) characters at a time, or choose a provider "
+      + "that takes longer input."
   }
 
   static func ttsError(for error: GroqTTSAPIError) -> TTSError {

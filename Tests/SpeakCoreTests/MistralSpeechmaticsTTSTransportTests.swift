@@ -62,9 +62,10 @@ final class MistralSpeechmaticsTTSTransportTests: XCTestCase {
         XCTAssertNil(TTSTransportMockURLProtocol.lastRequest)
     }
 
-    func testMistralVoiceListing_acceptsEveryUndocumentedEnvelopeShape() throws {
+    func testMistralVoiceListing_acceptsTheDocumentedAndUndocumentedEnvelopeShapes() throws {
         let voice = #"{"id":"abc","name":"Ada","gender":"female","languages":["en","fr"]}"#
         for payload in [
+            Data("{\"items\":[\(voice)]}".utf8),
             Data("{\"data\":[\(voice)]}".utf8),
             Data("{\"voices\":[\(voice)]}".utf8),
             Data("[\(voice)]".utf8)
@@ -73,6 +74,29 @@ final class MistralSpeechmaticsTTSTransportTests: XCTestCase {
             XCTAssertEqual(voices.map(\.id), ["abc"])
             XCTAssertEqual(voices.first?.providerVoiceID, "mistral/abc")
         }
+    }
+
+    func testMistralVoiceListing_walksPastTheFirstPage() async throws {
+        // A full first page means more may follow; the walk must keep going
+        // until a short page ends it, or a second page of voices is unreachable.
+        let firstPage = (0..<100).map {
+            #"{"id":"page1-\#($0)","name":"Voice \#($0)"}"#
+        }.joined(separator: ",")
+        let secondPage = #"{"id":"page2-0","name":"Late voice"}"#
+
+        TTSTransportMockURLProtocol.requestHandler = { request in
+            let query = request.url?.query ?? ""
+            let body = query.contains("offset=100")
+                ? Data("{\"items\":[\(secondPage)]}".utf8)
+                : Data("{\"items\":[\(firstPage)]}".utf8)
+            return (TTSTransportStub.response(for: request, statusCode: 200), body)
+        }
+        defer { TTSTransportMockURLProtocol.requestHandler = nil }
+
+        let api = MistralTTSAPI(session: TTSTransportStub.session())
+        let voices = try await api.listVoices(apiKey: "mist_test")
+        XCTAssertEqual(voices.count, 101)
+        XCTAssertEqual(voices.last?.id, "page2-0")
     }
 
     func testMistralErrors_classifyAuthQuotaAndTheOverloadedForbidden() {

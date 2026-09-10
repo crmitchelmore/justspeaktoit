@@ -78,6 +78,10 @@ public struct MistralTTSAPI: Sendable {
     /// longer text is spoken as a sequence of requests.
     public static let maxInputCharacters = 1_800
     private static let voicePageSize = 100
+    /// Pages one listing will walk. A key with more voices than this has more
+    /// than a picker can usefully hold, and the bound keeps a paging endpoint
+    /// that never terminates from looping.
+    private static let maxVoicePages = 10
 
     private let session: URLSession
 
@@ -132,7 +136,34 @@ public struct MistralTTSAPI: Sendable {
     /// - Parameter presetsOnly: Restrict to Mistral's own presets. Cloned
     ///   voices belong to the account that made them and are included when this
     ///   is `false`.
+    /// Walks the listing to its end rather than treating the first page as the
+    /// whole catalogue: an account with more than `voicePageSize` presets and
+    /// clones would otherwise be unable to pick anything past the first page.
     public func listVoices(apiKey: String, presetsOnly: Bool = false) async throws -> [MistralTTSVoice] {
+        var collected: [MistralTTSVoice] = []
+        var seenIDs: Set<String> = []
+
+        for page in 0..<Self.maxVoicePages {
+            let voices = try await voicePage(
+                apiKey: apiKey,
+                presetsOnly: presetsOnly,
+                offset: page * Self.voicePageSize
+            )
+            let fresh = voices.filter { seenIDs.insert($0.id).inserted }
+            collected.append(contentsOf: fresh)
+            // A short page is the last one. An endpoint that ignores `offset`
+            // repeats the page it already served, which adds nothing new and
+            // ends the walk just as safely.
+            if voices.count < Self.voicePageSize || fresh.isEmpty { break }
+        }
+        return collected
+    }
+
+    private func voicePage(
+        apiKey: String,
+        presetsOnly: Bool,
+        offset: Int
+    ) async throws -> [MistralTTSVoice] {
         guard var components = URLComponents(
             url: Self.voicesEndpoint,
             resolvingAgainstBaseURL: false
@@ -140,6 +171,9 @@ public struct MistralTTSAPI: Sendable {
             throw MistralTTSAPIError.invalidResponse
         }
         var queryItems = [URLQueryItem(name: "limit", value: String(Self.voicePageSize))]
+        if offset > 0 {
+            queryItems.append(URLQueryItem(name: "offset", value: String(offset)))
+        }
         if presetsOnly {
             queryItems.append(URLQueryItem(name: "type", value: "preset"))
         }
@@ -174,12 +208,13 @@ public struct MistralTTSAPI: Sendable {
         ).validate(key)
     }
 
-    /// The listing envelope is not documented, so the two conventional shapes
-    /// and a bare array are all accepted.
+    /// Mistral documents an `items` envelope; the two conventional alternatives
+    /// and a bare array are accepted too, because the response shape has moved
+    /// before.
     static func decodeVoices(from data: Data) throws -> [MistralTTSVoice] {
         let decoder = JSONDecoder()
         if let page = try? decoder.decode(VoicePage.self, from: data) {
-            return page.data ?? page.voices ?? []
+            return page.items ?? page.data ?? page.voices ?? []
         }
         if let voices = try? decoder.decode([MistralTTSVoice].self, from: data) {
             return voices
@@ -218,6 +253,7 @@ private struct SpeechResponse: Decodable {
 }
 
 private struct VoicePage: Decodable {
+    let items: [MistralTTSVoice]?
     let data: [MistralTTSVoice]?
     let voices: [MistralTTSVoice]?
 }

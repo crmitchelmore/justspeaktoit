@@ -224,6 +224,61 @@ final class TTSProviderBatchRoutingTests: XCTestCase {
     }
   }
 
+  func testSpeechmaticsLanguage_rejectsAnExplicitNonEnglishChoice() throws {
+    // Automatic and English are honoured; the request carries no language
+    // field, so anything else would be dropped in silence.
+    XCTAssertNil(
+      SpeechmaticsTTSClient.unsupportedSettingsMessage(TTSSettings(language: "automatic"))
+    )
+    XCTAssertNil(
+      SpeechmaticsTTSClient.unsupportedSettingsMessage(TTSSettings(language: "en_GB"))
+    )
+    let french = try XCTUnwrap(
+      SpeechmaticsTTSClient.unsupportedSettingsMessage(TTSSettings(language: "fr_FR"))
+    )
+    XCTAssertTrue(french.lowercased().contains("english"))
+  }
+
+  func testGroqSynthesis_boundsTheNumberOfBillableRequestsOneCallCanFanOutInto() throws {
+    XCTAssertEqual(
+      GroqTTSAPI.maxSynthesisCharacters,
+      GroqTTSAPI.maxInputCharacters * GroqTTSAPI.maxRequestsPerSynthesis
+    )
+    XCTAssertNil(
+      GroqTTSClient.excessiveFanOutMessage(segmentCount: GroqTTSAPI.maxRequestsPerSynthesis)
+    )
+    // A paste long enough to exceed the budget is refused, not billed.
+    let overLong = String(repeating: "word ", count: GroqTTSAPI.maxSynthesisCharacters)
+    let segments = TTSTextChunker.chunks(overLong, maximumCharacters: GroqTTSAPI.maxInputCharacters)
+    XCTAssertGreaterThan(segments.count, GroqTTSAPI.maxRequestsPerSynthesis)
+    let refusal = try XCTUnwrap(GroqTTSClient.excessiveFanOutMessage(segmentCount: segments.count))
+    XCTAssertTrue(refusal.contains("\(GroqTTSAPI.maxSynthesisCharacters)"))
+  }
+
+  func testKnownVoiceIDPrefixes_coverEveryProviderTheRouterDispatches() {
+    for prefix in TTSProvider.knownVoiceIDPrefixes where prefix != "system/" {
+      XCTAssertNotEqual(
+        TTSProvider.from(voiceID: prefix + "sample"),
+        .system,
+        "\(prefix) must route to its own provider"
+      )
+    }
+    // The account-listed Mistral case is the one this list exists for.
+    XCTAssertTrue(
+      TTSProvider.knownVoiceIDPrefixes.contains(MistralTTSCatalog.voiceIDPrefix)
+    )
+    XCTAssertEqual(TTSProvider.from(voiceID: "mistral/some-cloned-voice"), .mistral)
+  }
+
+  func testAccountListedVoice_keepsAStoredMistralSelectionInThePicker() throws {
+    let voice = try XCTUnwrap(VoiceCatalog.voice(forID: "mistral/abc123"))
+    XCTAssertEqual(voice.provider, .mistral)
+    XCTAssertEqual(
+      VoiceCatalog.includingSelection("mistral/abc123", in: []).map(\.id),
+      ["mistral/abc123"]
+    )
+  }
+
   func testMistralFormatMapping_servesAnM4APreferenceAsMP3() {
     XCTAssertEqual(MistralTTSClient.effectiveFormat(for: .m4a), .mp3)
     XCTAssertEqual(MistralTTSClient.responseFormat(for: .m4a), .mp3)
@@ -232,9 +287,15 @@ final class TTSProviderBatchRoutingTests: XCTestCase {
 
   // MARK: - Helpers
 
+  private struct UnexpectedTTSError: Error, CustomStringConvertible {
+    let description: String
+  }
+
   private func synthesisFailureMessage(_ error: TTSError) throws -> String {
     guard case .synthesisFailure(let message) = error else {
-      throw XCTSkip("expected a synthesis failure, got \(error)")
+      // A wrong error case is a routing defect, not a reason to skip.
+      XCTFail("expected a synthesis failure, got \(error)")
+      throw UnexpectedTTSError(description: "expected a synthesis failure, got \(error)")
     }
     return message
   }

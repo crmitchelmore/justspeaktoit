@@ -16,10 +16,15 @@ import SpeakCore
 /// The destination picker Shortcuts and Siri show.
 ///
 /// An `AppEnum` rather than a text field because the set is closed and lives
-/// in source: three cases that only change when the app changes. The language
+/// in source: four cases that only change when the app changes. The language
 /// and model parameters are catalogue-driven instead (see below).
 @available(iOS 18, *)
 public enum CaptureDestinationAppEnum: String, AppEnum {
+    /// Mirrors `HardwareTriggerDestination.auto` (issue #1008): the field the
+    /// Just Speak keyboard is open in when there is one, otherwise the
+    /// clipboard. Added here so the Shortcuts picker and the in-app setting
+    /// cannot offer different destinations — the parity test pins it.
+    case auto
     case clipboard
     case clipboardAndPostProcess
     case historyOnly
@@ -27,6 +32,10 @@ public enum CaptureDestinationAppEnum: String, AppEnum {
     public static var typeDisplayRepresentation: TypeDisplayRepresentation = "Destination"
 
     public static var caseDisplayRepresentations: [CaptureDestinationAppEnum: DisplayRepresentation] = [
+        .auto: DisplayRepresentation(
+            title: "Auto",
+            subtitle: "Into the Just Speak keyboard's field if one is open, otherwise the clipboard."
+        ),
         .clipboard: DisplayRepresentation(
             title: "Clipboard",
             subtitle: "Copy the transcript when recording stops."

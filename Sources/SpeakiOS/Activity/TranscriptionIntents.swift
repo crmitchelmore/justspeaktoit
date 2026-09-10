@@ -12,10 +12,18 @@ import UIKit
 
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
 
+/// The spoken and Shortcuts result of a stop.
+///
+/// `receipt` is what the delivery actually did (issue #1008) and always wins:
+/// it is built from observed results, so it cannot claim a copy that failed or
+/// a field insert that never happened. The per-destination strings below remain
+/// for the fixed destinations, where they say the same thing with the word
+/// count Siri reads out.
 @available(iOS 18, *)
 private func stopResultDialog(
     for result: TranscriptionResult,
     destination: HardwareTriggerDestination,
+    receipt: CaptureReceipt?,
     canPostProcess: Bool = true
 ) -> IntentDialog {
     let wordCount = result.text.split(separator: " ").count
@@ -23,6 +31,9 @@ private func stopResultDialog(
         return "Recording stopped. No speech detected."
     }
     switch destination {
+    case .auto:
+        guard let receipt else { return "Recording stopped." }
+        return IntentDialog(stringLiteral: "\(receipt.headline). \(wordCount) words.")
     case .clipboard:
         return "Copied \(wordCount) words to clipboard."
     case .clipboardAndPostProcess:
@@ -32,6 +43,28 @@ private func stopResultDialog(
         return "Copied \(wordCount) words. Add an OpenRouter API key to polish future recordings."
     case .historyOnly:
         return "Saved \(wordCount) words to history."
+    }
+}
+
+/// A keyboard-owned dictation shares the microphone with every hardware
+/// trigger. Rather than colliding with it — refusing with "already recording",
+/// or stopping it into the *hardware* destination and losing the field the
+/// keyboard was aiming at — a physical press finishes it into that field
+/// (issue #1002).
+///
+/// Returns `true` when the press was consumed by the keyboard session.
+@available(iOS 18, *)
+@MainActor
+private func finishedKeyboardSessionIfActive() -> Bool {
+    switch KeyboardDeliveryPublisher.sessionRouting() {
+    case let .finishKeyboardSession(requestID):
+        return KeyboardInstantDictationCoordinator.shared.finishKeyboardSession(requestID: requestID)
+    case .keyboardSessionStarting:
+        // The keyboard has asked for a recording that has not begun. Racing
+        // its start-up would either double-start or silently drop it.
+        return true
+    case .proceed:
+        return false
     }
 }
 
@@ -271,9 +304,16 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
         // than treating the service as free and double-starting (issue #701).
         let isActive = await service.isActive
 
+        // Share one session with the keyboard: a physical press finishes its
+        // dictation into its own field instead of colliding with it (#1002).
+        if await finishedKeyboardSessionIfActive() {
+            return .result()
+        }
+
         if isActive {
             await service.stopRecording(
-                destination: await service.resolvedStopDestination(explicit: destination?.destination)
+                destination: await service.resolvedStopDestination(explicit: destination?.destination),
+                keyboardDeliverySource: .hardwareTrigger
             )
             return .result()
         } else if SharedTranscriptionState.shared.isRecording {
@@ -339,6 +379,11 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
         // `starting` is cancellable, not "no active recording" (issue #701).
         let isActive = await service.isActive
 
+        // A keyboard-owned dictation finishes into its own field (#1002).
+        if await finishedKeyboardSessionIfActive() {
+            return .result(dialog: "Finishing into the keyboard's text field.")
+        }
+
         guard isActive else {
             if SharedTranscriptionState.shared.isRecording {
                 return .result(dialog: "A recording is active in the app. Use the in-app stop button.")
@@ -350,10 +395,14 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
         // global setting.
         let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
         let canPostProcess = await AppSettings.shared.hasOpenRouterKey
-        let result = await service.stopRecording(destination: resolved)
+        let result = await service.stopRecording(
+            destination: resolved,
+            keyboardDeliverySource: .hardwareTrigger
+        )
         return .result(dialog: stopResultDialog(
             for: result,
             destination: resolved,
+            receipt: await service.lastCaptureReceipt,
             canPostProcess: canPostProcess
         ))
     }
@@ -407,7 +456,10 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
             // The Control itself takes no parameters (a configurable Control
             // would change what an already-placed one means), but a Control
             // stop still honours the override the start carried.
-            await service.stopRecording(destination: service.resolvedStopDestination())
+            await service.stopRecording(
+                destination: service.resolvedStopDestination(),
+                keyboardDeliverySource: .hardwareTrigger
+            )
         case .none:
             break
         }

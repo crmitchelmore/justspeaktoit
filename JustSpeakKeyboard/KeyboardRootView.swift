@@ -21,6 +21,9 @@ struct KeyboardRootView: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            if let chip = pendingPickupChip {
+                pickupChipRow(chip)
+            }
             transcriptStrip
             controlRow
         }
@@ -29,6 +32,56 @@ struct KeyboardRootView: View {
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    // MARK: - Insert-pending chip (issue #1003)
+
+    private var pendingPickupChip: KeyboardPickupPolicy.Chip? {
+        guard case let .chip(chip) = model.pickupOffering else { return nil }
+        return chip
+    }
+
+    /// One tap inserts; one tap dismisses. Nothing here inserts on its own —
+    /// putting a transcript the user did not just ask for into whichever field
+    /// happens to be focused would corrupt their document.
+    private func pickupChipRow(_ chip: KeyboardPickupPolicy.Chip) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                model.insertPendingPickup()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "text.insert")
+                        .font(.footnote.weight(.semibold))
+                        .accessibilityHidden(true)
+                    Text(chip.label)
+                        .font(.footnote.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                .padding(.horizontal, 10)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(chip.label)
+            .accessibilityHint("Inserts this transcript at the cursor")
+            .accessibilityIdentifier("keyboardPickupChip")
+
+            Button {
+                model.dismissPendingPickup()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss pending transcript")
+            .accessibilityIdentifier("keyboardPickupDismissButton")
+        }
+        .foregroundStyle(.primary)
+        .background(
+            Color.accentColor.opacity(0.16),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 
     // MARK: - Transcript strip

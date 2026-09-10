@@ -238,12 +238,23 @@ public final class iOSHistoryManager: ObservableObject {
         syncedIDs.removeAll()
         saveSyncedIDs()
 
+        // A Handoff pointer must never outlive the entry it points at
+        // (issue #1006).
+        TranscriptHandoffPublisher.invalidate()
         guard syncEnabled else { return }
         Task {
             for entryID in allIDs {
                 try? await HistorySyncEngine.shared.delete(entryID: entryID)
             }
         }
+    }
+
+    /// What this device can honestly say about the CloudKit lane for a capture
+    /// (issue #1007). Never a claim that a Mac received anything — the phone
+    /// has no evidence of that (issue #952).
+    public func macLaneOutcome(for item: iOSHistoryItem?) -> MacLaneOutcome {
+        guard item != nil, syncEnabled else { return .notAttempted }
+        return HistorySyncEngine.shared.state.isCloudAvailable ? .queuedForICloud : .iCloudUnavailable
     }
 
     /// Trigger a manual sync.

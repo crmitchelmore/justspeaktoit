@@ -28,6 +28,9 @@ public enum SyncConfiguration {
     /// UserDefaults key for tracking subscription creation.
     public static let subscriptionCreatedKey = "speak.sync.subscriptionCreated"
 
+    /// The database subscription whose pushes announce a history change.
+    public static let historySubscriptionID = "transcription-history-changes"
+
     /// Maximum number of entries to sync in a single batch.
     public static let batchSize = 100
 

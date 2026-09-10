@@ -318,6 +318,9 @@ let iosAppTarget: Target = .target(
         // export exemption, so the app uses no *non-exempt* encryption.
         "ITSAppUsesNonExemptEncryption": false,
         "NSSupportsLiveActivities": true,
+        // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
+        // the History entry id, never the transcript itself.
+        "NSUserActivityTypes": ["com.justspeaktoit.transcript"],
         "UIBackgroundModes": ["audio", "remote-notification"],
         "UIApplicationShortcutItems": [
             [

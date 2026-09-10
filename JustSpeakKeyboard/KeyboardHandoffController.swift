@@ -29,22 +29,54 @@ final class KeyboardHandoffController: ObservableObject {
     @Published private(set) var liveTranscript = ""
     @Published private(set) var isInstantReady = false
 
+    /// Called immediately after a completed transcript reaches the document,
+    /// so the keyboard can hand itself back (issue #1005).
+    var onDidInsert: (() -> Void)?
+
+    /// Whether a keyboard-owned dictation currently owns the caret. A pending
+    /// pickup chip must not compete with words the user is saying right now.
+    var isInFlight: Bool {
+        requestID != nil
+    }
+
     private let store: KeyboardHandoffStore
     private let instantSessionStore: KeyboardInstantDictationStore
     private let consumer: KeyboardHandoffConsumer
     private var requestID: UUID?
     private var currentDocumentIdentifier: UUID?
     private var pollTask: Task<Void, Never>?
+    private var statusObservation: KeyboardHandoffSignalObservation?
     private var insertText: ((String) -> Void)?
     private var profile: KeyboardDictationProfileOption?
     private var autoStartWhenReady = false
 
-    /// Poll cadence while a handoff request is in flight; the keyboard mirrors
-    /// interim text from the App Group record at this rate.
-    private static let activePollInterval = Duration.milliseconds(120)
-    /// Slower cadence while nothing is in flight, so an idle keyboard stays
-    /// well inside the extension CPU budget.
-    private static let idlePollInterval = Duration.milliseconds(500)
+    /// Live streaming of the app's interims into the field (issue #1004). All
+    /// of the "when to mark, when to finalise, when to clear" reasoning lives
+    /// in the pure `KeyboardMarkedTextSession`; this class only performs the
+    /// proxy calls it asks for.
+    private var markedText: KeyboardMarkedTextSession = .init(
+        streamsMarkedText: false,
+        isSecureField: true
+    )
+    private var setMarkedText: ((String) -> Void)?
+    private var unmarkText: (() -> Void)?
+    private var streamsMarkedText = false
+    private var isSecureField = true
+    /// A `setMarkedText` of our own makes the host report a selection change.
+    /// At most one such echo is swallowed per write, so a genuine caret move
+    /// still abandons the stream; a host that reports more than one only makes
+    /// the keyboard fall back to plain insertion, never insert in the wrong
+    /// place.
+    private var expectsSelectionEcho = false
+
+    /// Safety-net poll cadence. Since #990 the containing app posts a Darwin
+    /// `statusChanged` after every write the keyboard is waiting on, so the
+    /// poll no longer sets the latency of a partial or of the final insertion
+    /// — it only covers a dropped notification. That is why the old 120 ms
+    /// in-flight tier is gone: it cost a wake-up eight times a second in an
+    /// extension with a hard memory and CPU budget, to save latency that the
+    /// notification now removes outright.
+    private static let safetyNetPollInterval = Duration.milliseconds(500)
 
     init(
         store: KeyboardHandoffStore = .shared,
@@ -59,11 +91,21 @@ final class KeyboardHandoffController: ObservableObject {
         documentIdentifier: UUID,
         profile: KeyboardDictationProfileOption,
         autoStart: Bool,
-        insertText: @escaping (String) -> Void
+        streamsMarkedText: Bool = false,
+        isSecureField: Bool = true,
+        insertText: @escaping (String) -> Void,
+        setMarkedText: ((String) -> Void)? = nil,
+        unmarkText: (() -> Void)? = nil
     ) {
         self.currentDocumentIdentifier = documentIdentifier
         self.profile = profile
         self.insertText = insertText
+        self.setMarkedText = setMarkedText
+        self.unmarkText = unmarkText
+        self.streamsMarkedText = streamsMarkedText && setMarkedText != nil && unmarkText != nil
+        self.isSecureField = isSecureField
+        self.markedText = newMarkedTextSession()
+        self.expectsSelectionEcho = false
 
         if requestID == nil {
             requestID = store.activeRecord()?.requestID
@@ -75,6 +117,7 @@ final class KeyboardHandoffController: ObservableObject {
         refreshInstantSession()
         refresh()
         startPolling()
+        observeStatusChanges()
         if autoStartWhenReady, requestID == nil, isInstantReady {
             start()
         } else if requestID == nil, !isInstantReady {
@@ -83,14 +126,26 @@ final class KeyboardHandoffController: ObservableObject {
     }
 
     func deactivate() {
+        // Provisional text must never outlive the keyboard that owns it. This
+        // runs before anything else, and before the proxy callbacks are let
+        // go, so a dismissal mid-stream takes the words back out of the field
+        // rather than stranding them there underlined forever. The transcript
+        // itself is not lost: #1030 keeps the request alive through dismissal
+        // and the completed result is inserted on the next appearance.
+        applyMarkedText(markedText.abandon())
         if let requestID,
            let phase = store.record(matching: requestID)?.phase,
-           phase == .requested || phase == .recording
-               || phase == .finishRequested || phase == .transcribing {
+           phase == .requested || phase == .recording {
             _ = try? store.cancel(requestID: requestID)
             KeyboardHandoffSignal.postRequestChanged()
             self.requestID = nil
         }
+        // Stop has committed the app-owned finalisation. Keep its nonce for
+        // recovery on return, but never retain an inactive document callback.
+        insertText = nil
+        setMarkedText = nil
+        unmarkText = nil
+        statusObservation = nil
         pollTask?.cancel()
         pollTask = nil
         autoStartWhenReady = false
@@ -99,6 +154,16 @@ final class KeyboardHandoffController: ObservableObject {
     }
 
     func updateDocumentContext(documentIdentifier: UUID, selectionChanged: Bool) {
+        if currentDocumentIdentifier != documentIdentifier {
+            // A different field: the marked range is unaddressable from here.
+            applyMarkedText(markedText.documentChanged())
+        } else if selectionChanged {
+            if expectsSelectionEcho {
+                expectsSelectionEcho = false
+            } else {
+                applyMarkedText(markedText.caretMoved())
+            }
+        }
         currentDocumentIdentifier = documentIdentifier
 
         guard let requestID,
@@ -107,7 +172,7 @@ final class KeyboardHandoffController: ObservableObject {
                   || record.phase == .recording
                   || record.phase == .finishRequested
                   || record.phase == .transcribing,
-              selectionChanged || record.targetDocumentIdentifier != documentIdentifier else {
+              record.targetDocumentIdentifier != documentIdentifier else {
             return
         }
         _ = try? store.cancel(requestID: requestID)
@@ -129,6 +194,10 @@ final class KeyboardHandoffController: ObservableObject {
                 profile: profile
             )
             requestID = request.requestID
+            // A new run gets a new ledger. An earlier run in this appearance
+            // may have abandoned streaming; that verdict belonged to it.
+            markedText = newMarkedTextSession()
+            expectsSelectionEcho = false
             liveTranscript = ""
             presentation = .starting
             KeyboardHandoffSignal.postRequestChanged()
@@ -138,6 +207,7 @@ final class KeyboardHandoffController: ObservableObject {
     }
 
     func cancel() {
+        applyMarkedText(markedText.abandon())
         guard let requestID else {
             presentation = .idle
             return
@@ -172,22 +242,56 @@ final class KeyboardHandoffController: ObservableObject {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                let interval: Duration
-                if let self {
-                    self.refresh()
-                    interval = self.requestID == nil
-                        ? Self.idlePollInterval
-                        : Self.activePollInterval
-                } else {
-                    return
-                }
-                try? await Task.sleep(for: interval)
+                guard let self else { return }
+                self.refresh()
+                try? await Task.sleep(for: Self.safetyNetPollInterval)
             }
         }
     }
 
+    /// Reads the record the moment the app says it changed, instead of on the
+    /// next poll tick (issue #990). Darwin notifications carry no payload, so
+    /// this is only a wake-up: the record, its nonce and its phase are still
+    /// read and validated from the App Group exactly as the poll does.
+    private func observeStatusChanges() {
+        guard statusObservation == nil else { return }
+        statusObservation = KeyboardHandoffSignal.observeStatusChanges { [weak self] in
+            Task { @MainActor in
+                self?.refresh()
+            }
+        }
+    }
+
+    private func newMarkedTextSession() -> KeyboardMarkedTextSession {
+        KeyboardMarkedTextSession(
+            streamsMarkedText: streamsMarkedText,
+            isSecureField: isSecureField
+        )
+    }
+
+    /// The only place that touches the host's marked text.
+    private func applyMarkedText(_ action: KeyboardMarkedTextSession.Action) {
+        switch action {
+        case .none:
+            return
+        case let .mark(text):
+            expectsSelectionEcho = true
+            setMarkedText?(text)
+        case let .finalise(text):
+            expectsSelectionEcho = false
+            setMarkedText?(text)
+            unmarkText?()
+        case .clear:
+            expectsSelectionEcho = false
+            setMarkedText?("")
+            unmarkText?()
+        }
+    }
+
+    /// The single place the shared record is re-read: the safety-net poll
+    /// tick, the Darwin wake from #990, and the tests that drive both.
     // swiftlint:disable:next function_body_length cyclomatic_complexity
-    private func refresh() {
+    func refresh() {
         refreshInstantSession()
         guard let requestID else {
             if autoStartWhenReady, isInstantReady, presentation == .waitingForApp {
@@ -202,6 +306,7 @@ final class KeyboardHandoffController: ObservableObject {
             return
         }
         guard let record = store.record(matching: requestID) else {
+            applyMarkedText(markedText.abandon())
             presentation = .error(.timedOut)
             self.requestID = nil
             return
@@ -210,6 +315,7 @@ final class KeyboardHandoffController: ObservableObject {
 
         if let target = record.targetDocumentIdentifier,
            target != currentDocumentIdentifier {
+            applyMarkedText(markedText.documentChanged())
             if record.phase != .completed {
                 _ = try? store.cancel(requestID: requestID)
                 KeyboardHandoffSignal.postRequestChanged()
@@ -223,6 +329,7 @@ final class KeyboardHandoffController: ObservableObject {
         case .requested:
             presentation = isInstantReady ? .starting : .waitingForApp
         case .recording:
+            applyMarkedText(markedText.interim(liveTranscript))
             presentation = .recording
         case .finishRequested, .transcribing:
             presentation = .transcribing
@@ -234,16 +341,32 @@ final class KeyboardHandoffController: ObservableObject {
             if consumer.insertReadyResult(
                 requestID: requestID,
                 documentIdentifier: currentDocumentIdentifier,
-                insert: insertText
+                // Streaming already put provisional words in the field, so the
+                // final transcript replaces them in place; with nothing marked
+                // — streaming off, a secure field, or an abandoned stream — it
+                // is the plain insertion it has always been. Exactly one of the
+                // two happens, so the words can be neither doubled nor lost.
+                insert: { [weak self] text in
+                    guard let self else { return }
+                    switch self.markedText.finish(text) {
+                    case let .finalise(final):
+                        self.applyMarkedText(.finalise(final))
+                    default:
+                        insertText(text)
+                    }
+                }
             ) {
                 self.requestID = nil
                 liveTranscript = ""
                 presentation = .inserted
+                onDidInsert?()
             }
         case .cancelled:
+            applyMarkedText(markedText.abandon())
             self.requestID = nil
             presentation = .cancelled
         case .failed:
+            applyMarkedText(markedText.abandon())
             self.requestID = nil
             presentation = .error(record.failureCode ?? .unknown)
         }

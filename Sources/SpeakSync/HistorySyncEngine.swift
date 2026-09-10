@@ -237,7 +237,7 @@ public final class HistorySyncEngine: ObservableObject {
 
     private func createSubscription() async throws {
         guard let database = SyncConfiguration.privateDatabase else { return }
-        let subscription = CKDatabaseSubscription(subscriptionID: "transcription-history-changes")
+        let subscription = CKDatabaseSubscription(subscriptionID: SyncConfiguration.historySubscriptionID)
         let info = CKSubscription.NotificationInfo()
         info.shouldSendContentAvailable = true
         subscription.notificationInfo = info

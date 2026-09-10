@@ -50,6 +50,16 @@ final class KeyboardViewController: UIInputViewController {
         model.activate(
             hasFullAccess: hasFullAccess,
             documentIdentifier: textDocumentProxy.documentIdentifier,
+            // Optional on `UITextInputMode`'s traits; an unreported trait is
+            // treated as "not secure", matching what the host actually shows.
+            isSecureField: textDocumentProxy.isSecureTextEntry ?? false,
+            // `advanceToNextInputMode()` moves to the *next* enabled keyboard;
+            // the model only calls back when exactly two are enabled, where
+            // "next" is provably the one the user was typing on (issue #1005).
+            activeInputModeCount: UITextInputMode.activeInputModes.count,
+            handBack: { [weak self] in
+                self?.advanceToNextInputMode()
+            },
             insertText: { [weak self] text in
                 self?.textDocumentProxy.insertText(text)
             },
@@ -61,6 +71,19 @@ final class KeyboardViewController: UIInputViewController {
             },
             contextAfterInput: { [weak self] in
                 self?.textDocumentProxy.documentContextAfterInput
+            },
+            // Provisional text, as Apple dictation and CJK input use (#1004).
+            // The caret is placed at the end of the marked range so the user
+            // can keep speaking; `unmarkText()` is what commits it, and
+            // marking the empty string then unmarking is what removes it.
+            setMarkedText: { [weak self] text in
+                self?.textDocumentProxy.setMarkedText(
+                    text,
+                    selectedRange: NSRange(location: (text as NSString).length, length: 0)
+                )
+            },
+            unmarkText: { [weak self] in
+                self?.textDocumentProxy.unmarkText()
             }
         )
     }

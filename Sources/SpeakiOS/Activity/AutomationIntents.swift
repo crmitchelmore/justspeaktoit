@@ -97,7 +97,10 @@ struct StopDictationIntent: AudioRecordingIntent {
             throw AutomationIntentError.noActiveRecording
         }
         let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
-        let result = await service.stopRecording(destination: resolved)
+        let result = await service.stopRecording(
+            destination: resolved,
+            keyboardDeliverySource: .hardwareTrigger
+        )
         let polished = waitForPolish
             ? await service.awaitPolishedTranscript(
                 timeout: AutomationIntentSupport.PolishWait.defaultSeconds

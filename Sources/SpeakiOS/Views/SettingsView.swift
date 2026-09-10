@@ -16,6 +16,14 @@ import OSLog
 /// Control Center, Back Tap. The main in-app record-and-stop flow is
 /// unaffected — it always shows the result on screen.
 public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Sendable {
+    /// Resolve the destination at stop time (issue #1008): the field the Just
+    /// Speak keyboard is open in when there is one, otherwise the clipboard.
+    /// Every capture also goes to History and iCloud, whichever lane runs.
+    ///
+    /// There is no "Mac" branch: see `AutoDestinationPolicy` for why the phone
+    /// cannot tell a reachable Mac from a configured one.
+    case auto
+
     /// Copy the transcript to the clipboard. Default — matches behaviour
     /// prior to the destination setting being added.
     case clipboard
@@ -35,6 +43,7 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
     public var displayName: String {
         switch self {
+        case .auto: return "Auto"
         case .clipboard: return "Copy to Clipboard"
         case .clipboardAndPostProcess: return "Copy & Polish"
         case .historyOnly: return "Save to History Only"
@@ -43,6 +52,10 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
     public var summary: String {
         switch self {
+        case .auto:
+            return "Decided when recording stops: straight into the field if the Just Speak keyboard is open "
+                + "there, otherwise the clipboard. Either way it is saved to History and pushed to iCloud, "
+                + "and the Live Activity says which one happened."
         case .clipboard:
             return "Transcript is copied to the clipboard immediately when recording stops."
         case .clipboardAndPostProcess:
@@ -435,9 +448,13 @@ public final class AppSettings: ObservableObject {
         )
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
-        // Default to .clipboard for backwards compatibility with prior versions.
+        // `.auto` is the default only for users who never made a choice: an
+        // explicitly stored value is always honoured (issue #1008). Auto is a
+        // superset of the old default — it copies to the clipboard except when
+        // the Just Speak keyboard is demonstrably open in a text field, where
+        // the words go into that field instead.
         let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination")
-        let hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw ?? "") ?? .clipboard
+        let hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw ?? "") ?? .auto
 
         // Post-processing settings
         let postEnabled = defaults.bool(forKey: "postProcessingEnabled")

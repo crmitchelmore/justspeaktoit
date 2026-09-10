@@ -1,6 +1,7 @@
 import SwiftUI
 import SpeakCore
 import SpeakiOSLib
+import SpeakSync
 import UIKit
 
 final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
@@ -31,6 +32,17 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        // The history subscription's push was created but never handled, so a
+        // transcript made on the Mac or the watch only reached this phone at
+        // the next launch (issue #1007). Route it to the history engine and
+        // leave every other push to the API-key sync as before.
+        if HistorySyncPushRouting.isHistoryChange(userInfo) {
+            Task { @MainActor in
+                await iOSHistoryManager.shared.triggerSync()
+                completionHandler(.newData)
+            }
+            return
+        }
         Task { @MainActor in
             let synced = await AppSettings.shared.syncCloudKitKeys()
             completionHandler(synced ? .newData : .noData)

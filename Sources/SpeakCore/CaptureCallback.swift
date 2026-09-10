@@ -64,6 +64,14 @@ public enum CaptureLinkFailure: String, Error, LocalizedError, Equatable, Sendab
 /// caller turns that into a visible failure. Nothing here falls back to a
 /// default: silently recording with a different model or language than the
 /// caller asked for is worse than refusing, because the caller cannot tell.
+///
+/// `language`, `model` and `requiresBatchMode` were duplicated verbatim in
+/// `CaptureParameterResolution` while the URL surface (#1070) and the
+/// parameterised-intent surface (#1076) were open in parallel and could not
+/// import each other. Both landed together, so this side now forwards: there
+/// is exactly one implementation, and `lang=en_GB` in a URL and
+/// "Language: English (United Kingdom)" in a Shortcut cannot drift apart.
+/// `maxDuration` has no counterpart there and stays here.
 public enum CaptureLinkParameters {
     /// Bounds on `maxDuration`, in seconds. The lower bound keeps a link from
     /// arming a recording that stops before the microphone is warm; the upper
@@ -83,36 +91,21 @@ public enum CaptureLinkParameters {
     /// locales and picking one would be exactly the silent substitution this
     /// parameter must not make.
     public static func language(from raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-        let normalized = trimmed.replacingOccurrences(of: "-", with: "_").lowercased()
-        if normalized == "auto" || normalized == TranscriptionLanguageCatalog.automaticIdentifier {
-            return TranscriptionLanguageCatalog.automaticIdentifier
-        }
-        return TranscriptionLanguageCatalog.options
-            .first { $0.id.lowercased() == normalized }?
-            .id
+        CaptureParameterResolution.language(from: raw)
     }
 
     /// Accepts a transcription model identifier that the catalogue lists for
     /// live or batch transcription. The "custom model" placeholder is not a
     /// real identifier, so it is rejected too.
     public static func model(from raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, trimmed != ModelCatalog.customOptionID else { return nil }
-        let options = ModelCatalog.liveTranscription
-            + ModelCatalog.batchTranscription
-            + ModelCatalog.localTranscriptionOptions
-        return options.first { $0.id.lowercased() == trimmed.lowercased() }?.id
+        CaptureParameterResolution.model(from: raw)
     }
 
     /// Whether the identifier is a batch-only model, so the capture has to run
-    /// in batch mode however the app is configured. `nil` when the model is
+    /// in batch mode however the app is configured. `false` when the model is
     /// available live, which leaves the configured mode alone.
     public static func requiresBatchMode(_ modelID: String) -> Bool {
-        let isLive = (ModelCatalog.liveTranscription + ModelCatalog.localTranscriptionOptions)
-            .contains { $0.id.lowercased() == modelID.lowercased() }
-        return !isLive
+        CaptureParameterResolution.requiresBatchMode(modelID)
     }
 
     /// Accepts a whole or fractional number of seconds inside `durationRange`.

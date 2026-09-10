@@ -27,6 +27,11 @@ public final class AudioRecordingPersistence: ObservableObject {
         set { issueLock.withLock { storedIssueHandler = newValue } }
     }
 
+    /// Input level of the most recent buffer, in dBFS. See
+    /// `AudioRecordingPersistence+Level.swift`.
+    nonisolated(unsafe) public internal(set) var currentInputLevelDBFS: Float =
+        AudioLevelMeter.silenceFloorDBFS
+
     // MARK: - Private
 
     /// Serial queue that owns the write-side `AVAudioFile`. Every write and
@@ -203,6 +208,12 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// asynchronously on the persistence I/O queue.
     @discardableResult
     nonisolated public func writeBuffer(_ buffer: AVAudioPCMBuffer) -> RecordingPersistenceAdmission? {
+        // Metered before the writer guard below, and before admission can drop
+        // the frame: the level is an observation of what the microphone heard,
+        // not of what was persisted. A user with audio retention turned off, or
+        // a session backpressured by a slow disk, still gets end-pointing.
+        currentInputLevelDBFS = Self.level(of: buffer)
+
         // Admission and enqueue are one atomic step against `closeWriter`'s
         // barrier. Releasing the lock before `ioQueue.async` would let a stalled
         // caller enqueue *after* the session closed; that block would then

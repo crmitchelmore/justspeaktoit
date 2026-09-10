@@ -246,9 +246,15 @@ public enum CaptureCommandRunner {
             return .failed(surfaced: false)
         }
         do {
+            // The per-run overrides travel with the capture, so every stop path
+            // — the Live Activity button, an interruption, a Siri stop — sees
+            // the same destination, language and model this link asked for.
             try await service.startRecording(
-                modelOverride: modelOverride,
-                languageOverride: languageOverride
+                parameters: CaptureRunParameters(
+                    destinationID: destinationOverride?.rawValue,
+                    languageIdentifier: languageOverride,
+                    modelID: modelOverride
+                )
             )
             startedDestination = destinationOverride
             return .started

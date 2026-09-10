@@ -40,6 +40,18 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
 
+    /// Whether the background polish started by the most recent stop is still
+    /// running, and what it produced (issue #1015).
+    ///
+    /// Published so a returning intent can opt in to waiting for the polished
+    /// text instead of handing a Shortcut the raw transcript while the
+    /// clipboard is about to hold a different one. `lastPolishedTranscript`
+    /// stays `nil` when the polish failed or was never started, which is what
+    /// keeps the wait honest: the caller falls back to the raw transcript
+    /// rather than being told nothing came back.
+    @Published public private(set) var isPostProcessing = false
+    @Published public private(set) var lastPolishedTranscript: String?
+
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState: SharedTranscriptionState
@@ -52,6 +64,16 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var sharesLiveTranscript = true
     private(set) var automaticStopDestination: HardwareTriggerDestination = .clipboard
     private var onCaptureDisruption: (() async -> Void)?
+    /// Which trigger started the session in flight, so onboarding can only
+    /// mark a trigger proven when a transcript really arrived through it.
+    /// `nil` means the caller did not identify itself, and nothing is claimed.
+    private var currentTrigger: CaptureTrigger?
+    /// Per-run parameter overrides supplied by the surface that started the
+    /// session (issue #1013). They travel with the run so every stop path —
+    /// the Live Activity button, a Siri stop, a quick action, an interruption
+    /// — finishes where the caller asked, not where the global setting says.
+    /// `.none` is the pre-parameter behaviour in every respect.
+    private var currentRunParameters: CaptureRunParameters = .none
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
@@ -70,6 +92,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     var watchdogTask: Task<Void, Never>?
     var watchdogRunID: UUID?
     var watchdogStartedAt: Date?
+    /// The armed silence end-pointing monitor's poll loop (issue #1012), or
+    /// `nil` when this capture runs until somebody stops it. See
+    /// `TranscriptionRecordingService+EndPointing.swift`.
+    var endPointingTask: Task<Void, Never>?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -155,8 +181,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil,
-        modelOverride: String? = nil,
-        languageOverride: String? = nil,
+        trigger: CaptureTrigger? = nil,
+        parameters: CaptureRunParameters = .none,
+        endPointing: CaptureEndPointingRequest? = nil,
         entry: StartupEntry? = nil
     ) async throws {
         try await startRecording(
@@ -164,8 +191,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             sharesLiveTranscript: sharesLiveTranscript,
             requiresLiveActivity: requiresLiveActivity,
             keyboardProfile: keyboardProfile,
-            modelOverride: modelOverride,
-            languageOverride: languageOverride,
+            trigger: trigger,
+            parameters: parameters,
+            endPointing: endPointing,
             destination: nil,
             entry: entry
         )
@@ -177,8 +205,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil,
-        modelOverride: String? = nil,
-        languageOverride: String? = nil,
+        trigger: CaptureTrigger? = nil,
+        parameters: CaptureRunParameters = .none,
+        endPointing: CaptureEndPointingRequest? = nil,
         destination: HardwareTriggerDestination?,
         entry: StartupEntry? = nil,
         onCaptureDisruption: (() async -> Void)? = nil
@@ -209,28 +238,40 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         lastSessionError = nil
         providerFallbackNotice = nil
+        currentTrigger = keyboardProfile == nil ? trigger : .keyboard
         // A model the catalogue only lists for batch transcription cannot run in
-        // streaming mode, so an explicit `model=` decides the mode rather than
-        // being started in a mode it has no client for.
-        let overrideRequiresBatch = modelOverride.map(CaptureLinkParameters.requiresBatchMode)
-        let usesBatchTranscription = keyboardProfile?.transcriptionMode == .batch
-            || (keyboardProfile == nil && (overrideRequiresBatch ?? (settings.transcriptionMode == .batch)))
-        currentModel = keyboardProfile?.transcriptionModelIdentifier
-            ?? modelOverride
-            ?? (usesBatchTranscription ? settings.batchTranscriptionModel : settings.selectedModel)
+        // streaming mode, so an explicit `model=` (from a capture link or a
+        // Shortcut) decides the mode rather than being started in a mode it has
+        // no client for. `modelSelection` owns that rule for every surface.
+        let runParameters = adoptRunParameters(parameters, keyboardProfile: keyboardProfile)
+        let selection = Self.modelSelection(
+            keyboardProfile: keyboardProfile,
+            parameters: runParameters,
+            settings: settings
+        )
+        let usesBatchTranscription = selection.usesBatch
+        currentModel = selection.modelID
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast
         startTime = Date()
         self.sharesLiveTranscript = sharesLiveTranscript
-        self.automaticStopDestination = destination ?? settings.hardwareTriggerDestination
+        // Explicit internal destination beats the override the run carried,
+        // which beats the global setting (issue #1013).
+        self.automaticStopDestination = destination
+            ?? runDestinationOverride
+            ?? settings.hardwareTriggerDestination
         self.onCaptureDisruption = onCaptureDisruption
         sharedState.clear()
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
 
         if !usesBatchTranscription && keyboardProfile == nil {
-            resolveLiveModel(settings: settings)
+            try resolveLiveModelHonouringRequest(
+                settings: settings,
+                requestedModelID: runParameters.modelID,
+                run: runID
+            )
         }
 
         // A Live Activity is required to record in the *background* via an
@@ -274,7 +315,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 ? .batch(retainRecording: retainBatchRecording)
                 : .streaming
             let languageIdentifier = keyboardProfile?.languageIdentifier
-                ?? languageOverride
+                ?? runParameters.languageIdentifier
                 ?? settings.preferredLocaleIdentifier
             let session = try IOSTranscriptionSession(
                 modelID: currentModel,
@@ -321,6 +362,20 @@ public final class TranscriptionRecordingService: ObservableObject {
             // second half of the pair rather than the first.
             notePresentation(presentation.noteBackendStarted(run: runID))
             diagnostics.finish(.started, run: runID)
+            // Armed only after activation, so a capture that never went live
+            // leaves no monitor behind and the run identity the monitor checks
+            // is the session that is actually recording (issue #1012). A `nil`
+            // request arms nothing and the capture behaves exactly as it did
+            // before end-pointing existed.
+            armEndPointing(
+                Self.endPointingRequest(
+                    explicit: endPointing,
+                    trigger: trigger,
+                    keyboardProfile: keyboardProfile,
+                    settings: settings
+                ),
+                for: session
+            )
         } catch {
             // Unwind runs for the retired case too: a stop that cancelled this
             // startup is awaiting settlement, and this run still owns whatever
@@ -332,7 +387,68 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
-    private func resolveLiveModel(settings: AppSettings) {
+    /// Stores the overrides this run will carry, and logs them so a capture's
+    /// parameters are recoverable after the fact.
+    ///
+    /// The keyboard carries its own profile and never takes intent parameters,
+    /// so a keyboard run stores none.
+    @discardableResult
+    private func adoptRunParameters(
+        _ parameters: CaptureRunParameters,
+        keyboardProfile: KeyboardDictationProfileOption?
+    ) -> CaptureRunParameters {
+        let adopted = keyboardProfile == nil ? parameters : .none
+        currentRunParameters = adopted
+        if !adopted.isEmpty {
+            SpeakLogger.transcription.info(
+                "Capture parameters: \(adopted.logDescription, privacy: .public)"
+            )
+        }
+        return adopted
+    }
+
+    /// Which model this run uses and whether it has to run in batch mode.
+    ///
+    /// Precedence: the keyboard's own profile, then the caller's per-run
+    /// parameters, then the configured settings. A batch-only model forces
+    /// batch mode; a live-capable one leaves the configured mode alone.
+    private static func modelSelection(
+        keyboardProfile: KeyboardDictationProfileOption?,
+        parameters: CaptureRunParameters,
+        settings: AppSettings
+    ) -> (modelID: String, usesBatch: Bool) {
+        let usesBatch = keyboardProfile?.transcriptionMode == .batch
+            || (keyboardProfile == nil
+                && (parameters.requiresBatchMode || settings.transcriptionMode == .batch))
+        let modelID = keyboardProfile?.transcriptionModelIdentifier
+            ?? parameters.modelID
+            ?? (usesBatch ? settings.batchTranscriptionModel : settings.selectedModel)
+        return (modelID, usesBatch)
+    }
+
+    /// Resolves the live model, refusing a silent substitution when the caller
+    /// asked for a specific one.
+    ///
+    /// The configured model may fall back to on-device when its key is
+    /// missing. That is acceptable for the global setting — it is the app's
+    /// own choice and `providerFallbackNotice` publishes it — but a caller
+    /// that *named* a model has to be told, not handed a different one it
+    /// cannot see.
+    private func resolveLiveModelHonouringRequest(
+        settings: AppSettings,
+        requestedModelID: String?,
+        run: UUID
+    ) throws {
+        let substituted = resolveLiveModel(settings: settings)
+        guard substituted, requestedModelID != nil else { return }
+        unwindCancelledStart(outcome: .failed, run: run)
+        throw CaptureParameterFailure.modelUnavailable
+    }
+
+    /// - Returns: whether the resolved model differs from the requested one,
+    ///   i.e. whether a silent substitution happened.
+    @discardableResult
+    private func resolveLiveModel(settings: AppSettings) -> Bool {
         let requestedModel = currentModel
         let route = LiveTranscriptionRouting.route(for: currentModel)
         currentModel = LiveTranscriptionRouting.resolvedModelID(
@@ -350,7 +466,35 @@ public final class TranscriptionRecordingService: ObservableObject {
                 falling back to \(self.currentModel, privacy: .public)
                 """
             )
+            return true
         }
+        return false
+    }
+
+    /// The destination a stop should use.
+    ///
+    /// Explicit beats remembered beats global (issue #1013): a Stop that names
+    /// a destination wins, otherwise the override the *start* carried travels
+    /// with the run, and only then does the one global setting apply. Every
+    /// stop path goes through this, so an interruption, a Live Activity button
+    /// and the in-app stop all agree.
+    public func resolvedStopDestination(
+        explicit: HardwareTriggerDestination? = nil
+    ) -> HardwareTriggerDestination {
+        let identifier = CaptureParameterResolution.stopDestinationID(
+            explicit: explicit?.rawValue,
+            runOverride: currentRunParameters.destinationID,
+            global: AppSettings.shared.hardwareTriggerDestination.rawValue
+        )
+        return HardwareTriggerDestination(rawValue: identifier)
+            ?? AppSettings.shared.hardwareTriggerDestination
+    }
+
+    /// The destination the running capture was started with, or `nil` when the
+    /// caller did not override it. Callers that must preserve the legacy
+    /// "no destination given" default pass this straight through.
+    public var runDestinationOverride: HardwareTriggerDestination? {
+        currentRunParameters.destinationID.flatMap(HardwareTriggerDestination.init(rawValue:))
     }
 
     /// Reverts everything a cancelled startup run had published: timing,
@@ -358,6 +502,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// this itself so ownership never crosses runs.
     private func unwindCancelledStart(outcome: StartupOutcome, run: UUID) {
         disarmWatchdogs()
+        disarmEndPointing()
         // A start that stopped short still reports what it did reach; the
         // stages it never crossed stay absent rather than becoming zeroes.
         diagnostics.finish(outcome, run: run)
@@ -368,6 +513,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         presentation.finish()
         activityManager.endActivity()
+        currentRunParameters = .none
         lifecycle.finishStartUnwind()
         state = lifecycle.state
     }
@@ -386,6 +532,13 @@ public final class TranscriptionRecordingService: ObservableObject {
         saveToHistory: Bool = true,
         primedActivityMessage: String = "Ready for the Action Button"
     ) async -> TranscriptionResult {
+        // Disarmed first, before anything can suspend: a monitor that is still
+        // polling while this stop runs would find the session gone and do
+        // nothing, but cancelling here means it cannot even observe the
+        // teardown. The auto-stop path re-enters this method, and the
+        // reentrancy guard below is what makes that safe either way.
+        disarmEndPointing()
+
         // A stop during startup cancels the pending run and waits for it to
         // unwind (issue #701): retiring `activeStartRunID` makes the suspended
         // start release everything it allocated instead of activating the
@@ -452,6 +605,15 @@ public final class TranscriptionRecordingService: ObservableObject {
         // entry, the clipboard, and the spoken dialog all agree on it.
         let text = bestAvailableText(from: drained)
         let result = drained.replacingText(text)
+        // Onboarding progress is earned by evidence only: an unidentified
+        // caller, or a run that produced no text, proves nothing.
+        if let currentTrigger {
+            CaptureOnboardingStore.shared.recordDictation(trigger: currentTrigger, transcript: text)
+        }
+        currentTrigger = nil
+        // The overrides belong to the run that just ended; the next capture
+        // starts from the global settings again unless it brings its own.
+        currentRunParameters = .none
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
 
@@ -496,11 +658,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         // settings call for it. The polished clipboard write must also survive
         // process suspension, so the background assertion is released only once
         // post-processing has finished.
+        // A new stop supersedes whatever the previous one polished, so an
+        // intent that waits can never be handed the run before last's text.
+        lastPolishedTranscript = nil
         if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
             && !text.isEmpty {
             if let historyItem {
                 historyManager.beginPostProcessing(for: historyItem.id)
             }
+            // Published so a returning intent can wait for the polished text
+            // instead of being handed the raw transcript (issue #1015).
+            isPostProcessing = true
             startPostProcessing(
                 text: text,
                 historyItemID: historyItem?.id,
@@ -509,6 +677,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 assertion: assertion
             )
         } else {
+            isPostProcessing = false
             assertion.end()
         }
 
@@ -543,6 +712,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             // A replacement must not start while it can still publish output.
             return
         }
+        currentTrigger = nil
+        disarmEndPointing()
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return
@@ -678,6 +849,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         guard lifecycle.state == .recording else { return }
         Task { [weak self] in
             guard let self, self.isRunning, self.transcriptionSession === session else { return }
+            // `automaticStopDestination` already folds in the run's override,
+            // so a parameterised capture still finishes where it was told to.
             await self.finishCaptureAfterDisruption()
         }
     }
@@ -715,6 +888,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             success: { [weak self] polished, current in
                 if current {
                     self?.sharedState.lastCompletedTranscript = polished
+                    // Only the current run's polish may be waited on; an
+                    // superseded one must not hand back the run before last.
+                    self?.lastPolishedTranscript = polished
                 }
                 if let historyItemID {
                     historyManager.setPostProcessed(polished, for: historyItemID)
@@ -725,10 +901,11 @@ public final class TranscriptionRecordingService: ObservableObject {
                     historyManager.setError(error.localizedDescription, for: historyItemID)
                 }
             },
-            completion: {
+            completion: { [weak self] in
                 if let historyItemID {
                     historyManager.endPostProcessing(for: historyItemID)
                 }
+                self?.isPostProcessing = false
                 assertion.end()
             }
         )
@@ -758,6 +935,28 @@ extension TranscriptionRecordingService {
 
     static func legacySharedTranscript(_ transcript: String, sharesCompletedTranscript: Bool) -> String? {
         sharesCompletedTranscript ? transcript : nil
+    }
+
+    /// Waits, at most `timeout` seconds, for the background polish started by
+    /// the stop that just happened, and returns what it produced.
+    ///
+    /// Returns `nil` — meaning "use the raw transcript" — in every case the
+    /// polish did not deliver: no polish was started, it failed, it produced
+    /// nothing, or it is still running when the budget runs out. It never
+    /// returns a placeholder and never blocks past the deadline, because an
+    /// intent the system kills for overrunning returns nothing at all, which
+    /// is worse than the raw text.
+    ///
+    /// Polls rather than observes, matching the wait in `DictateIntent`: the
+    /// polish runs in a detached `Task` whose completion this actor sees only
+    /// through `isPostProcessing`.
+    func awaitPolishedTranscript(timeout: TimeInterval) async -> String? {
+        guard timeout > 0 else { return nil }
+        let deadline = Date().addingTimeInterval(timeout)
+        while isPostProcessing, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return isPostProcessing ? nil : lastPolishedTranscript
     }
 }
 

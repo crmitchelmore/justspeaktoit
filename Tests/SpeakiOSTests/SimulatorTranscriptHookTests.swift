@@ -34,6 +34,24 @@ final class SimulatorTranscriptHookTests: XCTestCase {
 
     #if DEBUG && targetEnvironment(simulator)
 
+    // These construct the state with no environment seed, which is what the
+    // defaults fallback is for. The seam matters: `JUSTSPEAKTOIT_SIMULATOR_-`
+    // `TRANSCRIPT` takes precedence over the App Group value, a test process
+    // cannot unset its own inherited environment, and this bundle is run by the
+    // same tooling that sets that variable for the UI bundle. Reading the live
+    // process environment here would make the seeded, blank and missing cases
+    // pass or fail on how the run was launched.
+
+    func testHook_prefersTheLaunchEnvironmentOverTheSeededAppGroupValue() {
+        defaults.set("stale App Group value", forKey: "simulatorValidationTranscript")
+
+        let state = SharedTranscriptionState(
+            defaults: defaults, environmentTranscript: "  launch environment wins  "
+        )
+
+        XCTAssertEqual(state.simulatorValidationTranscript, "launch environment wins")
+    }
+
     func testHook_resolvesTheSeededAppGroupValueForAProcessThatInheritedNoEnvironment() {
         defaults.set("Regression harness transcript zulu", forKey: "simulatorValidationTranscript")
 

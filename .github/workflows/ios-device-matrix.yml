@@ -31,6 +31,12 @@ name: iOS Device Matrix (opt-in)
 #      certificate and a profile carrying the App Group and Live Activity
 #      entitlements. `CODE_SIGNING_ALLOWED=NO` is not an option on device —
 #      without those entitlements the app crashes at launch.
+#   5. Provision Tuist on the runner once, at the version pinned in
+#      `TUIST_PINNED_VERSION` below. Unlike the GitHub-hosted jobs in `ci.yml`,
+#      which run on a fresh VM that is discarded afterwards, this runner is
+#      long-lived and holds that signing keychain, so the job does not install
+#      anything at run time: it verifies what is already there and fails if the
+#      version does not match. Bumping the pin is a reviewed change to this file.
 #
 # Automated device runs still do not replace the manual matrix in
 # `.github/ISSUE_TEMPLATE/action_button_device_matrix.md`: no XCUITest can
@@ -93,8 +99,35 @@ jobs:
             exit 1
           fi
 
-      - name: Install Tuist
-        run: brew install tuist
+      - name: Verify the pinned Tuist
+        env:
+          # Pinned deliberately. `brew install tuist` — what the ephemeral
+          # GitHub-hosted jobs in `ci.yml` do — resolves and executes whatever
+          # the formula happens to say at run time. That is acceptable on a VM
+          # that is destroyed afterwards; it is not acceptable on the one runner
+          # that holds a development signing keychain and an attached
+          # provisioned device, where an altered formula would run arbitrary
+          # code next to the signing material. So nothing is installed here:
+          # the tool is provisioned once by the maintainer, out of band, and
+          # this step only checks that what is on PATH is the reviewed version.
+          TUIST_PINNED_VERSION: "4.207.0"
+        run: |
+          set -euo pipefail
+          if ! command -v tuist >/dev/null 2>&1; then
+            echo "::error::Tuist is not installed on this runner. Provision" \
+                 "Tuist $TUIST_PINNED_VERSION on it (see the setup notes at the" \
+                 "top of this workflow); the device job deliberately does not" \
+                 "install tooling next to the signing keychain."
+            exit 1
+          fi
+          INSTALLED="$(tuist version 2>/dev/null | tr -d '[:space:]')"
+          if [ "$INSTALLED" != "$TUIST_PINNED_VERSION" ]; then
+            echo "::error::Tuist on this runner is $INSTALLED but this workflow" \
+                 "pins $TUIST_PINNED_VERSION. Either reprovision the runner or" \
+                 "update TUIST_PINNED_VERSION in a reviewed change to this file."
+            exit 1
+          fi
+          echo "Tuist $INSTALLED matches the pin."
 
       - name: Generate iOS App Project
         env:

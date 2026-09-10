@@ -380,13 +380,23 @@ public final class SharedTranscriptionState {
 
     private let defaults: UserDefaults?
 
+    #if DEBUG && targetEnvironment(simulator)
+    /// The launch-environment seed, captured at construction. Held rather than
+    /// read on demand so a test can isolate itself from whatever the *test*
+    /// process inherited: the process environment is not something a test can
+    /// unset for itself, and it takes precedence over the injected defaults.
+    private let environmentTranscript: String?
+    #endif
+
     private init() {
         // Verified centrally so a missing effective entitlement fails the same
         // way here as in every other App Group store: a logged fault and an
         // unavailable, no-op store.
         defaults = AppGroupAvailability.verifiedDefaults()
         #if DEBUG && targetEnvironment(simulator)
-        if let value = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]?
+        environmentTranscript =
+            ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]
+        if let value = environmentTranscript?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !value.isEmpty {
             defaults?.set(value, forKey: "simulatorValidationTranscript")
@@ -394,18 +404,27 @@ public final class SharedTranscriptionState {
         #endif
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+    /// Allows tests to isolate shared state from the real App Group, and from
+    /// the launch environment of the test process itself.
+    init(defaults: UserDefaults?, environmentTranscript: String? = nil) {
+        self.defaults = defaults
+        self.environmentTranscript = environmentTranscript
+    }
+    #else
     /// Allows tests to isolate shared state from the real App Group.
     init(defaults: UserDefaults?) {
         self.defaults = defaults
     }
+    #endif
 
     #if DEBUG && targetEnvironment(simulator)
     /// Deterministic transcript used only by Simulator UX validation. App Intent
     /// execution does not reliably inherit launchd environment variables, so the
     /// App Group value keeps the real Shortcut lifecycle testable across hosts.
     var simulatorValidationTranscript: String? {
-        let environmentValue = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]
-        let value = environmentValue ?? defaults?.string(forKey: "simulatorValidationTranscript")
+        let value = self.environmentTranscript
+            ?? defaults?.string(forKey: "simulatorValidationTranscript")
         let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedValue?.isEmpty == false ? trimmedValue : nil
     }

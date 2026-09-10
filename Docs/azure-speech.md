@@ -16,8 +16,9 @@ by this integration. Access to a model depends on the resource's tier and region
 MAI live input uses Azure's `mai-transcribe` identifier. It is intentionally not
 labelled MAI-Transcribe-2: the live API does not promise the same version as the
 file API. Voice Live assistant responses are disabled; the client never sends
-`response.create`. Live shutdown drains queued audio, disables automatic VAD
-commits, commits remaining audio and waits within a five-second overall budget.
+`response.create`. Live shutdown drains queued audio, commits remaining audio without changing VAD,
+then awaits a server acknowledgement and transcription finals within a five-second
+overall budget. Azure rejects disabling turn detection after a session has started.
 Timeouts return the best available transcript with an error, not a fabricated final.
 
 This does not add a bring-your-own Azure OpenAI deployment. That requires its own
@@ -61,8 +62,24 @@ Sonia neural synthesis returned valid WAV audio after the prosody correction.
 The resource voice list contained 556 voices and no MAI voices. An explicit MAI-2
 file request returned HTTP 400 (`Enhanced mode with model is currently not supported yet`).
 This is an access/region limitation, not evidence of successful MAI inference.
-Voice Live and MAI synthesis still require credentialed qualification on a
-resource exposing those capabilities. No region/tier upgrade was performed.
+The original UK South resource remains unchanged. No region/tier upgrade was performed.
+
+On 10 September, the existing East US Foundry resource on the trial subscription
+passed compiled Fast Transcription, MAI-Transcribe-2 and 1.5, neural WAV synthesis
+and MAI-Voice-2 WAV synthesis checks. Azure Speech and MAI live input both returned
+the expected synthetic phrase, including its trailing words after finalisation.
+The portal reported GBP 143.42 trial credit remaining before these tests.
+The trial exposed `turn_detection_type_change_not_allowed` during shutdown;
+finalisation now retains VAD and waits for the commit/configuration acknowledgement
+and pending transcription finals. All five opt-in tests pass on the corrected client.
+These are compiled-client checks; installed-app microphone routing and iOS device
+acceptance remain separate release gates.
+
+For extended tests, set `JSTI_AZURE_TEST_EXTENDED=1`, the custom resource origin
+in `JSTI_AZURE_TEST_ENDPOINT`, and a mono signed 16-bit little-endian 24kHz PCM
+fixture in `JSTI_AZURE_TEST_PCM`, in addition to the credential and WAV above.
+The synthetic WAV and PCM must say "the quick brown fox". Extended tests are
+skipped without explicit configuration and never obtain credentials themselves.
 
 ## Official contracts
 

@@ -129,11 +129,12 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     private func beginFinish() {
-        // Disable automatic VAD commits behind the queued audio and await the
-        // server acknowledgement before our final manual commit. This fences
-        // earlier automatic commit events out of finalisation.
+        // Voice Live rejects disabling VAD after a session starts. Commit queued
+        // audio without changing VAD, then use a harmless configuration update
+        // as a server acknowledgement barrier behind the commit.
         awaitingFinishConfiguration = true
-        enqueue(#"{"type":"session.update","session":{"turn_detection":null}}"#)
+        commit()
+        enqueue(Self.finalizationBarrier)
     }
 
     private func commit() {
@@ -206,7 +207,7 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
             if finishing {
                 if awaitingFinishConfiguration {
                     awaitingFinishConfiguration = false
-                    commit()
+                    finishIfComplete()
                 } else { beginFinish() }
             }
         case "input_audio_buffer.committed":
@@ -248,7 +249,8 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     private func finishIfComplete() {
-        guard finishing, commitAcknowledged, items.allSatisfy(completed.contains) else { return }
+        guard finishing, !awaitingFinishConfiguration, commitAcknowledged,
+              items.allSatisfy(completed.contains) else { return }
         close()
     }
 
@@ -268,6 +270,8 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
 }
 
 extension AzureVoiceLiveClient {
+    static let finalizationBarrier = #"{"type":"session.update","session":{"modalities":["text"]}}"#
+
     static func connectionRequest(credentials: String, endpoint: String) throws -> URLRequest {
         let config = try AzureSpeechConfiguration(credentials: credentials)
         let origin = try AzureSpeechConfiguration.resourceURL(endpoint)

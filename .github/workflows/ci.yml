@@ -180,8 +180,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Cache Swift packages
-        uses: actions/cache@v6
+      # Debug CI populates the shared cache. This bounded gate only restores;
+      # uploading gigabytes afterwards must not consume its ten-minute budget.
+      - name: Restore Swift packages
+        uses: actions/cache/restore@v6
         with:
           path: .build
           key: ${{ runner.os }}-swift-core-journey-${{ hashFiles('Package.resolved') }}

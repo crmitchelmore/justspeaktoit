@@ -53,6 +53,19 @@ extension SettingsView {
         withAnimation { proxy.scrollTo(target, anchor: .top) }
         environment.apiKeysScrollTarget = nil
       }
+      // Balances are read from the same Keychain the cards write to. The work
+      // is cancelled with the view, and a failure only changes what the balance
+      // line says — the rest of the screen is unaffected.
+      .task {
+        let secureStorage = environment.secureStorage
+        providerBalances.configure { identifier in
+          try? await secureStorage.secret(identifier: identifier)
+        }
+        providerBalances.refreshAll(
+          storedCredentialIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
+        )
+      }
+      .onDisappear { providerBalances.cancelAll() }
     }
   }
 
@@ -142,6 +155,7 @@ extension SettingsView {
         isValidateDisabled: isValidatingKey,
         isRemoveDisabled: isValidatingKey,
         validationState: apiKeyValidationState,
+        credentialIdentifier: openRouterKeyIdentifier,
         tooltip: "Securely store and validate the OpenRouter key Speak uses for advanced models.",
         saveButtonTitle: isOpenRouterKeyStored ? "Replace Key" : "Save Key",
         saveTooltip: "Store this OpenRouter key safely in your macOS Keychain for Speak to use when needed.",
@@ -191,6 +205,7 @@ extension SettingsView {
       isValidateDisabled: validateDisabled,
       isRemoveDisabled: removeDisabled,
       validationState: validationState,
+      credentialIdentifier: provider.apiKeyIdentifier,
       tooltip: "Manage your \(provider.displayName) API key securely without leaving Speak.",
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
       saveTooltip: "Securely store your \(provider.displayName) key so Speak can contact the service when needed.",
@@ -320,6 +335,7 @@ extension SettingsView {
         isValidateDisabled: validateDisabled,
         isRemoveDisabled: removeDisabled,
         validationState: validationState,
+        credentialIdentifier: provider.apiKeyIdentifier,
         tooltip: "Manage your ElevenLabs API key. One key covers both voice synthesis (TTS) "
           + "and Scribe transcription (STT).",
         saveButtonTitle: isStored ? "Replace Key" : "Save Key",
@@ -357,6 +373,7 @@ extension SettingsView {
       isValidateDisabled: validateDisabled,
       isRemoveDisabled: removeDisabled,
       validationState: validationState,
+      credentialIdentifier: provider.apiKeyIdentifier,
       tooltip: "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
       saveTooltip: "Securely store your \(provider.displayName) key for voice synthesis.",
@@ -388,6 +405,7 @@ extension SettingsView {
     isValidateDisabled: Bool,
     isRemoveDisabled: Bool,
     validationState: ValidationViewState,
+    credentialIdentifier: String,
     tooltip: String,
     saveButtonTitle: String,
     saveTooltip: String,
@@ -415,6 +433,7 @@ extension SettingsView {
       isValidateDisabled: isValidateDisabled,
       isRemoveDisabled: isRemoveDisabled,
       validationState: validationState,
+      credentialIdentifier: credentialIdentifier,
       saveButtonTitle: saveButtonTitle,
       saveTooltip: saveTooltip,
       validateButtonTitle: validateButtonTitle,
@@ -458,9 +477,22 @@ extension SettingsView {
         .lineLimit(2)
         .speakTooltip(configuration.descriptionText)
 
+      providerBalanceView(configuration)
+
       validationStatusView(for: configuration.validationState)
       validationDebugDetails(for: configuration.validationState)
     }
+  }
+
+  /// The account balance beside the key. It never gates the card: a billing
+  /// endpoint that fails renders a reason and leaves everything else working.
+  @ViewBuilder
+  private func providerBalanceView(_ configuration: APIKeyCardConfiguration) -> some View {
+    ProviderBalanceView(
+      credentialIdentifier: configuration.credentialIdentifier,
+      isKeyStored: configuration.isStored,
+      store: providerBalances
+    )
   }
 
   private func compactAPIKeyStatus(_ configuration: APIKeyCardConfiguration) -> some View {
@@ -577,6 +609,8 @@ extension SettingsView {
         regularAPIKeyValidateButton(configuration)
         regularAPIKeyRemoveButton(configuration)
       }
+
+      providerBalanceView(configuration)
 
       validationStatusView(for: configuration.validationState)
       validationDebugDetails(for: configuration.validationState)
@@ -844,6 +878,7 @@ extension SettingsView {
           await MainActor.run {
             providerAPIKeys[provider.id] = ""
             providerValidationStates[provider.id] = .finished(result)
+            refreshBalance(forCredentialIdentifier: provider.apiKeyIdentifier)
           }
         } catch {
           let failure = APIKeyValidationResult.failure(
@@ -930,6 +965,7 @@ extension SettingsView {
             invalidateSharedTranscriptionCache(for: provider)
             ttsProviderAPIKeys[provider.rawValue] = ""
             ttsProviderValidationStates[provider.rawValue] = .finished(result)
+            refreshBalance(forCredentialIdentifier: provider.apiKeyIdentifier)
           }
         } catch {
           let failure = APIKeyValidationResult.failure(
@@ -975,6 +1011,13 @@ extension SettingsView {
         ttsProviderValidationStates[provider.rawValue] = .finished(result)
       }
     }
+  }
+
+  /// Re-reads the account balance after its credential changes, so a replaced
+  /// key never leaves the previous account's figure on screen.
+  private func refreshBalance(forCredentialIdentifier identifier: String) {
+    guard let account = ProviderBalanceDirectory.account(forCredentialIdentifier: identifier) else { return }
+    providerBalances.refresh(accountID: account.id)
   }
 
   /// Drops cached live controllers when this provider's key also powers

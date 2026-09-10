@@ -22,7 +22,19 @@ public final class CaptureSafetyClaimStore: @unchecked Sendable {
 
     public static let shared = CaptureSafetyClaimStore()
 
-    private static let storageKey = "captureSafetyClaims.v1"
+    /// One key per claim. A single array under one key made every mutation a
+    /// load-modify-save of the *whole* set, and the containing app, the
+    /// keyboard extension and a headless intent all mutate it. An in-process
+    /// lock cannot order those: two processes could each read the same array
+    /// and write back a different modification, and the later write would
+    /// silently drop the earlier claim — losing a recoverable recording or its
+    /// liveness state. Writing each claim under its own key means a mutation
+    /// only ever rewrites the claim it names, so unrelated concurrent updates
+    /// from another process survive it.
+    private static let claimKeyPrefix = "captureSafetyClaim.v1."
+    /// The pre-per-key storage. Read once and split into per-claim keys, so an
+    /// install that crashed while holding claims does not lose them.
+    private static let legacyStorageKey = "captureSafetyClaims.v1"
 
     private let defaults: UserDefaults?
     private let lock = NSLock()
@@ -47,49 +59,48 @@ public final class CaptureSafetyClaimStore: @unchecked Sendable {
     public func claims() -> [CaptureSafetyClaim] {
         self.lock.lock()
         defer { self.lock.unlock() }
-        return self.loadLocked()
+        self.migrateLegacyLocked()
+        return self.loadAllLocked()
     }
 
     // MARK: - Writing
 
     /// Opens a claim for a capture that has just started writing audio.
     public func open(recording: UUID, fileName: String, startedAt: Date, now: Date = Date()) {
-        self.mutate { claims in
-            claims.removeAll { $0.run == recording }
-            claims.append(CaptureSafetyClaim(
-                run: recording,
-                fileName: fileName,
-                startedAt: startedAt,
-                owner: self.owner,
-                lastHeartbeat: now
-            ))
-        }
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        self.migrateLegacyLocked()
+        self.saveLocked(CaptureSafetyClaim(
+            run: recording,
+            fileName: fileName,
+            startedAt: startedAt,
+            owner: self.owner,
+            lastHeartbeat: now
+        ))
     }
 
     /// Refreshes the claim so another process can tell this capture is alive.
     public func heartbeat(recording: UUID, now: Date = Date()) {
-        self.mutate { claims in
-            guard let index = claims.firstIndex(where: { $0.run == recording }) else { return }
-            claims[index].lastHeartbeat = now
-        }
+        self.mutate(recording) { claim in claim.lastHeartbeat = now }
     }
 
-    /// Records that the transcript for every capture this process opened and
-    /// has since stopped actually reached its destination.
+    /// Records that the transcript for one capture reached its destination.
     ///
     /// This runs after the History write rather than at stop, and that is the
     /// whole point: a process killed between the last audio buffer and the
     /// saved transcript leaves its claim un-delivered, which is exactly the
-    /// case this feature exists for. Claims of *other* processes are never
-    /// touched — this process cannot know what became of their transcripts.
+    /// case this feature exists for.
     ///
-    /// - Parameter excluding: captures still writing, which keep their claim.
-    public func markDeliveredForThisProcess(excluding live: Set<UUID> = []) {
-        self.mutate { claims in
-            for index in claims.indices
-            where claims[index].owner == self.owner && !live.contains(claims[index].run) {
-                claims[index].deliveredTranscript = true
-            }
+    /// It is scoped to the one capture whose result was delivered. Marking
+    /// every stopped claim this process holds would classify an earlier,
+    /// still-pending capture as delivered whenever a later one succeeded, and
+    /// that capture's audio would then be withheld from recovery. Claims of
+    /// *other* processes are never touched either — this process cannot know
+    /// what became of their transcripts.
+    public func markDelivered(recording: UUID) {
+        self.mutate(recording) { claim in
+            guard claim.owner == self.owner else { return }
+            claim.deliveredTranscript = true
         }
     }
 
@@ -101,32 +112,66 @@ public final class CaptureSafetyClaimStore: @unchecked Sendable {
 
     public func forget(recordings: [UUID]) {
         guard !recordings.isEmpty else { return }
-        let doomed = Set(recordings)
-        self.mutate { claims in
-            claims.removeAll { doomed.contains($0.run) }
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        self.migrateLegacyLocked()
+        for recording in recordings {
+            self.defaults?.removeObject(forKey: Self.key(for: recording))
         }
     }
 
     // MARK: - Private
 
-    private func mutate(_ body: (inout [CaptureSafetyClaim]) -> Void) {
+    private static func key(for recording: UUID) -> String {
+        Self.claimKeyPrefix + recording.uuidString
+    }
+
+    private func mutate(_ recording: UUID, _ body: (inout CaptureSafetyClaim) -> Void) {
         self.lock.lock()
         defer { self.lock.unlock() }
-        var claims = self.loadLocked()
-        body(&claims)
-        self.saveLocked(claims)
+        self.migrateLegacyLocked()
+        guard var claim = self.loadLocked(recording) else { return }
+        body(&claim)
+        self.saveLocked(claim)
     }
 
-    private func loadLocked() -> [CaptureSafetyClaim] {
-        guard let data = self.defaults?.data(forKey: Self.storageKey) else { return [] }
-        // A record this process cannot decode is a record it must not act on,
-        // and dropping it would forget audio. Report none rather than some.
-        return (try? JSONDecoder().decode([CaptureSafetyClaim].self, from: data)) ?? []
+    private func loadLocked(_ recording: UUID) -> CaptureSafetyClaim? {
+        guard let data = self.defaults?.data(forKey: Self.key(for: recording)) else { return nil }
+        return try? JSONDecoder().decode(CaptureSafetyClaim.self, from: data)
     }
 
-    private func saveLocked(_ claims: [CaptureSafetyClaim]) {
-        guard let data = try? JSONEncoder().encode(claims) else { return }
-        self.defaults?.set(data, forKey: Self.storageKey)
+    private func loadAllLocked() -> [CaptureSafetyClaim] {
+        guard let defaults else { return [] }
+        let keys = defaults.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix(Self.claimKeyPrefix) }
+        var claims: [CaptureSafetyClaim] = []
+        for key in keys {
+            // A record this process cannot decode is a record it must not act
+            // on, and acting on half a picture could offer a live capture for
+            // recovery. Report none rather than some.
+            guard let data = defaults.data(forKey: key),
+                  let claim = try? JSONDecoder().decode(CaptureSafetyClaim.self, from: data)
+            else { return [] }
+            claims.append(claim)
+        }
+        return claims.sorted { $0.startedAt < $1.startedAt }
+    }
+
+    private func saveLocked(_ claim: CaptureSafetyClaim) {
+        guard let data = try? JSONEncoder().encode(claim) else { return }
+        self.defaults?.set(data, forKey: Self.key(for: claim.run))
+    }
+
+    /// Moves any claims written by a previous build's single-array storage to
+    /// per-claim keys. A blob this build cannot decode is dropped rather than
+    /// guessed at, exactly as a per-claim record would be.
+    private func migrateLegacyLocked() {
+        guard let defaults, let data = defaults.data(forKey: Self.legacyStorageKey) else { return }
+        defaults.removeObject(forKey: Self.legacyStorageKey)
+        guard let claims = try? JSONDecoder().decode([CaptureSafetyClaim].self, from: data) else { return }
+        for claim in claims where defaults.data(forKey: Self.key(for: claim.run)) == nil {
+            self.saveLocked(claim)
+        }
     }
 }
 #endif

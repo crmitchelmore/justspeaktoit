@@ -107,7 +107,19 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
         }
 
         do {
-            let text = try await Self.transcribe(url: url)
+            // A provider request that never returns would otherwise hold the
+            // single recovering slot forever: this recording could not be
+            // retried and no other recording could be recovered. The bound
+            // restores a retryable state; the audio is untouched either way.
+            let text = try await CaptureDeadline.result(
+                of: { try await Self.transcribe(url: url) },
+                orNilAfter: CaptureRecoveryPolicy.recoveryDeadlineSeconds
+            )
+            guard let text else {
+                self.errorMessage =
+                    "That recording is taking too long to transcribe. The audio is kept in Saved Recordings."
+                return
+            }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 // No words came back, and the audio is the only evidence of
@@ -115,7 +127,14 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
                 self.errorMessage = "That recording produced no text. The audio is kept in Saved Recordings."
                 return
             }
+            // The History write and the claim removal are two steps, and a kill
+            // between them used to leave the claim recoverable and produce a
+            // second History row for the same audio on the retry. The recovered
+            // item's identity *is* the claim's run, so History already replaces
+            // by id: retrying an interrupted recovery re-files the same row
+            // rather than adding another.
             iOSHistoryManager.shared.add(iOSHistoryItem(
+                id: finding.run,
                 createdAt: finding.startedAt,
                 transcription: trimmed,
                 model: Self.recoveryModel(),
@@ -127,9 +146,25 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
             self.claimStore.forget(recording: finding.run)
             self.refresh()
         } catch {
-            self.logger.error("Recovery failed: \(error.localizedDescription, privacy: .public)")
+            // Never the error's message: a batch transcription failure is built
+            // from the provider's raw HTTP response body, and this log is
+            // public. The status is the only remote-derived number kept.
+            self.logger.error(
+                """
+                Recovery failed: \
+                \(RemoteFailureLabel.label(for: error, status: Self.httpStatus(of: error)), privacy: .public)
+                """
+            )
             self.errorMessage = "Could not transcribe that recording. The audio is kept in Saved Recordings."
         }
+    }
+
+    /// The HTTP status of a provider rejection, when the error carries one.
+    /// A number, never the response body that sits beside it.
+    private static func httpStatus(of error: Error) -> Int? {
+        guard let batch = error as? IOSBatchTranscriptionError,
+              case .httpError(_, let status, _) = batch else { return nil }
+        return status
     }
 
     /// Stops offering a recovery without touching its audio.

@@ -61,10 +61,18 @@ public final class CaptureSelfTestRunner {
             if sessionConfigured { self.audioSessionManager.deactivate() }
         }
 
-        do {
-            try await self.audioSessionManager.configureForRecording()
-            sessionConfigured = true
-        } catch {
+        // The elapsed clock starts above, so the documented ceiling has to
+        // cover configuration too: an audio session that blocks would otherwise
+        // leave `run()` pending indefinitely and hold the deferred teardown
+        // with it. The deadline only bounds the *wait* — a configuration that
+        // returns late still sets `sessionConfigured`, so anything it acquired
+        // is handed back by the teardown below.
+        let configured = await Self.configure(
+            audioSessionManager: self.audioSessionManager,
+            within: policy.overallDeadlineSeconds - Date().timeIntervalSince(began),
+            markConfigured: { sessionConfigured = true }
+        )
+        guard configured else {
             run.fail(at: .audioSession, atMilliseconds: elapsed())
             return run.result()
         }
@@ -94,6 +102,27 @@ public final class CaptureSelfTestRunner {
             run.noteInputBuffer(atMilliseconds: elapsed())
         }
         return self.report(run.finish(atMilliseconds: elapsed()))
+    }
+
+    /// Configures the audio session under the run's remaining budget.
+    ///
+    /// - Returns: `false` when configuration failed *or* the budget elapsed
+    ///   first. A late success still marks the session configured through
+    ///   `markConfigured`, so the caller's teardown deactivates it.
+    private static func configure(
+        audioSessionManager: AudioSessionManager,
+        within seconds: TimeInterval,
+        markConfigured: @escaping @MainActor () -> Void
+    ) async -> Bool {
+        let outcome = try? await CaptureDeadline.result(
+            of: { () async throws -> Bool in
+                try await audioSessionManager.configureForRecording()
+                markConfigured()
+                return true
+            },
+            orNilAfter: max(0, seconds)
+        )
+        return outcome == true
     }
 
     private static func start(_ engine: AVAudioEngine) -> Bool {

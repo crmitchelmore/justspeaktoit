@@ -78,14 +78,18 @@ final class IOSTranscriptionSession {
         return transcriber.confidence
     }
 
-    private enum Backend {
+    /// Internal rather than private so the safety-recording extension in its
+    /// own file can route on it.
+    enum Backend {
         case batch(IOSBatchTranscriber)
         case apple(iOSLiveTranscriber)
         case openAI(OpenAIRealtimeLiveTranscriber)
         case shared(SharedClientLiveTranscriber)
     }
 
-    private let backend: Backend
+    /// Internal rather than private so the same type's safety-recording
+    /// extension can route on it from its own file.
+    let backend: Backend
     private let language: String?
 
     init(
@@ -232,22 +236,6 @@ final class IOSTranscriptionSession {
         case .shared(let transcriber):
             return await transcriber.stop()
         }
-    }
-
-    /// The completed safety recording this session wrote, if it wrote one and
-    /// it has not been discarded yet.
-    var finishedRecordingURL: URL? {
-        guard case .batch(let transcriber) = backend else { return nil }
-        return transcriber.finishedRecordingURL
-    }
-
-    /// Discards the temporary recording of a non-retained batch capture, once
-    /// its owner has finished delivering the transcript. A no-op for every
-    /// other backend, and for a recording the user asked to keep.
-    @discardableResult
-    func discardTemporaryRecording() -> Bool {
-        guard case .batch(let transcriber) = backend else { return false }
-        return transcriber.discardRecordingIfNotRetained()
     }
 
     func cancel() {

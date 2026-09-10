@@ -78,7 +78,10 @@ final class CaptureSafetyClaimStoreTests: XCTestCase {
         store(owner: firstProcess).open(recording: mine, fileName: "mine.m4a", startedAt: now, now: now)
         store(owner: secondProcess).open(recording: theirs, fileName: "theirs.m4a", startedAt: now, now: now)
 
-        store(owner: firstProcess).markDeliveredForThisProcess()
+        // Another process's claim, named explicitly, is still not this
+        // process's to close.
+        store(owner: firstProcess).markDelivered(recording: mine)
+        store(owner: firstProcess).markDelivered(recording: theirs)
 
         let claims = Dictionary(
             uniqueKeysWithValues: store(owner: firstProcess).claims().map { ($0.run, $0) }
@@ -91,6 +94,24 @@ final class CaptureSafetyClaimStoreTests: XCTestCase {
         )
     }
 
+    /// The delivered capture is the one whose transcript landed. An earlier
+    /// capture of the same process may still be pending, and calling it
+    /// delivered would withhold its audio from recovery.
+    func testDeliveryMarkingLeavesAnotherPendingCaptureOfThisProcessAlone() {
+        let delivered = UUID()
+        let stillPending = UUID()
+        let now = Date()
+        let store = self.store(owner: firstProcess)
+        store.open(recording: stillPending, fileName: "a.m4a", startedAt: now, now: now)
+        store.open(recording: delivered, fileName: "b.m4a", startedAt: now, now: now)
+
+        store.markDelivered(recording: delivered)
+
+        let claims = Dictionary(uniqueKeysWithValues: store.claims().map { ($0.run, $0) })
+        XCTAssertEqual(claims[delivered]?.deliveredTranscript, true)
+        XCTAssertEqual(claims[stillPending]?.deliveredTranscript, false)
+    }
+
     func testACaptureStillWritingKeepsItsClaimWhenAnotherIsDelivered() {
         let finished = UUID()
         let stillWriting = UUID()
@@ -99,11 +120,56 @@ final class CaptureSafetyClaimStoreTests: XCTestCase {
         store.open(recording: finished, fileName: "a.m4a", startedAt: now, now: now)
         store.open(recording: stillWriting, fileName: "b.m4a", startedAt: now, now: now)
 
-        store.markDeliveredForThisProcess(excluding: [stillWriting])
+        store.markDelivered(recording: finished)
 
         let claims = Dictionary(uniqueKeysWithValues: store.claims().map { ($0.run, $0) })
         XCTAssertEqual(claims[finished]?.deliveredTranscript, true)
         XCTAssertEqual(claims[stillWriting]?.deliveredTranscript, false)
+    }
+
+    /// The app, the keyboard extension and a headless intent all mutate the
+    /// shared store, and an in-process lock cannot order them. A mutation must
+    /// therefore rewrite only the record it names — otherwise the later of two
+    /// concurrent writes drops the other's claim, and with it a recoverable
+    /// recording.
+    func testMutatingOneClaimDoesNotRewriteAnother() throws {
+        let mutated = UUID()
+        let untouched = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let store = self.store(owner: firstProcess)
+        store.open(recording: mutated, fileName: "a.m4a", startedAt: now, now: now)
+        store.open(recording: untouched, fileName: "b.m4a", startedAt: now, now: now)
+
+        let untouchedKey = "captureSafetyClaim.v1.\(untouched.uuidString)"
+        let before = try XCTUnwrap(defaults.data(forKey: untouchedKey))
+
+        store.heartbeat(recording: mutated, now: now.addingTimeInterval(30))
+        store.markDelivered(recording: mutated)
+        store.forget(recording: mutated)
+
+        XCTAssertEqual(
+            defaults.data(forKey: untouchedKey),
+            before,
+            "an unrelated claim's stored bytes must not be rewritten by another claim's mutation"
+        )
+        XCTAssertEqual(store.claims().map(\.run), [untouched])
+    }
+
+    /// Claims written by the previous single-array storage are not lost.
+    func testClaimsFromTheOlderStorageAreMigratedRatherThanDropped() throws {
+        let recording = UUID()
+        let started = Date(timeIntervalSince1970: 1_700_000_000)
+        let legacy = [CaptureSafetyClaim(
+            run: recording,
+            fileName: "a.m4a",
+            startedAt: started,
+            owner: firstProcess,
+            lastHeartbeat: started
+        )]
+        defaults.set(try JSONEncoder().encode(legacy), forKey: "captureSafetyClaims.v1")
+
+        XCTAssertEqual(store(owner: secondProcess).claims().map(\.run), [recording])
+        XCTAssertNil(defaults.data(forKey: "captureSafetyClaims.v1"))
     }
 
     func testHeartbeatMovesOnlyTheNamedClaim() {
@@ -147,6 +213,13 @@ final class CaptureSafetyClaimStoreTests: XCTestCase {
 
     func testAnUndecodableRecordReportsNoClaimsRatherThanPartialOnes() {
         // Acting on half a picture could offer a live capture for recovery.
+        let store = self.store(owner: firstProcess)
+        store.open(recording: UUID(), fileName: "a.m4a", startedAt: Date())
+        defaults.set(Data("not json".utf8), forKey: "captureSafetyClaim.v1.\(UUID().uuidString)")
+        XCTAssertTrue(store.claims().isEmpty)
+    }
+
+    func testAnUndecodableRecordFromTheOlderStorageReportsNoClaims() {
         defaults.set(Data("not json".utf8), forKey: "captureSafetyClaims.v1")
         XCTAssertTrue(store(owner: firstProcess).claims().isEmpty)
     }

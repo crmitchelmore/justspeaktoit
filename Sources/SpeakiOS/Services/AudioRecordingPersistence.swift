@@ -66,6 +66,13 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// `AudioRecordingPersistence+SafetyClaim.swift`.
     public internal(set) var activeClaim: UUID?
 
+    /// The claim this recorder opened most recently, kept after
+    /// `stopRecording()` clears `activeClaim`. The owner of the transcript
+    /// settles *that* capture's claim with it, rather than every claim this
+    /// process happens to hold. Cleared when the file is deleted, because a
+    /// claim then has nothing left to point at.
+    public internal(set) var lastClaim: UUID?
+
     /// Every claim being written right now, across every recorder instance.
     ///
     /// The recovery pass takes this as positive evidence of life, so a file a
@@ -114,24 +121,6 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// asserts on is observed rather than guessed at with a sleep.
     nonisolated(unsafe) public var writerCloseContentionHook: (@Sendable () -> Void)?
     #endif
-
-    // MARK: - Directory
-
-    /// Returns the persistent recordings directory, creating it if needed.
-    public static var recordingsDirectory: URL {
-        let docs = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        )[0]
-        let dir = docs.appendingPathComponent("Recordings", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(
-                at: dir,
-                withIntermediateDirectories: true
-            )
-        }
-        return dir
-    }
 
     // MARK: - Public API
 
@@ -190,6 +179,7 @@ public final class AudioRecordingPersistence: ObservableObject {
         // lists this file under, so no second scheme is introduced.
         let recordingID = Self.stableRecordingID(for: url)
         activeClaim = recordingID
+        lastClaim = recordingID
         claimStore.open(recording: recordingID, fileName: filename, startedAt: startedAt)
         startClaimHeartbeat(for: recordingID)
 
@@ -389,7 +379,10 @@ public final class AudioRecordingPersistence: ObservableObject {
         // nothing left to point at. This is the only place the claim is
         // dropped without the transcript having been delivered, and it is the
         // one case where the user asked for the audio to go.
-        if let claim { claimStore.forget(recording: claim) }
+        if let claim {
+            claimStore.forget(recording: claim)
+            if lastClaim == claim { lastClaim = nil }
+        }
 
         if let url {
             try? FileManager.default.removeItem(at: url)

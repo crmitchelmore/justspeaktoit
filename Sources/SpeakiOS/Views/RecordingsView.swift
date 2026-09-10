@@ -183,6 +183,10 @@ public struct RecordingsView: View {
                     transcribeMessage = "That recording produced no text. The audio is still here."
                     return
                 }
+                // A deliberate re-transcription is a new entry: the user asked
+                // for it, possibly with a different model. Only the automatic
+                // recovery path is keyed on the recording, so that retrying an
+                // interrupted one cannot duplicate its row.
                 iOSHistoryManager.shared.add(iOSHistoryItem(
                     createdAt: rec.startedAt,
                     transcription: trimmed,
@@ -191,6 +195,14 @@ public struct RecordingsView: View {
                     wordCount: trimmed.split(whereSeparator: \.isWhitespace).count,
                     originPlatform: CaptureRecoveryCoordinator.recoveredOrigin
                 ))
+                // This recording may be the one an interrupted capture left
+                // behind. Its transcript has just been delivered, so the
+                // matching claim must close: otherwise the next recovery pass
+                // offers the same audio again and accepting it duplicates the
+                // History row (issue #992). Failed and empty attempts above
+                // return before this and stay retryable.
+                CaptureSafetyClaimStore.shared.forget(recording: rec.id)
+                CaptureRecoveryCoordinator.shared.refresh()
                 transcribeMessage = "Saved to History. The audio is still here."
             } catch {
                 transcribeMessage = "Could not transcribe that recording. The audio is still here."

@@ -87,28 +87,6 @@ final class IOSTranscriptionSession: IOSRecordingSession {
     var onStartupObservation: ((StartupObservation) -> Void)?
     var onRecordingWarning: ((String) -> Void)?
 
-    var recordingLossSummary: String? { recordingLoss.finalSummary }
-
-    var recordingLoss: RecordingLossReporting {
-        switch backend {
-        case .batch(let transcriber): return transcriber.recordingLoss
-        case .apple(let transcriber): return transcriber.recordingLoss
-        case .openAI(let transcriber): return transcriber.recordingLoss
-        case .shared(let transcriber): return transcriber.recordingLoss
-        }
-    }
-
-    #if DEBUG
-    var recordingPersistenceForTesting: AudioRecordingPersistence {
-        switch backend {
-        case .batch(let transcriber): return transcriber.audioRecorder
-        case .apple(let transcriber): return transcriber.audioRecorder
-        case .openAI(let transcriber): return transcriber.audioRecorder
-        case .shared(let transcriber): return transcriber.audioRecorder
-        }
-    }
-    #endif
-
     let resolution: Resolution
 
     var isBatch: Bool { resolution.isBatch }
@@ -387,5 +365,30 @@ extension IOSTranscriptionSession {
         let resolution = try Self.resolve(modelID: "openai/gpt-live-transcribe-streaming", mode: .streaming)
         self.init(resolution: resolution, language: nil, backend: .openAI(transcriber))
     }
+
+// MARK: - Recording loss reporting (issue #950)
+
+extension IOSTranscriptionSession {
+    var recordingLossSummary: String? { recordingLoss.finalSummary }
+
+    var recordingLoss: RecordingLossReporting {
+        switch backend {
+        case .batch(let transcriber): return transcriber.recordingLoss
+        case .apple(let transcriber): return transcriber.recordingLoss
+        case .openAI(let transcriber): return transcriber.recordingLoss
+        case .shared(let transcriber): return transcriber.recordingLoss
+        }
+    }
+
+    #if DEBUG
+    var recordingPersistenceForTesting: AudioRecordingPersistence {
+        switch backend {
+        case .batch(let transcriber): return transcriber.audioRecorder
+        case .apple(let transcriber): return transcriber.audioRecorder
+        case .openAI(let transcriber): return transcriber.audioRecorder
+        case .shared(let transcriber): return transcriber.audioRecorder
+        }
+    }
+    #endif
 }
 #endif

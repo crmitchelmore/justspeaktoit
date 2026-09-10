@@ -11,11 +11,21 @@ import XCTest
 final class CaptureStartFailureVisibilityTests: XCTestCase {
     private var published: [Error] = []
 
+    /// - Returns: whether the user was told, which is what these assert on.
+    ///   The disposition itself is covered by `CaptureStartFailurePolicyTests`.
     private func surface(
         _ error: Error,
         later: Bool = false,
         ownedElsewhere: Bool = false
     ) -> Bool {
+        self.disposition(error, later: later, ownedElsewhere: ownedElsewhere).presentedMessage != nil
+    }
+
+    private func disposition(
+        _ error: Error,
+        later: Bool = false,
+        ownedElsewhere: Bool = false
+    ) -> CaptureStartFailurePolicy.Disposition {
         CaptureCommandRunner.surfaceStartFailure(
             error,
             laterCaptureInFlight: later,
@@ -44,6 +54,34 @@ final class CaptureStartFailureVisibilityTests: XCTestCase {
         // message tells the user which setting to turn on.
         XCTAssertTrue(surface(iOSTranscriptionError.liveActivityUnavailable))
         XCTAssertEqual(published.count, 1)
+    }
+
+    /// The disposition, not just the silence: `dictate` reads this to answer
+    /// its caller with `x-cancel` rather than a failure, so the difference
+    /// between "cancelled" and "silently failed" has to survive this call.
+    func testACancelledStartIsReportedAsCancelledRatherThanMerelySilent() {
+        XCTAssertEqual(disposition(CancellationError()), .logOnly(.cancelled))
+        XCTAssertEqual(
+            disposition(iOSTranscriptionError.recognizerUnavailable, later: true),
+            .logOnly(.superseded)
+        )
+        XCTAssertTrue(published.isEmpty)
+    }
+
+    /// The alert receives the message the policy chose, not the raw error: an
+    /// error whose `localizedDescription` is blank or padded would otherwise
+    /// reach the user as an empty or malformed alert.
+    func testThePublishedFailureCarriesTheNormalisedMessage() throws {
+        struct BlankError: LocalizedError { var errorDescription: String? { "   " } }
+
+        XCTAssertTrue(surface(BlankError()))
+        let published = try XCTUnwrap(self.published.first)
+        XCTAssertEqual(
+            published.localizedDescription,
+            CaptureLinkFailure.recordingFailed.localizedDescription,
+            "A failure with nothing quotable must still say the recording did not start"
+        )
+        XCTAssertFalse(published.localizedDescription.isEmpty)
     }
 
     func testCancelledStartPublishesNothing() {

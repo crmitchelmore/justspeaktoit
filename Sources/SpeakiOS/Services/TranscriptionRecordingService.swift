@@ -28,6 +28,11 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// app can surface it on next foreground instead of silently losing audio.
     @Published public internal(set) var lastSessionError: Error? {
         didSet {
+            // Every publication gets a fresh identity, including one that
+            // repeats an earlier failure word for word — a presenter that
+            // de-duplicated on the message would swallow the later one, with no
+            // intervening `nil` to tell the two apart (#1084).
+            sessionErrorToken = lastSessionError == nil ? nil : UUID()
             // One funnel for every capture failure, so the health screen can
             // report how the last real run ended rather than only what is
             // true this second (issue #997). The journal keeps a closed-set
@@ -36,6 +41,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             CaptureOutcomeJournal.record(CaptureOutcomeJournal.outcome(for: lastSessionError))
         }
     }
+    /// Identifies the *publication* of `lastSessionError`, not its text, so a
+    /// failure that reads identically to the last one is still a new event.
+    @Published public private(set) var sessionErrorToken: UUID?
     /// Non-nil when the session silently fell back to on-device transcription
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
@@ -64,6 +72,36 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// text. Completion state belongs to a particular stop, so it is tagged
     /// with one.
     @Published public private(set) var polishingRunID: UUID?
+
+    /// What one capture finished with, tagged with the session that produced it.
+    ///
+    /// A caller that starts a capture does not necessarily own its stop — the
+    /// Live Activity, the Action Button and `justspeaktoit://stop` can all end
+    /// it — and "the last completed transcript" in the App Group is a global
+    /// that a *later* recording overwrites. Anything waiting on a result it did
+    /// not stop needs to be able to tell one session's outcome from another's,
+    /// and to tell an empty transcript apart from a failed one.
+    public struct FinishedCapture: Sendable, Equatable {
+        /// The session this outcome belongs to, matching `currentSessionID` at
+        /// the time that session was started.
+        public let sessionID: UUID
+        /// The transcript, which is legitimately empty when nothing was said.
+        public let text: String
+        /// Set when the session ended in a provider or recording error, in
+        /// which case `text` is whatever had accumulated and is not an answer.
+        public let failureMessage: String?
+
+        public var failed: Bool { self.failureMessage != nil }
+    }
+
+    /// Identifies the capture currently starting or running, from the moment
+    /// `startRecording` commits to it until it finishes.
+    @Published public private(set) var currentSessionID: UUID?
+
+    /// The most recent capture to finish, whoever stopped it. Published after
+    /// the transcriber has drained and the transcript has been committed, so a
+    /// waiter that sees its own session id here is reading a settled result.
+    @Published public private(set) var lastFinishedCapture: FinishedCapture?
 
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
@@ -222,6 +260,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// its `x-error` callback; this is the half the user can see.
     public func reportCaptureFailure(_ failure: Error) {
         lastSessionError = failure
+        sessionErrorToken = UUID()
     }
 
     /// Starts a headless recording session with Live Activity.
@@ -300,6 +339,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
 
         lastSessionError = nil
+        sessionErrorToken = nil
         providerFallbackNotice = nil
         currentTrigger = keyboardProfile == nil ? trigger : .keyboard
         // A model the catalogue only lists for batch transcription cannot run in
@@ -317,6 +357,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast
+        currentSessionID = runID
         startTime = Date()
         self.sharesLiveTranscript = sharesLiveTranscript
         // Explicit internal destination beats the override the run carried,
@@ -344,7 +385,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         if !usesBatchTranscription && keyboardProfile == nil {
             try resolveLiveModelHonouringRequest(
                 settings: settings,
-                requestedModelID: runParameters.modelID,
+                // Either source counts as the caller naming a model: a
+                // Shortcut parameter (#1076) or a capture link's `model=`
+                // (#1070). Both must fail visibly rather than be substituted.
+                requestedModelID: runParameters.modelID ?? modelOverride,
                 run: runID
             )
         }
@@ -584,7 +628,26 @@ public final class TranscriptionRecordingService: ObservableObject {
         let substituted = resolveLiveModel(settings: settings)
         guard substituted, requestedModelID != nil else { return }
         unwindCancelledStart(outcome: .failed, run: run)
+        SpeakLogger.transcription.error(
+            """
+            Refusing capture: no API key for \(requestedModelID ?? "", privacy: .public), \
+            and a named model must not be silently replaced
+            """
+        )
         throw CaptureParameterFailure.modelUnavailable
+    }
+
+    /// Settles the current session's outcome under its own identity and clears
+    /// the identity, so nothing waiting on it can be answered twice or answered
+    /// with a later recording's result.
+    private func publishFinishedCapture(text: String, failure: Error?) {
+        guard let sessionID = currentSessionID else { return }
+        currentSessionID = nil
+        lastFinishedCapture = FinishedCapture(
+            sessionID: sessionID,
+            text: text,
+            failureMessage: failure?.localizedDescription
+        )
     }
 
     /// - Returns: whether the resolved model differs from the requested one,
@@ -910,6 +973,20 @@ public final class TranscriptionRecordingService: ObservableObject {
         // capture receipt (issue #1008) travels alongside it as the snippet,
         // where it reports what each lane actually did without becoming a
         // stronger claim than the outcome earns.
+        //
+        // Publish this session's settled outcome under its own identity, before
+        // anything else can start a new one. `lastSessionError` is cleared at
+        // the start of every run, so it is this session's error or nothing.
+        //
+        // This overlaps the `CaptureRunCompletion` / `activeCaptureID` pair
+        // above: the two were built independently, on branches that had not met,
+        // for the same problem — letting a caller collect its own capture's
+        // result instead of a global. They should collapse into one, keeping the
+        // failure this one carries and the settlement `isSettling` gives. Kept
+        // side by side here so the integration branch compiles and CI exercises
+        // both; the convergence belongs on #1070.
+        self.publishFinishedCapture(text: text, failure: lastSessionError)
+
         completeRecordingActivity(
             duration: duration,
             primedMessage: lastSessionError?.localizedDescription ?? primedActivityMessage,
@@ -1000,6 +1077,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             lifecycle.retireStartRun()
             return
         }
+        // A cancelled session still has to settle for anything waiting on it:
+        // an empty outcome is what a cancel produced, and a waiter must not be
+        // left reading the previous recording's result instead.
+        self.publishFinishedCapture(text: "", failure: nil)
         transcriptionSession?.cancel()
         transcriptionSession = nil
         sharesLiveTranscript = true
@@ -1131,6 +1212,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // publish the error so the app can surface it on next foreground.
         guard lifecycle.state == .recording || stoppingSession === session else { return }
         lastSessionError = error
+        // The token is stamped by `lastSessionError`'s observer above.
         guard lifecycle.state == .recording else { return }
         Task { [weak self] in
             guard let self, self.isRunning, self.transcriptionSession === session else { return }

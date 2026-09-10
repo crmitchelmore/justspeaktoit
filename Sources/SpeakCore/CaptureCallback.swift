@@ -29,6 +29,18 @@ public enum CaptureLinkFailure: String, Error, LocalizedError, Equatable, Sendab
     case alreadyRecording
     /// The recorder refused or threw while starting.
     case recordingFailed
+    /// The same capture parameter was supplied more than once with different
+    /// values, so there is no unambiguous request to honour.
+    case repeatedParameter
+    /// `model=` named a model this device cannot run right now — typically no
+    /// API key for its provider. Refused rather than quietly substituted.
+    case modelUnavailable
+    /// The capture started but ended in a provider or recording error, so its
+    /// transcript is not the caller's answer.
+    case transcriptionFailed
+    /// The request was queued during a cold launch and a later capture link
+    /// replaced it before the app was ready to act on either.
+    case superseded
 
     public var errorDescription: String? {
         switch self {
@@ -43,7 +55,8 @@ public enum CaptureLinkFailure: String, Error, LocalizedError, Equatable, Sendab
         case .invalidCallback:
             return "The callback URL was missing, malformed, or used a scheme this app will not open."
         case .unsupportedParameter:
-            return "Callback and maxDuration parameters are only supported on the dictate verb."
+            return "Callback, destination, language, model and maxDuration parameters are only "
+                + "supported on the verb that starts the capture they apply to."
         case .deviceLocked:
             return "Unlock the device before starting a dictation from a link."
         case .notForeground:
@@ -52,6 +65,16 @@ public enum CaptureLinkFailure: String, Error, LocalizedError, Equatable, Sendab
             return "A recording is already in progress."
         case .recordingFailed:
             return "The recording could not be started."
+        case .repeatedParameter:
+            return "A capture parameter was given more than once with conflicting values. "
+                + "The recording was not started."
+        case .modelUnavailable:
+            return "That transcription model is not available on this device — check its API key. "
+                + "The recording was not started, because it would have used a different model."
+        case .transcriptionFailed:
+            return "The recording failed before it produced a transcript."
+        case .superseded:
+            return "A later capture link replaced this request before the app could act on it."
         }
     }
 }
@@ -266,13 +289,16 @@ public struct CaptureCallback: Equatable, Sendable {
     ///   present but unusable. A bad callback is never dropped quietly: a
     ///   caller that thinks it passed `x-success` would otherwise wait forever
     ///   for a return that can never come.
+    /// - Throws: `CaptureLinkFailure.repeatedParameter` when the same callback
+    ///   was supplied twice with different values — a caller expecting a return
+    ///   at one of two addresses must be told, not sent to whichever came first.
     public static func parse(queryItems: [URLQueryItem]) throws -> CaptureCallback? {
-        func value(_ name: String) -> String? {
-            queryItems.first { $0.name.lowercased() == name }?.value
-        }
         func callback(_ name: String) throws -> URL? {
-            guard queryItems.contains(where: { $0.name.lowercased() == name }) else { return nil }
-            guard let raw = value(name), let url = validated(raw) else {
+            guard CaptureLinkQuery.isPresent(name, in: queryItems) else { return nil }
+            // A repeat throws `.repeatedParameter` from here, deliberately
+            // ahead of the `.invalidCallback` the value check would report.
+            guard let raw = try CaptureLinkQuery.singleValue(name, in: queryItems),
+                  let url = validated(raw) else {
                 throw CaptureLinkFailure.invalidCallback
             }
             return url

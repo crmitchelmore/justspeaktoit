@@ -15,6 +15,23 @@ import Foundation
 /// Kept pure and in SpeakCore so the whole decision is covered by host tests
 /// rather than only by a simulator run.
 public enum CaptureStartFailurePolicy {
+    /// A start failure reduced to the text the policy chose to present.
+    ///
+    /// The thrown error is kept for the log, but what reaches the alert has to
+    /// be the message the policy settled on — trimmed, and replaced by the
+    /// fallback when the error had nothing quotable to say. Publishing the
+    /// original instead is how a blank or whitespace-only `localizedDescription`
+    /// reaches the user as an empty alert.
+    public struct PresentedFailure: LocalizedError, Equatable, Sendable {
+        public let message: String
+
+        public init(message: String) {
+            self.message = message
+        }
+
+        public var errorDescription: String? { self.message }
+    }
+
     /// Why a failed start is not shown to the user. Logged, never presented.
     public enum SilentReason: String, Equatable, Sendable {
         /// The start was cancelled — a stop, or a second quick-action press
@@ -75,16 +92,20 @@ public enum CaptureStartFailurePolicy {
         return .surface(message)
     }
 
-    /// Whether a published session error is new to the surface presenting it.
+    /// Whether a published session failure is new to the surface presenting it.
     ///
     /// The alert is driven both by a change notification and by a read taken
     /// when the view attaches — the second is what covers a cold launch, where
     /// a quick action can fail before any observer exists. Both routes go
-    /// through here so the same failure cannot raise two alerts, and a start
-    /// that clears the error (passing `nil`) re-arms it, so a genuinely
-    /// repeated failure is shown again.
-    public static func shouldPresent(_ description: String?, lastPresented: String?) -> Bool {
-        guard let description, !description.isEmpty else { return false }
-        return description != lastPresented
+    /// through here so one failure cannot raise two alerts.
+    ///
+    /// The identity is the *publication*, not its text. Two refusals can carry
+    /// the same words — a second capture link refused for the same reason after
+    /// the first alert was dismissed is the obvious case — and de-duplicating on
+    /// the message would swallow the later one, with no `nil` in between to
+    /// re-arm anything. A token that changes on every publication cannot.
+    public static func shouldPresent(token: UUID?, lastPresented: UUID?) -> Bool {
+        guard let token else { return false }
+        return token != lastPresented
     }
 }

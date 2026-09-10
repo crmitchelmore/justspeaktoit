@@ -135,14 +135,19 @@ public extension CaptureDeepLink {
         }
     }
 
+    /// Every parameter this vocabulary reads. A repeat of any of them with
+    /// conflicting values is refused rather than resolved to whichever came
+    /// first — including `action`, which selects the verb itself.
+    private static let capturedParameterNames = [
+        "action", "destination", "lang", "model", "maxduration",
+        "x-success", "x-error", "x-cancel"
+    ]
+
     private static func resolve(
         action: CaptureDeepLinkAction,
         queryItems: [URLQueryItem]
     ) -> CaptureDeepLink {
-        let destination = self.destination(from: queryItems)
-        func value(_ name: String) -> String? {
-            queryItems.first { $0.name.lowercased() == name }?.value
-        }
+        let destination = self.destinationIfUnambiguous(from: queryItems)
         func refuse(_ failure: CaptureLinkFailure, _ callback: CaptureCallback?) -> CaptureDeepLink {
             CaptureDeepLink(
                 action: action,
@@ -152,13 +157,33 @@ public extension CaptureDeepLink {
             )
         }
 
+        // Ahead of everything else: a query that says two different things
+        // cannot be honoured, and honouring half of it is exactly the silent
+        // substitution this vocabulary refuses. `action` is included because a
+        // link that names two verbs has no single command to run.
+        if let repeated = self.capturedParameterNames.first(
+            where: { CaptureLinkQuery.hasConflictingRepeat($0, in: queryItems) }
+        ) {
+            SpeakLogger.transcription.warning(
+                "Capture link refused: \(repeated, privacy: .public) was given more than once"
+            )
+            // The callback cannot be trusted to be single-valued either, so the
+            // refusal is reported in-app only.
+            return refuse(.repeatedParameter, nil)
+        }
+
+        func value(_ name: String) -> String? {
+            guard let single = try? CaptureLinkQuery.singleValue(name, in: queryItems) else { return nil }
+            return single
+        }
+
         let callback: CaptureCallback?
         do {
             callback = try CaptureCallback.parse(queryItems: queryItems)
         } catch {
             // The callback itself is the thing that was wrong, so there is
             // nowhere safe to send the error: only the in-app alert reports it.
-            return refuse(.invalidCallback, nil)
+            return refuse(error as? CaptureLinkFailure ?? .invalidCallback, nil)
         }
 
         // A callback on `stop` would let any app redirect a dictation it did not
@@ -169,7 +194,14 @@ public extension CaptureDeepLink {
         if action != .dictate, wantsDictateOnly {
             return refuse(.unsupportedParameter, callback)
         }
-        if action == .stop, value("lang") != nil || value("model") != nil {
+        // `destination` joins them on `stop`. The runner already refuses to
+        // apply a caller's destination to a capture it did not start — that is
+        // what `startedDestination` is for — but accepting the parameter and
+        // then ignoring it is the same silent discard this vocabulary refuses
+        // everywhere else, and it reads to a caller as though it worked. An app
+        // that sends `stop?destination=clipboard` at somebody's history-only
+        // recording is told no, rather than told nothing.
+        if action == .stop, value("lang") != nil || value("model") != nil || value("destination") != nil {
             return refuse(.unsupportedParameter, callback)
         }
 
@@ -199,8 +231,11 @@ public extension CaptureDeepLink {
     private static func captureSettings(
         from queryItems: [URLQueryItem]
     ) -> Result<CaptureSettings, CaptureLinkFailure> {
+        // Repeats are already refused by `resolve`, so a value here is the only
+        // one the caller supplied.
         func value(_ name: String) -> String? {
-            queryItems.first { $0.name.lowercased() == name }?.value
+            guard let single = try? CaptureLinkQuery.singleValue(name, in: queryItems) else { return nil }
+            return single
         }
 
         var settings = CaptureSettings()
@@ -225,10 +260,19 @@ public extension CaptureDeepLink {
         return .success(settings)
     }
 
-    private static func destination(from queryItems: [URLQueryItem]) -> HardwareTriggerDestination? {
-        guard let raw = queryItems
-            .first(where: { $0.name.lowercased() == "destination" })?
-            .value?
+    /// The destination when the query names exactly one, otherwise none — a
+    /// contradictory query is refused by `resolve` before this matters.
+    private static func destinationIfUnambiguous(
+        from queryItems: [URLQueryItem]
+    ) -> HardwareTriggerDestination? {
+        guard let single = try? self.destination(from: queryItems) else { return nil }
+        return single
+    }
+
+    private static func destination(
+        from queryItems: [URLQueryItem]
+    ) throws -> HardwareTriggerDestination? {
+        guard let raw = try CaptureLinkQuery.singleValue("destination", in: queryItems)?
             .trimmingCharacters(in: .whitespaces),
             !raw.isEmpty
         else { return nil }

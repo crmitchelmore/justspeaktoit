@@ -75,39 +75,86 @@ final class CaptureStartFailurePolicyTests: XCTestCase {
 
     // MARK: - Presentation, one alert per failure
 
+    private static let first = UUID()
+    private static let second = UUID()
+
     func testAFreshFailureIsPresented() {
-        XCTAssertTrue(CaptureStartFailurePolicy.shouldPresent("Microphone denied.", lastPresented: nil))
+        XCTAssertTrue(CaptureStartFailurePolicy.shouldPresent(token: Self.first, lastPresented: nil))
     }
 
-    func testTheSameFailureIsNotPresentedTwice() {
+    func testTheSamePublicationIsNotPresentedTwice() {
         // The change observer and the on-appear read both run for a warm
         // failure; only one alert may come out of them.
         XCTAssertFalse(
-            CaptureStartFailurePolicy.shouldPresent("Microphone denied.", lastPresented: "Microphone denied.")
+            CaptureStartFailurePolicy.shouldPresent(token: Self.first, lastPresented: Self.first)
         )
     }
 
-    func testADifferentFailureIsPresentedOverAnOlderOne() {
+    func testALaterFailureIsPresentedOverAnOlderOne() {
         XCTAssertTrue(
-            CaptureStartFailurePolicy.shouldPresent("Recognizer unavailable.", lastPresented: "Microphone denied.")
+            CaptureStartFailurePolicy.shouldPresent(token: Self.second, lastPresented: Self.first)
         )
     }
 
     func testClearedErrorPresentsNothingSoASuccessfulStartInheritsNoAlert() {
-        XCTAssertFalse(CaptureStartFailurePolicy.shouldPresent(nil, lastPresented: "Microphone denied."))
-        XCTAssertFalse(CaptureStartFailurePolicy.shouldPresent("", lastPresented: nil))
+        XCTAssertFalse(CaptureStartFailurePolicy.shouldPresent(token: nil, lastPresented: Self.first))
     }
 
-    func testTheSameFailureRepeatedAfterAClearIsPresentedAgain() {
-        // A start clears the published error before it can fail again, so the
-        // second denial is a new event and must alert.
-        var lastPresented: String?
-        let message = "Microphone permission is required for transcription."
-        XCTAssertTrue(CaptureStartFailurePolicy.shouldPresent(message, lastPresented: lastPresented))
-        lastPresented = message
-        XCTAssertFalse(CaptureStartFailurePolicy.shouldPresent(message, lastPresented: lastPresented))
-        XCTAssertFalse(CaptureStartFailurePolicy.shouldPresent(nil, lastPresented: lastPresented))
-        lastPresented = nil
-        XCTAssertTrue(CaptureStartFailurePolicy.shouldPresent(message, lastPresented: lastPresented))
+    /// The reason the identity is the publication and not its text: two
+    /// refusals can read identically. A second capture link refused for the
+    /// same reason, after the first alert was dismissed and with no start in
+    /// between to clear anything, is a new event and must be shown.
+    func testATextuallyIdenticalLaterFailureIsStillPresented() {
+        let firstPublication = UUID()
+        let secondPublication = UUID()
+        var lastPresented: UUID?
+
+        XCTAssertTrue(
+            CaptureStartFailurePolicy.shouldPresent(token: firstPublication, lastPresented: lastPresented)
+        )
+        lastPresented = firstPublication
+        XCTAssertFalse(
+            CaptureStartFailurePolicy.shouldPresent(token: firstPublication, lastPresented: lastPresented)
+        )
+        // Same words, new publication, nothing cleared in between.
+        XCTAssertTrue(
+            CaptureStartFailurePolicy.shouldPresent(token: secondPublication, lastPresented: lastPresented),
+            "A repeated refusal must not be swallowed because it reads the same"
+        )
+    }
+
+    // MARK: - The presented message
+
+    func testTheMessageThePolicyChoseIsTheMessageThatIsPublished() throws {
+        let padded = CaptureStartFailurePolicy.disposition(
+            errorDescription: "  Microphone denied.  ",
+            isCancellation: false,
+            laterCaptureInFlight: false,
+            microphoneOwnedElsewhere: false
+        )
+        let failure = CaptureStartFailurePolicy.PresentedFailure(
+            message: try XCTUnwrap(padded.presentedMessage)
+        )
+        XCTAssertEqual(failure.errorDescription, "Microphone denied.")
+        XCTAssertEqual(failure.localizedDescription, "Microphone denied.")
+    }
+
+    func testAnUnquotableErrorIsPublishedAsTheFallbackRatherThanBlank() throws {
+        for description in [nil, "", "   \n "] {
+            let message = try XCTUnwrap(
+                CaptureStartFailurePolicy.disposition(
+                    errorDescription: description,
+                    isCancellation: false,
+                    laterCaptureInFlight: false,
+                    microphoneOwnedElsewhere: false
+                ).presentedMessage
+            )
+            XCTAssertEqual(message, CaptureLinkFailure.recordingFailed.localizedDescription)
+            XCTAssertFalse(
+                CaptureStartFailurePolicy.PresentedFailure(message: message)
+                    .localizedDescription.isEmpty,
+                "A failed capture must never reach the alert blank"
+            )
+        }
     }
 }

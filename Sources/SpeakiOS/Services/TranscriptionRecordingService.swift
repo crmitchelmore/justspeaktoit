@@ -47,6 +47,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
     private let lifecycle = RecordingLifecycleCoordinator()
+    /// Truthful capture presentation (issue #983): startup stays visibly
+    /// "preparing" until this run has both started its backend and observed a
+    /// buffer from its own live input tap.
+    private var presentation = CapturePresentationGate()
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -135,6 +139,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         onCaptureDisruption: (() async -> Void)? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
+        presentation.begin(run: runID)
         state = lifecycle.state
         defer { state = lifecycle.state }
 
@@ -181,7 +186,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             ? modelDisplayName
             : "\(modelDisplayName) (no API key)"
         let activityStarted = (requiresLiveActivity || appIsActive)
-            ? activityManager.startActivity(provider: activityProvider)
+            ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)
             : false
         if requiresLiveActivity && !activityStarted && !appIsActive {
             unwindCancelledStart()
@@ -190,6 +195,11 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         #if DEBUG && targetEnvironment(simulator)
         if let transcript = sharedState.simulatorValidationTranscript {
+            // A synthetic transcript is not observed microphone input, but this
+            // DEBUG-only simulator stub has no input tap at all. Resolve the
+            // gate explicitly so the harness never sits in preparation.
+            presentation.noteBackendStarted(run: runID)
+            presentation.noteInputObserved(run: runID)
             handlePartialResult(text: transcript)
             _ = lifecycle.activate(runID)
             state = lifecycle.state
@@ -226,6 +236,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                         || self.stoppingSession === session else { return }
                 self.handleError(error, session: session)
             }
+            bindFirstInput(session: session, runID: runID)
             startedSession = session
             guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
                 throw CancellationError()
@@ -242,6 +253,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             }
             transcriptionSession = session
             isRunning = true
+            // The tap can deliver before `start()` returns, so this may be the
+            // second half of the pair rather than the first.
+            notePresentation(presentation.noteBackendStarted(run: runID))
         } catch {
             // Unwind runs for the retired case too: a stop that cancelled this
             // startup is awaiting settlement, and this run still owns whatever
@@ -283,6 +297,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         partialText = ""
         wordCount = 0
         sharedState.clearRecordingState()
+        presentation.finish()
         activityManager.endActivity()
         lifecycle.finishStartUnwind()
         state = lifecycle.state
@@ -339,6 +354,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
         state = lifecycle.state
         isRunning = false
+        presentation.finish()
         let duration = elapsedSeconds
         let completionID = UUID()
         latestCompletionID = completionID
@@ -455,6 +471,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         transcriptionSession = nil
         sharesLiveTranscript = true
         isRunning = false
+        presentation.finish()
         startTime = nil
         partialText = ""
         wordCount = 0
@@ -482,11 +499,50 @@ public final class TranscriptionRecordingService: ObservableObject {
             }
         }
 
+        // Presentation only: the transcript above is delivered either way. A
+        // partial can arrive from pre-roll before this run has seen its own
+        // input, and it must not announce active capture (issue #983).
+        guard presentation.isPresentingCapture else {
+            publishPreparingActivity()
+            return
+        }
         activityManager.updateActivity(
             status: .listening,
             lastSnippet: text,
             wordCount: wordCount,
             duration: elapsedSeconds
+        )
+    }
+
+    /// Routes this run's own first live buffer into the presentation gate.
+    private func bindFirstInput(session: IOSTranscriptionSession, runID: UUID) {
+        session.onFirstInputBuffer = { [weak self, weak session] in
+            guard let self, let session,
+                  self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
+            else { return }
+            self.notePresentation(self.presentation.noteInputObserved(run: runID))
+        }
+    }
+
+    /// Publishes the one arming → recording transition, and only that one.
+    private func notePresentation(_ promoted: Bool) {
+        guard promoted else { return }
+        activityManager.updateActivity(
+            status: .recording,
+            lastSnippet: partialText,
+            wordCount: wordCount,
+            duration: elapsedSeconds
+        )
+    }
+
+    /// Keeps preparation truthful: no snippet, no elapsed time, no recording
+    /// indicator until this run's own tap has delivered.
+    private func publishPreparingActivity() {
+        activityManager.updateActivity(
+            status: .arming,
+            lastSnippet: CapturePresentationGate.preparingMessage,
+            wordCount: 0,
+            duration: 0
         )
     }
 

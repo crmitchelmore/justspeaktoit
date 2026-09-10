@@ -103,6 +103,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     case speechmatics
     case xai
     case meta
+    case revai
+    case mistral
 
     /// Keychain identifier for this provider's API key, or `nil` for on-device
     /// providers that need no credential. Matches the identifiers used by both
@@ -134,13 +136,17 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
     /// distinguish selectable models from ones that are catalogued but not yet
     /// wired up on iOS. Flip a case to `true` in the same change that adds the
     /// iOS path so the two never drift.
+    ///
+    /// Every case is `true` today: each cloud provider is driven by a shared
+    /// `StreamingTranscriptionClient` (or, for Apple and OpenAI, a native
+    /// transcriber that both platforms have), so there is nothing the Mac can
+    /// stream that the iPhone cannot. The property stays because it is the
+    /// seam a newly catalogued, macOS-only provider would use.
     public var isSupportedOnIOS: Bool {
         switch self {
         case .apple, .deepgram, .elevenlabs, .openai, .cartesia, .soniox, .modulate, .assemblyai,
-             .gladia, .google, .xai, .meta:
+             .gladia, .google, .xai, .meta, .speechmatics, .revai, .mistral:
             return true
-        case .speechmatics:
-            return false
         }
     }
 
@@ -161,6 +167,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .speechmatics: return "Speechmatics"
         case .xai: return "xAI"
         case .meta: return "Meta"
+        case .revai: return "Rev.ai"
+        case .mistral: return "Mistral"
         }
     }
 
@@ -184,6 +192,8 @@ public enum LiveTranscriptionProviderID: String, Sendable, CaseIterable, Hashabl
         case .speechmatics: website = "https://www.speechmatics.com"
         case .xai: website = "https://console.x.ai"
         case .meta: website = "https://llama.developer.meta.com"
+        case .revai: website = "https://www.rev.ai"
+        case .mistral: website = "https://console.mistral.ai"
         }
         return URL(string: website)
     }
@@ -312,6 +322,11 @@ public enum StreamingClientError: LocalizedError {
     case invalidURL
     case invalidAPIKey(provider: String)
     case missingAPIKey(provider: String)
+    /// The socket stopped completing sends while capture continued, so the
+    /// outbound audio budget was exhausted. Reported rather than absorbed: the
+    /// audio already sent is not being transcribed, and holding the rest in
+    /// memory would only make the failure larger.
+    case transportStalled(provider: String)
 
     public var errorDescription: String? {
         switch self {
@@ -321,6 +336,9 @@ public enum StreamingClientError: LocalizedError {
             return "\(provider) rejected the API key. Check it in Settings."
         case .missingAPIKey(let provider):
             return "\(provider) API key is missing. Please configure it in Settings."
+        case .transportStalled(let provider):
+            return "The connection to \(provider) stopped accepting audio. "
+                + "Check your network and start again."
         }
     }
 }

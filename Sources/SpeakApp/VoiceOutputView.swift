@@ -327,9 +327,40 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
     }
   }
 
+  /// Names the providers whose voice listing failed, so a provider that has
+  /// no offline catalogue does not simply disappear from the picker.
+  @ViewBuilder
+  private var voiceListingFailureNotice: some View {
+    if !tts.voiceListingErrors.isEmpty {
+      let names = tts.voiceListingErrors.keys
+        .map(\.displayName)
+        .sorted()
+        .joined(separator: ", ")
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Image(systemName: "exclamationmark.triangle")
+          .foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Could not load voices from \(names).")
+            .font(.caption)
+          Text("Any voices shown for them are from the last successful load.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("Retry") {
+          Task { await loadAvailableVoices() }
+        }
+        .buttonStyle(.link)
+        .font(.caption)
+      }
+      .accessibilityElement(children: .combine)
+    }
+  }
+
   private var voiceSelectionCard: some View {
     SpeakDensityCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
       VStack(alignment: .leading, spacing: 12) {
+        voiceListingFailureNotice
         if availableVoices.isEmpty {
           HStack {
             ProgressView()

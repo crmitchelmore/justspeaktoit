@@ -131,7 +131,8 @@ public enum AnalyticsModelFamily: String, Codable, Sendable {
     case speechmatics
     /// Google Gemini audio models used as transcribers.
     case gemini
-    /// xAI Grok Voice models used in transcription-only mode.
+    /// xAI speech models: Grok Voice used in transcription-only mode, and the
+    /// dedicated speech-to-text and speech-generation services.
     case grok
     /// Meta Muse Voice Transcribe.
     case muse

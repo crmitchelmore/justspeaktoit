@@ -310,10 +310,13 @@ enum MetaMuseAudioPreparer {
     static let sampleRate = 16_000
     /// 80 ms of valid silence: enough for the endpoint to parse and authorize
     /// the request without charging for a meaningful transcription.
+    /// The constants here are a valid 16 kHz mono format, so the writer cannot
+    /// reject them; the fallback keeps the accessor total without a force
+    /// unwrap.
     static let validationWAV = wavData(
         pcm: Data(repeating: 0, count: sampleRate * 2 * 80 / 1_000),
         sampleRate: sampleRate
-    )
+    ) ?? Data()
 
     // Conversion is one bounded pipeline so cancellation always stops before upload.
     // swiftlint:disable:next function_body_length
@@ -376,35 +379,20 @@ enum MetaMuseAudioPreparer {
             guard let bytes = buffer.mData, buffer.mDataByteSize > 0 else { continue }
             pcm.append(bytes.assumingMemoryBound(to: UInt8.self), count: Int(buffer.mDataByteSize))
         }
-        return PreparedAudio(data: wavData(pcm: pcm, sampleRate: sampleRate), duration: duration)
+        return try prepared(pcm: pcm, duration: duration)
     }
 
-    static func wavData(pcm: Data, sampleRate: Int) -> Data {
-        var data = Data()
-        func appendASCII(_ value: String) { data.append(Data(value.utf8)) }
-        func appendUInt16(_ value: UInt16) {
-            var little = value.littleEndian
-            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+    /// Wraps the converted samples, turning a format the RIFF header cannot
+    /// describe into an error rather than a trap.
+    private static func prepared(pcm: Data, duration: TimeInterval) throws -> PreparedAudio {
+        guard let wav = wavData(pcm: pcm, sampleRate: sampleRate) else {
+            throw MetaMuseError.invalidAudio("The converted audio could not be written as WAV.")
         }
-        func appendUInt32(_ value: UInt32) {
-            var little = value.littleEndian
-            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
-        }
-        appendASCII("RIFF")
-        appendUInt32(UInt32(36 + pcm.count))
-        appendASCII("WAVE")
-        appendASCII("fmt ")
-        appendUInt32(16)
-        appendUInt16(1)
-        appendUInt16(1)
-        appendUInt32(UInt32(sampleRate))
-        appendUInt32(UInt32(sampleRate * 2))
-        appendUInt16(2)
-        appendUInt16(16)
-        appendASCII("data")
-        appendUInt32(UInt32(pcm.count))
-        data.append(pcm)
-        return data
+        return PreparedAudio(data: wav, duration: duration)
+    }
+
+    static func wavData(pcm: Data, sampleRate: Int) -> Data? {
+        PCMWaveWriter.wavData(pcm: pcm, sampleRate: sampleRate)
     }
 }
 

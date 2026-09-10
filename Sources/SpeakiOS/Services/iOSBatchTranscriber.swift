@@ -220,11 +220,20 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case openAI
     case metaMuse
     case cartesia
+    /// Gladia's asynchronous pre-recorded job API, through the shared
+    /// `GladiaBatchClient` with the `gladia.apiKey` this app already stores for
+    /// the live Solaria provider.
+    case gladia
     /// Google's own Interactions API, through the shared
     /// `GeminiInteractionsClient`. Matched on the direct-batch identifiers
     /// only: the `google/gemini-2.0-flash-*` catalogue entries share the
     /// `google/` prefix but are OpenRouter-routed.
     case gemini
+    /// xAI's dedicated speech-to-text endpoint, through the shared
+    /// `XAIBatchTranscriptionClient`. The Grok Voice streaming identifier
+    /// shares the `xai/` prefix but has no file mode, so this matches on the
+    /// batch identifier alone.
+    case xai
     case openRouter
 
     static func route(for model: String) -> IOSBatchTranscriptionRoute {
@@ -232,8 +241,10 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
         if AppleLocalModels.isSpeechAnalyzerModel(model) { return .appleSpeechAnalyzer }
         if AppSettings.openAIBatchModelIDs.contains(model) { return .openAI }
         if model == CartesiaBatchClient.catalogID { return .cartesia }
+        if model == GladiaBatchClient.catalogID { return .gladia }
         if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
         if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
+        if model == XAISpeechToText.batchCatalogID { return .xai }
         return .openRouter
     }
 }

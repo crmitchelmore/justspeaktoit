@@ -86,6 +86,28 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             latencyTier: .fast,
             tags: [.fast, .leading]),
         Option(
+            id: XAISpeechToText.liveCatalogID,
+            displayName: "xAI Speech-to-Text (Streaming)",
+            description: "xAI's dedicated realtime speech-to-text endpoint: interim captions, "
+                + "chunk finals as speech locks, and one authoritative transcript at the end of "
+                + "the stream. Reuses your xAI API key.",
+            estimatedLatencyMs: 200,
+            latencyTier: .fast,
+            tags: [.fast]),
+        Option(
+            id: RevAIStreaming.liveCatalogID,
+            displayName: "Rev.ai Reverb (Streaming)",
+            description: "Rev.ai's streaming speech-to-text on the Reverb model, with rolling "
+                + "partial hypotheses and per-segment finals. Reuses your Rev.ai access token.",
+            estimatedLatencyMs: 300, latencyTier: .fast),
+        Option(
+            id: MistralVoxtralRealtime.liveCatalogID,
+            displayName: "Mistral Voxtral Realtime (Streaming)",
+            description: "Mistral's natively streaming Voxtral model across 13 languages, with "
+                + "automatic language detection and one authoritative transcript at the end of "
+                + "the stream. Reuses your Mistral API key.",
+            estimatedLatencyMs: 480, latencyTier: .fast),
+        Option(
             id: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
             displayName: "OpenAI GPT Live Transcribe (Streaming)",
             description: "OpenAI's recommended low-latency speech-to-text model with live transcript "
@@ -118,6 +140,20 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: CartesiaBatchClient.catalogID, displayName: "Cartesia Ink Whisper (Batch)",
             description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",
             estimatedLatencyMs: nil, latencyTier: .medium),
+        Option(
+            id: GladiaBatchClient.catalogID, displayName: "Gladia Solaria-1 (Batch)",
+            description: "Multilingual file transcription with per-utterance timings. "
+                + "Automatic detects the language and allows code switching.",
+            estimatedLatencyMs: nil, latencyTier: .medium),
+        Option(
+            id: SpeechmaticsBatchClient.enhancedCatalogID, displayName: "Speechmatics Enhanced (Batch)",
+            description: "Speechmatics' higher-accuracy file transcription tier, with word timings "
+                + "and automatic language identification.",
+            estimatedLatencyMs: nil, latencyTier: .medium),
+        Option(
+            id: SpeechmaticsBatchClient.standardCatalogID, displayName: "Speechmatics Standard (Batch)",
+            description: "Speechmatics' faster, lower-cost file transcription tier.",
+            estimatedLatencyMs: nil, latencyTier: .fast),
         // Dedicated transcription providers (OpenAI, Rev.ai, etc.)
         Option(
             id: OpenAITranscriptionModels.gptTranscribeCatalogID,
@@ -172,6 +208,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Google's Gemini Interactions API for recorded audio, with word-level "
                 + "timestamps and speaker attribution. Public preview — opt-in, never a default.",
             estimatedLatencyMs: 900, latencyTier: .fast),
+        Option(
+            id: XAISpeechToText.batchCatalogID,
+            displayName: "xAI Speech-to-Text",
+            description: "xAI's dedicated file transcription endpoint, with word timings, "
+                + "keyterm biasing and inverse text normalisation when a language is chosen.",
+            estimatedLatencyMs: 700, latencyTier: .fast),
         Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",

@@ -4,34 +4,34 @@ import XCTest
 /// Long documents reach Soniox as a sequence of requests. The split must stay
 /// inside the per-request budget, keep grapheme clusters whole and preserve the
 /// reading order, because the parts are spoken back to back.
-final class SonioxTTSTextChunkerTests: XCTestCase {
+final class TTSTextChunkerTests: XCTestCase {
     func testShortText_StaysASingleRequest() {
-        XCTAssertEqual(SonioxTTSTextChunker.chunks("One sentence."), ["One sentence."])
+        XCTAssertEqual(TTSTextChunker.chunks("One sentence."), ["One sentence."])
     }
 
     func testBlankText_ProducesNoRequests() {
-        XCTAssertTrue(SonioxTTSTextChunker.chunks("   \n\t ").isEmpty)
+        XCTAssertTrue(TTSTextChunker.chunks("   \n\t ").isEmpty)
     }
 
     func testDefaultBudget_StaysBelowTheAPILimit() {
         XCTAssertLessThan(
-            SonioxTTSTextChunker.maximumChunkCharacters,
+            TTSTextChunker.maximumChunkCharacters,
             SonioxTTSAPI.maxTextLength
         )
     }
 
     func testLongText_IsSplitWithinTheDefaultBudget() {
         let sentence = String(repeating: "This is a sentence about speech. ", count: 400)
-        let chunks = SonioxTTSTextChunker.chunks(sentence)
+        let chunks = TTSTextChunker.chunks(sentence)
 
         XCTAssertGreaterThan(chunks.count, 1)
-        XCTAssertTrue(chunks.allSatisfy { $0.count <= SonioxTTSTextChunker.maximumChunkCharacters })
+        XCTAssertTrue(chunks.allSatisfy { $0.count <= TTSTextChunker.maximumChunkCharacters })
         XCTAssertTrue(chunks.allSatisfy { !$0.isEmpty })
     }
 
     func testSplit_PrefersTheEndOfASentence() {
         let text = "First sentence here. Second sentence here. Third sentence here."
-        let chunks = SonioxTTSTextChunker.chunks(text, maximumCharacters: 30)
+        let chunks = TTSTextChunker.chunks(text, maximumCharacters: 30)
 
         XCTAssertEqual(
             chunks,
@@ -40,7 +40,7 @@ final class SonioxTTSTextChunkerTests: XCTestCase {
     }
 
     func testSplit_FallsBackToAWordGapWhenNoSentenceEnds() {
-        let chunks = SonioxTTSTextChunker.chunks(
+        let chunks = TTSTextChunker.chunks(
             "alpha bravo charlie delta echo",
             maximumCharacters: 12
         )
@@ -49,7 +49,7 @@ final class SonioxTTSTextChunkerTests: XCTestCase {
     }
 
     func testDecimalPoint_DoesNotEndASentence() {
-        let chunks = SonioxTTSTextChunker.chunks(
+        let chunks = TTSTextChunker.chunks(
             "The value 3.14159 matters here. Next part.",
             maximumCharacters: 32
         )
@@ -59,7 +59,7 @@ final class SonioxTTSTextChunkerTests: XCTestCase {
 
     func testOrder_IsPreservedWhenTheChunksAreJoined() {
         let text = String(repeating: "Alpha bravo charlie delta. ", count: 500)
-        let chunks = SonioxTTSTextChunker.chunks(text)
+        let chunks = TTSTextChunker.chunks(text)
 
         XCTAssertEqual(
             chunks.joined(),
@@ -72,7 +72,7 @@ final class SonioxTTSTextChunkerTests: XCTestCase {
         // and no word gap exists, so the split falls on a hard boundary.
         let family = "👨‍👩‍👧‍👦"
         let text = String(repeating: family, count: 20)
-        let chunks = SonioxTTSTextChunker.chunks(text, maximumCharacters: 3)
+        let chunks = TTSTextChunker.chunks(text, maximumCharacters: 3)
 
         XCTAssertEqual(chunks.joined(), text)
         XCTAssertTrue(chunks.allSatisfy { $0.count <= 3 })
@@ -85,14 +85,14 @@ final class SonioxTTSTextChunkerTests: XCTestCase {
         // "e" plus a combining acute accent is a single grapheme cluster.
         let accented = "e\u{0301}"
         let text = String(repeating: accented, count: 12)
-        let chunks = SonioxTTSTextChunker.chunks(text, maximumCharacters: 5)
+        let chunks = TTSTextChunker.chunks(text, maximumCharacters: 5)
 
         XCTAssertEqual(chunks.joined(), text)
         XCTAssertTrue(chunks.allSatisfy { $0.unicodeScalars.first != "\u{0301}" })
     }
 
     func testWordLongerThanTheBudget_IsCutAtTheBudget() {
-        let chunks = SonioxTTSTextChunker.chunks(
+        let chunks = TTSTextChunker.chunks(
             String(repeating: "a", count: 25),
             maximumCharacters: 10
         )
@@ -101,6 +101,6 @@ final class SonioxTTSTextChunkerTests: XCTestCase {
     }
 
     func testZeroBudget_ProducesNoRequestsRatherThanLooping() {
-        XCTAssertTrue(SonioxTTSTextChunker.chunks("Anything", maximumCharacters: 0).isEmpty)
+        XCTAssertTrue(TTSTextChunker.chunks("Anything", maximumCharacters: 0).isEmpty)
     }
 }

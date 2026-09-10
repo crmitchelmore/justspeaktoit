@@ -53,6 +53,19 @@ extension SettingsView {
         withAnimation { proxy.scrollTo(target, anchor: .top) }
         environment.apiKeysScrollTarget = nil
       }
+      // Balances are read from the same Keychain the cards write to. The work
+      // is cancelled with the view, and a failure only changes what the balance
+      // line says — the rest of the screen is unaffected.
+      .task {
+        let secureStorage = environment.secureStorage
+        providerBalances.configure { identifier in
+          try? await secureStorage.secret(identifier: identifier)
+        }
+        providerBalances.refreshAll(
+          storedCredentialIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
+        )
+      }
+      .onDisappear { providerBalances.cancelAll() }
     }
   }
 
@@ -142,6 +155,7 @@ extension SettingsView {
         isValidateDisabled: isValidatingKey,
         isRemoveDisabled: isValidatingKey,
         validationState: apiKeyValidationState,
+        credentialIdentifier: openRouterKeyIdentifier,
         tooltip: "Securely store and validate the OpenRouter key Speak uses for advanced models.",
         saveButtonTitle: isOpenRouterKeyStored ? "Replace Key" : "Save Key",
         saveTooltip: "Store this OpenRouter key safely in your macOS Keychain for Speak to use when needed.",
@@ -191,6 +205,7 @@ extension SettingsView {
       isValidateDisabled: validateDisabled,
       isRemoveDisabled: removeDisabled,
       validationState: validationState,
+      credentialIdentifier: provider.apiKeyIdentifier,
       tooltip: "Manage your \(provider.displayName) API key securely without leaving Speak.",
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
       saveTooltip: "Securely store your \(provider.displayName) key so Speak can contact the service when needed.",
@@ -222,6 +237,11 @@ extension SettingsView {
       case .deepgram: return .brandAccentWarm
       case .soniox: return .brandLagoon
       case .cartesia: return .purple
+      case .groq: return .orange
+      case .gemini: return .blue
+      case .mistral: return .indigo
+      case .speechmatics: return .cyan
+      case .xai: return .black
       case .system: return .gray
       }
     }()
@@ -234,6 +254,11 @@ extension SettingsView {
       case .deepgram: return "bolt.circle"
       case .soniox: return "globe"
       case .cartesia: return "waveform.and.person.filled"
+      case .groq: return "bolt.horizontal.circle"
+      case .gemini: return "sparkles"
+      case .mistral: return "waveform.circle"
+      case .speechmatics: return "waveform.and.magnifyingglass"
+      case .xai: return "waveform.badge.mic"
       case .system: return "speaker.wave.2"
       }
     }()
@@ -246,6 +271,11 @@ extension SettingsView {
       case .deepgram: return "https://deepgram.com"
       case .soniox: return "https://soniox.com"
       case .cartesia: return "https://cartesia.ai"
+      case .groq: return "https://console.groq.com"
+      case .gemini: return "https://aistudio.google.com/apikey"
+      case .mistral: return "https://console.mistral.ai"
+      case .speechmatics: return "https://www.speechmatics.com"
+      case .xai: return "https://console.x.ai"
       case .system: return ""
       }
     }()
@@ -262,6 +292,22 @@ extension SettingsView {
       case .cartesia:
         return "Stored securely in your macOS Keychain. Used for Cartesia Ink transcription and for "
           + "Cartesia Sonic 3.6 voice output."
+      case .groq:
+        return "Stored securely in your macOS Keychain. Used for Groq Whisper transcription and for "
+          + "Orpheus voice output. Orpheus also needs your Groq organisation to accept the model "
+          + "terms in the console; a saved key alone does not grant access."
+      case .gemini:
+        return "Stored securely in your macOS Keychain. Used for Gemini transcription and for "
+          + "Gemini voice output, billed directly by Google rather than through OpenRouter."
+      case .mistral:
+        return "Stored securely in your macOS Keychain. Used for Mistral Voxtral transcription and "
+          + "for Voxtral voice output. Mistral publishes no preset voices, so the picker loads the "
+          + "voices your account can use once this key is saved."
+      case .speechmatics:
+        return "Stored securely in your macOS Keychain. Used for Speechmatics transcription and for "
+          + "Speechmatics voice output, which the vendor still labels a preview. During that "
+          + "preview Speechmatics stores the text you send for voice output and the audio it "
+          + "generates, to improve their service."
       default:
         return "Stored securely in your macOS Keychain. Used only for "
           + "\(provider.displayName) text-to-speech voice synthesis."
@@ -289,6 +335,7 @@ extension SettingsView {
         isValidateDisabled: validateDisabled,
         isRemoveDisabled: removeDisabled,
         validationState: validationState,
+        credentialIdentifier: provider.apiKeyIdentifier,
         tooltip: "Manage your ElevenLabs API key. One key covers both voice synthesis (TTS) "
           + "and Scribe transcription (STT).",
         saveButtonTitle: isStored ? "Replace Key" : "Save Key",
@@ -326,6 +373,11 @@ extension SettingsView {
       isValidateDisabled: validateDisabled,
       isRemoveDisabled: removeDisabled,
       validationState: validationState,
+      credentialIdentifier: provider.apiKeyIdentifier,
+      // A provider that does not share its transcription credential already
+      // has a transcription card on the same Keychain item, and that card
+      // owns the account balance.
+      presentsAccountBalance: provider.sharesTranscriptionCredential,
       tooltip: "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
       saveTooltip: "Securely store your \(provider.displayName) key for voice synthesis.",
@@ -357,6 +409,8 @@ extension SettingsView {
     isValidateDisabled: Bool,
     isRemoveDisabled: Bool,
     validationState: ValidationViewState,
+    credentialIdentifier: String,
+    presentsAccountBalance: Bool = true,
     tooltip: String,
     saveButtonTitle: String,
     saveTooltip: String,
@@ -384,6 +438,8 @@ extension SettingsView {
       isValidateDisabled: isValidateDisabled,
       isRemoveDisabled: isRemoveDisabled,
       validationState: validationState,
+      credentialIdentifier: credentialIdentifier,
+      presentsAccountBalance: presentsAccountBalance,
       saveButtonTitle: saveButtonTitle,
       saveTooltip: saveTooltip,
       validateButtonTitle: validateButtonTitle,
@@ -427,9 +483,23 @@ extension SettingsView {
         .lineLimit(2)
         .speakTooltip(configuration.descriptionText)
 
+      providerBalanceView(configuration)
+
       validationStatusView(for: configuration.validationState)
       validationDebugDetails(for: configuration.validationState)
     }
+  }
+
+  /// The account balance beside the key. It never gates the card: a billing
+  /// endpoint that fails renders a reason and leaves everything else working.
+  @ViewBuilder
+  private func providerBalanceView(_ configuration: APIKeyCardConfiguration) -> some View {
+    ProviderBalanceView(
+      credentialIdentifier: configuration.credentialIdentifier,
+      isKeyStored: configuration.isStored,
+      presentsAccountBalance: configuration.presentsAccountBalance,
+      store: providerBalances
+    )
   }
 
   private func compactAPIKeyStatus(_ configuration: APIKeyCardConfiguration) -> some View {
@@ -546,6 +616,8 @@ extension SettingsView {
         regularAPIKeyValidateButton(configuration)
         regularAPIKeyRemoveButton(configuration)
       }
+
+      providerBalanceView(configuration)
 
       validationStatusView(for: configuration.validationState)
       validationDebugDetails(for: configuration.validationState)
@@ -813,6 +885,7 @@ extension SettingsView {
           await MainActor.run {
             providerAPIKeys[provider.id] = ""
             providerValidationStates[provider.id] = .finished(result)
+            refreshBalance(forCredentialIdentifier: provider.apiKeyIdentifier)
           }
         } catch {
           let failure = APIKeyValidationResult.failure(
@@ -899,6 +972,7 @@ extension SettingsView {
             invalidateSharedTranscriptionCache(for: provider)
             ttsProviderAPIKeys[provider.rawValue] = ""
             ttsProviderValidationStates[provider.rawValue] = .finished(result)
+            refreshBalance(forCredentialIdentifier: provider.apiKeyIdentifier)
           }
         } catch {
           let failure = APIKeyValidationResult.failure(
@@ -944,6 +1018,13 @@ extension SettingsView {
         ttsProviderValidationStates[provider.rawValue] = .finished(result)
       }
     }
+  }
+
+  /// Re-reads the account balance after its credential changes, so a replaced
+  /// key never leaves the previous account's figure on screen.
+  private func refreshBalance(forCredentialIdentifier identifier: String) {
+    guard let account = ProviderBalanceDirectory.account(forCredentialIdentifier: identifier) else { return }
+    providerBalances.refresh(accountID: account.id)
   }
 
   /// Drops cached live controllers when this provider's key also powers

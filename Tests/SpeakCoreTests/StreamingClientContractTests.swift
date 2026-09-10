@@ -402,6 +402,47 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         XCTAssertEqual(SonioxLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
         XCTAssertEqual(AssemblyAILiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
         XCTAssertEqual(ModulateLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+        XCTAssertEqual(XAISpeechToTextLiveClient(apiKey: "k").finalShape, .standaloneSegments)
+        XCTAssertEqual(SpeechmaticsLiveClient(apiKey: "k").finalShape, .standaloneSegments)
+        XCTAssertEqual(RevAILiveClient(accessToken: "k").finalShape, .standaloneSegments)
+        // Voxtral Realtime emits no per-utterance final: `transcription.done`
+        // restates the whole session.
+        XCTAssertEqual(MistralVoxtralLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+    }
+
+    /// Every catalogued model must have a transport. A model the factory
+    /// cannot build is one the picker offers and the app then refuses to run,
+    /// which is exactly the state Speechmatics was in on iOS.
+    func testEveryCatalogueRoute_hasASharedClientOrANativeTranscriber() {
+        for route in LiveTranscriptionRouting.allRoutes {
+            let client = LiveTranscriptionClientFactory.makeClient(
+                for: route, apiKey: "k", language: nil
+            )
+            switch route.provider {
+            case .apple, .openai:
+                // Driven by a platform-native transcriber on both platforms.
+                XCTAssertNil(client, "\(route.modelID) should have no shared client")
+            default:
+                XCTAssertNotNil(client, "\(route.modelID) has no transport")
+            }
+        }
+    }
+
+    /// The providers added alongside the shared Speechmatics client all commit
+    /// their tail on stop, so none of them can truncate a recording.
+    func testTheNewlySharedProvidersAllFinaliseGracefully() {
+        let clients: [StreamingTranscriptionClient] = [
+            SpeechmaticsLiveClient(apiKey: "k"),
+            RevAILiveClient(accessToken: "k"),
+            MistralVoxtralLiveClient(apiKey: "k")
+        ]
+        for client in clients {
+            guard let finalizing = client as? FinalizingStreamingTranscriptionClient else {
+                XCTFail("\(type(of: client)) must finalise gracefully")
+                continue
+            }
+            XCTAssertTrue(finalizing.finishFlushesBufferedAudio)
+        }
     }
 
     // MARK: - Fixtures

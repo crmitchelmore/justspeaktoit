@@ -30,10 +30,9 @@ public struct CartesiaBatchClient: Sendable {
             throw CancellationError()
         }
         try Task.checkCancellation()
-        guard let http = response as? HTTPURLResponse else { throw TranscriptionProviderError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            throw TranscriptionProviderError.httpError(http.statusCode, String(data: data, encoding: .utf8) ?? "")
-        }
+        // Shared with the Gladia and Speechmatics batch clients so a rejected
+        // key or an exhausted quota is named rather than shown as a status code.
+        try BatchTranscriptionJob.validate(response, data: data, provider: "Cartesia")
         return try Self.decode(data)
     }
 

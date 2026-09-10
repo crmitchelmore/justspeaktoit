@@ -1,17 +1,6 @@
 import Foundation
 import SpeakCore
 
-enum XAITranscriptionProviderError: LocalizedError {
-  case batchNotSupported
-
-  var errorDescription: String? {
-    switch self {
-    case .batchNotSupported:
-      return "xAI Grok Voice is currently available as live streaming transcription only."
-    }
-  }
-}
-
 struct XAITranscriptionProvider: TranscriptionProvider {
   let metadata = TranscriptionProviderMetadata(
     id: "xai",
@@ -28,14 +17,24 @@ struct XAITranscriptionProvider: TranscriptionProvider {
     self.session = session
   }
 
+  /// File transcription goes to xAI's dedicated speech-to-text endpoint, which
+  /// is a different service from the Grok Voice realtime route: Grok Voice has
+  /// no file mode, so a request naming it belongs to the streaming picker.
   func transcribeFile(
     at url: URL,
     apiKey: String,
     model: String,
     language: String?
   ) async throws -> TranscriptionResult {
-    _ = (url, apiKey, model, language)
-    throw XAITranscriptionProviderError.batchNotSupported
+    let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard model == XAISpeechToText.batchCatalogID else {
+      throw XAITranscriptionProviderError.batchNotSupported(model)
+    }
+    return try await XAIBatchTranscriptionClient(session: session).transcribeFile(
+      at: url,
+      apiKey: apiKey,
+      language: language
+    )
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
@@ -71,7 +70,25 @@ struct XAITranscriptionProvider: TranscriptionProvider {
     true
   }
 
+  /// Both catalogues: the Grok Voice streaming route and the dedicated
+  /// speech-to-text pair. The registry matches a model to its provider through
+  /// this list, so a batch identifier that is missing here would fall through
+  /// to OpenRouter with the wrong credential.
   func supportedModels() -> [ModelCatalog.Option] {
     ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
+      + ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
+  }
+}
+
+enum XAITranscriptionProviderError: LocalizedError {
+  case batchNotSupported(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .batchNotSupported(let model):
+      return "\(ModelCatalog.transcriptionDisplayName(for: model, isBatch: false)) has no file "
+        + "transcription mode. Choose xAI Speech-to-Text for recordings, or keep this model for "
+        + "live streaming."
+    }
   }
 }

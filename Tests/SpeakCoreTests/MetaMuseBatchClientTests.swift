@@ -229,7 +229,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
 
     private func makeTemporaryWAV(sampleRate: Int = 16_000) throws -> URL {
         let pcm = Data(repeating: 0, count: sampleRate / 5)
-        let data = MetaMuseAudioPreparer.wavData(pcm: pcm, sampleRate: sampleRate)
+        let data = try XCTUnwrap(MetaMuseAudioPreparer.wavData(pcm: pcm, sampleRate: sampleRate))
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("meta-muse-\(UUID().uuidString).wav")
         try data.write(to: url, options: .atomic)

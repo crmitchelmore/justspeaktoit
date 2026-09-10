@@ -12,6 +12,11 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   case deepgram
   case soniox
   case cartesia
+  case groq
+  case gemini = "google"
+  case mistral
+  case speechmatics
+  case xai
   case system
 
   var id: String { rawValue }
@@ -25,6 +30,11 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .deepgram: return "Deepgram"
     case .soniox: return "Soniox"
     case .cartesia: return "Cartesia Sonic"
+    case .groq: return "Groq Orpheus"
+    case .gemini: return GeminiTranscribeModels.providerDisplayName
+    case .mistral: return "Mistral Voxtral"
+    case .speechmatics: return "Speechmatics"
+    case .xai: return "xAI"
     case .system: return "macOS System"
     }
   }
@@ -47,6 +57,16 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     case .soniox: return "soniox.apiKey"
     // One Cartesia key covers Ink transcription and Sonic speech generation.
     case .cartesia: return "cartesia.apiKey"
+    // These four each use one account key for transcription and for speech
+    // generation, so they reuse the identifier the transcription provider
+    // already writes.
+    case .groq: return "groq.apiKey"
+    case .gemini: return "google.apiKey"
+    case .mistral: return "mistral.apiKey"
+    case .speechmatics: return "speechmatics.apiKey"
+    // One xAI key covers Grok Voice transcription, dedicated speech to text
+    // and speech generation.
+    case .xai: return "xai.apiKey"
     case .system: return ""
     }
   }
@@ -57,11 +77,33 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
   /// separate transcription entry writing the same Keychain item.
   var sharesTranscriptionCredential: Bool {
     switch self {
-    case .elevenlabs, .soniox, .cartesia, .openrouter: return true
+    case .elevenlabs, .soniox, .cartesia, .openrouter,
+         .groq, .gemini, .mistral, .speechmatics, .xai: return true
     case .openai, .azure, .deepgram, .system: return false
     }
   }
 
+  /// Every prefix `from(voiceID:)` routes, in the same order.
+  ///
+  /// Providers whose voices exist only in an account listing (Mistral) have no
+  /// offline catalogue entry to validate a stored identifier against, so this
+  /// is the single list callers test a dynamic identifier with. Keeping it
+  /// beside `from(voiceID:)` stops the two drifting apart.
+  static let knownVoiceIDPrefixes: [String] = [
+    "elevenlabs/", "openai/", "openrouter/", "azure/", "deepgram/", "soniox/",
+    CartesiaTTSCatalog.voiceIDPrefix,
+    GroqTTSCatalog.voiceIDPrefix,
+    GeminiTTSCatalog.voiceIDPrefix,
+    MistralTTSCatalog.voiceIDPrefix,
+    SpeechmaticsTTSCatalog.voiceIDPrefix,
+    // xAI hosts more voices than it documents, so an account voice the
+    // catalogue cannot name must still survive validation.
+    XAITTSCatalog.voiceIDPrefix,
+    "system/"
+  ]
+
+  // One provider per prefix: the branch count is the provider count.
+  // swiftlint:disable:next cyclomatic_complexity
   static func from(voiceID: String) -> TTSProvider {
     if voiceID.hasPrefix("elevenlabs/") { return .elevenlabs }
     if voiceID.hasPrefix("openai/") { return .openai }
@@ -70,6 +112,11 @@ enum TTSProvider: String, Codable, CaseIterable, Identifiable {
     if voiceID.hasPrefix("deepgram/") { return .deepgram }
     if voiceID.hasPrefix("soniox/") { return .soniox }
     if voiceID.hasPrefix(CartesiaTTSCatalog.voiceIDPrefix) { return .cartesia }
+    if voiceID.hasPrefix(GroqTTSCatalog.voiceIDPrefix) { return .groq }
+    if voiceID.hasPrefix(GeminiTTSCatalog.voiceIDPrefix) { return .gemini }
+    if voiceID.hasPrefix(MistralTTSCatalog.voiceIDPrefix) { return .mistral }
+    if voiceID.hasPrefix(SpeechmaticsTTSCatalog.voiceIDPrefix) { return .speechmatics }
+    if voiceID.hasPrefix(XAITTSCatalog.voiceIDPrefix) { return .xai }
     if voiceID.hasPrefix("system/") { return .system }
     return .system
   }
@@ -215,6 +262,11 @@ struct TTSResult {
 enum TTSError: LocalizedError {
   case apiKeyMissing(TTSProvider)
   case providerNotAvailable(TTSProvider)
+  /// The credential is good but the account cannot reach the model yet — a
+  /// terms acceptance, an organisation permission or a plan that excludes it.
+  /// Distinct from a bad key, because sending the user to Settings would not
+  /// help.
+  case providerAccessRequired(TTSProvider, reason: String)
   case invalidVoice(String)
   case synthesisFailure(String)
   case audioPlaybackFailure
@@ -228,6 +280,8 @@ enum TTSError: LocalizedError {
       return "API key missing for \(provider.displayName)"
     case .providerNotAvailable(let provider):
       return "\(provider.displayName) is not available"
+    case .providerAccessRequired(let provider, let reason):
+      return "\(provider.displayName) is not available on this account: \(reason)"
     case .invalidVoice(let voice):
       return "Invalid voice: \(voice)"
     case .synthesisFailure(let message):
@@ -255,6 +309,36 @@ protocol TextToSpeechClient {
 
   func listVoices() async throws -> [TTSVoice]
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult
+}
+
+/// A client that can hand back audio while the rest is still being generated.
+///
+/// Opt-in: `TextToSpeechManager` uses this path only when the client conforms
+/// *and* auto-play is on, so a provider with no streaming route keeps the
+/// existing synthesize-then-play behaviour untouched. The returned `TTSResult`
+/// is the same as the batch path's — one complete file — so history, cost, the
+/// recordings directory and replay need no special case.
+protocol ProgressiveTextToSpeechClient: TextToSpeechClient {
+  /// Linear PCM sample rate the chunks passed to `onAudioChunk` carry.
+  var progressiveSampleRate: Int { get }
+
+  /// Synthesizes `text`, calling `onAudioChunk` with headerless little-endian
+  /// 16-bit mono PCM as each chunk arrives.
+  ///
+  /// The callback is awaited and may throw. Awaiting lets the consumer hold
+  /// the provider back when it is producing audio faster than it can be
+  /// played; throwing makes a playback failure end the stream and reach the
+  /// synthesis error path, instead of a broken utterance being reported as a
+  /// successful one.
+  ///
+  /// Cancelling the calling task must stop the stream and discard the partial
+  /// audio.
+  func synthesizeProgressively(
+    text: String,
+    voice: String,
+    settings: TTSSettings,
+    onAudioChunk: @escaping @Sendable (Data) async throws -> Void
+  ) async throws -> TTSResult
 }
 
 // The provider lists form one static catalogue and are easier to audit as a single type.
@@ -516,10 +600,67 @@ struct VoiceCatalog {
     )
   }
 
+  // Both platform pickers project from the canonical SpeakCore Groq catalogue.
+  static let groqVoices: [TTSVoice] = GroqTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .groq,
+      traits: [voice.gender == .female ? .female : .male, .lowLatency],
+      previewURL: nil
+    )
+  }
+
+  // Both platform pickers project from the canonical SpeakCore Gemini catalogue.
+  static let geminiVoices: [TTSVoice] = GeminiTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .gemini,
+      traits: [.neutral, .multilingual],
+      previewURL: nil
+    )
+  }
+
+  // Both platform pickers project from the canonical SpeakCore Speechmatics
+  // catalogue.
+  static let speechmaticsVoices: [TTSVoice] = SpeechmaticsTTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .speechmatics,
+      traits: [
+        voice.gender == .female ? .female : .male,
+        voice.accent == .british ? .british : .american,
+        .lowLatency
+      ],
+      previewURL: nil
+    )
+  }
+
+  // Both platform pickers project from the canonical SpeakCore xAI catalogue.
+  static let xaiVoices: [TTSVoice] = XAITTSCatalog.voices.map { voice in
+    TTSVoice(
+      id: voice.providerVoiceID,
+      name: voice.displayName,
+      provider: .xai,
+      traits: [.neutral, .multilingual, .lowLatency],
+      previewURL: nil
+    )
+  }
+
+  /// Mistral publishes no preset voice identifiers, so there is no offline
+  /// list to fall back on. `MistralTTSClient.listVoices()` fills the picker
+  /// from the account's own listing once a key is stored.
+  static let mistralVoices: [TTSVoice] = []
+
   static let allVoices: [TTSVoice] =
     elevenlabsVoices + openaiVoices + azureVoices + deepgramVoices + sonioxVoices
-      + cartesiaVoices + systemVoices
+      + cartesiaVoices + groqVoices + geminiVoices + speechmaticsVoices + xaiVoices
+      + systemVoices
 
+  // One branch per provider; the catalogue is the whole body.
+  // swiftlint:disable:next cyclomatic_complexity
   static func voices(for provider: TTSProvider) -> [TTSVoice] {
     switch provider {
     case .elevenlabs: return elevenlabsVoices
@@ -529,6 +670,11 @@ struct VoiceCatalog {
     case .deepgram: return deepgramVoices
     case .soniox: return sonioxVoices
     case .cartesia: return cartesiaVoices
+    case .groq: return groqVoices
+    case .gemini: return geminiVoices
+    case .mistral: return mistralVoices
+    case .speechmatics: return speechmaticsVoices
+    case .xai: return xaiVoices
     case .system: return systemVoices
     }
   }
@@ -544,7 +690,24 @@ struct VoiceCatalog {
 
     // Try migrating legacy voice IDs
     let migratedID = migrateLegacyVoiceID(id)
-    return allVoices.first { $0.id == migratedID }
+    if let voice = allVoices.first(where: { $0.id == migratedID }) {
+      return voice
+    }
+    return accountListedVoice(forID: id)
+  }
+
+  /// A stand-in for a voice that only exists in a provider account listing.
+  ///
+  /// Mistral publishes no presets, so a saved Voxtral selection has no
+  /// catalogue entry. Without this the picker silently drops the user's own
+  /// choice whenever the listing is unavailable — offline, or between launches
+  /// before the account list has loaded.
+  static func accountListedVoice(forID id: String) -> TTSVoice? {
+    let prefix = MistralTTSCatalog.voiceIDPrefix
+    guard id.hasPrefix(prefix) else { return nil }
+    let name = String(id.dropFirst(prefix.count))
+    guard !name.isEmpty else { return nil }
+    return TTSVoice(id: id, name: name, provider: .mistral, traits: [], previewURL: nil)
   }
 
   // Migrate old voice IDs to new ones

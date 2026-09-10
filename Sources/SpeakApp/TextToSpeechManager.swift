@@ -1,3 +1,6 @@
+// The manager owns synthesis, playback control and the usage ledger for every
+// provider; the streaming player it drives lives in TextToSpeech/TTSProgressivePlayer.swift.
+// swiftlint:disable file_length
 import Foundation
 import AVFoundation
 import SpeakCore
@@ -14,12 +17,19 @@ final class TextToSpeechManager: ObservableObject {
   // Usage tracking
   @Published private(set) var usageHistory: [TTSResult] = []
 
+  /// The runtime voice listing: the last good result from each provider and
+  /// the providers whose listing failed. Mistral publishes no offline
+  /// catalogue, so a suppressed listing error would make a keyed provider
+  /// vanish from the picker with nothing to explain or retry.
+  @Published var voiceListing = TTSVoiceListingState()
+
   private let appSettings: AppSettings
   private let secureStorage: SecureAppStorage
   private let pronunciationManager: PronunciationManager?
   private let recordingSaver: (@MainActor (TTSResult) async throws -> Void)?
   let clients: [TTSProvider: TextToSpeechClient]
   private var audioPlayer: AVAudioPlayer?
+  private let progressivePlayer = TTSProgressivePlayer()
   private var synthesisTask: Task<TTSResult, Error>?
   private var playbackTask: Task<Void, Never>?
   private var synthesisID = UUID()
@@ -82,7 +92,20 @@ final class TextToSpeechManager: ObservableObject {
     let settings = synthesisSettings(useSSML: useSSML)
     let processedText = applyPronunciationProcessing(text: text, provider: provider, useSSML: settings.useSSML)
     synthesisProgress = 0.5
-    let task = Task { try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings) }
+    // A provider that can stream speaks while the rest is still generating.
+    // Everything after this point is identical either way, because the
+    // progressive task answers with the same complete result.
+    let progressive = appSettings.ttsAutoPlay ? client as? any ProgressiveTextToSpeechClient : nil
+    let player = progressivePlayer
+    let task = progressive.map { streaming in
+      Task { @MainActor in
+        stopPlayback()
+        isPlaying = true
+        return try await player.speak(
+          text: processedText, voice: effectiveVoice, settings: settings, using: streaming
+        )
+      }
+    } ?? Task { try await client.synthesize(text: processedText, voice: effectiveVoice, settings: settings) }
     synthesisTask = task
     let result: TTSResult
     do {
@@ -92,14 +115,22 @@ final class TextToSpeechManager: ObservableObject {
         task.cancel()
       }
     } catch {
+      // Only the request that still owns the player may tear it down. A
+      // replacement utterance has already prepared playback on the same
+      // player by the time a superseded request's cleanup runs, and stopping
+      // it here would silence the newer one.
+      if progressive != nil, synthesisID == requestID { stopPlayback() }
       if task.isCancelled || Task.isCancelled { throw CancellationError() }
       throw error
     }
+    if progressive != nil, synthesisID == requestID { isPlaying = false }
     guard synthesisID == requestID, !Task.isCancelled, !task.isCancelled else {
-      if result.provider == .openrouter { try? FileManager.default.removeItem(at: result.audioURL) }
+      // The result was never published — not played, not saved, not in
+      // history — so its file belongs to nobody whatever the provider is.
+      try? FileManager.default.removeItem(at: result.audioURL)
       throw CancellationError()
     }
-    stopPlayback()
+    if progressive == nil { stopPlayback() }
     openRouterOutput.replace(with: result)
     lastResult = result
     usageHistory.append(result)
@@ -107,7 +138,7 @@ final class TextToSpeechManager: ObservableObject {
     if appSettings.ttsSaveToDirectory { try? await saveToRecordingsDirectory(result: result) }
     try ensureSynthesisActive(task: task, requestID: requestID)
     synthesisProgress = 1
-    if appSettings.ttsAutoPlay { try await play(url: result.audioURL) }
+    if appSettings.ttsAutoPlay, progressive == nil { try await play(url: result.audioURL) }
     try ensureSynthesisActive(task: task, requestID: requestID)
     return result
   }
@@ -154,16 +185,27 @@ final class TextToSpeechManager: ObservableObject {
     playbackTask = nil
     audioPlayer?.stop()
     audioPlayer = nil
+    progressivePlayer.stop()
     isPlaying = false
   }
 
   func pause() {
+    if progressivePlayer.isActive {
+      progressivePlayer.pause()
+      isPlaying = false
+      return
+    }
     playbackTask?.cancel()
     audioPlayer?.pause()
     isPlaying = false
   }
 
   func resume() {
+    if progressivePlayer.isActive {
+      progressivePlayer.resume()
+      isPlaying = true
+      return
+    }
     guard let audioPlayer else { return }
     isPlaying = audioPlayer.play()
     if isPlaying { monitorPlayback(audioPlayer) }
@@ -189,20 +231,6 @@ final class TextToSpeechManager: ObservableObject {
       return true
     }
     return false
-  }
-
-  func availableVoices() async -> [TTSVoice] {
-    var voices: [TTSVoice] = []
-
-    for (provider, client) in clients {
-      if await hasAPIKey(for: provider) || !provider.requiresAPIKey {
-        if let providerVoices = try? await client.listVoices() {
-          voices.append(contentsOf: providerVoices)
-        }
-      }
-    }
-
-    return voices.isEmpty ? VoiceCatalog.systemVoices : voices
   }
 
     func estimatedCost(text: String, voice: String? = nil) -> Decimal? {
@@ -284,11 +312,13 @@ extension TextToSpeechManager {
       return migratedID
     }
 
-    // Validate the voice ID. Some providers return dynamic voice IDs (not in VoiceCatalog).
-    let knownPrefixes = [
-      "elevenlabs/", "openai/", "azure/", "deepgram/", "soniox/", "cartesia/", "openrouter/", "system/"
-    ]
-    if VoiceCatalog.voice(forID: voiceID) != nil || knownPrefixes.contains(where: { voiceID.hasPrefix($0) }) {
+    // Validate the voice ID. Some providers return dynamic voice IDs (not in
+    // VoiceCatalog): ElevenLabs and OpenRouter always, Mistral for every voice
+    // it has, since Mistral publishes no presets. The routing prefix list is
+    // the one `TTSProvider.from(voiceID:)` dispatches on, so anything that
+    // routes to a real provider also survives validation.
+    if VoiceCatalog.voice(forID: voiceID) != nil
+      || TTSProvider.knownVoiceIDPrefixes.contains(where: { voiceID.hasPrefix($0) }) {
       return voiceID
     }
 

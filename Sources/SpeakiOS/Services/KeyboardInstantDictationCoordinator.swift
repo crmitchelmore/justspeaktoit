@@ -34,6 +34,13 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
     private var startTask: Task<Void, Never>?
     private var activeRequestID: UUID?
     private var activeProfile: KeyboardDictationProfileOption?
+    /// The bounds this readiness session runs to (issue #995). Every rule —
+    /// the window, the resume back-off and the attempt budget that stops an
+    /// auto-resume looping — lives in SpeakCore and is proved on the host.
+    private var bounds = InstantDictationReadinessMonitor()
+    /// When the readiness session the bounds belong to started. Cleared with
+    /// the session, so a retired session's tick can never act.
+    private var boundsStartedAt: Date?
 
     private var finalisingRequestIDs: Set<UUID> = []
 
@@ -128,6 +135,12 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
            let active = sessionStore.activeSession(clearingStaleRecord: true) {
             sessionStore.setEnabled(true)
             session = active
+            // A process that was relaunched into a live session still needs
+            // the window measured from when that session actually started.
+            if boundsStartedAt == nil {
+                armReadinessBounds(startedAt: active.startedAt)
+                startHeartbeat()
+            }
             return
         }
 
@@ -161,6 +174,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                 return
             }
             session = started
+            armReadinessBounds(startedAt: started.startedAt)
             startHeartbeat()
             handleRequestChange()
         } catch {
@@ -192,28 +206,110 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         if disable {
             sessionStore.setEnabled(false)
         }
+        bounds.retire()
+        boundsStartedAt = nil
         session = nil
     }
 
+    private func armReadinessBounds(startedAt: Date) {
+        bounds = InstantDictationReadinessMonitor()
+        boundsStartedAt = startedAt
+        sessionStore.recordEndReason(nil)
+    }
+
+    /// The liveness loop, and the only place readiness heals or expires.
+    ///
+    /// It was already ticking once a second and already noticing that the
+    /// engine had died; what it did about it was give up. Now the same tick
+    /// feeds `InstantDictationReadinessMonitor`, which decides whether to try
+    /// again, how long to wait first, and when to stop trying (issue #995).
     private func startHeartbeat() {
         heartbeatTask?.cancel()
         heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 guard let updated = self.sessionStore.heartbeat() else {
-                    self.errorMessage = "Instant Dictation disconnected because its session state was unavailable."
-                    self.endSession(disable: false)
-                    return
-                }
-                guard updated.phase == .recording || self.readinessAudio.isRunning else {
-                    self.errorMessage = "Instant Dictation disconnected after an audio interruption."
-                    self.endSession(disable: false)
+                    self.finishReadiness(.storeUnavailable)
                     return
                 }
                 self.session = updated
+                if await self.applyReadinessBounds(phase: updated.phase) { return }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    /// - Returns: `true` when readiness ended and the loop must stop.
+    private func applyReadinessBounds(
+        phase: KeyboardInstantDictationSession.Phase
+    ) async -> Bool {
+        guard let startedAt = boundsStartedAt else { return false }
+        let health: InstantDictationReadinessHealth
+        if phase == .recording {
+            // A dictation owns the microphone. The readiness engine is stopped
+            // on purpose during one, so this is health, not failure — and the
+            // window never expires a session mid-dictation.
+            health = .recording
+        } else {
+            health = readinessAudio.isRunning ? .running : .stopped
+        }
+        let elapsed = Date().timeIntervalSince(startedAt)
+        switch bounds.observe(health, atSeconds: elapsed) {
+        case .idle:
+            return false
+        case .end(let reason):
+            finishReadiness(reason)
+            return true
+        case .resume(let delay, let attempt):
+            await resumeReadiness(afterSeconds: delay, attempt: attempt, startedAt: startedAt)
+            return false
+        }
+    }
+
+    /// Tries to restart the readiness engine after iOS took it away.
+    ///
+    /// The attempt is reported back to the monitor either way. A success does
+    /// not refund the attempt — only two unbroken minutes of health does — so a
+    /// session that dies every few seconds runs out of attempts rather than
+    /// resuming forever.
+    private func resumeReadiness(
+        afterSeconds delay: TimeInterval,
+        attempt: Int,
+        startedAt: Date
+    ) async {
+        SpeakLogger.transcription.info(
+            "Instant Dictation readiness: resume attempt \(attempt, privacy: .public)"
+        )
+        try? await Task.sleep(for: .seconds(delay))
+        guard !Task.isCancelled, boundsStartedAt == startedAt else { return }
+        // A dictation that began while this attempt was waiting owns the
+        // microphone now; taking it back would end their recording.
+        guard activeRequestID == nil, !recordingService.isRunning else { return }
+        var succeeded = true
+        do {
+            try readinessAudio.start()
+            session = sessionStore.heartbeat(phase: .ready)
+        } catch {
+            succeeded = false
+        }
+        bounds.noteResume(
+            succeeded: succeeded,
+            atSeconds: Date().timeIntervalSince(startedAt)
+        )
+    }
+
+    /// Ends readiness for a stated reason, leaving the user's preference on.
+    ///
+    /// The reason goes into the App Group as well as the app's own error
+    /// message: the keyboard is a separate process and never sees the latter,
+    /// so without the record it can only offer a generic reconnect prompt.
+    private func finishReadiness(_ reason: InstantDictationReadinessEndReason) {
+        errorMessage = reason.readinessMessage
+        SpeakLogger.transcription.info(
+            "Instant Dictation readiness ended: \(reason.rawValue, privacy: .public)"
+        )
+        endSession(disable: false)
+        sessionStore.recordEndReason(reason)
     }
 
     func handleRequestChange() {
@@ -375,8 +471,10 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
             try readinessAudio.start()
             session = sessionStore.heartbeat(phase: .ready)
         } catch {
-            errorMessage = "Instant Dictation disconnected because the microphone could not be reactivated."
-            endSession(disable: false)
+            // The same bounded outcome the liveness loop reaches, so a
+            // microphone that cannot be taken back after a dictation is
+            // reported the same way whichever path noticed it.
+            finishReadiness(.audioUnavailable)
         }
     }
 

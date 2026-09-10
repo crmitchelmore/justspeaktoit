@@ -123,8 +123,30 @@ final class CaptureStartFailureVisibilityTests: XCTestCase {
 
     func testEveryStartOutcomeReportsWhetherItStarted() {
         XCTAssertTrue(CaptureCommandRunner.StartOutcome.started.didStart)
-        XCTAssertFalse(CaptureCommandRunner.StartOutcome.failed(surfaced: true).didStart)
-        XCTAssertFalse(CaptureCommandRunner.StartOutcome.failed(surfaced: false).didStart)
+        XCTAssertFalse(CaptureCommandRunner.StartOutcome.cancelled.didStart)
+        XCTAssertFalse(
+            CaptureCommandRunner.StartOutcome.failed(.recordingFailed, surfaced: true).didStart
+        )
+        XCTAssertFalse(
+            CaptureCommandRunner.StartOutcome.failed(.modelUnavailable, surfaced: false).didStart
+        )
+    }
+
+    /// A failed start carries the reason, not just the fact: `dictate` hands it
+    /// to the caller's `x-error`, so a `model=` this device cannot honour must
+    /// not arrive as a generic `recordingFailed`.
+    func testAFailedStartCarriesTheReasonTheCallerWillBeGiven() {
+        let outcome = CaptureCommandRunner.StartOutcome.failed(.modelUnavailable, surfaced: true)
+        guard case .failed(let failure, let surfaced) = outcome else {
+            return XCTFail("Expected a failed outcome")
+        }
+        XCTAssertEqual(failure, .modelUnavailable)
+        XCTAssertTrue(surfaced)
+        XCTAssertNotEqual(
+            outcome,
+            .failed(.recordingFailed, surfaced: true),
+            "Two different reasons must not compare equal"
+        )
     }
 }
 #endif

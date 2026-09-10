@@ -30,6 +30,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Non-nil when the session silently fell back to on-device transcription
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
+    /// What the last completed capture actually did with the transcript
+    /// (issue #1008). Built from observed results, never from intentions, so
+    /// it is safe for any surface to render verbatim.
+    @Published public private(set) var lastCaptureReceipt: CaptureReceipt?
 
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
@@ -322,10 +326,58 @@ public final class TranscriptionRecordingService: ObservableObject {
             )
             : nil
 
+        // Offer the transcript to the keyboard *before* anything else acts on
+        // the destination: straight into the field when the keyboard is on
+        // screen right now, otherwise as a one-tap chip for late pickup
+        // (issues #1002, #1003). The offer that actually got written is what
+        // `.auto` routes on and what the receipt reports, so the decision can
+        // never disagree with the delivery. The keyboard hand-off passes `nil`
+        // because its result already travels the nonce-scoped record.
+        let keyboardOffer = keyboardDeliverySource.flatMap {
+            KeyboardDeliveryPublisher.publish(transcript: text, source: $0)
+        }
+
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
-        let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
-        await applyDestinationSideEffects(text: text, destination: resolvedDestination)
+        let requestedDestination: HardwareTriggerDestination = destination ?? .clipboard
+        let autoPlan = AutoDestinationPolicy.plan(
+            AutoDestinationPolicy.Inputs(
+                transcriptIsEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                keyboardTargetIsOpen: keyboardOffer?.mode == .targetedInsert,
+                keyboardOfferAvailable: keyboardDeliverySource != nil
+                    && KeyboardDeliveryStore.shared.isAvailable
+            )
+        )
+        let resolvedDestination = requestedDestination == .auto
+            ? Self.concreteDestination(for: autoPlan)
+            : requestedDestination
+        let clipboardWriteSucceeded = await applyDestinationSideEffects(
+            text: text,
+            destination: resolvedDestination
+        )
+
+        // The receipt is built from what every lane reported, never from what
+        // was attempted (issues #945, #952, #1008).
+        let receipt = CaptureReceiptBuilder.receipt(
+            for: CaptureReceiptBuilder.Outcome(
+                transcriptIsEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                preferredLane: requestedDestination == .auto ? autoPlan.preferredLane : .clipboard,
+                keyboardOfferWasTargeted: keyboardOffer?.mode == .targetedInsert,
+                keyboardOfferWasLatePickup: keyboardOffer?.mode == .latePickup,
+                clipboardWriteSucceeded: clipboardWriteSucceeded,
+                savedToHistory: historyItem != nil,
+                mac: iOSHistoryManager.shared.macLaneOutcome(for: historyItem)
+            )
+        )
+        lastCaptureReceipt = receipt
+
+        // The "Continue on Mac" pointer (issue #1006). It carries the History
+        // entry id, not the words — see `TranscriptHandoffActivity`.
+        TranscriptHandoffPublisher.publish(
+            entryID: historyItem?.id,
+            createdAt: historyItem?.createdAt ?? Date(),
+            wordCount: wordCount
+        )
 
         // Update shared state. Live writes are throttled, so commit the
         // complete transcript exactly once at stop.
@@ -335,8 +387,13 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
-        // Complete Live Activity with clipboard confirmation
-        completeRecordingActivity(duration: duration, primedMessage: primedActivityMessage)
+        // Complete the Live Activity with the receipt, so the row states what
+        // happened rather than a fixed outcome.
+        completeRecordingActivity(
+            duration: duration,
+            primedMessage: primedActivityMessage,
+            completionMessage: receipt.headline
+        )
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. The polished clipboard write must also survive
@@ -359,16 +416,6 @@ public final class TranscriptionRecordingService: ObservableObject {
             assertion.end()
         }
 
-        // Offer the transcript to the keyboard: straight into the field when
-        // it is on screen right now, otherwise as a one-tap chip for late
-        // pickup (issues #1002, #1003). Nothing above changes — the clipboard,
-        // History and Live Activity are untouched — so this can only add a
-        // delivery, never remove one. The keyboard hand-off passes `nil`
-        // because its result already travels the nonce-scoped record.
-        if let keyboardDeliverySource {
-            KeyboardDeliveryPublisher.publish(transcript: text, source: keyboardDeliverySource)
-        }
-
         // Clear per-session live state so a duplicate stop or a later fallback
         // path can never resurface this session's text.
         partialText = ""
@@ -379,12 +426,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         return result
     }
 
-    private func completeRecordingActivity(duration: Int, primedMessage: String) {
+    private func completeRecordingActivity(
+        duration: Int,
+        primedMessage: String,
+        completionMessage: String? = nil
+    ) {
         activityManager.completeActivity(
             finalWordCount: wordCount,
             duration: duration,
             keepPrimed: true,
-            primedMessage: primedMessage
+            primedMessage: primedMessage,
+            completionMessage: completionMessage
         )
     }
 
@@ -446,7 +498,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         lastSessionError = error
         Task { [weak self] in
             guard let self, self.isRunning else { return }
+            // An interruption must still honour the destination the user chose.
+            // Passing none resolved to `.clipboard` whatever it was set to, so
+            // a Siri stop or a mid-session failure quietly changed where the
+            // words went (issue #1008).
             await self.stopRecording(
+                destination: AppSettings.shared.hardwareTriggerDestination,
                 primedActivityMessage: "Stopped: \(error.localizedDescription)"
             )
         }
@@ -507,7 +564,22 @@ extension TranscriptionRecordingService {
             return canPostProcess ? polishingClipboardPlaceholder : transcript
         case .historyOnly:
             return nil
+        case .auto:
+            // `.auto` is mapped to a concrete destination by
+            // `concreteDestination(for:)` before any side effect runs; treating
+            // it as the clipboard here is a defensive default, never a path.
+            return transcript
         }
+    }
+
+    /// Turns an `.auto` plan into the concrete destination the existing
+    /// side-effect paths already understand (issue #1008). The keyboard lane
+    /// skips the pasteboard because the words are going into the field the
+    /// user was typing in; History still holds every capture either way.
+    static func concreteDestination(
+        for plan: AutoDestinationPolicy.Plan
+    ) -> HardwareTriggerDestination {
+        plan.writesClipboard ? .clipboard : .historyOnly
     }
 
     static func legacySharedTranscript(_ transcript: String, sharesCompletedTranscript: Bool) -> String? {
@@ -559,18 +631,24 @@ private extension TranscriptionRecordingService {
     /// Applies the destination's side-effects (clipboard write, shared state
     /// update). History recording is handled by the caller because it always
     /// happens regardless of destination.
+    ///
+    /// - Returns: whether the pasteboard write was verified, or `nil` when the
+    ///   destination deliberately does not touch the pasteboard. The receipt
+    ///   reports a failed write as a failure instead of claiming a copy.
+    @discardableResult
     func applyDestinationSideEffects(
         text: String,
         destination: HardwareTriggerDestination,
         sharesCompletedTranscript: Bool? = nil
-    ) async {
-        guard !text.isEmpty else { return }
+    ) async -> Bool? {
+        guard !text.isEmpty else { return nil }
+        var clipboardWriteSucceeded: Bool?
         if let clipboardText = Self.clipboardTextAtStop(
             transcript: text,
             destination: destination,
             canPostProcess: AppSettings.shared.hasOpenRouterKey
         ) {
-            await Self.writeClipboardReliably(clipboardText)
+            clipboardWriteSucceeded = await Self.writeClipboardReliably(clipboardText)
         }
 
         // Keyboard handoffs keep their result solely in the nonce-scoped store.
@@ -582,19 +660,25 @@ private extension TranscriptionRecordingService {
         ) {
             sharedState.lastCompletedTranscript = sharedTranscript
         }
+        return clipboardWriteSucceeded
     }
 
     /// Pasteboard writes from a background AppIntent can race process
     /// suspension. Verify the value and retry briefly before reporting success.
-    static func writeClipboardReliably(_ text: String) async {
+    ///
+    /// - Returns: whether the value was read back. A `false` here is the only
+    ///   thing that stops the receipt saying "Copied".
+    @discardableResult
+    static func writeClipboardReliably(_ text: String) async -> Bool {
         for attempt in 0..<3 {
             UIPasteboard.general.string = text
             await Task.yield()
-            if UIPasteboard.general.string == text { return }
+            if UIPasteboard.general.string == text { return true }
             if attempt < 2 {
                 try? await Task.sleep(for: .milliseconds(80))
             }
         }
+        return false
     }
 
     /// The most complete transcript we can produce at stop time. The transcriber
@@ -633,7 +717,7 @@ private extension TranscriptionRecordingService {
             return settings.hasOpenRouterKey
         case .clipboard:
             return isLegacyCaller && settings.autoPostProcess && settings.hasOpenRouterKey
-        case .historyOnly:
+        case .historyOnly, .auto:
             return false
         }
     }

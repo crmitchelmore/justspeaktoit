@@ -887,10 +887,8 @@ public struct ContentView: View {
                 else { return .rejected(.unsupportedConfiguration) }
                 do {
                     try await coordinator.start(
-                        preRollBuffers: preRoll,
-                        analyzerFallbackAllowed: false,
-                        entry: StartupEntry(origin: .handsFree, observedAt: detectedAt),
-                        handle: handsFreeCapture
+                        preRollBuffers: preRoll, analyzerFallbackAllowed: false,
+                        entry: StartupEntry(origin: .handsFree, observedAt: detectedAt), handle: handsFreeCapture
                     )
                     return .started
                 } catch {
@@ -1387,7 +1385,10 @@ public struct ContentView: View {
     private func autoStartIfEnabled() async {
         guard AppSettings.shared.autoStartRecording else { return }
         guard coordinator.state == .idle else { return }
-        guard !backgroundService.isRunning else { return }
+        // A headless capture that is starting or finalising owns the
+        // microphone as much as a running one; auto-start stands down rather
+        // than alerting over a quick action the user just pressed.
+        guard backgroundService.state == .idle else { return }
         do {
             try await coordinator.start()
         } catch is CancellationError {

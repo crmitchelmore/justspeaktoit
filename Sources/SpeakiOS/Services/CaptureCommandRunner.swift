@@ -257,7 +257,12 @@ public enum CaptureCommandRunner {
             // Asked *after* the failure: a capture active now is a newer run
             // that replaced this one, so this failure is stale.
             laterCaptureInFlight: service.isActive,
-            microphoneOwnedElsewhere: SharedTranscriptionState.shared.isRecording,
+            // The in-app recorder owns the microphone from before its first
+            // suspension until its teardown settles (#943); the App Group flag
+            // alone is false during its startup and stop drain, which is
+            // exactly when the service refuses with the in-app-owner message.
+            microphoneOwnedElsewhere: ForegroundRecordingOwnership.shared.isOwned
+                || SharedTranscriptionState.shared.isRecording,
             publish: service.reportCaptureFailure
         )
     }

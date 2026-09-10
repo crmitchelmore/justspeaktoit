@@ -47,14 +47,15 @@ private func stopResultDialog(
 /// background start succeeds, recording stays fully headless.
 @available(iOS 18, *)
 private func startRecordingContinuingInForegroundIfNeeded(
-    from intent: some ForegroundContinuableIntent
+    from intent: some ForegroundContinuableIntent,
+    trigger: CaptureTrigger
 ) async throws {
     let service = await TranscriptionRecordingService.shared
     do {
-        try await service.startRecording()
+        try await service.startRecording(trigger: trigger)
     } catch iOSTranscriptionError.liveActivityUnavailable {
         try await intent.requestToContinueInForeground {
-            try await TranscriptionRecordingService.shared.startRecording()
+            try await TranscriptionRecordingService.shared.startRecording(trigger: trigger)
         }
     }
 }
@@ -89,7 +90,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
             return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         }
         do {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            try await startRecordingContinuingInForegroundIfNeeded(from: self, trigger: .shortcut)
         } catch {
             return .result(
                 dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
@@ -148,7 +149,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
         } else if SharedTranscriptionState.shared.isRecording {
             throw ToggleRecordingError.alreadyRecordingInApp
         } else {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            try await startRecordingContinuingInForegroundIfNeeded(from: self, trigger: .shortcut)
             return .result()
         }
     }
@@ -239,7 +240,7 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
         )
         switch action {
         case .start:
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            try await startRecordingContinuingInForegroundIfNeeded(from: self, trigger: .control)
         case .stop:
             await service.stopRecording(destination: AppSettings.shared.hardwareTriggerDestination)
         case .none:

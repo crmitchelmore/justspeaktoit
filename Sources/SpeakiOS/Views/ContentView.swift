@@ -244,6 +244,9 @@ final class TranscriberCoordinator: ObservableObject {
         // Live shared-state writes are throttled; commit the final transcript
         // once so the copy intents always see the complete text.
         sharedState.updateTranscript(result.text)
+        // Onboarding progress is only ever earned by a transcript that really
+        // arrived; a blank one is ignored by the policy.
+        CaptureOnboardingStore.shared.recordDictation(trigger: .inApp, transcript: result.text)
         iOSHistoryManager.shared.recordTranscription(
             text: result.text,
             model: currentModel,
@@ -287,6 +290,11 @@ public struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showHistoryBadge = false
+    /// Guided first run and the progressive per-trigger cards. Every decision
+    /// here comes from `CaptureOnboardingPolicy`; this layer only renders it.
+    @ObservedObject private var onboarding = CaptureOnboardingStore.shared
+    @State private var showingFirstRun = false
+    private let captureHardware = CaptureHardwareProfile.current()
     /// Completion time of the background transcript we last surfaced, so we only
     /// surface a given session once and never clobber the user's in-app edits.
     @State private var lastSurfacedAt: Date?
@@ -345,6 +353,14 @@ public struct ContentView: View {
                                 alignment: .leading,
                                 spacing: density.isCompact ? density.cardContentSpacing : 12
                             ) {
+                                if let card = onboarding.offeredCard(hardware: captureHardware) {
+                                    CaptureOnboardingCard(
+                                        trigger: card,
+                                        hasActionButton: captureHardware.hasActionButton
+                                    ) {
+                                        onboarding.dismissCard(card)
+                                    }
+                                }
                                 if currentText.isEmpty {
                                     Text(backgroundService.isRunning
                                          ? "Recording via Action Button…"
@@ -487,8 +503,11 @@ public struct ContentView: View {
                 if !enabled { Task { await handsFree.disarm() } }
             }
             .task {
-                // Auto-start recording if enabled
-                if AppSettings.shared.autoStartRecording && !coordinator.isRunning {
+                // The guided first run owns the microphone until it is done,
+                // so never auto-start behind it.
+                if onboarding.shouldPresentFirstRun {
+                    showingFirstRun = true
+                } else if AppSettings.shared.autoStartRecording && !coordinator.isRunning {
                     do {
                         try await coordinator.start()
                     } catch {
@@ -515,6 +534,17 @@ public struct ContentView: View {
                     displayText = processedResult
                 }
             }
+            // Swiping the sheet away counts as finishing it, so first run is
+            // offered exactly once and never nags.
+            .sheet(isPresented: $showingFirstRun, onDismiss: { onboarding.completeFirstRun() }, content: {
+                FirstRunOnboardingView(
+                    audioSessionManager: coordinator.audioSessionManager,
+                    liveTranscript: coordinator.partialText,
+                    startTestDictation: { try await coordinator.start() },
+                    stopTestDictation: { await coordinator.stop().text },
+                    onFinish: { showingFirstRun = false }
+                )
+            })
         }
         .environment(\.appVisualDensity, settings.visualDensity)
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)

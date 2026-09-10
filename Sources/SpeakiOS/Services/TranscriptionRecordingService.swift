@@ -39,6 +39,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
+    /// Which trigger started the session in flight, so onboarding can only
+    /// mark a trigger proven when a transcript really arrived through it.
+    /// `nil` means the caller did not identify itself, and nothing is claimed.
+    private var currentTrigger: CaptureTrigger?
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
@@ -82,7 +86,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         retainBatchRecording: Bool = true,
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
-        keyboardProfile: KeyboardDictationProfileOption? = nil
+        keyboardProfile: KeyboardDictationProfileOption? = nil,
+        trigger: CaptureTrigger? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
         state = lifecycle.state
@@ -103,6 +108,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         lastSessionError = nil
         providerFallbackNotice = nil
+        currentTrigger = keyboardProfile == nil ? trigger : .keyboard
         let usesBatchTranscription = keyboardProfile?.transcriptionMode == .batch
             || (keyboardProfile == nil && settings.transcriptionMode == .batch)
         currentModel = keyboardProfile?.transcriptionModelIdentifier
@@ -309,6 +315,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         // entry, the clipboard, and the spoken dialog all agree on it.
         let text = bestAvailableText(from: drained)
         let result = drained.replacingText(text)
+        // Onboarding progress is earned by evidence only: an unidentified
+        // caller, or a run that produced no text, proves nothing.
+        if let currentTrigger {
+            CaptureOnboardingStore.shared.recordDictation(trigger: currentTrigger, transcript: text)
+        }
+        currentTrigger = nil
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
 
@@ -381,6 +393,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// pending run and cancels its allocated provider immediately. The owned
     /// startup task unwinds before another run can begin (issues #701, #786).
     public func cancelRecording() {
+        currentTrigger = nil
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return

@@ -148,6 +148,116 @@ final class ProviderBalanceTests: XCTestCase {
         }
         XCTAssertFalse(snapshot.state.isSpendableCredit)
     }
+
+    /// A replaced key must not leave the previous account's figure rendered.
+    @MainActor
+    func testStore_forgetsALoadedBalanceWhenItsCredentialChanges() async {
+        let store = ProviderBalanceStore(sources: [StubBalanceSource(accountID: "deepgram")])
+        store.configure { _ in "dg-key" }
+        store.refresh(accountID: "deepgram")
+        await store.waitForIdle()
+        guard case .loaded = store.entries["deepgram"] else {
+            return XCTFail("Expected a loaded balance before the credential changes")
+        }
+
+        store.invalidate(credentialIdentifier: "deepgram.apiKey")
+        XCTAssertEqual(store.entries["deepgram"], .idle)
+        XCTAssertEqual(store.entry(forCredentialIdentifier: "deepgram.apiKey"), .idle)
+    }
+
+    /// A result from the request that was in flight when the key changed
+    /// describes the previous account, so it must not repopulate the entry.
+    @MainActor
+    func testStore_dropsAResultFromASupersededRequest() async {
+        let source = SlowBalanceSource(accountID: "deepgram")
+        let store = ProviderBalanceStore(sources: [source])
+        store.configure { _ in "dg-key" }
+
+        store.refresh(accountID: "deepgram")
+        XCTAssertEqual(store.entries["deepgram"], .refreshing)
+        store.invalidate(accountID: "deepgram")
+        source.release()
+
+        // Give the superseded task every chance to publish.
+        for _ in 0..<40 {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(
+            store.entries["deepgram"], .idle,
+            "a superseded request must not repopulate the entry"
+        )
+    }
+
+    @MainActor
+    func testStore_ignoresADuplicateInjectedSourceRatherThanTrapping() {
+        let store = ProviderBalanceStore(sources: [
+            StubBalanceSource(accountID: "deepgram"),
+            StubBalanceSource(accountID: "deepgram")
+        ])
+        XCTAssertEqual(store.entry(forCredentialIdentifier: "deepgram.apiKey"), .idle)
+    }
+
+    // MARK: - Account definitions
+
+    func testAccount_rejectsADefinitionItCannotHonour() {
+        // No credentials: nothing to look an account up by.
+        XCTAssertNil(
+            ProviderBalanceAccount(
+                id: "empty",
+                displayName: "Empty",
+                credentialIdentifiers: [],
+                support: .balance,
+                billingURL: "https://example.com"
+            )
+        )
+        // A primary that is not one of its own credentials would render a
+        // balance on a card that never resolves back to this account.
+        XCTAssertNil(
+            ProviderBalanceAccount(
+                id: "mismatched",
+                displayName: "Mismatched",
+                credentialIdentifiers: ["a.apiKey"],
+                primaryCredentialIdentifier: "b.apiKey",
+                support: .balance,
+                billingURL: "https://example.com"
+            )
+        )
+        XCTAssertNotNil(
+            ProviderBalanceAccount(
+                id: "valid",
+                displayName: "Valid",
+                credentialIdentifiers: ["a.apiKey", "b.apiKey"],
+                primaryCredentialIdentifier: "b.apiKey",
+                support: .balance,
+                billingURL: "https://example.com"
+            )
+        )
+    }
+}
+
+/// A source that does not answer until it is released, so a refresh can be
+/// superseded while it is still in flight.
+final class SlowBalanceSource: ProviderBalanceSource, @unchecked Sendable {
+    let accountID: String
+    private let gate = DispatchSemaphore(value: 0)
+
+    init(accountID: String) { self.accountID = accountID }
+
+    func release() { gate.signal() }
+
+    func fetchBalance(apiKey: String) async -> ProviderBalanceSnapshot {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                self.gate.wait()
+                continuation.resume(returning: ProviderBalanceSnapshot(
+                    accountID: self.accountID,
+                    providerDisplayName: self.accountID,
+                    state: .cash(ProviderBalanceMoney(amount: 99, currencyCode: "USD")),
+                    refreshedAt: Date()
+                ))
+            }
+        }
+    }
 }
 
 // MARK: - Test support

@@ -21,6 +21,14 @@ enum ProviderBalanceFetch<Value> {
 /// Shared plumbing for the balance transports: one authenticated GET, decoded,
 /// with every failure mode mapped onto a state instead of an error.
 enum ProviderBalanceTransport {
+    /// Deadline for one balance request.
+    ///
+    /// A balance is informational: it must never hold settings-triggered work
+    /// open for whatever timeout the injected session configuration happens to
+    /// carry, and Deepgram's per-project walk multiplies that wait. Fifteen
+    /// seconds is generous for a billing GET and bounded either way.
+    static let requestTimeout: TimeInterval = 15
+
     static func get(
         _ url: URL,
         headers: [String: String],
@@ -28,6 +36,7 @@ enum ProviderBalanceTransport {
     ) async -> ProviderBalanceFetch<Data> {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = requestTimeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (field, value) in headers {
             request.setValue(value, forHTTPHeaderField: field)

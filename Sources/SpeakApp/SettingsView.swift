@@ -133,6 +133,13 @@ struct SettingsView: View {
     /// Keychain identifier of the credential this card manages, used to look up
     /// the account's balance.
     let credentialIdentifier: String
+    /// Whether this is the card that shows the account's balance.
+    ///
+    /// Two cards can manage the same Keychain item — Deepgram has a
+    /// transcription card and a voice-output card, both on `deepgram.apiKey` —
+    /// and the identifier cannot tell them apart, so the one that does not own
+    /// the account sets this to `false` and the figure appears exactly once.
+    var presentsAccountBalance = true
     let saveButtonTitle: String
     let saveTooltip: String
     let validateButtonTitle: String

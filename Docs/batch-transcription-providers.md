@@ -22,8 +22,8 @@ an account without batch access surfaces the provider's own rejection.
 
 `Sources/SpeakCore/BatchTranscriptionJob.swift` holds what the asynchronous job
 APIs share: the on-disk multipart snapshot (the recording is copied in 64 KiB
-chunks and never held in memory), the polling loop, cancellation checks, and the
-non-2xx rejection. Cartesia's `/stt` endpoint answers in one round trip and keeps
+chunks and never held in memory), the polling loop, cancellation checks, the
+non-2xx rejection, and the credential boundary. Cartesia's `/stt` endpoint answers in one round trip and keeps
 its own single-shot client.
 
 A non-2xx response becomes `TranscriptionProviderError.httpError(status, body)`,
@@ -52,7 +52,20 @@ Three steps against `https://api.gladia.io`, all authenticated with the
    fails immediately. An unrecognised status is treated as still running, so a
    new intermediate state cannot abort a job that would have succeeded.
 
-Cancelling issues a best-effort `DELETE /v2/pre-recorded/{id}`.
+`result_url` arrives inside a provider response and is polled with the account
+key attached, so it is only honoured while it stays on the configured Gladia
+origin (scheme, host and effective port). An off-origin `result_url` is
+discarded in favour of the documented `<baseURL>/v2/pre-recorded/{id}` endpoint,
+and a response offering neither is an invalid response. Redirects are held to
+the same boundary: `x-gladia-key` is a custom header, so URLSession would carry
+it across a cross-origin hop that `Authorization` would not survive.
+
+Once Gladia has accepted a job it bills until the job finishes, so every path
+that abandons one -- cancellation in either spelling, and the local polling
+deadline -- issues a best-effort `DELETE /v2/pre-recorded/{id}`. The delete runs
+detached, because the usual reason to be making it is that the surrounding task
+is already cancelled and URLSession would fail the request before it left the
+device.
 
 ### Speechmatics — `SpeechmaticsBatchClient`
 
@@ -93,12 +106,23 @@ OpenRouter fallback.
 ## Verification status
 
 Request construction, job-state handling, cancellation (including the
-provider-side job delete), authentication and quota failures, silent-recording
-finalisation and transcript parsing are covered by
+provider-side job delete on every abandonment path), the Gladia credential
+boundary, authentication and quota failures, silent-recording finalisation and
+transcript parsing are covered by
 `Tests/SpeakCoreTests/GladiaBatchClientTests.swift`,
-`Tests/SpeakCoreTests/SpeechmaticsBatchClientTests.swift` and
+`Tests/SpeakCoreTests/GladiaBatchClientSecurityTests.swift`,
+`Tests/SpeakCoreTests/SpeechmaticsBatchClientTests.swift`,
+`Tests/SpeakCoreTests/SpeechmaticsBatchClientLifecycleTests.swift`,
+`Tests/SpeakCoreTests/BatchTranscriptionJobTests.swift` and
 `Tests/SpeakCoreTests/CartesiaBatchClientTests.swift`, against recorded response
 shapes taken from the published API references.
+
+Nothing here has been exercised against a live Gladia or Speechmatics account:
+there are no credentials for either provider, so the wire shapes are those of
+the published references and the origin and redirect constraints are verified
+against the documented endpoints rather than observed traffic. If Gladia ever
+serves `result_url` from a host other than the configured base URL, the client
+will fall back to the job-id endpoint rather than follow it.
 
 **Not yet verified against live provider responses.** No Gladia or Speechmatics
 credit was available when this landed, so the Gladia and Speechmatics request and

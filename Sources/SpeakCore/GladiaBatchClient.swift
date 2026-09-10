@@ -23,8 +23,14 @@ public struct GladiaBatchClient: Sendable {
 
     public init(session: URLSession = .shared, baseURL: URL = GladiaBatchClient.defaultBaseURL) {
         self.baseURL = baseURL
-        self.upload = { request, file in try await session.upload(for: request, fromFile: file) }
-        self.send = { request in try await session.data(for: request) }
+        // Every request below carries `x-gladia-key`, which URLSession does not
+        // strip on a cross-origin redirect the way it does `Authorization`.
+        // The guard keeps the key inside the Gladia endpoint boundary.
+        let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: baseURL)
+        self.upload = { request, file in
+            try await session.upload(for: request, fromFile: file, delegate: redirects)
+        }
+        self.send = { request in try await session.data(for: request, delegate: redirects) }
     }
 
     public func transcribeFile(
@@ -41,11 +47,19 @@ public struct GladiaBatchClient: Sendable {
         try Task.checkCancellation()
         let audioURL = try await self.uploadRecording(at: url, apiKey: key)
         let job = try await self.startJob(audioURL: audioURL, apiKey: key, language: language)
+        // From here Gladia has accepted a job that will consume credit until it
+        // finishes, so every path that abandons it must try to cancel it --
+        // including a cancellation observed the instant the create response
+        // lands, which is why the check below sits inside the `do`.
         do {
+            try Task.checkCancellation()
             return try await self.awaitTranscript(job: job, apiKey: key)
-        } catch is CancellationError {
-            await self.cancelJob(job, apiKey: key)
-            throw CancellationError()
+        } catch {
+            let abandonment = BatchTranscriptionJob.mapCancellation(error)
+            if BatchTranscriptionJob.abandonsAcceptedJob(abandonment) {
+                await self.cancelJob(job, apiKey: key)
+            }
+            throw abandonment
         }
     }
 
@@ -90,8 +104,15 @@ public struct GladiaBatchClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(
             withJSONObject: Self.requestBody(audioURL: audioURL, language: language))
-        let (data, response) = try await self.send(request)
-        try Task.checkCancellation()
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await self.send(request)
+        } catch {
+            throw BatchTranscriptionJob.mapCancellation(error)
+        }
+        // No cancellation check here: once the response is in hand the job id
+        // must reach the caller, or the created job can never be cancelled.
         try BatchTranscriptionJob.validate(response, data: data, provider: Self.providerName)
         return try Self.decodeJob(data, baseURL: self.baseURL)
     }
@@ -114,12 +135,19 @@ public struct GladiaBatchClient: Sendable {
 
     /// Best effort: a cancelled dictation should not leave Gladia billing for a
     /// job nobody will read. A failure here is deliberately swallowed.
+    ///
+    /// The request runs detached because the usual reason to be here is that
+    /// this task is already cancelled, and URLSession fails a request started
+    /// on a cancelled task immediately -- the cleanup would never leave the
+    /// device.
     private func cancelJob(_ job: Job, apiKey: String) async {
         guard let id = job.id else { return }
         var request = URLRequest(url: self.baseURL.appendingPathComponent("v2/pre-recorded/\(id)"))
         request.httpMethod = "DELETE"
         request.setValue(apiKey, forHTTPHeaderField: "x-gladia-key")
-        _ = try? await self.send(request)
+        let send = self.send
+        let cancelled = request
+        _ = await Task.detached { _ = try? await send(cancelled) }.value
     }
 
     // MARK: - Wire format
@@ -147,6 +175,14 @@ public struct GladiaBatchClient: Sendable {
         return response.audioUrl
     }
 
+    /// The job response's `result_url` is polled with `x-gladia-key` attached,
+    /// so it is only honoured while it stays on the configured Gladia origin.
+    /// A `result_url` pointing anywhere else is discarded rather than trusted:
+    /// the documented status endpoint is derived from the job id instead, and
+    /// a response that offers neither is an invalid response. Gladia's own
+    /// `result_url` is `<baseURL>/v2/pre-recorded/{id}`, so this costs nothing
+    /// in normal operation and denies a compromised or spoofed job response the
+    /// ability to collect the account key.
     static func decodeJob(_ data: Data, baseURL: URL) throws -> Job {
         struct Response: Decodable {
             let id: String?
@@ -155,7 +191,8 @@ public struct GladiaBatchClient: Sendable {
         guard let response = try? Self.decoder.decode(Response.self, from: data) else {
             throw TranscriptionProviderError.invalidResponse
         }
-        if let resultUrl = response.resultUrl, let url = URL(string: resultUrl) {
+        if let resultUrl = response.resultUrl, let url = URL(string: resultUrl),
+           BatchTranscriptionJob.isSameOrigin(url, as: baseURL) {
             return Job(id: response.id, resultURL: url)
         }
         guard let id = response.id else { throw TranscriptionProviderError.invalidResponse }

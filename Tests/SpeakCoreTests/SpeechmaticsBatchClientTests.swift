@@ -198,6 +198,46 @@ final class SpeechmaticsBatchClientTests: XCTestCase {
         XCTAssertThrowsError(try SpeechmaticsBatchClient.decodeJobID(Data(#"{"id":""}"#.utf8)))
     }
 
+    /// json-v2 punctuation carries a direction. `previous` follows its word
+    /// with no space; `next` -- an opening bracket or quote -- takes the space
+    /// before it and suppresses the one that would otherwise follow it, so the
+    /// transcript reads `Hello (world)` rather than `Hello ( world)`.
+    func testPunctuationAttachesInBothDirectionsWithoutStrandingASpace() throws {
+        let json = """
+        {"job":{"duration":2.0},"results":[
+          {"type":"word","start_time":0.0,"end_time":0.4,
+           "alternatives":[{"content":"Hello","confidence":0.9}]},
+          {"type":"punctuation","attaches_to":"next",
+           "alternatives":[{"content":"("}]},
+          {"type":"word","start_time":0.5,"end_time":0.9,
+           "alternatives":[{"content":"world","confidence":0.9}]},
+          {"type":"punctuation","attaches_to":"previous",
+           "alternatives":[{"content":")"}]},
+          {"type":"punctuation","attaches_to":"previous",
+           "alternatives":[{"content":"."}]}]}
+        """
+        let result = try SpeechmaticsBatchClient.decodeTranscript(
+            Data(json.utf8), model: SpeechmaticsBatchClient.enhancedCatalogID)
+        XCTAssertEqual(result.text, "Hello (world).")
+        // Punctuation stays out of the timed word segments.
+        XCTAssertEqual(result.segments.map(\.text), ["Hello", "world"])
+    }
+
+    /// Leading punctuation at the very start of a transcript must not open with
+    /// a stray space either.
+    func testLeadingPunctuationAtTheStartOfATranscriptAddsNoLeadingSpace() throws {
+        let json = """
+        {"job":{"duration":1.0},"results":[
+          {"type":"punctuation","attaches_to":"next","alternatives":[{"content":"\\u201c"}]},
+          {"type":"word","start_time":0.0,"end_time":0.4,
+           "alternatives":[{"content":"Hello","confidence":0.9}]},
+          {"type":"punctuation","attaches_to":"previous","alternatives":[{"content":"\\u201d"}]}]}
+        """
+        let result = try SpeechmaticsBatchClient.decodeTranscript(
+            Data(json.utf8), model: SpeechmaticsBatchClient.enhancedCatalogID)
+        XCTAssertEqual(result.text, "\u{201C}Hello\u{201D}")
+    }
+
     func testPunctuationAttachesToTheWordItBelongsToAndNeverBecomesASegment() throws {
         let result = try SpeechmaticsBatchClient.decodeTranscript(
             Data(Self.transcript.utf8), model: SpeechmaticsBatchClient.standardCatalogID)

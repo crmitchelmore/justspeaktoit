@@ -55,7 +55,9 @@ public enum CaptureDestinationAppEnum: String, AppEnum {
 /// time the two drifted a Shortcut would name a language the app no longer
 /// has. The user still picks from a list; a Shortcut that prefers to pass a
 /// variable can, and an unrecognised value is refused rather than substituted.
-@available(iOS 18, *)
+///
+/// Available from the deployment target rather than iOS 18: `Transcribe Audio
+/// File` runs on iOS 17 and offers the same picker.
 public struct CaptureLanguageOptionsProvider: DynamicOptionsProvider {
     public init() {}
 
@@ -65,7 +67,6 @@ public struct CaptureLanguageOptionsProvider: DynamicOptionsProvider {
 }
 
 /// Offers every transcription model the app can actually run, live or batch.
-@available(iOS 18, *)
 public struct CaptureModelOptionsProvider: DynamicOptionsProvider {
     public init() {}
 

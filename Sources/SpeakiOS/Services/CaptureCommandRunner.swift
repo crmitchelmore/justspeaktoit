@@ -52,122 +52,6 @@ public enum CaptureCommandRunner {
         return await self.dictate(link)
     }
 
-    // MARK: - dictate
-
-    /// One-shot capture that returns its transcript to the caller.
-    ///
-    /// The refusal rules run before anything opens a microphone: locked device,
-    /// app not foreground, or a capture already in flight. That last one is the
-    /// existing single-flight rule (issue #943) — a `dictate` arriving mid
-    /// recording is refused, never allowed to start a second session.
-    private static func dictate(_ link: CaptureDeepLink) async -> Bool {
-        let service = TranscriptionRecordingService.shared
-        if let refusal = CaptureLinkPolicy.refusal(
-            isProtectedDataAvailable: UIApplication.shared.isProtectedDataAvailable,
-            isAppActive: UIApplication.shared.applicationState == .active,
-            isCaptureBusy: service.isActive || SharedTranscriptionState.shared.isRecording
-        ) {
-            self.report(refusal, to: link.callback)
-            return false
-        }
-
-        let outcome = await self.start(
-            service,
-            destinationOverride: link.destination,
-            modelOverride: link.modelIdentifier,
-            languageOverride: link.languageIdentifier
-        )
-        switch outcome {
-        case .started:
-            break
-        case .cancelled:
-            // A stop retired this startup, which is the user getting what they
-            // asked for. `x-cancel` is exactly this case in the
-            // x-callback-url convention, and no alert is raised: telling
-            // someone their cancellation failed is the contradiction the
-            // cancellation policy exists to avoid.
-            self.open(link.callback?.cancelURL, reason: "x-cancel")
-            return false
-        case .failed(let surfaced):
-            // `notifyUser: !surfaced`: when the start already published the
-            // real reason it failed, a generic `recordingFailed` on top of it
-            // would be a second alert for one failure — and the vaguer of the
-            // two. The caller still gets its `x-error` either way.
-            self.report(.recordingFailed, to: link.callback, notifyUser: !surfaced)
-            return false
-        }
-
-        let transcript = await self.awaitTranscript(service, maxDuration: link.dictateDuration)
-        self.deliver(transcript, to: link.callback)
-        return true
-    }
-
-    /// Waits for the dictation to end, then produces its text.
-    ///
-    /// Ends either because the deadline passed — this stops the capture itself
-    /// and takes the result straight from the recorder — or because something
-    /// else stopped it (the Live Activity, the Action Button, a later
-    /// `justspeaktoit://stop`), in which case the text that session published is
-    /// the answer. Polling rather than observing keeps this to one owner of the
-    /// stop, so a dictation can never be stopped twice.
-    private static func awaitTranscript(
-        _ service: TranscriptionRecordingService,
-        maxDuration: TimeInterval
-    ) async -> String {
-        let deadline = Date().addingTimeInterval(maxDuration)
-        while service.isActive, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-        }
-        guard service.isActive else {
-            return SharedTranscriptionState.shared.lastCompletedTranscript ?? ""
-        }
-        return await self.stop(service)
-    }
-
-    /// Opens the caller's `x-success` URL with the transcript, or `x-cancel`
-    /// when nothing was said.
-    private static func deliver(_ transcript: String, to callback: CaptureCallback?) {
-        guard let callback else { return }
-        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            self.open(callback.cancelURL, reason: "x-cancel")
-            return
-        }
-        self.open(callback.successURL(transcript: trimmed), reason: "x-success")
-    }
-
-    /// Reports a refusal to the caller and to the user. The caller only learns
-    /// of it if it passed an `x-error`; the user always gets the alert, because
-    /// a link that silently does nothing is the failure this vocabulary keeps
-    /// running into.
-    private static func report(
-        _ failure: CaptureLinkFailure,
-        to callback: CaptureCallback?,
-        notifyUser: Bool = true
-    ) {
-        SpeakLogger.transcription.warning(
-            "Capture link refused: \(failure.rawValue, privacy: .public)"
-        )
-        if notifyUser {
-            TranscriptionRecordingService.shared.reportCaptureFailure(failure)
-        }
-        self.open(callback?.errorURL(failure), reason: "x-error")
-    }
-
-    /// The sanctioned app-to-app return: a plain URL open of a callback that
-    /// `CaptureCallback.validated` already accepted. Nothing else in this file
-    /// opens a URL, so every caller-supplied destination passes that check.
-    private static func open(_ url: URL?, reason: String) {
-        guard let url else { return }
-        UIApplication.shared.open(url, options: [:]) { opened in
-            if !opened {
-                SpeakLogger.transcription.warning(
-                    "Capture \(reason, privacy: .public) callback could not be opened"
-                )
-            }
-        }
-    }
-
     /// Runs a capture verb, mirroring the App Intent semantics.
     ///
     /// - Parameters:
@@ -230,24 +114,26 @@ public enum CaptureCommandRunner {
 
     /// The result of a start attempt.
     ///
-    /// `failed` carries whether the user has already been told, so a caller
-    /// with a failure report of its own does not raise a second alert for one
-    /// failure.
+    /// Carries two things a caller needs and cannot recover afterwards: the
+    /// specific reason, so a `model=` this device cannot honour reaches the
+    /// caller's `x-error` as `.modelUnavailable` rather than a generic
+    /// `.recordingFailed`; and whether the user has already been shown that
+    /// reason, so nothing stacks a vaguer alert on top of one failure.
     enum StartOutcome: Equatable {
         case started
         /// The start was cancelled — a stop, or a second press while start-up
         /// was still in flight. The user asked for this; it is not a failure
         /// and must not be reported as one.
         case cancelled
-        /// Nothing is recording. `surfaced` says whether the user has already
-        /// been shown the real reason, so nothing downstream stacks a vaguer
-        /// alert on top of it.
-        case failed(surfaced: Bool)
+        /// Nothing is recording.
+        case failed(CaptureLinkFailure, surfaced: Bool)
 
         var didStart: Bool { self == .started }
     }
 
-    private static func start(
+    /// Internal rather than private: `dictate` lives in
+    /// `CaptureCommandRunner+Dictate.swift`.
+    static func start(
         _ service: TranscriptionRecordingService,
         destinationOverride: HardwareTriggerDestination?,
         modelOverride: String? = nil,
@@ -261,7 +147,10 @@ public enum CaptureCommandRunner {
             SpeakLogger.transcription.info(
                 "Capture command ignored: a recording is already running in the app"
             )
-            return .failed(surfaced: false)
+            // The surface that owns the microphone is on screen showing the
+            // recording it is running, so a second alert would only contradict
+            // it — the same reasoning as the policy's `ownedByAnotherSurface`.
+            return .failed(.alreadyRecording, surfaced: true)
         }
         do {
             try await service.startRecording(
@@ -272,13 +161,19 @@ public enum CaptureCommandRunner {
             return .started
         } catch {
             startedDestination = nil
+            // The recorder's own refusals are preserved rather than flattened:
+            // a `model=` this device cannot honour throws
+            // `CaptureLinkFailure.modelUnavailable`, and that is what the
+            // caller's `x-error` should say. `surfaceStartFailure` logs the
+            // error and decides, separately, whether the *user* sees it.
+            let failure = error as? CaptureLinkFailure ?? .recordingFailed
             switch surfaceStartFailure(error, service: service) {
             case .logOnly(.cancelled):
                 return .cancelled
             case .logOnly:
-                return .failed(surfaced: false)
+                return .failed(failure, surfaced: false)
             case .surface:
-                return .failed(surfaced: true)
+                return .failed(failure, surfaced: true)
             }
         }
     }
@@ -349,7 +244,8 @@ public enum CaptureCommandRunner {
 
     /// - Returns: the transcript this stop produced, which `dictate` returns to
     ///   its caller. Every other caller discards it.
-    private static func stop(_ service: TranscriptionRecordingService) async -> String {
+    /// Internal rather than private: `dictate` owns its own stop.
+    static func stop(_ service: TranscriptionRecordingService) async -> String {
         let destination = startedDestination ?? AppSettings.shared.hardwareTriggerDestination
         startedDestination = nil
         return await service.stopRecording(destination: destination).text

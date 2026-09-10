@@ -277,4 +277,5 @@ final class CaptureCallbackTests: XCTestCase {
         XCTAssertNil(CaptureLinkParameters.duration(from: ""))
         XCTAssertNil(CaptureLinkParameters.duration(from: "inf"))
     }
+
 }

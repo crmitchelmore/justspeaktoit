@@ -39,6 +39,36 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
 
+    /// What one capture finished with, tagged with the session that produced it.
+    ///
+    /// A caller that starts a capture does not necessarily own its stop — the
+    /// Live Activity, the Action Button and `justspeaktoit://stop` can all end
+    /// it — and "the last completed transcript" in the App Group is a global
+    /// that a *later* recording overwrites. Anything waiting on a result it did
+    /// not stop needs to be able to tell one session's outcome from another's,
+    /// and to tell an empty transcript apart from a failed one.
+    public struct FinishedCapture: Sendable, Equatable {
+        /// The session this outcome belongs to, matching `currentSessionID` at
+        /// the time that session was started.
+        public let sessionID: UUID
+        /// The transcript, which is legitimately empty when nothing was said.
+        public let text: String
+        /// Set when the session ended in a provider or recording error, in
+        /// which case `text` is whatever had accumulated and is not an answer.
+        public let failureMessage: String?
+
+        public var failed: Bool { self.failureMessage != nil }
+    }
+
+    /// Identifies the capture currently starting or running, from the moment
+    /// `startRecording` commits to it until it finishes.
+    @Published public private(set) var currentSessionID: UUID?
+
+    /// The most recent capture to finish, whoever stopped it. Published after
+    /// the transcriber has drained and the transcript has been committed, so a
+    /// waiter that sees its own session id here is reading a settled result.
+    @Published public private(set) var lastFinishedCapture: FinishedCapture?
+
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState = SharedTranscriptionState.shared
@@ -139,6 +169,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast
+        currentSessionID = runID
         startTime = Date()
         self.sharesLiveTranscript = sharesLiveTranscript
         sharedState.clear()
@@ -146,7 +177,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.recordingStartTime = startTime
 
         if !usesBatchTranscription && keyboardProfile == nil {
-            resolveLiveModel(settings: settings)
+            try resolveLiveModelHonouringRequest(
+                settings: settings,
+                requestedModelID: modelOverride
+            )
         }
 
         // A Live Activity is required to record in the *background* via an
@@ -229,7 +263,53 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
-    private func resolveLiveModel(settings: AppSettings) {
+    /// Settles the current session's outcome under its own identity and clears
+    /// the identity, so nothing waiting on it can be answered twice or answered
+    /// with a later recording's result.
+    private func publishFinishedCapture(text: String, failure: Error?) {
+        guard let sessionID = currentSessionID else { return }
+        currentSessionID = nil
+        lastFinishedCapture = FinishedCapture(
+            sessionID: sessionID,
+            text: text,
+            failureMessage: failure?.localizedDescription
+        )
+    }
+
+    /// Resolves the live model, refusing a silent substitution when the caller
+    /// named one.
+    ///
+    /// The configured model may fall back to on-device when its key is missing.
+    /// That is acceptable for the global setting — it is the app's own choice,
+    /// and `providerFallbackNotice` publishes it — but a link that said
+    /// `model=` has to be told, not handed a different model and a transcript
+    /// that looks like the one it asked for. The link vocabulary's whole
+    /// contract is that an unusable value fails visibly.
+    ///
+    /// This mirrors `resolveLiveModelHonouringRequest` on
+    /// `feat/parameterised-intents` (#1076), which does the same thing for the
+    /// Shortcut parameter; the two should collapse into one when those stacks
+    /// meet.
+    private func resolveLiveModelHonouringRequest(
+        settings: AppSettings,
+        requestedModelID: String?
+    ) throws {
+        let substituted = resolveLiveModel(settings: settings)
+        guard substituted, requestedModelID != nil else { return }
+        unwindCancelledStart()
+        SpeakLogger.transcription.error(
+            """
+            Refusing capture: no API key for \(requestedModelID ?? "", privacy: .public), \
+            and a named model must not be silently replaced
+            """
+        )
+        throw CaptureLinkFailure.modelUnavailable
+    }
+
+    /// - Returns: whether the resolved model differs from the requested one,
+    ///   i.e. whether a silent substitution happened.
+    @discardableResult
+    private func resolveLiveModel(settings: AppSettings) -> Bool {
         let requestedModel = currentModel
         let route = LiveTranscriptionRouting.route(for: currentModel)
         currentModel = LiveTranscriptionRouting.resolvedModelID(
@@ -247,7 +327,9 @@ public final class TranscriptionRecordingService: ObservableObject {
                 falling back to \(self.currentModel, privacy: .public)
                 """
             )
+            return true
         }
+        return false
     }
 
     /// Reverts everything a cancelled startup run had published: timing,
@@ -364,6 +446,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
+        // Publish this session's settled outcome under its own identity, before
+        // anything else can start a new one. `lastSessionError` is cleared at
+        // the start of every run, so it is this session's error or nothing.
+        self.publishFinishedCapture(text: text, failure: lastSessionError)
+
         // Complete Live Activity with clipboard confirmation
         completeRecordingActivity(duration: duration, primedMessage: primedActivityMessage)
 
@@ -415,6 +502,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             lifecycle.retireStartRun()
             return
         }
+        // A cancelled session still has to settle for anything waiting on it:
+        // an empty outcome is what a cancel produced, and a waiter must not be
+        // left reading the previous recording's result instead.
+        self.publishFinishedCapture(text: "", failure: nil)
         transcriptionSession?.cancel()
         transcriptionSession = nil
         sharesLiveTranscript = true

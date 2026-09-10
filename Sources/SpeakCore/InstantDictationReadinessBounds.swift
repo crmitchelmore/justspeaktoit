@@ -158,6 +158,15 @@ public struct InstantDictationReadinessMonitor: Equatable, Sendable {
 
         case .stopped:
             healthySinceSeconds = nil
+            // The window binds whenever readiness is not actively recording.
+            // A delayed resume can carry a session across the four-hour
+            // boundary, and a stopped session past its window must be ended
+            // for the reason that actually applies rather than resumed and
+            // then reported as an unavailable microphone.
+            if seconds >= window {
+                finished = true
+                return .end(.sessionWindowElapsed)
+            }
             guard attempts < maximumAttempts else {
                 finished = true
                 return .end(.audioUnavailable)
@@ -175,6 +184,22 @@ public struct InstantDictationReadinessMonitor: Equatable, Sendable {
     /// dies every few seconds from resuming indefinitely.
     public mutating func noteResume(succeeded: Bool, atSeconds seconds: TimeInterval) {
         healthySinceSeconds = succeeded ? seconds : nil
+    }
+
+    /// Returns an attempt that was requested but never made — a restart the
+    /// caller skipped because a dictation had taken the microphone in the
+    /// meantime.
+    ///
+    /// The budget exists to stop a microphone that will not come back from
+    /// being fought over forever. A restart that never ran is no evidence
+    /// either way, so charging it would end healthy sessions early: normal
+    /// keyboard handoffs would spend the budget three times over without
+    /// readiness ever having failed to restart. It deliberately does *not*
+    /// start the health clock — only two unbroken minutes of health still
+    /// forgives an attempt that really ran.
+    public mutating func refundUnattemptedResume() {
+        guard !finished, attempts > 0 else { return }
+        attempts -= 1
     }
 
     /// Ends the monitor. Called when the session ends by any route, so a

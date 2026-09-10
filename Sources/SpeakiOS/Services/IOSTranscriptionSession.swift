@@ -234,6 +234,22 @@ final class IOSTranscriptionSession {
         }
     }
 
+    /// The completed safety recording this session wrote, if it wrote one and
+    /// it has not been discarded yet.
+    var finishedRecordingURL: URL? {
+        guard case .batch(let transcriber) = backend else { return nil }
+        return transcriber.finishedRecordingURL
+    }
+
+    /// Discards the temporary recording of a non-retained batch capture, once
+    /// its owner has finished delivering the transcript. A no-op for every
+    /// other backend, and for a recording the user asked to keep.
+    @discardableResult
+    func discardTemporaryRecording() -> Bool {
+        guard case .batch(let transcriber) = backend else { return false }
+        return transcriber.discardRecordingIfNotRetained()
+    }
+
     func cancel() {
         switch backend {
         case .batch(let transcriber):

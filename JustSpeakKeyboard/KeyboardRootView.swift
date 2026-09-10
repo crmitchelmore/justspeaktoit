@@ -240,7 +240,10 @@ struct KeyboardRootView: View {
                 return Self.failureCopy(failure)
             }
         case .handoff:
-            return Self.handoffCopy(model.handoff.presentation)
+            return Self.handoffCopy(
+                model.handoff.presentation,
+                endReason: model.handoff.instantEndReason
+            )
         case let .blocked(reason):
             switch reason {
             case .fullAccessRequired:
@@ -267,14 +270,23 @@ struct KeyboardRootView: View {
         }
     }
 
-    private static func handoffCopy(_ presentation: KeyboardHandoffController.Presentation) -> String {
+    private static func handoffCopy(
+        _ presentation: KeyboardHandoffController.Presentation,
+        endReason: InstantDictationReadinessEndReason?
+    ) -> String {
         switch presentation {
         case .idle:
             return "Instant Dictation ready. Tap the mic to speak."
         case .starting:
             return "Connecting to Just Speak…"
         case .waitingForApp:
-            return "Open Just Speak once to reconnect Instant Dictation, then return here."
+            // A recorded terminal reason says which of microphone exhaustion,
+            // session-window expiry or store failure ended readiness; without
+            // one the generic reconnect prompt still stands (issue #995).
+            guard let endReason else {
+                return "Open Just Speak once to reconnect Instant Dictation, then return here."
+            }
+            return endReason.readinessMessage
         case .recording:
             return "Listening via Just Speak…"
         case .transcribing:

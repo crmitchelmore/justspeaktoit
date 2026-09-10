@@ -85,6 +85,11 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
             defaults.set(enabled, forKey: Self.enabledKey)
             if !enabled {
                 clearUnlocked()
+                // The store's contract is that a nil reason means "ended by the
+                // user". A readiness failure recorded before the user turned
+                // Instant Dictation off describes a session they have since
+                // replaced with a decision, so it must not outlive it.
+                defaults.removeObject(forKey: Self.endReasonKey)
             }
             defaults.synchronize()
         }

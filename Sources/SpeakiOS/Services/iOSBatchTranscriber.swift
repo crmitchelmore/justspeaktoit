@@ -47,6 +47,17 @@ public final class IOSBatchTranscriber {
     private let client: IOSBatchTranscriptionClient
     private let retainRecording: Bool
     private var startTime: Date?
+    /// The completed file this capture wrote, from `stop()` closing it until
+    /// its owner discards it. `nil` for a retained recording's lifetime is
+    /// meaningless: `discardRecordingIfNotRetained` never deletes one the user
+    /// asked to keep.
+    public private(set) var finishedRecordingURL: URL?
+
+    /// Whether this capture's recording is the user's to keep.
+    public var retainsRecording: Bool { retainRecording }
+
+    /// The safety claim this capture's recording was written under, if any.
+    public var safetyRecordingID: UUID? { audioRecorder.lastClaim }
 
     public let model: String
 
@@ -128,20 +139,38 @@ public final class IOSBatchTranscriber {
         releaseAudioSession()
 
         // A non-retained recording is temporary, but it is still the only copy
-        // of what the user said. Delete it after the transcript is safely in
-        // hand, never on the error path: the keyboard reports the failure to
-        // the user, and the preserved file stays visible in the Recordings
-        // screen, which lists every file in the recordings directory. From
-        // there the user can play it back, retry it, or delete it.
-        let result = try await client.transcribeFile(
+        // of what the user said, and a transcript in hand is not a transcript
+        // delivered. Deleting here lost the audio whenever the caller never
+        // used this result — a finalisation deadline that already gave up on
+        // the stop, or a process killed between this reply and the History
+        // write. The file is therefore kept until its owner says delivery of
+        // this capture is complete (`discardRecordingIfNotRetained`), and kept
+        // for good on the error path: the keyboard reports the failure to the
+        // user, and the preserved file stays visible in the Recordings screen,
+        // which lists every file in the recordings directory. From there the
+        // user can play it back, retry it, or delete it.
+        finishedRecordingURL = recording.url
+        return try await client.transcribeFile(
             at: recording.url,
             model: model,
             language: language
         )
-        if !retainRecording {
-            AudioRecordingPersistence.deleteRecording(at: recording.url)
-        }
-        return result
+    }
+
+    /// Discards the temporary recording of a capture whose transcript has been
+    /// delivered. Called by the owner of the result, never by the upload — a
+    /// result nobody used must leave its audio recoverable.
+    ///
+    /// - Returns: `true` when a file was actually removed.
+    @discardableResult
+    public func discardRecordingIfNotRetained() -> Bool {
+        guard !retainRecording, let url = finishedRecordingURL else { return false }
+        finishedRecordingURL = nil
+        AudioRecordingPersistence.deleteRecording(at: url)
+        // The file is gone, so its claim has nothing left to point at
+        // (issue #992). The transcript was delivered before this ran.
+        audioRecorder.forgetLastClaim()
+        return true
     }
 
     public func cancel() {

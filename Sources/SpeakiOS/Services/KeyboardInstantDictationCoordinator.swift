@@ -309,8 +309,14 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         try? await Task.sleep(for: .seconds(delay))
         guard !Task.isCancelled, boundsStartedAt == startedAt else { return }
         // A dictation that began while this attempt was waiting owns the
-        // microphone now; taking it back would end their recording.
-        guard activeRequestID == nil, !recordingService.isRunning else { return }
+        // microphone now; taking it back would end their recording. The
+        // restart therefore never ran, so it must not be charged against the
+        // budget: normal handoffs would otherwise exhaust three attempts
+        // without readiness ever having failed to restart, and end the session.
+        guard activeRequestID == nil, !recordingService.isRunning else {
+            bounds.refundUnattemptedResume()
+            return
+        }
         var succeeded = true
         do {
             try readinessAudio.start()

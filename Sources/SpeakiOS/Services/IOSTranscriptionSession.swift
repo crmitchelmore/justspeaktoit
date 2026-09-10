@@ -103,14 +103,18 @@ final class IOSTranscriptionSession {
         }
     }
 
-    private enum Backend {
+    /// Internal rather than private so the safety-recording extension in its
+    /// own file can route on it.
+    enum Backend {
         case batch(IOSBatchTranscriber)
         case apple(iOSLiveTranscriber)
         case openAI(OpenAIRealtimeLiveTranscriber)
         case shared(SharedClientLiveTranscriber)
     }
 
-    private let backend: Backend
+    /// Internal rather than private so the same type's safety-recording
+    /// extension can route on it from its own file.
+    let backend: Backend
     private let language: String?
 
     init(

@@ -116,6 +116,18 @@ public final class TranscriptionActivityManager: ObservableObject {
     /// The activity itself stays reusable throughout, so a primed headless start
     /// is unaffected.
     public static let resultRowDuration: TimeInterval = 180
+    /// Ordering and run ownership for every content publication (issue #983).
+    /// A reused activity outlives the run that primed it, so without this an
+    /// older `.arming` write — or a previous run's snippet — can complete after
+    /// the capture-proof state and leave proven capture displayed as
+    /// preparation.
+    private var order = ActivityPublicationOrder()
+    /// Publications are applied in submission order by chaining them: ActivityKit
+    /// gives no ordering guarantee across concurrent `update` calls.
+    private var publishChain: Task<Void, Never>?
+    /// The most recently *submitted* state. `activity.content.state` lags behind
+    /// anything still queued, so derived fields (provider, error) read this.
+    private var latestState: TranscriptionActivityAttributes.ContentState?
 
     private init() {}
 
@@ -133,6 +145,18 @@ public final class TranscriptionActivityManager: ObservableObject {
             return false
         }
 
+        // Retire the previous run before anything is published for this one, so
+        // a deferred update belonging to the predecessor cannot land here.
+        updateThrottleTask?.cancel()
+        updateThrottleTask = nil
+        lastUpdateTime = .distantPast
+        order.beginRun()
+
+        let initialState = TranscriptionActivityAttributes.ContentState(
+            status: initialStatus,
+            provider: provider
+        )
+
         // Reuse a primed activity when possible. ActivityKit will not allow a
         // background AppIntent to request a brand-new Live Activity, but it can
         // update one that was created while the app was foregrounded. Keeping
@@ -141,21 +165,11 @@ public final class TranscriptionActivityManager: ObservableObject {
         if let activity = currentActivity ?? Activity<TranscriptionActivityAttributes>.activities.first {
             currentActivity = activity
             isActivityRunning = true
-            let state = TranscriptionActivityAttributes.ContentState(
-                status: initialStatus,
-                provider: provider
-            )
-            Task {
-                await activity.update(.init(state: state, staleDate: nil))
-            }
+            publish(initialState, to: activity)
             return true
         }
 
         let attributes = TranscriptionActivityAttributes()
-        let initialState = TranscriptionActivityAttributes.ContentState(
-            status: initialStatus,
-            provider: provider
-        )
 
         do {
             let activity = try Activity.request(
@@ -165,9 +179,11 @@ public final class TranscriptionActivityManager: ObservableObject {
             )
             currentActivity = activity
             isActivityRunning = true
+            latestState = initialState
             SpeakLogger.activity.info("Started activity: \(activity.id, privacy: .public)")
             return true
         } catch {
+            order.retire()
             SpeakLogger.activity.error(
                 "Failed to start activity: \(error.localizedDescription, privacy: .public)")
             return false
@@ -193,18 +209,17 @@ public final class TranscriptionActivityManager: ObservableObject {
 
         lastUpdateTime = now
         updateThrottleTask?.cancel()
+        updateThrottleTask = nil
 
         let state = TranscriptionActivityAttributes.ContentState(
             status: status,
             lastSnippet: String(lastSnippet.suffix(100)),
             wordCount: wordCount,
             duration: duration,
-            provider: activity.content.state.provider
+            provider: latestState?.provider ?? activity.content.state.provider
         )
 
-        Task {
-            await activity.update(.init(state: state, staleDate: nil))
-        }
+        publish(state, to: activity)
     }
 
     private func scheduleThrottledUpdate(
@@ -214,10 +229,14 @@ public final class TranscriptionActivityManager: ObservableObject {
         duration: Int
     ) {
         updateThrottleTask?.cancel()
+        // The deferred write belongs to the run that requested it. A successor
+        // run must never inherit it.
+        let owner = order.currentRun
         updateThrottleTask = Task {
             try? await Task.sleep(for: .seconds(minimumUpdateInterval))
             guard !Task.isCancelled else { return }
             await MainActor.run {
+                guard let owner, order.owns(owner) else { return }
                 updateActivity(status: status, lastSnippet: lastSnippet, wordCount: wordCount, duration: duration)
             }
         }
@@ -262,6 +281,9 @@ public final class TranscriptionActivityManager: ObservableObject {
     ) {
         guard let activity = currentActivity else { return }
 
+        updateThrottleTask?.cancel()
+        updateThrottleTask = nil
+
         let finalState = TranscriptionActivityAttributes.ContentState(
             status: .completed,
             // The receipt's headline when the caller has one (issue #1008),
@@ -272,32 +294,42 @@ public final class TranscriptionActivityManager: ObservableObject {
             lastSnippet: completionMessage ?? completionOutcome.message,
             wordCount: finalWordCount,
             duration: duration,
-            provider: activity.content.state.provider,
+            provider: latestState?.provider ?? activity.content.state.provider,
             completionOutcome: completionOutcome,
             resultPreview: resultPreview
         )
 
-        Task {
-            if keepPrimed {
-                await activity.update(.init(state: finalState, staleDate: nil))
+        if keepPrimed {
+            let owner = order.currentRun
+            publish(finalState, to: activity)
+            // The idle continuation is submitted only after the delay, and only
+            // while this run still owns the activity: a capture that starts
+            // during the delay has already published its own preparation state
+            // and must not be overwritten by the previous run's priming copy.
+            Task { @MainActor in
                 try? await Task.sleep(for: .seconds(Self.resultRowDuration))
                 guard !Task.isCancelled, activity.activityState == .active else { return }
+                guard let owner, order.owns(owner) else { return }
                 let idleState = TranscriptionActivityAttributes.ContentState(
                     status: primedStatus,
                     lastSnippet: primedMessage,
                     provider: finalState.provider
                 )
-                await activity.update(.init(state: idleState, staleDate: nil))
-            } else {
-                await activity.end(
-                    .init(state: finalState, staleDate: nil),
-                    dismissalPolicy: .after(.now + Self.resultRowDuration)
-                )
-                await MainActor.run {
-                    currentActivity = nil
-                    isActivityRunning = false
-                }
+                publish(idleState, to: activity)
             }
+            return
+        }
+
+        // Ending supersedes every outstanding publication for this activity.
+        order.retire()
+        latestState = nil
+        currentActivity = nil
+        isActivityRunning = false
+        enqueuePublication {
+            await activity.end(
+                .init(state: finalState, staleDate: nil),
+                dismissalPolicy: .after(.now + Self.resultRowDuration)
+            )
         }
     }
 
@@ -316,16 +348,19 @@ public final class TranscriptionActivityManager: ObservableObject {
     /// Ends the current activity immediately.
     public func endActivity() {
         updateThrottleTask?.cancel()
+        updateThrottleTask = nil
 
         guard let activity = currentActivity else { return }
 
         // Clear state synchronously and end the captured activity, so a new
         // activity started right after (e.g. `startActivity` calls this first)
         // isn't orphaned when the async end completes and nils `currentActivity`.
+        order.retire()
+        latestState = nil
         currentActivity = nil
         isActivityRunning = false
 
-        Task {
+        enqueuePublication {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
     }
@@ -334,13 +369,11 @@ public final class TranscriptionActivityManager: ObservableObject {
     public func reportError(_ message: String) {
         guard let activity = currentActivity else { return }
 
-        var state = activity.content.state
+        var state = latestState ?? activity.content.state
         state.status = .error
         state.errorMessage = message
 
-        Task {
-            await activity.update(.init(state: state, staleDate: nil))
-        }
+        publish(state, to: activity)
     }
 }
 #endif

@@ -104,6 +104,16 @@ public enum CaptureRecoveryPolicy {
     /// `now`; anything beyond scheduling jitter means the clock moved.
     public static let clockToleranceSeconds: TimeInterval = 5
 
+    /// How long one recovery may wait on the provider before the attempt is
+    /// abandoned and offered again.
+    ///
+    /// Recovery has a single slot, so a request that never returns blocks both
+    /// a retry of this recording and the recovery of every other one. Five
+    /// minutes is far longer than a batch upload of a plausible safety
+    /// recording and still finite. Nothing is deleted when it elapses: the
+    /// claim stays open and the audio stays in the saved-recording library.
+    public static let recoveryDeadlineSeconds: TimeInterval = 300
+
     /// Below this the file holds a container and no meaningful audio. An
     /// AAC `.m4a` with a handful of frames is already several kilobytes, so
     /// this only catches files that never received a buffer.

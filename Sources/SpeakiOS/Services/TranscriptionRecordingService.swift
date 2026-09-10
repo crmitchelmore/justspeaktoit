@@ -122,6 +122,11 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// `nil` when this capture runs until somebody stops it. See
     /// `TranscriptionRecordingService+EndPointing.swift`.
     var endPointingTask: Task<Void, Never>?
+    /// The session whose transcript is being delivered by the stop in
+    /// progress. Held only across delivery so a non-retained batch capture's
+    /// recording can be discarded *after* its transcript has landed, never at
+    /// the moment the provider replied.
+    private var deliveringSession: IOSTranscriptionSession?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -849,11 +854,16 @@ public final class TranscriptionRecordingService: ObservableObject {
             destination: resolvedDestination
         )
 
-        // The transcript has landed, so this capture's safety audio no longer
+        // The transcript has landed, so *this* capture's safety audio no longer
         // needs recovering (issue #992). Marking it here rather than at stop is
         // deliberate: a kill anywhere above this line leaves the claim
-        // un-delivered and the recording offered back on the next launch.
-        CaptureSafetyClaimStore.shared.markDeliveredForThisProcess()
+        // un-delivered and the recording offered back on the next launch. It
+        // names the one capture that was delivered — an overlapping or earlier
+        // capture of this process may still be pending, and calling it
+        // delivered would withhold its audio from recovery.
+        if let recording = deliveringSession?.safetyRecordingID {
+            CaptureSafetyClaimStore.shared.markDelivered(recording: recording)
+        }
         if lastSessionError == nil {
             CaptureOutcomeJournal.record(text.isEmpty ? .cancelled : .delivered)
         }
@@ -888,6 +898,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
+        // Delivery of this capture is done: History has the transcript and the
+        // destination has been applied. Only now may a non-retained batch
+        // capture's temporary recording go — before this point it is the only
+        // copy of what the user said (issues #993, #992).
+        discardDeliveredRecording()
+
         // The outcome stays what the completion itself can prove: neither the
         // clipboard write nor `recordTranscription` is a durable delivery
         // receipt, and keyboard callers have not saved or inserted yet. The
@@ -905,9 +921,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
 
         // Kick off background post-processing if the chosen destination + user
-        // settings call for it. The polished clipboard write must also survive
-        // process suspension, so the background assertion is released only once
-        // post-processing has finished.
+        // settings call for it. Polished text stays in History; the raw clipboard
+        // write is final. Release the assertion when post-processing finishes.
         // A new stop supersedes whatever the previous one polished, so an
         // intent that waits can never be handed the run before last's text.
         lastPolishedTranscript = nil
@@ -945,6 +960,16 @@ public final class TranscriptionRecordingService: ObservableObject {
         lifecycle.finishStopping()
         state = lifecycle.state
         return result
+    }
+
+    /// Discards the temporary recording of the capture whose transcript has
+    /// just been delivered. A capture whose result was never used — an
+    /// abandoned finalisation, a failed stop — never reaches here, so its audio
+    /// survives for recovery.
+    private func discardDeliveredRecording() {
+        let session = deliveringSession
+        deliveringSession = nil
+        session?.discardTemporaryRecording()
     }
 
     private func completeRecordingActivity(
@@ -1271,8 +1296,13 @@ private extension TranscriptionRecordingService {
             defer { stoppingSession = nil }
             do {
                 guard let result = try await boundedStop(of: session) else {
+                    // The stop was abandoned, so nothing here delivers this
+                    // capture: its recording stays on disk to be recovered.
                     return timedOutFinalisationResult(for: session, duration: duration)
                 }
+                // This transcript is about to be delivered, so this capture's
+                // temporary recording may be discarded once that has happened.
+                deliveringSession = session
                 return result
             } catch {
                 handleError(error, session: session)

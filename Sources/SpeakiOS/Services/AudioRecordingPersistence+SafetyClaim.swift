@@ -25,6 +25,15 @@ extension AudioRecordingPersistence {
         claimHeartbeat = timer
     }
 
+    /// Drops the claim for the file this recorder last wrote, after that file
+    /// has been deleted. A claim outliving its audio is bookkeeping pointing at
+    /// nothing; the audio is never deleted *because* of a claim.
+    func forgetLastClaim() {
+        guard let claim = lastClaim else { return }
+        lastClaim = nil
+        claimStore.forget(recording: claim)
+    }
+
     func stopClaimHeartbeat() {
         claimHeartbeat?.invalidate()
         claimHeartbeat = nil

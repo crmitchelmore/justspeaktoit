@@ -38,10 +38,19 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    if context.state.status == .completed {
-                        Text("✓ \(context.state.wordCount) words copied to clipboard")
-                            .font(.caption)
-                            .foregroundStyle(.green)
+                    if let row = TranscriptionResultRow(state: context.state) {
+                        VStack(spacing: 2) {
+                            Text(row.outcomeMessage)
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                            if let preview = row.preview {
+                                Text(preview)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
                     } else {
                         Text(snippetText(for: context.state))
                             .font(.caption)
@@ -61,15 +70,13 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                         if context.state.status == .recording || context.state.status == .listening {
                             if #available(iOS 18, *) {
                                 Button(intent: StopTranscriptionRecordingIntent()) {
-                                    Label("Stop & Copy", systemImage: "stop.circle.fill")
+                                    Label("Stop", systemImage: "stop.circle.fill")
                                         .font(.caption2)
                                 }
                                 .tint(.red)
                             }
-                        } else if context.state.status == .completed {
-                            Text("Copied ✓")
-                                .font(.caption2)
-                                .foregroundStyle(.green)
+                        } else if let row = TranscriptionResultRow(state: context.state) {
+                            ResultRowActions(row: row)
                         }
                     }
                 }
@@ -179,11 +186,11 @@ struct LockScreenTranscriptionView: View {
 
                     if state.status == .arming {
                         // No recording timer while capture is unproven.
-                        Text("\(state.wordCount) words")
+                        Text(wordCountText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("\(state.wordCount) words • ")
+                        Text("\(wordCountText) • ")
                             .font(.caption)
                             .foregroundStyle(.secondary) +
                         Text(startTime, style: .timer)
@@ -192,10 +199,26 @@ struct LockScreenTranscriptionView: View {
                     }
                 }
 
-                if state.status == .completed {
-                    Text("✓ \(state.wordCount) words copied to clipboard")
+                if let row = TranscriptionResultRow(state: state) {
+                    Text(row.outcomeMessage)
                         .font(.subheadline)
                         .foregroundStyle(.green)
+                    // The capture receipt (issue #1008), which says what each
+                    // delivery lane actually did. The headline above stays the
+                    // resolved outcome's own message, so this can only add
+                    // detail, never upgrade the claim.
+                    if !state.lastSnippet.isEmpty, state.lastSnippet != row.outcomeMessage {
+                        Text(state.lastSnippet)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    if let preview = row.preview {
+                        Text(preview)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 } else if let error = state.errorMessage {
                     Text(error)
                         .font(.footnote)
@@ -221,10 +244,52 @@ struct LockScreenTranscriptionView: View {
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Stop recording")
                 }
+            } else if let resultRow {
+                ResultRowActions(row: resultRow)
             }
         }
         .padding()
+    }
+
+    private var resultRow: TranscriptionResultRow? { TranscriptionResultRow(state: state) }
+
+    /// A completed row suppresses the count when it would not be meaningful.
+    private var wordCountText: String {
+        if let resultRow { return resultRow.wordCountText ?? "" }
+        return "\(state.wordCount) words"
+    }
+}
+
+// MARK: - Result Row Actions
+
+/// Copy runs in the app process via `LiveActivityIntent`; Open is a plain deep
+/// link to the Transcribe tab. Both are shown only when the row says the
+/// transcript is retrievable, so neither can imply an action that cannot happen.
+private struct ResultRowActions: View {
+    let row: TranscriptionResultRow
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if row.offersCopy, #available(iOS 18, *) {
+                Button(intent: CopyLastTranscriptIntent()) {
+                    Label(row.copyTitle, systemImage: "doc.on.doc")
+                        .font(.caption2)
+                }
+                .buttonStyle(.plain)
+                .tint(brandAccent)
+                .accessibilityLabel(row.copyTitle)
+            }
+
+            if row.offersOpen, let url = URL(string: "justspeaktoit://transcribe") {
+                Link(destination: url) {
+                    Label("Open", systemImage: "arrow.up.forward.app")
+                        .font(.caption2)
+                }
+                .accessibilityLabel("Open the transcript")
+            }
+        }
     }
 }
 
@@ -247,4 +312,22 @@ struct LockScreenTranscriptionView: View {
         duration: 300,
         provider: "Deepgram"
     )
+}
+
+#Preview("Completion outcomes", as: .dynamicIsland(.expanded), using: TranscriptionActivityAttributes()) {
+    JustSpeakToItWidgetExtensionLiveActivity()
+} contentStates: {
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .ready)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .copied)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .savedToHistory)
+    TranscriptionActivityAttributes.ContentState(status: .completed, completionOutcome: .noSpeech)
+}
+
+#Preview("Completion outcomes", as: .content, using: TranscriptionActivityAttributes()) {
+    JustSpeakToItWidgetExtensionLiveActivity()
+} contentStates: {
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .ready)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .copied)
+    TranscriptionActivityAttributes.ContentState(status: .completed, wordCount: 12, completionOutcome: .savedToHistory)
+    TranscriptionActivityAttributes.ContentState(status: .completed, completionOutcome: .noSpeech)
 }

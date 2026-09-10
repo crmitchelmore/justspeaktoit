@@ -467,6 +467,63 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
     }
 }
 
+// MARK: - Result Row Intents
+
+/// Copies the completed transcript from the Live Activity result row.
+///
+/// `LiveActivityIntent` conformance is what makes this in-process: without it the
+/// widget extension performs the intent itself, and a UI-less extension cannot
+/// write the general pasteboard (PBErrorDomain 11). It is the same mechanism the
+/// Stop button already relies on.
+///
+/// The row only shows this button when the payload carries a preview, i.e. when
+/// the completed transcript was actually published to the App Group, so the
+/// button is never offered for a session whose text cannot be retrieved. The
+/// activity is moved to `.copied` only after `UIPasteboard.changeCount` confirms
+/// the write landed — nothing else in the app sets that outcome, so a `Copied`
+/// row always corresponds to a clipboard write that really happened.
+@available(iOS 18, *)
+public struct CopyLastTranscriptIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Copy Last Transcript"
+    public static var description = IntentDescription(
+        "Copies the most recent completed transcript to the clipboard."
+    )
+
+    public static var openAppWhenRun: Bool = false
+    /// Reads and writes private transcript data, so never run on a locked device.
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    public init() {}
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let state = SharedTranscriptionState.shared
+        // The background recorder publishes `lastCompletedTranscript`; the
+        // foreground coordinator commits the same text as `currentTranscriptText`.
+        let text = state.lastCompletedTranscript ?? state.currentTranscriptText
+        guard !text.isEmpty else {
+            return .result(dialog: "No transcript to copy.")
+        }
+
+        let copied = await MainActor.run { Self.copyConfirmingChangeCount(text) }
+        guard copied else {
+            return .result(dialog: "Couldn’t reach the clipboard. Open the app to copy it.")
+        }
+
+        await TranscriptionActivityManager.shared.markCompletionCopied()
+        let wordCount = text.split(whereSeparator: \.isWhitespace).count
+        return .result(dialog: "Copied \(wordCount) words.")
+    }
+
+    /// Writes to the pasteboard and reports whether the system observed the write.
+    @MainActor
+    private static func copyConfirmingChangeCount(_ text: String) -> Bool {
+        let pasteboard = UIPasteboard.general
+        let before = pasteboard.changeCount
+        pasteboard.string = text
+        return pasteboard.changeCount != before
+    }
+}
+
 // MARK: - Copy Intents
 
 /// App Intent to copy the last transcribed sentence to clipboard.

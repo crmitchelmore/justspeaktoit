@@ -108,6 +108,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let hasPolishingKey: @MainActor () -> Bool
     private let polish: @MainActor (String, String, String) async throws -> String
     private var latestCompletionID: UUID?
+    typealias ActivityCompletion =
+        @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String, String?) -> Void
+    private let completeActivity: ActivityCompletion
 
     private convenience init() {
         self.init(
@@ -127,13 +130,26 @@ public final class TranscriptionRecordingService: ObservableObject {
         historyManager: iOSHistoryManager,
         polishClipboard: PolishClipboard,
         hasPolishingKey: @escaping @MainActor () -> Bool,
-        polish: @escaping @MainActor (String, String, String) async throws -> String
+        polish: @escaping @MainActor (String, String, String) async throws -> String,
+        completeActivity: @escaping ActivityCompletion = {
+            wordCount, duration, primedMessage, outcome, preview, completionMessage in
+            TranscriptionActivityManager.shared.completeActivity(
+                finalWordCount: wordCount,
+                duration: duration,
+                keepPrimed: true,
+                primedMessage: primedMessage,
+                completionOutcome: outcome,
+                resultPreview: preview,
+                completionMessage: completionMessage
+            )
+        }
     ) {
         self.sharedState = sharedState
         self.historyManager = historyManager
         self.polishClipboard = polishClipboard
         self.hasPolishingKey = hasPolishingKey
         self.polish = polish
+        self.completeActivity = completeActivity
     }
 
     /// Picks the first non-blank candidate, else the fallback. Extracted as a
@@ -656,6 +672,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         let resolvedDestination = requestedDestination == .auto
             ? Self.concreteDestination(for: autoPlan)
             : requestedDestination
+        // Read before the side effects reset the flag: only a shared completion
+        // leaves a transcript the result row's actions can retrieve.
+        let publishesCompletedTranscript = sharesLiveTranscript
         let clipboardOutcome = await applyDestinationSideEffects(
             text: text,
             destination: resolvedDestination
@@ -701,13 +720,20 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
-        // Complete the Live Activity with the receipt, so the row states what
-        // happened rather than a fixed outcome. A session that ended in an
-        // error still says so in the primed message it leaves behind.
+        // The outcome stays what the completion itself can prove: neither the
+        // clipboard write nor `recordTranscription` is a durable delivery
+        // receipt, and keyboard callers have not saved or inserted yet. The
+        // capture receipt (issue #1008) travels alongside it as the snippet,
+        // where it reports what each lane actually did without becoming a
+        // stronger claim than the outcome earns.
         completeRecordingActivity(
             duration: duration,
             primedMessage: lastSessionError?.localizedDescription ?? primedActivityMessage,
-            completionMessage: receipt.headline
+            outcome: .unconfirmed(transcript: text),
+            // Keyboard handoffs publish nothing retrievable, so they carry no
+            // preview and the result row offers no actions it cannot honour.
+            resultPreview: publishesCompletedTranscript ? TranscriptionResultRow.preview(for: text) : "",
+            completionMessage: receipt.summary
         )
 
         // Kick off background post-processing if the chosen destination + user
@@ -729,7 +755,6 @@ public final class TranscriptionRecordingService: ObservableObject {
                 text: text,
                 historyItemID: historyItem?.id,
                 completionID: completionID,
-                receipt: clipboardOutcome.receipt,
                 assertion: assertion
             )
         } else {
@@ -750,15 +775,11 @@ public final class TranscriptionRecordingService: ObservableObject {
     private func completeRecordingActivity(
         duration: Int,
         primedMessage: String,
+        outcome: TranscriptionCompletionOutcome,
+        resultPreview: String,
         completionMessage: String? = nil
     ) {
-        activityManager.completeActivity(
-            finalWordCount: wordCount,
-            duration: duration,
-            keepPrimed: true,
-            primedMessage: primedMessage,
-            completionMessage: completionMessage
-        )
+        completeActivity(wordCount, duration, primedMessage, outcome, resultPreview, completionMessage)
     }
 
     /// Cancels recording without saving. During startup this retires the
@@ -936,7 +957,6 @@ public final class TranscriptionRecordingService: ObservableObject {
         text: String,
         historyItemID: UUID?,
         completionID: UUID,
-        receipt: PolishClipboard.Receipt?,
         assertion: BackgroundTaskAssertion
     ) {
         let settings = AppSettings.shared
@@ -945,8 +965,6 @@ public final class TranscriptionRecordingService: ObservableObject {
         let historyManager = self.historyManager
         let polish = self.polish
         let operation = AutomaticPolishOperation(
-            clipboard: polishClipboard,
-            receipt: receipt,
             isCurrent: { [weak self] in self?.latestCompletionID == completionID },
             success: { [weak self] polished, current in
                 if current {
@@ -1086,10 +1104,7 @@ private extension TranscriptionRecordingService {
 
     /// What the pasteboard lane of a stop produced.
     struct ClipboardOutcome {
-        /// The ownership receipt an automatic polish can replace into, or
-        /// `nil` when the write could not be claimed (or was never made).
-        var receipt: PolishClipboard.Receipt?
-        /// Whether the pasteboard write was verified, or `nil` when the
+        /// Whether the pasteboard write was read back, or `nil` when the
         /// destination deliberately does not touch the pasteboard. The capture
         /// receipt reports a failed write as a failure rather than claiming a
         /// copy that never landed.
@@ -1110,21 +1125,18 @@ private extension TranscriptionRecordingService {
         sharesCompletedTranscript: Bool? = nil
     ) async -> ClipboardOutcome {
         guard !text.isEmpty else { return ClipboardOutcome() }
-        var clipboardReceipt: PolishClipboard.Receipt?
         var clipboardWriteSucceeded: Bool?
         if let clipboardText = Self.clipboardTextAtStop(
             transcript: text,
             destination: destination
         ) {
-            // `copyRaw` writes and then verifies the value is still ours, so a
-            // receipt is proof the write landed. When ownership could not be
-            // taken (a background stop, where `changeCount` can be stale) there
-            // is nothing to replace a polish into, and the verified writer is
-            // what decides whether the receipt may say "Copied" at all.
-            clipboardReceipt = polishClipboard.copyRaw(clipboardText)
-            clipboardWriteSucceeded = clipboardReceipt != nil
-                ? true
-                : await Self.writeClipboardReliably(clipboardText)
+            // The raw write happens exactly once, through the seam that owns
+            // it (issue #1002/#1031). The read-back that follows only observes
+            // the result, so the receipt reports a copy that landed rather
+            // than one that was merely attempted (issue #945). Re-writing
+            // after another app copied is the clipboard theft #1031 removed.
+            polishClipboard.copyRaw(clipboardText)
+            clipboardWriteSucceeded = await Self.clipboardHolds(clipboardText)
         }
 
         // Keyboard handoffs keep their result solely in the nonce-scoped store.
@@ -1136,23 +1148,19 @@ private extension TranscriptionRecordingService {
         ) {
             sharedState.lastCompletedTranscript = sharedTranscript
         }
-        return ClipboardOutcome(
-            receipt: clipboardReceipt,
-            writeSucceeded: clipboardWriteSucceeded
-        )
+        return ClipboardOutcome(writeSucceeded: clipboardWriteSucceeded)
     }
 
-    /// Pasteboard writes from a background AppIntent can race process
-    /// suspension. Verify the value and retry briefly before reporting success.
+    /// A pasteboard write made from a background AppIntent can race process
+    /// suspension, so the value may not be readable back immediately. Poll
+    /// briefly before reporting the write as failed.
     ///
     /// - Returns: whether the value was read back. A `false` here is the only
     ///   thing that stops the receipt saying "Copied".
-    @discardableResult
-    static func writeClipboardReliably(_ text: String) async -> Bool {
+    static func clipboardHolds(_ text: String) async -> Bool {
         for attempt in 0..<3 {
-            UIPasteboard.general.string = text
-            await Task.yield()
             if UIPasteboard.general.string == text { return true }
+            await Task.yield()
             if attempt < 2 {
                 try? await Task.sleep(for: .milliseconds(80))
             }

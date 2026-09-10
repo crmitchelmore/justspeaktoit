@@ -6,14 +6,14 @@ import XCTest
 
 @MainActor
 final class AutomaticPolishOperationTests: XCTestCase {
-    func testTimelyPolishReplacesConfirmedRawAndSavesHistory() async {
+    func testSuccessfulPolishKeepsRawClipboardAndSavesHistory() async {
         let fixture = Fixture()
-        let receipt = fixture.clipboard.copyRaw("raw")
+        fixture.clipboard.copyRaw("raw")
         XCTAssertEqual(fixture.pasteboard.writes, ["raw"])
-        let operation = fixture.operation(receipt: receipt)
+        let operation = fixture.operation()
         operation.start { "polished" }
         await fixture.settle()
-        XCTAssertEqual(fixture.pasteboard.writes, ["raw", "polished"])
+        XCTAssertEqual(fixture.pasteboard.writes, ["raw"])
         XCTAssertEqual(fixture.history[fixture.currentID], "polished")
         XCTAssertEqual(fixture.latest, "polished")
     }
@@ -21,9 +21,9 @@ final class AutomaticPolishOperationTests: XCTestCase {
     func testInterveningDifferentIdenticalAndNonTextCopiesArePreserved() async {
         for copied in ["new", "raw", nil] as [String?] {
             let fixture = Fixture()
-            let receipt = fixture.clipboard.copyRaw("raw")
+            fixture.clipboard.copyRaw("raw")
             let processor = Processor()
-            let operation = fixture.operation(receipt: receipt)
+            let operation = fixture.operation()
             operation.start { try await processor.run() }
             await processor.waitUntilStarted()
             fixture.pasteboard.copyFromAnotherApp(copied)
@@ -35,74 +35,23 @@ final class AutomaticPolishOperationTests: XCTestCase {
         }
     }
 
-    func testCopiedOwnershipTokenStillRequiresUnchangedCount() {
+    func testInitialWriteNeverRetriesAfterAnotherCopy() async {
         let fixture = Fixture()
-        let receipt = fixture.clipboard.copyRaw("raw")!
-        fixture.pasteboard.changeCount += 1
-        XCTAssertFalse(fixture.clipboard.replace("polished", receipt: receipt))
-        XCTAssertEqual(fixture.pasteboard.writes, ["raw"])
-    }
-
-    func testDeferredInitialCountNeverAdoptsLaterWriteOrRetries() {
-        let fixture = Fixture()
-        fixture.pasteboard.defersCount = true
-        XCTAssertNil(fixture.clipboard.copyRaw("raw"))
-        fixture.pasteboard.copyFromAnotherApp("new")
-        XCTAssertEqual(fixture.pasteboard.writes, ["raw"])
-        XCTAssertEqual(fixture.pasteboard.string, "new")
-    }
-
-    func testInterveningInitialWriteCannotCreateReceipt() {
-        let fixture = Fixture()
-        fixture.pasteboard.afterWrite = { fixture.pasteboard.copyFromAnotherApp("raw") }
-        XCTAssertNil(fixture.clipboard.copyRaw("raw"))
-        XCTAssertEqual(fixture.pasteboard.writes, ["raw"])
-    }
-
-    func testDeadlineIsStrictAndDoesNotDiscardHistory() async {
-        for elapsed in [19.999, 20, 21] {
-            let fixture = Fixture()
-            let receipt = fixture.clipboard.copyRaw("raw")
-            let operation = fixture.operation(receipt: receipt)
-            fixture.now += elapsed
-            operation.start { "polished" }
-            await fixture.settle()
-            XCTAssertEqual(fixture.pasteboard.string, elapsed < 20 ? "polished" : "raw")
-            XCTAssertEqual(fixture.history[fixture.currentID], "polished")
-        }
-    }
-
-    func testBackgroundCannotEstablishOrUseReceipt() async {
-        let fixture = Fixture()
-        fixture.active = false
-        XCTAssertNil(fixture.clipboard.copyRaw("background raw"))
-        fixture.active = true
-        let receipt = fixture.clipboard.copyRaw("raw")
-        fixture.active = false
-        let operation = fixture.operation(receipt: receipt)
+        fixture.pasteboard.afterWrite = { fixture.pasteboard.copyFromAnotherApp("new") }
+        fixture.clipboard.copyRaw("raw")
+        let operation = fixture.operation()
         operation.start { "polished" }
         await fixture.settle()
-        XCTAssertEqual(fixture.pasteboard.string, "raw")
+        XCTAssertEqual(fixture.pasteboard.writes, ["raw"])
+        XCTAssertEqual(fixture.pasteboard.string, "new")
         XCTAssertEqual(fixture.history[fixture.currentID], "polished")
-    }
-
-    func testBackgroundCopyObservedOnReactivationPreventsReplacement() async {
-        let fixture = Fixture()
-        let receipt = fixture.clipboard.copyRaw("raw")
-        fixture.active = false
-        fixture.pasteboard.copyFromAnotherApp("new")
-        fixture.active = true
-        let operation = fixture.operation(receipt: receipt)
-        operation.start { "polished" }
-        await fixture.settle()
-        XCTAssertEqual(fixture.pasteboard.string, "new")
     }
 
     func testFailureNeverRestoresRawOverNewCopy() async {
         let fixture = Fixture()
-        let receipt = fixture.clipboard.copyRaw("raw")
+        fixture.clipboard.copyRaw("raw")
         fixture.pasteboard.copyFromAnotherApp("new")
-        let operation = fixture.operation(receipt: receipt)
+        let operation = fixture.operation()
         operation.start { throw URLError(.timedOut) }
         await fixture.settle()
         XCTAssertEqual(fixture.pasteboard.string, "new")
@@ -111,9 +60,9 @@ final class AutomaticPolishOperationTests: XCTestCase {
 
     func testCancelledProviderReturningSuccessHasNoLateSideEffects() async {
         let fixture = Fixture()
-        let receipt = fixture.clipboard.copyRaw("raw")
+        fixture.clipboard.copyRaw("raw")
         let processor = Processor()
-        let operation = fixture.operation(receipt: receipt)
+        let operation = fixture.operation()
         operation.start { try await processor.run() }
         await processor.waitUntilStarted()
         operation.cancel()
@@ -132,12 +81,14 @@ final class AutomaticPolishOperationTests: XCTestCase {
     func testOutOfOrderCompletionsKeepOwnHistoryAndNewLatestResult() async {
         let fixture = Fixture()
         let oldID = fixture.currentID
-        let old = fixture.operation(receipt: fixture.clipboard.copyRaw("old raw"))
+        fixture.clipboard.copyRaw("old raw")
+        let old = fixture.operation()
         let processor = Processor()
         old.start { try await processor.run() }
         await processor.waitUntilStarted()
         fixture.currentID = UUID()
-        let new = fixture.operation(receipt: fixture.clipboard.copyRaw("new raw"))
+        fixture.clipboard.copyRaw("new raw")
+        let new = fixture.operation()
         new.start { "new polished" }
         await fixture.settle()
         processor.continuation?.resume(returning: "old polished")
@@ -145,7 +96,8 @@ final class AutomaticPolishOperationTests: XCTestCase {
         XCTAssertEqual(fixture.history[oldID], "old polished")
         XCTAssertEqual(fixture.history[fixture.currentID], "new polished")
         XCTAssertEqual(fixture.latest, "new polished")
-        XCTAssertEqual(fixture.pasteboard.string, "new polished")
+        XCTAssertEqual(fixture.pasteboard.string, "new raw")
+        XCTAssertEqual(fixture.pasteboard.writes, ["old raw", "new raw"])
     }
 
     func testExpirationBeforeTaskInstallationEndsAssertionExactlyOnce() async {
@@ -159,7 +111,8 @@ final class AutomaticPolishOperationTests: XCTestCase {
             },
             end: { _ in ends += 1 }
         )
-        let operation = fixture.operation(receipt: fixture.clipboard.copyRaw("raw"))
+        fixture.clipboard.copyRaw("raw")
+        let operation = fixture.operation()
         var processed = false
         operation.start(under: assertion, isActive: true) { processed = true; return "polished" }
         await Task.yield()
@@ -182,7 +135,8 @@ final class AutomaticPolishOperationTests: XCTestCase {
             },
             end: { _ in ends += 1 }
         )
-        let operation = fixture.operation(receipt: fixture.clipboard.copyRaw("raw"))
+        fixture.clipboard.copyRaw("raw")
+        let operation = fixture.operation()
         let processor = Processor()
         operation.start(under: assertion, isActive: false) { try await processor.run() }
         await processor.waitUntilStarted()
@@ -206,7 +160,8 @@ final class AutomaticPolishOperationTests: XCTestCase {
             XCTFail("Must not end an invalid assertion")
         })
         XCTAssertFalse(assertion.isValid)
-        let operation = fixture.operation(receipt: fixture.clipboard.copyRaw("raw"))
+        fixture.clipboard.copyRaw("raw")
+        let operation = fixture.operation()
         operation.start(under: assertion, isActive: false) {
             XCTFail("Operation ran without background assertion")
             return "late"
@@ -219,32 +174,25 @@ final class AutomaticPolishOperationTests: XCTestCase {
 
     func testEmptyRawDoesNotTouchClipboard() {
         let fixture = Fixture()
-        XCTAssertNil(fixture.clipboard.copyRaw(""))
+        fixture.clipboard.copyRaw("")
         XCTAssertTrue(fixture.pasteboard.writes.isEmpty)
     }
 }
 private extension AutomaticPolishOperationTests {
     @MainActor
     private final class Pasteboard: PolishPasteboard {
-        var changeCount = 0
-        var ownershipToken: String?
         var string: String?
         var writes: [String] = []
-        var defersCount = false
         var afterWrite: (() -> Void)?
 
-        func write(_ text: String, token: String) {
+        func write(_ text: String) {
             string = text
-            ownershipToken = token
             writes.append(text)
-            if !defersCount { changeCount += 1 }
             afterWrite?()
         }
 
         func copyFromAnotherApp(_ text: String?) {
             string = text
-            ownershipToken = nil
-            changeCount += 1
         }
     }
 
@@ -268,26 +216,18 @@ private extension AutomaticPolishOperationTests {
     @MainActor
     private final class Fixture {
         let pasteboard = Pasteboard()
-        var now: TimeInterval = 100
-        var active = true
         var currentID = UUID()
         var latest = "raw"
         var history: [UUID: String] = [:]
         var errors = 0
         var completions = 0
         var processing: Set<UUID> = []
-        lazy var clipboard = PolishClipboard(
-            pasteboard: pasteboard,
-            now: { self.now },
-            isActive: { self.active }
-        )
+        lazy var clipboard = PolishClipboard(pasteboard: pasteboard)
 
-        func operation(receipt: PolishClipboard.Receipt?) -> AutomaticPolishOperation {
+        func operation() -> AutomaticPolishOperation {
             let operationID = currentID
             processing.insert(operationID)
             return AutomaticPolishOperation(
-                clipboard: clipboard,
-                receipt: receipt,
                 isCurrent: { self.currentID == operationID },
                 success: { text, current in
                     self.history[operationID] = text

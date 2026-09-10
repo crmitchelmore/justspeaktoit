@@ -1,11 +1,13 @@
+import Foundation
+
 #if os(iOS)
 import ActivityKit
-import Foundation
 import os.log
+#endif
 
 /// ActivityKit attributes for live transcription sessions.
 /// Defines the static and dynamic content shown in Live Activities and Dynamic Island.
-public struct TranscriptionActivityAttributes: ActivityAttributes {
+public struct TranscriptionActivityAttributes {
 
     /// Static content that doesn't change during the activity.
     public struct ContentState: Codable, Hashable {
@@ -21,6 +23,11 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
         public var provider: String
         /// Optional error message
         public var errorMessage: String?
+        /// Only describes confirmed completion effects; older payloads remain neutral.
+        public var completionOutcome: TranscriptionCompletionOutcome
+        /// First line of the completed transcript, empty unless it was published
+        /// to the App Group and is therefore retrievable by the result actions.
+        public var resultPreview: String
 
         public init(
             status: TranscriptionStatus = .idle,
@@ -28,7 +35,9 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
             wordCount: Int = 0,
             duration: Int = 0,
             provider: String = "Apple Speech",
-            errorMessage: String? = nil
+            errorMessage: String? = nil,
+            completionOutcome: TranscriptionCompletionOutcome = .ready,
+            resultPreview: String = ""
         ) {
             self.status = status
             self.lastSnippet = lastSnippet
@@ -36,6 +45,27 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
             self.duration = duration
             self.provider = provider
             self.errorMessage = errorMessage
+            self.completionOutcome = completionOutcome
+            self.resultPreview = resultPreview
+        }
+
+        private enum CodingKeys: String, CodingKey { // swiftlint:disable:this nesting
+            case status, lastSnippet, wordCount, duration, provider, errorMessage
+            case completionOutcome, resultPreview
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.status = try container.decode(TranscriptionStatus.self, forKey: .status)
+            self.lastSnippet = try container.decode(String.self, forKey: .lastSnippet)
+            self.wordCount = try container.decode(Int.self, forKey: .wordCount)
+            self.duration = try container.decode(Int.self, forKey: .duration)
+            self.provider = try container.decode(String.self, forKey: .provider)
+            self.errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+            self.completionOutcome = try container.decodeIfPresent(
+                TranscriptionCompletionOutcome.self, forKey: .completionOutcome
+            ) ?? .ready
+            self.resultPreview = try container.decodeIfPresent(String.self, forKey: .resultPreview) ?? ""
         }
     }
 
@@ -64,6 +94,9 @@ public struct TranscriptionActivityAttributes: ActivityAttributes {
     }
 }
 
+#if os(iOS)
+extension TranscriptionActivityAttributes: ActivityAttributes {}
+
 // MARK: - Activity Manager
 
 /// Manages Live Activity lifecycle for transcription sessions.
@@ -77,6 +110,12 @@ public final class TranscriptionActivityManager: ObservableObject {
     private var updateThrottleTask: Task<Void, Never>?
     private var lastUpdateTime: Date = .distantPast
     private let minimumUpdateInterval: TimeInterval = 1.0 // Throttle to 1 update per second
+
+    /// How long a finished capture stays on screen as a result row before it is
+    /// dismissed (or, when primed, reverts to the idle Action Button label).
+    /// The activity itself stays reusable throughout, so a primed headless start
+    /// is unaffected.
+    public static let resultRowDuration: TimeInterval = 180
 
     private init() {}
 
@@ -198,20 +237,50 @@ public final class TranscriptionActivityManager: ObservableObject {
         primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
         completionMessage: String? = nil
     ) {
+        completeActivity(
+            finalWordCount: finalWordCount,
+            duration: duration,
+            keepPrimed: keepPrimed,
+            primedMessage: primedMessage,
+            primedStatus: primedStatus,
+            completionOutcome: .ready,
+            resultPreview: "",
+            completionMessage: completionMessage
+        )
+    }
+
+    /// Explicit outcome variant; the original entry point remains neutral and source-compatible.
+    public func completeActivity(
+        finalWordCount: Int,
+        duration: Int,
+        keepPrimed: Bool = false,
+        primedMessage: String = "Ready for the Action Button",
+        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
+        completionOutcome: TranscriptionCompletionOutcome,
+        resultPreview: String = "",
+        completionMessage: String? = nil
+    ) {
         guard let activity = currentActivity else { return }
 
         let finalState = TranscriptionActivityAttributes.ContentState(
             status: .completed,
-            lastSnippet: completionMessage ?? "Transcription complete",
+            // The receipt's headline when the caller has one (issue #1008),
+            // else the resolved outcome's own message. The result row's
+            // headline still comes from `completionOutcome`, so a richer
+            // snippet can never turn into a delivery claim the lane did not
+            // earn (issue #945).
+            lastSnippet: completionMessage ?? completionOutcome.message,
             wordCount: finalWordCount,
             duration: duration,
-            provider: activity.content.state.provider
+            provider: activity.content.state.provider,
+            completionOutcome: completionOutcome,
+            resultPreview: resultPreview
         )
 
         Task {
             if keepPrimed {
                 await activity.update(.init(state: finalState, staleDate: nil))
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(Self.resultRowDuration))
                 guard !Task.isCancelled, activity.activityState == .active else { return }
                 let idleState = TranscriptionActivityAttributes.ContentState(
                     status: primedStatus,
@@ -220,13 +289,28 @@ public final class TranscriptionActivityManager: ObservableObject {
                 )
                 await activity.update(.init(state: idleState, staleDate: nil))
             } else {
-                await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 5))
+                await activity.end(
+                    .init(state: finalState, staleDate: nil),
+                    dismissalPolicy: .after(.now + Self.resultRowDuration)
+                )
                 await MainActor.run {
                     currentActivity = nil
                     isActivityRunning = false
                 }
             }
         }
+    }
+
+    /// Records a *confirmed* clipboard write on the result row. Only the Copy
+    /// action calls this, and only after reading back `UIPasteboard.changeCount`,
+    /// so `.copied` on screen always corresponds to a write that actually landed.
+    public func markCompletionCopied() async {
+        guard let activity = currentActivity else { return }
+        var state = activity.content.state
+        guard state.status == .completed, state.completionOutcome != .noSpeech else { return }
+        state.completionOutcome = .copied
+        state.lastSnippet = TranscriptionCompletionOutcome.copied.message
+        await activity.update(.init(state: state, staleDate: nil))
     }
 
     /// Ends the current activity immediately.

@@ -428,8 +428,19 @@ public final class AppSettings: ObservableObject {
         // superset of the old default — it copies to the clipboard except when
         // the Just Speak keyboard is demonstrably open in a text field, where
         // the words go into that field instead.
-        let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination")
-        let hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw ?? "") ?? .auto
+        //
+        // A stored value this build cannot parse is *not* the same thing as no
+        // stored value: it means a malformed, downgraded or migrated
+        // preference, and defaulting it to Auto would silently opt that user
+        // into suppressing the clipboard whenever a targeted keyboard offer
+        // exists. Missing keeps the new default; unrecognised keeps the
+        // pre-Auto behaviour it was last known to have.
+        let hardwareDest: HardwareTriggerDestination
+        if let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination") {
+            hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw) ?? .clipboard
+        } else {
+            hardwareDest = .auto
+        }
 
         // Post-processing settings
         let postEnabled = defaults.bool(forKey: "postProcessingEnabled")

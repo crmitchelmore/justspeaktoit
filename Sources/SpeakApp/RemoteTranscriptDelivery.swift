@@ -27,19 +27,33 @@ final class RemoteTranscriptDelivery: NSObject {
     /// so this type never reaches into the accessibility stack itself.
     private let paste: (String) -> TextOutputResult
     private let notificationCenter: UNUserNotificationCenter?
+    /// Resolves a transcript from durable local history by entry id, for
+    /// notifications that outlive this process. Injected so the delivery path
+    /// stays testable and this type never reaches into the history store.
+    private let transcriptForEntry: (UUID) -> String?
     private var syncObservers: [NSObjectProtocol] = []
-    /// The transcript each posted notification carries, so its actions can act
-    /// without going back to the history store.
+    /// The transcript each posted notification carries, as a fast path for the
+    /// common case where the action is pressed while this process is still
+    /// running. It is a cache, not the source of truth — see `transcript(for:)`.
     private var pendingTranscripts: [String: String] = [:]
+    /// Insertion order for `pendingTranscripts`, oldest first.
+    private var pendingOrder: [String] = []
+    /// Cap on retained transcript text. Notifications that are dismissed,
+    /// expire, or are never acted on would otherwise hold their full text for
+    /// the life of the process, so sustained normal arrivals grow without
+    /// bound. Evicted entries still resolve through local history.
+    static let pendingTranscriptLimit = 20
 
     init(
         settings: AppSettings,
         paste: @escaping (String) -> TextOutputResult,
-        notificationCenter: UNUserNotificationCenter? = RemoteTranscriptDelivery.systemNotificationCenter()
+        notificationCenter: UNUserNotificationCenter? = RemoteTranscriptDelivery.systemNotificationCenter(),
+        transcriptForEntry: @escaping (UUID) -> String? = { _ in nil }
     ) {
         self.settings = settings
         self.paste = paste
         self.notificationCenter = notificationCenter
+        self.transcriptForEntry = transcriptForEntry
         super.init()
     }
 
@@ -153,7 +167,7 @@ final class RemoteTranscriptDelivery: NSObject {
 
     private func post(_ alert: RemoteTranscriptArrival.Alert, id: UUID) {
         guard let notificationCenter else { return }
-        pendingTranscripts[id.uuidString] = alert.transcript
+        remember(alert.transcript, for: id.uuidString)
         let content = UNMutableNotificationContent()
         content.title = alert.title
         content.body = alert.body
@@ -161,6 +175,35 @@ final class RemoteTranscriptDelivery: NSObject {
         notificationCenter.add(
             UNNotificationRequest(identifier: id.uuidString, content: content, trigger: nil)
         )
+    }
+
+    private func remember(_ transcript: String, for identifier: String) {
+        if pendingTranscripts[identifier] == nil {
+            pendingOrder.append(identifier)
+        }
+        pendingTranscripts[identifier] = transcript
+        while pendingOrder.count > Self.pendingTranscriptLimit {
+            pendingTranscripts.removeValue(forKey: pendingOrder.removeFirst())
+        }
+    }
+
+    private func forget(_ identifier: String) {
+        pendingTranscripts.removeValue(forKey: identifier)
+        pendingOrder.removeAll { $0 == identifier }
+    }
+
+    /// The transcript a notification's action should act on.
+    ///
+    /// The in-memory cache is only a fast path. A notification stays actionable
+    /// across a quit, a crash or a relaunch, and its identifier is the History
+    /// entry id — which the entry that produced the notification also has, in
+    /// durable local history. Falling back to that is what stops a Paste or
+    /// Copy chosen after an ordinary process lifecycle event from silently
+    /// doing nothing.
+    func transcript(for identifier: String) -> String? {
+        if let cached = pendingTranscripts[identifier] { return cached }
+        guard let entryID = UUID(uuidString: identifier) else { return nil }
+        return transcriptForEntry(entryID)
     }
 }
 
@@ -188,8 +231,19 @@ extension RemoteTranscriptDelivery: UNUserNotificationCenterDelegate {
         }
     }
 
-    func perform(action: String, forNotification identifier: String) {
-        guard let transcript = pendingTranscripts.removeValue(forKey: identifier) else { return }
+    @discardableResult
+    func perform(action: String, forNotification identifier: String) -> Bool {
+        guard action == Self.pasteActionIdentifier || action == Self.copyActionIdentifier else {
+            return false
+        }
+        guard let transcript = transcript(for: identifier) else {
+            // The transcript is genuinely unrecoverable (the entry was deleted,
+            // or history is unavailable). Say so rather than discarding a
+            // deliberate user action in silence.
+            reportUnresolvableAction(for: identifier)
+            return false
+        }
+        forget(identifier)
         switch action {
         case Self.pasteActionIdentifier:
             _ = paste(transcript)
@@ -199,5 +253,20 @@ extension RemoteTranscriptDelivery: UNUserNotificationCenterDelegate {
         default:
             break
         }
+        return true
+    }
+
+    private func reportUnresolvableAction(for identifier: String) {
+        guard let notificationCenter else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Transcript unavailable"
+        content.body = "That transcript is no longer on this Mac, so it could not be pasted or copied."
+        notificationCenter.add(
+            UNNotificationRequest(
+                identifier: "\(identifier).unresolved",
+                content: content,
+                trigger: nil
+            )
+        )
     }
 }

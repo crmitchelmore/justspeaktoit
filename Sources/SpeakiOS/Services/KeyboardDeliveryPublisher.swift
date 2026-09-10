@@ -40,6 +40,47 @@ public enum KeyboardDeliveryPublisher {
         return store.publishOffer(offer)
     }
 
+    /// How long a stop waits for the keyboard to claim a targeted offer.
+    ///
+    /// The extension polls the App Group every 500 ms (and, once #990 lands,
+    /// is woken by a Darwin notification), so a keyboard that is genuinely
+    /// still open in the same document claims well inside this. The budget is
+    /// spent only on the one path where a targeted offer was written, and the
+    /// stop already holds a background assertion for the clipboard flush.
+    public static let insertionConfirmationTimeout = Duration.milliseconds(1500)
+    public static let insertionPollInterval = Duration.milliseconds(100)
+
+    /// Resolves what actually became of `offer`, rather than what publishing
+    /// it was meant to achieve.
+    ///
+    /// A published offer is a message in the App Group, not a delivery. For a
+    /// `.targetedInsert` this waits for the extension to write a claim naming
+    /// the offer — which `KeyboardViewModel.deliver(_:offerID:)` does only
+    /// after the text document proxy accepted the text, and which for a
+    /// targeted offer cannot come from a user dismissal because a targeted
+    /// offer is never shown as a dismissible chip. So the claim is evidence of
+    /// an insertion, and its absence means the words are not in the field and
+    /// the capture must fall back to the clipboard.
+    public static func awaitOutcome(
+        for offer: KeyboardPickupOffer?,
+        store: KeyboardDeliveryStore = .shared,
+        timeout: Duration = insertionConfirmationTimeout,
+        pollInterval: Duration = insertionPollInterval,
+        clock: ContinuousClock = ContinuousClock()
+    ) async -> CaptureReceiptBuilder.KeyboardOfferOutcome {
+        guard let offer else { return .notOffered }
+        guard offer.mode == .targetedInsert else { return .latePickupWaiting }
+
+        let deadline = clock.now.advanced(by: timeout)
+        while true {
+            if store.claim()?.offerID == offer.offerID { return .insertedInField }
+            guard clock.now < deadline else { return .targetedButNotInserted }
+            try? await Task.sleep(for: pollInterval, clock: clock)
+            if Task.isCancelled { break }
+        }
+        return store.claim()?.offerID == offer.offerID ? .insertedInField : .targetedButNotInserted
+    }
+
     /// What a hardware trigger should do about a keyboard-owned dictation
     /// before running its own start/stop logic (issue #1002).
     public static func sessionRouting(

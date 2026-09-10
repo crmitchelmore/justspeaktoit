@@ -9,12 +9,12 @@ final class CaptureDeliveryTests: XCTestCase {
 
     private func inputs(
         empty: Bool = false,
-        targetOpen: Bool = false,
+        inserted: Bool = false,
         offerAvailable: Bool = true
     ) -> AutoDestinationPolicy.Inputs {
         AutoDestinationPolicy.Inputs(
             transcriptIsEmpty: empty,
-            keyboardTargetIsOpen: targetOpen,
+            keyboardInsertedIntoField: inserted,
             keyboardOfferAvailable: offerAvailable
         )
     }
@@ -25,14 +25,16 @@ final class CaptureDeliveryTests: XCTestCase {
         XCTAssertFalse(plan.writesClipboard)
     }
 
-    func testOpenKeyboardWinsAndSkipsTheClipboard() {
-        let plan = AutoDestinationPolicy.plan(inputs(targetOpen: true))
+    func testConfirmedKeyboardInsertionWinsAndSkipsTheClipboard() {
+        let plan = AutoDestinationPolicy.plan(inputs(inserted: true))
         XCTAssertEqual(plan.preferredLane, .keyboardField)
         XCTAssertFalse(plan.writesClipboard)
     }
 
-    func testNoOpenKeyboardFallsBackToTheClipboard() {
-        let plan = AutoDestinationPolicy.plan(inputs(targetOpen: false))
+    /// An offer that the keyboard never took is not a delivery, so Auto keeps
+    /// the clipboard rather than leaving the words only in History.
+    func testKeyboardThatDidNotTakeItFallsBackToTheClipboard() {
+        let plan = AutoDestinationPolicy.plan(inputs(inserted: false))
         XCTAssertEqual(plan.preferredLane, .clipboard)
         XCTAssertTrue(plan.writesClipboard)
     }
@@ -40,17 +42,17 @@ final class CaptureDeliveryTests: XCTestCase {
     /// Without Full Access there is no App Group, so an "open keyboard" claim
     /// cannot be honoured even if one were somehow present.
     func testUnavailableOfferStoreForcesTheClipboardEvenWithAnOpenTarget() {
-        let plan = AutoDestinationPolicy.plan(inputs(targetOpen: true, offerAvailable: false))
+        let plan = AutoDestinationPolicy.plan(inputs(inserted: true, offerAvailable: false))
         XCTAssertEqual(plan.preferredLane, .clipboard)
         XCTAssertTrue(plan.writesClipboard)
     }
 
     func testEveryPlanExplainsItself() {
         for empty in [true, false] {
-            for targetOpen in [true, false] {
+            for inserted in [true, false] {
                 for offerAvailable in [true, false] {
                     let plan = AutoDestinationPolicy.plan(
-                        inputs(empty: empty, targetOpen: targetOpen, offerAvailable: offerAvailable)
+                        inputs(empty: empty, inserted: inserted, offerAvailable: offerAvailable)
                     )
                     XCTAssertFalse(plan.explanation.isEmpty)
                 }
@@ -62,10 +64,10 @@ final class CaptureDeliveryTests: XCTestCase {
     /// a Mac is reachable, so Auto never routes on it (issue #952).
     func testPolicyNeverChoosesAMacLane() {
         for empty in [true, false] {
-            for targetOpen in [true, false] {
+            for inserted in [true, false] {
                 for offerAvailable in [true, false] {
                     let plan = AutoDestinationPolicy.plan(
-                        inputs(empty: empty, targetOpen: targetOpen, offerAvailable: offerAvailable)
+                        inputs(empty: empty, inserted: inserted, offerAvailable: offerAvailable)
                     )
                     XCTAssertTrue(
                         [.none, .clipboard, .keyboardField].contains(plan.preferredLane)
@@ -80,8 +82,7 @@ final class CaptureDeliveryTests: XCTestCase {
     private func outcome(
         empty: Bool = false,
         preferred: CaptureDeliveryLane = .clipboard,
-        targeted: Bool = false,
-        latePickup: Bool = false,
+        keyboard: CaptureReceiptBuilder.KeyboardOfferOutcome = .notOffered,
         clipboard: Bool? = true,
         history: Bool = true,
         mac: MacLaneOutcome = .queuedForICloud
@@ -89,8 +90,7 @@ final class CaptureDeliveryTests: XCTestCase {
         CaptureReceiptBuilder.Outcome(
             transcriptIsEmpty: empty,
             preferredLane: preferred,
-            keyboardOfferWasTargeted: targeted,
-            keyboardOfferWasLatePickup: latePickup,
+            keyboard: keyboard,
             clipboardWriteSucceeded: clipboard,
             savedToHistory: history,
             mac: mac
@@ -103,20 +103,65 @@ final class CaptureDeliveryTests: XCTestCase {
         XCTAssertEqual(receipt.headline, "Nothing to deliver")
     }
 
-    func testTargetedOfferReportsTheField() {
+    func testObservedInsertionReportsTheField() {
         let receipt = CaptureReceiptBuilder.receipt(
-            for: outcome(preferred: .keyboardField, targeted: true, clipboard: nil)
+            for: outcome(preferred: .keyboardField, keyboard: .insertedInField, clipboard: nil)
         )
         XCTAssertEqual(receipt.lane, .keyboardField)
         XCTAssertTrue(receipt.headline.contains("field"))
         XCTAssertFalse(receipt.summary.lowercased().contains("copied"))
     }
 
+    /// The offer was written but the keyboard never took it. The receipt must
+    /// not read as a field delivery, and must say the keyboard did not take it
+    /// rather than leaving the user to guess where the words are.
+    func testPublishedButUnclaimedOfferNeverReportsTheField() {
+        let receipt = CaptureReceiptBuilder.receipt(
+            for: outcome(
+                preferred: .keyboardField,
+                keyboard: .targetedButNotInserted,
+                clipboard: true
+            )
+        )
+        XCTAssertNotEqual(receipt.lane, .keyboardField)
+        XCTAssertEqual(receipt.lane, .clipboard)
+        XCTAssertTrue(receipt.summary.contains("did not put it in that field"))
+    }
+
+    /// The sweep: for every combination in which the keyboard did not claim
+    /// the offer, nothing in the receipt may read as "the words are in your
+    /// text field".
+    func testNoReceiptClaimsAFieldTheKeyboardNeverTook() {
+        let unproven: [CaptureReceiptBuilder.KeyboardOfferOutcome] = [
+            .notOffered, .latePickupWaiting, .targetedButNotInserted
+        ]
+        for keyboard in unproven {
+            for preferred: CaptureDeliveryLane in [.keyboardField, .clipboard, .history, .none] {
+                for clipboard: Bool? in [true, false, nil] {
+                    for history in [true, false] {
+                        let receipt = CaptureReceiptBuilder.receipt(
+                            for: outcome(
+                                preferred: preferred,
+                                keyboard: keyboard,
+                                clipboard: clipboard,
+                                history: history
+                            )
+                        )
+                        let text = receipt.summary.lowercased()
+                        XCTAssertNotEqual(receipt.lane, .keyboardField, text)
+                        XCTAssertFalse(text.contains("put into the field"), text)
+                        XCTAssertFalse(text.contains("put it there"), text)
+                    }
+                }
+            }
+        }
+    }
+
     /// The keyboard closed between the plan and the stop: the receipt reports
     /// the clipboard, which is what actually ran, not the field it aimed at.
     func testKeyboardPlanThatFellBackReportsTheClipboard() {
         let receipt = CaptureReceiptBuilder.receipt(
-            for: outcome(preferred: .keyboardField, targeted: false, clipboard: true)
+            for: outcome(preferred: .keyboardField, keyboard: .notOffered, clipboard: true)
         )
         XCTAssertEqual(receipt.lane, .clipboard)
         XCTAssertEqual(receipt.headline, "Copied")
@@ -148,7 +193,9 @@ final class CaptureDeliveryTests: XCTestCase {
     }
 
     func testLatePickupOfferIsMentionedAlongsideTheClipboard() {
-        let receipt = CaptureReceiptBuilder.receipt(for: outcome(latePickup: true, clipboard: true))
+        let receipt = CaptureReceiptBuilder.receipt(
+            for: outcome(keyboard: .latePickupWaiting, clipboard: true)
+        )
         XCTAssertEqual(receipt.lane, .clipboard)
         XCTAssertTrue(receipt.summary.contains("10 minutes"))
     }
@@ -159,10 +206,10 @@ final class CaptureDeliveryTests: XCTestCase {
             .notAttempted, .queuedForICloud, .iCloudUnavailable, .uploadFailed
         ]
         for mac in macCases {
-            for targeted in [true, false] {
+            for keyboard in CaptureReceiptBuilder.KeyboardOfferOutcome.allCases {
                 for clipboard: Bool? in [true, false, nil] {
                     let receipt = CaptureReceiptBuilder.receipt(
-                        for: outcome(targeted: targeted, clipboard: clipboard, mac: mac)
+                        for: outcome(keyboard: keyboard, clipboard: clipboard, mac: mac)
                     )
                     let text = receipt.summary.lowercased()
                     XCTAssertFalse(text.contains("sent to your mac"), text)

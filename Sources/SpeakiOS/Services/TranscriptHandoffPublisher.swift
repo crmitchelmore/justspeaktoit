@@ -17,6 +17,14 @@ import SpeakCore
 @MainActor
 public enum TranscriptHandoffPublisher {
     private static var activity: NSUserActivity?
+    /// The entry the current pointer names, so a deletion of exactly that
+    /// entry can withdraw it (issue #1006).
+    private static var advertisedEntryID: UUID?
+
+    /// The entry the pointer currently advertises, or `nil` when nothing is
+    /// advertised. Exposed for tests and for callers that need to reason about
+    /// what a deletion has to withdraw.
+    public static var currentEntryID: UUID? { advertisedEntryID }
 
     /// - Returns: the pointer that was published, or `nil` when there was
     ///   nothing to point at.
@@ -45,6 +53,7 @@ public enum TranscriptHandoffPublisher {
         activity.isEligibleForPublicIndexing = false
         activity.userInfo = TranscriptHandoffActivity.userInfo(for: pointer)
         activity.becomeCurrent()
+        advertisedEntryID = entryID
         return pointer
     }
 
@@ -54,6 +63,18 @@ public enum TranscriptHandoffPublisher {
         activity?.resignCurrent()
         activity?.invalidate()
         activity = nil
+        advertisedEntryID = nil
+    }
+
+    /// Withdraws the pointer when — and only when — it names `entryID`.
+    ///
+    /// Deleting the advertised entry, locally or through a remote tombstone,
+    /// has to stop the advertisement: otherwise the Dock keeps offering
+    /// metadata for a transcript the user deliberately removed, and following
+    /// it sends the Mac to an entry that no longer exists.
+    public static func invalidateIfAdvertising(entryID: UUID) {
+        guard advertisedEntryID == entryID else { return }
+        invalidate()
     }
 }
 #endif

@@ -138,6 +138,25 @@ final class HistorySyncEngineTests: XCTestCase {
         XCTAssertEqual(transport.requestedTokens, [repeatedToken])
     }
 
+    /// A push arriving mid-pass may be about a record the running fetch has
+    /// already gone past. Dropping it left the phone stale until some later,
+    /// unrelated sync, so the trigger has to survive as a follow-up pass.
+    func testATriggerDuringAnActivePassStillGetsItsOwnReconciliation() async {
+        let transport = FakeHistorySyncTransport(pages: [.empty, .empty], uploads: [])
+        let delegate = FakeHistorySyncDelegate(entries: [])
+        let engine = makeEngine(transport: transport, delegate: delegate)
+        transport.onFetch = { await engine.sync() }
+
+        await engine.sync()
+
+        XCTAssertEqual(
+            transport.requestedTokens.count,
+            2,
+            "the trigger observed during the first pass must produce a second one"
+        )
+        XCTAssertNil(engine.state.error)
+    }
+
     private func makeEngine(
         transport: FakeHistorySyncTransport,
         delegate: FakeHistorySyncDelegate
@@ -181,6 +200,9 @@ private final class FakeHistorySyncTransport: HistorySyncTransport {
     private var pages: [HistoryChangePage]
     private var uploads: [HistoryUploadResult]
     private(set) var requestedTokens: [Data?] = []
+    /// Runs inside a fetch, so a test can model a trigger that arrives while a
+    /// reconciliation pass is already under way.
+    var onFetch: (() async -> Void)?
 
     init(pages: [HistoryChangePage], uploads: [HistoryUploadResult]) {
         self.pages = pages
@@ -189,6 +211,10 @@ private final class FakeHistorySyncTransport: HistorySyncTransport {
 
     func fetchChanges(after tokenData: Data?) async throws -> HistoryChangePage {
         requestedTokens.append(tokenData)
+        if let onFetch {
+            self.onFetch = nil
+            await onFetch()
+        }
         return pages.isEmpty ? .empty : pages.removeFirst()
     }
 

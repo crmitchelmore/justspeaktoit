@@ -86,6 +86,34 @@ final class RemoteTranscriptArrivalTests: XCTestCase {
         }
     }
 
+    /// The age check accepted every negative age, so an entry dated far in the
+    /// future stayed "fresh" forever and could notify — or, with auto-paste on,
+    /// paste at the cursor — on this and every later sync. Only skew a real
+    /// pair of clocks can produce is tolerated.
+    func testFutureDatedEntriesDoNotBypassTheFreshnessGuard() {
+        XCTAssertEqual(
+            RemoteTranscriptArrival.decide(
+                input(age: -(RemoteTranscriptArrival.futureSkewAllowance + 10)),
+                now: now
+            ),
+            .ignore(.datedInTheFuture)
+        )
+        XCTAssertEqual(
+            RemoteTranscriptArrival.decide(
+                input(age: -(60 * 60 * 24 * 365), autoPaste: true),
+                now: now
+            ),
+            .ignore(.datedInTheFuture)
+        )
+    }
+
+    /// Devices genuinely disagree by seconds; that must still notify.
+    func testSmallClockSkewIsStillTreatedAsALiveArrival() {
+        guard case .notify = RemoteTranscriptArrival.decide(input(age: -5), now: now) else {
+            return XCTFail("a few seconds of clock skew is a live arrival")
+        }
+    }
+
     func testEmptyTranscriptsAreIgnored() {
         XCTAssertEqual(RemoteTranscriptArrival.decide(input(text: "   \n"), now: now), .ignore(.noText))
     }

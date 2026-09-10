@@ -27,8 +27,10 @@ public enum TranscriptPreview {
 /// These are *outcomes*, not intentions: a lane is only reported once the work
 /// that defines it has been done and its result observed.
 public enum CaptureDeliveryLane: String, Codable, Equatable, Sendable, CaseIterable {
-    /// An offer bound to the exact document the Just Speak keyboard was open
-    /// in was written for the keyboard to insert (issue #1002).
+    /// The Just Speak keyboard inserted the transcript into the document it
+    /// was open in, and said so by claiming the offer (issue #1002). Writing
+    /// the offer is not this lane: an offer is an intention, and an intention
+    /// the keyboard never acts on is not a delivery.
     case keyboardField
     /// The transcript was written to the pasteboard and the write verified.
     case clipboard
@@ -62,20 +64,23 @@ public enum AutoDestinationPolicy {
     public struct Inputs: Equatable, Sendable {
         /// The final transcript is empty or whitespace only.
         public let transcriptIsEmpty: Bool
-        /// The Just Speak keyboard advertised an open, non-secure document
-        /// within its 8 s window (`KeyboardTargetRecord.isOpen`).
-        public let keyboardTargetIsOpen: Bool
+        /// The Just Speak keyboard *inserted* the transcript into the document
+        /// it was open in, evidenced by its claim on the offer. Not "a target
+        /// was advertised" and not "an offer was published": Auto skips the
+        /// clipboard on the strength of this, so anything short of an observed
+        /// insertion has to keep the clipboard.
+        public let keyboardInsertedIntoField: Bool
         /// The shared App Group is writable, i.e. the keyboard has Full
         /// Access. Without it no offer can be published at all.
         public let keyboardOfferAvailable: Bool
 
         public init(
             transcriptIsEmpty: Bool,
-            keyboardTargetIsOpen: Bool,
+            keyboardInsertedIntoField: Bool,
             keyboardOfferAvailable: Bool
         ) {
             self.transcriptIsEmpty = transcriptIsEmpty
-            self.keyboardTargetIsOpen = keyboardTargetIsOpen
+            self.keyboardInsertedIntoField = keyboardInsertedIntoField
             self.keyboardOfferAvailable = keyboardOfferAvailable
         }
     }
@@ -111,19 +116,19 @@ public enum AutoDestinationPolicy {
                 explanation: "Keyboard delivery is unavailable, so the transcript is copied to the clipboard."
             )
         }
-        guard inputs.keyboardTargetIsOpen else {
+        guard inputs.keyboardInsertedIntoField else {
             return Plan(
                 preferredLane: .clipboard,
                 writesClipboard: true,
-                explanation: "No keyboard is open, so the transcript is copied to the clipboard "
+                explanation: "The keyboard did not take the transcript, so it is copied to the clipboard "
                     + "and offered to the keyboard for later."
             )
         }
         return Plan(
             preferredLane: .keyboardField,
             writesClipboard: false,
-            explanation: "The Just Speak keyboard is open in a text field, so the transcript goes there "
-                + "instead of the clipboard."
+            explanation: "The Just Speak keyboard put the transcript in the text field you were typing "
+                + "in, so the clipboard is left alone."
         )
     }
 }
@@ -187,34 +192,53 @@ public struct CaptureReceipt: Equatable, Sendable {
 }
 
 public enum CaptureReceiptBuilder {
+    /// What became of the keyboard offer by the time the receipt was written.
+    ///
+    /// The distinction that matters is between *publishing an offer* and
+    /// *observing an insertion*. An offer bound to the open document is only a
+    /// message left in the App Group; the keyboard inserts it when it next
+    /// polls and finds the same document still focused. Close the keyboard,
+    /// move field, or let the extension be suspended in between and that never
+    /// happens — so only `.insertedInField`, which is backed by the
+    /// extension's own claim, may be reported as delivery to a field.
+    public enum KeyboardOfferOutcome: Equatable, Sendable, CaseIterable {
+        /// No offer was written for this capture.
+        case notOffered
+        /// An unbound, late-pickup offer is waiting in the keyboard strip.
+        case latePickupWaiting
+        /// An offer bound to the open document was written and the keyboard
+        /// claimed it, which it does only after the proxy accepted the text.
+        case insertedInField
+        /// An offer bound to the open document was written, but no insertion
+        /// was observed before the deadline. The words are not in the field.
+        case targetedButNotInserted
+    }
+
     /// The observed result of every side effect a stop performed.
     public struct Outcome: Equatable, Sendable {
         public let transcriptIsEmpty: Bool
         /// The lane the policy (or the user's fixed destination) aimed at.
         public let preferredLane: CaptureDeliveryLane
-        /// An offer bound to the document the keyboard was open in was written.
-        public let keyboardOfferWasTargeted: Bool
-        /// An unbound, late-pickup offer was written for the keyboard strip.
-        public let keyboardOfferWasLatePickup: Bool
+        /// What the keyboard offer, if any, actually came to.
+        public let keyboard: KeyboardOfferOutcome
         /// `nil` when the pasteboard was deliberately not written.
         public let clipboardWriteSucceeded: Bool?
-        /// A History entry exists for this capture.
+        /// A History entry exists for this capture *and its write reached
+        /// disk*. An entry that only exists in memory is not saved.
         public let savedToHistory: Bool
         public let mac: MacLaneOutcome
 
         public init(
             transcriptIsEmpty: Bool,
             preferredLane: CaptureDeliveryLane,
-            keyboardOfferWasTargeted: Bool,
-            keyboardOfferWasLatePickup: Bool,
+            keyboard: KeyboardOfferOutcome,
             clipboardWriteSucceeded: Bool?,
             savedToHistory: Bool,
             mac: MacLaneOutcome
         ) {
             self.transcriptIsEmpty = transcriptIsEmpty
             self.preferredLane = preferredLane
-            self.keyboardOfferWasTargeted = keyboardOfferWasTargeted
-            self.keyboardOfferWasLatePickup = keyboardOfferWasLatePickup
+            self.keyboard = keyboard
             self.clipboardWriteSucceeded = clipboardWriteSucceeded
             self.savedToHistory = savedToHistory
             self.mac = mac
@@ -232,29 +256,25 @@ public enum CaptureReceiptBuilder {
 
         var clauses: [String] = []
 
-        // 1. The field. Reported only when an offer bound to the exact open
-        //    document was actually written — never merely attempted.
-        if outcome.keyboardOfferWasTargeted {
-            clauses.append("Waiting in the Just Speak keyboard to go into that field.")
+        // 1. The field. Reported only when the keyboard extension claimed the
+        //    offer, which it does after the text document proxy accepted the
+        //    text — never for an offer that was merely published.
+        if outcome.keyboard == .insertedInField {
+            clauses.append("The Just Speak keyboard put it there.")
             if outcome.clipboardWriteSucceeded == false {
                 clauses.append("The clipboard write did not go through.")
             }
             appendFallbacks(&clauses, outcome: outcome, mentionHistory: true)
             return CaptureReceipt(
                 lane: .keyboardField,
-                headline: "Sent to the field you were typing in",
+                headline: "Put into the field you were typing in",
                 detail: joined(clauses)
             )
         }
 
         // 2. The clipboard, when the write was verified.
         if outcome.clipboardWriteSucceeded == true {
-            if outcome.preferredLane == .keyboardField {
-                clauses.append("The keyboard was no longer open, so the transcript went to the clipboard.")
-            }
-            if outcome.keyboardOfferWasLatePickup {
-                clauses.append("The Just Speak keyboard can also insert it for the next 10 minutes.")
-            }
+            appendKeyboardShortfall(&clauses, outcome: outcome, wentToClipboard: true)
             appendFallbacks(&clauses, outcome: outcome, mentionHistory: true)
             return CaptureReceipt(lane: .clipboard, headline: "Copied", detail: joined(clauses))
         }
@@ -264,9 +284,7 @@ public enum CaptureReceiptBuilder {
         if outcome.clipboardWriteSucceeded == false {
             clauses.append("The clipboard write did not go through, so nothing was copied.")
         }
-        if outcome.keyboardOfferWasLatePickup {
-            clauses.append("The Just Speak keyboard can insert it for the next 10 minutes.")
-        }
+        appendKeyboardShortfall(&clauses, outcome: outcome, wentToClipboard: false)
         appendFallbacks(&clauses, outcome: outcome, mentionHistory: false)
 
         guard outcome.savedToHistory else {
@@ -277,6 +295,32 @@ public enum CaptureReceiptBuilder {
             )
         }
         return CaptureReceipt(lane: .history, headline: "Saved to History", detail: joined(clauses))
+    }
+
+    /// Says what the keyboard lane did *not* do, whenever Auto aimed at it and
+    /// the words ended up somewhere else. Silence here is what let a capture
+    /// read as field delivery while the transcript sat in History.
+    private static func appendKeyboardShortfall(
+        _ clauses: inout [String],
+        outcome: Outcome,
+        wentToClipboard: Bool
+    ) {
+        switch outcome.keyboard {
+        case .insertedInField, .notOffered:
+            if outcome.preferredLane == .keyboardField, wentToClipboard {
+                clauses.append("The keyboard was no longer open, so the transcript went to the clipboard.")
+            }
+        case .targetedButNotInserted:
+            clauses.append(
+                "The Just Speak keyboard did not put it in that field \u{2014} it was no longer open there."
+            )
+        case .latePickupWaiting:
+            clauses.append(
+                wentToClipboard
+                    ? "The Just Speak keyboard can also insert it for the next 10 minutes."
+                    : "The Just Speak keyboard can insert it for the next 10 minutes."
+            )
+        }
     }
 
     /// `mentionHistory` is false when History is already the headline, so the

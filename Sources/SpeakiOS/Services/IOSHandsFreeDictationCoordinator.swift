@@ -4,6 +4,10 @@ import Foundation
 import SpeakCore
 import UIKit
 
+// The detector lifecycle, its capture ownership and its presentation belong to
+// one type; splitting them across files hid ownership bugs before.
+// swiftlint:disable file_length
+
 /// Owns the iOS hands-free detector lifecycle. Silent audio is retained only
 /// in the bounded pre-roll buffer and is neither recorded nor transcribed.
 @MainActor
@@ -37,6 +41,10 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private var captureIsStarting = false
     // Injectable boundaries exercise route-to-owner behaviour without hardware.
     var inputIsUsable: () -> Bool = { !AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty }
+    /// Whether the owned capture has proven it is really recording — its
+    /// backend started and its own input tap delivered (issue #983). An
+    /// utterance must not announce active capture before that.
+    var captureIsProven: () -> Bool = { true }
     var detectorIsRunning: (() -> Bool)?
     var startDetectorCapture: (() async throws -> Void)?
 
@@ -71,6 +79,13 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     var isArmed: Bool { machine.isArmed }
+
+    /// Re-publishes the current state when the owned capture's presentation
+    /// changes. The machine state is unchanged, so nothing is announced twice.
+    func refreshCapturePresentation() {
+        guard machine.state == .recording else { return }
+        publishState()
+    }
 
     func handleRouteChange(reason: AVAudioSession.RouteChangeReason) async {
         // Reasons describe inputs OR outputs. Even oldDeviceUnavailable is
@@ -367,7 +382,7 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         case .off: activityStatus = nil
         case .arming: activityStatus = .arming
         case .armed: activityStatus = .armed
-        case .recording: activityStatus = .recording
+        case .recording: activityStatus = captureIsProven() ? .recording : .arming
         case .finalising: activityStatus = .finalising
         }
         if let activityStatus, ownsLiveActivity {
@@ -388,7 +403,8 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
         case .off: return "Hands-free off"
         case .arming: return "Preparing on-device detector"
         case .armed: return "Hands-free armed"
-        case .recording: return "Recording"
+        case .recording:
+            return captureIsProven() ? "Recording" : CapturePresentationGate.preparingMessage
         case .finalising: return "Finalising transcript"
         }
     }

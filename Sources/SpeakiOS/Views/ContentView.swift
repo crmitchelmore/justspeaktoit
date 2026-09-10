@@ -34,6 +34,17 @@ final class TranscriberCoordinator: ObservableObject {
     private var stoppingSession: IOSTranscriptionSession?
     private var stopWasCancelled = false
     var onCaptureDisruption: (() async -> Void)?
+    /// Truthful capture presentation (issue #983): startup stays visibly
+    /// "preparing" until this run has both started its backend and observed a
+    /// buffer from its own live input tap.
+    private var presentation = CapturePresentationGate()
+    private var presentationRunID: UUID?
+    /// Raised when this coordinator's capture presentation changes, so an
+    /// owner presenting on its behalf (hands-free) can re-publish.
+    var onCapturePresentationChanged: (() -> Void)?
+
+    /// Whether active-capture presentation may be shown for the current run.
+    var isPresentingCapture: Bool { presentation.isPresentingCapture }
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
@@ -62,6 +73,9 @@ final class TranscriberCoordinator: ObservableObject {
         analyzerFallbackAllowed: Bool = true
     ) async throws {
         guard stoppingSession == nil else { throw LifecycleError.sessionFinalising }
+        let runID = UUID()
+        presentationRunID = runID
+        presentation.begin(run: runID)
         let settings = AppSettings.shared
         // Wait for the initial keychain load so auto-start on a cold launch
         // doesn't read empty API keys and fall back to Apple Speech.
@@ -86,11 +100,16 @@ final class TranscriberCoordinator: ObservableObject {
 
         // Start Live Activity (if enabled)
         if settings.liveActivitiesEnabled {
-            activityManager.startActivity(provider: modelDisplayName)
+            activityManager.startActivity(provider: modelDisplayName, initialStatus: .arming)
         }
 
         #if DEBUG && targetEnvironment(simulator)
         if let transcript = sharedState.simulatorValidationTranscript {
+            // A synthetic transcript is not observed microphone input, but this
+            // DEBUG-only simulator stub has no input tap at all. Resolve the
+            // gate explicitly so the harness never sits in preparation.
+            presentation.noteBackendStarted(run: runID)
+            notePresentation(presentation.noteInputObserved(run: runID))
             handlePartialResult(text: transcript, isFinal: true)
             markRecordingStarted()
             return
@@ -127,6 +146,7 @@ final class TranscriberCoordinator: ObservableObject {
                 }
             }
         }
+        bindFirstInput(session: session, runID: runID)
         transcriptionSession = session
         do {
             try await session.start(
@@ -137,12 +157,16 @@ final class TranscriberCoordinator: ObservableObject {
             session.cancel()
             transcriptionSession = nil
             startTime = nil
+            finishPresentation()
             if settings.liveActivitiesEnabled {
                 activityManager.endActivity()
             }
             throw error
         }
         markRecordingStarted()
+        // The tap can deliver before `start()` returns, so this may be the
+        // second half of the pair rather than the first.
+        notePresentation(presentation.noteBackendStarted(run: runID))
     }
 
     private func markRecordingStarted() {
@@ -165,15 +189,7 @@ final class TranscriberCoordinator: ObservableObject {
             sharedState.updateTranscript(text)
         }
 
-        // Update Live Activity (if enabled)
-        if AppSettings.shared.liveActivitiesEnabled {
-            activityManager.updateActivity(
-                status: .recording,
-                lastSnippet: text,
-                wordCount: wordCount,
-                duration: elapsedSeconds
-            )
-        }
+        publishTranscriptActivity(text: text)
     }
 
     private func handleError(_ error: Error) {
@@ -185,6 +201,7 @@ final class TranscriberCoordinator: ObservableObject {
 
     func stop(rearmHandsFree: Bool = false) async -> TranscriptionResult {
         isRunning = false
+        finishPresentation()
         sharedState.clearRecordingState()
         let duration = elapsedSeconds
 
@@ -275,12 +292,71 @@ final class TranscriberCoordinator: ObservableObject {
         transcriptionSession = nil
         // A stopping session retains ownership until its suspended drain returns.
         isRunning = false
+        finishPresentation()
         startTime = nil
         if AppSettings.shared.liveActivitiesEnabled {
             activityManager.endActivity()
         }
         sharedState.clear()
         sharedState.clearRecordingState()
+    }
+}
+
+// MARK: - Truthful capture presentation (issue #983)
+
+private extension TranscriberCoordinator {
+    /// Routes this run's own first live buffer into the presentation gate.
+    func bindFirstInput(session: IOSTranscriptionSession, runID: UUID) {
+        session.onFirstInputBuffer = { [weak self, weak session] in
+            guard let self, let session, self.transcriptionSession === session else { return }
+            self.notePresentation(self.presentation.noteInputObserved(run: runID))
+        }
+    }
+
+    /// Publishes the one arming → recording transition, and only that one.
+    func notePresentation(_ promoted: Bool) {
+        guard promoted else { return }
+        if AppSettings.shared.liveActivitiesEnabled {
+            activityManager.updateActivity(
+                status: .recording,
+                lastSnippet: partialText,
+                wordCount: wordCount,
+                duration: elapsedSeconds
+            )
+        }
+        onCapturePresentationChanged?()
+    }
+
+    /// Ends the run's presentation: stop, cancel, or a failed start. A run that
+    /// never saw input therefore resolves to a terminal state, not to
+    /// permanent preparation.
+    func finishPresentation() {
+        guard presentationRunID != nil else { return }
+        presentationRunID = nil
+        presentation.finish()
+        onCapturePresentationChanged?()
+    }
+
+    /// Presentation only: the transcript is delivered either way. A partial can
+    /// arrive from pre-roll before this run has seen its own input, and it must
+    /// not announce active capture.
+    func publishTranscriptActivity(text: String) {
+        guard AppSettings.shared.liveActivitiesEnabled else { return }
+        guard presentation.isPresentingCapture else {
+            activityManager.updateActivity(
+                status: .arming,
+                lastSnippet: CapturePresentationGate.preparingMessage,
+                wordCount: 0,
+                duration: 0
+            )
+            return
+        }
+        activityManager.updateActivity(
+            status: .recording,
+            lastSnippet: text,
+            wordCount: wordCount,
+            duration: elapsedSeconds
+        )
     }
 }
 
@@ -348,6 +424,12 @@ public struct ContentView: View {
             liveActivitiesEnabled: { AppSettings.shared.liveActivitiesEnabled }
         )
         _handsFree = StateObject(wrappedValue: handsFree)
+        // A hands-free utterance presents through the coordinator's capture, so
+        // it inherits the same proof gate rather than keeping a second one.
+        handsFree.captureIsProven = { [weak coordinator] in coordinator?.isPresentingCapture ?? false }
+        coordinator.onCapturePresentationChanged = { [weak handsFree] in
+            handsFree?.refreshCapturePresentation()
+        }
         coordinator.onCaptureDisruption = { [weak coordinator, weak handsFree] in
             if handsFree?.isArmed == true {
                 await handsFree?.stopForCaptureDisruption()

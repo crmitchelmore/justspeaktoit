@@ -24,9 +24,21 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     public var onPartialResult: ((String, Bool) -> Void)?
     public var onError: ((Error) -> Void)?
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count (issue #983).
+    public var onFirstInputBuffer: (() -> Void)?
 
     private let audioSessionManager: AudioSessionManager
     private let startup = RecordingStartupOperation()
+    /// Replaced per start so a retired run's tap can never report input for
+    /// the run that replaced it.
+    private var firstInputSignal = FirstInputSignal()
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
     private var cleanupTask: Task<Void, Never>?
     private var isStopping = false
     private var activeCaptureID: UUID?
@@ -165,6 +177,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func startClient(_ client: StreamingTranscriptionClient) {
         let captureID = UUID()
         activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
         client.start(
             onTranscript: { [weak self] text, isFinal in
                 Task { @MainActor in
@@ -428,10 +441,15 @@ private extension SharedClientLiveTranscriber {
             targetFormat: targetFormat, converter: converter, targetSampleRate: sampleRate
         )
         let nativeSampleRate = nativeFormat.sampleRate
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            if copied.frameLength > 0, let captureID, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
             self.audioProcessingQueue.async {
                 defer { self.tapBufferPool.recycle(copied) }
                 self.audioRecorder.writeBuffer(copied)

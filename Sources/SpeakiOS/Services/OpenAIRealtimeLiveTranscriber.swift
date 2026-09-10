@@ -78,6 +78,9 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     public var onPartialResult: ((String, Bool) -> Void)?
     public var onFinalResult: ((TranscriptionResult) -> Void)?
     public var onError: ((Error) -> Void)?
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count (issue #983).
+    public var onFirstInputBuffer: (() -> Void)?
 
     // MARK: - Private
 
@@ -85,6 +88,15 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private let startup = RecordingStartupOperation()
     private var ownsAudioSession = false
     private var hasInputTap = false
+    /// Replaced per start so a retired run's tap can never report input for
+    /// the run that replaced it.
+    private var firstInputSignal = FirstInputSignal()
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
 
     private func releaseAudioSession() {
         guard ownsAudioSession else { return }
@@ -163,6 +175,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     }
 
     private func startCapture() async throws {
+        firstInputSignal = FirstInputSignal()
         SpeakLogger.logTranscription(event: "start", model: "openai/\(modelID)")
 
         guard let apiKey, !apiKey.isEmpty else {
@@ -424,11 +437,16 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         let nativeFormat = inputNode.outputFormat(forBus: 0)
         let (target, conv) = try createAudioConverter(from: nativeFormat)
         let client = transcriber
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            if copied.frameLength > 0, let captureID, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
             self.audioProcessingQueue.async {
                 defer { self.tapBufferPool.recycle(copied) }
                 self.audioRecorder.writeBuffer(copied)

@@ -122,7 +122,9 @@ struct SpeakiOSApp: App {
         guard scenePhase == .active else { return }
         guard let link = deepLinkRouter.consumePendingCaptureAction() else { return }
         Task { @MainActor in
-            await CaptureCommandRunner.perform(link.action, destinationOverride: link.destination)
+            // The whole link, not just its verb: `dictate` also has to wait for
+            // the capture to end and hand the transcript back to the caller.
+            await CaptureCommandRunner.perform(link)
         }
     }
 }

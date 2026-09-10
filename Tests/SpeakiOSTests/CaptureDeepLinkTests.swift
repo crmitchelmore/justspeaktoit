@@ -79,6 +79,94 @@ final class CaptureDeepLinkTests: XCTestCase {
         XCTAssertEqual(link?.destination, .historyOnly)
     }
 
+    // MARK: - dictate and x-callback-url
+
+    func testDictateParsesAsAVerb() {
+        XCTAssertEqual(parse("justspeaktoit://dictate")?.action, .dictate)
+        XCTAssertEqual(parse("justspeaktoit://transcribe?action=dictate")?.action, .dictate)
+    }
+
+    func testXCallbackWrapperCarriesTheVerbInThePath() {
+        XCTAssertEqual(parse("justspeaktoit://x-callback-url/dictate")?.action, .dictate)
+        XCTAssertEqual(parse("justspeaktoit://x-callback-url/start")?.action, .start)
+        XCTAssertNil(parse("justspeaktoit://x-callback-url"))
+        XCTAssertNil(parse("justspeaktoit://x-callback-url/explode"))
+    }
+
+    func testCallbackTripleIsParsedOnDictate() {
+        let link = parse(
+            "justspeaktoit://x-callback-url/dictate"
+                + "?x-success=drafts://create?text=&x-error=drafts://error&x-cancel=drafts://cancel"
+        )
+        XCTAssertEqual(link?.action, .dictate)
+        XCTAssertEqual(link?.callback?.success?.absoluteString, "drafts://create?text=")
+        XCTAssertEqual(link?.callback?.error?.absoluteString, "drafts://error")
+        XCTAssertEqual(link?.callback?.cancel?.absoluteString, "drafts://cancel")
+        XCTAssertNil(link?.failure)
+    }
+
+    func testAPercentEncodedCallbackIsAcceptedToo() {
+        let link = parse("justspeaktoit://dictate?x-success=drafts%3A%2F%2Fcreate%3Ftext%3D")
+        XCTAssertEqual(link?.callback?.success?.absoluteString, "drafts://create?text=")
+    }
+
+    func testACallbackTheAppWillNotOpenFailsTheLink() {
+        let link = parse("justspeaktoit://dictate?x-success=https://example.com/collect")
+        XCTAssertEqual(link?.failure, .invalidCallback)
+        // Nowhere safe to send the error, so no callback is kept.
+        XCTAssertNil(link?.callback)
+    }
+
+    /// A callback on `stop` would let any app redirect a dictation it did not
+    /// start into its own text field.
+    func testCallbacksAndMaxDurationAreRefusedOnOtherVerbs() {
+        XCTAssertEqual(parse("justspeaktoit://stop?x-success=drafts://create")?.failure, .unsupportedParameter)
+        XCTAssertEqual(parse("justspeaktoit://start?x-success=drafts://create")?.failure, .unsupportedParameter)
+        XCTAssertEqual(parse("justspeaktoit://toggle?maxDuration=30")?.failure, .unsupportedParameter)
+    }
+
+    func testDictateWithoutMaxDurationStillHasADeadline() {
+        let link = parse("justspeaktoit://dictate")
+        XCTAssertNil(link?.maxDuration)
+        XCTAssertEqual(link?.dictateDuration, CaptureLinkParameters.defaultDictateDuration)
+    }
+
+    func testMaxDurationParsesAndBoundsAreEnforced() {
+        XCTAssertEqual(parse("justspeaktoit://dictate?maxDuration=45")?.maxDuration, 45)
+        XCTAssertEqual(parse("justspeaktoit://dictate?maxDuration=0")?.failure, .invalidMaxDuration)
+        XCTAssertEqual(parse("justspeaktoit://dictate?maxDuration=9999")?.failure, .invalidMaxDuration)
+        XCTAssertEqual(parse("justspeaktoit://dictate?maxDuration=soon")?.failure, .invalidMaxDuration)
+    }
+
+    // MARK: - lang and model
+
+    func testLanguageAndModelParse() {
+        let known = ModelCatalog.liveTranscription[0].id
+        let link = parse("justspeaktoit://start?lang=en-GB&model=\(known)")
+        XCTAssertEqual(link?.languageIdentifier, "en_GB")
+        XCTAssertEqual(link?.modelIdentifier, known)
+        XCTAssertNil(link?.failure)
+    }
+
+    /// Recording with a different model or language than the caller named is a
+    /// silent wrong answer, so an unknown value fails the link.
+    func testUnknownLanguageOrModelFailsTheLinkVisibly() {
+        XCTAssertEqual(parse("justspeaktoit://start?lang=klingon")?.failure, .unknownLanguage)
+        XCTAssertEqual(parse("justspeaktoit://start?model=openai/not-a-model")?.failure, .unknownModel)
+        // A bare language matches four catalogue locales — too ambiguous to pick.
+        XCTAssertEqual(parse("justspeaktoit://dictate?lang=en")?.failure, .unknownLanguage)
+    }
+
+    func testLanguageAndModelAreRefusedOnStop() {
+        XCTAssertEqual(parse("justspeaktoit://stop?lang=en_US")?.failure, .unsupportedParameter)
+    }
+
+    func testAFailedLinkStillCarriesItsErrorCallback() {
+        let link = parse("justspeaktoit://dictate?lang=klingon&x-error=drafts://error")
+        XCTAssertEqual(link?.failure, .unknownLanguage)
+        XCTAssertEqual(link?.callback?.error?.absoluteString, "drafts://error")
+    }
+
     // MARK: - Router integration
 
     @MainActor

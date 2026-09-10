@@ -77,12 +77,26 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     // MARK: - Public API
 
+    /// Surfaces a refused capture link on the same alert path a failed session
+    /// uses, so a link that does nothing says why. The caller is told through
+    /// its `x-error` callback; this is the half the user can see.
+    public func reportCaptureFailure(_ failure: Error) {
+        lastSessionError = failure
+    }
+
     /// Starts a headless recording session with Live Activity.
+    ///
+    /// `modelOverride` and `languageOverride` are the `model=` and `lang=`
+    /// parameters of a capture link, and apply to this session only. Both are
+    /// already validated against the catalogues by the caller, so an
+    /// unrecognised value never reaches here — it fails the link instead.
     public func startRecording( // swiftlint:disable:this function_body_length
         retainBatchRecording: Bool = true,
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
-        keyboardProfile: KeyboardDictationProfileOption? = nil
+        keyboardProfile: KeyboardDictationProfileOption? = nil,
+        modelOverride: String? = nil,
+        languageOverride: String? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
         state = lifecycle.state
@@ -103,9 +117,14 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         lastSessionError = nil
         providerFallbackNotice = nil
+        // A model the catalogue only lists for batch transcription cannot run in
+        // streaming mode, so an explicit `model=` decides the mode rather than
+        // being started in a mode it has no client for.
+        let overrideRequiresBatch = modelOverride.map(CaptureLinkParameters.requiresBatchMode)
         let usesBatchTranscription = keyboardProfile?.transcriptionMode == .batch
-            || (keyboardProfile == nil && settings.transcriptionMode == .batch)
+            || (keyboardProfile == nil && (overrideRequiresBatch ?? (settings.transcriptionMode == .batch)))
         currentModel = keyboardProfile?.transcriptionModelIdentifier
+            ?? modelOverride
             ?? (usesBatchTranscription ? settings.batchTranscriptionModel : settings.selectedModel)
         partialText = ""
         wordCount = 0
@@ -152,6 +171,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 ? .batch(retainRecording: retainBatchRecording)
                 : .streaming
             let languageIdentifier = keyboardProfile?.languageIdentifier
+                ?? languageOverride
                 ?? settings.preferredLocaleIdentifier
             let session = try IOSTranscriptionSession(
                 modelID: currentModel,

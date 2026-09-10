@@ -12,11 +12,20 @@ import SwiftUI
 ///   justspeaktoit://start                        → start recording
 ///   justspeaktoit://stop                         → stop recording
 ///   justspeaktoit://toggle                       → start, or stop if running
+///   justspeaktoit://dictate                      → one-shot capture that
+///                                                  returns the transcript
 ///   justspeaktoit://transcribe?action=start      → same, for surfaces that
 ///                                                  only own a tab link
+///   justspeaktoit://x-callback-url/dictate?x-success=drafts://create?text=
+///                                                → dictate, then open the
+///                                                  caller's URL with the text
 ///
 /// Capture verbs accept `?destination=clipboard|polish|history` to override the
-/// configured hardware-trigger destination for one capture.
+/// configured hardware-trigger destination for one capture, and `?lang=`/
+/// `?model=` to override the transcription language and model. `dictate` also
+/// takes `?maxDuration=` and the `x-success` / `x-error` / `x-cancel` callbacks.
+/// `CaptureDeepLink` documents which values are accepted and which fail the
+/// link outright.
 ///
 /// The router only records what was asked for. Capture commands are published
 /// as `pendingCaptureAction` and performed by the app once the scene is active,

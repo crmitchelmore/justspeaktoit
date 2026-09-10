@@ -242,6 +242,31 @@ public actor SecureStorage {
         }
     }
 
+    /// The accessibility class the stored secrets item actually carries, read
+    /// back off the keychain item itself (issue #997).
+    ///
+    /// This is a real read of the real item's `kSecAttrAccessible` attribute
+    /// with `kSecReturnData` off, not a restatement of what the write path
+    /// asked for, because the two can differ — a migrated item keeps the class
+    /// it was created with, which is the whole of issue #930: a `WhenUnlocked`
+    /// item is unreadable during a locked-device capture and the capture
+    /// silently downgrades to Apple Speech instead of saying so.
+    ///
+    /// Returns `nil` when there is no item to inspect. The raw attribute
+    /// string never leaves this method.
+    public func storedAccessibility() -> CaptureHealthAccessibility? {
+        var query = self.baseQuery(account: self.configuration.masterAccount)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let attributes = item as? [String: Any],
+              let accessible = attributes[kSecAttrAccessible as String] as? String
+        else { return nil }
+        return CaptureHealthAccessibility(secAttrAccessible: accessible)
+    }
+
     public func preload() async {
         try? await ensureCacheLoaded()
     }

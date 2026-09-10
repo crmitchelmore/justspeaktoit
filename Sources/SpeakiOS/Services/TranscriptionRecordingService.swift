@@ -26,7 +26,16 @@ public final class TranscriptionRecordingService: ObservableObject {
     @Published public private(set) var wordCount = 0
     /// Error that ended the most recent session mid-recording. Published so the
     /// app can surface it on next foreground instead of silently losing audio.
-    @Published public internal(set) var lastSessionError: Error?
+    @Published public internal(set) var lastSessionError: Error? {
+        didSet {
+            // One funnel for every capture failure, so the health screen can
+            // report how the last real run ended rather than only what is
+            // true this second (issue #997). The journal keeps a closed-set
+            // label and a date — never the error's text.
+            guard let lastSessionError else { return }
+            CaptureOutcomeJournal.record(CaptureOutcomeJournal.outcome(for: lastSessionError))
+        }
+    }
     /// Non-nil when the session silently fell back to on-device transcription
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
@@ -440,6 +449,15 @@ public final class TranscriptionRecordingService: ObservableObject {
         // pre-destination behaviour: clipboard + post-process if user opted in.
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
         applyDestinationSideEffects(text: text, destination: resolvedDestination)
+
+        // The transcript has landed, so this capture's safety audio no longer
+        // needs recovering (issue #992). Marking it here rather than at stop is
+        // deliberate: a kill anywhere above this line leaves the claim
+        // un-delivered and the recording offered back on the next launch.
+        CaptureSafetyClaimStore.shared.markDeliveredForThisProcess()
+        if lastSessionError == nil {
+            CaptureOutcomeJournal.record(text.isEmpty ? .cancelled : .delivered)
+        }
 
         // Update shared state. Live writes are throttled, so commit the
         // complete transcript exactly once at stop.

@@ -464,12 +464,14 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
         hasInputTap = true
 
+        // The safety writer opens before the engine, so the file covers the
+        // very first buffers instead of starting a beat late (issue #992).
+        try? audioRecorder.startRecording(format: nativeFormat)
         audioEngine.prepare()
         try audioEngine.start()
         // Only after the engine actually returned.
         onStartupObservation?(.stage(.engineStarted))
         observeCaptureConfiguration()
-        try? audioRecorder.startRecording(format: nativeFormat)
     }
 
     private func createAudioConverter(

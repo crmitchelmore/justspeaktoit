@@ -363,6 +363,9 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     private func startAudioEngine(request: SFSpeechAudioBufferRecognitionRequest) throws {
         let recordingFormat = installTap(appendingTo: request)
+        // The safety writer opens before the engine, so the file covers the
+        // very first buffers instead of starting a beat late (issue #992).
+        _ = try? audioRecorder.startRecording(format: recordingFormat)
         audioEngine.prepare()
         try audioEngine.start()
         // The legacy branch is the one that actually ran, and the engine has
@@ -370,7 +373,6 @@ public final class iOSLiveTranscriber: ObservableObject {
         onStartupObservation?(.backend(.appleLegacy))
         onStartupObservation?(.stage(.engineStarted))
         observeCaptureConfiguration()
-        _ = try? audioRecorder.startRecording(format: recordingFormat)
     }
 
     /// Installs the input tap appending to `request`. The request is captured

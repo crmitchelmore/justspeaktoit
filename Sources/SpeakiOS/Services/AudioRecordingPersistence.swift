@@ -37,12 +37,12 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// Serial queue that owns the write-side `AVAudioFile`. Every write and
     /// the close on stop/cancel run here, so the audio pipeline never races
     /// main-actor teardown while `AVAudioFile.write` is in flight.
-    private let ioQueue = DispatchQueue(label: "com.justspeaktoit.ios.audioPersistence.io")
+    let ioQueue = DispatchQueue(label: "com.justspeaktoit.ios.audioPersistence.io")
     /// Only touched on `ioQueue` after `startRecording` hands the file over.
-    nonisolated(unsafe) private var ioFile: AVAudioFile?
+    nonisolated(unsafe) var ioFile: AVAudioFile?
     /// Fast-path flag read by `writeBuffer` before copying; guarded by `stateLock`.
-    private let stateLock = NSLock()
-    nonisolated(unsafe) private var isWriterOpen = false
+    let stateLock = NSLock()
+    nonisolated(unsafe) var isWriterOpen = false
     /// Pool for buffer copies handed to `ioQueue` so writes never touch the
     /// caller's (reused) buffer.
     private let writeBufferPool = PCMBufferPool(maximumBuffers: 8)
@@ -306,28 +306,6 @@ public final class AudioRecordingPersistence: ObservableObject {
                 self.logger.error("Write error: \(error.localizedDescription, privacy: .public)")
             }
         }
-    }
-
-    /// Flips the fast-path flag and drains + closes the file on the I/O
-    /// queue. `sync` so pending writes finish and the file header is
-    /// finalised before callers read the file (size, playback, deletion).
-    private func closeWriter() {
-        acquireStateLockForClose()
-        isWriterOpen = false
-        stateLock.unlock()
-        ioQueue.sync { ioFile = nil }
-    }
-
-    /// Takes `stateLock` for the close path. A failed `try()` means an admitted
-    /// write still holds the lock across its `ioQueue` submit — the exact state
-    /// the lock scope exists to guarantee — so DEBUG builds report it before
-    /// blocking. Release builds just take the lock.
-    private func acquireStateLockForClose() {
-        #if DEBUG
-        if stateLock.try() { return }
-        writerCloseContentionHook?()
-        #endif
-        stateLock.lock()
     }
 
     /// Stop recording and return metadata about the saved file.

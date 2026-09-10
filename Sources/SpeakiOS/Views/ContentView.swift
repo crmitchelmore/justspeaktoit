@@ -203,13 +203,6 @@ final class TranscriberCoordinator: ObservableObject {
         publishTranscriptActivity(text: text)
     }
 
-    private func handleError(_ error: Error) {
-        self.error = error
-        if AppSettings.shared.liveActivitiesEnabled {
-            activityManager.reportError(error.localizedDescription)
-        }
-    }
-
     func stop(rearmHandsFree: Bool = false) async -> TranscriptionResult {
         isRunning = false
         finishPresentation()
@@ -353,6 +346,19 @@ private extension TranscriberCoordinator {
         // A late partial cannot report against a run that is over.
         diagnostics.retire()
         onCapturePresentationChanged?()
+    }
+
+}
+
+/// Live Activity presentation for the foreground coordinator. In an extension
+/// so the coordinator itself stays inside the type-length limit.
+extension TranscriberCoordinator {
+    /// Publishes a mid-session failure and mirrors it into the Live Activity.
+    func handleError(_ error: Error) {
+        self.error = error
+        if AppSettings.shared.liveActivitiesEnabled {
+            activityManager.reportError(error.localizedDescription)
+        }
     }
 
     /// Presentation only: the transcript is delivered either way. A partial can

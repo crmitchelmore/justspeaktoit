@@ -131,18 +131,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         polishClipboard: PolishClipboard,
         hasPolishingKey: @escaping @MainActor () -> Bool,
         polish: @escaping @MainActor (String, String, String) async throws -> String,
-        completeActivity: @escaping ActivityCompletion = {
-            wordCount, duration, primedMessage, outcome, preview, completionMessage in
-            TranscriptionActivityManager.shared.completeActivity(
-                finalWordCount: wordCount,
-                duration: duration,
-                keepPrimed: true,
-                primedMessage: primedMessage,
-                completionOutcome: outcome,
-                resultPreview: preview,
-                completionMessage: completionMessage
-            )
-        }
+        completeActivity: @escaping ActivityCompletion = TranscriptionRecordingService.completeSharedActivity
     ) {
         self.sharedState = sharedState
         self.historyManager = historyManager
@@ -150,6 +139,29 @@ public final class TranscriptionRecordingService: ObservableObject {
         self.hasPolishingKey = hasPolishingKey
         self.polish = polish
         self.completeActivity = completeActivity
+    }
+
+    // The default completion sink: the real Live Activity. A named function
+    // rather than an inline default closure so the seam's six parameters stay
+    // readable; it forwards them unchanged, which is why it carries all six.
+    // swiftlint:disable:next function_parameter_count
+    private static func completeSharedActivity(
+        wordCount: Int,
+        duration: Int,
+        primedMessage: String,
+        outcome: TranscriptionCompletionOutcome,
+        preview: String,
+        completionMessage: String?
+    ) {
+        TranscriptionActivityManager.shared.completeActivity(
+            finalWordCount: wordCount,
+            duration: duration,
+            keepPrimed: true,
+            primedMessage: primedMessage,
+            completionOutcome: outcome,
+            resultPreview: preview,
+            completionMessage: completionMessage
+        )
     }
 
     /// Picks the first non-blank candidate, else the fallback. Extracted as a

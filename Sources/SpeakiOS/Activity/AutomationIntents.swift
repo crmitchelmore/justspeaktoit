@@ -58,13 +58,27 @@ struct StopDictationIntent: AudioRecordingIntent {
     /// available for locked Action Button flows.)
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
+    /// The transcript comes back either way; this only redirects the
+    /// side-effects (clipboard, history, background polish).
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    var destination: CaptureDestinationAppEnum?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Stop dictation and get text") {
+            \.$destination
+        }
+    }
+
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         let service = await TranscriptionRecordingService.shared
         guard await service.isActive else {
             throw AutomationIntentError.noActiveRecording
         }
-        let destination = await AppSettings.shared.hardwareTriggerDestination
-        let result = await service.stopRecording(destination: destination)
+        let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
+        let result = await service.stopRecording(destination: resolved)
         // A duplicate stop (second Shortcut, Action Button race) intentionally
         // yields an empty no-op result, and a silent or failed recording can
         // finish empty too. Neither is a transcript, so fail the Shortcut

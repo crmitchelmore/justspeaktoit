@@ -43,6 +43,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// mark a trigger proven when a transcript really arrived through it.
     /// `nil` means the caller did not identify itself, and nothing is claimed.
     private var currentTrigger: CaptureTrigger?
+    /// Per-run parameter overrides supplied by the surface that started the
+    /// session (issue #1013). They travel with the run so every stop path —
+    /// the Live Activity button, a Siri stop, a quick action, an interruption
+    /// — finishes where the caller asked, not where the global setting says.
+    /// `.none` is the pre-parameter behaviour in every respect.
+    private var currentRunParameters: CaptureRunParameters = .none
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
@@ -87,7 +93,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil,
-        trigger: CaptureTrigger? = nil
+        trigger: CaptureTrigger? = nil,
+        parameters: CaptureRunParameters = .none
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
         state = lifecycle.state
@@ -109,10 +116,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         lastSessionError = nil
         providerFallbackNotice = nil
         currentTrigger = keyboardProfile == nil ? trigger : .keyboard
-        let usesBatchTranscription = keyboardProfile?.transcriptionMode == .batch
-            || (keyboardProfile == nil && settings.transcriptionMode == .batch)
-        currentModel = keyboardProfile?.transcriptionModelIdentifier
-            ?? (usesBatchTranscription ? settings.batchTranscriptionModel : settings.selectedModel)
+        let runParameters = adoptRunParameters(parameters, keyboardProfile: keyboardProfile)
+        let selection = Self.modelSelection(
+            keyboardProfile: keyboardProfile,
+            parameters: runParameters,
+            settings: settings
+        )
+        let usesBatchTranscription = selection.usesBatch
+        currentModel = selection.modelID
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast
@@ -123,7 +134,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.recordingStartTime = startTime
 
         if !usesBatchTranscription && keyboardProfile == nil {
-            resolveLiveModel(settings: settings)
+            try resolveLiveModelHonouringRequest(
+                settings: settings,
+                requestedModelID: runParameters.modelID
+            )
         }
 
         // A Live Activity is required to record in the *background* via an
@@ -158,6 +172,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 ? .batch(retainRecording: retainBatchRecording)
                 : .streaming
             let languageIdentifier = keyboardProfile?.languageIdentifier
+                ?? runParameters.languageIdentifier
                 ?? settings.preferredLocaleIdentifier
             let session = try IOSTranscriptionSession(
                 modelID: currentModel,
@@ -205,7 +220,67 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
-    private func resolveLiveModel(settings: AppSettings) {
+    /// Stores the overrides this run will carry, and logs them so a capture's
+    /// parameters are recoverable after the fact.
+    ///
+    /// The keyboard carries its own profile and never takes intent parameters,
+    /// so a keyboard run stores none.
+    @discardableResult
+    private func adoptRunParameters(
+        _ parameters: CaptureRunParameters,
+        keyboardProfile: KeyboardDictationProfileOption?
+    ) -> CaptureRunParameters {
+        let adopted = keyboardProfile == nil ? parameters : .none
+        currentRunParameters = adopted
+        if !adopted.isEmpty {
+            SpeakLogger.transcription.info(
+                "Capture parameters: \(adopted.logDescription, privacy: .public)"
+            )
+        }
+        return adopted
+    }
+
+    /// Which model this run uses and whether it has to run in batch mode.
+    ///
+    /// Precedence: the keyboard's own profile, then the caller's per-run
+    /// parameters, then the configured settings. A batch-only model forces
+    /// batch mode; a live-capable one leaves the configured mode alone.
+    private static func modelSelection(
+        keyboardProfile: KeyboardDictationProfileOption?,
+        parameters: CaptureRunParameters,
+        settings: AppSettings
+    ) -> (modelID: String, usesBatch: Bool) {
+        let usesBatch = keyboardProfile?.transcriptionMode == .batch
+            || (keyboardProfile == nil
+                && (parameters.requiresBatchMode || settings.transcriptionMode == .batch))
+        let modelID = keyboardProfile?.transcriptionModelIdentifier
+            ?? parameters.modelID
+            ?? (usesBatch ? settings.batchTranscriptionModel : settings.selectedModel)
+        return (modelID, usesBatch)
+    }
+
+    /// Resolves the live model, refusing a silent substitution when the caller
+    /// asked for a specific one.
+    ///
+    /// The configured model may fall back to on-device when its key is
+    /// missing. That is acceptable for the global setting — it is the app's
+    /// own choice and `providerFallbackNotice` publishes it — but a caller
+    /// that *named* a model has to be told, not handed a different one it
+    /// cannot see.
+    private func resolveLiveModelHonouringRequest(
+        settings: AppSettings,
+        requestedModelID: String?
+    ) throws {
+        let substituted = resolveLiveModel(settings: settings)
+        guard substituted, requestedModelID != nil else { return }
+        unwindCancelledStart()
+        throw CaptureParameterFailure.modelUnavailable
+    }
+
+    /// - Returns: whether the resolved model differs from the requested one,
+    ///   i.e. whether a silent substitution happened.
+    @discardableResult
+    private func resolveLiveModel(settings: AppSettings) -> Bool {
         let requestedModel = currentModel
         let route = LiveTranscriptionRouting.route(for: currentModel)
         currentModel = LiveTranscriptionRouting.resolvedModelID(
@@ -223,7 +298,35 @@ public final class TranscriptionRecordingService: ObservableObject {
                 falling back to \(self.currentModel, privacy: .public)
                 """
             )
+            return true
         }
+        return false
+    }
+
+    /// The destination a stop should use.
+    ///
+    /// Explicit beats remembered beats global (issue #1013): a Stop that names
+    /// a destination wins, otherwise the override the *start* carried travels
+    /// with the run, and only then does the one global setting apply. Every
+    /// stop path goes through this, so an interruption, a Live Activity button
+    /// and the in-app stop all agree.
+    public func resolvedStopDestination(
+        explicit: HardwareTriggerDestination? = nil
+    ) -> HardwareTriggerDestination {
+        let identifier = CaptureParameterResolution.stopDestinationID(
+            explicit: explicit?.rawValue,
+            runOverride: currentRunParameters.destinationID,
+            global: AppSettings.shared.hardwareTriggerDestination.rawValue
+        )
+        return HardwareTriggerDestination(rawValue: identifier)
+            ?? AppSettings.shared.hardwareTriggerDestination
+    }
+
+    /// The destination the running capture was started with, or `nil` when the
+    /// caller did not override it. Callers that must preserve the legacy
+    /// "no destination given" default pass this straight through.
+    public var runDestinationOverride: HardwareTriggerDestination? {
+        currentRunParameters.destinationID.flatMap(HardwareTriggerDestination.init(rawValue:))
     }
 
     /// Reverts everything a cancelled startup run had published: timing,
@@ -236,6 +339,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         wordCount = 0
         sharedState.clearRecordingState()
         activityManager.endActivity()
+        currentRunParameters = .none
         lifecycle.finishStartUnwind()
         state = lifecycle.state
     }
@@ -321,6 +425,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             CaptureOnboardingStore.shared.recordDictation(trigger: currentTrigger, transcript: text)
         }
         currentTrigger = nil
+        // The overrides belong to the run that just ended; the next capture
+        // starts from the global settings again unless it brings its own.
+        currentRunParameters = .none
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
 
@@ -449,6 +556,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         Task { [weak self] in
             guard let self, self.isRunning else { return }
             await self.stopRecording(
+                // Nil when the run carried no override, which keeps the
+                // pre-existing default for an unparameterised session.
+                destination: self.runDestinationOverride,
                 primedActivityMessage: "Stopped: \(error.localizedDescription)"
             )
         }

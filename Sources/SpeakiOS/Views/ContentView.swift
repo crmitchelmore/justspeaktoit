@@ -834,8 +834,10 @@ public struct ContentView: View {
         } else if handsFree.isArmed {
             await handsFree.disarm()
         } else if backgroundService.isRunning {
+            // An in-app stop finishes a headless run where that run asked to
+            // finish, not where the global setting points (issue #1013).
             let result = await backgroundService.stopRecording(
-                destination: settings.hardwareTriggerDestination
+                destination: backgroundService.resolvedStopDestination()
             )
             displayText = result.text
         } else if coordinator.isRunning {

@@ -293,6 +293,41 @@ final class StartupDiagnosticsTests: XCTestCase {
         XCTAssertEqual(harness.lines.count, 1)
     }
 
+    func testCancellingDuringStartupStillReportsTheBoundariesItReached() {
+        let harness = Harness()
+        var diagnostics = harness.makeDiagnostics()
+        let run = UUID()
+        diagnostics.begin(run: run, entry: nil, localOrigin: .coordinator)
+        diagnostics.note(.backend(.appleAnalyzer), run: run)
+        diagnostics.note(.stage(.credentialsReady), run: run)
+        // The user cancels while `session.start()` is still suspended: teardown
+        // retires the run before the cancelled start reaches its catch block.
+        diagnostics.retire()
+
+        XCTAssertEqual(harness.lines.count, 1)
+        XCTAssertTrue(harness.lines[0].contains("outcome=cancelled"))
+        XCTAssertTrue(harness.lines[0].contains("backend=appleAnalyzer"))
+        XCTAssertTrue(harness.lines[0].contains("credentials-ms="))
+        XCTAssertFalse(harness.lines[0].contains("session-start"))
+
+        // The cancelled start's own terminal call is the same outcome already
+        // reported, so it adds nothing, and nothing later can be recorded.
+        diagnostics.finish(.cancelled, run: run)
+        diagnostics.noteFirstPartial(run: run)
+        XCTAssertEqual(harness.lines.count, 1)
+    }
+
+    func testRetiringAnAlreadyReportedRunAddsNoSecondSummary() {
+        let harness = Harness()
+        var diagnostics = harness.makeDiagnostics()
+        let run = UUID()
+        diagnostics.begin(run: run, entry: nil, localOrigin: .service)
+        diagnostics.finish(.started, run: run)
+        XCTAssertEqual(harness.lines.count, 1)
+        diagnostics.retire()
+        XCTAssertEqual(harness.lines.count, 1)
+    }
+
     func testOnlyOneSummaryIsEmittedPerRun() {
         let harness = Harness()
         var diagnostics = harness.makeDiagnostics()

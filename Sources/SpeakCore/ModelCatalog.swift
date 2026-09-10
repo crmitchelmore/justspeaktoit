@@ -95,6 +95,19 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             latencyTier: .fast,
             tags: [.fast]),
         Option(
+            id: RevAIStreaming.liveCatalogID,
+            displayName: "Rev.ai Reverb (Streaming)",
+            description: "Rev.ai's streaming speech-to-text on the Reverb model, with rolling "
+                + "partial hypotheses and per-segment finals. Reuses your Rev.ai access token.",
+            estimatedLatencyMs: 300, latencyTier: .fast),
+        Option(
+            id: MistralVoxtralRealtime.liveCatalogID,
+            displayName: "Mistral Voxtral Realtime (Streaming)",
+            description: "Mistral's natively streaming Voxtral model across 13 languages, with "
+                + "automatic language detection and one authoritative transcript at the end of "
+                + "the stream. Reuses your Mistral API key.",
+            estimatedLatencyMs: 480, latencyTier: .fast),
+        Option(
             id: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
             displayName: "OpenAI GPT Live Transcribe (Streaming)",
             description: "OpenAI's recommended low-latency speech-to-text model with live transcript "

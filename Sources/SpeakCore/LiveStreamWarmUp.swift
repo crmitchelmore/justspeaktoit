@@ -84,6 +84,10 @@ extension LiveTranscriptionProviderID {
             return "api.x.ai"
         case .meta:
             return "api.meta.ai"
+        case .revai:
+            return "api.rev.ai"
+        case .mistral:
+            return "api.mistral.ai"
         }
     }
 
@@ -93,7 +97,7 @@ extension LiveTranscriptionProviderID {
         case .apple, .assemblyai, .openai:
             return .unsupported
         case .deepgram, .cartesia, .gladia, .google, .modulate, .soniox, .elevenlabs,
-             .speechmatics, .xai, .meta:
+             .speechmatics, .xai, .meta, .revai, .mistral:
             guard let host = self.streamingHost else { return .unsupported }
             return .endpointProbe(host: host)
         }

@@ -235,6 +235,22 @@ final class TranscriberCoordinator: ObservableObject {
 // run identity.
 @MainActor
 private extension TranscriberCoordinator {
+    /// Batch runs need usable credentials before anything is published, so a
+    /// missing key settles the run here rather than leaving it in preparation.
+    func requireBatchCredentialsIfNeeded(runID: UUID) throws {
+        let settings = AppSettings.shared
+        guard settings.transcriptionMode == .batch else { return }
+        do {
+            try settings.requireAvailableCredentials(for: currentModel, purpose: .batchTranscription)
+        } catch {
+            // Nothing has been published yet beyond the run itself, so the
+            // run settles here rather than sitting in preparation forever.
+            finishStartupDiagnostics(runID: runID, error: error)
+            finishPresentation()
+            throw error
+        }
+    }
+
     // swiftlint:disable:next function_body_length
     func performStart(
         preRollBuffers: [AVAudioPCMBuffer],
@@ -251,17 +267,7 @@ private extension TranscriberCoordinator {
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
-        if settings.transcriptionMode == .batch {
-            do {
-                try settings.requireAvailableCredentials(for: currentModel, purpose: .batchTranscription)
-            } catch {
-                // Nothing has been published yet beyond the run itself, so the
-                // run settles here rather than sitting in preparation forever.
-                finishStartupDiagnostics(runID: runID, error: error)
-                finishPresentation()
-                throw error
-            }
-        }
+        try requireBatchCredentialsIfNeeded(runID: runID)
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast

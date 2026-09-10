@@ -26,13 +26,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Swift build state embeds absolute paths. Scope both exact and fallback
+      # keys to the architecture, stable host identity and checkout workspace.
       - name: Cache Swift packages
         uses: actions/cache@v6
         with:
           path: .build
-          key: ${{ runner.os }}-${{ runner.arch }}-swift-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-swift-
+            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
       - name: Build
         run: make build

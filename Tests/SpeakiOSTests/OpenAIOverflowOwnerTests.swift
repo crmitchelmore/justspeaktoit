@@ -188,7 +188,7 @@ private final class OverflowOwnerFixture {
     func makeService() -> TranscriptionRecordingService {
         TranscriptionRecordingService(
             sharedState: shared, historyManager: history,
-            polishClipboard: PolishClipboard(pasteboard: pasteboard, now: { 100 }, isActive: { true }),
+            polishClipboard: PolishClipboard(pasteboard: pasteboard),
             hasPolishingKey: { false }, polish: { text, _, _ in text },
             sessionFactory: { [unowned self] in try IOSTranscriptionSession(openAI: self.transcriber) }
         )
@@ -225,12 +225,8 @@ private final class OverflowOwnerFixture {
 
 @MainActor
 private final class OverflowOwnerPasteboard: PolishPasteboard {
-    var changeCount = 0
-    var ownershipToken: String?
     var string: String? = "Original clipboard"
-    func write(_ text: String, token: String) {
-        changeCount += 1
-        ownershipToken = token
+    func write(_ text: String) {
         string = text
     }
 }

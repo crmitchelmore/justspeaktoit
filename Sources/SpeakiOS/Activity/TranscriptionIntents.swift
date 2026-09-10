@@ -75,20 +75,18 @@ func finishedKeyboardSessionIfActive() -> Bool {
     }
 }
 
-/// Starts recording, transparently recovering when the *background* Live Activity
-/// can't be started.
+/// Starts recording with foreground recovery if the required Live Activity is unavailable.
 ///
-/// When the Action Button / a Shortcut / Siri launches the app in the background,
-/// ActivityKit refuses to start a Live Activity (`Activity.request` throws), so
-/// `startRecording()` reports `iOSTranscriptionError.liveActivityUnavailable`
-/// rather than record without the mandatory Live Activity (which the AppIntents
-/// system-policy check would kill). Previously the user just saw a "turn on Live
-/// Activities" error even when they *were* enabled.
+/// `LiveActivityIntent` permits activity creation without opening the app when
+/// requested within its awaited `perform()` execution. `AudioRecordingIntent`
+/// requires that activity throughout microphone capture. Keep this call awaited
+/// so the service can reuse a primed activity or request one before starting audio.
 ///
-/// Here we recover by continuing in the foreground: the app briefly comes to the
-/// front, where starting a Live Activity is permitted, and recording proceeds.
-/// The foreground hop only happens on that specific failure — when the headless
-/// background start succeeds, recording stays fully headless.
+/// The grant does not guarantee success in every device state. If the service
+/// reports `liveActivityUnavailable`, retain the narrow foreground-continuation
+/// retry: the app briefly comes to the front, where starting a Live Activity is
+/// permitted, and recording proceeds. Other failures propagate without starting
+/// audio through this fallback.
 ///
 /// `entry` is the timestamp taken at `perform()` entry. It is passed through
 /// unchanged — including into the foreground retry — so the measured startup
@@ -152,7 +150,7 @@ private func resolvedRunParameters(
 /// to a one-shot start (and a separate one to stop). If a recording is already
 /// in progress this intent leaves it running and reports the state.
 @available(iOS 18, *)
-public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinuableIntent {
+public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent, ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Start Recording"
     public static var description = IntentDescription(
         "Start a fresh transcription. No-op if already recording. Pair with Stop Recording to finish."
@@ -243,10 +241,11 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
 }
 
 /// Toggle intent for starting/stopping transcription via Action Button, Siri, or Shortcuts.
-/// Conforms to AudioRecordingIntent so the system allows background audio recording
-/// and shows the recording indicator. Requires iOS 18+.
+/// Combines the audio-recording grant with permission to start the required Live
+/// Activity during intent execution. Retains foreground recovery on iOS 18+.
 @available(iOS 18, *)
-public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, ForegroundContinuableIntent {
+public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivityIntent,
+    ForegroundContinuableIntent {
     private enum ToggleRecordingError: LocalizedError {
         case alreadyRecordingInApp
 
@@ -430,19 +429,19 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 /// Control Center toggle intent for one-tap start/stop of transcription.
 ///
 /// This lives in SpeakiOSLib (not the widget extension) so it can adopt
-/// `ForegroundContinuableIntent` and reuse the same background-recovery path as
-/// the Action Button. Control Center runs this intent in the app's *background*
-/// process, where ActivityKit refuses to start the mandatory Live Activity, so a
-/// plain `startRecording()` would fail with `liveActivityUnavailable`. Conforming
-/// to `AudioRecordingIntent` requests the background-audio grant, and the
-/// foreground fallback brings the app forward when the headless start is refused.
+/// `ForegroundContinuableIntent` and reuse the Action Button's recovery path.
+/// `LiveActivityIntent` permits starting the required activity in the app process
+/// during `perform()` without opening the app. `AudioRecordingIntent` supplies
+/// the recording grant; foreground continuation remains available if the required
+/// activity cannot be started or reused.
 ///
 /// The widget extension only ever uses this as a `SetValueIntent` (via
 /// `ControlWidgetToggle`), so it never references `ForegroundContinuableIntent`
 /// itself — that protocol is unavailable to app extensions, but merely using a
 /// type that conforms to it is allowed.
 @available(iOS 18, *)
-public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, ForegroundContinuableIntent {
+public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIntent, LiveActivityIntent,
+    ForegroundContinuableIntent {
     public static var title: LocalizedStringResource = "Toggle Transcription"
 
     /// Deliberately runs without authentication: Control Center is reachable

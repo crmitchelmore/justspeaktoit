@@ -481,7 +481,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 self.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
                 self.handlePartialResult(text: text)
             }
-            bindRecordingWarning(session)
+            bindRecordingWarning(session, runID: runID)
             session.onError = { [weak self, weak session] error in
                 guard let self, let session,
                       self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
@@ -1339,9 +1339,15 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
     }
 
-    private func bindRecordingWarning(_ session: IOSTranscriptionSession) {
+    /// Routes the run's one nonfatal loss notice to the published warning. The
+    /// first notice may arrive while `start()` is still suspended, before
+    /// `transcriptionSession` is assigned, so the starting run is accepted on
+    /// the same terms as `onError` (issue #950).
+    private func bindRecordingWarning(_ session: IOSTranscriptionSession, runID: UUID) {
         session.onRecordingWarning = { [weak self, weak session] message in
-            guard let self, let session, self.transcriptionSession === session else { return }
+            guard let self, let session,
+                  self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
+            else { return }
             self.recordingWarning = message
         }
     }

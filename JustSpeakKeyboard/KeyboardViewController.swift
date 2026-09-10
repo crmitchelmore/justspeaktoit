@@ -50,6 +50,14 @@ final class KeyboardViewController: UIInputViewController {
         model.activate(
             hasFullAccess: hasFullAccess,
             documentIdentifier: textDocumentProxy.documentIdentifier,
+            isSecureField: documentIsSecure,
+            // `advanceToNextInputMode()` moves to the *next* enabled keyboard;
+            // the model only calls back when exactly two are enabled, where
+            // "next" is provably the one the user was typing on (issue #1005).
+            activeInputModeCount: UITextInputMode.activeInputModes.count,
+            handBack: { [weak self] in
+                self?.advanceToNextInputMode()
+            },
             insertText: { [weak self] text in
                 self?.textDocumentProxy.insertText(text)
             },
@@ -61,6 +69,19 @@ final class KeyboardViewController: UIInputViewController {
             },
             contextAfterInput: { [weak self] in
                 self?.textDocumentProxy.documentContextAfterInput
+            },
+            // Provisional text, as Apple dictation and CJK input use (#1004).
+            // The caret is placed at the end of the marked range so the user
+            // can keep speaking; `unmarkText()` is what commits it, and
+            // marking the empty string then unmarking is what removes it.
+            setMarkedText: { [weak self] text in
+                self?.textDocumentProxy.setMarkedText(
+                    text,
+                    selectedRange: NSRange(location: (text as NSString).length, length: 0)
+                )
+            },
+            unmarkText: { [weak self] in
+                self?.textDocumentProxy.unmarkText()
             }
         )
     }
@@ -82,11 +103,30 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    /// Whether the field the proxy currently addresses collects a secret.
+    ///
+    /// `isSecureTextEntry` is an optional trait: hosts that never set it, and
+    /// proxies the system has not populated yet, report `nil`. An unknown
+    /// answer is treated as **secure**, because the two failure modes are not
+    /// symmetric — guessing "not secure" can push a transcript into a password
+    /// field, which is unrecoverable, while guessing "secure" only withholds
+    /// delivery for that field, leaving the transcript in History and on the
+    /// clipboard where the user can still reach it.
+    ///
+    /// It is read fresh on every host callback rather than latched at
+    /// appearance: focus can move from a normal field to a password field, and
+    /// a field can flip `isSecureTextEntry` under a "show password" toggle,
+    /// without the keyboard ever being dismissed.
+    private var documentIsSecure: Bool {
+        textDocumentProxy.isSecureTextEntry ?? true
+    }
+
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         model.updateDocumentContext(
             documentIdentifier: textDocumentProxy.documentIdentifier,
-            selectionChanged: false
+            selectionChanged: false,
+            isSecureField: documentIsSecure
         )
     }
 
@@ -94,7 +134,8 @@ final class KeyboardViewController: UIInputViewController {
         super.selectionDidChange(textInput)
         model.updateDocumentContext(
             documentIdentifier: textDocumentProxy.documentIdentifier,
-            selectionChanged: true
+            selectionChanged: true,
+            isSecureField: documentIsSecure
         )
     }
 

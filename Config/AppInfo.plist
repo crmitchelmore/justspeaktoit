@@ -82,6 +82,10 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Just Speak to It uses the microphone to capture audio for transcription.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.justspeaktoit.transcript</string>
+	</array>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

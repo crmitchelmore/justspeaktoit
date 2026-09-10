@@ -24,9 +24,23 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     public var onPartialResult: ((String, Bool) -> Void)?
     public var onError: ((Error) -> Void)?
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count (issue #983).
+    public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972).
+    public var onStartupObservation: ((StartupObservation) -> Void)?
 
     private let audioSessionManager: AudioSessionManager
     private let startup = RecordingStartupOperation()
+    /// Replaced per start so a retired run's tap can never report input for
+    /// the run that replaced it.
+    private var firstInputSignal = FirstInputSignal()
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
     private var cleanupTask: Task<Void, Never>?
     private var isStopping = false
     private var activeCaptureID: UUID?
@@ -55,6 +69,8 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private var client: StreamingTranscriptionClient?
     private let audioEngine = AVAudioEngine()
+    private let configurationObserver = CaptureDisruptionObserver()
+    var configurationNotificationObject: AnyObject { audioEngine }
     private var startTime: Date?
     /// Finalised text so far, folded by the hosted client's declared final
     /// shape once `start()` knows which client is in use (issue #700).
@@ -150,6 +166,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             try startAudioEngine()
         }
         resetState()
+        observeCaptureConfiguration()
     }
 
     private func makeClient() -> StreamingTranscriptionClient? {
@@ -162,6 +179,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func startClient(_ client: StreamingTranscriptionClient) {
         let captureID = UUID()
         activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
         client.start(
             onTranscript: { [weak self] text, isFinal in
                 Task { @MainActor in
@@ -178,7 +196,20 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         )
     }
 
+    private func observeCaptureConfiguration() {
+        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
+            self?.audioEngine.isRunning == true
+        } onDisruption: { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.audioEngine.stop()
+            self.removeInputTap()
+            self.error = iOSTranscriptionError.microphoneChanged
+            self.onError?(iOSTranscriptionError.microphoneChanged)
+        }
+    }
+
     public func stop() async -> TranscriptionResult {
+        configurationObserver.stop()
         guard isRunning, !isStopping else {
             await cleanupTask?.value
             let text = partialText.isEmpty ? accumulated.text : partialText
@@ -229,11 +260,13 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
+        configurationObserver.stop()
         startup.cancel()
         _ = cleanupCapture()
     }
 
     private func cleanupCapture() -> Task<Void, Never>? {
+        configurationObserver.stop()
         if let cleanupTask { return cleanupTask }
         guard isRunning || ownsAudioSession || hasInputTap else { return nil }
         audioEngine.stop()
@@ -341,6 +374,7 @@ extension SharedClientLiveTranscriber {
     private func configureAudioSession() async throws {
         do {
             try await audioSessionManager.configureForRecording()
+            onStartupObservation?(.stage(.audioSessionConfigured))
         } catch {
             if Task.isCancelled || error is CancellationError { throw CancellationError() }
             let wrapped = iOSTranscriptionError.audioSessionFailed(error)
@@ -410,10 +444,15 @@ private extension SharedClientLiveTranscriber {
             targetFormat: targetFormat, converter: converter, targetSampleRate: sampleRate
         )
         let nativeSampleRate = nativeFormat.sampleRate
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            if copied.frameLength > 0, let captureID, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
             self.audioProcessingQueue.async {
                 defer { self.tapBufferPool.recycle(copied) }
                 self.audioRecorder.writeBuffer(copied)
@@ -425,9 +464,13 @@ private extension SharedClientLiveTranscriber {
         }
         hasInputTap = true
 
+        // The safety writer opens before the engine, so the file covers the
+        // very first buffers instead of starting a beat late (issue #992).
+        try? audioRecorder.startRecording(format: nativeFormat)
         audioEngine.prepare()
         try audioEngine.start()
-        try? audioRecorder.startRecording(format: nativeFormat)
+        // Only after the engine actually returned.
+        onStartupObservation?(.stage(.engineStarted))
     }
 
     /// Bundles the audio-conversion context handed to the capture tap.

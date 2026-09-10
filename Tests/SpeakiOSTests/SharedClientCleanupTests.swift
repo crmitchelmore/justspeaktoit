@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import Foundation
 import SpeakCore
 import XCTest
@@ -108,6 +109,56 @@ final class SharedClientCleanupTests: XCTestCase {
         XCTAssertTrue(transcriber.isRunning)
         XCTAssertEqual(transcriber.partialText, "")
         XCTAssertEqual(replacement.stops, 0)
+        transcriber.cancel()
+        _ = await transcriber.stop()
+    }
+
+    func testEngineNotification_finishesOwnedCaptureOnceAndPreservesTranscript() async throws {
+        let transcriber = try makeTranscriber()
+        let client = CleanupTestClient()
+        var finishes = 0
+        client.finish = { finishes += 1; return "captured final words" }
+        transcriber.clientFactory = { client }
+        try await transcriber.start()
+        let stopped = expectation(description: "normal owner finalised")
+        var errors = 0
+        var resultText = ""
+        transcriber.onError = { error in
+            errors += 1
+            XCTAssertEqual(error.localizedDescription, "The microphone changed and recording stopped.")
+            Task { @MainActor in
+                resultText = await transcriber.stop().text
+                stopped.fulfill()
+            }
+        }
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: NSObject())
+        NotificationCenter.default.post(
+            name: .AVAudioEngineConfigurationChange, object: transcriber.configurationNotificationObject
+        )
+        NotificationCenter.default.post(
+            name: .AVAudioEngineConfigurationChange, object: transcriber.configurationNotificationObject
+        )
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertEqual(errors, 1)
+        XCTAssertEqual(finishes, 1)
+        XCTAssertEqual(resultText, "captured final words")
+        XCTAssertFalse(transcriber.isRunning)
+    }
+
+    func testQueuedConfiguration_cancelAndReplacementIgnoreRetiredNotification() async throws {
+        let transcriber = try makeTranscriber()
+        transcriber.clientFactory = { CleanupTestClient() }
+        try await transcriber.start()
+        var errors = 0
+        transcriber.onError = { _ in errors += 1 }
+        NotificationCenter.default.post(
+            name: .AVAudioEngineConfigurationChange, object: transcriber.configurationNotificationObject
+        )
+        transcriber.cancel()
+        try await transcriber.start()
+        await Task { @MainActor in }.value
+        XCTAssertEqual(errors, 0)
+        XCTAssertTrue(transcriber.isRunning)
         transcriber.cancel()
         _ = await transcriber.stop()
     }

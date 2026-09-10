@@ -127,6 +127,16 @@ extension SettingsView {
               .speakTooltip(
                 "After Speak pastes your transcript, we put your original clipboard content back automatically."
               )
+              settingsToggle(
+                "Paste iPhone and Watch transcripts at the cursor",
+                isOn: settingsBinding(\AppSettings.pasteRemoteTranscriptsAtCursor),
+                tint: .brandLagoon
+              )
+              .speakTooltip(
+                "Off by default. When off, a capture from your iPhone or Apple Watch arrives as a "
+                  + "notification with Paste and Copy. When on, a capture made in the last minute is "
+                  + "pasted wherever your cursor is, which can overwrite a selection."
+              )
             }
           }
         }

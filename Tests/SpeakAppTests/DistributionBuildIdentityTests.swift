@@ -354,13 +354,20 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("input.installTap"))
         XCTAssertTrue(engine.contains("input.installTap"))
         XCTAssertTrue(engine.contains("try session.setCategory(.record"))
+        // Issue #991: the in-extension capture engine, and the AVFoundation
+        // and Speech imports it needs, exist only behind the flag. A hand-off
+        // build — every build the App Store has received — compiles a stub
+        // that refuses to start, so no shipping keyboard carries capture code
+        // it can never reach. The flagged shape is still built in CI.
+        XCTAssertTrue(engine.contains("#if IOS_KEYBOARD_DIRECT_CAPTURE\nimport AVFoundation\nimport Speech\n#endif"))
+        XCTAssertTrue(engine.contains("#if !IOS_KEYBOARD_DIRECT_CAPTURE"))
+        XCTAssertTrue(engine.contains("onEvent?(runID, .captureFailed(.microphoneUnavailable))"))
         XCTAssertTrue(instantCoordinator.contains("requiresLiveActivity: false"))
         XCTAssertTrue(instantCoordinator.contains("updateInterim"))
         XCTAssertFalse(instantCoordinator.contains(".write("))
         XCTAssertFalse(instantCoordinator.contains(".upload("))
         XCTAssertTrue(instantCoordinator.contains("saveToHistory: false"))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory(transcript, result: result)"))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory(result.text, result: result)"))
+        // History outcomes across drain/polish races are exercised by KeyboardInstantFinalisationTests.
         XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 

@@ -12,6 +12,24 @@ public final class IOSBatchTranscriber {
     private let startup = RecordingStartupOperation()
     private var ownsAudioSession = false
     private var hasInputTap = false
+    /// Batch has no live partial result, so its input tap is the only signal
+    /// that capture is really running. Replaced per start so a retired run's
+    /// tap can never report input for the run that replaced it (issue #983).
+    private var firstInputSignal = FirstInputSignal()
+    private var activeCaptureID: UUID?
+
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count.
+    public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972). Batch
+    /// has no live partial, so its timeline ends at the session start.
+    public var onStartupObservation: ((StartupObservation) -> Void)?
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
 
     private func releaseAudioSession() {
         guard ownsAudioSession else { return }
@@ -25,10 +43,21 @@ public final class IOSBatchTranscriber {
         hasInputTap = false
     }
     private let audioEngine = AVAudioEngine()
-    private let audioRecorder = AudioRecordingPersistence()
+    let audioRecorder = AudioRecordingPersistence()
     private let client: IOSBatchTranscriptionClient
     private let retainRecording: Bool
     private var startTime: Date?
+    /// The completed file this capture wrote, from `stop()` closing it until
+    /// its owner discards it. `nil` for a retained recording's lifetime is
+    /// meaningless: `discardRecordingIfNotRetained` never deletes one the user
+    /// asked to keep.
+    public private(set) var finishedRecordingURL: URL?
+
+    /// Whether this capture's recording is the user's to keep.
+    public var retainsRecording: Bool { retainRecording }
+
+    /// The safety claim this capture's recording was written under, if any.
+    public var safetyRecordingID: UUID? { audioRecorder.lastClaim }
 
     public let model: String
 
@@ -60,6 +89,9 @@ public final class IOSBatchTranscriber {
     }
 
     private func startCapture() async throws {
+        let captureID = UUID()
+        activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
         let permissionGranted = await ensureMicrophonePermission()
         try Task.checkCancellation()
         guard permissionGranted else {
@@ -67,19 +99,25 @@ public final class IOSBatchTranscriber {
         }
         ownsAudioSession = true
         try await audioSessionManager.configureForRecording()
+        onStartupObservation?(.stage(.audioSessionConfigured))
         try Task.checkCancellation()
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         try audioRecorder.startRecording(format: format)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder] buffer, _ in
+        let signal = firstInputSignal
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder, weak self] buffer, _ in
             audioRecorder.writeBuffer(buffer)
+            guard buffer.frameLength > 0, signal.markObserved() else { return }
+            Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
         }
         hasInputTap = true
 
         do {
             audioEngine.prepare()
             try audioEngine.start()
+            // Only after the engine actually returned.
+            onStartupObservation?(.stage(.engineStarted))
             startTime = Date()
         } catch {
             removeInputTap()
@@ -92,6 +130,7 @@ public final class IOSBatchTranscriber {
     public func stop(language: String?) async throws -> TranscriptionResult {
         audioEngine.stop()
         removeInputTap()
+        activeCaptureID = nil
         startTime = nil
         guard let recording = audioRecorder.stopRecording() else {
             releaseAudioSession()
@@ -100,20 +139,38 @@ public final class IOSBatchTranscriber {
         releaseAudioSession()
 
         // A non-retained recording is temporary, but it is still the only copy
-        // of what the user said. Delete it after the transcript is safely in
-        // hand, never on the error path: the keyboard reports the failure to
-        // the user, and the preserved file stays visible in the Recordings
-        // screen, which lists every file in the recordings directory. From
-        // there the user can play it back, retry it, or delete it.
-        let result = try await client.transcribeFile(
+        // of what the user said, and a transcript in hand is not a transcript
+        // delivered. Deleting here lost the audio whenever the caller never
+        // used this result — a finalisation deadline that already gave up on
+        // the stop, or a process killed between this reply and the History
+        // write. The file is therefore kept until its owner says delivery of
+        // this capture is complete (`discardRecordingIfNotRetained`), and kept
+        // for good on the error path: the keyboard reports the failure to the
+        // user, and the preserved file stays visible in the Recordings screen,
+        // which lists every file in the recordings directory. From there the
+        // user can play it back, retry it, or delete it.
+        finishedRecordingURL = recording.url
+        return try await client.transcribeFile(
             at: recording.url,
             model: model,
             language: language
         )
-        if !retainRecording {
-            AudioRecordingPersistence.deleteRecording(at: recording.url)
-        }
-        return result
+    }
+
+    /// Discards the temporary recording of a capture whose transcript has been
+    /// delivered. Called by the owner of the result, never by the upload — a
+    /// result nobody used must leave its audio recoverable.
+    ///
+    /// - Returns: `true` when a file was actually removed.
+    @discardableResult
+    public func discardRecordingIfNotRetained() -> Bool {
+        guard !retainRecording, let url = finishedRecordingURL else { return false }
+        finishedRecordingURL = nil
+        AudioRecordingPersistence.deleteRecording(at: url)
+        // The file is gone, so its claim has nothing left to point at
+        // (issue #992). The transcript was delivered before this ran.
+        audioRecorder.forgetLastClaim()
+        return true
     }
 
     public func cancel() {
@@ -126,6 +183,7 @@ public final class IOSBatchTranscriber {
         removeInputTap()
         audioRecorder.cancelRecording()
         releaseAudioSession()
+        activeCaptureID = nil
         startTime = nil
     }
 

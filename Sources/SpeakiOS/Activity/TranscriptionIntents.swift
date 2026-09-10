@@ -4,15 +4,26 @@ import SpeakCore
 import UIKit
 
 // App Intent declarations intentionally stay together so Shortcuts metadata and
-// foreground-continuation behavior remain auditable in one place.
+// foreground-continuation behavior remain auditable in one place. That is worth
+// more than the file-length rule: splitting the recording intents across files
+// is how one of them quietly ends up with a different authentication policy or
+// a different destination precedence from its siblings.
 // swiftlint:disable file_length
 
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
 
+/// The spoken and Shortcuts result of a stop.
+///
+/// `receipt` is what the delivery actually did (issue #1008) and always wins:
+/// it is built from observed results, so it cannot claim a copy that failed or
+/// a field insert that never happened. The per-destination strings below remain
+/// for the fixed destinations, where they say the same thing with the word
+/// count Siri reads out.
 @available(iOS 18, *)
 private func stopResultDialog(
     for result: TranscriptionResult,
     destination: HardwareTriggerDestination,
+    receipt: CaptureReceipt?,
     canPostProcess: Bool = true
 ) -> IntentDialog {
     let wordCount = result.text.split(separator: " ").count
@@ -20,6 +31,9 @@ private func stopResultDialog(
         return "Recording stopped. No speech detected."
     }
     switch destination {
+    case .auto:
+        guard let receipt else { return "Recording stopped." }
+        return IntentDialog(stringLiteral: "\(receipt.headline). \(wordCount) words.")
     case .clipboard:
         return "Copied \(wordCount) words to clipboard."
     case .clipboardAndPostProcess:
@@ -29,6 +43,35 @@ private func stopResultDialog(
         return "Copied \(wordCount) words. Add an OpenRouter API key to polish future recordings."
     case .historyOnly:
         return "Saved \(wordCount) words to history."
+    }
+}
+
+/// A keyboard-owned dictation shares the microphone with every hardware
+/// trigger. Rather than colliding with it — refusing with "already recording",
+/// or stopping it into the *hardware* destination and losing the field the
+/// keyboard was aiming at — a physical press finishes it into that field
+/// (issue #1002).
+///
+/// Returns `true` when the press was consumed by the keyboard session.
+///
+/// Every supported stop entry point must run this **before** its own generic
+/// stop: `StopTranscriptionRecordingIntent`, the Action Button toggle, the
+/// Control Center toggle's off position, and `StopDictationIntent`. Stopping
+/// the service directly would finalise a keyboard-owned capture with the
+/// *hardware* destination and publish a pickup offer, instead of completing
+/// the nonce-scoped handoff into the field the keyboard opened it for.
+@available(iOS 18, *)
+@MainActor
+func finishedKeyboardSessionIfActive() -> Bool {
+    switch KeyboardDeliveryPublisher.sessionRouting() {
+    case let .finishKeyboardSession(requestID):
+        return KeyboardInstantDictationCoordinator.shared.finishKeyboardSession(requestID: requestID)
+    case .keyboardSessionStarting:
+        // The keyboard has asked for a recording that has not begun. Racing
+        // its start-up would either double-start or silently drop it.
+        return true
+    case .proceed:
+        return false
     }
 }
 
@@ -46,18 +89,63 @@ private func stopResultDialog(
 /// front, where starting a Live Activity is permitted, and recording proceeds.
 /// The foreground hop only happens on that specific failure — when the headless
 /// background start succeeds, recording stays fully headless.
+///
+/// `entry` is the timestamp taken at `perform()` entry. It is passed through
+/// unchanged — including into the foreground retry — so the measured startup
+/// covers the intent hop rather than restarting the clock partway down the
+/// path (issue #972).
 @available(iOS 18, *)
-private func startRecordingContinuingInForegroundIfNeeded(
-    from intent: some ForegroundContinuableIntent
+func startRecordingContinuingInForegroundIfNeeded(
+    from intent: some ForegroundContinuableIntent,
+    trigger: CaptureTrigger,
+    parameters: CaptureRunParameters = .none,
+    entry: StartupEntry,
+    endPointing: CaptureEndPointingRequest? = nil
 ) async throws {
     let service = await TranscriptionRecordingService.shared
     do {
-        try await service.startRecording()
+        try await service.startRecording(
+            trigger: trigger,
+            parameters: parameters,
+            endPointing: endPointing,
+            entry: entry
+        )
     } catch iOSTranscriptionError.liveActivityUnavailable {
         try await intent.requestToContinueInForeground {
-            try await TranscriptionRecordingService.shared.startRecording()
+            try await TranscriptionRecordingService.shared.startRecording(
+                trigger: trigger,
+                parameters: parameters,
+                endPointing: endPointing,
+                entry: entry
+            )
         }
     }
+}
+
+/// The overrides a start intent carries, or a visible failure.
+///
+/// Validation happens before anything is allocated, so a Shortcut that names a
+/// language or model the app does not have never opens a microphone: it fails
+/// with a message naming what was wrong instead of recording with something
+/// else and letting the user find out afterwards.
+@available(iOS 18, *)
+private func resolvedRunParameters(
+    destination: CaptureDestinationAppEnum?,
+    language: String?,
+    model: String?,
+    source: String?
+) throws -> CaptureRunParameters {
+    try CaptureParameterResolution.resolve(
+        destinationID: destination?.rawValue,
+        language: language,
+        model: model,
+        source: source,
+        // Validate against what iOS can actually execute, not just what the
+        // cross-platform catalogue can spell. A Mac-only streaming provider or
+        // a batch entry with no iOS upload route is refused here rather than
+        // accepted and then run as something else.
+        vocabulary: CaptureModelSupport.vocabulary
+    )
 }
 
 /// Idempotent start intent for users who wire their Action Button / Shortcut
@@ -76,9 +164,47 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
     /// a core use of this intent.
     public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    public var destination: CaptureDestinationAppEnum?
+
+    @Parameter(
+        title: "Language",
+        description: "Language to transcribe in, such as en_GB. Leave unset to use the language from Settings.",
+        optionsProvider: CaptureLanguageOptionsProvider()
+    )
+    public var language: String?
+
+    @Parameter(
+        title: "Model",
+        description: "Transcription model for this recording. Leave unset to use the model from Settings.",
+        optionsProvider: CaptureModelOptionsProvider()
+    )
+    public var model: String?
+
+    @Parameter(
+        title: "Source",
+        description: "A label for your own automation. It is written to the app's log and changes nothing else."
+    )
+    public var source: String?
+
+    /// Every parameter sits below the summary line, so a saved shortcut that
+    /// sets none of them still reads as plain "Start recording".
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Start recording") {
+            \.$destination
+            \.$language
+            \.$model
+            \.$source
+        }
+    }
+
     public init() {}
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let entry = StartupEntry(origin: .startIntent)
         let service = await TranscriptionRecordingService.shared
         // `starting` counts: a startup in flight is already an active
         // operation, not a free slot (issue #701).
@@ -89,8 +215,24 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
         if SharedTranscriptionState.shared.isRecording {
             return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         }
+        // A refused parameter is reported as itself. Folding it into the
+        // generic "check your permissions" line below would send the user to
+        // the wrong place entirely.
+        let parameters = try resolvedRunParameters(
+            destination: destination,
+            language: language,
+            model: model,
+            source: source
+        )
         do {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            try await startRecordingContinuingInForegroundIfNeeded(
+                from: self,
+                trigger: .shortcut,
+                parameters: parameters,
+                entry: entry
+            )
+        } catch let failure as CaptureParameterFailure {
+            throw failure
         } catch {
             return .result(
                 dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
@@ -128,6 +270,44 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
     /// destination. This locked-capture flow is a deliberate product choice.
     public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    public var destination: CaptureDestinationAppEnum?
+
+    @Parameter(
+        title: "Language",
+        description: "Language to transcribe in, such as en_GB. Leave unset to use the language from Settings.",
+        optionsProvider: CaptureLanguageOptionsProvider()
+    )
+    public var language: String?
+
+    @Parameter(
+        title: "Model",
+        description: "Transcription model for this recording. Leave unset to use the model from Settings.",
+        optionsProvider: CaptureModelOptionsProvider()
+    )
+    public var model: String?
+
+    @Parameter(
+        title: "Source",
+        description: "A label for your own automation. It is written to the app's log and changes nothing else."
+    )
+    public var source: String?
+
+    /// The language, model and source apply to the start half of a toggle; the
+    /// destination applies to whichever half runs, because a toggle that stops
+    /// an unparameterised recording still has somewhere to put the text.
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Toggle recording") {
+            \.$destination
+            \.$language
+            \.$model
+            \.$source
+        }
+    }
+
     public init() {}
 
     /// Returns no Shortcuts value or dialog. Shortcuts promotes textual intent
@@ -137,19 +317,39 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
     /// Recording feedback already lives in the Live Activity; the pasteboard is
     /// owned exclusively by `stopRecording(destination:)`.
     public func perform() async throws -> IntentResultContainer<Never, Never, Never, Never> {
+        let entry = StartupEntry(origin: .toggleIntent)
         let service = await TranscriptionRecordingService.shared
         // A toggle during startup must stop (cancel) the pending run rather
         // than treating the service as free and double-starting (issue #701).
         let isActive = await service.isActive
 
+        // Share one session with the keyboard: a physical press finishes its
+        // dictation into its own field instead of colliding with it (#1002).
+        if await finishedKeyboardSessionIfActive() {
+            return .result()
+        }
+
         if isActive {
-            let destination = await AppSettings.shared.hardwareTriggerDestination
-            await service.stopRecording(destination: destination)
+            await service.stopRecording(
+                destination: await service.resolvedStopDestination(explicit: destination?.destination),
+                keyboardDeliverySource: .hardwareTrigger
+            )
             return .result()
         } else if SharedTranscriptionState.shared.isRecording {
             throw ToggleRecordingError.alreadyRecordingInApp
         } else {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            let parameters = try resolvedRunParameters(
+                destination: destination,
+                language: language,
+                model: model,
+                source: source
+            )
+            try await startRecordingContinuingInForegroundIfNeeded(
+                from: self,
+                trigger: .shortcut,
+                parameters: parameters,
+                entry: entry
+            )
             return .result()
         }
     }
@@ -177,12 +377,31 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
     /// `StopDictationIntent` (authenticated) to get the text in a Shortcut.
     public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
+    /// A stop cannot choose a language or model — the recording it is ending
+    /// already made those choices — but it can still redirect the text.
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    public var destination: CaptureDestinationAppEnum?
+
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Stop recording") {
+            \.$destination
+        }
+    }
+
     public init() {}
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let service = await TranscriptionRecordingService.shared
         // `starting` is cancellable, not "no active recording" (issue #701).
         let isActive = await service.isActive
+
+        // A keyboard-owned dictation finishes into its own field (#1002).
+        if await finishedKeyboardSessionIfActive() {
+            return .result(dialog: "Finishing into the keyboard's text field.")
+        }
 
         guard isActive else {
             if SharedTranscriptionState.shared.isRecording {
@@ -191,12 +410,18 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
             return .result(dialog: "No active recording.")
         }
 
-        let destination = await AppSettings.shared.hardwareTriggerDestination
+        // Explicit beats the override the start carried, which beats the
+        // global setting.
+        let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
         let canPostProcess = await AppSettings.shared.hasOpenRouterKey
-        let result = await service.stopRecording(destination: destination)
+        let result = await service.stopRecording(
+            destination: resolved,
+            keyboardDeliverySource: .hardwareTrigger
+        )
         return .result(dialog: stopResultDialog(
             for: result,
-            destination: destination,
+            destination: resolved,
+            receipt: await service.lastCaptureReceipt,
             canPostProcess: canPostProcess
         ))
     }
@@ -230,14 +455,113 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
 
     public init() {}
 
+    @MainActor
     public func perform() async throws -> some IntentResult {
-        let service = await TranscriptionRecordingService.shared
-        if value {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
-        } else {
-            await service.stopRecording(destination: AppSettings.shared.hardwareTriggerDestination)
+        let entry = StartupEntry(origin: .controlToggleIntent)
+        let service = TranscriptionRecordingService.shared
+        let action = try RecordingControlRequest.action(
+            desiredValue: value,
+            serviceState: service.state,
+            sharedIsRecording: SharedTranscriptionState.shared.isRecording
+        )
+        switch action {
+        case .start:
+            try await startRecordingContinuingInForegroundIfNeeded(
+                from: self,
+                trigger: .control,
+                entry: entry
+            )
+        case .stop:
+            // A keyboard-owned dictation finishes into its own field (#1002);
+            // only a capture nobody else owns falls through to the generic
+            // hardware-destination stop.
+            if await finishedKeyboardSessionIfActive() {
+                return .result()
+            }
+            // The Control itself takes no parameters (a configurable Control
+            // would change what an already-placed one means), but a Control
+            // stop still honours the override the start carried.
+            await service.stopRecording(
+                destination: service.resolvedStopDestination(),
+                keyboardDeliverySource: .hardwareTrigger
+            )
+        case .none:
+            break
         }
         return .result()
+    }
+}
+
+// MARK: - Result Row Intents
+
+/// Copies the completed transcript from the Live Activity result row.
+///
+/// `LiveActivityIntent` conformance is what makes this in-process: without it the
+/// widget extension performs the intent itself, and a UI-less extension cannot
+/// write the general pasteboard (PBErrorDomain 11). It is the same mechanism the
+/// Stop button already relies on.
+///
+/// The row only shows this button when the payload carries a preview, i.e. when
+/// the completed transcript was actually published to the App Group, so the
+/// button is never offered for a session whose text cannot be retrieved. The
+/// activity is moved to `.copied` only after `UIPasteboard.changeCount` confirms
+/// the write landed — nothing else in the app sets that outcome, so a `Copied`
+/// row always corresponds to a clipboard write that really happened.
+///
+/// The intent is *not* parameterless: "the last completed transcript" is a moving
+/// target. The activity is reused and a finished row is offered for three
+/// minutes, so between rendering a row and tapping it another session can finish
+/// and replace what the App Group holds. `completionID` is the id of the
+/// completion that rendered the tapped row, and the copy is refused unless the
+/// stored transcript is still that completion's — a caller is never handed a
+/// different recording's text.
+@available(iOS 18, *)
+public struct CopyLastTranscriptIntent: LiveActivityIntent {
+    public static var title: LocalizedStringResource = "Copy Last Transcript"
+    public static var description = IntentDescription(
+        "Copies the transcript shown on the completed recording row to the clipboard."
+    )
+
+    public static var openAppWhenRun: Bool = false
+    /// Reads and writes private transcript data, so never run on a locked device.
+    public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
+
+    /// The completion the tapped row was rendered from.
+    @Parameter(title: "Completion")
+    public var completionID: String
+
+    public init() {}
+
+    public init(completionID: String) {
+        self.completionID = completionID
+    }
+
+    public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let state = SharedTranscriptionState.shared
+        // Bound to the row that was tapped, not to whatever finished most
+        // recently: a row whose transcript has been superseded refuses rather
+        // than copying the newer session's text.
+        guard let text = state.completedTranscript(matching: completionID) else {
+            return .result(dialog: "That transcript is no longer the latest one. Open the app to find it.")
+        }
+
+        let copied = await MainActor.run { Self.copyConfirmingChangeCount(text) }
+        guard copied else {
+            return .result(dialog: "Couldn’t reach the clipboard. Open the app to copy it.")
+        }
+
+        await TranscriptionActivityManager.shared.markCompletionCopied(completionID: completionID)
+        let wordCount = text.split(whereSeparator: \.isWhitespace).count
+        return .result(dialog: "Copied \(wordCount) words.")
+    }
+
+    /// Writes to the pasteboard and reports whether the system observed the write.
+    @MainActor
+    private static func copyConfirmingChangeCount(_ text: String) -> Bool {
+        let pasteboard = UIPasteboard.general
+        let before = pasteboard.changeCount
+        pasteboard.string = text
+        return pasteboard.changeCount != before
     }
 }
 
@@ -313,7 +637,11 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
             intent: StartTranscriptionIntent(),
             phrases: [
                 "Start recording with \(.applicationName)",
-                "Start transcription with \(.applicationName)"
+                "Start transcription with \(.applicationName)",
+                // The parameterised phrase is what makes a spoken destination
+                // possible at all: "Start recording to History Only with
+                // Just Speak to It".
+                "Start recording to \(\.$destination) with \(.applicationName)"
             ],
             shortTitle: "Start Recording",
             systemImageName: "mic.badge.plus"
@@ -327,6 +655,20 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Stop Recording",
             systemImageName: "stop.fill"
+        )
+
+        // The one-shot action (#1011) had no phrase, so the only spoken way to
+        // get text back was the two-step Start / "Stop dictation and get text"
+        // pair. Every parameter it needs has a default, so a bare phrase runs.
+        AppShortcut(
+            intent: DictateIntent(),
+            phrases: [
+                "Dictate with \(.applicationName)",
+                "Take a note with \(.applicationName)",
+                "Dictate to \(\.$destination) with \(.applicationName)"
+            ],
+            shortTitle: "Dictate",
+            systemImageName: "waveform.badge.mic"
         )
 
         AppShortcut(
@@ -371,143 +713,4 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
     }
 }
 
-// MARK: - Shared State Manager
-
-/// Manages state shared between main app and extensions via App Group.
-public final class SharedTranscriptionState {
-    public static let shared = SharedTranscriptionState()
-    public static let appGroupIdentifier = KeyboardHandoffStore.appGroupIdentifier
-
-    private let defaults: UserDefaults?
-
-    private init() {
-        // Verified centrally so a missing effective entitlement fails the same
-        // way here as in every other App Group store: a logged fault and an
-        // unavailable, no-op store.
-        defaults = AppGroupAvailability.verifiedDefaults()
-        #if DEBUG && targetEnvironment(simulator)
-        if let value = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !value.isEmpty {
-            defaults?.set(value, forKey: "simulatorValidationTranscript")
-        }
-        #endif
-    }
-
-    /// Allows tests to isolate shared state from the real App Group.
-    init(defaults: UserDefaults?) {
-        self.defaults = defaults
-    }
-
-    #if DEBUG && targetEnvironment(simulator)
-    /// Deterministic transcript used only by Simulator UX validation. App Intent
-    /// execution does not reliably inherit launchd environment variables, so the
-    /// App Group value keeps the real Shortcut lifecycle testable across hosts.
-    var simulatorValidationTranscript: String? {
-        let environmentValue = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]
-        let value = environmentValue ?? defaults?.string(forKey: "simulatorValidationTranscript")
-        let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmedValue?.isEmpty == false ? trimmedValue : nil
-    }
-    #endif
-
-    public var isAvailable: Bool {
-        defaults != nil
-    }
-
-    /// The full transcript currently shared with extensions and App Intents.
-    public var currentTranscriptText: String { defaults?.string(forKey: "currentTranscriptText") ?? "" }
-
-    /// The most recent sentence shared with extensions and App Intents.
-    public var lastTranscribedSentence: String { defaults?.string(forKey: "lastTranscribedSentence") ?? "" }
-
-    /// Updates the current transcript text (for copy action)
-    public func updateTranscript(_ text: String) {
-        defaults?.set(text, forKey: "currentTranscriptText")
-
-        // Extract and store last sentence
-        if let lastSentence = extractLastSentence(from: text) {
-            defaults?.set(lastSentence, forKey: "lastTranscribedSentence")
-        }
-    }
-
-    /// Clears all shared state
-    public func clear() {
-        defaults?.removeObject(forKey: "currentTranscriptText")
-        defaults?.removeObject(forKey: "lastTranscribedSentence")
-    }
-
-    // MARK: - Recording State
-
-    /// Whether a headless recording session is currently active.
-    public var isRecording: Bool {
-        get { defaults?.bool(forKey: "isRecording") ?? false }
-        set { defaults?.set(newValue, forKey: "isRecording") }
-    }
-
-    /// Start time of the current recording session.
-    public var recordingStartTime: Date? {
-        get { defaults?.object(forKey: "recordingStartTime") as? Date }
-        set {
-            if let date = newValue {
-                defaults?.set(date, forKey: "recordingStartTime")
-            } else {
-                defaults?.removeObject(forKey: "recordingStartTime")
-            }
-        }
-    }
-
-    /// The most recently completed transcript (for clipboard result).
-    public var lastCompletedTranscript: String? {
-        get { defaults?.string(forKey: "lastCompletedTranscript") }
-        set {
-            if let text = newValue {
-                defaults?.set(text, forKey: "lastCompletedTranscript")
-                // Stamp completion time and flag it unseen so the app can surface
-                // the latest background (Action Button / Siri / Shortcuts) session
-                // and badge History on next foreground. Only background sessions
-                // set this key, so in-app recordings don't raise the marker.
-                defaults?.set(Date(), forKey: "lastCompletedAt")
-                defaults?.set(true, forKey: "hasUnseenBackgroundTranscript")
-            } else {
-                defaults?.removeObject(forKey: "lastCompletedTranscript")
-                defaults?.removeObject(forKey: "lastCompletedAt")
-                defaults?.set(false, forKey: "hasUnseenBackgroundTranscript")
-            }
-        }
-    }
-
-    /// When `lastCompletedTranscript` was last written by a background session.
-    public var lastCompletedAt: Date? {
-        defaults?.object(forKey: "lastCompletedAt") as? Date
-    }
-
-    /// Whether a background session finished a transcript the user hasn't been
-    /// shown in-app yet. Drives the History badge and the "surface as current
-    /// view" behaviour.
-    public var hasUnseenBackgroundTranscript: Bool {
-        get { defaults?.bool(forKey: "hasUnseenBackgroundTranscript") ?? false }
-        set { defaults?.set(newValue, forKey: "hasUnseenBackgroundTranscript") }
-    }
-
-    /// Marks the latest background transcript as seen (clears the History badge).
-    public func markBackgroundTranscriptSeen() {
-        hasUnseenBackgroundTranscript = false
-    }
-
-    /// Clears recording-specific state when a session ends.
-    public func clearRecordingState() {
-        isRecording = false
-        recordingStartTime = nil
-    }
-
-    private func extractLastSentence(from text: String) -> String? {
-        // Split by sentence-ending punctuation
-        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".!?"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        return sentences.last
-    }
-}
 #endif

@@ -29,6 +29,10 @@ public enum SpeakLogger {
     public static let activity = Logger(subsystem: subsystem, category: "activity")
     public static let transport = Logger(subsystem: subsystem, category: "transport")
     public static let sync = Logger(subsystem: subsystem, category: "sync")
+    /// Local, run-scoped recording-startup timing lines (issue #972). Carries
+    /// only closed-set labels and whole milliseconds — see
+    /// ``StartupDiagnostics`` for the content-free field allowlist.
+    public static let startup = Logger(subsystem: subsystem, category: "startup")
     public static let general = Logger(subsystem: subsystem, category: "general")
 
     // MARK: - Debug Mode

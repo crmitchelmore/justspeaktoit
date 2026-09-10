@@ -72,6 +72,7 @@ let version: String = {
 let appProfileName = ProcessInfo.processInfo.environment["APP_PROFILE_NAME"]
 let widgetProfileName = ProcessInfo.processInfo.environment["WIDGET_PROFILE_NAME"]
 let keyboardProfileName = ProcessInfo.processInfo.environment["KEYBOARD_PROFILE_NAME"]
+let shareProfileName = ProcessInfo.processInfo.environment["SHARE_PROFILE_NAME"]
 let watchProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_PROFILE_NAME"]
 let watchWidgetProfileName = ProcessInfo.processInfo.environment["TUIST_WATCH_WIDGET_PROFILE_NAME"]
 let macAppStoreProfileName = ProcessInfo.processInfo.environment["TUIST_MAC_PROFILE_NAME"]
@@ -103,6 +104,18 @@ let isIOSKeyboardDirectCaptureEnabled = ["1", "true", "yes"].contains(iosKeyboar
 // profile exists for the watch bundle id.
 let watchAppFlag = (ProcessInfo.processInfo.environment["TUIST_WATCH_APP"] ?? "").lowercased()
 let isWatchAppEnabled = ["1", "true", "yes"].contains(watchAppFlag)
+// `TUIST_IOS_SHARE_EXTENSION=1 tuist generate` includes the Share Sheet
+// extension for existing recordings (issue #1020) and defines
+// `IOS_SHARE_EXTENSION_FEATURE`. Off by default for the same reason the watch
+// app and the keyboard are: an extension needs its own App ID, its own App
+// Group registration and its own provisioning profile, and release signing
+// must not start failing before those exist. The App Group inbox the
+// extension writes to is drained by the app whether or not the extension is
+// built, so nothing in the shipped app changes while the flag is off.
+let shareExtensionFlag = (
+    ProcessInfo.processInfo.environment["TUIST_IOS_SHARE_EXTENSION"] ?? ""
+).lowercased()
+let isShareExtensionEnabled = ["1", "true", "yes"].contains(shareExtensionFlag)
 var iosActiveCompilationConditions: [String] = []
 var iosTestSettings: [String: SettingValue] = [:]
 var iosTestResourceElements: [ResourceFileElement] = [
@@ -125,6 +138,10 @@ if isIOSKeyboardEnabled, isIOSKeyboardDirectCaptureEnabled {
 }
 if isWatchAppEnabled {
     iosActiveCompilationConditions.append("WATCH_APP_FEATURE")
+}
+if isShareExtensionEnabled {
+    iosActiveCompilationConditions.append("IOS_SHARE_EXTENSION_FEATURE")
+    iosTestResourceElements.append("JustSpeakShare/JustSpeakShare.entitlements")
 }
 if !iosActiveCompilationConditions.isEmpty {
     iosAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = .string(
@@ -170,6 +187,13 @@ var macAppSettings: [String: SettingValue] = [
 var iosWidgetSettings: [String: SettingValue] = [
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)"
+]
+
+var iosShareSettings: [String: SettingValue] = [
+    "APPLICATION_EXTENSION_API_ONLY": "YES",
+    "CURRENT_PROJECT_VERSION": "1",
+    "MARKETING_VERSION": "\(version)",
+    "SKIP_INSTALL": "YES"
 ]
 
 var iosKeyboardSettings: [String: SettingValue] = [
@@ -238,6 +262,10 @@ if let keyboardProfileName {
     configureManualSigning(for: &iosKeyboardSettings, profileName: keyboardProfileName)
 }
 
+if let shareProfileName {
+    configureManualSigning(for: &iosShareSettings, profileName: shareProfileName)
+}
+
 if let watchProfileName {
     configureManualSigning(for: &watchAppSettings, profileName: watchProfileName)
 }
@@ -301,6 +329,9 @@ if isIOSKeyboardEnabled {
 if isWatchAppEnabled {
     iosAppDependencies.append(.target(name: "JustSpeakWatchApp"))
 }
+if isShareExtensionEnabled {
+    iosAppDependencies.append(.target(name: "JustSpeakShare"))
+}
 
 let macAppTarget: Target = .target(
     name: "SpeakApp",
@@ -348,6 +379,9 @@ let iosAppTarget: Target = .target(
         // export exemption, so the app uses no *non-exempt* encryption.
         "ITSAppUsesNonExemptEncryption": false,
         "NSSupportsLiveActivities": true,
+        // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
+        // the History entry id, never the transcript itself.
+        "NSUserActivityTypes": ["com.justspeaktoit.transcript"],
         "UIBackgroundModes": ["audio", "remote-notification"],
         "UIApplicationShortcutItems": [
             [
@@ -467,6 +501,24 @@ let keyboardTarget: Target = .target(
     settings: .settings(base: iosKeyboardSettings)
 )
 
+// Share Sheet import for an existing recording (issue #1020). Depends on
+// SpeakCore only: it copies the shared file into the App Group inbox and
+// stops, so it needs neither the app's UI layer nor its credentials.
+let shareTarget: Target = .target(
+    name: "JustSpeakShare",
+    destinations: .iOS,
+    product: .appExtension,
+    bundleId: "com.justspeaktoit.ios.share",
+    deploymentTargets: .iOS("17.0"),
+    infoPlist: .file(path: "JustSpeakShare/Info.plist"),
+    sources: ["JustSpeakShare/**/*.swift"],
+    entitlements: .file(path: "JustSpeakShare/JustSpeakShare.entitlements"),
+    dependencies: [
+        .package(product: "SpeakCore")
+    ],
+    settings: .settings(base: iosShareSettings)
+)
+
 let widgetTarget: Target = .target(
     name: "JustSpeakToItWidgetExtension",
     destinations: .iOS,
@@ -550,6 +602,9 @@ if isWatchAppEnabled {
 }
 if isIOSKeyboardEnabled {
     projectTargets.append(keyboardTarget)
+}
+if isShareExtensionEnabled {
+    projectTargets.append(shareTarget)
 }
 projectTargets += [widgetTarget, coreJourneyFixtureTarget, macUITestsTarget, iosUITestsTarget, iosTestsTarget]
 

@@ -330,6 +330,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case clipboardInsertionTriggers
     case enableSendToMac
     case enableAutomationServer
+    case pasteRemoteTranscriptsAtCursor
     case autoCorrectionsEnabled
     case autoCorrectionsPromotionThreshold
     case recordingSoundsEnabled
@@ -987,6 +988,20 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(enableAutomationServer, key: .enableAutomationServer) }
   }
 
+  // MARK: - Transcripts arriving from iPhone or Apple Watch (#1007)
+
+  /// Paste a freshly arrived phone or watch transcript straight at the cursor
+  /// instead of only posting a notification with a Paste action.
+  ///
+  /// Off by default and deliberately opt-in: text appearing in whatever window
+  /// happens to be focused, seconds after a capture the user made on another
+  /// device, can overwrite a selection and corrupt a document. The notification
+  /// is the safe default, and the paste only ever runs for captures younger
+  /// than `RemoteTranscriptArrival.freshnessWindow`.
+  @Published var pasteRemoteTranscriptsAtCursor: Bool {
+    didSet { store(pasteRemoteTranscriptsAtCursor, key: .pasteRemoteTranscriptsAtCursor) }
+  }
+
   // MARK: - Analytics
 
   /// Whether the user has opted into anonymous product analytics (PostHog).
@@ -1340,6 +1355,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
     enableAutomationServer =
       defaults.object(forKey: DefaultsKey.enableAutomationServer.rawValue) as? Bool ?? false
+    pasteRemoteTranscriptsAtCursor =
+      defaults.object(forKey: DefaultsKey.pasteRemoteTranscriptsAtCursor.rawValue) as? Bool ?? false
     analyticsEnabled =
       defaults.object(forKey: DefaultsKey.analyticsEnabled.rawValue) as? Bool ?? false
 
@@ -1480,6 +1497,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.clipboardInsertionTriggers = restored.clipboardInsertionTriggers
     self.enableSendToMac = restored.enableSendToMac
     self.enableAutomationServer = restored.enableAutomationServer
+    self.pasteRemoteTranscriptsAtCursor = restored.pasteRemoteTranscriptsAtCursor
     self.analyticsEnabled = restored.analyticsEnabled
     self.autoCorrectionsEnabled = restored.autoCorrectionsEnabled
     self.autoCorrectionsPromotionThreshold = restored.autoCorrectionsPromotionThreshold

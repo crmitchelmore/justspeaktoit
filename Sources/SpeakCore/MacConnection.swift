@@ -2,13 +2,20 @@ import Combine
 import Foundation
 import Network
 
-/// Client half of "Send to Mac": connects a device to a Mac that runs the
-/// transport server, authenticates with the pairing code, then streams
+/// Client half of the local transport: connects to a Mac that runs
+/// `TransportServer`, authenticates with the pairing code, then streams
 /// transcripts to it.
 ///
 /// It lives in `SpeakCore` rather than the iOS library so that the shipping
 /// client and the shipping server can be exercised against each other in one
-/// test process. The phone drives it through `SendToMacView`.
+/// test process.
+///
+/// There is no shipping caller. The iOS "Send to Mac" screen that used to drive
+/// it was removed because nothing ever called `sendTranscript` — pairing worked
+/// and no transcript was ever delivered. This type is retained deliberately as
+/// the client that `TransportLoopbackTests` drives against the real server, so
+/// the server the `speak` automation CLI depends on keeps its wire-protocol
+/// coverage. Do not delete it without replacing that coverage.
 @MainActor
 public final class MacConnection: ObservableObject {
     public enum ConnectionState: Equatable {

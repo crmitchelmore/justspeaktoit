@@ -321,6 +321,27 @@ jobs:
             -skipPackagePluginValidation \
             2>&1 | tee "$RUNNER_TEMP/ios-tests.log" | tail -50
 
+      - name: Label these results as simulator, not device
+        if: ${{ always() }}
+        # ActivityKit and AVAudioSession are not simulator-faithful (issue
+        # #998), so a green run here is not evidence about Live Activity
+        # behaviour, audio interruptions, or routing. Say so where the result
+        # is read, not only in a test file's doc comment.
+        run: |
+          {
+            echo "### iOS tests — Simulator"
+            echo
+            echo "Outcome: ${{ steps.ios-tests.outcome }}"
+            echo
+            echo "These ran on \`platform=iOS Simulator\`. ActivityKit and"
+            echo "AVAudioSession do not behave as they do on a device, so this"
+            echo "job proves the app's own logic and screen flow only. Live"
+            echo "Activity content, audio interruptions, routing and the"
+            echo "hardware Action Button are settled by the manual device"
+            echo "matrix (\`.github/ISSUE_TEMPLATE/action_button_device_matrix.md\`)"
+            echo "and the opt-in \`ios-device-matrix.yml\` workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify iOS XCTest execution evidence
         if: ${{ always() }}
         run: |
@@ -388,8 +409,19 @@ jobs:
             -quiet \
             2>&1 | tail -30
 
-  build-ios-keyboard-direct-capture:
-    name: Build iOS Keyboard (direct capture)
+  build-ios-keyboard:
+    # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
+    # not a required status check, so the rename costs nothing, and the old
+    # name had become misleading: the job now builds the *shipping* hand-off
+    # shape first and the flagged direct-capture shape second.
+    #
+    # The job is kept rather than removed. The `JustSpeakKeyboard` scheme is
+    # the only place `APPLICATION_EXTENSION_API_ONLY=YES` is enforced against
+    # this code, so it catches extension-unsafe API that the SpeakiOS app build
+    # does not. Until this change the shipping shape was never built through
+    # that scheme at all — only the direct-capture one was — so the shape users
+    # actually receive had the weaker check. Both are built here now.
+    name: Build iOS Keyboard
     # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
     runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
@@ -401,20 +433,36 @@ jobs:
       - name: Install Tuist
         run: brew install tuist
 
-      - name: Generate iOS App Project (direct capture)
+      - name: Build Keyboard Extension, hand-off shape (unsigned)
+        # The shape every release ships: no in-extension capture engine, and
+        # therefore no AVFoundation or Speech linked into the appex (#991).
+        env:
+          TUIST_IOS_KEYBOARD: "1"
+          TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "0"
+        run: |
+          set -o pipefail
+          tuist generate --no-open
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme JustSpeakKeyboard \
+            -destination generic/platform=iOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
+      - name: Build Keyboard Extension, direct-capture shape (unsigned)
         # The direct-capture shape only exists behind two flags, so its `#if
         # IOS_KEYBOARD_DIRECT_CAPTURE` branches and its file-based Info.plist
         # compile nowhere else. Build them here so the flagged code cannot rot.
+        # Build only: the hand-off shape already runs the flow tests in the
+        # Build iOS Library job, and this leg exists to catch compile rot.
         env:
           TUIST_IOS_KEYBOARD: "1"
           TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: "1"
-        run: tuist generate --no-open
-
-      - name: Build Keyboard Extension (unsigned)
-        # Build only: the shipping handoff shape already runs the flow tests in
-        # the Build iOS Library job, and this leg exists to catch compile rot.
         run: |
           set -o pipefail
+          tuist generate --no-open
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakKeyboard \
@@ -488,7 +536,7 @@ jobs:
     needs:
       - build-macos
       - build-ios
-      - build-ios-keyboard-direct-capture
+      - build-ios-keyboard
       - lint
       - release-paths
       - release-validation
@@ -504,7 +552,7 @@ jobs:
           always() && (
             needs.build-macos.result != 'success' ||
             needs.build-ios.result != 'success' ||
-            needs.build-ios-keyboard-direct-capture.result != 'success' ||
+            needs.build-ios-keyboard.result != 'success' ||
             needs.lint.result != 'success' ||
             needs.release-paths.result != 'success' ||
             (needs.release-paths.outputs.package != 'true' && needs.release-paths.outputs.package != 'false') ||

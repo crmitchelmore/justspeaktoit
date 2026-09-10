@@ -1,0 +1,7 @@
+# Labels for self-hosted runners this repository expects. Without them
+# `actionlint` reports every custom label as unknown.
+self-hosted-runner:
+  labels:
+    # The macOS runner with a provisioned iPhone attached, used by the opt-in
+    # `ios-device-matrix.yml` workflow.
+    - ios-device

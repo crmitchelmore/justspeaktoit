@@ -9,7 +9,7 @@ enum SpeechmaticsLiveError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .batchNotSupported:
-      "Speechmatics is currently only available for live streaming in Speak."
+      "This Speechmatics model is only available for live streaming in Speak."
     }
   }
 }
@@ -41,7 +41,7 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
     guard SpeechmaticsBatchClient.catalogIDs.contains(
       model.trimmingCharacters(in: .whitespacesAndNewlines)
     ) else {
-      throw SpeechmaticsLiveError.batchNotSupported
+      throw BatchTranscriptionJobError.unsupportedModel("Speechmatics")
     }
     return try await SpeechmaticsBatchClient(session: session).transcribeFile(
       at: url, apiKey: apiKey, model: model, language: language

@@ -42,6 +42,15 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// rather than being told nothing came back.
     @Published public private(set) var isPostProcessing = false
     @Published public private(set) var lastPolishedTranscript: String?
+    /// Which capture's polish `isPostProcessing` and `lastPolishedTranscript`
+    /// describe.
+    ///
+    /// Both used to be service-wide with no owner, so recording B could start,
+    /// stop and begin waiting while A was still polishing; A would then write
+    /// its own result and clear the flag, and B's waiter would return A's
+    /// text. Completion state belongs to a particular stop, so it is tagged
+    /// with one.
+    @Published public private(set) var polishingRunID: UUID?
 
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
@@ -601,7 +610,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         // starts from the global settings again unless it brings its own.
         currentRunParameters = .none
         // Tagged with the run, so a waiter that started this capture gets this
-        // capture's text — including when that text is empty.
+        // capture's text — including when that text is empty. The identity is
+        // kept for the polish that may follow.
+        let completedRunID = currentRunID
         completeRun(with: text)
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
@@ -644,17 +655,26 @@ public final class TranscriptionRecordingService: ObservableObject {
                 iOSHistoryManager.shared.beginPostProcessing(for: historyItem.id)
             }
             isPostProcessing = true
-            Task { [resolvedDestination, assertion] in
+            polishingRunID = completedRunID
+            Task { [resolvedDestination, assertion, completedRunID] in
                 await postProcess(
                     text: text,
                     historyItemID: historyItem?.id,
-                    replacingClipboard: resolvedDestination != .historyOnly
+                    replacingClipboard: resolvedDestination != .historyOnly,
+                    runID: completedRunID
                 )
-                isPostProcessing = false
+                // Only the run that still owns the polish may publish its
+                // completion. A later stop has already taken ownership, and
+                // clearing the flag here would release its waiter with this
+                // run's text.
+                if polishingRunID == completedRunID {
+                    isPostProcessing = false
+                }
                 assertion.end()
             }
         } else {
             isPostProcessing = false
+            polishingRunID = nil
             assertion.end()
         }
 
@@ -753,10 +773,15 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
     }
 
+    /// - Parameter runID: the capture whose polish this is, or `nil` for a
+    ///   caller with no run identity. Only the run that still owns the polish
+    ///   state publishes into it, so a slow polish cannot overwrite the result
+    ///   a later stop is already waiting on.
     private func postProcess(
         text: String,
         historyItemID: UUID?,
-        replacingClipboard: Bool = true
+        replacingClipboard: Bool = true,
+        runID: UUID? = nil
     ) async {
         let settings = AppSettings.shared
         let processor = iOSPostProcessingManager.shared
@@ -771,7 +796,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             if replacingClipboard {
                 await Self.writeClipboardReliably(polished)
             }
-            lastPolishedTranscript = polished
+            if runID == nil || polishingRunID == runID {
+                lastPolishedTranscript = polished
+            }
             sharedState.lastCompletedTranscript = polished
             if let historyItemID {
                 iOSHistoryManager.shared.setPostProcessed(polished, for: historyItemID)
@@ -829,13 +856,24 @@ extension TranscriptionRecordingService {
     /// Polls rather than observes, matching the wait in `DictateIntent`: the
     /// polish runs in a detached `Task` whose completion this actor sees only
     /// through `isPostProcessing`.
-    func awaitPolishedTranscript(timeout: TimeInterval) async -> String? {
-        guard timeout > 0 else { return nil }
-        let deadline = Date().addingTimeInterval(timeout)
-        while isPostProcessing, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 100_000_000)
+    func awaitPolishedTranscript(timeout: TimeInterval, forRun runID: UUID?) async -> String? {
+        guard timeout > 0, let runID, polishingRunID == runID else { return nil }
+        // Monotonic: a wall-clock correction must not extend an intent's wait.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
+        while isPostProcessing, polishingRunID == runID, ContinuousClock.now < deadline {
+            do {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            } catch {
+                // Cancelled. Every later sleep would throw immediately, so
+                // continuing here would spin the main actor until the deadline
+                // and delay the actor-hosted polish it is waiting for.
+                return nil
+            }
         }
-        return isPostProcessing ? nil : lastPolishedTranscript
+        // A newer stop took ownership of the polish state: whatever is in
+        // `lastPolishedTranscript` is not this run's.
+        guard polishingRunID == runID, !isPostProcessing else { return nil }
+        return lastPolishedTranscript
     }
 }
 

@@ -53,7 +53,7 @@ extension TranscriptionRecordingService {
                 }
                 let decision = monitor.observe(
                     speechDetected: speechDetected,
-                    atSeconds: Self.elapsedSeconds(since: startedAt)
+                    atSeconds: MonotonicClock.elapsedSeconds(since: startedAt)
                 )
                 switch decision {
                 case .waiting:
@@ -66,14 +66,6 @@ extension TranscriptionRecordingService {
                 }
             }
         }
-    }
-
-    /// Monotonic elapsed seconds. `Duration` is exact; this is the only place
-    /// it is turned back into the `TimeInterval` the pure policy speaks.
-    private static func elapsedSeconds(since start: ContinuousClock.Instant) -> TimeInterval {
-        let elapsed = ContinuousClock.now - start
-        return TimeInterval(elapsed.components.seconds)
-            + TimeInterval(elapsed.components.attoseconds) / 1_000_000_000_000_000_000
     }
 
     /// Cancels any armed monitor. Safe to call when nothing is armed, and

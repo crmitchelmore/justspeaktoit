@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import os
 import SpeakCore
 
 /// Transcribes the recordings the Share extension left in the App Group inbox
@@ -83,15 +84,19 @@ public final class SharedRecordingImporter: ObservableObject {
                 try await transcribe(item, from: inbox, model: model, settings: settings)
                 imported += 1
             } catch {
+                // Classification only, never the provider's response body:
+                // the batch client can put an HTTP error payload in
+                // `localizedDescription`, and that must not become public
+                // device-log data. The user still sees the full message in the
+                // in-app outcome below.
                 logger.error(
                     """
-                    Shared recording \(item.id.uuidString, privacy: .public) failed: \
-                    \(error.localizedDescription, privacy: .public)
+                    Shared recording \(item.id.uuidString, privacy: .public) failed \
+                    (\(Self.failureClassification(error), privacy: .public)): \
+                    \(error.localizedDescription, privacy: .private)
                     """
                 )
-                // Drop our copy rather than retry it on every foreground for
-                // ever. The user still has the original and can share it again.
-                inbox.remove(item)
+                Self.retire(item, after: error, from: inbox, logger: logger)
                 lastOutcome = .failed(
                     filename: item.originalFilename,
                     message: error.localizedDescription
@@ -121,27 +126,101 @@ public final class SharedRecordingImporter: ObservableObject {
             language: settings.preferredModelLanguage,
             keywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
-        guard iOSHistoryManager.shared.recordTranscription(
-            text: result.text,
-            model: model,
-            duration: result.duration
-        ) != nil else {
+        guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             // A file that produced no words is not a success; saying
             // "transcribed" here is exactly the kind of claim #945 and #952
             // were about.
             throw ImportFailure.noSpeech
         }
+        // The History entry carries the inbox item's own id, and the write is
+        // only acknowledged when it reached disk.
+        //
+        // `recordTranscription` mints a fresh id and returns the item whether
+        // or not the save succeeded, so acknowledging on a non-nil result
+        // deleted the only staged copy of the user's audio on a persistence
+        // failure — and a crash between a successful write and the delete made
+        // the replay add a second entry with a different id. Upserting by a
+        // stable id is idempotent: a replay updates the same row.
+        guard iOSHistoryManager.shared.upsertReportingDurability(
+            iOSHistoryItem(
+                id: item.id,
+                transcription: result.text,
+                model: model,
+                duration: result.duration,
+                wordCount: result.text.split(whereSeparator: \.isWhitespace).count
+            )
+        ) else {
+            throw ImportFailure.notSaved
+        }
+        // Only now: the recording is durably in History, so dropping our copy
+        // cannot lose it.
         inbox.remove(item)
+    }
+
+    /// Decides what a failure means for the staged copy.
+    ///
+    /// A terminal failure — no speech in the file, a file this app will never
+    /// accept, a model it cannot run — will fail the same way for ever, so the
+    /// copy goes. Anything else (no network, a provider outage, a credential
+    /// not loaded yet) is exactly what the durable hand-off exists for, so the
+    /// item stays for the next foreground until it has used its attempts.
+    private static func retire(
+        _ item: SharedRecordingInboxItem,
+        after error: Error,
+        from inbox: SharedRecordingInbox,
+        logger: os.Logger
+    ) {
+        guard !isTerminal(error) else {
+            inbox.remove(item)
+            return
+        }
+        let updated = inbox.registerAttempt(item)
+        guard updated.attemptCount >= SharedRecordingInbox.maximumAttempts else {
+            logger.info(
+                """
+                Shared recording \(item.id.uuidString, privacy: .public) kept for retry \
+                (attempt \(updated.attemptCount, privacy: .public) of \
+                \(SharedRecordingInbox.maximumAttempts, privacy: .public))
+                """
+            )
+            return
+        }
+        inbox.remove(item)
+    }
+
+    private static func isTerminal(_ error: Error) -> Bool {
+        if error is SharedAudioImportRejection { return true }
+        if let failure = error as? ImportFailure { return failure == .noSpeech }
+        if case AutomationIntentError.unsupportedBatchModel = error { return true }
+        return false
+    }
+
+    /// A safe, non-identifying name for the log. Never the provider's own
+    /// message, which can carry an HTTP response body.
+    private static func failureClassification(_ error: Error) -> String {
+        if let rejection = error as? SharedAudioImportRejection {
+            return "rejected/\(String(describing: rejection).prefix(while: { $0 != "(" }))"
+        }
+        if let failure = error as? ImportFailure { return "import/\(failure)" }
+        if let urlError = error as? URLError { return "network/\(urlError.code.rawValue)" }
+        return "provider/\(String(describing: type(of: error)))"
     }
 
     /// Clears the reported outcome once the app has shown it.
     public func acknowledgeOutcome() { lastOutcome = nil }
 
-    enum ImportFailure: LocalizedError {
+    enum ImportFailure: String, LocalizedError, Equatable {
         case noSpeech
+        case notSaved
 
         var errorDescription: String? {
-            "No speech was found in the recording."
+            switch self {
+            case .noSpeech:
+                return "No speech was found in the recording."
+            case .notSaved:
+                return "The transcript could not be saved to History, so your recording was kept "
+                    + "for another try."
+            }
         }
     }
 }

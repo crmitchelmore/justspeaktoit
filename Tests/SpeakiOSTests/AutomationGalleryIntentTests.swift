@@ -108,3 +108,57 @@ final class AutomationGalleryIntentTests: XCTestCase {
     }
 }
 #endif
+
+#if os(iOS)
+/// A shared recording may only be acknowledged once it is durably in History,
+/// and replaying one inbox item must not create a second entry.
+@MainActor
+final class SharedRecordingDurabilityTests: XCTestCase {
+    private var root = URL(fileURLWithPath: NSTemporaryDirectory())
+
+    override func setUpWithError() throws {
+        root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    /// The entry carries the inbox item's own id, so a replay updates the same
+    /// row instead of adding another. This is the property the importer relies
+    /// on when it deletes the staged copy.
+    func testReplayingTheSameInboxItemDoesNotAddASecondHistoryEntry() throws {
+        let history = iOSHistoryManager.shared
+        history.ensureLoaded()
+        let inboxItemID = UUID()
+        let before = history.items.count
+
+        let first = iOSHistoryItem(
+            id: inboxItemID,
+            transcription: "shared recording",
+            model: "test/model",
+            duration: 1,
+            wordCount: 2
+        )
+        XCTAssertTrue(history.upsertReportingDurability(first))
+        let replay = iOSHistoryItem(
+            id: inboxItemID,
+            transcription: "shared recording",
+            model: "test/model",
+            duration: 1,
+            wordCount: 2
+        )
+        XCTAssertTrue(history.upsertReportingDurability(replay))
+
+        XCTAssertEqual(history.items.filter { $0.id == inboxItemID }.count, 1)
+        XCTAssertEqual(history.items.count, before + 1)
+        history.remove(first)
+    }
+
+    func testEveryImportFailureHasAUserFacingMessage() {
+        for failure in [SharedRecordingImporter.ImportFailure.noSpeech, .notSaved] {
+            XCTAssertFalse(failure.errorDescription?.isEmpty ?? true, "\(failure) has no message")
+        }
+    }
+}
+#endif

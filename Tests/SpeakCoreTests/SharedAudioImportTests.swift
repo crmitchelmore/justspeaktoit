@@ -249,3 +249,116 @@ final class SharedAudioImportTests: XCTestCase {
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
+
+/// The size a file was when it was inspected is a snapshot. Staging must hold
+/// the copy to it rather than trust it, or a file that grows in between is
+/// copied past the limit and advertised at the wrong length.
+final class SharedAudioStagingBoundsTests: XCTestCase {
+    private var directory = URL(fileURLWithPath: NSTemporaryDirectory())
+
+    override func setUpWithError() throws {
+        directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func makeSource(bytes: Int, named name: String = "memo.m4a") throws -> URL {
+        let url = directory.appendingPathComponent(name)
+        try Data(repeating: 0x41, count: bytes).write(to: url)
+        return url
+    }
+
+    func testAnUnchangedFileStagesExactly() throws {
+        let source = try makeSource(bytes: 200_000)
+        let destination = directory.appendingPathComponent("copy.m4a")
+        let written = try SharedAudioImport.stage(
+            from: source,
+            to: destination,
+            expectedByteCount: 200_000
+        )
+        XCTAssertEqual(written, 200_000)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    /// The snapshot said 100 bytes; the file is a megabyte by the time it is
+    /// copied. The copy must stop, not run to EOF.
+    func testAFileThatGrewAfterInspectionIsRefusedAndNotLeftStaged() throws {
+        let source = try makeSource(bytes: 1_000_000)
+        let destination = directory.appendingPathComponent("copy.m4a")
+        XCTAssertThrowsError(
+            try SharedAudioImport.stage(from: source, to: destination, expectedByteCount: 100)
+        ) { error in
+            XCTAssertEqual(
+                error as? SharedAudioImportRejection,
+                .changedWhileCopying(filename: "memo.m4a")
+            )
+        }
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destination.path),
+            "an invalid partial copy must not remain staged"
+        )
+    }
+
+    func testAFileThatShrankAfterInspectionIsRefused() throws {
+        let source = try makeSource(bytes: 1_000)
+        let destination = directory.appendingPathComponent("copy.m4a")
+        XCTAssertThrowsError(
+            try SharedAudioImport.stage(from: source, to: destination, expectedByteCount: 5_000)
+        ) { error in
+            XCTAssertEqual(
+                error as? SharedAudioImportRejection,
+                .changedWhileCopying(filename: "memo.m4a")
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    /// Even with no accepted size, the hard cap still bounds the copy.
+    func testTheHardCapBoundsACopyWithNoAcceptedSize() throws {
+        let source = try makeSource(bytes: 300_000)
+        let destination = directory.appendingPathComponent("copy.m4a")
+        XCTAssertThrowsError(
+            try SharedAudioImport.stage(
+                from: source,
+                to: destination,
+                expectedByteCount: nil,
+                maximumByteCount: 100_000
+            )
+        ) { error in
+            guard case .tooLarge(_, let limit) = error as? SharedAudioImportRejection else {
+                return XCTFail("expected tooLarge, got \(error)")
+            }
+            XCTAssertEqual(limit, 100_000)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    /// The source is read-only on every path, including the refused ones.
+    func testARefusedCopyLeavesTheSourceUntouched() throws {
+        let source = try makeSource(bytes: 50_000)
+        let before = try Data(contentsOf: source)
+        let destination = directory.appendingPathComponent("copy.m4a")
+        _ = try? SharedAudioImport.stage(from: source, to: destination, expectedByteCount: 10)
+        XCTAssertEqual(try Data(contentsOf: source), before)
+    }
+
+    func testEveryRejectionHasAUserFacingMessage() {
+        let rejections: [SharedAudioImportRejection] = [
+            .missingExtension(filename: "a"),
+            .unsupportedType(fileExtension: "zip"),
+            .tooLarge(byteCount: 1, limit: 2),
+            .notDownloaded(filename: "a"),
+            .unreadable(filename: "a"),
+            .empty(filename: "a"),
+            .cancelled,
+            .changedWhileCopying(filename: "a")
+        ]
+        for rejection in rejections {
+            XCTAssertFalse(rejection.errorDescription?.isEmpty ?? true, "\(rejection) has no message")
+        }
+    }
+}

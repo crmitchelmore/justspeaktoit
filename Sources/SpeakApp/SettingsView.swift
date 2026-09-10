@@ -41,6 +41,10 @@ struct SettingsView: View {
   @State var ttsProviderAPIKeys: [String: String] = [:]
   @State var ttsProviderValidationStates: [String: ValidationViewState] = [:]
   @State var apiKeySearchText = ""
+  /// Provider credit balances shown beside the saved keys. Deduplicated by
+  /// account, so one account is fetched and displayed once however many cards
+  /// its key powers.
+  @StateObject var providerBalances = ProviderBalanceStore()
   @State var apiKeyStatusFilter: APIKeyStatusFilter = .all
   @State var apiKeySortOrder: APIKeySortOrder = .name
   @State private var didResolveAPIKeyStorage = false
@@ -124,6 +128,9 @@ struct SettingsView: View {
     let isValidateDisabled: Bool
     let isRemoveDisabled: Bool
     let validationState: ValidationViewState
+    /// Keychain identifier of the credential this card manages, used to look up
+    /// the account's balance.
+    let credentialIdentifier: String
     let saveButtonTitle: String
     let saveTooltip: String
     let validateButtonTitle: String

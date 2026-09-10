@@ -1804,6 +1804,9 @@ struct APIKeysView: View {
     @State private var searchText = ""
     @State private var statusFilter: APIKeyStatusFilter = .all
     @State private var sortOrder: APIKeySortOrder = .name
+    /// Account balances shown beside the saved keys, deduplicated per account
+    /// by `ProviderBalanceDirectory`.
+    @StateObject private var balances = ProviderBalanceStore()
 
     private struct KeyPresentation {
         let title: String
@@ -1941,6 +1944,18 @@ struct APIKeysView: View {
         } message: {
             Text(validationMessage ?? "Keys saved")
         }
+        .task {
+            let storage = AppSettings.canonicalCredentialStorage
+            balances.configure { identifier in
+                try? await storage.secret(identifier: identifier)
+            }
+            balances.refreshAll(
+                storedCredentialIdentifiers: Set(
+                    allEntries.filter(\.isStored).map { "\($0.id).apiKey" }
+                )
+            )
+        }
+        .onDisappear { balances.cancelAll() }
     }
 
     private func apiKeySection(for entry: APIKeyListEntry) -> some View {
@@ -1955,6 +1970,14 @@ struct APIKeysView: View {
                     clearStoredKey(for: entry.id)
                 }
             }
+
+            // Purely informational: a billing endpoint that fails changes this
+            // line and nothing else on the screen.
+            ProviderBalanceView(
+                credentialIdentifier: "\(entry.id).apiKey",
+                isKeyStored: entry.isStored,
+                store: balances
+            )
         } header: {
             HStack {
                 Label(presentation.title, systemImage: presentation.systemImage)

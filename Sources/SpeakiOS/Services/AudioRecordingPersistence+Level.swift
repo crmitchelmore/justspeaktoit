@@ -13,20 +13,80 @@ import SpeakCore
 // partial results at all, so an end-pointing rule written against the
 // transcript could never fire for anyone using it.
 //
-// `currentInputLevelDBFS` is read from the main actor at
+// The metered value is read from the main actor at
 // `CaptureEndPointingPolicy.sampleIntervalSeconds` and written on whichever
-// thread delivered the buffer. A torn `Float` read is not worth a lock on every
-// buffer: it is one sample of a level re-read ten times a second, and the
-// silence window is many samples long.
+// thread delivered the buffer, so it is published through a leaf lock in
+// `AudioRecordingPersistence` as an `InputLevelSample` — level plus a buffer
+// sequence — rather than left as an unsynchronised `Float`. The sequence is
+// what lets the sampler tell a fresh observation from the same one read twice,
+// so a level that has stopped being refreshed cannot be counted as new silence
+// in the middle of an utterance.
+
+/// One metered observation of the microphone: the level of a buffer, and a
+/// counter that identifies *which* buffer it came from.
+///
+/// The sequence exists so a reader can tell a fresh observation from the same
+/// one read twice. End-pointing samples ten times a second while buffers
+/// arrive far more often, but if audio stops flowing entirely the last level
+/// would otherwise keep being counted as new evidence — and a stale silent
+/// reading is exactly what can end an utterance that is still in progress.
+public struct CaptureInputLevelSample: Sendable, Equatable {
+    public let levelDBFS: Float
+    /// Increments once per metered buffer, from 0 at the start of a capture.
+    /// Two reads with the same sequence are one observation, not two.
+    public let sequence: UInt64
+
+    public init(levelDBFS: Float, sequence: UInt64) {
+        self.levelDBFS = levelDBFS
+        self.sequence = sequence
+    }
+}
+
+/// Lock-guarded holder for the metered level.
+///
+/// Written from whichever thread delivered the buffer and read from the main
+/// actor, so it takes a leaf lock rather than being left as an unsynchronised
+/// `nonisolated(unsafe) Float`: level and sequence have to be one coherent
+/// observation, and an unsynchronised `Float` is a data race, not a cheap
+/// approximation of one. The lock is taken for a single struct assignment or
+/// a single read and is never held across anything else, so it cannot
+/// participate in an ordering with the persistence state lock or its I/O queue.
+final class CaptureInputLevelMeter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sample = CaptureInputLevelSample(
+        levelDBFS: AudioLevelMeter.silenceFloorDBFS,
+        sequence: 0
+    )
+
+    var current: CaptureInputLevelSample { lock.withLock { sample } }
+
+    func publish(_ levelDBFS: Float) {
+        lock.withLock {
+            sample = CaptureInputLevelSample(levelDBFS: levelDBFS, sequence: sample.sequence &+ 1)
+        }
+    }
+
+    func reset() {
+        lock.withLock {
+            sample = CaptureInputLevelSample(levelDBFS: AudioLevelMeter.silenceFloorDBFS, sequence: 0)
+        }
+    }
+}
 
 extension AudioRecordingPersistence {
+    /// The most recent metered observation, read as one value.
+    nonisolated public var inputLevelSample: CaptureInputLevelSample { inputLevelMeter.current }
+
+    /// Input level of the most recent buffer, in dBFS.
+    nonisolated public var currentInputLevelDBFS: Float { inputLevelSample.levelDBFS }
+
     /// Forgets the metered level, so the first sample of a new capture cannot
     /// be the last sample of the previous one. Without this a capture starting
     /// in a silent room could inherit a loud reading, count it as speech, and
     /// become eligible to end-point one window later having heard nothing.
-    nonisolated public func resetInputLevel() {
-        currentInputLevelDBFS = AudioLevelMeter.silenceFloorDBFS
-    }
+    nonisolated public func resetInputLevel() { inputLevelMeter.reset() }
+
+    nonisolated func publishInputLevel(_ levelDBFS: Float) { inputLevelMeter.publish(levelDBFS) }
 
     /// RMS level of one buffer, in dBFS.
     ///

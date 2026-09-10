@@ -88,6 +88,12 @@ final class IOSTranscriptionSession {
     /// backends produce.
     var currentInputLevelDBFS: Float { audioRecorder.currentInputLevelDBFS }
 
+    /// The level together with the buffer sequence it came from, so a caller
+    /// can tell a fresh observation from the same one read twice.
+    var inputLevelSample: CaptureInputLevelSample {
+        audioRecorder.inputLevelSample
+    }
+
     /// Forgets the metered level, so a new capture never inherits the previous
     /// one's last reading.
     func resetInputLevel() { audioRecorder.resetInputLevel() }

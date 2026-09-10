@@ -43,3 +43,90 @@ final class DictateIntentBoundsTests: XCTestCase {
         XCTAssertEqual(CaptureEndPointingPolicy.intentMaximumDuration(configured: -5), 5)
     }
 }
+
+#if os(iOS)
+import AVFoundation
+
+/// The metered level is written on whichever thread delivered the buffer and
+/// read from the main actor. It has to be one coherent observation, and it has
+/// to say *which* buffer it came from, so a level that stopped being refreshed
+/// cannot be counted as fresh silence in the middle of an utterance.
+@MainActor
+final class InputLevelSampleTests: XCTestCase {
+    func testResetReturnsToSilenceAtSequenceZero() {
+        let recorder = AudioRecordingPersistence()
+        recorder.publishInputLevel(-6)
+        recorder.resetInputLevel()
+        let sample = recorder.inputLevelSample
+        XCTAssertEqual(sample.levelDBFS, AudioLevelMeter.silenceFloorDBFS)
+        XCTAssertEqual(sample.sequence, 0)
+    }
+
+    func testEachPublishedLevelIsANewObservation() {
+        let recorder = AudioRecordingPersistence()
+        recorder.resetInputLevel()
+        recorder.publishInputLevel(-20)
+        let first = recorder.inputLevelSample
+        recorder.publishInputLevel(-20)
+        let second = recorder.inputLevelSample
+        XCTAssertEqual(first.levelDBFS, second.levelDBFS)
+        XCTAssertNotEqual(
+            first.sequence,
+            second.sequence,
+            "the same level from a new buffer is still a new observation"
+        )
+        XCTAssertEqual(
+            recorder.inputLevelSample.sequence,
+            second.sequence,
+            "a re-read is not a new observation"
+        )
+    }
+
+    /// Concurrent writers plus a concurrent reader, which is exactly how this
+    /// value is used: written from whichever thread delivered the buffer, read
+    /// from the main actor. Under an unsynchronised `Float` this is undefined;
+    /// with the leaf lock every read is one published pair, no sample is lost
+    /// and the sequence never goes backwards.
+    func testConcurrentMeteringPublishesCoherentSamples() {
+        let recorder = AudioRecordingPersistence()
+        recorder.resetInputLevel()
+        let writesPerWorker = 500
+        let workers = 4
+        let group = DispatchGroup()
+        for worker in 0..<workers {
+            DispatchQueue.global().async(group: group) { [recorder] in
+                for index in 0..<writesPerWorker {
+                    recorder.publishInputLevel(Float(-60 + (worker + index) % 60))
+                }
+            }
+        }
+        DispatchQueue.global().async(group: group) { [recorder] in
+            for _ in 0..<writesPerWorker {
+                let sample = recorder.inputLevelSample
+                XCTAssertGreaterThanOrEqual(sample.levelDBFS, -60)
+                XCTAssertLessThanOrEqual(sample.sequence, UInt64(writesPerWorker * workers))
+            }
+        }
+        XCTAssertEqual(group.wait(timeout: .now() + 30), .success)
+        XCTAssertEqual(recorder.inputLevelSample.sequence, UInt64(writesPerWorker * workers))
+    }
+}
+
+/// A Dictate wait may only be satisfied by its own capture's result.
+@MainActor
+final class CaptureRunCompletionTests: XCTestCase {
+    func testAnUnknownRunHasNoCompletedTranscript() {
+        let service = TranscriptionRecordingService.shared
+        XCTAssertNil(service.completedTranscript(forRun: UUID()))
+    }
+
+    /// `isActive` goes false at `stopping`; a waiter needs the wider question
+    /// so it does not read a result that has not been committed yet.
+    func testSettlingIsWiderThanActive() {
+        let service = TranscriptionRecordingService.shared
+        XCTAssertEqual(service.state, .idle)
+        XCTAssertFalse(service.isSettling)
+        XCTAssertFalse(service.isActive)
+    }
+}
+#endif

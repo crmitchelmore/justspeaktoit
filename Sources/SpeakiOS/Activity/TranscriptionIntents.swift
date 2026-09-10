@@ -88,20 +88,27 @@ private func finishedKeyboardSessionIfActive() -> Bool {
 /// covers the intent hop rather than restarting the clock partway down the
 /// path (issue #972).
 @available(iOS 18, *)
-private func startRecordingContinuingInForegroundIfNeeded(
+func startRecordingContinuingInForegroundIfNeeded(
     from intent: some ForegroundContinuableIntent,
     trigger: CaptureTrigger,
     parameters: CaptureRunParameters = .none,
-    entry: StartupEntry
+    entry: StartupEntry,
+    endPointing: CaptureEndPointingRequest? = nil
 ) async throws {
     let service = await TranscriptionRecordingService.shared
     do {
-        try await service.startRecording(trigger: trigger, parameters: parameters, entry: entry)
+        try await service.startRecording(
+            trigger: trigger,
+            parameters: parameters,
+            endPointing: endPointing,
+            entry: entry
+        )
     } catch iOSTranscriptionError.liveActivityUnavailable {
         try await intent.requestToContinueInForeground {
             try await TranscriptionRecordingService.shared.startRecording(
                 trigger: trigger,
                 parameters: parameters,
+                endPointing: endPointing,
                 entry: entry
             )
         }

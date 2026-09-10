@@ -27,10 +27,9 @@ public final class AudioRecordingPersistence: ObservableObject {
         set { issueLock.withLock { storedIssueHandler = newValue } }
     }
 
-    /// Input level of the most recent buffer, in dBFS. See
-    /// `AudioRecordingPersistence+Level.swift`.
-    nonisolated(unsafe) public internal(set) var currentInputLevelDBFS: Float =
-        AudioLevelMeter.silenceFloorDBFS
+    /// The metered microphone level. Everything about it —  the type, the
+    /// lock and the accessors — lives in `AudioRecordingPersistence+Level.swift`.
+    let inputLevelMeter = CaptureInputLevelMeter()
 
     // MARK: - Private
 
@@ -212,7 +211,7 @@ public final class AudioRecordingPersistence: ObservableObject {
         // the frame: the level is an observation of what the microphone heard,
         // not of what was persisted. A user with audio retention turned off, or
         // a session backpressured by a slow disk, still gets end-pointing.
-        currentInputLevelDBFS = Self.level(of: buffer)
+        publishInputLevel(Self.level(of: buffer))
 
         // Admission and enqueue are one atomic step against `closeWriter`'s
         // barrier. Releasing the lock before `ioQueue.async` would let a stalled

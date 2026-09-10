@@ -119,6 +119,36 @@ public final class SharedTranscriptionState {
         }
     }
 
+    /// Identifies the completion whose transcript `lastCompletedTranscript`
+    /// currently holds.
+    ///
+    /// The Live Activity result row is offered for three minutes and the activity
+    /// is reused across sessions, so "the last completed transcript" and "the
+    /// transcript this row was rendered from" drift apart as soon as a second
+    /// session finishes. Written by the session that publishes the text, and read
+    /// back through `completedTranscript(matching:)` so a row can prove the text
+    /// it is about to copy is its own. Post-processing rewrites the text under the
+    /// same id, so a polished result stays copyable from the row that produced it.
+    public var completedTranscriptID: String? {
+        get { defaults?.string(forKey: "completedTranscriptID") }
+        set {
+            if let id = newValue {
+                defaults?.set(id, forKey: "completedTranscriptID")
+            } else {
+                defaults?.removeObject(forKey: "completedTranscriptID")
+            }
+        }
+    }
+
+    /// The completed transcript published under `id`, or `nil` when a later
+    /// session has since replaced it — in which case the caller must refuse
+    /// rather than hand back someone else's text.
+    public func completedTranscript(matching id: String) -> String? {
+        guard !id.isEmpty, completedTranscriptID == id else { return nil }
+        guard let text = lastCompletedTranscript, !text.isEmpty else { return nil }
+        return text
+    }
+
     /// When `lastCompletedTranscript` was last written by a background session.
     public var lastCompletedAt: Date? {
         defaults?.object(forKey: "lastCompletedAt") as? Date

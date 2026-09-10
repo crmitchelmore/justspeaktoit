@@ -2,16 +2,20 @@ import XCTest
 @testable import SpeakCore
 
 final class TranscriptionResultRowTests: XCTestCase {
+    private static let completionID = "9F2C0E1A-0000-4000-8000-00000000ABCD"
+
     private func completed(
         outcome: TranscriptionCompletionOutcome,
         preview: String = "Raw transcript",
-        wordCount: Int = 2
+        wordCount: Int = 2,
+        completionID: String = TranscriptionResultRowTests.completionID
     ) -> TranscriptionActivityAttributes.ContentState {
         TranscriptionActivityAttributes.ContentState(
             status: .completed,
             wordCount: wordCount,
             completionOutcome: outcome,
-            resultPreview: preview
+            resultPreview: preview,
+            resultCompletionID: completionID
         )
     }
 
@@ -67,6 +71,22 @@ final class TranscriptionResultRowTests: XCTestCase {
         XCTAssertEqual(row?.outcomeMessage, "Transcription ready")
     }
 
+    func testTheRowCarriesTheCompletionItsCopyActionMustAddress() {
+        let row = TranscriptionResultRow(state: completed(outcome: .ready))
+        XCTAssertEqual(row?.completionID, Self.completionID)
+        XCTAssertEqual(row?.offersCopy, true)
+    }
+
+    func testARowThatCannotNameItsCompletionOffersNoCopy() {
+        // Copy retrieves one specific completion's transcript. A payload with a
+        // preview but no completion id — written before the id existed — cannot
+        // prove which transcript it means, so it must not offer to copy one.
+        let row = TranscriptionResultRow(state: completed(outcome: .ready, completionID: ""))
+        XCTAssertEqual(row?.offersCopy, false, "Copy must never guess which completion it means")
+        XCTAssertEqual(row?.preview, "Raw transcript")
+        XCTAssertEqual(row?.offersOpen, true, "Open needs no id: it just opens the app")
+    }
+
     func testWordCountTextIsSingularForOneWord() {
         XCTAssertEqual(TranscriptionResultRow(state: completed(outcome: .ready, wordCount: 1))?.wordCountText, "1 word")
         XCTAssertEqual(TranscriptionResultRow(state: completed(outcome: .ready, wordCount: 0))?.wordCountText, nil)
@@ -97,6 +117,7 @@ final class TranscriptionResultRowTests: XCTestCase {
         """.utf8)
         let state = try JSONDecoder().decode(TranscriptionActivityAttributes.ContentState.self, from: legacy)
         XCTAssertEqual(state.resultPreview, "")
+        XCTAssertEqual(state.resultCompletionID, "")
         XCTAssertEqual(state.completionOutcome, .ready)
         let row = TranscriptionResultRow(state: state)
         XCTAssertEqual(row?.offersCopy, false, "An older payload proves nothing is retrievable")
@@ -111,5 +132,6 @@ final class TranscriptionResultRowTests: XCTestCase {
         )
         XCTAssertEqual(decoded, state)
         XCTAssertEqual(decoded.resultPreview, "Hello there")
+        XCTAssertEqual(decoded.resultCompletionID, Self.completionID)
     }
 }

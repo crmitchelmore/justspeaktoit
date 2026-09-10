@@ -507,26 +507,42 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
 /// activity is moved to `.copied` only after `UIPasteboard.changeCount` confirms
 /// the write landed — nothing else in the app sets that outcome, so a `Copied`
 /// row always corresponds to a clipboard write that really happened.
+///
+/// The intent is *not* parameterless: "the last completed transcript" is a moving
+/// target. The activity is reused and a finished row is offered for three
+/// minutes, so between rendering a row and tapping it another session can finish
+/// and replace what the App Group holds. `completionID` is the id of the
+/// completion that rendered the tapped row, and the copy is refused unless the
+/// stored transcript is still that completion's — a caller is never handed a
+/// different recording's text.
 @available(iOS 18, *)
 public struct CopyLastTranscriptIntent: LiveActivityIntent {
     public static var title: LocalizedStringResource = "Copy Last Transcript"
     public static var description = IntentDescription(
-        "Copies the most recent completed transcript to the clipboard."
+        "Copies the transcript shown on the completed recording row to the clipboard."
     )
 
     public static var openAppWhenRun: Bool = false
     /// Reads and writes private transcript data, so never run on a locked device.
     public static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
+    /// The completion the tapped row was rendered from.
+    @Parameter(title: "Completion")
+    public var completionID: String
+
     public init() {}
+
+    public init(completionID: String) {
+        self.completionID = completionID
+    }
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let state = SharedTranscriptionState.shared
-        // The background recorder publishes `lastCompletedTranscript`; the
-        // foreground coordinator commits the same text as `currentTranscriptText`.
-        let text = state.lastCompletedTranscript ?? state.currentTranscriptText
-        guard !text.isEmpty else {
-            return .result(dialog: "No transcript to copy.")
+        // Bound to the row that was tapped, not to whatever finished most
+        // recently: a row whose transcript has been superseded refuses rather
+        // than copying the newer session's text.
+        guard let text = state.completedTranscript(matching: completionID) else {
+            return .result(dialog: "That transcript is no longer the latest one. Open the app to find it.")
         }
 
         let copied = await MainActor.run { Self.copyConfirmingChangeCount(text) }
@@ -534,7 +550,7 @@ public struct CopyLastTranscriptIntent: LiveActivityIntent {
             return .result(dialog: "Couldn’t reach the clipboard. Open the app to copy it.")
         }
 
-        await TranscriptionActivityManager.shared.markCompletionCopied()
+        await TranscriptionActivityManager.shared.markCompletionCopied(completionID: completionID)
         let wordCount = text.split(whereSeparator: \.isWhitespace).count
         return .result(dialog: "Copied \(wordCount) words.")
     }

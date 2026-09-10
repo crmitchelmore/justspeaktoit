@@ -174,7 +174,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let polish: @MainActor (String, String, String) async throws -> String
     private var latestCompletionID: UUID?
     typealias ActivityCompletion =
-        @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String, String?) -> Void
+        @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String, String?, String) -> Void
     private let completeActivity: ActivityCompletion
 
     private convenience init() {
@@ -207,8 +207,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     }
 
     // The default completion sink: the real Live Activity. A named function
-    // rather than an inline default closure so the seam's six parameters stay
-    // readable; it forwards them unchanged, which is why it carries all six.
+    // rather than an inline default closure so the seam's parameters stay
+    // readable; it forwards them unchanged, which is why it carries all seven.
     // swiftlint:disable:next function_parameter_count
     private static func completeSharedActivity(
         wordCount: Int,
@@ -216,7 +216,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         primedMessage: String,
         outcome: TranscriptionCompletionOutcome,
         preview: String,
-        completionMessage: String?
+        completionMessage: String?,
+        resultCompletionID: String
     ) {
         TranscriptionActivityManager.shared.completeActivity(
             finalWordCount: wordCount,
@@ -225,7 +226,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             primedMessage: primedMessage,
             completionOutcome: outcome,
             resultPreview: preview,
-            completionMessage: completionMessage
+            completionMessage: completionMessage,
+            resultCompletionID: resultCompletionID
         )
     }
 
@@ -958,6 +960,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         if sharesLiveTranscript {
             sharedState.updateTranscript(text)
         }
+        // Stamp the published transcript with this completion so the Live
+        // Activity result row's Copy action can prove the text it retrieves is
+        // the one that row was rendered from, however many sessions finish while
+        // it is still on screen. Post-processing rewrites the text under the same
+        // id, so a polished result stays copyable from the same row.
+        let publishedCompletionID = publishesCompletedTranscript && !text.isEmpty
+            ? completionID.uuidString
+            : ""
+        if !publishedCompletionID.isEmpty {
+            sharedState.completedTranscriptID = publishedCompletionID
+        }
         sharedState.clearRecordingState()
         sharesLiveTranscript = true
 
@@ -994,7 +1007,8 @@ public final class TranscriptionRecordingService: ObservableObject {
             // Keyboard handoffs publish nothing retrievable, so they carry no
             // preview and the result row offers no actions it cannot honour.
             resultPreview: publishesCompletedTranscript ? TranscriptionResultRow.preview(for: text) : "",
-            completionMessage: receipt.summary
+            completionMessage: receipt.summary,
+            resultCompletionID: publishedCompletionID
         )
 
         // Kick off background post-processing if the chosen destination + user
@@ -1054,9 +1068,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         primedMessage: String,
         outcome: TranscriptionCompletionOutcome,
         resultPreview: String,
-        completionMessage: String? = nil
+        completionMessage: String? = nil,
+        resultCompletionID: String
     ) {
-        completeActivity(wordCount, duration, primedMessage, outcome, resultPreview, completionMessage)
+        completeActivity(
+            wordCount, duration, primedMessage, outcome, resultPreview, completionMessage, resultCompletionID
+        )
     }
 
     /// Cancels recording without saving. During startup this retires the

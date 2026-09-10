@@ -36,7 +36,36 @@ public struct SharedRecordingInboxItem: Codable, Equatable, Sendable, Identifiab
         self.originalFilename = originalFilename
         self.fileExtension = fileExtension
         self.byteCount = byteCount
-        self.receivedAt = receivedAt
+        self.receivedAt = Self.storable(receivedAt)
+    }
+
+    /// Rounds to whole milliseconds.
+    ///
+    /// The manifest stores this as a JSON number of seconds, and a `Double`
+    /// does not reliably survive that decimal text round trip bit for bit: a
+    /// committed item and the same item read back could compare unequal.
+    /// Millisecond resolution is far finer than anything the inbox orders by,
+    /// and the decode below re-applies exactly this rounding, so the two
+    /// values are computed from the same integer and are always identical.
+    static func storable(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1000).rounded() / 1000)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, originalFilename, fileExtension, byteCount, receivedAt
+    }
+
+    /// Routed through the memberwise initialiser so a decoded date is rounded
+    /// the same way a committed one was.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            originalFilename: try container.decode(String.self, forKey: .originalFilename),
+            fileExtension: try container.decode(String.self, forKey: .fileExtension),
+            byteCount: try container.decode(Int.self, forKey: .byteCount),
+            receivedAt: try container.decode(Date.self, forKey: .receivedAt)
+        )
     }
 }
 

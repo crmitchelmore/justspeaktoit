@@ -93,3 +93,8 @@ public enum TTSTextChunker {
         return split
     }
 }
+
+/// Compatibility alias for the pre-2.71 name, kept so callers built against
+/// the Soniox-only chunker keep compiling. Removed at the next major release.
+@available(*, deprecated, renamed: "TTSTextChunker")
+public typealias SonioxTTSTextChunker = TTSTextChunker

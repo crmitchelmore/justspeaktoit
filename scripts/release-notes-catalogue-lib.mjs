@@ -5,7 +5,7 @@
 // from the same Markdown that `generate-release-notes.mjs` produces for the
 // GitHub release, so there is a single release-note source.
 
-export const CATALOGUE_SCHEMA_VERSION = 2;
+export const CATALOGUE_SCHEMA_VERSION = 3;
 export const DEFAULT_CATALOGUE_PATH = "Sources/SpeakCore/Resources/ReleaseNotes.json";
 export const DEFAULT_ENTRY_LIMIT = 12;
 export const RELEASE_PLATFORMS = Object.freeze(["mac", "ios"]);
@@ -60,7 +60,7 @@ export const sanitiseNotes = (markdown) => String(markdown ?? "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-export const catalogueEntry = ({ platform, version, tag, publishedAt, markdown }) => {
+export const catalogueEntry = ({ platform, version, tag, publishedAt, markdown, train = "stable", build }) => {
     const resolvedVersion = normaliseVersion(version ?? tag);
     if (!resolvedVersion) throw new Error("A release-note entry needs a version");
     const resolvedPlatform = normalisePlatform(platform ?? platformForTag(tag));
@@ -68,6 +68,8 @@ export const catalogueEntry = ({ platform, version, tag, publishedAt, markdown }
     if (!notes) throw new Error(`Release notes for ${resolvedVersion} were empty`);
     return {
         platform: resolvedPlatform,
+        train,
+        ...(build == null ? {} : { build: String(build) }),
         version: resolvedVersion,
         tag: tag ?? `${resolvedPlatform}-v${resolvedVersion}`,
         publishedAt: publishedAt ?? new Date().toISOString(),
@@ -81,7 +83,11 @@ export const mergeEntries = (existing, incoming, limit = DEFAULT_ENTRY_LIMIT) =>
         if (!entry?.version) return;
         const platform = normalisePlatform(entry.platform ?? platformForTag(entry.tag));
         const version = normaliseVersion(entry.version);
-        byPlatformVersion.set(`${platform}:${version}`, { ...entry, platform, version });
+        const train = entry.train ?? "stable";
+        if (!["stable", "alpha"].includes(train)) throw new Error("Invalid release train");
+        if (train === "alpha" && !entry.build) throw new Error("Alpha notes require a build");
+        const key = `${platform}:${train}:${version}:${train === "alpha" ? entry.build : ""}`;
+        byPlatformVersion.set(key, { ...entry, platform, version });
     };
     for (const entry of existing ?? []) {
         add(entry);
@@ -91,10 +97,10 @@ export const mergeEntries = (existing, incoming, limit = DEFAULT_ENTRY_LIMIT) =>
     }
     const counts = new Map();
     return [...byPlatformVersion.values()]
-        .sort((a, b) => compareVersions(a.version, b.version) || a.platform.localeCompare(b.platform))
+        .sort((a, b) => compareVersions(a.version, b.version) || compareVersions(a.build ?? "0", b.build ?? "0") || a.platform.localeCompare(b.platform))
         .filter((entry) => {
-            const count = counts.get(entry.platform) ?? 0;
-            counts.set(entry.platform, count + 1);
+            const count = counts.get(`${entry.platform}:${entry.train ?? "stable"}`) ?? 0;
+            counts.set(`${entry.platform}:${entry.train ?? "stable"}`, count + 1);
             return count < Math.max(1, limit);
         });
 };

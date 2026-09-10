@@ -359,6 +359,19 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testAlphaHotKey_requiresExplicitChoiceEvenWhenDefaultWasPersisted() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectedHotKey = .fnKey
+        XCTAssertFalse(settings.isGlobalHotKeyConfigured(for: .alpha))
+        XCTAssertTrue(settings.isGlobalHotKeyConfigured(for: .stable))
+
+        settings.chooseGlobalHotKey(.fnKey)
+        XCTAssertTrue(settings.isGlobalHotKeyConfigured(for: .alpha))
+        let restored = AppSettings(defaults: defaults)
+        XCTAssertTrue(restored.isGlobalHotKeyConfigured(for: .alpha))
+    }
+
+    @MainActor
     func testStoredHotKey_unsupportedOrdinarySingleKeyFallsBackToFn() throws {
         let unsupported = HotKey.custom(keyCode: 0, modifiers: [])
         defaults.set(try JSONEncoder().encode(unsupported), forKey: "selectedHotKey")

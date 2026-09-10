@@ -181,7 +181,7 @@ public final class OpenClawSettings: ObservableObject {
     // MARK: - Keychain
 
     private func saveToKeychain(key: String, for account: String) {
-        let service = "com.speak.ios.credentials"
+        let service = ReleaseTrain.current.namespace("com.speak.ios.credentials")
 
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -202,7 +202,7 @@ public final class OpenClawSettings: ObservableObject {
     }
 
     private static func loadFromKeychain(for account: String) -> String? {
-        let service = "com.speak.ios.credentials"
+        let service = ReleaseTrain.current.namespace("com.speak.ios.credentials")
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

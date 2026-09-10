@@ -719,7 +719,8 @@ enum WireUp {
     let stateURL = (FileManager.default
       .urls(for: .applicationSupportDirectory, in: .userDomainMask)
       .first ?? FileManager.default.homeDirectoryForCurrentUser)
-      .appendingPathComponent("SpeakApp/analytics_state.json")
+      .appendingPathComponent(ReleaseTrain.current.supportDirectory)
+      .appendingPathComponent("analytics_state.json")
     let queueURL = stateURL.deletingLastPathComponent().appendingPathComponent("analytics_queue.json")
     let stateStore = FileProductAnalyticsStateStore(fileURL: stateURL)
     let context = buildAnalyticsContext()

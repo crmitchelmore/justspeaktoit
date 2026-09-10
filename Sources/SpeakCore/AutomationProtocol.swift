@@ -374,7 +374,7 @@ public enum AutomationEndpoint {
         let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         return support
-            .appendingPathComponent("SpeakApp", isDirectory: true)
+            .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
             .appendingPathComponent("Automation", isDirectory: true)
             .appendingPathComponent("automation.sock")
             .path

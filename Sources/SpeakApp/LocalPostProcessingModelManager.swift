@@ -104,7 +104,7 @@ final class LocalPostProcessingModelManager: ObservableObject {
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
     baseDirectory = base
-      .appendingPathComponent("SpeakApp", isDirectory: true)
+        .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
       .appendingPathComponent("LocalModels", isDirectory: true)
       .appendingPathComponent("LocalPostProcessing", isDirectory: true)
     modelsDirectory = baseDirectory.appendingPathComponent("Models", isDirectory: true)

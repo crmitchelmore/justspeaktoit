@@ -10,7 +10,11 @@ struct ReleaseNotesView: View {
   @State private var browser = ReleaseNotesView.makeBrowser()
 
   static func makeBrowser(bundle: Bundle = .main) -> ReleaseNotesBrowser {
-    ReleaseNotesBrowser(installedVersion: ReleaseNotesCatalog.installedVersion(bundle: bundle))
+    ReleaseNotesBrowser(
+            installedVersion: ReleaseNotesCatalog.installedVersion(bundle: bundle),
+            train: .current,
+            installedBuild: ReleaseNotesCatalog.installedBuild(bundle: bundle)
+        )
   }
 
   var body: some View {
@@ -32,7 +36,7 @@ struct ReleaseNotesView: View {
     List(selection: selectionBinding) {
       ForEach(browser.entries) { entry in
         VStack(alignment: .leading, spacing: 2) {
-          Text("Version \(entry.version)")
+          Text(entry.displayTitle)
             .font(.body)
           if let published = entry.publishedDate {
             Text(published.formatted(date: .abbreviated, time: .omitted))
@@ -40,7 +44,7 @@ struct ReleaseNotesView: View {
               .foregroundStyle(.secondary)
           }
         }
-        .tag(entry.version)
+        .tag(entry.selectionKey)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(browser.title(for: entry))
       }

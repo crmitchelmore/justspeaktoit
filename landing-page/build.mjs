@@ -5,10 +5,9 @@ const output = new URL('./dist/', import.meta.url);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 // Keep preview builds complete, including clean privacy URLs and Apple associations.
-// _routes.json is intentionally excluded: its legacy "routes"/"headers" shape
-// is not Cloudflare's Functions routing schema. Static cache policy is in _headers.
+// Only Alpha endpoints invoke the Worker; Stable routes stay on static Pages.
 for (const asset of [
-  'index.html', 'privacy.html', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
+  '_worker.js', '_routes.json', 'index.html', 'privacy.html', 'site.css', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png',
   'icon-192.png', 'icon-512.png', 'site.webmanifest',
   'download-architecture.js', 'voice-motion.js', 'images', '.well-known', '_headers', '_redirects',
 ]) {

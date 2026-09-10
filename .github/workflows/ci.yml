@@ -12,14 +12,15 @@ on:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-macos:
     # Keep this context aligned with the required main-branch status check.
     name: Build & Test (macOS)
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -44,7 +45,7 @@ jobs:
         run: git diff --exit-code Package.resolved
 
       - name: Test (Debug)
-        run: swift test --enable-code-coverage
+        run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage
 
       # Snapshot mismatches write the freshly rendered PNG to the process
       # temporary directory. Publishing it is the only way to inspect a CI-only
@@ -87,10 +88,10 @@ jobs:
             EXEC_PATH="$XCTEST_PATH/Contents/MacOS/$(basename "$XCTEST_PATH" .xctest)"
             COV_DIR=$(swift test --show-codecov-path 2>/dev/null || echo "")
             if [ -n "$COV_DIR" ] && [ -f "$COV_DIR" ]; then
-              echo "### Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+              echo "### Test Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
               xcrun llvm-cov report "$EXEC_PATH" \
                 --instr-profile="$(dirname "$COV_DIR")/default.profdata" \
-                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY || true
+                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> "$GITHUB_STEP_SUMMARY" || true
             fi
           fi
 
@@ -171,7 +172,8 @@ jobs:
 
   core-journey-e2e:
     name: Core Dictation Journey (≤10m)
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -200,7 +202,8 @@ jobs:
 
   core-journey-fixture-ui:
     name: Core Journey Fixture UI
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -245,7 +248,8 @@ jobs:
 
   release-validation:
     name: Build & Test (Release)
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 45
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'
@@ -261,11 +265,12 @@ jobs:
             ${{ runner.os }}-swift-release-
 
       - name: Test (Release)
-        run: swift test -c release
+        run: python3 scripts/with-test-keychain.py swift test -c release
 
   build-ios:
     name: Build iOS Library
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -378,7 +383,8 @@ jobs:
 
   build-ios-keyboard-direct-capture:
     name: Build iOS Keyboard (direct capture)
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -413,7 +419,8 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -434,7 +441,9 @@ jobs:
 
       - name: Test CI and release gates
         run: |
-          node --test scripts/tests/*.test.mjs
+          node --test scripts/tests/*.test.mjs scripts/release-train.test.mjs
+          python3 scripts/generate-release-train-config.py --check
+          ruby scripts/tests/release_apple_test.rb
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Test release-notes generator
@@ -442,7 +451,8 @@ jobs:
 
   api-compatibility:
     name: Public API compatibility
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:

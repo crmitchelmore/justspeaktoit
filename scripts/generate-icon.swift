@@ -3,6 +3,7 @@
 // Explicit pixel buffers avoid lockFocus() inheriting the display's Retina scale.
 import AppKit
 
+let isAlpha = CommandLine.arguments.contains("--alpha")
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let heights: [CGFloat] = [208, 368, 544, 368, 208]
 let barWidth: CGFloat = 80
@@ -17,6 +18,9 @@ func colour(_ hex: String) -> NSColor {
                    blue: CGFloat(value & 255) / 255, alpha: 1)
 }
 func palette(_ appearance: Appearance) -> (String, String, String) {
+    if isAlpha {
+        return appearance == .tinted ? ("242424", "121212", "EAEAEA") : ("9F84FF", "6A59D1", "17152B")
+    }
     switch appearance {
     case .standard: return ("FF6B3D", "FF9C4A", "181B1D")
     case .dark: return ("20292C", "181B1D", "FF6B3D")
@@ -54,6 +58,16 @@ func png(size: Int, appearance: Appearance = .standard, mac: Bool = false) -> Da
         colour(ink).setFill()
         NSBezierPath(roundedRect: rect, xRadius: barWidth / 2, yRadius: barWidth / 2).fill()
     }
+    if isAlpha {
+        let badge = NSRect(x: 330, y: 92, width: 364, height: 100)
+        colour(ink).setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 32, yRadius: 32).fill()
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        ("ALPHA" as NSString).draw(in: NSRect(x: 330, y: 104, width: 364, height: 82), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 66, weight: .bold), .foregroundColor: colour(top), .paragraphStyle: style
+        ])
+    }
     return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
 }
 func svg(appearance: Appearance = .standard, rounded: Bool = true) -> String {
@@ -70,6 +84,27 @@ func svg(appearance: Appearance = .standard, rounded: Bool = true) -> String {
       </g>
     </svg>
     """
+}
+if isAlpha {
+    for points in [16, 32, 64, 128, 256, 512] {
+        for scale in [1, 2] {
+            let suffix = scale == 2 ? "@2x" : ""
+            try write(png(size: points * scale, mac: true),
+                      to: ".build/Alpha.iconset/icon_\(points)x\(points)\(suffix).png")
+        }
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+    process.arguments = ["-c", "icns", ".build/Alpha.iconset", "-o", "Resources/AppIconAlpha.icns"]
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else { fatalError("iconutil failed") }
+    for (appearance, name) in [(Appearance.standard, "AppIcon"), (.dark, "AppIcon-dark"), (.tinted, "AppIcon-tinted")] {
+        try write(png(size: 1024, appearance: appearance), to: "SpeakiOSApp/Assets.xcassets/AppIconAlpha.appiconset/\(name).png")
+    }
+    try write(Data(contentsOf: root.appendingPathComponent("SpeakiOSApp/Assets.xcassets/AppIcon.appiconset/Contents.json")),
+              to: "SpeakiOSApp/Assets.xcassets/AppIconAlpha.appiconset/Contents.json")
+    exit(0)
 }
 for points in [16, 32, 64, 128, 256, 512] {
     for scale in [1, 2] {

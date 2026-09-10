@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import SpeakCore
 import SwiftUI
 
 // MARK: - Deep Link Router
@@ -24,7 +25,7 @@ public final class DeepLinkRouter: ObservableObject {
     /// Handles an incoming deep link URL. Returns `true` if handled.
     @discardableResult
     public func handle(_ url: URL) -> Bool {
-        guard url.scheme == "justspeaktoit" else { return false }
+        guard url.scheme == ReleaseTrain.current.urlScheme else { return false }
 
         switch url.host {
         case "openclaw":

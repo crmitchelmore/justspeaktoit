@@ -21,7 +21,7 @@ public actor AutoCorrectionStore {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
-    let appFolder = supportURL.appendingPathComponent("SpeakApp", isDirectory: true)
+    let appFolder = supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
     let autoCorrectionFolder = appFolder.appendingPathComponent("AutoCorrections", isDirectory: true)
 
     if !fileManager.fileExists(atPath: autoCorrectionFolder.path) {

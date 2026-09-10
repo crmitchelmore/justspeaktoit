@@ -46,7 +46,7 @@ extension SettingsView {
           Text(
             "Your preference applies when a new recording session starts. Speak temporarily switches "
               + "the macOS default to your chosen microphone, then restores it when the session ends. "
-              + "If that microphone is unavailable, Speak uses the macOS default."
+              + "If that microphone disconnects, the preference resets to Use macOS default."
           )
           .font(.caption)
           .foregroundStyle(.secondary)

@@ -43,7 +43,7 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                             .font(.caption)
                             .foregroundStyle(.green)
                     } else {
-                        Text(context.state.lastSnippet.isEmpty ? "Listening..." : context.state.lastSnippet)
+                        Text(snippetText(for: context.state))
                             .font(.caption)
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
@@ -99,6 +99,13 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
 }
 
 // MARK: - Helpers
+
+/// What to show when there is no snippet yet. Startup that has not proven
+/// capture says so rather than claiming the microphone is live (issue #983).
+private func snippetText(for state: TranscriptionActivityAttributes.ContentState) -> String {
+    if !state.lastSnippet.isEmpty { return state.lastSnippet }
+    return state.status == .arming ? CapturePresentationGate.preparingMessage : "Listening..."
+}
 
 private func formatDuration(_ seconds: Int) -> String {
     let mins = seconds / 60
@@ -170,12 +177,19 @@ struct LockScreenTranscriptionView: View {
 
                     Spacer()
 
-                    Text("\(state.wordCount) words • ")
-                        .font(.caption)
-                        .foregroundStyle(.secondary) +
-                    Text(startTime, style: .timer)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if state.status == .arming {
+                        // No recording timer while capture is unproven.
+                        Text("\(state.wordCount) words")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(state.wordCount) words • ")
+                            .font(.caption)
+                            .foregroundStyle(.secondary) +
+                        Text(startTime, style: .timer)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if state.status == .completed {
@@ -188,7 +202,7 @@ struct LockScreenTranscriptionView: View {
                         .foregroundStyle(.red)
                         .lineLimit(1)
                 } else if state.lastSnippet.isEmpty {
-                    Text("Listening...")
+                    Text(snippetText(for: state))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .italic()

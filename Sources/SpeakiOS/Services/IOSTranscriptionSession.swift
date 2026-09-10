@@ -30,6 +30,12 @@ final class IOSTranscriptionSession {
 
     var onPartialResult: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
+    /// Raised at most once per session, on the main actor, when this session's
+    /// own live input tap accepts a buffer with a positive frame count. Every
+    /// backend supplies it — batch included, which has no partial result — so
+    /// recording presentation never waits on a signal that cannot arrive
+    /// (issue #983).
+    var onFirstInputBuffer: (() -> Void)?
 
     let resolution: Resolution
 
@@ -231,18 +237,25 @@ final class IOSTranscriptionSession {
             self?.onError?(error)
         }
 
+        let firstInputHandler: () -> Void = { [weak self] in
+            self?.onFirstInputBuffer?()
+        }
+
         switch backend {
-        case .batch:
-            break
+        case .batch(let transcriber):
+            transcriber.onFirstInputBuffer = firstInputHandler
         case .apple(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
         case .openAI(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
         case .shared(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
         }
     }
 }

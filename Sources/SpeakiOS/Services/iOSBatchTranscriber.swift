@@ -12,6 +12,21 @@ public final class IOSBatchTranscriber {
     private let startup = RecordingStartupOperation()
     private var ownsAudioSession = false
     private var hasInputTap = false
+    /// Batch has no live partial result, so its input tap is the only signal
+    /// that capture is really running. Replaced per start so a retired run's
+    /// tap can never report input for the run that replaced it (issue #983).
+    private var firstInputSignal = FirstInputSignal()
+    private var activeCaptureID: UUID?
+
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count.
+    public var onFirstInputBuffer: (() -> Void)?
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
 
     private func releaseAudioSession() {
         guard ownsAudioSession else { return }
@@ -60,6 +75,9 @@ public final class IOSBatchTranscriber {
     }
 
     private func startCapture() async throws {
+        let captureID = UUID()
+        activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
         let permissionGranted = await ensureMicrophonePermission()
         try Task.checkCancellation()
         guard permissionGranted else {
@@ -72,8 +90,11 @@ public final class IOSBatchTranscriber {
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         try audioRecorder.startRecording(format: format)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder] buffer, _ in
+        let signal = firstInputSignal
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder, weak self] buffer, _ in
             audioRecorder.writeBuffer(buffer)
+            guard buffer.frameLength > 0, signal.markObserved() else { return }
+            Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
         }
         hasInputTap = true
 
@@ -92,6 +113,7 @@ public final class IOSBatchTranscriber {
     public func stop(language: String?) async throws -> TranscriptionResult {
         audioEngine.stop()
         removeInputTap()
+        activeCaptureID = nil
         startTime = nil
         guard let recording = audioRecorder.stopRecording() else {
             releaseAudioSession()
@@ -126,6 +148,7 @@ public final class IOSBatchTranscriber {
         removeInputTap()
         audioRecorder.cancelRecording()
         releaseAudioSession()
+        activeCaptureID = nil
         startTime = nil
     }
 

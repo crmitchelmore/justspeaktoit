@@ -31,6 +31,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     public var onPartialResult: ((String, Bool) -> Void)?
     public var onFinalResult: ((TranscriptionResult) -> Void)?
     public var onError: ((Error) -> Void)?
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count (issue #983).
+    public var onFirstInputBuffer: (() -> Void)?
 
     // MARK: - Private
 
@@ -38,6 +41,24 @@ public final class iOSLiveTranscriber: ObservableObject {
     private let startup = RecordingStartupOperation()
     private var ownsAudioSession = false
     private var hasInputTap = false
+    /// Replaced per start so a retired run's tap can never report input for
+    /// the run that replaced it.
+    private var firstInputSignal = FirstInputSignal()
+
+    /// Starts a fresh capture identity, so a retired run's tap can never
+    /// report input for the run that replaced it.
+    private func beginCapture() -> UUID {
+        let captureID = UUID()
+        activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
+        return captureID
+    }
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
 
     private func releaseAudioSession() {
         guard ownsAudioSession else { return }
@@ -159,8 +180,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         preRollBuffers: [AVAudioPCMBuffer],
         analyzerFallbackAllowed: Bool
     ) async throws {
-        let captureID = UUID()
-        activeCaptureID = captureID
+        let captureID = beginCapture()
         SpeakLogger.logTranscription(event: "start", model: "Apple Speech")
 
         // Verify permissions
@@ -258,10 +278,14 @@ public final class iOSLiveTranscriber: ObservableObject {
                 sourceFormat: recordingFormat,
                 targetFormat: session.audioFormat
             )
+            let signal = firstInputSignal
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
                 // Copy the buffer and hop off the real-time audio thread —
                 // heavy work in the tap makes CoreAudio drop mic buffers.
                 guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+                if copied.frameLength > 0, signal.markObserved() {
+                    Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+                }
                 self.audioProcessingQueue.async {
                     defer { self.tapBufferPool.recycle(copied) }
                     self.audioRecorder.writeBuffer(copied)
@@ -340,12 +364,17 @@ public final class iOSLiveTranscriber: ObservableObject {
         let recorder = audioRecorder
         let pool = tapBufferPool
         let queue = audioProcessingQueue
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             // `request` is captured immutably; the tap is reinstalled with the
             // fresh request in `restartRecognitionTask()`.
             guard let copied = pool.copy(buffer) else { return }
+            if copied.frameLength > 0, let captureID, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
             queue.async {
                 defer { pool.recycle(copied) }
                 request.append(copied)

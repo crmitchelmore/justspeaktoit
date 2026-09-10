@@ -152,6 +152,11 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
                 from: self,
                 trigger: .shortcut,
                 parameters: parameters,
+                // Integration merge of #1077 with the startup diagnostics
+                // stack: Dictate is a start intent as far as the entry label
+                // goes. Whichever of the two PRs lands second on main decides
+                // whether it deserves an origin of its own.
+                entry: StartupEntry(origin: .startIntent),
                 endPointing: endPointing
             )
         } catch let failure as CaptureParameterFailure {

@@ -99,113 +99,6 @@ final class TranscriberCoordinator: ObservableObject {
         }
     }
 
-    // swiftlint:disable:next function_body_length
-    private func performStart(
-        preRollBuffers: [AVAudioPCMBuffer],
-        analyzerFallbackAllowed: Bool,
-        entry: StartupEntry?
-    ) async throws {
-        let runID = beginRun(entry: entry)
-        let settings = AppSettings.shared
-        // Wait for the initial keychain load so auto-start on a cold launch
-        // doesn't read empty API keys and fall back to Apple Speech.
-        await settings.ensureKeysLoaded()
-        diagnostics.note(.stage(.credentialsReady), run: runID)
-        error = nil
-        currentModel = settings.transcriptionMode == .batch
-            ? settings.batchTranscriptionModel
-            : settings.selectedModel
-        partialText = ""
-        wordCount = 0
-        lastSharedStateWriteAt = .distantPast
-        startTime = Date()
-        sharedState.clear()
-
-        if settings.transcriptionMode == .streaming {
-            let route = LiveTranscriptionRouting.route(for: currentModel)
-            currentModel = LiveTranscriptionRouting.resolvedModelID(
-                for: currentModel,
-                apiKey: route.map { settings.liveAPIKey(for: $0) }
-            )
-        }
-
-        // Start Live Activity (if enabled)
-        if settings.liveActivitiesEnabled {
-            activityManager.startActivity(provider: modelDisplayName, initialStatus: .arming)
-        }
-
-        #if DEBUG && targetEnvironment(simulator)
-        if let transcript = sharedState.simulatorValidationTranscript {
-            // A synthetic transcript is not observed microphone input, but this
-            // DEBUG-only simulator stub has no input tap at all. Resolve the
-            // gate explicitly so the harness never sits in preparation.
-            presentation.noteBackendStarted(run: runID)
-            notePresentation(presentation.noteInputObserved(run: runID))
-            noteSimulatorStubStartup(runID: runID)
-            handlePartialResult(text: transcript, isFinal: true)
-            markRecordingStarted()
-            return
-        }
-        #endif
-
-        let mode: IOSTranscriptionSession.Mode = settings.transcriptionMode == .batch
-            ? .batch(retainRecording: true)
-            : .streaming
-        let session = try IOSTranscriptionSession(
-            modelID: currentModel,
-            mode: mode,
-            language: settings.preferredModelLanguage,
-            audioSessionManager: audioSessionManager,
-            batchAPIKey: settings.batchAPIKey,
-            liveAPIKey: settings.liveAPIKey(for:),
-            transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
-        )
-        session.onPartialResult = { [weak self, weak session] text, isFinal in
-            self?.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
-            self?.handlePartialResult(text: text, isFinal: isFinal)
-            self?.confidence = session?.confidence
-        }
-        session.onError = { [weak self, weak session] error in
-            guard let self, let session,
-                  self.transcriptionSession === session || self.stoppingSession === session else { return }
-            self.handleError(error)
-            guard case iOSTranscriptionError.microphoneChanged = error else { return }
-            Task { @MainActor [weak self] in
-                guard let self, self.transcriptionSession === session, self.isRunning else { return }
-                if let onCaptureDisruption = self.onCaptureDisruption {
-                    await onCaptureDisruption()
-                } else {
-                    _ = await self.stop()
-                }
-            }
-        }
-        bindFirstInput(session: session, runID: runID)
-        bindStartupDiagnostics(session: session, runID: runID)
-        transcriptionSession = session
-        do {
-            try await session.start(
-                preRollBuffers: preRollBuffers,
-                analyzerFallbackAllowed: analyzerFallbackAllowed
-            )
-            diagnostics.note(.stage(.sessionStarted), run: runID)
-        } catch {
-            session.cancel()
-            transcriptionSession = nil
-            startTime = nil
-            finishStartupDiagnostics(runID: runID, error: error)
-            finishPresentation()
-            if settings.liveActivitiesEnabled {
-                activityManager.endActivity()
-            }
-            throw error
-        }
-        markRecordingStarted()
-        // The tap can deliver before `start()` returns, so this may be the
-        // second half of the pair rather than the first.
-        notePresentation(presentation.noteBackendStarted(run: runID))
-        diagnostics.finish(.started, run: runID)
-    }
-
     private func markRecordingStarted() {
         isRunning = true
         sharedState.isRecording = true
@@ -335,6 +228,120 @@ final class TranscriberCoordinator: ObservableObject {
         sharedState.clear()
         sharedState.clearRecordingState()
     }
+}
+
+// The provider start itself lives in an extension so the coordinator's own
+// body stays readable; `start` above owns the single-flight guard and the
+// run identity.
+@MainActor
+private extension TranscriberCoordinator {
+    // swiftlint:disable:next function_body_length
+    func performStart(
+        preRollBuffers: [AVAudioPCMBuffer],
+        analyzerFallbackAllowed: Bool,
+        entry: StartupEntry?
+    ) async throws {
+        let runID = beginRun(entry: entry)
+        let settings = AppSettings.shared
+        // Wait for the initial keychain load so auto-start on a cold launch
+        // doesn't read empty API keys and fall back to Apple Speech.
+        await settings.ensureKeysLoaded()
+        diagnostics.note(.stage(.credentialsReady), run: runID)
+        error = nil
+        currentModel = settings.transcriptionMode == .batch
+            ? settings.batchTranscriptionModel
+            : settings.selectedModel
+        partialText = ""
+        wordCount = 0
+        lastSharedStateWriteAt = .distantPast
+        startTime = Date()
+        sharedState.clear()
+
+        if settings.transcriptionMode == .streaming {
+            let route = LiveTranscriptionRouting.route(for: currentModel)
+            currentModel = LiveTranscriptionRouting.resolvedModelID(
+                for: currentModel,
+                apiKey: route.map { settings.liveAPIKey(for: $0) }
+            )
+        }
+
+        // Start Live Activity (if enabled)
+        if settings.liveActivitiesEnabled {
+            activityManager.startActivity(provider: modelDisplayName, initialStatus: .arming)
+        }
+
+        #if DEBUG && targetEnvironment(simulator)
+        if let transcript = sharedState.simulatorValidationTranscript {
+            // A synthetic transcript is not observed microphone input, but this
+            // DEBUG-only simulator stub has no input tap at all. Resolve the
+            // gate explicitly so the harness never sits in preparation.
+            presentation.noteBackendStarted(run: runID)
+            notePresentation(presentation.noteInputObserved(run: runID))
+            noteSimulatorStubStartup(runID: runID)
+            handlePartialResult(text: transcript, isFinal: true)
+            markRecordingStarted()
+            return
+        }
+        #endif
+
+        let mode: IOSTranscriptionSession.Mode = settings.transcriptionMode == .batch
+            ? .batch(retainRecording: true)
+            : .streaming
+        let session = try IOSTranscriptionSession(
+            modelID: currentModel,
+            mode: mode,
+            language: settings.preferredModelLanguage,
+            audioSessionManager: audioSessionManager,
+            batchAPIKey: settings.batchAPIKey,
+            liveAPIKey: settings.liveAPIKey(for:),
+            transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
+        )
+        session.onPartialResult = { [weak self, weak session] text, isFinal in
+            self?.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
+            self?.handlePartialResult(text: text, isFinal: isFinal)
+            self?.confidence = session?.confidence
+        }
+        session.onError = { [weak self, weak session] error in
+            guard let self, let session,
+                  self.transcriptionSession === session || self.stoppingSession === session else { return }
+            self.handleError(error)
+            guard case iOSTranscriptionError.microphoneChanged = error else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.transcriptionSession === session, self.isRunning else { return }
+                if let onCaptureDisruption = self.onCaptureDisruption {
+                    await onCaptureDisruption()
+                } else {
+                    _ = await self.stop()
+                }
+            }
+        }
+        bindFirstInput(session: session, runID: runID)
+        bindStartupDiagnostics(session: session, runID: runID)
+        transcriptionSession = session
+        do {
+            try await session.start(
+                preRollBuffers: preRollBuffers,
+                analyzerFallbackAllowed: analyzerFallbackAllowed
+            )
+            diagnostics.note(.stage(.sessionStarted), run: runID)
+        } catch {
+            session.cancel()
+            transcriptionSession = nil
+            startTime = nil
+            finishStartupDiagnostics(runID: runID, error: error)
+            finishPresentation()
+            if settings.liveActivitiesEnabled {
+                activityManager.endActivity()
+            }
+            throw error
+        }
+        markRecordingStarted()
+        // The tap can deliver before `start()` returns, so this may be the
+        // second half of the pair rather than the first.
+        notePresentation(presentation.noteBackendStarted(run: runID))
+        diagnostics.finish(.started, run: runID)
+    }
+
 }
 
 // MARK: - Truthful capture presentation (issue #983)

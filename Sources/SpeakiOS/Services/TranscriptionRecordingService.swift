@@ -332,7 +332,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         try refuseUnusableRequestedModel(
             runParameters.modelID,
             usesBatch: usesBatchTranscription,
-            settings: settings
+            settings: settings,
+            run: runID
         )
 
         if !usesBatchTranscription && keyboardProfile == nil {
@@ -531,11 +532,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     private func refuseUnusableRequestedModel(
         _ requestedModelID: String?,
         usesBatch: Bool,
-        settings: AppSettings
+        settings: AppSettings,
+        run: UUID
     ) throws {
         guard let requestedModelID else { return }
         guard CaptureModelSupport.canRun(requestedModelID, usesBatch: usesBatch) else {
-            unwindCancelledStart()
+            unwindCancelledStart(outcome: .failed, run: run)
             SpeakLogger.transcription.error(
                 """
                 Refusing capture: \(requestedModelID, privacy: .public) has no iOS \
@@ -554,7 +556,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         guard case .apiKey = requirement else { return }
         let key = settings.batchAPIKey(for: requestedModelID)
         guard key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        unwindCancelledStart()
+        unwindCancelledStart(outcome: .failed, run: run)
         SpeakLogger.transcription.error(
             "Refusing capture: no API key for \(requestedModelID, privacy: .public)"
         )

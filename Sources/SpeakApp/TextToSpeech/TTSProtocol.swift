@@ -325,13 +325,19 @@ protocol ProgressiveTextToSpeechClient: TextToSpeechClient {
   /// Synthesizes `text`, calling `onAudioChunk` with headerless little-endian
   /// 16-bit mono PCM as each chunk arrives.
   ///
+  /// The callback is awaited and may throw. Awaiting lets the consumer hold
+  /// the provider back when it is producing audio faster than it can be
+  /// played; throwing makes a playback failure end the stream and reach the
+  /// synthesis error path, instead of a broken utterance being reported as a
+  /// successful one.
+  ///
   /// Cancelling the calling task must stop the stream and discard the partial
   /// audio.
   func synthesizeProgressively(
     text: String,
     voice: String,
     settings: TTSSettings,
-    onAudioChunk: @escaping @Sendable (Data) -> Void
+    onAudioChunk: @escaping @Sendable (Data) async throws -> Void
   ) async throws -> TTSResult
 }
 

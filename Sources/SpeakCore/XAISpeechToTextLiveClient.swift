@@ -23,11 +23,19 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
 
     static let finishBudget: TimeInterval = 5
     private static let sendDrainBudget: TimeInterval = 1
+    /// How long a graceful finish waits for `transcript.created` before giving
+    /// up on the held capture. Inside `finishBudget`, so the caller's stop is
+    /// still bounded by it.
+    static let readyBudget: TimeInterval = 2
 
     private let apiKey: String
     private let language: String?
     private let keywords: [String]
-    private let sampleRate: Int
+    /// The rate the socket declares and the rate the caller's PCM must be
+    /// encoded at. Exactly what the initializer was given: substituting a
+    /// different one here would have the session declare a rate the audio does
+    /// not have, which recognises badly and silently.
+    public let sampleRate: Int
     private let session: URLSession
     private let stateLock = NSLock()
     private let finishLock = NSLock()
@@ -42,6 +50,10 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     private var isFinishing = false
     private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
     private var finishContinuation: CheckedContinuation<String?, Never>?
+    /// Signalled once `transcript.created` arrives, so a finish that lands
+    /// during the handshake can wait for the ready frame instead of sending
+    /// the held capture into a socket that will reject it.
+    private var readySignal = DispatchSemaphore(value: 0)
 
     let preroll: StreamingAudioPreroll
 
@@ -55,9 +67,9 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = language
         self.keywords = keywords
-        self.sampleRate = XAISpeechToText.supportedSampleRates.contains(sampleRate) ? sampleRate : 24_000
+        self.sampleRate = sampleRate
         self.session = session
-        self.preroll = StreamingAudioPreroll(sampleRate: self.sampleRate)
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
     public func start(
@@ -66,6 +78,13 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     ) {
         guard !apiKey.isEmpty else {
             onError(StreamingClientError.missingAPIKey(provider: "xAI"))
+            return
+        }
+        // An unsupported rate is refused rather than quietly replaced: the
+        // caller encodes its PCM at the rate it asked for, so a substitution
+        // here would declare one rate and send another.
+        guard XAISpeechToText.supportedSampleRates.contains(sampleRate) else {
+            onError(XAISpeechToTextError.unsupportedSampleRate(sampleRate))
             return
         }
         beginSession(onTranscript: onTranscript, onError: onError)
@@ -86,6 +105,7 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
             isFinishing = false
             accumulated.reset()
             finishContinuation = nil
+            readySignal = DispatchSemaphore(value: 0)
         }
         preroll.reset()
     }
@@ -123,13 +143,7 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
         let result = await awaitFinalTranscript { [weak self, weak task] in
             DispatchQueue.global().async {
                 guard let self, let task else { return }
-                self.flushPreroll(to: task)
-                _ = self.pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
-                task.send(.string(#"{"type":"audio.done"}"#)) { [weak self] error in
-                    guard let self, let error, !WebSocketErrorFilter.shouldIgnore(error) else { return }
-                    self.logger.error("xAI audio.done send failed: \(error.localizedDescription)")
-                    self.resolveFinish()
-                }
+                self.commitHeldCapture(to: task)
             }
         }
         stop()
@@ -159,6 +173,34 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
         }
     }
 
+    /// Sends the held capture and closes the stream, waiting first for the
+    /// ready frame if the handshake is still in flight.
+    ///
+    /// xAI requires `transcript.created` before audio, so a short recording
+    /// finished during an ordinary handshake must hold its capture until the
+    /// session is ready rather than push PCM the service will refuse. A
+    /// session that cannot become ready inside `readyBudget` is finished
+    /// without sending, so the stop still completes.
+    private func commitHeldCapture(to task: URLSessionWebSocketTask) {
+        let signal = withStateLock { readySignal }
+        if !isSessionReady {
+            _ = signal.wait(timeout: .now() + Self.readyBudget)
+        }
+        guard isSessionReady, isCurrent(task) else {
+            logger.error("xAI session never became ready; finishing without sending held audio")
+            resolveFinish()
+            return
+        }
+        flushPreroll(to: task)
+        _ = pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
+        task.send(.string(#"{"type":"audio.done"}"#)) { [weak self, weak task] error in
+            guard let self, let task, self.isCurrent(task) else { return }
+            guard let error, !WebSocketErrorFilter.shouldIgnore(error) else { return }
+            self.logger.error("xAI audio.done send failed: \(error.localizedDescription)")
+            self.resolveFinish()
+        }
+    }
+
     public func stop() {
         let task = withStateLock { () -> URLSessionWebSocketTask? in
             isStopping = true
@@ -173,33 +215,6 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     }
 
     // MARK: - Connection
-
-    /// `wss://api.x.ai/v1/stt` with the session configured entirely by query
-    /// items — there is no start message and no `model` parameter.
-    static func webSocketURL(
-        sampleRate: Int,
-        language: String?,
-        keywords: [String] = []
-    ) -> URL? {
-        var components = URLComponents()
-        components.scheme = "wss"
-        components.host = XAISpeechToText.webSocketHost
-        components.path = XAISpeechToText.webSocketPath
-        var items = [
-            URLQueryItem(name: "encoding", value: "pcm"),
-            URLQueryItem(name: "sample_rate", value: String(sampleRate)),
-            URLQueryItem(name: "interim_results", value: "true")
-        ]
-        if let code = XAISpeechToText.languageCode(for: language) {
-            items.append(URLQueryItem(name: "language", value: code))
-        }
-        // Repeated `keyterm` items, which is how the service takes a list.
-        items += XAISpeechToText.boundedKeyterms(keywords).map {
-            URLQueryItem(name: "keyterm", value: $0)
-        }
-        components.queryItems = items
-        return components.url
-    }
 
     private func connect() {
         guard let url = Self.webSocketURL(
@@ -253,7 +268,11 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
 
         switch event {
         case .created:
-            withStateLock { isReady = true }
+            let signal = withStateLock { () -> DispatchSemaphore in
+                isReady = true
+                return readySignal
+            }
+            signal.signal()
             if let task = currentTask() { flushPreroll(to: task) }
         case .partial(let text, let isFinal, _, let eventID):
             handlePartial(text: text, isFinal: isFinal, eventID: eventID)
@@ -317,9 +336,14 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
 
     private func send(_ audio: Data, on task: URLSessionWebSocketTask) {
         pendingSends.enter()
-        task.send(.data(audio)) { [weak self] error in
+        task.send(.data(audio)) { [weak self, weak task] error in
             guard let self else { return }
             self.pendingSends.leave()
+            // A completion from a socket that is no longer the session's must
+            // not cancel the current one or report its error: beginning
+            // another session replaces `webSocketTask`, and a late failure
+            // from the old one says nothing about the new one.
+            guard let task, self.isCurrent(task) else { return }
             if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
                 self.handleTransportFailure(error)
             }
@@ -339,33 +363,6 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
         guard let continuation else { return false }
         continuation.resume(returning: fullTranscript())
         return true
-    }
-
-    static func error(fromServerMessage message: String) -> Error {
-        let lowered = message.lowercased()
-        if lowered.contains("unauthorized") || lowered.contains("api key")
-            || lowered.contains("forbidden") || lowered.contains("401")
-            || lowered.contains("403") {
-            return StreamingClientError.invalidAPIKey(provider: "xAI")
-        }
-        if lowered.contains("credit") || lowered.contains("quota")
-            || lowered.contains("balance") {
-            return XAISpeechToTextError.quotaExceeded(message: message)
-        }
-        if lowered.contains("rate limit") || lowered.contains("429") {
-            return XAISpeechToTextError.rateLimited(message: message)
-        }
-        return XAISpeechToTextError.server(message: message)
-    }
-
-    private func mapConnectionError(_ error: Error) -> Error {
-        let nsError = error as NSError
-        let description = nsError.localizedDescription.lowercased()
-        if description.contains("401") || description.contains("403")
-            || description.contains("unauthorized") || description.contains("forbidden") {
-            return StreamingClientError.invalidAPIKey(provider: "xAI")
-        }
-        return error
     }
 
     /// Whether `transcript.created` has arrived and the socket accepts audio.

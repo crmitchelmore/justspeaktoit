@@ -248,11 +248,36 @@ final class XAITTSTransportTests: XCTestCase {
         XCTAssertNil(XAITTSRealtimeEvent(frame: Data("not json".utf8)))
     }
 
+    func testProgressiveText_isSplitIntoUtterancesInsideTheDocumentedMaximum() {
+        let chunkSize = XAITTSRealtime.textChunkCharacters
+        let maximum = XAITTSAPI.maximumTextCharacters
+        // Two and a half utterances worth of delta frames.
+        let chunkCount = (maximum / chunkSize) * 2 + 5
+        let chunks = Array(repeating: String(repeating: "a", count: chunkSize), count: chunkCount)
+
+        let utterances = XAITTSRealtime.utterances(from: chunks)
+        XCTAssertGreaterThan(utterances.count, 1, "a long document cannot be one utterance")
+        for utterance in utterances {
+            let characters = utterance.reduce(0) { $0 + $1.count }
+            XCTAssertLessThanOrEqual(characters, maximum)
+        }
+        // Nothing is dropped or reordered.
+        XCTAssertEqual(utterances.flatMap { $0 }, chunks)
+    }
+
+    func testProgressiveText_keepsAShortDocumentAsOneUtterance() {
+        let chunks = ["Hello there.", "How are you?"]
+        XCTAssertEqual(XAITTSRealtime.utterances(from: chunks), [chunks])
+        XCTAssertTrue(XAITTSRealtime.utterances(from: []).isEmpty)
+    }
+
     /// Progressive playback schedules the samples directly, so the finished
     /// file has to be given the RIFF header the players need.
-    func testProgressiveAudio_becomesAPlayableWAVAtTheStreamSampleRate() {
+    func testProgressiveAudio_becomesAPlayableWAVAtTheStreamSampleRate() throws {
         let pcm = Data(repeating: 0x7F, count: 48)
-        let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: XAITTSAPI.defaultSampleRate)
+        let wav = try XCTUnwrap(
+            PCMWaveWriter.wavData(pcm: pcm, sampleRate: XAITTSAPI.defaultSampleRate)
+        )
 
         XCTAssertEqual(wav.count, pcm.count + 44)
         XCTAssertEqual(wav.prefix(4), Data("RIFF".utf8))

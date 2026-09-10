@@ -82,7 +82,7 @@ actor XAITTSClient: TextToSpeechClient, ProgressiveTextToSpeechClient {
     text: String,
     voice: String,
     settings: TTSSettings,
-    onAudioChunk: @escaping @Sendable (Data) -> Void
+    onAudioChunk: @escaping @Sendable (Data) async throws -> Void
   ) async throws -> TTSResult {
     let apiKey = try await requireAPIKey()
     try Self.validate(settings: settings)
@@ -96,31 +96,29 @@ actor XAITTSClient: TextToSpeechClient, ProgressiveTextToSpeechClient {
     guard !chunks.isEmpty else {
       throw TTSError.synthesisFailure("There is no text to speak")
     }
-    guard let url = XAITTSRealtime.webSocketURL(request: request) else {
-      throw TTSError.synthesisFailure("Could not build the xAI speech stream URL")
-    }
+    // One socket speaks one utterance, and an utterance is capped at the same
+    // 15,000 characters the REST route splits on. A longer document becomes
+    // several utterances rather than one the service would reject.
+    let utterances = XAITTSRealtime.utterances(from: chunks)
 
-    var urlRequest = URLRequest(url: url)
-    urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    let task = session.webSocketTask(with: urlRequest)
-    task.resume()
-
-    let pcm: Data
-    do {
-      pcm = try await Self.stream(chunks: chunks, on: task, onAudioChunk: onAudioChunk)
-    } catch {
-      // A cancelled utterance is a barge-in: tell xAI to drop the queued audio
-      // rather than paying for speech nobody will hear.
-      try? await task.send(.string(XAITTSRealtime.textClearJSON))
-      task.cancel(with: .goingAway, reason: nil)
-      throw error
+    var pcm = Data()
+    for utterance in utterances {
+      pcm.append(
+        try await streamUtterance(
+          utterance,
+          apiKey: apiKey,
+          request: request,
+          onAudioChunk: onAudioChunk
+        )
+      )
     }
-    task.cancel(with: .normalClosure, reason: nil)
 
     guard !pcm.isEmpty else {
       throw TTSError.synthesisFailure("xAI produced no audio for this text")
     }
-    let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: progressiveSampleRate)
+    guard let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: progressiveSampleRate) else {
+      throw TTSError.synthesisFailure("xAI returned audio Speak could not write as WAV")
+    }
     let outputURL = try saveAudio(wav, format: .wav)
     return TTSResult(
       audioURL: outputURL,
@@ -132,6 +130,35 @@ actor XAITTSClient: TextToSpeechClient, ProgressiveTextToSpeechClient {
     )
   }
 
+  /// Speaks one utterance over its own socket and answers its PCM.
+  private func streamUtterance(
+    _ chunks: [String],
+    apiKey: String,
+    request: XAITTSRequest,
+    onAudioChunk: @escaping @Sendable (Data) async throws -> Void
+  ) async throws -> Data {
+    guard let url = XAITTSRealtime.webSocketURL(request: request) else {
+      throw TTSError.synthesisFailure("Could not build the xAI speech stream URL")
+    }
+    var urlRequest = URLRequest(url: url)
+    urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    let task = session.webSocketTask(with: urlRequest)
+    task.resume()
+
+    do {
+      let pcm = try await Self.stream(chunks: chunks, on: task, onAudioChunk: onAudioChunk)
+      task.cancel(with: .normalClosure, reason: nil)
+      return pcm
+    } catch {
+      // A cancelled utterance is a barge-in, and a playback failure is just as
+      // final: tell xAI to drop the queued audio rather than paying for speech
+      // nobody will hear.
+      try? await task.send(.string(XAITTSRealtime.textClearJSON))
+      task.cancel(with: .goingAway, reason: nil)
+      throw error
+    }
+  }
+
   /// Pushes the text and collects audio until `audio.done`.
   ///
   /// Runs on the actor's executor rather than as a detached task so a cancelled
@@ -139,7 +166,7 @@ actor XAITTSClient: TextToSpeechClient, ProgressiveTextToSpeechClient {
   private static func stream(
     chunks: [String],
     on task: URLSessionWebSocketTask,
-    onAudioChunk: @escaping @Sendable (Data) -> Void
+    onAudioChunk: @escaping @Sendable (Data) async throws -> Void
   ) async throws -> Data {
     for chunk in chunks {
       try Task.checkCancellation()
@@ -159,7 +186,10 @@ actor XAITTSClient: TextToSpeechClient, ProgressiveTextToSpeechClient {
       switch event {
       case .audio(let audio):
         pcm.append(audio)
-        onAudioChunk(audio)
+        // Awaited, so the consumer can hold the socket back rather than let
+        // audio pile up faster than it can be heard, and so a playback
+        // failure ends the paid stream instead of being swallowed.
+        try await onAudioChunk(audio)
       case .done:
         return pcm
       case .cleared:
@@ -224,57 +254,6 @@ actor XAITTSClient: TextToSpeechClient, ProgressiveTextToSpeechClient {
       throw TTSError.apiKeyMissing(provider)
     }
     return apiKey
-  }
-
-  static func makeRequest(
-    voice: String,
-    settings: TTSSettings,
-    codec: XAITTSCodec,
-    sampleRate: Int = XAITTSAPI.defaultSampleRate
-  ) -> XAITTSRequest {
-    XAITTSRequest(
-      voiceID: voice,
-      language: settings.language,
-      codec: codec,
-      sampleRate: sampleRate,
-      speed: settings.speed
-    )
-  }
-
-  /// xAI serves MP3, WAV and PCM. AAC is not one of them, so an M4A preference
-  /// becomes MP3 — the closest compressed container it does serve.
-  static func codec(for format: AudioFormat) -> XAITTSCodec {
-    switch format {
-    case .mp3, .m4a: .mp3
-    case .wav: .wav
-    }
-  }
-
-  static func audioFormat(for codec: XAITTSCodec) -> AudioFormat {
-    switch codec {
-    case .mp3: .mp3
-    case .wav, .pcm: .wav
-    }
-  }
-
-  /// Reports the controls xAI cannot honour instead of pretending they applied.
-  static func validate(settings: TTSSettings) throws {
-    if abs(settings.pitch) > 0.001 {
-      throw TTSError.synthesisFailure(
-        "xAI voices do not support pitch control. Reset it to the default, "
-          + "or choose another provider."
-      )
-    }
-    guard XAITTSAPI.speedRange.contains(settings.speed) else {
-      throw TTSError.synthesisFailure(
-        "xAI accepts a speaking rate between \(XAITTSAPI.speedRange.lowerBound) and "
-          + "\(XAITTSAPI.speedRange.upperBound); this one is \(settings.speed)."
-      )
-    }
-  }
-
-  static func cost(characterCount: Int) -> Decimal {
-    Decimal(characterCount) * XAITTSAPI.estimatedCostPerThousandCharacters / 1000
   }
 
   static func ttsError(for error: XAITTSAPIError) -> TTSError {

@@ -115,13 +115,19 @@ final class TextToSpeechManager: ObservableObject {
         task.cancel()
       }
     } catch {
-      if progressive != nil { stopPlayback() }
+      // Only the request that still owns the player may tear it down. A
+      // replacement utterance has already prepared playback on the same
+      // player by the time a superseded request's cleanup runs, and stopping
+      // it here would silence the newer one.
+      if progressive != nil, synthesisID == requestID { stopPlayback() }
       if task.isCancelled || Task.isCancelled { throw CancellationError() }
       throw error
     }
-    if progressive != nil { isPlaying = false }
+    if progressive != nil, synthesisID == requestID { isPlaying = false }
     guard synthesisID == requestID, !Task.isCancelled, !task.isCancelled else {
-      if result.provider == .openrouter { try? FileManager.default.removeItem(at: result.audioURL) }
+      // The result was never published — not played, not saved, not in
+      // history — so its file belongs to nobody whatever the provider is.
+      try? FileManager.default.removeItem(at: result.audioURL)
       throw CancellationError()
     }
     if progressive == nil { stopPlayback() }

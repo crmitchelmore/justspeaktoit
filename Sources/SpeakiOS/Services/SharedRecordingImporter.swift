@@ -42,6 +42,8 @@ public final class SharedRecordingImporter: ObservableObject {
     @Published public private(set) var lastOutcome: Outcome?
 
     private let inbox: SharedRecordingInbox?
+    /// Tests inject a store whose Keychain access they control.
+    var credentialSettings: AppSettings?
     private let logger = SpeakLogger.logger(category: "SharedRecordingImporter")
 
     init(inbox: SharedRecordingInbox? = SharedRecordingInbox.shared()) {
@@ -64,7 +66,7 @@ public final class SharedRecordingImporter: ObservableObject {
         isImporting = true
         defer { isImporting = false }
 
-        let settings = AppSettings.shared
+        let settings = credentialSettings ?? AppSettings.shared
         await settings.ensureKeysLoaded()
         let model = settings.batchTranscriptionModel
         guard AppSettings.supportedBatchModels.contains(where: { $0.id == model }) else {
@@ -74,6 +76,19 @@ public final class SharedRecordingImporter: ObservableObject {
             lastOutcome = .failed(
                 filename: pending[0].originalFilename,
                 message: AutomationIntentError.unsupportedBatchModel(model).localizedDescription
+            )
+            return
+        }
+        do {
+            try settings.requireAvailableCredentials(for: model, purpose: .batchTranscription)
+        } catch {
+            // Keychain access has not recovered yet (issue #930). An empty key
+            // is not a terminal failure, so submitting it would spend one of
+            // each item's attempts and eventually delete the staged audio.
+            // Leave every item and its attempt count untouched instead.
+            lastOutcome = .failed(
+                filename: pending[0].originalFilename,
+                message: error.localizedDescription
             )
             return
         }

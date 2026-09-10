@@ -167,6 +167,36 @@ final class CredentialLoadingTests: XCTestCase {
         }
     }
 
+    func testSharedImport_unavailableCredentialsKeepInboxAndAttemptsUntouched() async throws {
+        let fixture = Fixture()
+        defer { fixture.cleanUp() }
+        let settings = fixture.settings(permissions: RetryPermissions())
+        settings.batchTranscriptionModel = "openai/gpt-4o-transcribe"
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inbox = SharedRecordingInbox(root: root)
+        try inbox.prepare()
+        let item = SharedRecordingInboxItem(originalFilename: "memo.m4a", fileExtension: "m4a", byteCount: 5)
+        let audioURL = inbox.stagedURL(id: item.id, fileExtension: item.fileExtension)
+        let audio = Data("synthetic audio must not be submitted".utf8)
+        try audio.write(to: audioURL)
+        try inbox.commit(item)
+        let importer = SharedRecordingImporter(inbox: inbox)
+        importer.credentialSettings = settings
+        // More unavailable passes than the retry limit must neither spend an
+        // attempt nor retire the staged audio.
+        for _ in 0...SharedRecordingInbox.maximumAttempts {
+            await importer.drain()
+            XCTAssertEqual(inbox.pending(), [item])
+            XCTAssertEqual(try Data(contentsOf: audioURL), audio)
+        }
+        guard case .failed(let filename, let message)? = importer.lastOutcome else {
+            return XCTFail("Unavailable credentials must report a failed outcome")
+        }
+        XCTAssertEqual(filename, "memo.m4a")
+        XCTAssertTrue(message.contains("Keychain"))
+    }
+
     func testGenuinelyMissingKeys_reportMissingAfterSuccessfulLoad() async {
         let fixture = Fixture()
         defer { fixture.cleanUp() }

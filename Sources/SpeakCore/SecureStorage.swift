@@ -90,15 +90,27 @@ public struct SecureStorageConfiguration: Sendable {
 
     public init(
         service: String = "com.github.speakapp.credentials",
-        masterAccount: String = "speak-app-secrets",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
         legacyServices: [String] = [],
         accessGroup: String? = nil,
         synchronizable: Bool = false
     ) {
-        self.service = service
+        self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
+                  accessGroup: accessGroup, synchronizable: synchronizable, releaseTrain: .current)
+    }
+
+    public init(
+        service: String = "com.github.speakapp.credentials",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
+        legacyServices: [String] = [],
+        accessGroup: String? = nil,
+        synchronizable: Bool = false,
+        releaseTrain: ReleaseTrain
+    ) {
+        self.service = releaseTrain.namespace(service)
         self.masterAccount = masterAccount
-        self.legacyServices = legacyServices
-        self.accessGroup = accessGroup
+        self.legacyServices = legacyServices.map { releaseTrain.namespace($0) }
+        self.accessGroup = accessGroup.map { releaseTrain.namespace($0) }
         self.synchronizable = synchronizable
     }
 

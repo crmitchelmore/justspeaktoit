@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import SpeakCore
 import SwiftUI
 
 // MARK: - Deep Link Router
@@ -51,8 +52,9 @@ public final class DeepLinkRouter: ObservableObject {
     public func handle(_ url: URL) -> Bool {
         // Case-insensitive to match `CaptureDeepLink.parse`, which lowercases
         // the scheme: otherwise JUSTSPEAKTOIT://start parses as a command and
-        // is then dropped here.
-        guard url.scheme?.lowercased() == CaptureDeepLink.scheme else { return false }
+        // is then dropped here. The expected scheme comes from the release
+        // train, so Alpha and Stable builds each answer for their own.
+        guard url.scheme?.lowercased() == ReleaseTrain.current.urlScheme else { return false }
 
         // Capture verbs are checked first: `transcribe?action=start` is both a
         // tab link and a command, and the command is the point of it.

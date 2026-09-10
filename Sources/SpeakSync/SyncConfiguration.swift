@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import SpeakCore
 #if os(macOS)
 import Security
 #endif
@@ -8,9 +9,9 @@ import Security
 public enum SyncConfiguration {
     /// The CloudKit container identifier.
     #if os(iOS)
-    public static let containerIdentifier = "iCloud.com.justspeaktoit.ios"
+    public static let containerIdentifier = ReleaseTrain.current.iosCloudContainer
     #elseif os(macOS)
-    public static let containerIdentifier = "iCloud.com.justspeaktoit"
+    public static let containerIdentifier = ReleaseTrain.current.macCloudContainer
     #endif
 
     /// The custom zone name for transcription history.

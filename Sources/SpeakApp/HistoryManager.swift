@@ -187,7 +187,7 @@ final class HistoryManager: ObservableObject, RepeatingTimerTarget {
     let supportURL =
       fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
-    let appFolder = supportURL.appendingPathComponent("SpeakApp", isDirectory: true)
+    let appFolder = supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
     let historyDir = appFolder.appendingPathComponent("History", isDirectory: true)
     if !fileManager.fileExists(atPath: historyDir.path) {
       try? fileManager.createDirectory(at: historyDir, withIntermediateDirectories: true)

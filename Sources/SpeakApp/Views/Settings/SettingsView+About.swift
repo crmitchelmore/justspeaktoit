@@ -7,14 +7,14 @@ import SwiftUI
 extension SettingsView {
   var aboutSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
-      SettingsCard(title: "Just Speak to It", systemImage: "info.circle", tint: Color.blue) {
+      SettingsCard(title: ReleaseTrain.current.displayName, systemImage: "info.circle", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 16) {
           HStack(alignment: .top, spacing: 16) {
             Image(nsImage: AppIconProvider.applicationIcon())
               .resizable()
               .frame(width: 64, height: 64)
             VStack(alignment: .leading, spacing: 4) {
-              Text("Just Speak to It")
+              Text(ReleaseTrain.current.displayName)
                 .font(.title2.bold())
               Text("Voice-to-text made simple")
                 .font(.subheadline)
@@ -150,8 +150,10 @@ extension SettingsView {
             .font(.callout)
             .foregroundStyle(.secondary)
 
-          TipJarView()
-            .frame(maxWidth: .infinity)
+          if ReleaseTrain.current == .stable {
+            TipJarView()
+              .frame(maxWidth: .infinity)
+          }
 
           // In-app StoreKit tips work in App Store builds; external donation
           // links are only shown where cross-channel messaging is permitted.

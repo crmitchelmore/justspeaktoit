@@ -27,7 +27,7 @@
 	<key>SpeakDistributionChannel</key>
 	<string>direct</string>
 	<!-- Marker read by scripts/sparkle-update-smoke.sh: this build understands
-	     --sparkle-smoke-update and can install a Sparkle update headlessly.
+	     the sparkle smoke update flag and can install a Sparkle update headlessly.
 	     Releases that predate the flag lack the key, and the smoke job skips
 	     rather than failing on them. Direct channel only: the App Store build
 	     does not embed Sparkle. -->

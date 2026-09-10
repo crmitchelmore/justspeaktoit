@@ -151,7 +151,7 @@ final class LocalModelManager: ObservableObject {
     let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? fileManager.homeDirectoryForCurrentUser
     let defaultStorageDirectory = base
-      .appendingPathComponent("SpeakApp", isDirectory: true)
+        .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
       .appendingPathComponent("LocalModels", isDirectory: true)
     markerDirectory = storageDirectory ?? defaultStorageDirectory
     self.modelStorage = modelStorage ?? WhisperKitModelStorage(

@@ -11,26 +11,33 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-macos:
-    # Keep this context aligned with the required main-branch status check.
-    name: Build & Test (macOS)
-    runs-on: macos-latest
+    # The aggregate required-macos job owns the required branch-protection name.
+    name: Build & Test (macOS Debug)
+    # Route only the explicitly reviewed revision to the native pool.
+    # Both Macs must also admit this revision locally before the variable is set.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && '["jsti-macos-build","macOS"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
+      # Swift build state embeds absolute paths. Scope both exact and fallback
+      # keys to the architecture, stable host identity and checkout workspace.
       - name: Cache Swift packages
         uses: actions/cache@v6
         with:
           path: .build
-          key: ${{ runner.os }}-swift-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swift-
+            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
       - name: Build
         run: make build
@@ -44,7 +51,7 @@ jobs:
         run: git diff --exit-code Package.resolved
 
       - name: Test (Debug)
-        run: swift test --enable-code-coverage
+        run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage
 
       # Snapshot mismatches write the freshly rendered PNG to the process
       # temporary directory. Publishing it is the only way to inspect a CI-only
@@ -87,10 +94,10 @@ jobs:
             EXEC_PATH="$XCTEST_PATH/Contents/MacOS/$(basename "$XCTEST_PATH" .xctest)"
             COV_DIR=$(swift test --show-codecov-path 2>/dev/null || echo "")
             if [ -n "$COV_DIR" ] && [ -f "$COV_DIR" ]; then
-              echo "### Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+              echo "### Test Coverage Summary" >> "$GITHUB_STEP_SUMMARY"
               xcrun llvm-cov report "$EXEC_PATH" \
                 --instr-profile="$(dirname "$COV_DIR")/default.profdata" \
-                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> $GITHUB_STEP_SUMMARY || true
+                --ignore-filename-regex='\.build|Tests/' 2>/dev/null | head -30 >> "$GITHUB_STEP_SUMMARY" || true
             fi
           fi
 
@@ -171,21 +178,23 @@ jobs:
 
   core-journey-e2e:
     name: Core Dictation Journey (≤10m)
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
     steps:
       - uses: actions/checkout@v7
 
-      - name: Cache Swift packages
-        uses: actions/cache@v6
+      # Debug CI populates the shared cache. This bounded gate only restores;
+      # uploading gigabytes afterwards must not consume its ten-minute budget.
+      - name: Restore Swift packages
+        uses: actions/cache/restore@v6
         with:
           path: .build
-          key: ${{ runner.os }}-swift-core-journey-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swift-core-journey-
-            ${{ runner.os }}-swift-
+            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-
 
       - name: Run core journey gate
         run: scripts/run-core-journey-e2e.sh
@@ -200,7 +209,8 @@ jobs:
 
   core-journey-fixture-ui:
     name: Core Journey Fixture UI
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 10
     needs: release-paths
     if: needs.release-paths.outputs.core-journey == 'true'
@@ -245,7 +255,8 @@ jobs:
 
   release-validation:
     name: Build & Test (Release)
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 45
     needs: release-paths
     if: needs.release-paths.outputs.package == 'true'
@@ -256,16 +267,17 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .build
-          key: ${{ runner.os }}-swift-release-${{ hashFiles('Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swift-release-
+            ${{ runner.os }}-${{ runner.arch }}-${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}-${{ github.workspace }}-swift-release-
 
       - name: Test (Release)
-        run: swift test -c release
+        run: python3 scripts/with-test-keychain.py swift test -c release
 
   build-ios:
     name: Build iOS Library
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -389,7 +401,8 @@ jobs:
     # that scheme at all — only the direct-capture one was — so the shape users
     # actually receive had the weaker check. Both are built here now.
     name: Build iOS Keyboard
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -440,7 +453,8 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: macos-latest
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -461,7 +475,9 @@ jobs:
 
       - name: Test CI and release gates
         run: |
-          node --test scripts/tests/*.test.mjs
+          node --test scripts/tests/*.test.mjs scripts/release-train.test.mjs
+          python3 scripts/generate-release-train-config.py --check
+          ruby scripts/tests/release_apple_test.rb
           python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Test release-notes generator
@@ -469,7 +485,9 @@ jobs:
 
   api-compatibility:
     name: Public API compatibility
-    runs-on: macos-latest
+    # Route only the explicitly reviewed revision to the native pool.
+    # Both Macs must also admit this revision locally before the variable is set.
+    runs-on: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.JSTI_NATIVE_APPROVED_SHA == github.sha) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.JSTI_NATIVE_APPROVED_SHA == github.event.pull_request.head.sha)) && '["jsti-macos-build","macOS"]' || '["macos-latest"]') }}
     timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:

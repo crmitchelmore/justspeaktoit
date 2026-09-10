@@ -833,6 +833,7 @@ public final class AppSettings: ObservableObject {
     /// iCloud-syncable store. Additive and idempotent: legacy items are read but
     /// never deleted, and each key is only migrated when the new store lacks it.
     private static func migrateLegacyKeysIfNeeded() async {
+        guard ReleaseTrain.current == .stable else { return }
         let existing = Set(await credentialStorage.knownIdentifiers())
 
         for identifier in [deepgramKeyID, openRouterKeyID, openAIKeyID] where !existing.contains(identifier) {

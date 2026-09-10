@@ -15,7 +15,7 @@ public actor PersonalLexiconStore {
       supportURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
     }
-    let appFolder = supportURL.appendingPathComponent("SpeakApp", isDirectory: true)
+    let appFolder = supportURL.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
     let lexiconFolder = appFolder.appendingPathComponent("PersonalLexicon", isDirectory: true)
 
     if !fileManager.fileExists(atPath: lexiconFolder.path) {

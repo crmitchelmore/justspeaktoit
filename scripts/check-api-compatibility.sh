@@ -39,6 +39,35 @@ if ! grep -q "API breakage" <<< "$output"; then
     exit "$status"
 fi
 
+# Reviewed additive changes are listed in the allowlist and do not fail the
+# gate. The tool's own --breakage-allowlist-path does not match SwiftPM's
+# rendered findings, so the filtering is done here against the same text the
+# report prints. See the allowlist file for what may be listed.
+ALLOWLIST="$(dirname "$0")/api-breakage-allowlist.txt"
+findings=$(grep -o 'API breakage: .*' <<< "$output" | sort -u)
+allowed=""
+if [[ -f "$ALLOWLIST" ]]; then
+    allowed=$(grep -v '^[[:space:]]*#' "$ALLOWLIST" | grep -v '^[[:space:]]*$')
+fi
+
+remaining=$findings
+if [[ -n "$allowed" ]]; then
+    remaining=$(grep -vxF -f <(printf '%s\n' "$allowed") <<< "$findings" || true)
+    ignored=$(grep -xF -f <(printf '%s\n' "$allowed") <<< "$findings" || true)
+    if [[ -n "$ignored" ]]; then
+        echo "==> Ignoring reviewed additive changes from ${ALLOWLIST}:"
+        sed 's/^/    /' <<< "$ignored"
+    fi
+fi
+
+if [[ -z "${remaining//[[:space:]]/}" ]]; then
+    echo "==> No unreviewed public API breakage against ${BASELINE}"
+    exit 0
+fi
+
+echo "==> Unreviewed breaking changes:" >&2
+sed 's/^/    /' <<< "$remaining" >&2
+
 breaking_title_pattern='^[a-z]+(\([^)]+\))?!:'
 if [[ "$PR_TITLE" =~ $breaking_title_pattern ]]; then
     echo "==> Breaking API change declared by the PR title's '!' marker;"

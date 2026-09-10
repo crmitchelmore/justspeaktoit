@@ -70,15 +70,41 @@ final class TranscriberCoordinator: ObservableObject {
         return Int(Date().timeIntervalSince(start))
     }
 
+    /// Exclusive ownership of provider startup, so a second call while the
+    /// first is still awaiting `session.start` cannot create a second session
+    /// and leave the earlier one capturing (#943). This is the same guard the
+    /// transcribers use; the coordinator does not invent its own.
+    private let startup = RecordingStartupOperation()
+
+    /// True while a start is in flight. UI that toggles recording uses this to
+    /// stay on one action until startup settles.
+    var isStartingRecording: Bool { startup.isStarting }
+
     /// - Parameter entry: the earliest app-code entry the caller observed.
     ///   Callers with no earlier observation pass `nil` and the coordinator
     ///   times its own entry (issue #972).
-    func start( // swiftlint:disable:this function_body_length
+    func start(
         preRollBuffers: [AVAudioPCMBuffer] = [],
         analyzerFallbackAllowed: Bool = true,
         entry: StartupEntry? = nil
     ) async throws {
         guard stoppingSession == nil else { throw LifecycleError.sessionFinalising }
+        guard !isRunning, !startup.isStarting else { return }
+        try await startup.run {
+            try await self.performStart(
+                preRollBuffers: preRollBuffers,
+                analyzerFallbackAllowed: analyzerFallbackAllowed,
+                entry: entry
+            )
+        }
+    }
+
+    // swiftlint:disable:next function_body_length
+    private func performStart(
+        preRollBuffers: [AVAudioPCMBuffer],
+        analyzerFallbackAllowed: Bool,
+        entry: StartupEntry?
+    ) async throws {
         let runID = beginRun(entry: entry)
         let settings = AppSettings.shared
         // Wait for the initial keychain load so auto-start on a cold launch
@@ -708,16 +734,12 @@ public struct ContentView: View {
             }
             .task {
                 // The guided first run owns the microphone until it is done,
-                // so never auto-start behind it.
+                // so never auto-start behind it. Auto-start is reconsidered
+                // when onboarding finishes (see the sheet's onDismiss).
                 if onboarding.shouldPresentFirstRun {
                     showingFirstRun = true
-                } else if AppSettings.shared.autoStartRecording && !coordinator.isRunning {
-                    do {
-                        try await coordinator.start()
-                    } catch {
-                        errorMessage = error.localizedDescription
-                        showingError = true
-                    }
+                } else {
+                    await autoStartIfEnabled()
                 }
             }
             .onAppear {
@@ -750,8 +772,14 @@ public struct ContentView: View {
                 }
             }
             // Swiping the sheet away counts as finishing it, so first run is
-            // offered exactly once and never nags.
-            .sheet(isPresented: $showingFirstRun, onDismiss: { onboarding.completeFirstRun() }, content: {
+            // offered exactly once and never nags. Auto-start is considered on
+            // the way out, so enabling it before onboarding still takes effect
+            // on this launch — the onboarding capture has already been stopped
+            // by then, and `coordinator.start()` is single-flight regardless.
+            .sheet(isPresented: $showingFirstRun, onDismiss: {
+                onboarding.completeFirstRun()
+                Task { await autoStartIfEnabled() }
+            }, content: {
                 FirstRunOnboardingView(
                     audioSessionManager: coordinator.audioSessionManager,
                     liveTranscript: coordinator.partialText,
@@ -966,6 +994,22 @@ public struct ContentView: View {
     }
 
     // MARK: - Background session surfacing
+
+    /// Starts recording on launch when the user asked for it. Considered once
+    /// when onboarding was already complete and once more when the first-run
+    /// sheet finishes, so enabling auto-start before onboarding is not silently
+    /// dropped for the whole first launch.
+    private func autoStartIfEnabled() async {
+        guard AppSettings.shared.autoStartRecording else { return }
+        guard !coordinator.isRunning, !coordinator.isStartingRecording else { return }
+        guard !backgroundService.isRunning else { return }
+        do {
+            try await coordinator.start()
+        } catch {
+            errorMessage = error.localizedDescription
+            showingError = true
+        }
+    }
 
     /// Presents a background session failure once.
     ///

@@ -62,12 +62,25 @@ final class KeyboardHandoffController: ObservableObject {
     private var unmarkText: (() -> Void)?
     private var streamsMarkedText = false
     private var isSecureField = true
-    /// A `setMarkedText` of our own makes the host report a selection change.
-    /// At most one such echo is swallowed per write, so a genuine caret move
-    /// still abandons the stream; a host that reports more than one only makes
-    /// the keyboard fall back to plain insertion, never insert in the wrong
-    /// place.
-    private var expectsSelectionEcho = false
+    /// When this keyboard last wrote marked text, or `nil` when no echo is
+    /// outstanding.
+    ///
+    /// A `setMarkedText` of our own usually makes the host report a selection
+    /// change, and that echo must not be mistaken for the user moving the
+    /// caret. But a bare "expecting an echo" flag is not attribution: a host
+    /// that reports no selection callback for `setMarkedText` leaves it set
+    /// indefinitely, so the user's next genuine caret move — minutes later —
+    /// is the one that gets swallowed, and streaming carries on writing at a
+    /// caret that has moved. An echo is therefore only credited when it
+    /// arrives within `selectionEchoWindow` of the write that could have
+    /// caused it; anything later is treated as a real caret move and abandons
+    /// the stream, which costs only the live preview.
+    private var markedTextWrittenAt: ContinuousClock.Instant?
+    /// Injected so tests can move time without sleeping.
+    private let now: @MainActor () -> ContinuousClock.Instant
+    /// How soon after a marked-text write a selection callback can still be
+    /// attributed to it. A host echo is same-runloop; this is generous.
+    static let selectionEchoWindow = Duration.milliseconds(250)
 
     /// Safety-net poll cadence. Since #990 the containing app posts a Darwin
     /// `statusChanged` after every write the keyboard is waiting on, so the
@@ -80,10 +93,12 @@ final class KeyboardHandoffController: ObservableObject {
 
     init(
         store: KeyboardHandoffStore = .shared,
-        instantSessionStore: KeyboardInstantDictationStore = .shared
+        instantSessionStore: KeyboardInstantDictationStore = .shared,
+        now: @escaping @MainActor () -> ContinuousClock.Instant = { ContinuousClock().now }
     ) {
         self.store = store
         self.instantSessionStore = instantSessionStore
+        self.now = now
         self.consumer = KeyboardHandoffConsumer(store: store)
     }
 
@@ -105,7 +120,7 @@ final class KeyboardHandoffController: ObservableObject {
         self.streamsMarkedText = streamsMarkedText && setMarkedText != nil && unmarkText != nil
         self.isSecureField = isSecureField
         self.markedText = newMarkedTextSession()
-        self.expectsSelectionEcho = false
+        self.markedTextWrittenAt = nil
 
         if requestID == nil {
             requestID = store.activeRecord()?.requestID
@@ -145,6 +160,10 @@ final class KeyboardHandoffController: ObservableObject {
         insertText = nil
         setMarkedText = nil
         unmarkText = nil
+        markedTextWrittenAt = nil
+        // Dropping the observation does not unschedule a wake-up that is
+        // already in flight; invalidating it does.
+        statusObservation?.invalidate()
         statusObservation = nil
         pollTask?.cancel()
         pollTask = nil
@@ -155,12 +174,13 @@ final class KeyboardHandoffController: ObservableObject {
 
     func updateDocumentContext(documentIdentifier: UUID, selectionChanged: Bool) {
         if currentDocumentIdentifier != documentIdentifier {
-            // A different field: the marked range is unaddressable from here.
+            // A different field. `textDocumentProxy` already points at it, so
+            // the session forgets its ledger without issuing any proxy call —
+            // see `KeyboardMarkedTextSession.documentChanged()`.
+            markedTextWrittenAt = nil
             applyMarkedText(markedText.documentChanged())
         } else if selectionChanged {
-            if expectsSelectionEcho {
-                expectsSelectionEcho = false
-            } else {
+            if consumeAttributableSelectionEcho() == false {
                 applyMarkedText(markedText.caretMoved())
             }
         }
@@ -197,7 +217,7 @@ final class KeyboardHandoffController: ObservableObject {
             // A new run gets a new ledger. An earlier run in this appearance
             // may have abandoned streaming; that verdict belonged to it.
             markedText = newMarkedTextSession()
-            expectsSelectionEcho = false
+            markedTextWrittenAt = nil
             liveTranscript = ""
             presentation = .starting
             KeyboardHandoffSignal.postRequestChanged()
@@ -255,8 +275,13 @@ final class KeyboardHandoffController: ObservableObject {
     /// read and validated from the App Group exactly as the poll does.
     private func observeStatusChanges() {
         guard statusObservation == nil else { return }
+        // The observation delivers on the main queue and coalesces to one
+        // outstanding wake-up, so this runs straight through instead of
+        // spawning a fresh main-actor task per notification: a payload-free
+        // Darwin name is globally postable, and a task per post is an
+        // unbounded backlog anyone can create on this extension's main actor.
         statusObservation = KeyboardHandoffSignal.observeStatusChanges { [weak self] in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self?.refresh()
             }
         }
@@ -269,20 +294,29 @@ final class KeyboardHandoffController: ObservableObject {
         )
     }
 
+    /// Whether this selection callback can be attributed to a marked-text
+    /// write of our own. Consumes the expectation either way: at most one echo
+    /// is ever credited per write.
+    private func consumeAttributableSelectionEcho() -> Bool {
+        guard let writtenAt = markedTextWrittenAt else { return false }
+        markedTextWrittenAt = nil
+        return now() - writtenAt <= Self.selectionEchoWindow
+    }
+
     /// The only place that touches the host's marked text.
     private func applyMarkedText(_ action: KeyboardMarkedTextSession.Action) {
         switch action {
         case .none:
             return
         case let .mark(text):
-            expectsSelectionEcho = true
+            markedTextWrittenAt = now()
             setMarkedText?(text)
         case let .finalise(text):
-            expectsSelectionEcho = false
+            markedTextWrittenAt = nil
             setMarkedText?(text)
             unmarkText?()
         case .clear:
-            expectsSelectionEcho = false
+            markedTextWrittenAt = nil
             setMarkedText?("")
             unmarkText?()
         }
@@ -315,6 +349,7 @@ final class KeyboardHandoffController: ObservableObject {
 
         if let target = record.targetDocumentIdentifier,
            target != currentDocumentIdentifier {
+            markedTextWrittenAt = nil
             applyMarkedText(markedText.documentChanged())
             if record.phase != .completed {
                 _ = try? store.cancel(requestID: requestID)

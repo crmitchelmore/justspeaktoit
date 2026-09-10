@@ -195,7 +195,16 @@ public final class iOSHistoryManager: ObservableObject {
         return true
     }
 
-    /// Creates and adds a history item from transcription result.
+    /// Creates and adds a history item from a transcription result.
+    ///
+    /// Returns the item **only when the write reached disk**. Callers use the
+    /// returned item to decide whether to say "Saved to History" and whether
+    /// to publish a Handoff pointer at it, and neither may be claimed for an
+    /// entry that exists only in this process's memory: the receipt would be
+    /// false and the pointer would send a Mac to an entry that is gone after
+    /// the next relaunch (issue #674's durability signal, applied to #1006 and
+    /// #1008). The item stays in `items` for the current session either way,
+    /// and `persistenceError` already surfaces the failure in the UI.
     @discardableResult
     public func recordTranscription(
         text: String,
@@ -211,7 +220,7 @@ public final class iOSHistoryManager: ObservableObject {
             duration: duration,
             wordCount: text.split(separator: " ").count
         )
-        add(item)
+        guard upsertReportingDurability(item) else { return nil }
         return item
     }
 
@@ -222,6 +231,10 @@ public final class iOSHistoryManager: ObservableObject {
         saveHistory()
         syncedIDs.remove(item.id)
         saveSyncedIDs()
+        // A Handoff pointer must never outlive the entry it points at
+        // (issue #1006) — deleting the advertised entry individually counts
+        // just as much as clearing everything.
+        TranscriptHandoffPublisher.invalidateIfAdvertising(entryID: item.id)
 
         guard syncEnabled else { return }
         Task {
@@ -490,6 +503,9 @@ extension iOSHistoryManager: HistorySyncDelegate {
         syncedIDs.remove(id)
         saveHistory()
         saveSyncedIDs()
+        // Same rule as a local delete: the pointer cannot outlive its entry
+        // (issue #1006). A remote tombstone is still a deliberate deletion.
+        TranscriptHandoffPublisher.invalidateIfAdvertising(entryID: id)
     }
 
     public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {

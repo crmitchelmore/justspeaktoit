@@ -4,7 +4,30 @@ import SpeakiOSLib
 import SpeakSync
 import UIKit
 
+/// Calls a background-fetch completion handler exactly once, whichever of the
+/// reconciliation and its time bound gets there first. Calling it twice is a
+/// UIKit contract violation; never calling it costs the app future background
+/// delivery opportunities.
+@MainActor
+private final class OneShotBackgroundFetchCompletion {
+    private var handler: ((UIBackgroundFetchResult) -> Void)?
+
+    init(_ handler: @escaping (UIBackgroundFetchResult) -> Void) {
+        self.handler = handler
+    }
+
+    func complete(_ result: UIBackgroundFetchResult) {
+        guard let handler else { return }
+        self.handler = nil
+        handler(result)
+    }
+}
+
 final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
+    /// Well inside iOS's background-notification allowance, and far longer
+    /// than a routine incremental sync needs.
+    static let historyPushCompletionBudget: TimeInterval = 20
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -37,9 +60,25 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         // the next launch (issue #1007). Route it to the history engine and
         // leave every other push to the API-key sync as before.
         if HistorySyncPushRouting.isHistoryChange(userInfo) {
+            // A full CloudKit reconciliation is unbounded: it fetches every
+            // page and uploads every pending entry. iOS gives a background
+            // notification a limited allowance and reduces future delivery
+            // when a handler overruns it, so report a result on a bound of our
+            // own and let the reconciliation finish under a background task —
+            // an unfinished pass stays recoverable through the engine's queued
+            // follow-up and the next trigger.
+            let backgroundTask = application.beginBackgroundTask(withName: "HistoryPushReconciliation")
+            let completion = OneShotBackgroundFetchCompletion(completionHandler)
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(Self.historyPushCompletionBudget))
+                completion.complete(.newData)
+            }
             Task { @MainActor in
                 await iOSHistoryManager.shared.triggerSync()
-                completionHandler(.newData)
+                completion.complete(.newData)
+                if backgroundTask != .invalid {
+                    application.endBackgroundTask(backgroundTask)
+                }
             }
             return
         }

@@ -83,13 +83,13 @@ final class HardwareTriggerDestinationTests: XCTestCase {
 
     // MARK: - Auto (#1008)
 
-    /// The keyboard lane skips the pasteboard because the words are going into
-    /// the field the user was typing in; History still holds every capture.
-    func testAutoMapsAnOpenKeyboardToAHistoryOnlySideEffect() {
+    /// The keyboard lane skips the pasteboard only once the keyboard has been
+    /// observed inserting the words; History still holds every capture.
+    func testAutoMapsAConfirmedKeyboardInsertionToAHistoryOnlySideEffect() {
         let plan = AutoDestinationPolicy.plan(
             AutoDestinationPolicy.Inputs(
                 transcriptIsEmpty: false,
-                keyboardTargetIsOpen: true,
+                keyboardInsertedIntoField: true,
                 keyboardOfferAvailable: true
             )
         )
@@ -100,7 +100,7 @@ final class HardwareTriggerDestinationTests: XCTestCase {
         let plan = AutoDestinationPolicy.plan(
             AutoDestinationPolicy.Inputs(
                 transcriptIsEmpty: false,
-                keyboardTargetIsOpen: false,
+                keyboardInsertedIntoField: false,
                 keyboardOfferAvailable: true
             )
         )

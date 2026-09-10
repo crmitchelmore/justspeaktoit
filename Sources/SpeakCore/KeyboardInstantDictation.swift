@@ -269,14 +269,39 @@ public enum KeyboardHandoffSignal {
     }
 }
 
+/// A Darwin notification subscription that delivers **at most one pending
+/// wake-up at a time**, and that can be switched off synchronously.
+///
+/// Both properties matter because a Darwin name is globally postable and
+/// carries no payload. Enqueuing one main-queue block, and one main-actor
+/// task, per notification let any local process build an arbitrary backlog of
+/// stale refreshes on a keyboard extension's main actor simply by posting the
+/// name in a loop — the extension has a hard CPU and memory budget and would
+/// become unresponsive. Coalescing costs nothing in freshness: the handler
+/// re-reads the shared record when it runs, so one delivery after a burst
+/// observes exactly the same state as the last of N deliveries would.
+///
+/// The handler is always invoked on the **main queue**, so a `@MainActor`
+/// consumer can run straight through with `MainActor.assumeIsolated` rather
+/// than allocating a task per notification.
+///
+/// `invalidate()` exists because removing the last reference is not enough. A
+/// wake-up already sitting on the main queue would still run its handler after
+/// a keyboard has been dismissed, and that handler can re-advertise a target
+/// or act on a document the extension no longer owns.
 public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
     private let name: CFString
     private let handler: @Sendable () -> Void
+    private let lock = NSLock()
+    private var isDeliveryPending = false
+    private var isInvalidated = false
+    private var isObserving = false
 
     fileprivate init(name: CFString, handler: @escaping @Sendable () -> Void) {
         self.name = name
         self.handler = handler
         let pointer = Unmanaged.passUnretained(self).toOpaque()
+        isObserving = true
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             pointer,
@@ -285,7 +310,12 @@ public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
                 let observation = Unmanaged<KeyboardHandoffSignalObservation>
                     .fromOpaque(observer)
                     .takeUnretainedValue()
+                guard observation.beginDeliveryIfIdle() else { return }
                 DispatchQueue.main.async {
+                    // Cleared before the handler runs, so a notification posted
+                    // *while* it runs still schedules a fresh delivery and no
+                    // change is missed.
+                    guard observation.endDeliveryAndShouldRun() else { return }
                     observation.handler()
                 }
             },
@@ -295,12 +325,44 @@ public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
         )
     }
 
-    deinit {
+    /// Stops delivering, including any wake-up already queued. Idempotent, and
+    /// safe to call from any thread.
+    public func invalidate() {
+        lock.withLock { isInvalidated = true }
+        removeObserver()
+    }
+
+    private func beginDeliveryIfIdle() -> Bool {
+        lock.withLock {
+            guard !isInvalidated, !isDeliveryPending else { return false }
+            isDeliveryPending = true
+            return true
+        }
+    }
+
+    private func endDeliveryAndShouldRun() -> Bool {
+        lock.withLock {
+            isDeliveryPending = false
+            return !isInvalidated
+        }
+    }
+
+    private func removeObserver() {
+        let shouldRemove = lock.withLock {
+            guard isObserving else { return false }
+            isObserving = false
+            return true
+        }
+        guard shouldRemove else { return }
         CFNotificationCenterRemoveObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(self).toOpaque(),
             CFNotificationName(name),
             nil
         )
+    }
+
+    deinit {
+        removeObserver()
     }
 }

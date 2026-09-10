@@ -104,14 +104,23 @@ public final class KeyboardDeliveryStore: @unchecked Sendable {
     // MARK: - Offer (app-owned)
 
     /// Publishes one transcript for keyboard delivery, replacing any earlier
-    /// one. A new offer clears the previous claim so the extension can take it.
+    /// one.
+    ///
+    /// The previous claim is deliberately **not** deleted here. A claim names
+    /// the offer it settled (`KeyboardPickupClaim.offerID`), and every consumer
+    /// compares that identifier against the current offer, so a stale claim
+    /// already fails to suppress a replacement offer. Deleting it would open a
+    /// cross-process race the single-writer discipline otherwise avoids: the
+    /// keyboard can observe the new offer, insert it and write its claim in the
+    /// window between the two writes below, and this process would then erase
+    /// that fresh claim — leaving the offer looking unhandled so the next poll
+    /// inserts the same transcript a second time. The app owns `offer.v1`, the
+    /// extension owns `claim.v1`, and neither touches the other's key.
     @discardableResult
     public func publishOffer(_ offer: KeyboardPickupOffer) -> KeyboardPickupOffer? {
         let published: KeyboardPickupOffer? = lock.withLock {
             guard let defaults else { return nil }
             writeUnlocked(offer, key: Self.offerKey, to: defaults)
-            defaults.removeObject(forKey: Self.claimKey)
-            defaults.synchronize()
             return offer
         }
         // The offer key is app-owned, so wake the keyboard rather than making
@@ -122,12 +131,18 @@ public final class KeyboardDeliveryStore: @unchecked Sendable {
 
     /// Removes the offer entirely. Used when the app decides the transcript is
     /// no longer on the table at all.
+    ///
+    /// Announced for the same reason a publish is: retracting an offer changes
+    /// what the extension may present just as much as adding one, and a chip
+    /// for a withdrawn offer should not stay on screen until the safety-net
+    /// poll notices.
     public func clearOffer() {
         lock.withLock {
             defaults?.removeObject(forKey: Self.offerKey)
             defaults?.removeObject(forKey: Self.claimKey)
             defaults?.synchronize()
         }
+        announceStatusChange()
     }
 
     /// The current offer, or `nil` if there is none or it has aged out.

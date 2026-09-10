@@ -669,6 +669,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         let keyboardOffer = keyboardDeliverySource.flatMap {
             KeyboardDeliveryPublisher.publish(transcript: text, source: $0)
         }
+        // Publishing an offer is not delivering it. For an offer bound to the
+        // document the keyboard is open in, wait briefly for the extension to
+        // claim it — that claim is written after the proxy accepted the text,
+        // so it is the only evidence that the words reached the field. Without
+        // it the capture falls back to the clipboard below and the receipt
+        // says the keyboard did not take it, rather than reporting a field
+        // delivery for a transcript that is only in History.
+        let keyboardOutcome = await KeyboardDeliveryPublisher.awaitOutcome(for: keyboardOffer)
 
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
@@ -676,7 +684,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         let autoPlan = AutoDestinationPolicy.plan(
             AutoDestinationPolicy.Inputs(
                 transcriptIsEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                keyboardTargetIsOpen: keyboardOffer?.mode == .targetedInsert,
+                keyboardInsertedIntoField: keyboardOutcome == .insertedInField,
                 keyboardOfferAvailable: keyboardDeliverySource != nil
                     && KeyboardDeliveryStore.shared.isAvailable
             )
@@ -707,8 +715,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             for: CaptureReceiptBuilder.Outcome(
                 transcriptIsEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 preferredLane: requestedDestination == .auto ? autoPlan.preferredLane : .clipboard,
-                keyboardOfferWasTargeted: keyboardOffer?.mode == .targetedInsert,
-                keyboardOfferWasLatePickup: keyboardOffer?.mode == .latePickup,
+                keyboard: keyboardOutcome,
                 clipboardWriteSucceeded: clipboardOutcome.writeSucceeded,
                 savedToHistory: historyItem != nil,
                 mac: iOSHistoryManager.shared.macLaneOutcome(for: historyItem)

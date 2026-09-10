@@ -129,7 +129,7 @@ final class TranscriptionRecordingServiceTextTests: XCTestCase {
         pasteboard.string = "User clipboard"
         let service = TranscriptionRecordingService(
             sharedState: sharedState, historyManager: history,
-            polishClipboard: PolishClipboard(pasteboard: pasteboard, now: { 100 }, isActive: { true }),
+            polishClipboard: PolishClipboard(pasteboard: pasteboard),
             hasPolishingKey: { false }, polish: { text, _, _ in text }
         )
         defaults.set("Saved before microphone changed", forKey: "simulatorValidationTranscript")

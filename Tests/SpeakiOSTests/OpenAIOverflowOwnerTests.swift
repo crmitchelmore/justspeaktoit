@@ -47,7 +47,12 @@ final class OpenAIOverflowOwnerTests: XCTestCase {
         fixture.socket.acknowledge()
         await settle { fixture.finalResults == 1 && fixture.history.items.count == 1 }
         XCTAssertFalse(service.isRunning)
-        XCTAssertEqual(service.partialText, "Retained synthetic words")
+        // Live text is cleared once delivered; the settled capture carries it.
+        XCTAssertEqual(service.lastFinishedCapture?.text, "Retained synthetic words")
+        XCTAssertEqual(
+            service.lastFinishedCapture?.failureMessage,
+            OpenAIRealtimeError.preReadyAudioOverflow.localizedDescription
+        )
         XCTAssertEqual(fixture.pasteboard.string, "Original clipboard")
         XCTAssertNotNil(service.lastSessionError as? OpenAIRealtimeError)
         try fixture.assertRetainedAudio(at: originalURL)
@@ -170,10 +175,12 @@ private final class OverflowOwnerFixture {
                 return client
             },
             startCapture: { [unowned self] recorder in
-                let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1))
-                let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 24_000))
-                buffer.frameLength = 24_000
-                for frame in 0..<24_000 {
+                // 48 kHz is the native capture rate the AAC safety writer accepts on
+                // the simulator; the 24 kHz PCM the client sees is synthetic anyway.
+                let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+                let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000))
+                buffer.frameLength = 48_000
+                for frame in 0..<48_000 {
                     buffer.floatChannelData?[0][frame] = Float(sin(Double(frame) * 0.1)) * 0.25
                 }
                 let url = try recorder.startRecording(format: format)

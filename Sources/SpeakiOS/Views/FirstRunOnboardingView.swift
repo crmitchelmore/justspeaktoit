@@ -21,10 +21,24 @@ struct FirstRunOnboardingView: View {
     let stopTestDictation: () async -> String
     let onFinish: () -> Void
 
+    /// The test dictation is a three-state toggle, not a boolean. `starting`
+    /// exists because the coordinator start is asynchronous: without it a
+    /// second tap (or a Skip) arriving mid-start would be read as "not
+    /// recording" and could either spawn a second session or stop nothing and
+    /// leave the started one capturing.
+    private enum TestPhase {
+        case idle
+        case starting
+        /// A teardown arrived while startup was still in flight. `startTest`
+        /// stops the session it just created rather than leaving it live.
+        case stoppingAfterStart
+        case recording
+    }
+
     @State private var microphoneGranted: Bool?
     @State private var speechGranted: Bool?
     @State private var isRequestingPermissions = false
-    @State private var isRecording = false
+    @State private var phase: TestPhase = .idle
     @State private var testTranscript = ""
     @State private var secondsRemaining = Int(CaptureOnboardingPolicy.testDictationLimit)
     @State private var failureMessage: String?
@@ -41,6 +55,15 @@ struct FirstRunOnboardingView: View {
     private var testPassed: Bool {
         CaptureOnboardingPolicy.isProvenTranscript(testTranscript)
     }
+
+    /// True from the moment a start is requested until the capture has been
+    /// stopped, so nothing releases the sheet while a microphone may be live.
+    private var testIsActive: Bool { phase != .idle }
+
+    private var isRecording: Bool { phase == .recording }
+
+    /// A start is in flight, so there is nothing stoppable yet.
+    private var isSettlingStartup: Bool { phase == .starting || phase == .stoppingAfterStart }
 
     var body: some View {
         NavigationStack {
@@ -71,12 +94,21 @@ struct FirstRunOnboardingView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(testPassed ? "Done" : "Skip") { finish() }
                         .accessibilityIdentifier("firstRunFinishButton")
+                        // Finishing stops the capture first; the button stays
+                        // out of reach only while startup itself is in flight,
+                        // where there is nothing stoppable yet.
+                        .disabled(isSettlingStartup)
                 }
             }
-            .interactiveDismissDisabled(isRecording)
+            .interactiveDismissDisabled(testIsActive)
         }
         .task { refreshPermissionStatus() }
-        .onDisappear { countdown?.cancel() }
+        // Returning from iOS Settings with access newly granted must clear the
+        // Settings-only recovery path rather than leaving the test disabled.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissionStatus()
+        }
+        .onDisappear { stopTestOnTeardown() }
     }
 
     // MARK: - Steps
@@ -152,7 +184,7 @@ struct FirstRunOnboardingView: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!permissionsGranted)
+            .disabled(!permissionsGranted || isSettlingStartup)
             .accessibilityIdentifier("firstRunTestDictationButton")
         }
     }
@@ -172,11 +204,21 @@ struct FirstRunOnboardingView: View {
         }
         .accessibilityElement(children: .combine)
     }
+}
 
+// The actions live in an extension so the view body and the actions can
+// each be read on their own; SwiftUI treats them identically.
+@MainActor
+private extension FirstRunOnboardingView {
     // MARK: - Actions
 
     private func refreshPermissionStatus() {
-        microphoneGranted = audioSessionManager.hasMicrophonePermission() ? true : nil
+        if audioSessionManager.hasMicrophonePermission() {
+            microphoneGranted = true
+        } else if microphoneGranted != false {
+            // A refused request is remembered; "not granted yet" stays unknown.
+            microphoneGranted = nil
+        }
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized: speechGranted = true
         case .denied, .restricted: speechGranted = false
@@ -200,24 +242,43 @@ struct FirstRunOnboardingView: View {
     }
 
     private func toggleTestDictation() async {
-        if isRecording {
-            await stopTest()
-        } else {
+        switch phase {
+        case .idle:
             await startTest()
+        case .recording:
+            await stopTest()
+        case .starting, .stoppingAfterStart:
+            // A start is already in flight and owns the toggle. The coordinator
+            // refuses an overlapping start anyway; this keeps the UI honest
+            // rather than relying on that alone.
+            break
         }
     }
 
     private func startTest() async {
+        guard phase == .idle else { return }
         failureMessage = nil
         testTranscript = ""
         secondsRemaining = Int(CaptureOnboardingPolicy.testDictationLimit)
+        // Claim the toggle before the await: a second tap during startup must
+        // not be read as "not recording".
+        phase = .starting
         do {
             try await startTestDictation()
         } catch {
-            failureMessage = error.localizedDescription
+            let wasTornDown = phase == .stoppingAfterStart
+            phase = .idle
+            if !wasTornDown { failureMessage = error.localizedDescription }
             return
         }
-        isRecording = true
+        if phase == .stoppingAfterStart {
+            // The sheet was dismissed while startup was in flight. The session
+            // exists now, so this is the only place that can release it.
+            phase = .idle
+            _ = await stopTestDictation()
+            return
+        }
+        phase = .recording
         countdown = Task {
             for remaining in stride(from: secondsRemaining - 1, through: 0, by: -1) {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -229,10 +290,10 @@ struct FirstRunOnboardingView: View {
     }
 
     private func stopTest() async {
-        guard isRecording else { return }
+        guard phase == .recording else { return }
         countdown?.cancel()
         countdown = nil
-        isRecording = false
+        phase = .idle
         let text = await stopTestDictation()
         testTranscript = text
         if !CaptureOnboardingPolicy.isProvenTranscript(text) {
@@ -240,19 +301,54 @@ struct FirstRunOnboardingView: View {
         }
     }
 
+    /// Stops the test capture if one is running and reports whether the caller
+    /// had to wait for it. Used by every path that ends the sheet, so the
+    /// microphone can never outlive the UI that started it.
+    private func stopTestIfActive() async {
+        countdown?.cancel()
+        countdown = nil
+        switch phase {
+        case .idle, .stoppingAfterStart:
+            return
+        case .recording:
+            phase = .idle
+            _ = await stopTestDictation()
+        case .starting:
+            // Startup has not returned, so there may be no session to stop yet.
+            // Hand the stop to `startTest`, which resumes owning it.
+            phase = .stoppingAfterStart
+        }
+    }
+
+    /// Any dismissal route other than the toolbar button — a programmatic
+    /// dismissal, or a swipe once the capture has ended — still has to release
+    /// the microphone.
+    private func stopTestOnTeardown() {
+        guard phase != .idle else {
+            countdown?.cancel()
+            countdown = nil
+            return
+        }
+        Task { await stopTestIfActive() }
+    }
+
     /// Primes the Live Activity so the first headless trigger can update an
     /// existing activity instead of asking the user to continue in the app,
-    /// then records that first run is over.
+    /// then records that first run is over. The test capture is stopped first:
+    /// the sheet is never released while its recording is still live.
     private func finish() {
         countdown?.cancel()
         countdown = nil
-        if permissionsGranted, AppSettings.shared.liveActivitiesEnabled {
-            TranscriptionActivityManager.shared.startActivity(
-                provider: "Ready to record",
-                initialStatus: .idle
-            )
+        Task {
+            await stopTestIfActive()
+            if permissionsGranted, AppSettings.shared.liveActivitiesEnabled {
+                TranscriptionActivityManager.shared.startActivity(
+                    provider: "Ready to record",
+                    initialStatus: .idle
+                )
+            }
+            onFinish()
         }
-        onFinish()
     }
 }
 #endif

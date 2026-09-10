@@ -89,12 +89,23 @@ public struct SecureStorageConfiguration: Sendable {
     public let synchronizable: Bool
 
     public init(
+        service: String,
+        masterAccount: String = "speak-app-secrets",
+        legacyServices: [String] = [],
+        accessGroup: String? = nil,
+        synchronizable: Bool = false
+    ) {
+        self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
+                  accessGroup: accessGroup, synchronizable: synchronizable, releaseTrain: .current)
+    }
+
+    public init(
         service: String = "com.github.speakapp.credentials",
         masterAccount: String = "speak-app-secrets",
         legacyServices: [String] = [],
         accessGroup: String? = nil,
         synchronizable: Bool = false,
-        releaseTrain: ReleaseTrain = .current
+        releaseTrain: ReleaseTrain
     ) {
         self.service = releaseTrain.namespace(service)
         self.masterAccount = masterAccount

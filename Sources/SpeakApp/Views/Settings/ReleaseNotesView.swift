@@ -12,6 +12,7 @@ struct ReleaseNotesView: View {
   static func makeBrowser(bundle: Bundle = .main) -> ReleaseNotesBrowser {
     ReleaseNotesBrowser(
             installedVersion: ReleaseNotesCatalog.installedVersion(bundle: bundle),
+            train: .current,
             installedBuild: ReleaseNotesCatalog.installedBuild(bundle: bundle)
         )
   }

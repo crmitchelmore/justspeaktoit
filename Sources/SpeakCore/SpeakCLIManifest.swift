@@ -41,10 +41,18 @@ public struct SpeakCLIManifest: Codable, Equatable, Sendable {
 
     public init(
         schemaVersion: Int = SpeakCLIManifest.currentSchemaVersion,
+        version: String, automationSchemaVersion: Int, assets: [Asset]
+    ) {
+        self.init(schemaVersion: schemaVersion, version: version,
+                  automationSchemaVersion: automationSchemaVersion, assets: assets, releaseTrain: nil)
+    }
+
+    public init(
+        schemaVersion: Int = SpeakCLIManifest.currentSchemaVersion,
         version: String,
         automationSchemaVersion: Int,
         assets: [Asset],
-        releaseTrain: ReleaseTrain? = nil
+        releaseTrain: ReleaseTrain?
     ) {
         self.releaseTrain = releaseTrain
         self.schemaVersion = schemaVersion

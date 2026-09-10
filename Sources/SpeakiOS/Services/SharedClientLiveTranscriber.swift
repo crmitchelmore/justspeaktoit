@@ -80,6 +80,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     /// Persistent audio recorder — saves audio to disk alongside transcription,
     /// so a session survives the network dropping mid-stream.
     public let audioRecorder = AudioRecordingPersistence()
+    let recordingLoss = RecordingLossReporting()
 
     /// Serial queue that takes tap buffers off the real-time audio thread —
     /// persistence and resample + network sends all run here, not in the tap
@@ -129,6 +130,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func startCapture() async throws {
+        recordingLoss.begin(recorder: audioRecorder)
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             let err = StreamingClientError.missingAPIKey(provider: route.provider.displayName)
             SpeakLogger.logError(
@@ -223,6 +225,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     public func stop() async -> TranscriptionResult {
         configurationObserver.stop()
         captureInterruptionObserver.stop()
+        let lossRun = recordingLoss.currentReport
         guard isRunning, !isStopping else {
             await cleanupTask?.value
             let text = partialText.isEmpty ? accumulated.text : partialText
@@ -256,7 +259,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             return makeResult(text: partialText, duration: 0)
         }
         activeCaptureID = nil
-        _ = audioRecorder.stopRecording()
+        recordingLoss.finish(recorder: audioRecorder, run: lossRun)
         isRunning = false
         releaseAudioSession()
 
@@ -282,6 +285,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func cleanupCapture() -> Task<Void, Never>? {
         configurationObserver.stop()
         captureInterruptionObserver.stop()
+        recordingLoss.cancel()
         if let cleanupTask { return cleanupTask }
         guard isRunning || ownsAudioSession || hasInputTap else { return nil }
         audioEngine.stop()
@@ -450,10 +454,15 @@ private extension SharedClientLiveTranscriber {
         let nativeSampleRate = nativeFormat.sampleRate
         let signal = firstInputSignal
         let captureID = activeCaptureID
+        // The safety writer opens before the tap and the engine, so the file
+        // covers the very first buffers instead of starting a beat late
+        // (issue #992); a writer failure is reported, never fatal (issue #950).
+        recordingLoss.startWriter(audioRecorder, format: nativeFormat)
+        let lossReport = recordingLoss.currentReport
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
-            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            guard let self, let copied = lossReport.copyCapture(buffer, using: self.tapBufferPool) else { return }
             if copied.frameLength > 0, let captureID, signal.markObserved() {
                 Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
             }
@@ -468,9 +477,6 @@ private extension SharedClientLiveTranscriber {
         }
         hasInputTap = true
 
-        // The safety writer opens before the engine, so the file covers the
-        // very first buffers instead of starting a beat late (issue #992).
-        try? audioRecorder.startRecording(format: nativeFormat)
         audioEngine.prepare()
         try audioEngine.start()
         // Only after the engine actually returned.

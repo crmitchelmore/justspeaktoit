@@ -24,6 +24,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     @Published public private(set) var isRunning = false
     @Published public private(set) var partialText = ""
     @Published public private(set) var wordCount = 0
+    /// Nonfatal audio-loss notice, separate from errors that stop recording.
+    @Published public private(set) var recordingWarning: String?
+    private var recordingWarningRunID = UUID()
     /// Error that ended the most recent session mid-recording. Published so the
     /// app can surface it on next foreground instead of silently losing audio.
     @Published public internal(set) var lastSessionError: Error? {
@@ -332,6 +335,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // publishes an empty completion for *this* run rather than leaving a
         // waiter to read an older one.
         currentRunID = runID
+        recordingWarningRunID = UUID()
         state = lifecycle.state
         defer { state = lifecycle.state }
 
@@ -352,6 +356,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         lastSessionError = nil
         sessionErrorToken = nil
         captureStopNotice = nil
+        recordingWarning = nil
         providerFallbackNotice = nil
         currentTrigger = keyboardProfile == nil ? trigger : .keyboard
         // A model the catalogue only lists for batch transcription cannot run in
@@ -476,6 +481,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 self.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
                 self.handlePartialResult(text: text)
             }
+            bindRecordingWarning(session)
             session.onError = { [weak self, weak session] error in
                 guard let self, let session,
                       self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
@@ -888,6 +894,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             duration: duration
         )
 
+        let endingSession = transcriptionSession
         let drained = await drainActiveTranscriber(duration: duration)
         startTime = nil
         guard latestCompletionID == completionID else {
@@ -935,7 +942,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             ? historyManager.recordTranscription(
                 text: text,
                 model: currentModel,
-                duration: result.duration
+                duration: result.duration,
+                errorMessage: endingSession?.recordingLossSummary.map { warning in
+                    [warning, lastSessionError?.localizedDescription].compactMap { $0 }.joined(separator: " ")
+                }
             )
             : nil
 
@@ -1094,6 +1104,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             startPostProcessing(
                 text: text,
                 historyItemID: historyItem?.id,
+                recordingWarning: historyItem?.errorMessage,
                 completionID: completionID,
                 runID: completedRunID,
                 assertion: assertion
@@ -1151,6 +1162,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
         currentTrigger = nil
         disarmEndPointing()
+        // The cancelled run's loss notice describes a recording that is being
+        // discarded; retire it with the run so a later capture cannot inherit it.
+        recordingWarningRunID = UUID()
+        recordingWarning = nil
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return
@@ -1324,9 +1339,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
     }
 
+    private func bindRecordingWarning(_ session: IOSTranscriptionSession) {
+        session.onRecordingWarning = { [weak self, weak session] message in
+            guard let self, let session, self.transcriptionSession === session else { return }
+            self.recordingWarning = message
+        }
+    }
+
     private func startPostProcessing(
         text: String,
         historyItemID: UUID?,
+        recordingWarning: String? = nil,
         completionID: UUID,
         runID: UUID?,
         assertion: BackgroundTaskAssertion
@@ -1346,12 +1369,18 @@ public final class TranscriptionRecordingService: ObservableObject {
                     self?.lastPolishedTranscript = polished
                 }
                 if let historyItemID {
-                    historyManager.setPostProcessed(polished, for: historyItemID)
+                    // A loss notice recorded at stop survives the polish (issue #950).
+                    historyManager.setPostProcessed(
+                        polished, for: historyItemID, preservingError: recordingWarning
+                    )
                 }
             },
             failure: { error in
                 if let historyItemID {
-                    historyManager.setError(error.localizedDescription, for: historyItemID)
+                    historyManager.setError(
+                        [recordingWarning, error.localizedDescription].compactMap { $0 }.joined(separator: " "),
+                        for: historyItemID
+                    )
                 }
             },
             completion: { [weak self] in
@@ -1459,7 +1488,13 @@ private extension TranscriptionRecordingService {
         if let session = transcriptionSession {
             transcriptionSession = nil
             stoppingSession = session
-            defer { stoppingSession = nil }
+            let warningRunID = recordingWarningRunID
+            defer {
+                stoppingSession = nil
+                // The drained writer's final summary replaces the initial notice
+                // unless a newer run already owns the surface (issue #950).
+                if recordingWarningRunID == warningRunID { recordingWarning = session.recordingLossSummary }
+            }
             do {
                 guard let result = try await boundedStop(of: session) else {
                     // The stop was abandoned, so nothing here delivers this

@@ -27,6 +27,10 @@ protocol IOSRecordingSession: AnyObject {
     func start(preRollBuffers: [AVAudioPCMBuffer], analyzerFallbackAllowed: Bool) async throws
     func stop() async throws -> TranscriptionResult
     func cancel()
+    /// Publishes a nonfatal capture or writer loss for this run (#950).
+    var onRecordingWarning: ((String) -> Void)? { get set }
+    /// A summary of this run's losses, once it has finished.
+    var recordingLossSummary: String? { get }
 }
 
 /// One factory-owned transcription session shared by foreground and hardware-trigger recording.
@@ -81,6 +85,29 @@ final class IOSTranscriptionSession: IOSRecordingSession {
     /// Realtime, the shared client and batch — report through one seam.
     /// Measurement only: nothing here changes capture, ordering or delivery.
     var onStartupObservation: ((StartupObservation) -> Void)?
+    var onRecordingWarning: ((String) -> Void)?
+
+    var recordingLossSummary: String? { recordingLoss.finalSummary }
+
+    var recordingLoss: RecordingLossReporting {
+        switch backend {
+        case .batch(let transcriber): return transcriber.recordingLoss
+        case .apple(let transcriber): return transcriber.recordingLoss
+        case .openAI(let transcriber): return transcriber.recordingLoss
+        case .shared(let transcriber): return transcriber.recordingLoss
+        }
+    }
+
+    #if DEBUG
+    var recordingPersistenceForTesting: AudioRecordingPersistence {
+        switch backend {
+        case .batch(let transcriber): return transcriber.audioRecorder
+        case .apple(let transcriber): return transcriber.audioRecorder
+        case .openAI(let transcriber): return transcriber.audioRecorder
+        case .shared(let transcriber): return transcriber.audioRecorder
+        }
+    }
+    #endif
 
     let resolution: Resolution
 
@@ -286,6 +313,7 @@ final class IOSTranscriptionSession: IOSRecordingSession {
     }
 
     private func bindCallbacks() {
+        recordingLoss.onWarning = { [weak self] message in self?.onRecordingWarning?(message) }
         let partialHandler: (String, Bool) -> Void = { [weak self] text, isFinal in
             guard let self else { return }
             self.onPartialResult?(self.partialText.isEmpty ? text : self.partialText, isFinal)

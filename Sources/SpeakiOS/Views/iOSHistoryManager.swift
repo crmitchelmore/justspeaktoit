@@ -236,10 +236,16 @@ public final class iOSHistoryManager: ObservableObject {
     /// #1008). The item stays in `items` for the current session either way,
     /// and `persistenceError` already surfaces the failure in the UI.
     @discardableResult
-    public func recordTranscription(
+    public func recordTranscription(text: String, model: String, duration: TimeInterval) -> iOSHistoryItem? {
+        recordTranscription(text: text, model: model, duration: duration, errorMessage: nil)
+    }
+
+    @discardableResult
+    func recordTranscription(
         text: String,
         model: String,
-        duration: TimeInterval
+        duration: TimeInterval,
+        errorMessage: String?
     ) -> iOSHistoryItem? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -248,7 +254,8 @@ public final class iOSHistoryManager: ObservableObject {
             transcription: text,
             model: model,
             duration: duration,
-            wordCount: text.split(separator: " ").count
+            wordCount: text.split(separator: " ").count,
+            errorMessage: errorMessage
         )
         guard upsertReportingDurability(item) else { return nil }
         return item
@@ -350,9 +357,13 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Stores a polished transcript on an entry and re-syncs it.
     public func setPostProcessed(_ processed: String, for id: UUID) {
+        setPostProcessed(processed, for: id, preservingError: nil)
+    }
+
+    func setPostProcessed(_ processed: String, for id: UUID, preservingError: String?) {
         loadHistoryFromDiskIfNeeded()
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        let updated = items[index].withPostProcessed(processed)
+        let updated = items[index].withPostProcessed(processed).withError(preservingError)
         reprocessingIDs.remove(id)
         upsertReportingDurability(updated)
     }

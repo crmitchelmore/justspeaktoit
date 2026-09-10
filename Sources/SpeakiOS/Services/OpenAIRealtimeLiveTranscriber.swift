@@ -144,6 +144,8 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
+    let recordingLoss = RecordingLossReporting()
+    var startCaptureAudio: (() throws -> Void)?
 
     /// Serial queue that takes tap buffers off the real-time audio thread —
     /// persistence, resampling, and the base64/JSON encode inside
@@ -194,6 +196,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
     private func startCapture() async throws {
         firstInputSignal = FirstInputSignal()
+        recordingLoss.begin(recorder: audioRecorder)
         SpeakLogger.logTranscription(event: "start", model: "openai/\(modelID)")
 
         guard let apiKey, !apiKey.isEmpty else {
@@ -215,7 +218,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         ownsAudioSession = true
         try await configureAudioSession()
         try Task.checkCancellation()
-        connectClient(apiKey: apiKey)
+        if startCaptureAudio == nil { connectClient(apiKey: apiKey) }
         do {
             if let startCaptureAudio {
                 try startCaptureAudio()
@@ -259,6 +262,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     public func stop() async -> TranscriptionResult {
         configurationObserver.stop()
         captureInterruptionObserver.stop()
+        let lossRun = recordingLoss.currentReport
         guard isRunning, !hasFinishedStopping else {
             return emptyResult()
         }
@@ -287,7 +291,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
         transcriber = nil
 
-        _ = audioRecorder.stopRecording()
+        recordingLoss.finish(recorder: audioRecorder, run: lossRun)
 
         let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let text = composedTranscript()
@@ -400,6 +404,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private func cleanupCapture() {
         configurationObserver.stop()
         captureInterruptionObserver.stop()
+        recordingLoss.cancel()
         guard isRunning || ownsAudioSession || hasInputTap else { return }
 
         audioEngine.stop()
@@ -489,10 +494,15 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         let signal = firstInputSignal
         let captureID = activeCaptureID
 
+        // The safety writer opens before the tap and the engine, so the file
+        // covers the very first buffers instead of starting a beat late
+        // (issue #992); a writer failure is reported, never fatal (issue #950).
+        recordingLoss.startWriter(audioRecorder, format: nativeFormat)
+        let lossReport = recordingLoss.currentReport
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
-            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            guard let self, let copied = lossReport.copyCapture(buffer, using: self.tapBufferPool) else { return }
             if copied.frameLength > 0, let captureID, signal.markObserved() {
                 Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
             }
@@ -510,9 +520,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
         }
         hasInputTap = true
 
-        // The safety writer opens before the engine, so the file covers the
-        // very first buffers instead of starting a beat late (issue #992).
-        try? audioRecorder.startRecording(format: nativeFormat)
         audioEngine.prepare()
         try audioEngine.start()
         // Only after the engine actually returned.

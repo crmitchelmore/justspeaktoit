@@ -1,0 +1,144 @@
+name: iOS Device Matrix (opt-in)
+
+# Runs the iOS test bundles on a *physical* device attached to a self-hosted
+# runner. ActivityKit and AVAudioSession are not simulator-faithful, so the
+# simulator job in `ci.yml` can only prove the app's own logic; this job is the
+# only automated place a real audio session and a real Live Activity are
+# involved (issue #998).
+#
+# ## It is opt-in, deliberately
+#
+# Nothing here is a required check and nothing here runs by default. The job is
+# gated on the repository variable `IOS_DEVICE_MATRIX_ENABLED`, which does not
+# exist until someone creates it, so:
+#
+#   * with no variable set, every run of this workflow completes in seconds
+#     with the job **skipped** — it never queues against a runner label that
+#     has no runner, and it never blocks or fails anything in `ci.yml`;
+#   * setting `IOS_DEVICE_MATRIX_ENABLED=true` without a matching runner would
+#     leave the job queued, so the variable is the switch a maintainer flips
+#     only once the runner and the provisioned device are both in place.
+#
+# ## Setting it up
+#
+#   1. Register a self-hosted macOS runner with the labels
+#      `self-hosted`, `macOS`, `ios-device`.
+#   2. Attach and trust a provisioned iPhone; `xcrun xctrace list devices`
+#      should show it.
+#   3. Set the repository variables `IOS_DEVICE_MATRIX_ENABLED=true` and
+#      `IOS_DEVICE_UDID=<the device UDID>`.
+#   4. Signing is real here: the runner needs a keychain with a development
+#      certificate and a profile carrying the App Group and Live Activity
+#      entitlements. `CODE_SIGNING_ALLOWED=NO` is not an option on device —
+#      without those entitlements the app crashes at launch.
+#
+# Automated device runs still do not replace the manual matrix in
+# `.github/ISSUE_TEMPLATE/action_button_device_matrix.md`: no XCUITest can
+# press a hardware Action Button, read the Dynamic Island, or take a phone call.
+
+on:
+  schedule:
+    # Nightly, well clear of the release workflows.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      device_udid:
+        description: "Device UDID to target (defaults to the IOS_DEVICE_UDID variable)"
+        required: false
+        type: string
+
+concurrency:
+  # One device, one run at a time.
+  group: ios-device-matrix
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  device-tests:
+    name: iOS Tests (physical device)
+    # Skipped outright until a maintainer opts in, so a repository with no
+    # self-hosted runner sees this workflow succeed with nothing queued.
+    if: ${{ vars.IOS_DEVICE_MATRIX_ENABLED == 'true' }}
+    runs-on: [self-hosted, macOS, ios-device]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve the target device
+        env:
+          INPUT_UDID: ${{ inputs.device_udid }}
+          VAR_UDID: ${{ vars.IOS_DEVICE_UDID }}
+        run: |
+          set -euo pipefail
+          UDID="${INPUT_UDID:-$VAR_UDID}"
+          if [ -z "$UDID" ]; then
+            echo "::error::No device UDID. Set the IOS_DEVICE_UDID repository variable" \
+                 "or pass device_udid when dispatching."
+            exit 1
+          fi
+          echo "DEVICE_UDID=$UDID" >> "$GITHUB_ENV"
+          echo "::group::Attached devices"
+          xcrun xctrace list devices || true
+          echo "::endgroup::"
+
+      - name: Install Tuist
+        run: brew install tuist
+
+      - name: Generate iOS App Project
+        env:
+          TUIST_IOS_KEYBOARD: "1"
+        run: tuist generate --no-open
+
+      - name: Test on device
+        id: device-tests
+        # Signing is required: the App Group and Live Activity entitlements are
+        # what make this run worth more than the simulator one.
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS \
+            -destination "platform=iOS,id=$DEVICE_UDID" \
+            -only-testing:SpeakiOSTests \
+            -only-testing:SpeakiOSUITests \
+            -resultBundlePath "$RUNNER_TEMP/SpeakiOS-device.xcresult" \
+            -skipPackagePluginValidation \
+            2>&1 | tee "$RUNNER_TEMP/ios-device-tests.log" | tail -50
+
+      - name: Label the run as device evidence
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### iOS tests — physical device"
+            echo
+            echo "Device UDID: \`$DEVICE_UDID\`"
+            echo "Outcome: ${{ steps.device-tests.outcome }}"
+            echo
+            echo "Unlike the simulator job in \`ci.yml\`, this run used a real"
+            echo "AVAudioSession and a real ActivityKit activity. It still does"
+            echo "not cover the hardware Action Button, the Dynamic Island, or"
+            echo "interruptions — those stay on the manual device matrix."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show failing assertions
+        if: ${{ failure() || cancelled() }}
+        run: |
+          echo "::group::Assertion failures and crashes from the device test log"
+          grep -nE 'error: |Fatal error|Assertion Failure|Failed to (get|find|launch)|crashed' \
+            "$RUNNER_TEMP/ios-device-tests.log" | head -200 || echo "(none matched)"
+          echo "::endgroup::"
+
+      - name: Upload device test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-device-test-results-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/SpeakiOS-device.xcresult
+            ${{ runner.temp }}/ios-device-tests.log
+          retention-days: 7
+          if-no-files-found: ignore

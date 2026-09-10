@@ -13,7 +13,10 @@ public struct ReleaseNotesView: View {
     public init() {}
 
     public static func makeBrowser(bundle: Bundle = .main) -> ReleaseNotesBrowser {
-        ReleaseNotesBrowser(installedVersion: ReleaseNotesCatalog.installedVersion(bundle: bundle))
+        ReleaseNotesBrowser(
+            installedVersion: ReleaseNotesCatalog.installedVersion(bundle: bundle),
+            installedBuild: ReleaseNotesCatalog.installedBuild(bundle: bundle)
+        )
     }
 
     public var body: some View {

@@ -10,7 +10,10 @@ struct ReleaseNotesView: View {
   @State private var browser = ReleaseNotesView.makeBrowser()
 
   static func makeBrowser(bundle: Bundle = .main) -> ReleaseNotesBrowser {
-    ReleaseNotesBrowser(installedVersion: ReleaseNotesCatalog.installedVersion(bundle: bundle))
+    ReleaseNotesBrowser(
+            installedVersion: ReleaseNotesCatalog.installedVersion(bundle: bundle),
+            installedBuild: ReleaseNotesCatalog.installedBuild(bundle: bundle)
+        )
   }
 
   var body: some View {

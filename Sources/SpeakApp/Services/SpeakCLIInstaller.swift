@@ -52,7 +52,7 @@ final class SpeakCLIInstaller: ObservableObject {
     }
   }
 
-  static let executableName = ReleaseTrain.current.cliExecutableName
+    static let executableName = ReleaseTrain.current.cliExecutableName
   static let recordName = "installed.json"
 
   @Published private(set) var state: State = .notInstalled

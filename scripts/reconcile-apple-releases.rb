@@ -9,10 +9,16 @@ failures=[]
 output.lines.map(&:strip).each do |tag|
   data, result = Open3.capture2('git','for-each-ref','--format=%(contents)',"refs/tags/#{tag}")
   next unless result.success?
-  manifest=JSON.parse(data)
-  # Expired Alpha builds remain in the ledger but cannot be made installable.
-  # Rebuild explicitly if the most recent Alpha approaches TestFlight's 90 days.
-  if manifest['train'] == 'alpha' && Time.parse(manifest['createdAt']) < Time.now - 90*86_400
+  begin
+    manifest=JSON.parse(data)
+    # Expired Alpha builds remain in the ledger but cannot be made installable.
+    # Rebuild explicitly if the most recent Alpha approaches TestFlight's 90 days.
+    if manifest['train'] == 'alpha' && Time.parse(manifest['createdAt']) < Time.now - 90*86_400
+      next
+    end
+  rescue StandardError => error
+    warn "#{tag}: #{error.message}"
+    failures << tag
     next
   end
   %w[ios mac-store].each do |surface|

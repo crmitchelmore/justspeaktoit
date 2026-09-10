@@ -29,7 +29,15 @@ public struct ProviderBalanceAccount: Sendable, Equatable, Identifiable {
     public let support: Support
     public let billingURL: URL?
 
-    public init(
+    /// Builds an account, or `nil` when the definition could not honour the
+    /// lookup and deduplication rules above.
+    ///
+    /// An account with no credentials has nothing to look up, and a primary
+    /// identifier that is not one of its own credentials would render a
+    /// balance on a card that never resolves to this account. Both are
+    /// rejected here rather than indexing an empty array or leaving a broken
+    /// mapping behind.
+    public init?(
         id: String,
         displayName: String,
         credentialIdentifiers: [String],
@@ -37,10 +45,14 @@ public struct ProviderBalanceAccount: Sendable, Equatable, Identifiable {
         support: Support,
         billingURL: String
     ) {
+        guard let firstIdentifier = credentialIdentifiers.first else { return nil }
+        let primary = primaryCredentialIdentifier ?? firstIdentifier
+        guard credentialIdentifiers.contains(primary) else { return nil }
+
         self.id = id
         self.displayName = displayName
         self.credentialIdentifiers = credentialIdentifiers
-        self.primaryCredentialIdentifier = primaryCredentialIdentifier ?? credentialIdentifiers[0]
+        self.primaryCredentialIdentifier = primary
         self.support = support
         self.billingURL = URL(string: billingURL)
     }
@@ -52,7 +64,11 @@ public struct ProviderBalanceAccount: Sendable, Equatable, Identifiable {
 /// The default is a billing link. An account is promoted to `.balance` only
 /// where the vendor documents an endpoint that reports what the account holds.
 public enum ProviderBalanceDirectory {
-    public static let accounts: [ProviderBalanceAccount] = [
+    /// Every account definition here is a literal with a non-empty credential
+    /// list and a member primary identifier, so nothing is dropped; the
+    /// `compactMap` is what keeps a future malformed entry out of the
+    /// directory instead of it becoming a broken lookup.
+    public static let accounts: [ProviderBalanceAccount] = [ProviderBalanceAccount?]([
         ProviderBalanceAccount(
             id: "deepgram",
             displayName: "Deepgram",
@@ -189,7 +205,7 @@ public enum ProviderBalanceDirectory {
             support: .billingLinkOnly(reason: Self.noDocumentedContract),
             billingURL: "https://modulate.ai"
         )
-    ]
+    ]).compactMap { $0 }
 
     private static let noDocumentedContract =
         "This provider publishes no balance endpoint we can read, so Speak links to its billing page instead."

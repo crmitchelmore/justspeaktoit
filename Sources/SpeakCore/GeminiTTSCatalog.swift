@@ -2,11 +2,11 @@ import Foundation
 
 /// Gemini speech-generation models reachable over the Interactions API.
 ///
-/// Google lists three TTS models, but only this one appears in the Interactions
-/// API's supported-model table — the two `gemini-2.5-*-preview-tts` entries are
-/// reachable only through the legacy `generateContent` path, which Speak does
-/// not use for Gemini. Offering them here would put a model in the picker that
-/// cannot run, so the catalogue carries the one that does.
+/// Google lists three TTS models on that surface. This catalogue carries the
+/// newest, which supersedes the two `gemini-2.5-*-preview-tts` entries and is
+/// the only one of the three that supports streaming; the older previews work
+/// but add a choice with no benefit attached, so they are left out until
+/// something asks for them.
 public enum GeminiTTSModel: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
     case flash31TTSPreview = "gemini-3.1-flash-tts-preview"
 
@@ -25,6 +25,33 @@ public enum GeminiTTSModel: String, CaseIterable, Codable, Hashable, Identifiabl
         switch self {
         case .flash31TTSPreview: Decimal(string: "0.0005") ?? 0
         }
+    }
+
+    /// The submitted text is billed too, at $1 per million input tokens —
+    /// small beside the audio charge, but not zero, so it belongs in the
+    /// recorded cost rather than being dropped.
+    public var costPerInputToken: Decimal {
+        switch self {
+        case .flash31TTSPreview: Decimal(string: "0.000001") ?? 0
+        }
+    }
+
+    /// Characters per input token when a response carries no usage block.
+    ///
+    /// Four characters per token is Google's own published rule of thumb for
+    /// Gemini text. It is an estimate, and the cost it feeds is documented as
+    /// one.
+    public static let estimatedCharactersPerInputToken = 4
+
+    /// The input charge for `characterCount` when the response reported
+    /// `reportedTokens`, falling back to the documented estimate when it did
+    /// not.
+    public func inputCost(characterCount: Int, reportedTokens: Int?) -> Decimal {
+        let tokens = reportedTokens ?? Int(
+            (Double(characterCount) / Double(Self.estimatedCharactersPerInputToken)).rounded(.up)
+        )
+        guard tokens > 0 else { return 0 }
+        return Decimal(tokens) * costPerInputToken
     }
 }
 

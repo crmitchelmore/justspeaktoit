@@ -175,6 +175,20 @@ final class ProviderBalanceClientTests: XCTestCase {
         XCTAssertFalse(rendered.lowercased().contains("unlimited"), rendered)
     }
 
+    /// An omitted usage counter is not zero usage: showing the whole plan as
+    /// remaining would be the one number a user must never be shown as fact.
+    func testElevenLabs_treatsAnOmittedUsageCounterAsUnknownRatherThanUnused() async {
+        stub { _ in (200, #"{"tier":"creator","character_limit":100000}"#) }
+
+        let snapshot = await makeElevenLabsClient().fetchBalance(apiKey: "el-key")
+
+        guard case .unknown(let reason) = snapshot.state else {
+            return XCTFail("Expected unknown for an omitted usage counter, got \(snapshot.state)")
+        }
+        XCTAssertTrue(reason.lowercased().contains("used"), reason)
+        XCTAssertFalse(snapshot.state.isSpendableCredit)
+    }
+
     func testElevenLabs_labelsAFreeTierAsQuotaNotCredit() async {
         stub { _ in (200, #"{"tier":"free","character_count":5000,"character_limit":10000}"#) }
 
@@ -224,6 +238,24 @@ final class ProviderBalanceClientTests: XCTestCase {
         )
     }
 
+    /// Usage above purchased credit is an overdrawn or postpaid account. It is
+    /// not a negative wallet, and must never be marked spendable.
+    func testOpenRouter_doesNotCallANegativeRemainderSpendableCash() async {
+        stub { _ in (200, #"{"data":{"total_credits":5.0,"total_usage":8.25}}"#) }
+
+        let snapshot = await OpenRouterBalanceClient(
+            session: mockSession(),
+            baseURL: URL(string: "https://openrouter.test")!
+        ).fetchBalance(apiKey: "or-key")
+
+        XCTAssertFalse(snapshot.state.isSpendableCredit)
+        guard case .usage(let spent, _, _, let note) = snapshot.state else {
+            return XCTFail("Expected usage for an overdrawn account, got \(snapshot.state)")
+        }
+        XCTAssertEqual(spent, ProviderBalanceMoney(amount: Decimal(8.25), currencyCode: "USD"))
+        XCTAssertFalse(note.isEmpty)
+    }
+
     func testOpenRouter_reportsUnknownWhenAFieldIsMissing() async {
         stub { _ in (200, #"{"data":{"total_credits":20.0}}"#) }
 
@@ -245,6 +277,96 @@ final class ProviderBalanceClientTests: XCTestCase {
 
     private func makeElevenLabsClient() -> ElevenLabsBalanceClient {
         ElevenLabsBalanceClient(session: mockSession(), baseURL: URL(string: "https://elevenlabs.test")!)
+    }
+
+    private func stub(_ handler: @escaping @Sendable (URLRequest) -> (Int, String)) {
+        stubProviderBalanceResponses(handler)
+    }
+
+    private func mockSession() -> URLSession {
+        providerBalanceMockSession()
+    }
+}
+
+/// Deepgram is the one provider whose key can bill several projects, so which
+/// wallets a figure covers is its own question.
+final class DeepgramMultiProjectBalanceTests: XCTestCase {
+    override func tearDown() {
+        ProviderBalanceMockURLProtocol.handler = nil
+        super.tearDown()
+    }
+
+    /// A key can reach several projects, and response order is not a choice
+    /// between their wallets: the figure covers all of them or none.
+    func testDeepgram_totalsEveryBillableProjectRatherThanTheFirstOne() async {
+        var requestedBalancePaths: [String] = []
+        stub { request in
+            if request.url?.path == "/v1/projects" {
+                return (
+                    200,
+                    #"{"projects":[{"project_id":"proj-1"},{"project_id":"proj-2"}]}"#
+                )
+            }
+            requestedBalancePaths.append(request.url?.path ?? "")
+            let amount = request.url?.path.contains("proj-1") == true ? "4.0" : "1.5"
+            return (200, #"{"balances":[{"amount":\#(amount),"units":"usd"}]}"#)
+        }
+
+        let snapshot = await makeDeepgramClient().fetchBalance(apiKey: "dg-key")
+
+        XCTAssertEqual(
+            snapshot.state,
+            .cash(ProviderBalanceMoney(amount: Decimal(5.5), currencyCode: "USD"))
+        )
+        XCTAssertEqual(
+            requestedBalancePaths.sorted(),
+            ["/v1/projects/proj-1/balances", "/v1/projects/proj-2/balances"]
+        )
+    }
+
+    func testDeepgram_reportsUnknownWhenOneProjectIsUnreadable() async {
+        stub { request in
+            if request.url?.path == "/v1/projects" {
+                return (
+                    200,
+                    #"{"projects":[{"project_id":"proj-1"},{"project_id":"proj-2"}]}"#
+                )
+            }
+            if request.url?.path.contains("proj-2") == true { return (403, "") }
+            return (200, #"{"balances":[{"amount":4.0,"units":"usd"}]}"#)
+        }
+
+        let snapshot = await makeDeepgramClient().fetchBalance(apiKey: "dg-key")
+
+        // A partial sum presented as the whole would be a wrong number.
+        guard case .unknown = snapshot.state else {
+            return XCTFail("Expected unknown when a project cannot be read, got \(snapshot.state)")
+        }
+        XCTAssertFalse(snapshot.state.isSpendableCredit)
+    }
+
+    func testDeepgram_reportsUnknownWhenProjectsUseDifferentUnits() async {
+        stub { request in
+            if request.url?.path == "/v1/projects" {
+                return (
+                    200,
+                    #"{"projects":[{"project_id":"proj-1"},{"project_id":"proj-2"}]}"#
+                )
+            }
+            let units = request.url?.path.contains("proj-1") == true ? "usd" : "hours"
+            return (200, #"{"balances":[{"amount":2.0,"units":"\#(units)"}]}"#)
+        }
+
+        let snapshot = await makeDeepgramClient().fetchBalance(apiKey: "dg-key")
+
+        guard case .unknown(let reason) = snapshot.state else {
+            return XCTFail("Expected unknown for mixed units, got \(snapshot.state)")
+        }
+        XCTAssertTrue(reason.lowercased().contains("unit"), reason)
+    }
+
+    private func makeDeepgramClient() -> DeepgramBalanceClient {
+        DeepgramBalanceClient(session: mockSession(), baseURL: URL(string: "https://deepgram.test")!)
     }
 
     private func stub(_ handler: @escaping @Sendable (URLRequest) -> (Int, String)) {

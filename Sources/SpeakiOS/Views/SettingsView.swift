@@ -2028,11 +2028,7 @@ struct APIKeysView: View {
             balances.configure { identifier in
                 try? await storage.secret(identifier: identifier)
             }
-            balances.refreshAll(
-                storedCredentialIdentifiers: Set(
-                    allEntries.filter(\.isStored).map { "\($0.id).apiKey" }
-                )
-            )
+            balances.refreshAll(storedCredentialIdentifiers: storedCredentialIdentifiers)
         }
         .onDisappear { balances.cancelAll() }
     }
@@ -2167,6 +2163,23 @@ struct APIKeysView: View {
         }
     }
 
+    private var storedCredentialIdentifiers: Set<String> {
+        Set(allEntries.filter(\.isStored).map { "\($0.id).apiKey" })
+    }
+
+    /// Forgets every rendered balance and re-reads the accounts whose key is
+    /// still stored.
+    ///
+    /// Saving or clearing a key replaces the credential a figure was read
+    /// with, so the figure on screen can belong to an account the user is no
+    /// longer using; invalidating first also stops a request already in flight
+    /// from repopulating the entry with the previous account's balance.
+    private func reloadBalancesAfterCredentialChange() {
+        balances.reloadAfterCredentialChange(
+            storedCredentialIdentifiers: storedCredentialIdentifiers
+        )
+    }
+
     // swiftlint:disable:next cyclomatic_complexity
     private func clearStoredKey(for id: String) {
         switch id {
@@ -2186,6 +2199,7 @@ struct APIKeysView: View {
         case "mistral": settings.mistralAPIKey = ""
         default: settings.gladiaAPIKey = ""
         }
+        reloadBalancesAfterCredentialChange()
     }
 
     // swiftlint:disable:next function_body_length cyclomatic_complexity
@@ -2325,6 +2339,7 @@ struct APIKeysView: View {
             isValidating = false
             validationMessage = messages.joined(separator: "\n")
             showingValidation = true
+            reloadBalancesAfterCredentialChange()
         }
     }
 }

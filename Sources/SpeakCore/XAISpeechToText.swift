@@ -88,6 +88,10 @@ public enum XAISpeechToText {
 /// Settings and an exhausted balance does not. Nothing echoes a credential.
 public enum XAISpeechToTextError: LocalizedError, Equatable {
     case unsupportedAudioFormat(String)
+    /// The live socket was asked for a rate xAI does not accept. Reported
+    /// rather than silently replaced, because the caller encodes its PCM at
+    /// the rate it asked for.
+    case unsupportedSampleRate(Int)
     case fileTooLarge
     case emptyTranscript
     case invalidResponse
@@ -106,6 +110,12 @@ public enum XAISpeechToTextError: LocalizedError, Equatable {
         case .unsupportedAudioFormat(let extensionName):
             return "xAI speech-to-text cannot read a .\(extensionName) recording. "
                 + "It accepts WAV, MP3, Ogg, Opus, FLAC, AAC, MP4, M4A or MKV."
+        case .unsupportedSampleRate(let rate):
+            let supported = XAISpeechToText.supportedSampleRates.sorted()
+                .map { "\($0 / 1_000) kHz" }
+                .joined(separator: ", ")
+            return "xAI live speech-to-text cannot accept \(rate) Hz audio. "
+                + "It accepts \(supported)."
         case .fileTooLarge:
             return "The recording is larger than the 500 MB xAI speech-to-text accepts."
         case .emptyTranscript:
@@ -155,14 +165,33 @@ public enum XAISpeechToTextError: LocalizedError, Equatable {
         guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             return fallback
         }
-        if let error = object["error"] as? String, !error.isEmpty { return error }
+        if let error = object["error"] as? String, !error.isEmpty { return boundedMessage(error) }
         if let error = object["error"] as? [String: Any],
            let message = error["message"] as? String, !message.isEmpty {
-            return message
+            return boundedMessage(message)
         }
         for key in ["message", "detail"] {
-            if let value = object[key] as? String, !value.isEmpty { return value }
+            if let value = object[key] as? String, !value.isEmpty { return boundedMessage(value) }
         }
         return fallback
+    }
+
+    /// Longest server-supplied text a user-visible error will carry.
+    static let maximumServerMessageCharacters = 200
+
+    /// Makes a server-supplied string safe to display.
+    ///
+    /// These fields are echoed by the provider and can carry back the text
+    /// that was submitted, or an unbounded body, so they are collapsed to one
+    /// line and truncated before they reach an error message that lands in
+    /// history and in the UI.
+    public static func boundedMessage(_ raw: String) -> String {
+        let collapsed = raw
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .filter { !$0.isASCII || !($0.asciiValue.map { $0 < 0x20 } ?? false) }
+        guard collapsed.count > maximumServerMessageCharacters else { return collapsed }
+        return String(collapsed.prefix(maximumServerMessageCharacters)) + "…"
     }
 }

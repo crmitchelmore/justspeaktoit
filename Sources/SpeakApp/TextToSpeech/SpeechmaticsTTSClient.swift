@@ -45,7 +45,15 @@ actor SpeechmaticsTTSClient: TextToSpeechClient {
     }
 
     let outputURL = try saveAudioData(data, format: .wav)
-    let duration = try await getAudioDuration(url: outputURL)
+    // A 2xx body that is not decodable audio makes duration reading throw;
+    // without this the UUID-named file would be left behind every time.
+    let duration: TimeInterval
+    do {
+      duration = try await getAudioDuration(url: outputURL)
+    } catch {
+      try? FileManager.default.removeItem(at: outputURL)
+      throw error
+    }
     let cost =
       Decimal(text.count) * SpeechmaticsTTSAPI.estimatedCostPerThousandCharacters / 1000
 
@@ -77,9 +85,36 @@ actor SpeechmaticsTTSClient: TextToSpeechClient {
     var ignored: [String] = []
     if abs(settings.speed - 1.0) > 0.001 { ignored.append("speed") }
     if abs(settings.pitch) > 0.001 { ignored.append("pitch") }
-    guard !ignored.isEmpty else { return nil }
-    return "Speechmatics voices do not support \(ignored.joined(separator: " or ")) control. "
-      + "Reset it to the default, or choose another provider."
+    if !ignored.isEmpty {
+      return "Speechmatics voices do not support \(ignored.joined(separator: " or ")) control. "
+        + "Reset it to the default, or choose another provider."
+    }
+    // The four voices are English only and the request carries no language
+    // parameter, so an explicit non-English choice would be dropped in silence.
+    if let language = requestedNonEnglishLanguage(settings) {
+      return "Speechmatics voices speak English only, so the \(language) output language "
+        + "cannot be honoured. Set the voice-output language back to Automatic or English, "
+        + "or choose another provider."
+    }
+    return nil
+  }
+
+  /// The chosen output language when it is an explicit non-English one.
+  ///
+  /// Automatic makes no claim, and Speechmatics happens to serve English, so
+  /// only a deliberate other choice is a conflict.
+  static func requestedNonEnglishLanguage(_ settings: TTSSettings) -> String? {
+    let normalized = VoiceOutputLanguageCatalog.normalizedIdentifier(settings.language)
+    guard normalized != VoiceOutputLanguageCatalog.automaticIdentifier else { return nil }
+    let base = normalized
+      .lowercased()
+      .split(whereSeparator: { $0 == "_" || $0 == "-" })
+      .first
+      .map(String.init)
+    guard let base, base != "en" else { return nil }
+    return VoiceOutputLanguageCatalog.options
+      .first { $0.id.caseInsensitiveCompare(normalized) == .orderedSame }?
+      .displayName ?? normalized
   }
 
   static func ttsError(for error: SpeechmaticsTTSAPIError) -> TTSError {

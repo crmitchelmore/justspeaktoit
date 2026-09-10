@@ -17,7 +17,19 @@ final class TTSProgressivePlayer {
   private var format: AVAudioFormat?
   private var pending = Data()
   private var scheduledBuffers = 0
+  private var scheduledFrames = 0
   private var drainContinuation: CheckedContinuation<Void, Never>?
+
+  /// Seconds of audio that may sit scheduled ahead of what has been heard.
+  ///
+  /// A streaming provider can generate far faster than real time, so without a
+  /// ceiling a long utterance accumulates the whole document in scheduled
+  /// buffers. Ten seconds is more than enough to ride out a network stall.
+  static let scheduledAheadLimit: TimeInterval = 10
+  /// Longest one chunk waits for that headroom before being scheduled anyway.
+  /// Playback that is paused indefinitely must not stall the socket forever.
+  static let headroomWaitLimit: TimeInterval = 5
+  private static let headroomPollInterval: TimeInterval = 0.05
 
   /// Whether an utterance is currently scheduled or playing.
   private(set) var isActive = false
@@ -75,8 +87,9 @@ final class TTSProgressivePlayer {
     }
     buffer.frameLength = frameCount
     scheduledBuffers += 1
+    scheduledFrames += Int(frameCount)
     player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-      Task { @MainActor in self?.didFinishBuffer() }
+      Task { @MainActor in self?.didFinishBuffer(frames: Int(frameCount)) }
     }
     if !player.isPlaying { player.play() }
     return true
@@ -109,16 +122,39 @@ final class TTSProgressivePlayer {
     format = nil
     pending.removeAll(keepingCapacity: false)
     scheduledBuffers = 0
+    scheduledFrames = 0
     isActive = false
     drainContinuation?.resume()
     drainContinuation = nil
   }
 
-  private func didFinishBuffer() {
+  private func didFinishBuffer(frames: Int) {
     scheduledBuffers = max(0, scheduledBuffers - 1)
+    scheduledFrames = max(0, scheduledFrames - frames)
     guard scheduledBuffers == 0 else { return }
     drainContinuation?.resume()
     drainContinuation = nil
+  }
+
+  /// Seconds of scheduled audio that have not been heard yet.
+  var scheduledAheadSeconds: TimeInterval {
+    guard let format, format.sampleRate > 0 else { return 0 }
+    return Double(scheduledFrames) / format.sampleRate
+  }
+
+  /// Waits, up to `headroomWaitLimit`, until the scheduled audio falls back
+  /// under the ahead-of-playback ceiling.
+  ///
+  /// Bounded rather than open-ended: a paused or stalled engine would
+  /// otherwise hold a provider socket open indefinitely, which is a worse
+  /// failure than briefly exceeding the ceiling.
+  func waitForHeadroom(now: () -> Date = Date.init) async {
+    let deadline = now().addingTimeInterval(Self.headroomWaitLimit)
+    while isActive, scheduledAheadSeconds >= Self.scheduledAheadLimit, now() < deadline {
+      try? await Task.sleep(
+        nanoseconds: UInt64(Self.headroomPollInterval * 1_000_000_000)
+      )
+    }
   }
 }
 
@@ -126,10 +162,12 @@ extension TTSProgressivePlayer {
   /// Plays a streaming provider's audio as it arrives and answers the finished
   /// result, which is the same complete `TTSResult` the batch path returns.
   ///
-  /// The chunks travel through an `AsyncStream` rather than one task per chunk,
-  /// because independent tasks would be free to run out of order and scramble
-  /// the speech. A thrown error — including the cancellation a barge-in causes —
-  /// stops the engine and discards the partial audio.
+  /// Each chunk is scheduled from inside the provider's own callback, which
+  /// the provider awaits. That keeps the speech in order without a second
+  /// task, lets a full playback queue hold the provider back, and lets a
+  /// scheduling failure end the stream: a thrown error — a barge-in
+  /// cancellation or a playback failure — stops the engine, discards the
+  /// partial audio and reaches the caller as a failed synthesis.
   func speak(
     text: String,
     voice: String,
@@ -137,26 +175,26 @@ extension TTSProgressivePlayer {
     using client: any ProgressiveTextToSpeechClient
   ) async throws -> TTSResult {
     try prepare(sampleRate: client.progressiveSampleRate)
-    let (chunks, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
-    let playback = Task { @MainActor in
-      for await chunk in chunks { try? enqueue(chunk) }
-    }
     do {
       let result = try await client.synthesizeProgressively(
         text: text, voice: voice, settings: settings
-      ) { chunk in
-        continuation.yield(chunk)
+      ) { [weak self] chunk in
+        guard let self else { return }
+        try await self.schedule(chunk)
       }
-      continuation.finish()
-      await playback.value
       await waitUntilDrained()
       stop()
       return result
     } catch {
-      continuation.finish()
-      playback.cancel()
       stop()
       throw error
     }
+  }
+
+  /// Schedules one arriving chunk, first waiting for playback headroom.
+  private func schedule(_ chunk: Data) async throws {
+    await waitForHeadroom()
+    try Task.checkCancellation()
+    try enqueue(chunk)
   }
 }

@@ -23,6 +23,35 @@ public enum XAITTSRealtime {
     /// starts before a long document has finished uploading.
     public static let textChunkCharacters = 400
 
+    /// Groups delta-sized chunks into utterances that each stay inside the
+    /// documented per-utterance character maximum.
+    ///
+    /// One socket speaks one utterance: the deltas are pushed, `text.done`
+    /// closes it and the audio comes back. A document longer than the maximum
+    /// therefore has to become several utterances, exactly as the REST route
+    /// splits it into several requests — sending it as one would have the
+    /// service reject text that batch synthesis speaks without complaint.
+    public static func utterances(
+        from chunks: [String],
+        maximumCharacters: Int = XAITTSAPI.maximumTextCharacters
+    ) -> [[String]] {
+        guard maximumCharacters > 0 else { return [] }
+        var utterances: [[String]] = []
+        var current: [String] = []
+        var currentCount = 0
+        for chunk in chunks {
+            if !current.isEmpty, currentCount + chunk.count > maximumCharacters {
+                utterances.append(current)
+                current = []
+                currentCount = 0
+            }
+            current.append(chunk)
+            currentCount += chunk.count
+        }
+        if !current.isEmpty { utterances.append(current) }
+        return utterances
+    }
+
     public static func webSocketURL(request: XAITTSRequest) -> URL? {
         var components = URLComponents()
         components.scheme = "wss"

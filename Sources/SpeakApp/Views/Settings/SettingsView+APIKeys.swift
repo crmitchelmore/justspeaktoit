@@ -305,7 +305,9 @@ extension SettingsView {
           + "voices your account can use once this key is saved."
       case .speechmatics:
         return "Stored securely in your macOS Keychain. Used for Speechmatics transcription and for "
-          + "Speechmatics voice output, which the vendor still labels a preview."
+          + "Speechmatics voice output, which the vendor still labels a preview. During that "
+          + "preview Speechmatics stores the text you send for voice output and the audio it "
+          + "generates, to improve their service."
       default:
         return "Stored securely in your macOS Keychain. Used only for "
           + "\(provider.displayName) text-to-speech voice synthesis."
@@ -372,6 +374,10 @@ extension SettingsView {
       isRemoveDisabled: removeDisabled,
       validationState: validationState,
       credentialIdentifier: provider.apiKeyIdentifier,
+      // A provider that does not share its transcription credential already
+      // has a transcription card on the same Keychain item, and that card
+      // owns the account balance.
+      presentsAccountBalance: provider.sharesTranscriptionCredential,
       tooltip: "Manage your \(provider.displayName) API key for text-to-speech synthesis.",
       saveButtonTitle: isStored ? "Replace Key" : "Save Key",
       saveTooltip: "Securely store your \(provider.displayName) key for voice synthesis.",
@@ -404,6 +410,7 @@ extension SettingsView {
     isRemoveDisabled: Bool,
     validationState: ValidationViewState,
     credentialIdentifier: String,
+    presentsAccountBalance: Bool = true,
     tooltip: String,
     saveButtonTitle: String,
     saveTooltip: String,
@@ -432,6 +439,7 @@ extension SettingsView {
       isRemoveDisabled: isRemoveDisabled,
       validationState: validationState,
       credentialIdentifier: credentialIdentifier,
+      presentsAccountBalance: presentsAccountBalance,
       saveButtonTitle: saveButtonTitle,
       saveTooltip: saveTooltip,
       validateButtonTitle: validateButtonTitle,
@@ -489,6 +497,7 @@ extension SettingsView {
     ProviderBalanceView(
       credentialIdentifier: configuration.credentialIdentifier,
       isKeyStored: configuration.isStored,
+      presentsAccountBalance: configuration.presentsAccountBalance,
       store: providerBalances
     )
   }

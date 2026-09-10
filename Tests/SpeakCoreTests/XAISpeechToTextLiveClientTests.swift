@@ -187,6 +187,57 @@ final class XAISpeechToTextLiveClientTests: XCTestCase {
         )
     }
 
+    func testLiveClient_refusesAnUnsupportedSampleRateInsteadOfSubstitutingOne() {
+        // 11,025 Hz is not on xAI'"'"'s list. The caller encodes PCM at the rate it
+        // asked for, so quietly declaring 24 kHz would recognise the wrong
+        // audio; the session must not start at all.
+        let client = XAISpeechToTextLiveClient(apiKey: "k", sampleRate: 11_025)
+        XCTAssertEqual(client.sampleRate, 11_025, "the effective rate is the requested one")
+
+        var reported: Error?
+        client.start(onTranscript: { _, _ in }, onError: { reported = $0 })
+        XCTAssertEqual(
+            reported as? XAISpeechToTextError,
+            .unsupportedSampleRate(11_025)
+        )
+        XCTAssertFalse(client.isSessionReady)
+
+        // Every supported rate is carried through untouched.
+        for rate in XAISpeechToText.supportedSampleRates {
+            XCTAssertEqual(XAISpeechToTextLiveClient(apiKey: "k", sampleRate: rate).sampleRate, rate)
+        }
+    }
+
+    func testLiveClient_boundsProviderTextInUserVisibleErrors() throws {
+        let echoed = String(repeating: "secret dictation ", count: 200)
+        let error = try XCTUnwrap(
+            XAISpeechToTextLiveClient.error(fromServerMessage: echoed) as? XAISpeechToTextError
+        )
+        guard case .server(let message) = error else {
+            return XCTFail("expected a server error, got \(error)")
+        }
+        XCTAssertLessThanOrEqual(
+            message.count,
+            XAISpeechToTextError.maximumServerMessageCharacters + 1
+        )
+        // Classification still reads the whole raw value.
+        XCTAssertEqual(
+            XAISpeechToTextLiveClient.error(
+                fromServerMessage: String(repeating: "x", count: 400) + " rate limit exceeded"
+            ) as? XAISpeechToTextError,
+            .rateLimited(message: XAISpeechToTextError.boundedMessage(
+                String(repeating: "x", count: 400) + " rate limit exceeded"
+            ))
+        )
+    }
+
+    func testLiveClient_collapsesNewlinesOutOfProviderText() {
+        XCTAssertEqual(
+            XAISpeechToTextError.boundedMessage("bad\n  request\r\nhere"),
+            "bad request here"
+        )
+    }
+
     // MARK: - Fixtures
 
     private static func partial(_ text: String, isFinal: Bool, start: Double) -> String {

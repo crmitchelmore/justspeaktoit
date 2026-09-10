@@ -25,13 +25,26 @@ public struct GeminiTTSAudio: Equatable, Sendable {
     public let mimeType: String
     public let sampleRate: Int
     public let channels: Int
+    /// Text-input tokens the response reported, or `nil` when it carried no
+    /// usage block. Gemini charges these separately from the audio it returns.
+    public let inputTokens: Int?
 
-    public init(data: Data, mimeType: String, sampleRate: Int, channels: Int) {
+    public init(
+        data: Data,
+        mimeType: String,
+        sampleRate: Int,
+        channels: Int,
+        inputTokens: Int? = nil
+    ) {
         self.data = data
         self.mimeType = mimeType
         self.sampleRate = sampleRate
         self.channels = channels
+        self.inputTokens = inputTokens
     }
+
+    /// Bit depth of the `L16` PCM Gemini returns.
+    static let pcmBitsPerSample = 16
 
     /// Whether the bytes are already a self-describing container. Raw `L16`
     /// PCM needs a RIFF header before `AVAudioPlayer` will open it.
@@ -39,14 +52,29 @@ public struct GeminiTTSAudio: Equatable, Sendable {
         !mimeType.lowercased().contains("l16")
     }
 
+    /// Whether raw PCM here can actually be given a RIFF header.
+    ///
+    /// `sampleRate` and `channels` arrive from the provider response, so they
+    /// are untrusted: a value outside the header's fixed-width fields must
+    /// become a synthesis error, never a trap.
+    public var isPlayableFormat: Bool {
+        isContainerised || PCMWaveWriter.isRepresentable(
+            sampleRate: sampleRate,
+            channels: channels,
+            bitsPerSample: Self.pcmBitsPerSample,
+            pcmByteCount: data.count
+        )
+    }
+
     /// Playable bytes: a container is passed through, raw PCM is wrapped.
-    public var playableData: Data {
+    /// `nil` when the reported PCM format cannot be described by a WAV header.
+    public var playableData: Data? {
         guard !isContainerised else { return data }
         return PCMWaveWriter.wavData(
             pcm: data,
             sampleRate: sampleRate,
             channels: channels,
-            bitsPerSample: 16
+            bitsPerSample: Self.pcmBitsPerSample
         )
     }
 }
@@ -204,12 +232,18 @@ public struct GeminiTTSAPI: Sendable {
                 message: "Gemini returned no audio for this request"
             )
         }
-        return GeminiTTSAudio(
+        let audio = GeminiTTSAudio(
             data: bytes,
             mimeType: audioBlock.mimeType ?? "audio/l16",
             sampleRate: audioBlock.sampleRate ?? requestedSampleRate,
-            channels: audioBlock.channels ?? 1
+            channels: audioBlock.channels ?? 1,
+            inputTokens: interaction.usage?.textInputTokens
         )
+        // `sample_rate` and `channels` are whatever the response carried. A
+        // value a WAV header cannot describe is a bad response, not a reason
+        // to terminate the app inside the header writer.
+        guard audio.isPlayableFormat else { throw GeminiTTSAPIError.invalidResponse }
+        return audio
     }
 
     /// Validates a Gemini API key with a `ListModels` probe. The same key
@@ -261,6 +295,22 @@ public struct GeminiTTSAPI: Sendable {
 
 private struct InteractionResponse: Decodable {
     let steps: [InteractionStep]?
+    let usage: InteractionUsage?
+}
+
+/// Token counts the interaction reports. Gemini bills text input and audio
+/// output at different rates, so the input count is the only way to charge the
+/// text half honestly.
+private struct InteractionUsage: Decodable {
+    let inputTokens: Int?
+    let promptTokenCount: Int?
+
+    var textInputTokens: Int? { inputTokens ?? promptTokenCount }
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case promptTokenCount = "prompt_token_count"
+    }
 }
 
 private struct InteractionStep: Decodable {

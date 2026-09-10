@@ -160,4 +160,93 @@ final class XAISpeechRoutingTests: XCTestCase {
       TTSError.synthesisFailure("There is no text to speak").localizedDescription
     )
   }
+
+  // MARK: - Progressive playback failure handling
+
+  /// A failure raised while scheduling must reach the synthesis error path and
+  /// end the provider'"'"'s stream. Swallowing it would record usage and history
+  /// for an utterance nobody heard, and keep paying for audio nobody can play.
+  @MainActor
+  func testProgressivePlayback_aSchedulingFailureFailsTheSynthesisAndEndsTheStream() async {
+    let player = TTSProgressivePlayer()
+    let client = FailingChunkProgressiveClient()
+    let task = Task { @MainActor in
+      try await player.speak(
+        text: "Hello there.",
+        voice: "xai/eve",
+        settings: TTSSettings(),
+        using: client
+      )
+    }
+    task.cancel()
+    do {
+      _ = try await task.value
+      XCTFail("a scheduling failure must not be reported as a successful synthesis")
+    } catch {
+      XCTAssertTrue(
+        client.sawChunkFailure,
+        "the failure must reach the provider so it stops the paid stream"
+      )
+    }
+  }
+
+  /// The chunk callback is awaited, so a consumer that is not keeping up holds
+  /// the provider back instead of letting audio pile up unheard.
+  func testProgressiveCallback_isAwaitedByTheProvider() async throws {
+    let client = FailingChunkProgressiveClient()
+    let order = ChunkOrderRecorder()
+    _ = try? await client.synthesizeProgressively(
+      text: "x", voice: "xai/eve", settings: TTSSettings()
+    ) { _ in
+      await order.record()
+    }
+    let recorded = await order.count
+    XCTAssertEqual(recorded, 1)
+  }
+}
+
+/// A progressive client that yields one chunk and answers a result, so the
+/// player's handling of a scheduling failure can be exercised without a socket.
+private final class FailingChunkProgressiveClient: TextToSpeechClient, ProgressiveTextToSpeechClient,
+  @unchecked Sendable {
+  let provider: TTSProvider = .xai
+  let progressiveSampleRate = XAITTSAPI.defaultSampleRate
+  private(set) var sawChunkFailure = false
+
+  func synthesize(text: String, voice: String, settings: TTSSettings) async throws -> TTSResult {
+    throw TTSError.synthesisFailure("not used")
+  }
+
+  func listVoices() async throws -> [TTSVoice] { [] }
+
+  func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
+    .failure(message: "not used")
+  }
+
+  func synthesizeProgressively(
+    text: String,
+    voice: String,
+    settings: TTSSettings,
+    onAudioChunk: @escaping @Sendable (Data) async throws -> Void
+  ) async throws -> TTSResult {
+    do {
+      try await onAudioChunk(Data(repeating: 0, count: 64))
+    } catch {
+      sawChunkFailure = true
+      throw error
+    }
+    return TTSResult(
+      audioURL: URL(fileURLWithPath: "/dev/null"),
+      provider: .xai,
+      voice: voice,
+      duration: 0,
+      characterCount: text.count,
+      cost: 0
+    )
+  }
+}
+
+private actor ChunkOrderRecorder {
+  private(set) var count = 0
+  func record() { count += 1 }
 }

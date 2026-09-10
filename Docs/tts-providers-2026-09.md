@@ -67,10 +67,11 @@ in #821. Speak already reaches Gemini transcription over the Interactions API,
 and the speech-generation guide documents the same surface, so both directions
 share one host, one header and one credential.
 
-`gemini-2.5-flash-preview-tts` and `gemini-2.5-pro-preview-tts` are **not**
-offered: they are absent from the Interactions API's supported-model table and
-are reachable only through the legacy `generateContent` path, which Speak does
-not use. Offering them would put an option in the picker that cannot run.
+`gemini-2.5-flash-preview-tts` and `gemini-2.5-pro-preview-tts` are supported by
+the Interactions API too, and are simply not offered yet: `gemini-3.1-flash-tts`
+supersedes both, it is the only one of the three that supports streaming, and a
+one-model picker is one fewer choice with no benefit attached. Adding them is a
+catalogue entry and a price, not a new code path.
 
 Because the charge is per generated audio token rather than per submitted
 character, there is no honest pre-synthesis estimate — the cost shown in History

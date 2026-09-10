@@ -43,8 +43,13 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     private var lastAcknowledgedSeqNo = -1
     private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
     private var finishContinuation: CheckedContinuation<String?, Never>?
+    /// Audio accepted from the tap but not yet large enough to be a legal
+    /// `AddAudio` frame. See `outboundFrames(appending:)`.
+    private var outboundBuffer = Data()
 
     let preroll: StreamingAudioPreroll
+    let readiness = StreamingSessionReadiness()
+    let sendBudget: StreamingAudioSendBudget
 
     public init(
         apiKey: String,
@@ -59,6 +64,7 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         self.sampleRate = sampleRate
         self.session = session
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.sendBudget = StreamingAudioSendBudget(sampleRate: sampleRate)
     }
 
     public func start(
@@ -89,8 +95,11 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
             lastAcknowledgedSeqNo = -1
             accumulated.reset()
             finishContinuation = nil
+            outboundBuffer.removeAll(keepingCapacity: true)
         }
         preroll.reset()
+        readiness.reset()
+        sendBudget.reset()
     }
 
     /// Feeds one raw server frame through the receive path. The WebSocket loop
@@ -112,30 +121,70 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
             if !isEnding { preroll.append(audioData) }
             return
         }
-        send(audioData, on: task)
+        enqueueOutbound(audioData, on: task)
+    }
+
+    /// Accumulates capture into legal `AddAudio` frames and sends them.
+    private func enqueueOutbound(_ chunk: Data, on task: URLSessionWebSocketTask) {
+        let frames = withStateLock { () -> [Data] in
+            let (frames, remainder) = Self.outboundFrames(appending: chunk, to: outboundBuffer)
+            outboundBuffer = remainder
+            return frames
+        }
+        for frame in frames { send(frame, on: task) }
+    }
+
+    /// Sends whatever is left in the buffer as the stream's final frame,
+    /// padded to the minimum so a short tail still reaches the service.
+    private func flushOutboundTail(on task: URLSessionWebSocketTask) {
+        let tail = withStateLock { () -> Data in
+            let tail = outboundBuffer
+            outboundBuffer.removeAll(keepingCapacity: true)
+            return tail
+        }
+        guard !tail.isEmpty else { return }
+        send(Self.paddedFinalChunk(tail), on: task)
     }
 
     public func finishAndWait() async -> String? {
-        let (task, wasReady) = withStateLock { () -> (URLSessionWebSocketTask?, Bool) in
+        let task = withStateLock { () -> URLSessionWebSocketTask? in
             isFinishing = true
-            return (webSocketTask, isReady)
+            return webSocketTask
         }
-        // Without `RecognitionStarted` there is no server-side session to
-        // commit: `EndOfStream` would be rejected, so close instead of waiting.
-        guard let task, wasReady else {
+        // No socket at all: there is nothing that could become ready.
+        guard let task else {
             stop()
             return fullTranscript()
         }
         let result = await awaitFinalTranscript { [weak self, weak task] in
             DispatchQueue.global().async { [weak self, weak task] in
                 guard let self, let task else { return }
-                self.flushPreroll(to: task)
-                _ = self.pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
-                self.sendEndOfStream(on: task)
+                self.commitHeldCapture(to: task)
             }
         }
         stop()
         return result
+    }
+
+    /// Commits the held capture and closes the stream, waiting first for
+    /// `RecognitionStarted` if the handshake is still in flight.
+    ///
+    /// A short recording finished during an ordinary handshake used to lose
+    /// everything the user said: the client saw "not ready" and `stop()`
+    /// cleared the preroll and cancelled a socket that was moments from being
+    /// usable. The bounded wait commits that capture when readiness arrives
+    /// inside the budget; a session that cannot become ready is still closed,
+    /// because `EndOfStream` on an unstarted session would be rejected.
+    private func commitHeldCapture(to task: URLSessionWebSocketTask) {
+        guard readiness.waitUntilReady(), isCurrent(task) else {
+            logger.error("Speechmatics session never started; finishing without EndOfStream")
+            resolveFinish()
+            return
+        }
+        flushPreroll(to: task)
+        flushOutboundTail(on: task)
+        _ = pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
+        sendEndOfStream(on: task)
     }
 
     /// The bounded wait for `EndOfTranscript`, resolved by that frame (the
@@ -167,9 +216,12 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
             isReady = false
             let task = webSocketTask
             webSocketTask = nil
+            outboundBuffer.removeAll(keepingCapacity: true)
             return task
         }
         preroll.reset()
+        readiness.reset()
+        sendBudget.reset()
         task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish()
     }
@@ -223,6 +275,29 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
             contentsOf: repeatElement(UInt8(0), count: SpeechmaticsRealtime.minimumChunkBytes - chunk.count)
         )
         return padded
+    }
+
+    /// Splits a running buffer into frames Speechmatics will accept.
+    ///
+    /// The shared capture path converts one 4,096-frame tap buffer at a time,
+    /// which at a 44.1 kHz or 48 kHz input rate becomes well under 3,200 bytes
+    /// of 16 kHz PCM — under the service's minimum, so *every* ordinary frame
+    /// was being rejected, not just the tail. Chunks are therefore accumulated
+    /// and emitted only once they reach the minimum, in capture order; what is
+    /// left over stays buffered for the next chunk, and the terminal remainder
+    /// is padded and sent by `flushOutboundTail`.
+    ///
+    /// - Returns: The frames to send now, and the remainder to keep.
+    static func outboundFrames(appending chunk: Data, to buffer: Data) -> (frames: [Data], remainder: Data) {
+        var pending = buffer
+        pending.append(chunk)
+        guard pending.count >= SpeechmaticsRealtime.minimumChunkBytes else {
+            return ([], pending)
+        }
+        // One frame per flush keeps the send count — and so `last_seq_no` —
+        // proportional to the audio, and every frame is at or above the
+        // minimum by construction.
+        return ([pending], Data())
     }
 
     // MARK: - Connection
@@ -318,6 +393,7 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         switch event {
         case .recognitionStarted:
             withStateLock { isReady = true }
+            readiness.markReady()
             if let task = currentTask() { flushPreroll(to: task) }
         case .audioAdded(let seqNo):
             withStateLock { lastAcknowledgedSeqNo = max(lastAcknowledgedSeqNo, seqNo) }
@@ -356,10 +432,19 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     }
 
     private func send(_ audio: Data, on task: URLSessionWebSocketTask) {
+        // A socket that has stopped completing sends would otherwise retain
+        // every frame captured from here on. The budget turns that into a
+        // reported transport failure, which cancels the socket and releases
+        // the work already queued behind it.
+        guard sendBudget.admit(audio.count) else {
+            handleTransportFailure(StreamingClientError.transportStalled(provider: "Speechmatics"))
+            return
+        }
         withStateLock { sentAudioFrameCount += 1 }
         pendingSends.enter()
         task.send(.data(audio)) { [weak self] error in
             guard let self else { return }
+            self.sendBudget.release(audio.count)
             self.pendingSends.leave()
             if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
                 self.handleTransportFailure(error)
@@ -367,13 +452,10 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         }
     }
 
-    /// Replays held audio in capture order. The last chunk is padded to the
-    /// service's minimum frame size so a short tail is still transcribed.
+    /// Replays held audio in capture order, through the same frame-size
+    /// accumulator the live path uses, so no replayed frame is undersized.
     private func flushPreroll(to task: URLSessionWebSocketTask) {
-        let held = preroll.drain()
-        guard let last = held.last else { return }
-        for chunk in held.dropLast() { send(chunk, on: task) }
-        send(Self.paddedFinalChunk(last), on: task)
+        for chunk in preroll.drain() { enqueueOutbound(chunk, on: task) }
     }
 
     @discardableResult

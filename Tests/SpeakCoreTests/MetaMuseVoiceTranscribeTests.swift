@@ -126,7 +126,7 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase { // swiftlint:disable:this
     }
 
     func testBatchRequest_usesMultipartSpeechEndpointContract() throws {
-        let wav = MetaMuseAudioPreparer.wavData(pcm: Data([0, 0]), sampleRate: 16_000)
+        let wav = try XCTUnwrap(MetaMuseAudioPreparer.wavData(pcm: Data([0, 0]), sampleRate: 16_000))
         let request = try MetaMuseBatchClient.makeRequest(
             endpoint: MetaMuseVoiceTranscribe.transcribeURL,
             apiKey: "secret",
@@ -151,8 +151,8 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase { // swiftlint:disable:this
         XCTAssertTrue(body.contains(Data("RIFF".utf8)))
     }
 
-    func testAudioPreparation_buildsSupportedPCM16WAVHeader() {
-        let data = MetaMuseAudioPreparer.wavData(pcm: Data([1, 2, 3, 4]), sampleRate: 16_000)
+    func testAudioPreparation_buildsSupportedPCM16WAVHeader() throws {
+        let data = try XCTUnwrap(MetaMuseAudioPreparer.wavData(pcm: Data([1, 2, 3, 4]), sampleRate: 16_000))
 
         XCTAssertEqual(String(bytes: data[0..<4], encoding: .utf8), "RIFF")
         XCTAssertEqual(String(bytes: data[8..<12], encoding: .utf8), "WAVE")
@@ -307,7 +307,7 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase { // swiftlint:disable:this
         let request = try MetaMuseBatchClient.makeRequest(
             endpoint: MetaMuseVoiceTranscribe.transcribeURL,
             apiKey: "secret",
-            audio: MetaMuseAudioPreparer.wavData(pcm: Data([0, 0]), sampleRate: 16_000),
+            audio: try XCTUnwrap(MetaMuseAudioPreparer.wavData(pcm: Data([0, 0]), sampleRate: 16_000)),
             filename: hostile.lastPathComponent,
             model: MetaMuseVoiceTranscribe.modelID,
             mode: .endpointing,
@@ -326,7 +326,7 @@ final class MetaMuseVoiceTranscribeTests: XCTestCase { // swiftlint:disable:this
 
     private func makeTemporaryWAV(sampleRate: Int = 16_000) throws -> URL {
         let pcm = Data(repeating: 0, count: sampleRate / 5)
-        let data = MetaMuseAudioPreparer.wavData(pcm: pcm, sampleRate: sampleRate)
+        let data = try XCTUnwrap(MetaMuseAudioPreparer.wavData(pcm: pcm, sampleRate: sampleRate))
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("meta-muse-\(UUID().uuidString).wav")
         try data.write(to: url, options: .atomic)

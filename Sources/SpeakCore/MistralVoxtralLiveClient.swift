@@ -50,6 +50,8 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     private var finishContinuation: CheckedContinuation<String?, Never>?
 
     let preroll: StreamingAudioPreroll
+    let readiness = StreamingSessionReadiness()
+    let sendBudget: StreamingAudioSendBudget
 
     public init(
         apiKey: String,
@@ -62,6 +64,7 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
         self.sampleRate = sampleRate
         self.session = session
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.sendBudget = StreamingAudioSendBudget(sampleRate: sampleRate)
     }
 
     public func start(
@@ -93,6 +96,8 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
             finishContinuation = nil
         }
         preroll.reset()
+        readiness.reset()
+        sendBudget.reset()
     }
 
     /// Feeds one raw server frame through the receive path. The WebSocket loop
@@ -118,29 +123,45 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     }
 
     public func finishAndWait() async -> String? {
-        let (task, wasReady) = withStateLock { () -> (URLSessionWebSocketTask?, Bool) in
+        let task = withStateLock { () -> URLSessionWebSocketTask? in
             isFinishing = true
-            return (webSocketTask, isReady)
+            return webSocketTask
         }
-        // Without `session.created` there is nothing to flush, and the deltas
-        // folded so far are all there will ever be.
-        guard let task, wasReady else {
+        // No socket at all: there is nothing that could become ready.
+        guard let task else {
             stop()
             return fullTranscript()
         }
         let result = await awaitFinalTranscript { [weak self, weak task] in
             DispatchQueue.global().async { [weak self, weak task] in
                 guard let self, let task else { return }
-                self.flushPreroll(to: task)
-                _ = self.pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
-                // Flush first, then end: the order is what the SDK sends and
-                // what its own tests assert.
-                self.sendJSON(["type": "input_audio.flush"], on: task)
-                self.sendJSON(["type": "input_audio.end"], on: task)
+                self.commitHeldCapture(to: task)
             }
         }
         stop()
         return result
+    }
+
+    /// Commits the held capture and closes the stream, waiting first for
+    /// `session.created` if the session is still being set up.
+    ///
+    /// Finishing a short recording during setup used to drop the preroll
+    /// entirely: `stop()` erased it and cancelled a socket that was about to
+    /// be configured. The bounded wait lets the session finish configuring and
+    /// flush that audio; a session that cannot be created inside the budget is
+    /// still closed.
+    private func commitHeldCapture(to task: URLSessionWebSocketTask) {
+        guard readiness.waitUntilReady(), isCurrent(task) else {
+            logger.error("Mistral realtime session was never created; finishing without a flush")
+            resolveFinish()
+            return
+        }
+        flushPreroll(to: task)
+        _ = pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
+        // Flush first, then end: the order is what the SDK sends and
+        // what its own tests assert.
+        sendJSON(["type": "input_audio.flush"], on: task)
+        sendJSON(["type": "input_audio.end"], on: task)
     }
 
     /// The bounded wait for `transcription.done`, resolved by that frame (the
@@ -175,6 +196,8 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
             return task
         }
         preroll.reset()
+        readiness.reset()
+        sendBudget.reset()
         task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish()
     }
@@ -298,10 +321,12 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     private func handleSessionCreated() {
         guard let task = currentTask() else {
             withStateLock { isReady = true }
+            readiness.markReady()
             return
         }
         sendJSON(Self.sessionUpdatePayload(sampleRate: sampleRate), on: task)
         withStateLock { isReady = true }
+        readiness.markReady()
         flushPreroll(to: task)
     }
 
@@ -366,17 +391,42 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     }
 
     private func send(_ audio: Data, on task: URLSessionWebSocketTask) {
+        // Each chunk becomes one or more base64 JSON frames, and every one is
+        // retained until its send completes. A socket that has stopped
+        // completing them would otherwise grow that backlog for the whole
+        // recording, so each frame is admitted against a budget and a stalled
+        // transport becomes a reported failure, which cancels the socket and
+        // releases the work behind it.
         for payload in Self.appendPayloads(for: audio) {
-            sendJSON(payload, on: task)
+            guard let json = Self.jsonString(payload) else { continue }
+            let byteCount = json.utf8.count
+            guard sendBudget.admit(byteCount) else {
+                handleTransportFailure(StreamingClientError.transportStalled(provider: "Mistral"))
+                return
+            }
+            sendFrame(json, on: task, releasing: byteCount)
         }
     }
 
+    private static func jsonString(_ payload: [String: Any]) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
     private func sendJSON(_ payload: [String: Any], on task: URLSessionWebSocketTask) {
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
-              let json = String(data: data, encoding: .utf8) else { return }
+        guard let json = Self.jsonString(payload) else { return }
+        sendFrame(json, on: task, releasing: 0)
+    }
+
+    /// - Parameter releasing: Bytes reserved with `sendBudget` for this frame,
+    ///   released when the send completes. Control frames reserve nothing.
+    private func sendFrame(_ json: String, on task: URLSessionWebSocketTask, releasing byteCount: Int) {
         pendingSends.enter()
         task.send(.string(json)) { [weak self] error in
             guard let self else { return }
+            if byteCount > 0 { self.sendBudget.release(byteCount) }
             self.pendingSends.leave()
             if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
                 self.logger.error("Mistral realtime send failed: \(error.localizedDescription)")

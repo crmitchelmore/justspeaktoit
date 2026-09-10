@@ -268,6 +268,59 @@ final class SpeechmaticsLiveClientTests: XCTestCase {
         XCTAssertEqual(SpeechmaticsLiveClient.paddedFinalChunk(full), full)
     }
 
+    /// The Critical case: the shared capture path hands over one converted tap
+    /// buffer at a time, which at a 44.1 kHz or 48 kHz input rate is well under
+    /// the service's 3,200-byte minimum. Sending those straight through had
+    /// every ordinary frame rejected, not just the tail.
+    func testOutboundFrames_neverEmitsAnUndersizedAddAudioFrame() {
+        // 4,096 input frames at 48 kHz become 1,365 frames of 16 kHz PCM16,
+        // which is 2,730 bytes — below the minimum.
+        let tapChunk = Data(repeating: 3, count: 2_730)
+        XCTAssertLessThan(tapChunk.count, SpeechmaticsRealtime.minimumChunkBytes)
+
+        var buffer = Data()
+        var sent: [Data] = []
+        for _ in 0..<10 {
+            let (frames, remainder) = SpeechmaticsLiveClient.outboundFrames(
+                appending: tapChunk, to: buffer
+            )
+            sent += frames
+            buffer = remainder
+        }
+
+        XCTAssertFalse(sent.isEmpty, "coalesced frames must actually be sent")
+        for frame in sent {
+            XCTAssertGreaterThanOrEqual(
+                frame.count,
+                SpeechmaticsRealtime.minimumChunkBytes,
+                "every non-terminal frame must meet the provider minimum"
+            )
+        }
+        // Capture order is preserved and nothing is lost: the frames plus the
+        // remainder are exactly the audio that went in.
+        let reassembled = sent.reduce(into: Data()) { $0.append($1) } + buffer
+        XCTAssertEqual(reassembled.count, tapChunk.count * 10)
+        XCTAssertTrue(reassembled.allSatisfy { $0 == 3 })
+    }
+
+    func testOutboundFrames_holdsAnythingBelowTheMinimumForTheNextChunk() {
+        let (frames, remainder) = SpeechmaticsLiveClient.outboundFrames(
+            appending: Data(repeating: 1, count: 100), to: Data()
+        )
+        XCTAssertTrue(frames.isEmpty)
+        XCTAssertEqual(remainder.count, 100)
+    }
+
+    func testOutboundFrames_emitsAsSoonAsTheMinimumIsReached() {
+        let (frames, remainder) = SpeechmaticsLiveClient.outboundFrames(
+            appending: Data(repeating: 1, count: SpeechmaticsRealtime.minimumChunkBytes),
+            to: Data()
+        )
+        XCTAssertEqual(frames.count, 1)
+        XCTAssertEqual(frames.first?.count, SpeechmaticsRealtime.minimumChunkBytes)
+        XCTAssertTrue(remainder.isEmpty)
+    }
+
     func testEndOfStreamSequenceNumberNeverUnderReportsTheTail() {
         XCTAssertEqual(
             SpeechmaticsLiveClient.endOfStreamLastSequenceNumber(lastAcknowledged: 2, sentFrameCount: 3), 3

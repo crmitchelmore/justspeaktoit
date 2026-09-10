@@ -64,14 +64,17 @@ actor MistralTTSClient: TextToSpeechClient {
     }
 
     let outputURL = try TTSAudioJoiner.join(partURLs, format: format)
-    let cost = Decimal(text.count) * MistralTTSAPI.estimatedCostPerThousandCharacters / 1000
+    // Only what was actually submitted is billed: the chunker drops the
+    // surrounding whitespace, so `text.count` would over-report usage.
+    let spokenCharacters = segments.reduce(0) { $0 + $1.count }
+    let cost = Decimal(spokenCharacters) * MistralTTSAPI.estimatedCostPerThousandCharacters / 1000
 
     return TTSResult(
       audioURL: outputURL,
       provider: provider,
       voice: request.voiceID,
       duration: duration,
-      characterCount: text.count,
+      characterCount: spokenCharacters,
       cost: cost
     )
   }

@@ -17,6 +17,12 @@ final class TextToSpeechManager: ObservableObject {
   // Usage tracking
   @Published private(set) var usageHistory: [TTSResult] = []
 
+  /// The runtime voice listing: the last good result from each provider and
+  /// the providers whose listing failed. Mistral publishes no offline
+  /// catalogue, so a suppressed listing error would make a keyed provider
+  /// vanish from the picker with nothing to explain or retry.
+  @Published var voiceListing = TTSVoiceListingState()
+
   private let appSettings: AppSettings
   private let secureStorage: SecureAppStorage
   private let pronunciationManager: PronunciationManager?
@@ -109,13 +115,19 @@ final class TextToSpeechManager: ObservableObject {
         task.cancel()
       }
     } catch {
-      if progressive != nil { stopPlayback() }
+      // Only the request that still owns the player may tear it down. A
+      // replacement utterance has already prepared playback on the same
+      // player by the time a superseded request's cleanup runs, and stopping
+      // it here would silence the newer one.
+      if progressive != nil, synthesisID == requestID { stopPlayback() }
       if task.isCancelled || Task.isCancelled { throw CancellationError() }
       throw error
     }
-    if progressive != nil { isPlaying = false }
+    if progressive != nil, synthesisID == requestID { isPlaying = false }
     guard synthesisID == requestID, !Task.isCancelled, !task.isCancelled else {
-      if result.provider == .openrouter { try? FileManager.default.removeItem(at: result.audioURL) }
+      // The result was never published — not played, not saved, not in
+      // history — so its file belongs to nobody whatever the provider is.
+      try? FileManager.default.removeItem(at: result.audioURL)
       throw CancellationError()
     }
     if progressive == nil { stopPlayback() }
@@ -221,20 +233,6 @@ final class TextToSpeechManager: ObservableObject {
     return false
   }
 
-  func availableVoices() async -> [TTSVoice] {
-    var voices: [TTSVoice] = []
-
-    for (provider, client) in clients {
-      if await hasAPIKey(for: provider) || !provider.requiresAPIKey {
-        if let providerVoices = try? await client.listVoices() {
-          voices.append(contentsOf: providerVoices)
-        }
-      }
-    }
-
-    return voices.isEmpty ? VoiceCatalog.systemVoices : voices
-  }
-
     func estimatedCost(text: String, voice: String? = nil) -> Decimal? {
         let effectiveVoice = voice ?? appSettings.defaultTTSVoice
         return TTSProvider.from(voiceID: effectiveVoice)
@@ -314,14 +312,13 @@ extension TextToSpeechManager {
       return migratedID
     }
 
-    // Validate the voice ID. Some providers return dynamic voice IDs (not in VoiceCatalog).
-    let knownPrefixes = [
-      "elevenlabs/", "openai/", "azure/", "deepgram/", "soniox/", "cartesia/", "openrouter/",
-      // xAI hosts more voices than it documents, so an account voice that the
-      // catalogue cannot name must still survive validation.
-      XAITTSCatalog.voiceIDPrefix, "system/"
-    ]
-    if VoiceCatalog.voice(forID: voiceID) != nil || knownPrefixes.contains(where: { voiceID.hasPrefix($0) }) {
+    // Validate the voice ID. Some providers return dynamic voice IDs (not in
+    // VoiceCatalog): ElevenLabs and OpenRouter always, Mistral for every voice
+    // it has, since Mistral publishes no presets. The routing prefix list is
+    // the one `TTSProvider.from(voiceID:)` dispatches on, so anything that
+    // routes to a real provider also survives validation.
+    if VoiceCatalog.voice(forID: voiceID) != nil
+      || TTSProvider.knownVoiceIDPrefixes.contains(where: { voiceID.hasPrefix($0) }) {
       return voiceID
     }
 

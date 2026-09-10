@@ -47,7 +47,14 @@ public struct ElevenLabsBalanceClient: ProviderBalanceSource {
         guard let limit = subscription.characterLimit else {
             return .unknown(reason: "ElevenLabs did not report a character limit for this plan.")
         }
-        let used = subscription.characterCount ?? 0
+        // An omitted usage counter is not zero usage. Substituting zero would
+        // show the whole plan as untouched on a partial response, which is the
+        // one number a user must never be shown as fact.
+        guard let used = subscription.characterCount else {
+            return .unknown(
+                reason: "ElevenLabs did not report how many characters this plan has used."
+            )
+        }
         let remaining = max(0, limit - used)
         if (subscription.tier ?? "").lowercased().contains("free") {
             return .freeQuota(remaining: remaining, total: limit, unit: .characters)

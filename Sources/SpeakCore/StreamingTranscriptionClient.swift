@@ -322,6 +322,11 @@ public enum StreamingClientError: LocalizedError {
     case invalidURL
     case invalidAPIKey(provider: String)
     case missingAPIKey(provider: String)
+    /// The socket stopped completing sends while capture continued, so the
+    /// outbound audio budget was exhausted. Reported rather than absorbed: the
+    /// audio already sent is not being transcribed, and holding the rest in
+    /// memory would only make the failure larger.
+    case transportStalled(provider: String)
 
     public var errorDescription: String? {
         switch self {
@@ -331,6 +336,9 @@ public enum StreamingClientError: LocalizedError {
             return "\(provider) rejected the API key. Check it in Settings."
         case .missingAPIKey(let provider):
             return "\(provider) API key is missing. Please configure it in Settings."
+        case .transportStalled(let provider):
+            return "The connection to \(provider) stopped accepting audio. "
+                + "Check your network and start again."
         }
     }
 }

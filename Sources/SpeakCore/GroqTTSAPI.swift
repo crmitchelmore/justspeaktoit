@@ -65,6 +65,18 @@ public struct GroqTTSAPI: Sendable {
     /// Groq caps one Orpheus request at 200 characters, so longer text is
     /// spoken as a sequence of requests and the audio joined.
     public static let maxInputCharacters = 200
+    /// Most requests one synthesis may fan out into.
+    ///
+    /// Every chunk is a separate billable Orpheus request, a separate
+    /// temporary file and a separate round trip, so a 200-character cap turns
+    /// a pasted document into hundreds of charges with no warning. Sixty
+    /// requests is about 12,000 characters — several minutes of speech — and
+    /// anything longer is refused with an explanation rather than billed.
+    public static let maxRequestsPerSynthesis = 60
+    /// Longest text one synthesis accepts, derived from the request budget.
+    public static var maxSynthesisCharacters: Int {
+        maxInputCharacters * maxRequestsPerSynthesis
+    }
     /// Where an organisation admin accepts a model's terms.
     public static let modelTermsURL = "https://console.groq.com/settings/model-terms"
 

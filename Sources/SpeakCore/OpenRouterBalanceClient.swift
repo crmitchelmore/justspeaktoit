@@ -38,8 +38,21 @@ public struct OpenRouterBalanceClient: ProviderBalanceSource {
             guard let purchased = credits.data.totalCredits, let used = credits.data.totalUsage else {
                 return snapshot(.unknown(reason: "OpenRouter did not report both purchased and used credits."))
             }
+            let remainder = purchased - used
+            // Usage above purchased credit is an overdrawn or postpaid
+            // account, not a negative wallet: reporting it as `.cash` would
+            // mark it spendable and format it as credit.
+            guard remainder >= 0 else {
+                return snapshot(.usage(
+                    spent: ProviderBalanceMoney(amount: Decimal(used), currencyCode: "USD"),
+                    quantity: nil,
+                    unit: nil,
+                    note: "OpenRouter reports more usage than purchased credit on this account, "
+                        + "so there is no spendable balance to show."
+                ))
+            }
             return snapshot(
-                .cash(ProviderBalanceMoney(amount: Decimal(purchased - used), currencyCode: "USD"))
+                .cash(ProviderBalanceMoney(amount: Decimal(remainder), currencyCode: "USD"))
             )
         }
     }

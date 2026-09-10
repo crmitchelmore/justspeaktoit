@@ -202,15 +202,8 @@ struct IOSBatchTranscriptionClient {
             throw IOSBatchTranscriptionError.invalidResponse
         } catch let TranscriptionProviderError.httpError(statusCode, body) {
             throw IOSBatchTranscriptionError.httpError(GladiaBatchClient.providerName, statusCode, body)
-        } catch BatchTranscriptionJobError.emptyTranscript {
-            throw IOSBatchTranscriptionError.emptyTranscript
         } catch let error as BatchTranscriptionJobError {
-            // The shared batch client has its own vocabulary for unsupported
-            // input, terminal job failures and the polling deadline; this route
-            // documents that every failure it emits is an
-            // `IOSBatchTranscriptionError`, so map rather than leak.
-            throw IOSBatchTranscriptionError.jobFailed(
-                GladiaBatchClient.providerName, error.errorDescription ?? "")
+            throw IOSBatchTranscriptionError.from(error, service: GladiaBatchClient.providerName)
         }
         guard !result.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw IOSBatchTranscriptionError.emptyTranscript

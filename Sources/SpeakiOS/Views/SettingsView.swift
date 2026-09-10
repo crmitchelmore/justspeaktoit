@@ -1915,20 +1915,19 @@ struct HardwareTriggerSettingsView: View {
             }
 
             Section("Try Your Shortcut") {
-                StepRow(
-                    number: 1,
-                    text: "Open JustSpeakToIt and complete initial setup and permissions. "
-                        + "The destination above is shared by hardware triggers; it is not a separate "
+                Text(
+                    "Every trigger uses the destination selected above; it is not a separate "
                         + "setting for each gesture."
                 )
+                    .font(.callout)
                 StepRow(
-                    number: 2,
+                    number: 1,
                     text: "For your first test, keep the screen awake and the device unlocked. "
                         + "Run your assigned gesture, check that recording has started, then speak. "
                         + "Opening or unlocking the app may be required."
                 )
                 StepRow(
-                    number: 3,
+                    number: 2,
                     text: "Run the same gesture again to stop with Toggle Recording, or use the "
                         + "Live Activity stop control. Check History for the result."
                 )

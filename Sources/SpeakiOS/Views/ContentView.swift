@@ -10,7 +10,6 @@ private let logger = SpeakLogger.logger(category: "ContentView")
 /// Foreground recording coordinator backed by the shared iOS transcription factory.
 /// Integrates with Live Activity for lock screen presence.
 @MainActor
-// swiftlint:disable:next type_body_length
 final class TranscriberCoordinator: ObservableObject {
     private enum LifecycleError: LocalizedError {
         case sessionFinalising

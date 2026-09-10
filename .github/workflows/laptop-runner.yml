@@ -1,0 +1,28 @@
+name: Laptop runner
+on:
+  push:
+    branches: [codex/laptop-runner]
+    paths: [.github/workflows/laptop-runner.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.actor == 'crmitchelmore' || github.actor == 'bravostation'
+    runs-on: [macbook-intel-local, macOS, X64]
+    timeout-minutes: 5
+    steps:
+      - name: Verify laptop and shared build slot
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ARCH" = X64
+          test "$(uname -m)" = x86_64
+          echo "Runner: $RUNNER_NAME"
+          swift --version
+          git --version
+          test "$CMAKE_BUILD_PARALLEL_LEVEL" = 9
+          test "$MAKEFLAGS" = -j9
+          echo "Holding shared slot for 20 seconds"
+          sleep 20
+          echo "Laptop runner verified"

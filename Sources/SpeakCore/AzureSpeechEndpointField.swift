@@ -8,6 +8,12 @@ public struct AzureSpeechEndpointField: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Azure resource endpoint", text: $endpoint)
                 .autocorrectionDisabled()
+                #if os(iOS)
+                // The origin check requires a lowercase `https` scheme, so a
+                // sentence-cased `Https://` from the keyboard would be rejected.
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                #endif
                 .accessibilityIdentifier("azure-speech-resource-endpoint")
             Text("For live transcription, paste the HTTPS endpoint from your Speech resource’s Keys and Endpoint page. "
                 + "Recorded audio uses your region when this is empty. Models depend on region and tier.")

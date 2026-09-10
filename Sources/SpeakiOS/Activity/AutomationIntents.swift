@@ -92,19 +92,30 @@ struct StopDictationIntent: AudioRecordingIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // The budget is the whole operation's, not the polish wait's alone.
+        // `stopRecording` awaits transcription finalisation, History and the
+        // destination side effects first; starting a full 12-second wait after
+        // a slow stop is how a Wait For Polish shortcut overran the system's
+        // limit and returned nothing at all — not even the raw transcript.
+        let startedAt = ContinuousClock.now
         let service = await TranscriptionRecordingService.shared
         guard await service.isActive else {
             throw AutomationIntentError.noActiveRecording
         }
+        // Captured before the stop: the polish that follows belongs to this
+        // capture, and the wait must not be satisfied by an earlier one's.
+        let runID = await service.activeCaptureID
         let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
         let result = await service.stopRecording(
             destination: resolved,
             keyboardDeliverySource: .hardwareTrigger
         )
-        let polished = waitForPolish
-            ? await service.awaitPolishedTranscript(
-                timeout: AutomationIntentSupport.PolishWait.defaultSeconds
-            )
+        let polishBudget = AutomationIntentSupport.PolishWait.remaining(
+            requested: AutomationIntentSupport.PolishWait.defaultSeconds,
+            elapsed: MonotonicClock.elapsedSeconds(since: startedAt)
+        )
+        let polished = waitForPolish && polishBudget > 0
+            ? await service.awaitPolishedTranscript(timeout: polishBudget, forRun: runID)
             : nil
         // A duplicate stop (second Shortcut, Action Button race) intentionally
         // yields an empty no-op result, and a silent or failed recording can
@@ -182,7 +193,7 @@ struct TranscribeAudioFileIntent: AppIntent {
         }
         let temporaryURL = try await Self.stageAudioForTranscription(
             file: file,
-            fileExtension: acceptance.fileExtension
+            acceptance: acceptance
         )
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
 
@@ -236,15 +247,22 @@ struct TranscribeAudioFileIntent: AppIntent {
     /// when Shortcuts gave no URL at all.
     private static func stageAudioForTranscription(
         file: IntentFile,
-        fileExtension: String
+        acceptance: SharedAudioAcceptance
     ) async throws -> URL {
+        let fileExtension = acceptance.fileExtension
         let temporaryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(fileExtension)
         if let sourceURL = file.fileURL {
             let scoped = sourceURL.startAccessingSecurityScopedResource()
             defer { if scoped { sourceURL.stopAccessingSecurityScopedResource() } }
-            try SharedAudioImport.stage(from: sourceURL, to: temporaryURL)
+            try SharedAudioImport.stage(
+                from: sourceURL,
+                to: temporaryURL,
+                // The accepted size, re-applied while copying: a file that
+                // grows after inspection must not be staged past the limit.
+                expectedByteCount: acceptance.byteCount
+            )
         } else {
             try file.data.write(to: temporaryURL)
         }

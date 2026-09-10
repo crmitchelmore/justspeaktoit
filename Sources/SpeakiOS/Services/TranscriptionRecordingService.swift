@@ -55,6 +55,15 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// rather than being told nothing came back.
     @Published public private(set) var isPostProcessing = false
     @Published public private(set) var lastPolishedTranscript: String?
+    /// Which capture's polish `isPostProcessing` and `lastPolishedTranscript`
+    /// describe.
+    ///
+    /// Both used to be service-wide with no owner, so recording B could start,
+    /// stop and begin waiting while A was still polishing; A would then write
+    /// its own result and clear the flag, and B's waiter would return A's
+    /// text. Completion state belongs to a particular stop, so it is tagged
+    /// with one.
+    @Published public private(set) var polishingRunID: UUID?
 
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
@@ -781,7 +790,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         // starts from the global settings again unless it brings its own.
         currentRunParameters = .none
         // Tagged with the run, so a waiter that started this capture gets this
-        // capture's text — including when that text is empty.
+        // capture's text — including when that text is empty. The identity is
+        // kept for the polish that may follow.
+        let completedRunID = currentRunID
         completeRun(with: text)
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
@@ -899,14 +910,21 @@ public final class TranscriptionRecordingService: ObservableObject {
             // Published so a returning intent can wait for the polished text
             // instead of being handed the raw transcript (issue #1015).
             isPostProcessing = true
+            // Which capture this polish belongs to, so a waiter can only be
+            // satisfied by its own (#1015 review). `completionID` already
+            // identifies the stop for `AutomaticPolishOperation`; this is the
+            // same identity expressed in the run ids intents hold.
+            polishingRunID = completedRunID
             startPostProcessing(
                 text: text,
                 historyItemID: historyItem?.id,
                 completionID: completionID,
+                runID: completedRunID,
                 assertion: assertion
             )
         } else {
             isPostProcessing = false
+            polishingRunID = nil
             assertion.end()
         }
 
@@ -1110,6 +1128,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         text: String,
         historyItemID: UUID?,
         completionID: UUID,
+        runID: UUID?,
         assertion: BackgroundTaskAssertion
     ) {
         let settings = AppSettings.shared
@@ -1139,7 +1158,13 @@ public final class TranscriptionRecordingService: ObservableObject {
                 if let historyItemID {
                     historyManager.endPostProcessing(for: historyItemID)
                 }
-                self?.isPostProcessing = false
+                // Only the run that still owns the polish may release a
+                // waiter. A superseded polish clearing the flag would let a
+                // newer stop's `awaitPolishedTranscript` return before its own
+                // polish had landed.
+                if self?.polishingRunID == runID {
+                    self?.isPostProcessing = false
+                }
                 assertion.end()
             }
         )
@@ -1199,13 +1224,24 @@ extension TranscriptionRecordingService {
     /// Polls rather than observes, matching the wait in `DictateIntent`: the
     /// polish runs in a detached `Task` whose completion this actor sees only
     /// through `isPostProcessing`.
-    func awaitPolishedTranscript(timeout: TimeInterval) async -> String? {
-        guard timeout > 0 else { return nil }
-        let deadline = Date().addingTimeInterval(timeout)
-        while isPostProcessing, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 100_000_000)
+    func awaitPolishedTranscript(timeout: TimeInterval, forRun runID: UUID?) async -> String? {
+        guard timeout > 0, let runID, polishingRunID == runID else { return nil }
+        // Monotonic: a wall-clock correction must not extend an intent's wait.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
+        while isPostProcessing, polishingRunID == runID, ContinuousClock.now < deadline {
+            do {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            } catch {
+                // Cancelled. Every later sleep would throw immediately, so
+                // continuing here would spin the main actor until the deadline
+                // and delay the actor-hosted polish it is waiting for.
+                return nil
+            }
         }
-        return isPostProcessing ? nil : lastPolishedTranscript
+        // A newer stop took ownership of the polish state: whatever is in
+        // `lastPolishedTranscript` is not this run's.
+        guard polishingRunID == runID, !isPostProcessing else { return nil }
+        return lastPolishedTranscript
     }
 }
 

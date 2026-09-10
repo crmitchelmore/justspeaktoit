@@ -109,3 +109,74 @@ final class SharedRecordingInboxTests: XCTestCase {
         return item
     }
 }
+
+/// A recoverable failure must not throw the user's only staged copy away, and
+/// nothing may sit in the queue for ever.
+final class SharedRecordingAttemptTests: XCTestCase {
+    private var root = URL(fileURLWithPath: NSTemporaryDirectory())
+
+    override func setUpWithError() throws {
+        root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func makeStagedItem(in inbox: SharedRecordingInbox) throws -> SharedRecordingInboxItem {
+        try inbox.prepare()
+        let item = SharedRecordingInboxItem(
+            originalFilename: "memo.m4a",
+            fileExtension: "m4a",
+            byteCount: 4
+        )
+        try Data([1, 2, 3, 4]).write(to: inbox.stagedURL(id: item.id, fileExtension: "m4a"))
+        try inbox.commit(item)
+        return item
+    }
+
+    func testANewItemStartsWithNoAttempts() throws {
+        let inbox = SharedRecordingInbox(root: root)
+        let item = try makeStagedItem(in: inbox)
+        XCTAssertEqual(item.attemptCount, 0)
+        XCTAssertEqual(inbox.pending().first?.attemptCount, 0)
+    }
+
+    func testAnAttemptIsPersistedAndTheAudioIsKept() throws {
+        let inbox = SharedRecordingInbox(root: root)
+        let item = try makeStagedItem(in: inbox)
+        let updated = inbox.registerAttempt(item)
+        XCTAssertEqual(updated.attemptCount, 1)
+        XCTAssertEqual(inbox.pending().first?.attemptCount, 1)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: inbox.stagedURL(id: item.id, fileExtension: "m4a").path
+            ),
+            "the staged audio must survive a counted retry"
+        )
+    }
+
+    func testAttemptsAccumulateUpToTheLimit() throws {
+        let inbox = SharedRecordingInbox(root: root)
+        var item = try makeStagedItem(in: inbox)
+        for expected in 1...SharedRecordingInbox.maximumAttempts {
+            item = inbox.registerAttempt(item)
+            XCTAssertEqual(item.attemptCount, expected)
+        }
+        XCTAssertGreaterThanOrEqual(item.attemptCount, SharedRecordingInbox.maximumAttempts)
+    }
+
+    /// Manifests the extension wrote before attempts were counted still decode.
+    func testAManifestWithoutAnAttemptCountDecodesAsZero() throws {
+        let inbox = SharedRecordingInbox(root: root)
+        try inbox.prepare()
+        let id = UUID()
+        let json = """
+        {"id":"\(id.uuidString)","originalFilename":"old.m4a","fileExtension":"m4a",\
+        "byteCount":4,"receivedAt":1000}
+        """
+        try Data([1, 2, 3, 4]).write(to: inbox.stagedURL(id: id, fileExtension: "m4a"))
+        try Data(json.utf8).write(to: inbox.manifestURL(id: id))
+        XCTAssertEqual(inbox.pending().first?.attemptCount, 0)
+    }
+}

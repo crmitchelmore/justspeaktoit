@@ -41,6 +41,11 @@ public enum SharedAudioImportRejection: LocalizedError, Equatable, Sendable {
     /// The user dismissed the share sheet, or the extension was terminated,
     /// while the copy was in flight.
     case cancelled
+    /// The file was a different size by the time it was copied than it was
+    /// when it was inspected — still being written, or replaced underneath us.
+    /// The staged copy is not the recording the size check accepted, so it is
+    /// discarded rather than transcribed or advertised at the wrong length.
+    case changedWhileCopying(filename: String)
 
     public var errorDescription: String? {
         switch self {
@@ -68,6 +73,9 @@ public enum SharedAudioImportRejection: LocalizedError, Equatable, Sendable {
                 + "still saving, wait for it to finish and share it again."
         case .cancelled:
             return "Import cancelled. Nothing was transcribed, and the recording was not changed."
+        case .changedWhileCopying(let filename):
+            return "\"\(filename)\" changed while it was being copied. If it is still recording, "
+                + "wait for it to finish and share it again. The file was not changed."
         }
     }
 }
@@ -191,11 +199,27 @@ public enum SharedAudioImport {
     /// as it was found — a half-written file in our inbox would later be
     /// transcribed as if it were the whole recording.
     ///
-    /// Returns the number of bytes written.
+    /// The size constraints `evaluate` accepted are re-applied here rather
+    /// than trusted from the earlier snapshot. A file can grow between being
+    /// inspected and being copied — a Voice Memo still recording, a download
+    /// still landing — and copying to EOF regardless would consume unbounded
+    /// app-group storage, send an over-limit upload, and leave a manifest
+    /// whose advertised byte count no longer describes its audio. The copy
+    /// stops the moment it exceeds the limit, and a size that does not match
+    /// what was accepted is refused; either way the partial copy is removed.
+    ///
+    /// - Parameters:
+    ///   - expectedByteCount: the size `evaluate` accepted, or `nil` when the
+    ///     caller has no accepted size to hold the copy to.
+    ///   - maximumByteCount: the hard cap, enforced even without an expected
+    ///     size.
+    /// - Returns: the number of bytes written.
     @discardableResult
     public static func stage(
         from source: URL,
         to destination: URL,
+        expectedByteCount: Int? = nil,
+        maximumByteCount: Int = AutomationIntentSupport.maximumAudioFileBytes,
         isCancelled: () -> Bool = { false }
     ) throws -> Int {
         guard let input = try? FileHandle(forReadingFrom: source) else {
@@ -206,6 +230,9 @@ public enum SharedAudioImport {
         guard fileManager.createFile(atPath: destination.path, contents: nil) else {
             throw SharedAudioImportRejection.unreadable(filename: destination.lastPathComponent)
         }
+        // The copy may never exceed the accepted size, and never the hard cap
+        // whether or not a size was accepted.
+        let ceiling = min(expectedByteCount ?? maximumByteCount, maximumByteCount)
         do {
             let output = try FileHandle(forWritingTo: destination)
             defer { try? output.close() }
@@ -215,10 +242,31 @@ public enum SharedAudioImport {
                 guard let chunk = try input.read(upToCount: stagingChunkBytes), !chunk.isEmpty else {
                     break
                 }
-                try output.write(contentsOf: chunk)
                 written += chunk.count
+                guard written <= ceiling else {
+                    // Stop at the moment the limit is passed rather than after
+                    // copying to EOF: an unbounded source must not be able to
+                    // fill the container first and be rejected afterwards.
+                    if expectedByteCount == nil || written > maximumByteCount {
+                        throw SharedAudioImportRejection.tooLarge(
+                            byteCount: written,
+                            limit: maximumByteCount
+                        )
+                    }
+                    throw SharedAudioImportRejection.changedWhileCopying(
+                        filename: source.lastPathComponent
+                    )
+                }
+                try output.write(contentsOf: chunk)
             }
             try output.synchronize()
+            // A file that shrank is not the one that was accepted either: its
+            // manifest would advertise a byte count that does not describe it.
+            if let expectedByteCount, written != expectedByteCount {
+                throw SharedAudioImportRejection.changedWhileCopying(
+                    filename: source.lastPathComponent
+                )
+            }
             return written
         } catch {
             // Our copy only. The shared item is untouched on every path.

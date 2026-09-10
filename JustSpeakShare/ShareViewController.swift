@@ -118,6 +118,10 @@ final class ShareViewController: UIViewController {
         try SharedAudioImport.stage(
             from: url,
             to: destination,
+            // Held to the size the check above accepted: a recording that is
+            // still being written must not be copied past the limit and must
+            // not produce a manifest whose byte count no longer describes it.
+            expectedByteCount: acceptance.byteCount,
             isCancelled: { cancellation.isCancelled }
         )
         // Manifest last: an item the app can see is an item whose bytes are

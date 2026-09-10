@@ -131,11 +131,41 @@ public enum AutomationIntentSupport {
         public static let defaultSeconds: TimeInterval = 12
         public static let maximumSeconds: TimeInterval = 20
 
+        /// The whole operation's budget, not just the polish wait's share of
+        /// it. `perform()` gets roughly 30 seconds; the stop that precedes the
+        /// wait — draining the transcriber, History, destination side effects
+        /// — spends part of that, and a wait that started its own full budget
+        /// after a slow stop could push the intent past the system's limit and
+        /// return nothing at all, not even the raw transcript.
+        public static let operationBudgetSeconds: TimeInterval = 25
+
+        /// Reserved for finishing up after the wait: building and returning
+        /// the result. Small, but the wait must not consume the last of the
+        /// budget.
+        public static let returnReserveSeconds: TimeInterval = 2
+
         /// Clamps a caller-supplied wait into the range the intent budget
         /// allows. A non-positive value means "do not wait".
         public static func clamped(_ seconds: TimeInterval) -> TimeInterval {
             guard seconds > 0 else { return 0 }
             return min(seconds, maximumSeconds)
+        }
+
+        /// How long is left for the polish wait once the stop has already
+        /// spent `elapsed` seconds of the operation's budget.
+        ///
+        /// Returns 0 — "do not wait, return the raw transcript now" — when the
+        /// stop has already used the budget. That is the case this exists for:
+        /// a slow stop must shorten the wait, never be followed by a full one.
+        public static func remaining(
+            requested: TimeInterval,
+            elapsed: TimeInterval,
+            budget: TimeInterval = operationBudgetSeconds,
+            reserve: TimeInterval = returnReserveSeconds
+        ) -> TimeInterval {
+            let available = budget - reserve - max(0, elapsed)
+            guard available > 0 else { return 0 }
+            return min(clamped(requested), available)
         }
     }
 

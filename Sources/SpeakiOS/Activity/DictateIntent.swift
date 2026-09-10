@@ -117,6 +117,9 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // The whole operation's budget starts here, not when the polish wait
+        // does: recording, end-pointing and the stop all spend from it.
+        let startedAt = ContinuousClock.now
         let service = await TranscriptionRecordingService.shared
         // Single-flight (issue #943): a Dictate arriving while something is
         // already recording is refused, never allowed to open a second
@@ -173,11 +176,7 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
             runID: runID,
             maximumDuration: endPointing.maximumDuration
         )
-        let polished = waitForPolish
-            ? await service.awaitPolishedTranscript(
-                timeout: AutomationIntentSupport.PolishWait.defaultSeconds
-            )
-            : nil
+        let polished = await polishedTranscript(service, runID: runID, since: startedAt)
         guard let text = AutomationIntentSupport.transcriptAfterPolishWait(
             raw: transcript,
             polished: polished,
@@ -186,6 +185,23 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
             throw AutomationIntentError.emptyTranscript
         }
         return .result(value: text)
+    }
+
+    /// The polished text, waited for within whatever is left of the whole
+    /// operation's budget — never a fresh full wait started on top of the time
+    /// the recording and its stop already spent.
+    private func polishedTranscript(
+        _ service: TranscriptionRecordingService,
+        runID: UUID,
+        since startedAt: ContinuousClock.Instant
+    ) async -> String? {
+        guard waitForPolish else { return nil }
+        let budget = AutomationIntentSupport.PolishWait.remaining(
+            requested: AutomationIntentSupport.PolishWait.defaultSeconds,
+            elapsed: MonotonicClock.elapsedSeconds(since: startedAt)
+        )
+        guard budget > 0 else { return nil }
+        return await service.awaitPolishedTranscript(timeout: budget, forRun: runID)
     }
 
     /// Waits for the dictation to end, then produces its text.

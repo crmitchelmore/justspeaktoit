@@ -24,19 +24,42 @@ public struct SharedRecordingInboxItem: Codable, Equatable, Sendable, Identifiab
     public let fileExtension: String
     public let byteCount: Int
     public let receivedAt: Date
+    /// How many times the app has tried and failed to transcribe this item.
+    ///
+    /// A recoverable failure — no network, a provider outage, a credential not
+    /// loaded yet — must not throw the only staged copy of the user's audio
+    /// away; the whole point of a durable hand-off is to defer the work until
+    /// the app can do it. But nothing may sit in the queue for ever either, so
+    /// recoverable failures are counted and the item is dropped once it passes
+    /// ``SharedRecordingInbox/maximumAttempts``.
+    public let attemptCount: Int
 
     public init(
         id: UUID = UUID(),
         originalFilename: String,
         fileExtension: String,
         byteCount: Int,
-        receivedAt: Date = Date()
+        receivedAt: Date = Date(),
+        attemptCount: Int = 0
     ) {
         self.id = id
         self.originalFilename = originalFilename
         self.fileExtension = fileExtension
         self.byteCount = byteCount
         self.receivedAt = Self.storable(receivedAt)
+        self.attemptCount = attemptCount
+    }
+
+    /// The same item with one more failed attempt recorded.
+    public func recordingAttempt() -> SharedRecordingInboxItem {
+        SharedRecordingInboxItem(
+            id: id,
+            originalFilename: originalFilename,
+            fileExtension: fileExtension,
+            byteCount: byteCount,
+            receivedAt: receivedAt,
+            attemptCount: attemptCount + 1
+        )
     }
 
     /// Rounds to whole milliseconds.
@@ -52,7 +75,7 @@ public struct SharedRecordingInboxItem: Codable, Equatable, Sendable, Identifiab
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, originalFilename, fileExtension, byteCount, receivedAt
+        case id, originalFilename, fileExtension, byteCount, receivedAt, attemptCount
     }
 
     /// Routed through the memberwise initialiser so a decoded date is rounded
@@ -64,7 +87,10 @@ public struct SharedRecordingInboxItem: Codable, Equatable, Sendable, Identifiab
             originalFilename: try container.decode(String.self, forKey: .originalFilename),
             fileExtension: try container.decode(String.self, forKey: .fileExtension),
             byteCount: try container.decode(Int.self, forKey: .byteCount),
-            receivedAt: try container.decode(Date.self, forKey: .receivedAt)
+            receivedAt: try container.decode(Date.self, forKey: .receivedAt),
+            // Absent in manifests the extension wrote before attempts were
+            // counted, and in any it writes without one.
+            attemptCount: try container.decodeIfPresent(Int.self, forKey: .attemptCount) ?? 0
         )
     }
 }
@@ -79,6 +105,11 @@ public struct SharedRecordingInboxItem: Codable, Equatable, Sendable, Identifiab
 /// `FileManager.default`.
 public struct SharedRecordingInbox: @unchecked Sendable {
     public static let directoryName = "SharedRecordings"
+
+    /// How many recoverable failures an item is given before its staged copy
+    /// is dropped. High enough to survive a flight or a provider outage across
+    /// several foregrounds, low enough that nothing retries for ever.
+    public static let maximumAttempts = 5
 
     public let root: URL
     private let fileManager: FileManager
@@ -170,6 +201,24 @@ public struct SharedRecordingInbox: @unchecked Sendable {
         decoder.dateDecodingStrategy = .secondsSince1970
         return decoder
     }()
+
+    /// Records one failed attempt against an item and returns the updated
+    /// value, so the caller can decide whether it has had enough.
+    ///
+    /// Only the manifest is rewritten; the audio copy is untouched. If the
+    /// rewrite fails the item keeps its old count — an uncounted retry is the
+    /// safe direction, since the alternative is dropping the user's only
+    /// staged copy on a bookkeeping failure.
+    @discardableResult
+    public func registerAttempt(_ item: SharedRecordingInboxItem) -> SharedRecordingInboxItem {
+        let next = item.recordingAttempt()
+        do {
+            try commit(next)
+            return next
+        } catch {
+            return item
+        }
+    }
 
     /// Removes our copy and its manifest once the app has finished with it.
     /// Only ever touches files inside `root`, all of which this code wrote.

@@ -791,8 +791,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(liveStopGracePeriod, key: .liveStopGracePeriod) }
   }
 
-  // Registry metadata only (for example "openai.apiKey"), never credential values.
-  // SecureStorage persists values to Keychain before registering their identifiers.
+    // Registry metadata only (for example "openai.apiKey"), never credential values.
+    // SecureStorage persists values to Keychain before registering their identifiers.
   @Published private(set) var trackedAPIKeyIdentifiers: [String] {
     didSet { store(trackedAPIKeyIdentifiers, key: .trackedKeyIdentifiers) }
   }

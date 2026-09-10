@@ -27,7 +27,7 @@ actor AzureSpeechClient: TextToSpeechClient {
     let voiceID = voice.replacingOccurrences(of: "azure/", with: "")
 
     guard let baseURL = AzureSpeechEndpoint.baseURL(region: region) else {
-      throw TTSError.synthesisFailure("Invalid Azure Speech region")
+        throw TTSError.synthesisFailure("Invalid Azure Speech region")
     }
     let url = baseURL.appendingPathComponent("cognitiveservices/v1")
 
@@ -100,7 +100,7 @@ actor AzureSpeechClient: TextToSpeechClient {
     }
 
     guard let baseURL = AzureSpeechEndpoint.baseURL(region: region) else {
-      return .failure(message: "Invalid Azure Speech region")
+        return .failure(message: "Invalid Azure Speech region")
     }
     let url = baseURL.appendingPathComponent("cognitiveservices/voices/list")
 

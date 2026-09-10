@@ -50,18 +50,32 @@ final class CaptureDeepLinkTests: XCTestCase {
     // MARK: - Destination override
 
     func testDestinationRawValuesParse() {
-        XCTAssertEqual(parse("justspeaktoit://stop?destination=clipboard")?.destination, .clipboard)
+        XCTAssertEqual(parse("justspeaktoit://start?destination=clipboard")?.destination, .clipboard)
         XCTAssertEqual(
-            parse("justspeaktoit://stop?destination=clipboardAndPostProcess")?.destination,
+            parse("justspeaktoit://start?destination=clipboardAndPostProcess")?.destination,
             .clipboardAndPostProcess
         )
-        XCTAssertEqual(parse("justspeaktoit://stop?destination=historyOnly")?.destination, .historyOnly)
+        XCTAssertEqual(parse("justspeaktoit://start?destination=historyOnly")?.destination, .historyOnly)
     }
 
     func testDestinationAliasesParse() {
-        XCTAssertEqual(parse("justspeaktoit://stop?destination=polish")?.destination, .clipboardAndPostProcess)
-        XCTAssertEqual(parse("justspeaktoit://stop?destination=history")?.destination, .historyOnly)
-        XCTAssertEqual(parse("justspeaktoit://stop?destination=HISTORY")?.destination, .historyOnly)
+        XCTAssertEqual(parse("justspeaktoit://start?destination=polish")?.destination, .clipboardAndPostProcess)
+        XCTAssertEqual(parse("justspeaktoit://start?destination=history")?.destination, .historyOnly)
+        XCTAssertEqual(parse("justspeaktoit://start?destination=HISTORY")?.destination, .historyOnly)
+    }
+
+    /// A destination belongs to the capture that starts, not to whoever stops
+    /// it. The runner already refuses to redirect a capture it did not begin,
+    /// but accepting the parameter and ignoring it reads to the caller as
+    /// though it worked — and an app sending this at somebody's history-only
+    /// recording is asking to pull their dictation onto the pasteboard.
+    func testADestinationIsRefusedOnStopRatherThanAcceptedAndIgnored() {
+        XCTAssertEqual(
+            parse("justspeaktoit://stop?destination=clipboardAndPostProcess")?.failure,
+            .unsupportedParameter
+        )
+        XCTAssertEqual(parse("justspeaktoit://stop?destination=history")?.failure, .unsupportedParameter)
+        XCTAssertNil(parse("justspeaktoit://stop")?.failure)
     }
 
     func testMissingOrUnknownDestinationFallsBackToTheConfiguredOne() {
@@ -161,6 +175,54 @@ final class CaptureDeepLinkTests: XCTestCase {
         XCTAssertEqual(parse("justspeaktoit://stop?lang=en_US")?.failure, .unsupportedParameter)
     }
 
+    // MARK: - Repeated parameters
+
+    /// A query is a list, so `?lang=en_US&lang=klingon` carries two values.
+    /// Honouring the first would start a recording under `en_US` and never tell
+    /// the caller its unknown value had been discarded.
+    func testAConflictingRepeatFailsTheLinkRatherThanTakingTheFirstValue() {
+        let known = ModelCatalog.liveTranscription[0].id
+        XCTAssertEqual(
+            parse("justspeaktoit://start?lang=en_US&lang=klingon")?.failure,
+            .repeatedParameter
+        )
+        XCTAssertEqual(
+            parse("justspeaktoit://start?model=\(known)&model=openai/not-a-model")?.failure,
+            .repeatedParameter
+        )
+        XCTAssertEqual(
+            parse("justspeaktoit://dictate?maxDuration=30&maxduration=600")?.failure,
+            .repeatedParameter
+        )
+        XCTAssertEqual(
+            parse("justspeaktoit://start?destination=clipboard&destination=history")?.failure,
+            .repeatedParameter
+        )
+        XCTAssertEqual(
+            parse("justspeaktoit://dictate?x-success=drafts://a&x-success=bear://b")?.failure,
+            .repeatedParameter
+        )
+        // Two verbs is no single command either.
+        XCTAssertEqual(
+            parse("justspeaktoit://transcribe?action=start&action=stop")?.failure,
+            .repeatedParameter
+        )
+    }
+
+    func testRepeatingAParameterWithTheSameValueIsHonoured() {
+        let link = parse("justspeaktoit://start?lang=en_US&lang=en_US")
+        XCTAssertNil(link?.failure, "Saying the same thing twice asks for nothing ambiguous")
+        XCTAssertEqual(link?.languageIdentifier, "en_US")
+    }
+
+    /// The callback cannot be trusted to be single-valued when the query is
+    /// self-contradictory, so a repeat is reported in-app rather than returned.
+    func testAConflictingRepeatIsNotReturnedThroughACallback() {
+        let link = parse("justspeaktoit://dictate?lang=en_US&lang=klingon&x-error=drafts://error")
+        XCTAssertEqual(link?.failure, .repeatedParameter)
+        XCTAssertNil(link?.callback)
+    }
+
     func testAFailedLinkStillCarriesItsErrorCallback() {
         let link = parse("justspeaktoit://dictate?lang=klingon&x-error=drafts://error")
         XCTAssertEqual(link?.failure, .unknownLanguage)
@@ -227,6 +289,23 @@ final class CaptureDeepLinkTests: XCTestCase {
         let pending = router.consumePendingCaptureAction()
         XCTAssertEqual(pending?.action, .stop)
         XCTAssertNil(pending?.destination)
+    }
+
+    /// Latest-wins is the deliberate contract for the cold-launch window, but a
+    /// `dictate` that is superseded has an app blocked on a return address. It
+    /// must be answered rather than dropped.
+    @MainActor
+    func testASupersededDictateStillCarriesACallbackItsCallerCanBeAnswered() {
+        let router = DeepLinkRouter()
+        router.handle(URL(string: "justspeaktoit://dictate?x-error=drafts://err")!)
+        let queued = router.pendingCaptureAction
+        XCTAssertEqual(queued?.action, .dictate)
+        XCTAssertNotNil(queued?.callback?.error, "The queued command has a caller waiting on it")
+
+        router.handle(URL(string: "justspeaktoit://stop")!)
+
+        XCTAssertEqual(router.pendingCaptureAction?.action, .stop, "Latest still wins")
+        XCTAssertNil(router.pendingCaptureAction?.callback)
     }
 
     @MainActor

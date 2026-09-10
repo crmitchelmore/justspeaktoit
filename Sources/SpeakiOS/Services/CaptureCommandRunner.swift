@@ -71,41 +71,150 @@ public enum CaptureCommandRunner {
             return false
         }
 
-        guard await self.start(
+        if let failure = await self.start(
             service,
             destinationOverride: link.destination,
             modelOverride: link.modelIdentifier,
             languageOverride: link.languageIdentifier
-        ) else {
+        ) {
+            self.report(failure, to: link.callback)
+            return false
+        }
+
+        // Captured now, before anything can stop the capture: this is what ties
+        // the result that comes back to the session this link started.
+        guard let sessionID = service.currentSessionID else {
             self.report(.recordingFailed, to: link.callback)
             return false
         }
 
-        let transcript = await self.awaitTranscript(service, maxDuration: link.dictateDuration)
-        self.deliver(transcript, to: link.callback)
-        return true
+        let outcome = await self.awaitOutcome(
+            service, sessionID: sessionID, maxDuration: link.dictateDuration
+        )
+        switch outcome {
+        case .transcript(let text):
+            self.deliver(text, to: link.callback)
+            return true
+        case .failed(let failure):
+            self.report(failure, to: link.callback)
+            return false
+        }
     }
 
-    /// Waits for the dictation to end, then produces its text.
+    /// How a dictation ended, as far as its caller is concerned.
+    private enum DictateOutcome {
+        /// The session finished. An empty string is a real answer — silence —
+        /// and becomes `x-cancel`.
+        case transcript(String)
+        /// The session did not produce an answer. Becomes `x-error`, never a
+        /// cancellation and never an empty success.
+        case failed(CaptureLinkFailure)
+    }
+
+    /// Waits for *this* dictation to end, then produces its outcome.
     ///
-    /// Ends either because the deadline passed — this stops the capture itself
-    /// and takes the result straight from the recorder — or because something
-    /// else stopped it (the Live Activity, the Action Button, a later
-    /// `justspeaktoit://stop`), in which case the text that session published is
-    /// the answer. Polling rather than observing keeps this to one owner of the
-    /// stop, so a dictation can never be stopped twice.
-    private static func awaitTranscript(
+    /// Three ways it ends, and all three resolve through the recorder's
+    /// `lastFinishedCapture` rather than through any global "last transcript":
+    ///
+    /// * the deadline passes, and this stops the capture itself;
+    /// * the app leaves the foreground, and this stops the capture itself —
+    ///   `Task.sleep` does not run while the process is suspended, so the
+    ///   deadline alone cannot bound a microphone across that transition, and
+    ///   `dictate` is a foreground-only verb in the first place;
+    /// * something else stops it (the Live Activity, the Action Button, a later
+    ///   `justspeaktoit://stop`), in which case this waits for that session's
+    ///   own result to settle.
+    ///
+    /// The last case is the one that used to read
+    /// `SharedTranscriptionState.lastCompletedTranscript`: the recorder leaves
+    /// `isActive` before it has drained and published, so that read could return
+    /// the *previous* recording's text, or — if another capture finished in the
+    /// interval — someone else's.
+    private static func awaitOutcome(
         _ service: TranscriptionRecordingService,
+        sessionID: UUID,
         maxDuration: TimeInterval
-    ) async -> String {
+    ) async -> DictateOutcome {
         let deadline = Date().addingTimeInterval(maxDuration)
-        while service.isActive, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 250_000_000)
+        let foreground = ForegroundWatch()
+        defer { foreground.stop() }
+
+        while service.isActive, Date() < deadline, !foreground.leftForeground {
+            try? await Task.sleep(nanoseconds: pollInterval)
         }
-        guard service.isActive else {
-            return SharedTranscriptionState.shared.lastCompletedTranscript ?? ""
+
+        if service.isActive {
+            _ = await self.stop(service)
         }
-        return await self.stop(service)
+        // Settlement is awaited either way. Owning the stop is not enough: a
+        // stop that lands on the recorder's re-entrancy guard, or on a startup
+        // still unwinding, returns an empty no-op result while the session that
+        // is really finishing publishes a moment later.
+        await self.awaitSettlement(of: sessionID, from: service)
+
+        guard let finished = service.lastFinishedCapture, finished.sessionID == sessionID else {
+            // The capture this link started never settled under its own
+            // identity. Refusing is the only honest answer: the alternative is
+            // handing back whatever text happens to be lying around.
+            SpeakLogger.transcription.warning(
+                "Dictate could not collect its own session's result"
+            )
+            return .failed(.transcriptionFailed)
+        }
+        if finished.failed {
+            // A provider or recording error is not silence and not success.
+            return .failed(.transcriptionFailed)
+        }
+        return .transcript(finished.text)
+    }
+
+    private static let pollInterval: UInt64 = 250_000_000
+
+    /// Waits, bounded, for a session that something else stopped to publish its
+    /// result. Draining a transcriber is not instant, and the recorder leaves
+    /// `isActive` first.
+    private static func awaitSettlement(
+        of sessionID: UUID,
+        from service: TranscriptionRecordingService
+    ) async {
+        let settlementDeadline = Date().addingTimeInterval(settlementGrace)
+        while service.lastFinishedCapture?.sessionID != sessionID, Date() < settlementDeadline {
+            try? await Task.sleep(nanoseconds: pollInterval)
+        }
+    }
+
+    /// How long to wait for an externally stopped session to finish draining
+    /// and publish. Generous enough for a batch upload to come back, short
+    /// enough that a caller is not left waiting indefinitely.
+    private static let settlementGrace: TimeInterval = 120
+
+    /// Notices the app leaving the foreground while a dictation is in flight.
+    ///
+    /// `didEnterBackground` rather than `willResignActive`: a notification
+    /// banner or Control Centre must not end someone's dictation, but a switch
+    /// to another app suspends this process, and a suspended process cannot
+    /// enforce the caller's `maxDuration` on the microphone it opened.
+    @MainActor
+    private final class ForegroundWatch {
+        private(set) var leftForeground = false
+        private var observer: (any NSObjectProtocol)?
+
+        init() {
+            self.observer = NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.leftForeground = true }
+            }
+        }
+
+        /// Always called, from the `defer` in `awaitOutcome`, so there is no
+        /// `deinit` fallback to reason about.
+        func stop() {
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            self.observer = nil
+        }
     }
 
     /// Opens the caller's `x-success` URL with the transcript, or `x-cancel`
@@ -118,6 +227,17 @@ public enum CaptureCommandRunner {
             return
         }
         self.open(callback.successURL(transcript: trimmed), reason: "x-success")
+    }
+
+    /// Answers the caller of a queued capture link that a later link replaced
+    /// before the scene became active.
+    ///
+    /// Reported to the caller only. The user did not lose anything — the
+    /// command they issued last is the one that runs — so there is nothing to
+    /// alert them about; the app that is blocked waiting for a return is the
+    /// only party that needs to hear.
+    static func reportSuperseded(to callback: CaptureCallback) {
+        self.open(callback.errorURL(.superseded), reason: "x-error")
     }
 
     /// Reports a refusal to the caller and to the user. The caller only learns
@@ -185,7 +305,7 @@ public enum CaptureCommandRunner {
                 destinationOverride: destinationOverride,
                 modelOverride: modelOverride,
                 languageOverride: languageOverride
-            )
+            ) == nil
 
         case .stop:
             guard isActive else { return false }
@@ -202,16 +322,22 @@ public enum CaptureCommandRunner {
                 destinationOverride: destinationOverride,
                 modelOverride: modelOverride,
                 languageOverride: languageOverride
-            )
+            ) == nil
         }
     }
 
+    /// - Returns: `nil` when the capture started, or why it did not.
+    ///
+    /// The recorder's own refusals are preserved rather than flattened: a
+    /// `model=` this device cannot honour comes back as `.modelUnavailable`, not
+    /// as the generic `.recordingFailed`, so the caller's `x-error` says which
+    /// of its parameters was the problem.
     private static func start(
         _ service: TranscriptionRecordingService,
         destinationOverride: HardwareTriggerDestination?,
         modelOverride: String? = nil,
         languageOverride: String? = nil
-    ) async -> Bool {
+    ) async -> CaptureLinkFailure? {
         // The in-app recorder owns the microphone through its own coordinator,
         // which the headless service knows nothing about. Starting here anyway
         // would run two sessions against one input. The App Intents refuse for
@@ -220,7 +346,7 @@ public enum CaptureCommandRunner {
             SpeakLogger.transcription.info(
                 "Capture command ignored: a recording is already running in the app"
             )
-            return false
+            return .alreadyRecording
         }
         do {
             try await service.startRecording(
@@ -228,7 +354,7 @@ public enum CaptureCommandRunner {
                 languageOverride: languageOverride
             )
             startedDestination = destinationOverride
-            return true
+            return nil
         } catch {
             startedDestination = nil
             SpeakLogger.logError(
@@ -236,7 +362,7 @@ public enum CaptureCommandRunner {
                 context: "Capture command start",
                 logger: SpeakLogger.transcription
             )
-            return false
+            return error as? CaptureLinkFailure ?? .recordingFailed
         }
     }
 

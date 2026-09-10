@@ -63,6 +63,14 @@ public final class DeepLinkRouter: ObservableObject {
             // window before the scene is active, and the newer one is the better
             // guess at what the user last asked for; queueing both would replay a
             // superseded command seconds later.
+            //
+            // What may not be dropped silently is a *caller* waiting on the
+            // command being replaced. A `dictate` carries x-callback-url return
+            // addresses, and an app that opened one is blocked until one of them
+            // fires; leaving it waiting forever is worse than any ordering
+            // question. So the superseded command answers its caller before it
+            // goes, and only then is it replaced.
+            self.reportSupersededCaptureIfNeeded(replacing: pendingCaptureAction, with: capture)
             pendingCaptureAction = capture
             return true
         }
@@ -88,6 +96,23 @@ public final class DeepLinkRouter: ObservableObject {
         default:
             return false
         }
+    }
+
+    /// Tells a superseded `dictate`'s caller that its request was replaced,
+    /// rather than leaving it waiting on a callback that will never fire.
+    ///
+    /// Only fires for a command that actually carried a return address, and
+    /// only when a *different* command replaces it — a duplicate of the same
+    /// link (a double-tap, a re-delivered URL) is not a supersession.
+    private func reportSupersededCaptureIfNeeded(
+        replacing previous: CaptureDeepLink?,
+        with replacement: CaptureDeepLink
+    ) {
+        guard let previous, let callback = previous.callback, previous != replacement else { return }
+        SpeakLogger.transcription.info(
+            "Queued capture link superseded before the scene was active; answering its caller"
+        )
+        CaptureCommandRunner.reportSuperseded(to: callback)
     }
 
     /// Consumes and returns the pending conversation ID (if any).

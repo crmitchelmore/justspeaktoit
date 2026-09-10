@@ -252,7 +252,15 @@ private extension TranscriberCoordinator {
             ? settings.batchTranscriptionModel
             : settings.selectedModel
         if settings.transcriptionMode == .batch {
-            try settings.requireAvailableCredentials(for: currentModel, purpose: .batchTranscription)
+            do {
+                try settings.requireAvailableCredentials(for: currentModel, purpose: .batchTranscription)
+            } catch {
+                // Nothing has been published yet beyond the run itself, so the
+                // run settles here rather than sitting in preparation forever.
+                finishStartupDiagnostics(runID: runID, error: error)
+                finishPresentation()
+                throw error
+            }
         }
         partialText = ""
         wordCount = 0

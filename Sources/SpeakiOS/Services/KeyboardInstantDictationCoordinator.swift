@@ -223,8 +223,13 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
 
         switch record.phase {
         case .requested:
+            // The containing app begins handling the request here — before
+            // credential loading and before readiness teardown — so this is
+            // the earliest app-code entry the keyboard path can observe
+            // (issue #972).
+            let requestedAt = Date()
             requestTask = Task { [weak self] in
-                await self?.beginRecording(for: record)
+                await self?.beginRecording(for: record, requestedAt: requestedAt)
                 self?.requestTask = nil
                 self?.handleRequestChange()
             }
@@ -241,7 +246,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         }
     }
 
-    private func beginRecording(for record: KeyboardHandoffRecord) async {
+    private func beginRecording(for record: KeyboardHandoffRecord, requestedAt: Date) async {
         let requestID = record.requestID
         guard activeRequestID == nil, !recordingService.isRunning else {
             _ = try? handoffStore.fail(requestID: requestID, code: .recordingUnavailable)
@@ -266,6 +271,7 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
                 requiresLiveActivity: false,
                 keyboardProfile: profile,
                 destination: .historyOnly,
+                entry: StartupEntry(origin: .keyboardHandoff, observedAt: requestedAt),
                 onCaptureDisruption: { [weak self] in
                     await self?.finishRecording(for: requestID)
                 }

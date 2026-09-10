@@ -56,7 +56,7 @@ final class ReleaseTrainTests: XCTestCase {
                              markdown: "Build \(build)", platform: .mac, train: .alpha, build: "1000.0.\(build)")
         }
         var browser = ReleaseNotesBrowser(catalog: .init(entries: entries), installedVersion: "3.2.0",
-                                          platform: .mac, train: .alpha)
+                                          platform: .mac, train: .alpha, installedBuild: "1000.0.2")
         XCTAssertTrue(browser.isShowingInstalledVersion)
         XCTAssertNotEqual(entries[0].displayTitle, entries[1].displayTitle)
         browser.select(version: entries[0].selectionKey)

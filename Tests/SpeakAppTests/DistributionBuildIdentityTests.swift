@@ -376,10 +376,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         )
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
-        XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
+        XCTAssertTrue(workflow.contains("$BUNDLE_ID.keyboard"))
         XCTAssertTrue(workflow.contains("--capability APP_GROUPS"))
         XCTAssertFalse(workflow.contains("--recreate"))
-        XCTAssertTrue(workflow.contains("Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios"))
+        XCTAssertTrue(workflow.contains("Keyboard provisioning profile does not authorize $IOS_APP_GROUP"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.plist"))
         XCTAssertTrue(workflow.contains("plutil -extract Entitlements xml1"))
         XCTAssertTrue(workflow.contains("<string>$IOS_APP_GROUP</string>"))
@@ -394,7 +394,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
         XCTAssertTrue(workflow.contains("APP_ICLOUD_CONTAINER"))
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
-        XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit.ios"))
+        XCTAssertTrue(workflow.contains("$IOS_CLOUD_CONTAINER"))
         XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: \"1\""))
         XCTAssertTrue(
             workflow.contains(

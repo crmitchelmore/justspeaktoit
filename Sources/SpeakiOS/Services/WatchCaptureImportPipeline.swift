@@ -30,6 +30,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     nonisolated(unsafe) public var sendAck: (@Sendable (WatchCaptureAck) -> Void)?
 
     let journal: WatchCaptureImportJournal
+    var credentialSettings: AppSettings?
     private let inboxDirectory: URL
     // Serialises delivery with journal retirement and audio deletion so a
     // replacement job cannot reference a payload that cleanup then removes.
@@ -178,6 +179,10 @@ public final class WatchCaptureImportPipeline: ObservableObject {
                 captureID: job.captureID,
                 message: "Import interrupted by background expiration"
             )
+        } catch AppSettings.CredentialLoadingError.unavailable {
+            // Loading failed before transcription began. Keep the existing
+            // job and retry budget intact until Keychain access recovers.
+            return
         } catch {
             SpeakLogger.logError(error, context: "WatchCaptureImportPipeline.import")
             journal.recordAttemptFailure(
@@ -196,12 +201,13 @@ public final class WatchCaptureImportPipeline: ObservableObject {
             return
         }
 
-        let settings = AppSettings.shared
+        let settings = credentialSettings ?? AppSettings.shared
         // API keys load from the keychain asynchronously after init; a cold
         // background launch must wait for them before resolving the model.
         await settings.ensureKeysLoaded()
         try Task.checkCancellation()
         let model = settings.batchTranscriptionModel
+        try settings.requireAvailableCredentials(for: model, purpose: .batchTranscription)
 
         let result = try await IOSBatchTranscriber.transcribeFile(
             at: audioURL,

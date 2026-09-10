@@ -187,6 +187,9 @@ public final class CaptureRecoveryCoordinator: ObservableObject {
         let settings = AppSettings.shared
         await settings.ensureKeysLoaded()
         let model = Self.recoveryModel()
+        // A failed Keychain load is not a missing key (issue #930): refuse
+        // rather than submit the placeholder empty credential.
+        try settings.requireAvailableCredentials(for: model, purpose: .batchTranscription)
         let key = settings.batchAPIKey(for: model)
         let language = TranscriptionLanguageCatalog.providerLanguage(
             for: settings.preferredLocaleIdentifier

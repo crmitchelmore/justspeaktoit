@@ -357,6 +357,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
         let usesBatchTranscription = selection.usesBatch
         currentModel = selection.modelID
+        try validateCredentialAvailability(
+            settings: settings,
+            usesBatchTranscription: usesBatchTranscription,
+            keyboardProfile: keyboardProfile,
+            run: runID
+        )
         partialText = ""
         wordCount = 0
         lastSharedStateWriteAt = .distantPast
@@ -404,7 +410,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         let appIsActive = UIApplication.shared.applicationState == .active
         let activityProvider = providerFallbackNotice == nil
             ? modelDisplayName
-            : "\(modelDisplayName) (no API key)"
+            : "\(modelDisplayName) (\(settings.credentialFallbackReason))"
         let activityStarted = (requiresLiveActivity || appIsActive)
             ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)
             : false
@@ -668,10 +674,10 @@ public final class TranscriptionRecordingService: ObservableObject {
             // Make the silent on-device fallback visible: publish it for
             // the UI and log it so a "worse than usual" session is
             // diagnosable.
-            providerFallbackNotice = "Using \(modelDisplayName) (no API key)"
+            providerFallbackNotice = "Using \(modelDisplayName) (\(settings.credentialFallbackReason))"
             SpeakLogger.transcription.warning(
                 """
-                No API key for \(requestedModel, privacy: .public); \
+                \(settings.credentialFallbackReason, privacy: .public) for \(requestedModel, privacy: .public); \
                 falling back to \(self.currentModel, privacy: .public)
                 """
             )
@@ -732,6 +738,25 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func completedTranscript(forRun runID: UUID) -> String? {
         guard let lastRunCompletion, lastRunCompletion.runID == runID else { return nil }
         return lastRunCompletion.text
+    }
+
+    private func validateCredentialAvailability(
+        settings: AppSettings,
+        usesBatchTranscription: Bool,
+        keyboardProfile: KeyboardDictationProfileOption?,
+        run: UUID
+    ) throws {
+        // Ordinary streaming retains its visible Apple Speech fallback.
+        guard usesBatchTranscription || keyboardProfile != nil else { return }
+        do {
+            try settings.requireAvailableCredentials(
+                for: currentModel,
+                purpose: usesBatchTranscription ? .batchTranscription : .liveTranscription
+            )
+        } catch {
+            unwindCancelledStart(outcome: .failed, run: run)
+            throw error
+        }
     }
 
     /// Reverts everything a cancelled startup run had published: timing,

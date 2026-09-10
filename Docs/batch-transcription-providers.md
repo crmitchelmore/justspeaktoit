@@ -72,16 +72,18 @@ host the existing key validator probes — with `Authorization: Bearer`:
 
 Cancelling issues a best-effort `DELETE /v2/jobs/{id}?force=true`.
 
-## Platform restriction: Speechmatics is macOS-only
+## Platform restriction: Speechmatics batch is macOS-only
 
-The iOS app has no Speechmatics credential field — `AppSettings` stores no
-`speechmatics.apiKey`, matching the existing treatment of the Speechmatics live
-entry. The batch entries are therefore filtered out of the iOS Batch picker
-rather than shown as options that could never resolve a key.
-`PlatformFeatureVisibilityTests.testSpeechmaticsBatchIsHiddenOnIOSBecauseThereIsNoCredentialField`
-pins that behaviour; lifting the restriction means adding the key field to
-`AppSettings` and its API-keys screen, at which point the filter line and that
-test change together.
+The iOS app now stores `speechmatics.apiKey` — the Speechmatics live provider
+added the field and its API-keys row — so the credential is no longer what
+holds the batch entries back. What does is the upload path:
+`IOSBatchTranscriptionRoute` has no Speechmatics case, so a visible entry would
+fall through to the OpenRouter route and send the audio to the wrong service.
+The batch entries are therefore filtered out of the iOS Batch picker.
+`PlatformFeatureVisibilityTests.testSpeechmaticsBatchIsHiddenOnIOSBecauseThereIsNoUploadRoute`
+pins that behaviour. Lifting the restriction means adding a `.speechmatics`
+route and its `transcribeWithSpeechmatics` client call, at which point the
+filter line and that test change together.
 
 Cartesia and Gladia are wired on both platforms:
 `IOSBatchTranscriptionRoute` sends each identifier to its own shared client, and

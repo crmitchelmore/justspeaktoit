@@ -31,6 +31,18 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
 
+    /// Whether the background polish started by the most recent stop is still
+    /// running, and what it produced (issue #1015).
+    ///
+    /// Published so a returning intent can opt in to waiting for the polished
+    /// text instead of handing a Shortcut the raw transcript while the
+    /// clipboard is about to hold a different one. `lastPolishedTranscript`
+    /// stays `nil` when the polish failed or was never started, which is what
+    /// keeps the wait honest: the caller falls back to the raw transcript
+    /// rather than being told nothing came back.
+    @Published public private(set) var isPostProcessing = false
+    @Published public private(set) var lastPolishedTranscript: String?
+
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState = SharedTranscriptionState.shared
@@ -623,20 +635,26 @@ public final class TranscriptionRecordingService: ObservableObject {
         // settings call for it. The polished clipboard write must also survive
         // process suspension, so the background assertion is released only once
         // post-processing has finished.
+        // A new stop supersedes whatever the previous one polished, so an
+        // intent that waits can never be handed the run before last's text.
+        lastPolishedTranscript = nil
         if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
             && !text.isEmpty {
             if let historyItem {
                 iOSHistoryManager.shared.beginPostProcessing(for: historyItem.id)
             }
+            isPostProcessing = true
             Task { [resolvedDestination, assertion] in
                 await postProcess(
                     text: text,
                     historyItemID: historyItem?.id,
                     replacingClipboard: resolvedDestination != .historyOnly
                 )
+                isPostProcessing = false
                 assertion.end()
             }
         } else {
+            isPostProcessing = false
             assertion.end()
         }
 
@@ -753,6 +771,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             if replacingClipboard {
                 await Self.writeClipboardReliably(polished)
             }
+            lastPolishedTranscript = polished
             sharedState.lastCompletedTranscript = polished
             if let historyItemID {
                 iOSHistoryManager.shared.setPostProcessed(polished, for: historyItemID)
@@ -795,6 +814,28 @@ extension TranscriptionRecordingService {
 
     static func legacySharedTranscript(_ transcript: String, sharesCompletedTranscript: Bool) -> String? {
         sharesCompletedTranscript ? transcript : nil
+    }
+
+    /// Waits, at most `timeout` seconds, for the background polish started by
+    /// the stop that just happened, and returns what it produced.
+    ///
+    /// Returns `nil` — meaning "use the raw transcript" — in every case the
+    /// polish did not deliver: no polish was started, it failed, it produced
+    /// nothing, or it is still running when the budget runs out. It never
+    /// returns a placeholder and never blocks past the deadline, because an
+    /// intent the system kills for overrunning returns nothing at all, which
+    /// is worse than the raw text.
+    ///
+    /// Polls rather than observes, matching the wait in `DictateIntent`: the
+    /// polish runs in a detached `Task` whose completion this actor sees only
+    /// through `isPostProcessing`.
+    func awaitPolishedTranscript(timeout: TimeInterval) async -> String? {
+        guard timeout > 0 else { return nil }
+        let deadline = Date().addingTimeInterval(timeout)
+        while isPostProcessing, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return isPostProcessing ? nil : lastPolishedTranscript
     }
 }
 

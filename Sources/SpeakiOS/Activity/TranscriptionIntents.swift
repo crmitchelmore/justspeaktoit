@@ -502,6 +502,20 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
             systemImageName: "stop.fill"
         )
 
+        // The one-shot action (#1011) had no phrase, so the only spoken way to
+        // get text back was the two-step Start / "Stop dictation and get text"
+        // pair. Every parameter it needs has a default, so a bare phrase runs.
+        AppShortcut(
+            intent: DictateIntent(),
+            phrases: [
+                "Dictate with \(.applicationName)",
+                "Take a note with \(.applicationName)",
+                "Dictate to \(\.$destination) with \(.applicationName)"
+            ],
+            shortTitle: "Dictate",
+            systemImageName: "waveform.badge.mic"
+        )
+
         AppShortcut(
             intent: StopDictationIntent(),
             phrases: [

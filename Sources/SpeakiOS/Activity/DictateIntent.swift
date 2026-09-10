@@ -91,6 +91,19 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
     )
     var source: String?
 
+    /// Issue #1015. Same contract as `StopDictationIntent.waitForPolish`, and
+    /// the same default: off, which is what this action already did.
+    @Parameter(
+        title: "Wait For Polish",
+        description: """
+            Wait for the polished version and return that instead of the raw transcript. \
+            Only has an effect when your destination polishes; if the polish fails or takes \
+            too long, the raw transcript is returned.
+            """,
+        default: false
+    )
+    var waitForPolish: Bool
+
     static var parameterSummary: some ParameterSummary {
         Summary("Dictate and get text") {
             \.$pauseLength
@@ -99,6 +112,7 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
             \.$language
             \.$model
             \.$source
+            \.$waitForPolish
         }
     }
 
@@ -159,7 +173,16 @@ struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
             runID: runID,
             maximumDuration: endPointing.maximumDuration
         )
-        guard let text = AutomationIntentSupport.bestTranscript(raw: transcript, polished: nil) else {
+        let polished = waitForPolish
+            ? await service.awaitPolishedTranscript(
+                timeout: AutomationIntentSupport.PolishWait.defaultSeconds
+            )
+            : nil
+        guard let text = AutomationIntentSupport.transcriptAfterPolishWait(
+            raw: transcript,
+            polished: polished,
+            didWait: waitForPolish
+        ) else {
             throw AutomationIntentError.emptyTranscript
         }
         return .result(value: text)

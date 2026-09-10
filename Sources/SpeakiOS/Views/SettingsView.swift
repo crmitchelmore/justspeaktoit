@@ -1203,6 +1203,13 @@ public struct SettingsView: View {
                 }
                 .accessibilityIdentifier("hardwareTriggerSettingsLink")
 
+                NavigationLink {
+                    AutomationGalleryView()
+                } label: {
+                    Label("Shortcuts Gallery", systemImage: "square.stack.3d.up")
+                }
+                .accessibilityIdentifier("automationGalleryLink")
+
                 if !usesInlineDensityLayout {
                     Text(
                         "Trigger transcription from the Action Button, Siri, Lock Screen, "
@@ -1686,6 +1693,13 @@ struct HardwareTriggerSettingsView: View {
                     Label("Open Shortcuts App", systemImage: "arrow.up.right.square")
                 }
                 .accessibilityIdentifier("openShortcutsAppButton")
+
+                NavigationLink {
+                    AutomationGalleryView()
+                } label: {
+                    Label("Shortcuts Gallery", systemImage: "square.stack.3d.up")
+                }
+                .accessibilityIdentifier("hardwareTriggerGalleryLink")
             }
 
             Section("Other Trigger Options") {

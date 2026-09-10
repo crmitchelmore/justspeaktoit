@@ -317,6 +317,10 @@ public struct ContentView: View {
     /// here comes from `CaptureOnboardingPolicy`; this layer only renders it.
     @ObservedObject private var onboarding = CaptureOnboardingStore.shared
     @State private var showingFirstRun = false
+    /// Recordings handed over by the Share extension (issue #1020). Drained on
+    /// every foreground because that is the first moment the app has the keys,
+    /// the batch client and the memory budget the extension does not.
+    @ObservedObject private var sharedImporter = SharedRecordingImporter.shared
     private let captureHardware = CaptureHardwareProfile.current()
     /// Completion time of the background transcript we last surfaced, so we only
     /// surface a given session once and never clobber the user's in-app edits.
@@ -522,6 +526,14 @@ public struct ContentView: View {
                     showingError = true
                 }
             }
+            // A shared recording that could not be transcribed is reported,
+            // never swallowed. Successes need no alert: they are in History.
+            .onChange(of: sharedImporter.lastOutcome) { _, outcome in
+                guard case .failed = outcome, let outcome else { return }
+                errorMessage = outcome.message
+                showingError = true
+                sharedImporter.acknowledgeOutcome()
+            }
             .onChange(of: settings.handsFreeDictationEnabled) { _, enabled in
                 if !enabled { Task { await handsFree.disarm() } }
             }
@@ -535,10 +547,14 @@ public struct ContentView: View {
                     await autoStartIfEnabled()
                 }
             }
-            .onAppear { refreshBackgroundState() }
+            .onAppear {
+                refreshBackgroundState()
+                Task { await sharedImporter.drain() }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     refreshBackgroundState()
+                    Task { await sharedImporter.drain() }
                 } else {
                     Task { await handsFree.disarm() }
                 }

@@ -114,6 +114,46 @@ public enum AutomationIntentSupport {
         return PolishRequest(systemPrompt: trimmedPrompt, userMessage: text, isCustomPrompt: true)
     }
 
+    // MARK: - Waiting for the background polish
+
+    /// How long a returning intent will wait for the background post-process
+    /// before handing back the raw transcript instead (issue #1015).
+    ///
+    /// The problem this solves: under the "Clipboard and Polish" destination
+    /// the clipboard eventually holds the polished text while the Shortcut
+    /// chain already got the raw text, so the two disagree and the user cannot
+    /// tell which one they pasted. Opting in to the wait makes them agree.
+    ///
+    /// Bounded because an intent that never returns is killed by the system
+    /// with no result at all, which is worse than the raw transcript. The
+    /// ceiling is deliberately under the ~30s an `perform()` is given.
+    public enum PolishWait {
+        public static let defaultSeconds: TimeInterval = 12
+        public static let maximumSeconds: TimeInterval = 20
+
+        /// Clamps a caller-supplied wait into the range the intent budget
+        /// allows. A non-positive value means "do not wait".
+        public static func clamped(_ seconds: TimeInterval) -> TimeInterval {
+            guard seconds > 0 else { return 0 }
+            return min(seconds, maximumSeconds)
+        }
+    }
+
+    /// What a returning intent hands back once its wait is over.
+    ///
+    /// Never fabricates: if the polish did not land in time, or produced
+    /// nothing usable, the raw transcript is returned rather than an empty
+    /// string or a placeholder. `nil` only when there was no transcript at all,
+    /// which the caller turns into a visible failure.
+    public static func transcriptAfterPolishWait(
+        raw: String,
+        polished: String?,
+        didWait: Bool
+    ) -> String? {
+        guard didWait else { return bestTranscript(raw: raw, polished: nil) }
+        return bestTranscript(raw: raw, polished: polished)
+    }
+
     // MARK: - Transcript selection
 
     /// Picks the text Get Last Transcription should return for a history

@@ -450,11 +450,16 @@ public final class TranscriptionRecordingService: ObservableObject {
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
         applyDestinationSideEffects(text: text, destination: resolvedDestination)
 
-        // The transcript has landed, so this capture's safety audio no longer
+        // The transcript has landed, so *this* capture's safety audio no longer
         // needs recovering (issue #992). Marking it here rather than at stop is
         // deliberate: a kill anywhere above this line leaves the claim
-        // un-delivered and the recording offered back on the next launch.
-        CaptureSafetyClaimStore.shared.markDeliveredForThisProcess()
+        // un-delivered and the recording offered back on the next launch. It
+        // names the one capture that was delivered — an overlapping or earlier
+        // capture of this process may still be pending, and calling it
+        // delivered would withhold its audio from recovery.
+        if let recording = deliveringSession?.safetyRecordingID {
+            CaptureSafetyClaimStore.shared.markDelivered(recording: recording)
+        }
         if lastSessionError == nil {
             CaptureOutcomeJournal.record(text.isEmpty ? .cancelled : .delivered)
         }

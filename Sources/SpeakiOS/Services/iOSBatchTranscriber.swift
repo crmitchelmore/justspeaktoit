@@ -56,6 +56,9 @@ public final class IOSBatchTranscriber {
     /// Whether this capture's recording is the user's to keep.
     public var retainsRecording: Bool { retainRecording }
 
+    /// The safety claim this capture's recording was written under, if any.
+    public var safetyRecordingID: UUID? { audioRecorder.lastClaim }
+
     public let model: String
 
     public init(
@@ -164,6 +167,9 @@ public final class IOSBatchTranscriber {
         guard !retainRecording, let url = finishedRecordingURL else { return false }
         finishedRecordingURL = nil
         AudioRecordingPersistence.deleteRecording(at: url)
+        // The file is gone, so its claim has nothing left to point at
+        // (issue #992). The transcript was delivered before this ran.
+        audioRecorder.forgetLastClaim()
         return true
     }
 

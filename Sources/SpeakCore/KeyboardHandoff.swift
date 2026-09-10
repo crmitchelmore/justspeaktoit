@@ -78,6 +78,20 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         self.announceStatusChange = announceStatusChange
     }
 
+    /// The pre-`announceStatusChange` initialiser, kept for source and API
+    /// compatibility (issue #680): the wake-up uses the real Darwin
+    /// notification, exactly as the designated initialiser's default does.
+    /// Swift resolves `init(defaults:role:)` calls to this overload (no
+    /// defaulted parameter is needed), so both symbols stay usable — the same
+    /// arrangement `init(defaults:)` already uses below (issue #790).
+    public convenience init(defaults: UserDefaults?, role: Role = .detected) {
+        self.init(
+            defaults: defaults,
+            role: role,
+            announceStatusChange: KeyboardHandoffSignal.postStatusChanged
+        )
+    }
+
     /// Only the containing app owns `status` and `interim`, so only the app
     /// ever has something for the extension to wake up and read.
     func announceIfContainingApp() {

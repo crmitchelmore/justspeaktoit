@@ -44,11 +44,9 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                                 .font(.caption)
                                 .foregroundStyle(.green)
                             if let preview = row.preview {
-                                Text(preview)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
+                                ResultPreviewText(
+                                    preview: preview, font: .caption2, alignment: .center
+                                )
                             }
                         }
                     } else {
@@ -190,10 +188,7 @@ struct LockScreenTranscriptionView: View {
                         .font(.subheadline)
                         .foregroundStyle(.green)
                     if let preview = row.preview {
-                        Text(preview)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                        ResultPreviewText(preview: preview, font: .footnote, alignment: .leading)
                     }
                 } else if let error = state.errorMessage {
                     Text(error)
@@ -238,6 +233,39 @@ struct LockScreenTranscriptionView: View {
     }
 }
 
+// MARK: - Result Preview
+
+/// The completed transcript's opening line.
+///
+/// A Live Activity is presented on the Lock Screen and in the Dynamic Island of
+/// a device that may be locked, and this is the user's private dictated text —
+/// the Copy action next to it declares `.requiresAuthentication` for exactly
+/// that reason, so the preview must not be the thing that leaks what Copy
+/// refuses to hand over unauthenticated. When the presentation is privacy
+/// redacted (a locked device), the preview is omitted entirely rather than
+/// shown as redacted placeholders: the outcome headline and the word count
+/// already say a recording finished and how long it was, which is all a locked
+/// screen needs to convey. `privacySensitive()` marks it for any presentation
+/// that redacts rather than sets the environment.
+private struct ResultPreviewText: View {
+    let preview: String
+    let font: Font
+    let alignment: TextAlignment
+
+    @Environment(\.redactionReasons) private var redactionReasons
+
+    var body: some View {
+        if !redactionReasons.contains(.privacy) {
+            Text(preview)
+                .font(font)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(alignment)
+                .privacySensitive()
+        }
+    }
+}
+
 // MARK: - Result Row Actions
 
 /// Copy runs in the app process via `LiveActivityIntent`; Open is a plain deep
@@ -249,7 +277,7 @@ private struct ResultRowActions: View {
     var body: some View {
         HStack(spacing: 12) {
             if row.offersCopy, #available(iOS 18, *) {
-                Button(intent: CopyLastTranscriptIntent()) {
+                Button(intent: CopyLastTranscriptIntent(completionID: row.completionID)) {
                     Label(row.copyTitle, systemImage: "doc.on.doc")
                         .font(.caption2)
                 }

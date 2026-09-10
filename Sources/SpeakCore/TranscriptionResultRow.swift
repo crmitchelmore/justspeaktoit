@@ -25,6 +25,11 @@ public struct TranscriptionResultRow: Equatable, Sendable {
     public let offersOpen: Bool
     /// Imperative while the clipboard is untouched; "Copy again" once it is confirmed.
     public let copyTitle: String
+    /// The completion this row was rendered from. Carried by the Copy action so
+    /// it can only ever retrieve this row's own transcript, never a later
+    /// session's — an activity is reused, and a finished row outlives its
+    /// session by minutes.
+    public let completionID: String
 
     /// Builds the row for a completed state, or `nil` when the session is not finished.
     public init?(state: TranscriptionActivityAttributes.ContentState) {
@@ -39,7 +44,12 @@ public struct TranscriptionResultRow: Equatable, Sendable {
         self.outcomeMessage = outcome.message
         self.preview = outcome == .noSpeech ? nil : preview
         self.wordCountText = Self.wordCountText(state.wordCount, outcome: outcome)
-        self.offersCopy = hasRetrievableTranscript
+        self.completionID = state.resultCompletionID
+        // Copy addresses one specific completion, so a row that cannot name its
+        // own completion — an older payload, or one published before this
+        // existed — offers no Copy rather than a button that would have to guess
+        // which transcript it means.
+        self.offersCopy = hasRetrievableTranscript && !state.resultCompletionID.isEmpty
         self.offersOpen = hasRetrievableTranscript
         self.copyTitle = outcome == .copied ? "Copy again" : "Copy"
     }

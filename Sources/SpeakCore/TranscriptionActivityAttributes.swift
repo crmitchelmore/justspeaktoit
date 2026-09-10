@@ -28,6 +28,16 @@ public struct TranscriptionActivityAttributes {
         /// First line of the completed transcript, empty unless it was published
         /// to the App Group and is therefore retrievable by the result actions.
         public var resultPreview: String
+        /// Identifies the completion whose transcript this row is offering.
+        ///
+        /// A Live Activity is reused across sessions and a finished row stays on
+        /// screen for `TranscriptionActivityManager.resultRowDuration`, so "the
+        /// last completed transcript" is not the same thing as "the transcript
+        /// this row was rendered from". The row's Copy action carries this id and
+        /// the App Group stores it beside the published text, so a row can only
+        /// ever copy its own completion. Empty when nothing retrievable was
+        /// published, and absent from payloads written before this existed.
+        public var resultCompletionID: String
 
         public init(
             status: TranscriptionStatus = .idle,
@@ -37,7 +47,8 @@ public struct TranscriptionActivityAttributes {
             provider: String = "Apple Speech",
             errorMessage: String? = nil,
             completionOutcome: TranscriptionCompletionOutcome = .ready,
-            resultPreview: String = ""
+            resultPreview: String = "",
+            resultCompletionID: String = ""
         ) {
             self.status = status
             self.lastSnippet = lastSnippet
@@ -47,11 +58,12 @@ public struct TranscriptionActivityAttributes {
             self.errorMessage = errorMessage
             self.completionOutcome = completionOutcome
             self.resultPreview = resultPreview
+            self.resultCompletionID = resultCompletionID
         }
 
         private enum CodingKeys: String, CodingKey { // swiftlint:disable:this nesting
             case status, lastSnippet, wordCount, duration, provider, errorMessage
-            case completionOutcome, resultPreview
+            case completionOutcome, resultPreview, resultCompletionID
         }
 
         public init(from decoder: any Decoder) throws {
@@ -66,6 +78,9 @@ public struct TranscriptionActivityAttributes {
                 TranscriptionCompletionOutcome.self, forKey: .completionOutcome
             ) ?? .ready
             self.resultPreview = try container.decodeIfPresent(String.self, forKey: .resultPreview) ?? ""
+            self.resultCompletionID = try container.decodeIfPresent(
+                String.self, forKey: .resultCompletionID
+            ) ?? ""
         }
     }
 
@@ -117,6 +132,16 @@ public final class TranscriptionActivityManager: ObservableObject {
     /// is unaffected.
     public static let resultRowDuration: TimeInterval = 180
 
+    /// The deferred reset that returns a primed activity to its idle label once
+    /// the result row's window is over, held so it can be cancelled.
+    /// Internal rather than private so the result-row lifecycle can live in
+    /// `TranscriptionActivityManager+ResultRow.swift`.
+    var resultRowResetTask: Task<Void, Never>?
+    /// Identifies the completion the current result row belongs to. A new
+    /// recording, or a later completion, replaces it — which is what tells the
+    /// deferred reset that the activity has moved on without it.
+    var resultRowToken: UUID?
+
     private init() {}
 
     /// Starts a new Live Activity for transcription. Returns whether one is now
@@ -132,6 +157,12 @@ public final class TranscriptionActivityManager: ObservableObject {
             SpeakLogger.activity.info("Live Activities not enabled")
             return false
         }
+
+        // A primed activity is reused, so a recording started inside the previous
+        // completion's result-row window inherits that window's pending reset.
+        // Retire it here: this activity now belongs to a live session, and the
+        // older completion must not be able to write idle over it.
+        self.retireResultRow()
 
         // Reuse a primed activity when possible. ActivityKit will not allow a
         // background AppIntent to request a brand-new Live Activity, but it can
@@ -239,7 +270,8 @@ public final class TranscriptionActivityManager: ObservableObject {
             primedMessage: primedMessage,
             primedStatus: primedStatus,
             completionOutcome: .ready,
-            resultPreview: ""
+            resultPreview: "",
+            resultCompletionID: ""
         )
     }
 
@@ -251,7 +283,8 @@ public final class TranscriptionActivityManager: ObservableObject {
         primedMessage: String = "Ready for the Action Button",
         primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
         completionOutcome: TranscriptionCompletionOutcome,
-        resultPreview: String = ""
+        resultPreview: String = "",
+        resultCompletionID: String = ""
     ) {
         guard let activity = currentActivity else { return }
 
@@ -262,47 +295,53 @@ public final class TranscriptionActivityManager: ObservableObject {
             duration: duration,
             provider: activity.content.state.provider,
             completionOutcome: completionOutcome,
-            resultPreview: resultPreview
+            resultPreview: resultPreview,
+            resultCompletionID: resultCompletionID
         )
 
-        Task {
-            if keepPrimed {
-                await activity.update(.init(state: finalState, staleDate: nil))
+        // This completion owns the result row from here. Any earlier row's
+        // pending reset is retired, and this token is what the reset scheduled
+        // below checks before it writes anything.
+        self.retireResultRow()
+        let token = UUID()
+        self.resultRowToken = token
+
+        if keepPrimed {
+            Task { await activity.update(.init(state: finalState, staleDate: nil)) }
+            // Created here rather than after the update so there is no window in
+            // which a newer session cannot cancel it.
+            self.resultRowResetTask = Task {
                 try? await Task.sleep(for: .seconds(Self.resultRowDuration))
-                guard !Task.isCancelled, activity.activityState == .active else { return }
+                // The activity is reused, so by now it may be showing a newer
+                // recording or a newer completion. Only the completion that
+                // scheduled this reset may apply it: an expired row must never
+                // write idle over a session that is still running.
+                guard !Task.isCancelled,
+                      self.resultRowToken == token,
+                      activity.activityState == .active else { return }
                 let idleState = TranscriptionActivityAttributes.ContentState(
                     status: primedStatus,
                     lastSnippet: primedMessage,
                     provider: finalState.provider
                 )
                 await activity.update(.init(state: idleState, staleDate: nil))
-            } else {
+                self.resultRowToken = nil
+            }
+        } else {
+            Task {
                 await activity.end(
                     .init(state: finalState, staleDate: nil),
                     dismissalPolicy: .after(.now + Self.resultRowDuration)
                 )
-                await MainActor.run {
-                    currentActivity = nil
-                    isActivityRunning = false
-                }
+                currentActivity = nil
+                isActivityRunning = false
             }
         }
     }
 
-    /// Records a *confirmed* clipboard write on the result row. Only the Copy
-    /// action calls this, and only after reading back `UIPasteboard.changeCount`,
-    /// so `.copied` on screen always corresponds to a write that actually landed.
-    public func markCompletionCopied() async {
-        guard let activity = currentActivity else { return }
-        var state = activity.content.state
-        guard state.status == .completed, state.completionOutcome != .noSpeech else { return }
-        state.completionOutcome = .copied
-        state.lastSnippet = TranscriptionCompletionOutcome.copied.message
-        await activity.update(.init(state: state, staleDate: nil))
-    }
-
     /// Ends the current activity immediately.
     public func endActivity() {
+        self.retireResultRow()
         updateThrottleTask?.cancel()
 
         guard let activity = currentActivity else { return }

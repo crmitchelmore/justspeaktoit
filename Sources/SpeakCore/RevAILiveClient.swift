@@ -45,6 +45,8 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
     private var finishContinuation: CheckedContinuation<String?, Never>?
 
     let preroll: StreamingAudioPreroll
+    let readiness = StreamingSessionReadiness()
+    let sendBudget: StreamingAudioSendBudget
 
     public init(
         accessToken: String,
@@ -57,6 +59,7 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
         self.sampleRate = sampleRate
         self.session = session
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.sendBudget = StreamingAudioSendBudget(sampleRate: sampleRate)
     }
 
     public func start(
@@ -87,6 +90,8 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
             finishContinuation = nil
         }
         preroll.reset()
+        readiness.reset()
+        sendBudget.reset()
     }
 
     /// Feeds one raw server frame through the receive path. The WebSocket loop
@@ -114,30 +119,47 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
     }
 
     public func finishAndWait() async -> String? {
-        let (task, wasReady) = withStateLock { () -> (URLSessionWebSocketTask?, Bool) in
+        let task = withStateLock { () -> URLSessionWebSocketTask? in
             isFinishing = true
-            return (webSocketTask, isReady)
+            return webSocketTask
         }
-        // Without `connected` there is no session to commit, and an `EOS` on a
-        // socket Rev AI has not acknowledged would be rejected.
-        guard let task, wasReady else {
+        // No socket at all: there is nothing that could become ready.
+        guard let task else {
             stop()
             return fullTranscript()
         }
         let result = await awaitFinalTranscript { [weak self, weak task] in
             DispatchQueue.global().async { [weak self, weak task] in
                 guard let self, let task else { return }
-                self.flushPreroll(to: task)
-                _ = self.pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
-                task.send(.string(Self.endOfStreamToken)) { [weak self] error in
-                    guard let self, let error, !WebSocketErrorFilter.shouldIgnore(error) else { return }
-                    self.logger.error("Rev.ai EOS send failed: \(error.localizedDescription)")
-                    self.resolveFinish()
-                }
+                self.commitHeldCapture(to: task)
             }
         }
         stop()
         return result
+    }
+
+    /// Commits the held capture and closes the stream, waiting first for the
+    /// `connected` frame if the handshake is still in flight.
+    ///
+    /// A short recording finished during an ordinary handshake used to lose
+    /// everything the user said, because `stop()` cleared the preroll and
+    /// cancelled a socket that was about to be acknowledged. A connection that
+    /// still is not acknowledged inside the budget is closed without `EOS`,
+    /// which Rev AI would reject on an unacknowledged socket anyway.
+    private func commitHeldCapture(to task: URLSessionWebSocketTask) {
+        guard readiness.waitUntilReady(), isCurrent(task) else {
+            logger.error("Rev.ai connection was never acknowledged; finishing without EOS")
+            resolveFinish()
+            return
+        }
+        flushPreroll(to: task)
+        _ = pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
+        task.send(.string(Self.endOfStreamToken)) { [weak self, weak task] error in
+            guard let self, let task, self.isCurrent(task) else { return }
+            guard let error, !WebSocketErrorFilter.shouldIgnore(error) else { return }
+            self.logger.error("Rev.ai EOS send failed: \(error.localizedDescription)")
+            self.resolveFinish()
+        }
     }
 
     /// The bounded wait for the trailing hypothesis. Rev AI answers `EOS` with
@@ -173,6 +195,8 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
             return task
         }
         preroll.reset()
+        readiness.reset()
+        sendBudget.reset()
         task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish()
     }
@@ -252,6 +276,7 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
         switch event {
         case .connected:
             withStateLock { isReady = true }
+            readiness.markReady()
             if let task = currentTask() { flushPreroll(to: task) }
         case .partial(let text):
             currentOnTranscript()?(text, false)
@@ -291,9 +316,21 @@ public final class RevAILiveClient: FinalizingStreamingTranscriptionClient, @unc
     }
 
     private func send(_ audio: Data, on task: URLSessionWebSocketTask) {
+        // A socket that has stopped completing sends would otherwise retain
+        // every frame captured from here on. The budget turns that into a
+        // reported transport failure, which cancels the socket and releases
+        // the work already queued behind it.
+        guard sendBudget.admit(audio.count) else {
+            handleTransportFailure(
+                StreamingClientError.transportStalled(provider: "Rev.ai"),
+                closeCode: task.closeCode
+            )
+            return
+        }
         pendingSends.enter()
         task.send(.data(audio)) { [weak self, weak task] error in
             guard let self else { return }
+            self.sendBudget.release(audio.count)
             self.pendingSends.leave()
             if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
                 self.handleTransportFailure(error, closeCode: task?.closeCode ?? .invalid)

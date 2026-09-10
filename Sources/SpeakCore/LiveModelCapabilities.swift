@@ -120,7 +120,7 @@ extension ModelCatalog {
         // stays large enough to capture it before teardown.
         MistralVoxtralRealtime.liveCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 3.0
+            postStopFinalizeBudget: MistralVoxtralRealtime.finishBudget
         ),
         "speechmatics/enhanced-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],

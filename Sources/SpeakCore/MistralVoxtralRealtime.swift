@@ -41,10 +41,15 @@ public enum MistralVoxtralRealtime {
     /// chunked before base64 encoding, never after.
     static let maximumAppendBytes = 262_144
 
-    /// How long `finishAndWait()` waits for `transcription.done`. Voxtral
-    /// Realtime emits no per-utterance final, so this frame is the only
-    /// authoritative transcript and the budget is correspondingly generous.
-    static let finishBudget: TimeInterval = 6
+    /// How long `finishAndWait()` waits for `transcription.done`.
+    ///
+    /// This is the same number `LiveModelCapabilities` declares as the model's
+    /// `postStopFinalizeBudget`, and that entry reads it from here so the two
+    /// cannot drift: a client that waited longer than the declared budget
+    /// would hold a user's stop open past the bound they were promised.
+    /// Missing the frame is not the same as losing the transcript — the deltas
+    /// folded during the session are still returned.
+    public static let finishBudget: TimeInterval = 3
 }
 
 /// Failures the shared Mistral realtime transport reports.

@@ -50,12 +50,11 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     private var isFinishing = false
     private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
     private var finishContinuation: CheckedContinuation<String?, Never>?
-    /// Signalled once `transcript.created` arrives, so a finish that lands
-    /// during the handshake can wait for the ready frame instead of sending
-    /// the held capture into a socket that will reject it.
-    private var readySignal = DispatchSemaphore(value: 0)
 
     let preroll: StreamingAudioPreroll
+    /// The shared handshake gate, so this client, Speechmatics, Rev.ai and
+    /// Voxtral all commit held capture the same way.
+    let readiness = StreamingSessionReadiness()
 
     public init(
         apiKey: String,
@@ -105,9 +104,9 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
             isFinishing = false
             accumulated.reset()
             finishContinuation = nil
-            readySignal = DispatchSemaphore(value: 0)
         }
         preroll.reset()
+        readiness.reset()
     }
 
     /// Feeds one raw server frame through the receive path. The WebSocket loop
@@ -182,11 +181,7 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     /// session that cannot become ready inside `readyBudget` is finished
     /// without sending, so the stop still completes.
     private func commitHeldCapture(to task: URLSessionWebSocketTask) {
-        let signal = withStateLock { readySignal }
-        if !isSessionReady {
-            _ = signal.wait(timeout: .now() + Self.readyBudget)
-        }
-        guard isSessionReady, isCurrent(task) else {
+        guard readiness.waitUntilReady(budget: Self.readyBudget), isCurrent(task) else {
             logger.error("xAI session never became ready; finishing without sending held audio")
             resolveFinish()
             return
@@ -210,6 +205,7 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
             return task
         }
         preroll.reset()
+        readiness.reset()
         task?.cancel(with: .normalClosure, reason: nil)
         resolveFinish()
     }
@@ -268,11 +264,8 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
 
         switch event {
         case .created:
-            let signal = withStateLock { () -> DispatchSemaphore in
-                isReady = true
-                return readySignal
-            }
-            signal.signal()
+            withStateLock { isReady = true }
+            readiness.markReady()
             if let task = currentTask() { flushPreroll(to: task) }
         case .partial(let text, let isFinal, _, let eventID):
             handlePartial(text: text, isFinal: isFinal, eventID: eventID)

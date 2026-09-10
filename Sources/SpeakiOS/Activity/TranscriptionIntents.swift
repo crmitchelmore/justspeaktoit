@@ -4,7 +4,11 @@ import SpeakCore
 import UIKit
 
 // App Intent declarations intentionally stay together so Shortcuts metadata and
-// foreground-continuation behavior remain auditable in one place.
+// foreground-continuation behavior remain auditable in one place. That is worth
+// more than the file-length rule: splitting the recording intents across files
+// is how one of them quietly ends up with a different authentication policy or
+// a different destination precedence from its siblings.
+// swiftlint:disable file_length
 
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
 
@@ -48,16 +52,41 @@ private func stopResultDialog(
 @available(iOS 18, *)
 private func startRecordingContinuingInForegroundIfNeeded(
     from intent: some ForegroundContinuableIntent,
-    trigger: CaptureTrigger
+    trigger: CaptureTrigger,
+    parameters: CaptureRunParameters = .none
 ) async throws {
     let service = await TranscriptionRecordingService.shared
     do {
-        try await service.startRecording(trigger: trigger)
+        try await service.startRecording(trigger: trigger, parameters: parameters)
     } catch iOSTranscriptionError.liveActivityUnavailable {
         try await intent.requestToContinueInForeground {
-            try await TranscriptionRecordingService.shared.startRecording(trigger: trigger)
+            try await TranscriptionRecordingService.shared.startRecording(
+                trigger: trigger,
+                parameters: parameters
+            )
         }
     }
+}
+
+/// The overrides a start intent carries, or a visible failure.
+///
+/// Validation happens before anything is allocated, so a Shortcut that names a
+/// language or model the app does not have never opens a microphone: it fails
+/// with a message naming what was wrong instead of recording with something
+/// else and letting the user find out afterwards.
+@available(iOS 18, *)
+private func resolvedRunParameters(
+    destination: CaptureDestinationAppEnum?,
+    language: String?,
+    model: String?,
+    source: String?
+) throws -> CaptureRunParameters {
+    try CaptureParameterResolution.resolve(
+        destinationID: destination?.rawValue,
+        language: language,
+        model: model,
+        source: source
+    )
 }
 
 /// Idempotent start intent for users who wire their Action Button / Shortcut
@@ -76,6 +105,43 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
     /// a core use of this intent.
     public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    public var destination: CaptureDestinationAppEnum?
+
+    @Parameter(
+        title: "Language",
+        description: "Language to transcribe in, such as en_GB. Leave unset to use the language from Settings.",
+        optionsProvider: CaptureLanguageOptionsProvider()
+    )
+    public var language: String?
+
+    @Parameter(
+        title: "Model",
+        description: "Transcription model for this recording. Leave unset to use the model from Settings.",
+        optionsProvider: CaptureModelOptionsProvider()
+    )
+    public var model: String?
+
+    @Parameter(
+        title: "Source",
+        description: "A label for your own automation. It is written to the app's log and changes nothing else."
+    )
+    public var source: String?
+
+    /// Every parameter sits below the summary line, so a saved shortcut that
+    /// sets none of them still reads as plain "Start recording".
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Start recording") {
+            \.$destination
+            \.$language
+            \.$model
+            \.$source
+        }
+    }
+
     public init() {}
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -89,8 +155,23 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
         if SharedTranscriptionState.shared.isRecording {
             return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         }
+        // A refused parameter is reported as itself. Folding it into the
+        // generic "check your permissions" line below would send the user to
+        // the wrong place entirely.
+        let parameters = try resolvedRunParameters(
+            destination: destination,
+            language: language,
+            model: model,
+            source: source
+        )
         do {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self, trigger: .shortcut)
+            try await startRecordingContinuingInForegroundIfNeeded(
+                from: self,
+                trigger: .shortcut,
+                parameters: parameters
+            )
+        } catch let failure as CaptureParameterFailure {
+            throw failure
         } catch {
             return .result(
                 dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
@@ -128,6 +209,44 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
     /// destination. This locked-capture flow is a deliberate product choice.
     public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    public var destination: CaptureDestinationAppEnum?
+
+    @Parameter(
+        title: "Language",
+        description: "Language to transcribe in, such as en_GB. Leave unset to use the language from Settings.",
+        optionsProvider: CaptureLanguageOptionsProvider()
+    )
+    public var language: String?
+
+    @Parameter(
+        title: "Model",
+        description: "Transcription model for this recording. Leave unset to use the model from Settings.",
+        optionsProvider: CaptureModelOptionsProvider()
+    )
+    public var model: String?
+
+    @Parameter(
+        title: "Source",
+        description: "A label for your own automation. It is written to the app's log and changes nothing else."
+    )
+    public var source: String?
+
+    /// The language, model and source apply to the start half of a toggle; the
+    /// destination applies to whichever half runs, because a toggle that stops
+    /// an unparameterised recording still has somewhere to put the text.
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Toggle recording") {
+            \.$destination
+            \.$language
+            \.$model
+            \.$source
+        }
+    }
+
     public init() {}
 
     /// Returns no Shortcuts value or dialog. Shortcuts promotes textual intent
@@ -143,13 +262,24 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
         let isActive = await service.isActive
 
         if isActive {
-            let destination = await AppSettings.shared.hardwareTriggerDestination
-            await service.stopRecording(destination: destination)
+            await service.stopRecording(
+                destination: await service.resolvedStopDestination(explicit: destination?.destination)
+            )
             return .result()
         } else if SharedTranscriptionState.shared.isRecording {
             throw ToggleRecordingError.alreadyRecordingInApp
         } else {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self, trigger: .shortcut)
+            let parameters = try resolvedRunParameters(
+                destination: destination,
+                language: language,
+                model: model,
+                source: source
+            )
+            try await startRecordingContinuingInForegroundIfNeeded(
+                from: self,
+                trigger: .shortcut,
+                parameters: parameters
+            )
             return .result()
         }
     }
@@ -177,6 +307,20 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
     /// `StopDictationIntent` (authenticated) to get the text in a Shortcut.
     public static var authenticationPolicy: IntentAuthenticationPolicy { .alwaysAllowed }
 
+    /// A stop cannot choose a language or model — the recording it is ending
+    /// already made those choices — but it can still redirect the text.
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    public var destination: CaptureDestinationAppEnum?
+
+    public static var parameterSummary: some ParameterSummary {
+        Summary("Stop recording") {
+            \.$destination
+        }
+    }
+
     public init() {}
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -191,12 +335,14 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
             return .result(dialog: "No active recording.")
         }
 
-        let destination = await AppSettings.shared.hardwareTriggerDestination
+        // Explicit beats the override the start carried, which beats the
+        // global setting.
+        let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
         let canPostProcess = await AppSettings.shared.hasOpenRouterKey
-        let result = await service.stopRecording(destination: destination)
+        let result = await service.stopRecording(destination: resolved)
         return .result(dialog: stopResultDialog(
             for: result,
-            destination: destination,
+            destination: resolved,
             canPostProcess: canPostProcess
         ))
     }
@@ -242,7 +388,10 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
         case .start:
             try await startRecordingContinuingInForegroundIfNeeded(from: self, trigger: .control)
         case .stop:
-            await service.stopRecording(destination: AppSettings.shared.hardwareTriggerDestination)
+            // The Control itself takes no parameters (a configurable Control
+            // would change what an already-placed one means), but a Control
+            // stop still honours the override the start carried.
+            await service.stopRecording(destination: service.resolvedStopDestination())
         case .none:
             break
         }
@@ -322,7 +471,11 @@ struct TranscriptionShortcuts: AppShortcutsProvider {
             intent: StartTranscriptionIntent(),
             phrases: [
                 "Start recording with \(.applicationName)",
-                "Start transcription with \(.applicationName)"
+                "Start transcription with \(.applicationName)",
+                // The parameterised phrase is what makes a spoken destination
+                // possible at all: "Start recording to History Only with
+                // Just Speak to It".
+                "Start recording to \(\.$destination) with \(.applicationName)"
             ],
             shortTitle: "Start Recording",
             systemImageName: "mic.badge.plus"

@@ -137,6 +137,8 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         XCTAssertTrue(manager.startActivity(provider: "Test"))
         manager.completeActivity(finalWordCount: 2, duration: 1, keepPrimed: true)
         await waitUntil { sleeper.waiters.count == 1 }
+        // The completed row stays up for the result-row window (#1071) before idle.
+        XCTAssertEqual(sleeper.requested, [TranscriptionActivityManager.resultRowDuration])
         sleeper.resumeAll()
         await waitUntil { activity.updates.last?.status == .idle }
         XCTAssertTrue(manager.isActivityRunning)
@@ -188,7 +190,7 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         }
     }
 
-    private func makeManager(
+    func makeManager(
         _ activity: FakeActivity, sleeper: SuspendedSleep? = nil
     ) -> TranscriptionActivityManager {
         let sleeper = sleeper ?? SuspendedSleep()
@@ -198,7 +200,7 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         )
     }
 
-    private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+    func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
         for _ in 0..<1_000 {
             if condition() { return }
             await Task.yield()
@@ -206,7 +208,7 @@ final class TranscriptionActivityLifecycleTests: XCTestCase {
         XCTFail("Asynchronous lifecycle operation did not settle", file: file, line: line)
     }
 
-    private func drainTasks() async {
+    func drainTasks() async {
         for _ in 0..<30 { await Task.yield() }
     }
 }
@@ -304,12 +306,14 @@ extension TranscriptionActivityLifecycleTests {
 
 }
 
-private enum TestError: Error { case unavailable }
+enum TestError: Error { case unavailable }
 
 @MainActor
-private final class SuspendedSleep {
+final class SuspendedSleep {
     var waiters: [CheckedContinuation<Void, Never>] = []
+    var requested: [TimeInterval] = []
     func sleep(_ seconds: TimeInterval) async {
+        requested.append(seconds)
         // Deliberately ignore cancellation to prove the run guard also rejects stale work.
         await withCheckedContinuation { waiters.append($0) }
     }
@@ -321,7 +325,7 @@ private final class SuspendedSleep {
 }
 
 @MainActor
-private final class FakeActivity: TranscriptionActivityHandle {
+final class FakeActivity: TranscriptionActivityHandle {
     let id = UUID().uuidString
     var nativeActivity: Activity<TranscriptionActivityAttributes>? { nil }
     var supportsUpdateTimestamps = true

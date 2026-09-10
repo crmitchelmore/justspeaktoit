@@ -3,57 +3,13 @@ import ActivityKit
 import Foundation
 import os.log
 
-/// A narrow ActivityKit boundary lets lifecycle races be exercised without system UI.
-@MainActor
-protocol TranscriptionActivityHandle: AnyObject {
-    var nativeActivity: Activity<TranscriptionActivityAttributes>? { get }
-    var id: String { get }
-    var activityState: ActivityState { get }
-    var supportsUpdateTimestamps: Bool { get }
-    var transcriptionState: TranscriptionActivityAttributes.ContentState { get }
-    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async
-    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?, timestamp: Date) async
-    func observeState(_ handler: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never>
-}
-
-extension Activity: TranscriptionActivityHandle where Attributes == TranscriptionActivityAttributes {
-    var nativeActivity: Activity<TranscriptionActivityAttributes>? { self }
-    var transcriptionState: TranscriptionActivityAttributes.ContentState { content.state }
-    var supportsUpdateTimestamps: Bool {
-        if #available(iOS 17.2, *) { return true }
-        return false
-    }
-
-    func updateTranscription(_ state: TranscriptionActivityAttributes.ContentState, timestamp: Date) async {
-        if #available(iOS 17.2, *) {
-            // ActivityKit ignores a payload older than its last accepted update.
-            await update(.init(state: state, staleDate: nil), timestamp: timestamp)
-        } else {
-            await update(.init(state: state, staleDate: nil))
-        }
-    }
-
-    func endTranscription(_ state: TranscriptionActivityAttributes.ContentState?, timestamp: Date) async {
-        let content = state.map { ActivityContent(state: $0, staleDate: nil) }
-        let policy: ActivityUIDismissalPolicy = state == nil ? .immediate : .after(.now + 5)
-        if #available(iOS 17.2, *) {
-            await end(content, dismissalPolicy: policy, timestamp: timestamp)
-        } else {
-            await end(content, dismissalPolicy: policy)
-        }
-    }
-
-    func observeState(_ handler: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
-        Task {
-            for await state in activityStateUpdates {
-                guard !Task.isCancelled else { return }
-                handler(state)
-            }
-        }
-    }
-}
-
 /// Manages Live Activity lifecycle for transcription sessions.
+///
+/// Every piece of asynchronous work — the observer, throttled updates, the
+/// result row's idle reset, in-flight writes and ending — belongs to one
+/// recording run. A new run supersedes all of it synchronously, so nothing an
+/// earlier run scheduled can land on the activity a later run owns, even when
+/// the `Activity` object itself is reused (issue #932).
 @MainActor
 public final class TranscriptionActivityManager: ObservableObject {
     public static let shared = TranscriptionActivityManager()
@@ -61,13 +17,26 @@ public final class TranscriptionActivityManager: ObservableObject {
     @Published public private(set) var currentActivity: Activity<TranscriptionActivityAttributes>?
     @Published public private(set) var isActivityRunning = false
 
-    private var activity: (any TranscriptionActivityHandle)?
-    private var runID = UUID()
+    /// How long a finished capture stays on screen as a result row before it is
+    /// dismissed (or, when primed, reverts to the idle Action Button label).
+    /// The activity itself stays reusable throughout, so a primed headless start
+    /// is unaffected.
+    public static let resultRowDuration: TimeInterval = 180
+
+    /// Internal rather than private because the result-row API that owns the
+    /// row (`markCompletionCopied`) lives in this type's result-row extension,
+    /// in its own file. Still not settable from outside the module.
+    var activity: (any TranscriptionActivityHandle)?
+    var runID = UUID()
     private var observerTask: Task<Void, Never>?
     private var completionTask: Task<Void, Never>?
     private var updateThrottleTask: Task<Void, Never>?
     private var updateTask: Task<Void, Never>?
     private var pendingUpdate: (state: TranscriptionActivityAttributes.ContentState, timestamp: Date)?
+    /// The most recently *submitted* state. `activity.content.state` lags behind
+    /// anything still in flight, so derived fields (provider, error) read this.
+    /// Internal for the result-row extension, like `activity`.
+    var latestState: TranscriptionActivityAttributes.ContentState?
     private var inFlightUpdates: [String: Int] = [:]
     private var lastPayloadTimestamp: Date = .distantPast
     private var retiringIDs: Set<String> = []
@@ -101,8 +70,11 @@ public final class TranscriptionActivityManager: ObservableObject {
         self.sleep = sleep
     }
 
-    /// Reuses only active activities. Required background recording must not
-    /// start audio if this returns false; foreground recovery remains the caller's responsibility.
+    /// Starts a Live Activity for transcription, reusing only an *active* one.
+    /// Returns whether one is now active — callers that require a Live Activity
+    /// (e.g. `AudioRecordingIntent` background recording) must not proceed when
+    /// this returns `false`, or the system-policy check will assert
+    /// (EXC_BREAKPOINT). Foreground recovery remains the caller's responsibility.
     @discardableResult
     public func startActivity(
         provider: String,
@@ -120,8 +92,11 @@ public final class TranscriptionActivityManager: ObservableObject {
             retire(activity, finalState: nil)
         }
         let state = TranscriptionActivityAttributes.ContentState(status: initialStatus, provider: provider)
-        // A stale activity has outdated content, but is deliberately not reused
-        // under our active-only policy. Inspect every candidate after rejecting the cache.
+        // Reuse a primed activity when possible. ActivityKit will not allow a
+        // background AppIntent to request a brand-new Live Activity, but it can
+        // update one that was created while the app was foregrounded. A stale
+        // activity has outdated content, but is deliberately not reused under
+        // our active-only policy. Inspect every candidate after rejecting the cache.
         if let candidate = ([activity].compactMap { $0 } + activities()).first(where: {
             $0.activityState == .active && !retiringIDs.contains($0.id)
                 && ($0.supportsUpdateTimestamps || inFlightUpdates[$0.id] == nil)
@@ -135,6 +110,7 @@ public final class TranscriptionActivityManager: ObservableObject {
             let candidate = try request(state)
             guard candidate.activityState == .active else { return false }
             adopt(candidate)
+            latestState = state
             SpeakLogger.activity.info("Started activity: \(candidate.id, privacy: .public)")
             return true
         } catch {
@@ -143,6 +119,8 @@ public final class TranscriptionActivityManager: ObservableObject {
         }
     }
 
+    /// Opens a new run: everything the previous run scheduled is superseded now,
+    /// before anything is published for this one.
     private func beginRun() {
         runID = UUID()
         completionTask?.cancel()
@@ -174,6 +152,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         observerTask?.cancel()
         observerTask = nil
         activity = nil
+        latestState = nil
         currentActivity = nil
         isActivityRunning = false
     }
@@ -185,11 +164,12 @@ public final class TranscriptionActivityManager: ObservableObject {
     /// Coalesce writes within a run to one in-flight call and one latest payload.
     /// New runs never await old writes; timestamps protect reuse on iOS 17.2+.
     /// Activity.request publishes its initial content independently of this queue.
-    private func enqueueUpdate(
+    func enqueueUpdate(
         _ state: TranscriptionActivityAttributes.ContentState,
         activity: any TranscriptionActivityHandle,
         runID: UUID
     ) {
+        latestState = state
         pendingUpdate = (state, nextPayloadTimestamp())
         guard updateTask == nil else { return }
         updateTask = Task { [weak self] in
@@ -215,6 +195,8 @@ public final class TranscriptionActivityManager: ObservableObject {
         inFlightUpdates[activityID] = count > 1 ? count - 1 : nil
     }
 
+    /// Updates the Live Activity with new transcription state, throttled to one
+    /// write per second. A deferred write belongs to the run that requested it.
     public func updateActivity(
         status: TranscriptionActivityAttributes.TranscriptionStatus,
         lastSnippet: String,
@@ -225,7 +207,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         updateThrottleTask?.cancel()
         let state = TranscriptionActivityAttributes.ContentState(
             status: status, lastSnippet: String(lastSnippet.suffix(100)), wordCount: wordCount,
-            duration: duration, provider: activity.transcriptionState.provider
+            duration: duration, provider: (latestState ?? activity.transcriptionState).provider
         )
         let currentRun = runID
         let remaining = minimumUpdateInterval - Date().timeIntervalSince(lastUpdateTime)
@@ -242,23 +224,44 @@ public final class TranscriptionActivityManager: ObservableObject {
         }
     }
 
-    /// Keeps a completed headless activity primed for the next Action Button invocation.
+    /// Explicit outcome variant; the original entry point remains neutral and source-compatible.
+    ///
+    /// The completed row stays on screen for `resultRowDuration`. A primed
+    /// activity then returns to its idle label — unless a new recording has
+    /// taken the activity over in the meantime, in which case the reset was
+    /// superseded and never publishes.
     public func completeActivity(
         finalWordCount: Int,
         duration: Int,
         keepPrimed: Bool = false,
         primedMessage: String = "Ready for the Action Button",
-        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle
+        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
+        completionOutcome: TranscriptionCompletionOutcome,
+        resultPreview: String = "",
+        completionMessage: String? = nil,
+        resultCompletionID: String = ""
     ) {
         guard let activity else { return }
+        let provider = (latestState ?? activity.transcriptionState).provider
         beginRun()
         guard activity.activityState == .active else {
             clearActivity()
             return
         }
         let finalState = TranscriptionActivityAttributes.ContentState(
-            status: .completed, lastSnippet: "Transcription complete", wordCount: finalWordCount,
-            duration: duration, provider: activity.transcriptionState.provider
+            status: .completed,
+            // The receipt's headline when the caller has one (issue #1008),
+            // else the resolved outcome's own message. The result row's
+            // headline still comes from `completionOutcome`, so a richer
+            // snippet can never turn into a delivery claim the lane did not
+            // earn (issue #945).
+            lastSnippet: completionMessage ?? completionOutcome.message,
+            wordCount: finalWordCount,
+            duration: duration,
+            provider: provider,
+            completionOutcome: completionOutcome,
+            resultPreview: resultPreview,
+            resultCompletionID: resultCompletionID
         )
         guard keepPrimed, activity.supportsUpdateTimestamps || inFlightUpdates[activity.id] == nil else {
             retire(activity, finalState: finalState)
@@ -268,7 +271,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         let completionRun = runID
         enqueueUpdate(finalState, activity: activity, runID: completionRun)
         completionTask = Task { [weak self, sleep] in
-            do { try await sleep(5) } catch { return }
+            do { try await sleep(Self.resultRowDuration) } catch { return }
             guard !Task.isCancelled, let self, self.isCurrent(activity, runID: completionRun) else { return }
             let idleState = TranscriptionActivityAttributes.ContentState(
                 status: primedStatus, lastSnippet: primedMessage, provider: finalState.provider
@@ -277,6 +280,7 @@ public final class TranscriptionActivityManager: ObservableObject {
         }
     }
 
+    /// Ends the current activity immediately.
     public func endActivity() {
         beginRun()
         guard let activity else { return }
@@ -298,11 +302,12 @@ public final class TranscriptionActivityManager: ObservableObject {
         }
     }
 
+    /// Reports an error to the Live Activity.
     public func reportError(_ message: String) {
         guard let activity else { return }
         updateThrottleTask?.cancel()
         completionTask?.cancel()
-        var state = activity.transcriptionState
+        var state = latestState ?? activity.transcriptionState
         state.status = .error
         state.errorMessage = message
         enqueueUpdate(state, activity: activity, runID: runID)

@@ -17,11 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: a43520a51e4b0a9dbcfd40fa5b0222645b3101f6
+          ref: 00b17f96648335d880eb832260d1ea5cfcae0c7c
           persist-credentials: false
       - name: Verify native toolchain and reviewed source
         run: |
-          test "$(git rev-parse HEAD)" = a43520a51e4b0a9dbcfd40fa5b0222645b3101f6
+          test "$(git rev-parse HEAD)" = 00b17f96648335d880eb832260d1ea5cfcae0c7c
           test "$(uname -m)" = x86_64
           xcodebuild -checkFirstLaunchStatus
           swift --version

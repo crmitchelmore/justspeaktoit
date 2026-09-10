@@ -34,6 +34,10 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// Raised on the main actor at most once per start, when this run's own
     /// input tap accepts a buffer with a positive frame count (issue #983).
     public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972).
+    /// Measurement only: it changes no capture order, ordering guarantee or
+    /// audio behaviour.
+    public var onStartupObservation: ((StartupObservation) -> Void)?
 
     // MARK: - Private
 
@@ -52,6 +56,13 @@ public final class iOSLiveTranscriber: ObservableObject {
         activeCaptureID = captureID
         firstInputSignal = FirstInputSignal()
         return captureID
+    }
+
+    /// The analyzer branch is the one that actually ran, and the engine has
+    /// actually returned (issue #972).
+    private func reportAnalyzerEngineStarted() {
+        onStartupObservation?(.backend(.appleAnalyzer))
+        onStartupObservation?(.stage(.engineStarted))
     }
 
     /// Hopped to from the audio thread once, never per buffer.
@@ -245,6 +256,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         do {
             ownsAudioSession = true
             try await audioSessionManager.configureForRecording()
+            onStartupObservation?(.stage(.audioSessionConfigured))
             try Task.checkCancellation()
             SpeakLogger.audio.info("Audio session configured for recording")
         } catch is CancellationError {
@@ -256,6 +268,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     @available(iOS 26.0, *)
+    // One do/catch owns the analyzer session, its tap and its teardown; the
+    // engine-start boundary must be reported from inside it (issue #972).
+    // swiftlint:disable:next function_body_length
     private func startSpeechAnalyzer(
         engine: AppleSpeechAnalyzerEngine,
         preRollBuffers: [AVAudioPCMBuffer],
@@ -302,6 +317,7 @@ public final class iOSLiveTranscriber: ObservableObject {
             }
             audioEngine.prepare()
             try audioEngine.start()
+            reportAnalyzerEngineStarted()
             observeCaptureConfiguration()
             speechAnalyzerSession = session
             speechAnalyzerConverter = converter
@@ -349,6 +365,10 @@ public final class iOSLiveTranscriber: ObservableObject {
         let recordingFormat = installTap(appendingTo: request)
         audioEngine.prepare()
         try audioEngine.start()
+        // The legacy branch is the one that actually ran, and the engine has
+        // actually returned.
+        onStartupObservation?(.backend(.appleLegacy))
+        onStartupObservation?(.stage(.engineStarted))
         observeCaptureConfiguration()
         _ = try? audioRecorder.startRecording(format: recordingFormat)
     }

@@ -51,6 +51,9 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// "preparing" until this run has both started its backend and observed a
     /// buffer from its own live input tap.
     private var presentation = CapturePresentationGate()
+    /// Local run-scoped startup timing (issue #972). Measurement only: it adds
+    /// no network call, no vendor reporting and no behaviour change.
+    private var diagnostics = StartupDiagnostics()
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -114,18 +117,25 @@ public final class TranscriptionRecordingService: ObservableObject {
     // MARK: - Public API
 
     /// Starts a headless recording session with Live Activity.
+    ///
+    /// - Parameter entry: the earliest app-code entry the caller observed —
+    ///   an intent's `perform()` entry, or the moment the app began handling a
+    ///   keyboard request. Callers with no earlier observation pass `nil` and
+    ///   the service times its own entry (issue #972).
     public func startRecording(
         retainBatchRecording: Bool = true,
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
-        keyboardProfile: KeyboardDictationProfileOption? = nil
+        keyboardProfile: KeyboardDictationProfileOption? = nil,
+        entry: StartupEntry? = nil
     ) async throws {
         try await startRecording(
             retainBatchRecording: retainBatchRecording,
             sharesLiveTranscript: sharesLiveTranscript,
             requiresLiveActivity: requiresLiveActivity,
             keyboardProfile: keyboardProfile,
-            destination: nil
+            destination: nil,
+            entry: entry
         )
     }
 
@@ -136,10 +146,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil,
         destination: HardwareTriggerDestination?,
+        entry: StartupEntry? = nil,
         onCaptureDisruption: (() async -> Void)? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
         presentation.begin(run: runID)
+        diagnostics.begin(run: runID, entry: entry, localOrigin: .service)
         state = lifecycle.state
         defer { state = lifecycle.state }
 
@@ -149,10 +161,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Button could read those empty keys and silently fall back to Apple
         // Speech, so wait for the initial load before resolving the model.
         await settings.ensureKeysLoaded()
+        diagnostics.note(.stage(.credentialsReady), run: runID)
         // A stop/cancel during the suspension above retires the run; nothing
         // has been allocated yet, so unwinding only settles the state machine.
         guard lifecycle.isCurrentStartRun(runID) else {
-            unwindCancelledStart()
+            unwindCancelledStart(outcome: .cancelled, run: runID)
             throw CancellationError()
         }
 
@@ -189,7 +202,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)
             : false
         if requiresLiveActivity && !activityStarted && !appIsActive {
-            unwindCancelledStart()
+            unwindCancelledStart(outcome: .failed, run: runID)
             throw iOSTranscriptionError.liveActivityUnavailable
         }
 
@@ -200,6 +213,7 @@ public final class TranscriptionRecordingService: ObservableObject {
             // gate explicitly so the harness never sits in preparation.
             presentation.noteBackendStarted(run: runID)
             presentation.noteInputObserved(run: runID)
+            noteSimulatorStubStartup(runID: runID)
             handlePartialResult(text: transcript)
             _ = lifecycle.activate(runID)
             state = lifecycle.state
@@ -224,10 +238,11 @@ public final class TranscriptionRecordingService: ObservableObject {
                 liveAPIKey: settings.liveAPIKey(for:),
                 transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
             )
-            session.onPartialResult = { [weak self, weak session] text, _ in
+            session.onPartialResult = { [weak self, weak session] text, isFinal in
                 guard let self, let session,
                       self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
                         || self.stoppingSession === session else { return }
+                self.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
                 self.handlePartialResult(text: text)
             }
             session.onError = { [weak self, weak session] error in
@@ -237,18 +252,20 @@ public final class TranscriptionRecordingService: ObservableObject {
                 self.handleError(error, session: session)
             }
             bindFirstInput(session: session, runID: runID)
+            bindStartupDiagnostics(session: session, runID: runID)
             startedSession = session
             guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
                 throw CancellationError()
             }
             try await session.start()
+            diagnostics.note(.stage(.sessionStarted), run: runID)
             // The session this run allocated is published only while the run
             // is still current; a stop during start() retires the run, and the
             // cleanup below tears down exactly what this run owns without
             // touching any replacement run's session (issue #701).
             guard lifecycle.activate(runID) else {
                 session.cancel()
-                unwindCancelledStart()
+                unwindCancelledStart(outcome: .cancelled, run: runID)
                 throw CancellationError()
             }
             transcriptionSession = session
@@ -256,13 +273,14 @@ public final class TranscriptionRecordingService: ObservableObject {
             // The tap can deliver before `start()` returns, so this may be the
             // second half of the pair rather than the first.
             notePresentation(presentation.noteBackendStarted(run: runID))
+            diagnostics.finish(.started, run: runID)
         } catch {
             // Unwind runs for the retired case too: a stop that cancelled this
             // startup is awaiting settlement, and this run still owns whatever
             // it allocated. `transcriptionSession` is untouched — it is only
             // ever assigned after successful activation.
             startedSession?.cancel()
-            unwindCancelledStart()
+            unwindCancelledStart(outcome: outcome(for: error), run: runID)
             throw error
         }
     }
@@ -291,7 +309,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Reverts everything a cancelled startup run had published: timing,
     /// shared App Group recording state and the Live Activity. The run calls
     /// this itself so ownership never crosses runs.
-    private func unwindCancelledStart() {
+    private func unwindCancelledStart(outcome: StartupOutcome, run: UUID) {
+        // A start that stopped short still reports what it did reach; the
+        // stages it never crossed stay absent rather than becoming zeroes.
+        diagnostics.finish(outcome, run: run)
         startTime = nil
         sharesLiveTranscript = true
         partialText = ""
@@ -355,6 +376,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         state = lifecycle.state
         isRunning = false
         presentation.finish()
+        diagnostics.retire()
         let duration = elapsedSeconds
         let completionID = UUID()
         latestCompletionID = completionID
@@ -472,6 +494,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharesLiveTranscript = true
         isRunning = false
         presentation.finish()
+        diagnostics.retire()
         startTime = nil
         partialText = ""
         wordCount = 0
@@ -512,6 +535,35 @@ public final class TranscriptionRecordingService: ObservableObject {
             wordCount: wordCount,
             duration: elapsedSeconds
         )
+    }
+
+    /// Wires this run to the session's existing observation boundary, and
+    /// labels the backend when routing already settled it (issue #972).
+    private func bindStartupDiagnostics(session: IOSTranscriptionSession, runID: UUID) {
+        session.onStartupObservation = { [weak self] observation in
+            self?.diagnostics.note(observation, run: runID)
+        }
+        if let backend = session.resolution.resolvedStartupBackend {
+            diagnostics.note(.backend(backend), run: runID)
+        }
+    }
+
+    /// The measured boundary is the first *live* partial: a final result is a
+    /// delivery, not evidence that streaming began.
+    private func noteFirstLivePartial(text: String, isFinal: Bool, runID: UUID) {
+        guard !isFinal, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        diagnostics.noteFirstPartial(run: runID)
+    }
+
+    /// Explicitly synthetic: the DEBUG simulator stub has no audio session, no
+    /// engine and no measured engine start.
+    private func noteSimulatorStubStartup(runID: UUID) {
+        diagnostics.note(.backend(.simulatorStub), run: runID)
+        diagnostics.finish(.started, run: runID)
+    }
+
+    private func outcome(for error: Error) -> StartupOutcome {
+        (error is CancellationError || Task.isCancelled) ? .cancelled : .failed
     }
 
     /// Routes this run's own first live buffer into the presentation gate.

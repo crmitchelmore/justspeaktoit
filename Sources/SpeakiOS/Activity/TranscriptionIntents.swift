@@ -46,16 +46,22 @@ private func stopResultDialog(
 /// front, where starting a Live Activity is permitted, and recording proceeds.
 /// The foreground hop only happens on that specific failure — when the headless
 /// background start succeeds, recording stays fully headless.
+///
+/// `entry` is the timestamp taken at `perform()` entry. It is passed through
+/// unchanged — including into the foreground retry — so the measured startup
+/// covers the intent hop rather than restarting the clock partway down the
+/// path (issue #972).
 @available(iOS 18, *)
 private func startRecordingContinuingInForegroundIfNeeded(
-    from intent: some ForegroundContinuableIntent
+    from intent: some ForegroundContinuableIntent,
+    entry: StartupEntry
 ) async throws {
     let service = await TranscriptionRecordingService.shared
     do {
-        try await service.startRecording()
+        try await service.startRecording(entry: entry)
     } catch iOSTranscriptionError.liveActivityUnavailable {
         try await intent.requestToContinueInForeground {
-            try await TranscriptionRecordingService.shared.startRecording()
+            try await TranscriptionRecordingService.shared.startRecording(entry: entry)
         }
     }
 }
@@ -79,6 +85,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
     public init() {}
 
     public func perform() async throws -> some IntentResult & ProvidesDialog {
+        let entry = StartupEntry(origin: .startIntent)
         let service = await TranscriptionRecordingService.shared
         // `starting` counts: a startup in flight is already an active
         // operation, not a free slot (issue #701).
@@ -90,7 +97,7 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, ForegroundContinua
             return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         }
         do {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            try await startRecordingContinuingInForegroundIfNeeded(from: self, entry: entry)
         } catch {
             return .result(
                 dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
@@ -137,6 +144,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
     /// Recording feedback already lives in the Live Activity; the pasteboard is
     /// owned exclusively by `stopRecording(destination:)`.
     public func perform() async throws -> IntentResultContainer<Never, Never, Never, Never> {
+        let entry = StartupEntry(origin: .toggleIntent)
         let service = await TranscriptionRecordingService.shared
         // A toggle during startup must stop (cancel) the pending run rather
         // than treating the service as free and double-starting (issue #701).
@@ -149,7 +157,7 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
         } else if SharedTranscriptionState.shared.isRecording {
             throw ToggleRecordingError.alreadyRecordingInApp
         } else {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            try await startRecordingContinuingInForegroundIfNeeded(from: self, entry: entry)
             return .result()
         }
     }
@@ -231,9 +239,10 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
     public init() {}
 
     public func perform() async throws -> some IntentResult {
+        let entry = StartupEntry(origin: .controlToggleIntent)
         let service = await TranscriptionRecordingService.shared
         if value {
-            try await startRecordingContinuingInForegroundIfNeeded(from: self)
+            try await startRecordingContinuingInForegroundIfNeeded(from: self, entry: entry)
         } else {
             await service.stopRecording(destination: AppSettings.shared.hardwareTriggerDestination)
         }

@@ -38,6 +38,9 @@ final class TranscriberCoordinator: ObservableObject {
     /// "preparing" until this run has both started its backend and observed a
     /// buffer from its own live input tap.
     private var presentation = CapturePresentationGate()
+    /// Local run-scoped startup timing (issue #972). Measurement only: it adds
+    /// no network call, no vendor reporting and no behaviour change.
+    private var diagnostics = StartupDiagnostics()
     private var presentationRunID: UUID?
     /// Raised when this coordinator's capture presentation changes, so an
     /// owner presenting on its behalf (hands-free) can re-publish.
@@ -67,19 +70,21 @@ final class TranscriberCoordinator: ObservableObject {
         return Int(Date().timeIntervalSince(start))
     }
 
-    // swiftlint:disable:next function_body_length
-    func start(
+    /// - Parameter entry: the earliest app-code entry the caller observed.
+    ///   Callers with no earlier observation pass `nil` and the coordinator
+    ///   times its own entry (issue #972).
+    func start( // swiftlint:disable:this function_body_length
         preRollBuffers: [AVAudioPCMBuffer] = [],
-        analyzerFallbackAllowed: Bool = true
+        analyzerFallbackAllowed: Bool = true,
+        entry: StartupEntry? = nil
     ) async throws {
         guard stoppingSession == nil else { throw LifecycleError.sessionFinalising }
-        let runID = UUID()
-        presentationRunID = runID
-        presentation.begin(run: runID)
+        let runID = beginRun(entry: entry)
         let settings = AppSettings.shared
         // Wait for the initial keychain load so auto-start on a cold launch
         // doesn't read empty API keys and fall back to Apple Speech.
         await settings.ensureKeysLoaded()
+        diagnostics.note(.stage(.credentialsReady), run: runID)
         error = nil
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
@@ -110,6 +115,7 @@ final class TranscriberCoordinator: ObservableObject {
             // gate explicitly so the harness never sits in preparation.
             presentation.noteBackendStarted(run: runID)
             notePresentation(presentation.noteInputObserved(run: runID))
+            noteSimulatorStubStartup(runID: runID)
             handlePartialResult(text: transcript, isFinal: true)
             markRecordingStarted()
             return
@@ -129,6 +135,7 @@ final class TranscriberCoordinator: ObservableObject {
             transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
         session.onPartialResult = { [weak self, weak session] text, isFinal in
+            self?.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
             self?.handlePartialResult(text: text, isFinal: isFinal)
             self?.confidence = session?.confidence
         }
@@ -147,16 +154,19 @@ final class TranscriberCoordinator: ObservableObject {
             }
         }
         bindFirstInput(session: session, runID: runID)
+        bindStartupDiagnostics(session: session, runID: runID)
         transcriptionSession = session
         do {
             try await session.start(
                 preRollBuffers: preRollBuffers,
                 analyzerFallbackAllowed: analyzerFallbackAllowed
             )
+            diagnostics.note(.stage(.sessionStarted), run: runID)
         } catch {
             session.cancel()
             transcriptionSession = nil
             startTime = nil
+            finishStartupDiagnostics(runID: runID, error: error)
             finishPresentation()
             if settings.liveActivitiesEnabled {
                 activityManager.endActivity()
@@ -167,6 +177,7 @@ final class TranscriberCoordinator: ObservableObject {
         // The tap can deliver before `start()` returns, so this may be the
         // second half of the pair rather than the first.
         notePresentation(presentation.noteBackendStarted(run: runID))
+        diagnostics.finish(.started, run: runID)
     }
 
     private func markRecordingStarted() {
@@ -334,6 +345,8 @@ private extension TranscriberCoordinator {
         guard presentationRunID != nil else { return }
         presentationRunID = nil
         presentation.finish()
+        // A late partial cannot report against a run that is over.
+        diagnostics.retire()
         onCapturePresentationChanged?()
     }
 
@@ -357,6 +370,54 @@ private extension TranscriberCoordinator {
             wordCount: wordCount,
             duration: elapsedSeconds
         )
+    }
+}
+
+/// Local run-scoped startup measurement for this coordinator (issue #972).
+/// Measurement only — nothing here changes capture, ordering or delivery.
+private extension TranscriberCoordinator {
+    /// Opens a run: one identity shared by the presentation gate and the
+    /// startup measurement, so neither can attribute work to the other's run.
+    func beginRun(entry: StartupEntry?) -> UUID {
+        let runID = UUID()
+        presentationRunID = runID
+        presentation.begin(run: runID)
+        diagnostics.begin(run: runID, entry: entry, localOrigin: .coordinator)
+        return runID
+    }
+
+    /// Wires this run to the session's existing observation boundary, and
+    /// labels the backend when routing already settled it.
+    func bindStartupDiagnostics(session: IOSTranscriptionSession, runID: UUID) {
+        session.onStartupObservation = { [weak self] observation in
+            self?.diagnostics.note(observation, run: runID)
+        }
+        if let backend = session.resolution.resolvedStartupBackend {
+            diagnostics.note(.backend(backend), run: runID)
+        }
+    }
+
+    /// The measured boundary is the first *live* partial: a final result is a
+    /// delivery, not evidence that streaming began.
+    func noteFirstLivePartial(text: String, isFinal: Bool, runID: UUID) {
+        guard !isFinal, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        diagnostics.noteFirstPartial(run: runID)
+    }
+
+    /// A start that stopped short still reports what it did reach; the stages
+    /// it never crossed stay absent rather than becoming zeroes.
+    func finishStartupDiagnostics(runID: UUID, error: Error) {
+        diagnostics.finish(
+            (error is CancellationError || Task.isCancelled) ? .cancelled : .failed,
+            run: runID
+        )
+    }
+
+    /// Explicitly synthetic: the DEBUG simulator stub has no audio session, no
+    /// engine and no measured engine start.
+    func noteSimulatorStubStartup(runID: UUID) {
+        diagnostics.note(.backend(.simulatorStub), run: runID)
+        diagnostics.finish(.started, run: runID)
     }
 }
 
@@ -389,6 +450,8 @@ public struct ContentView: View {
         let handsFree = IOSHandsFreeDictationCoordinator(
             audioSessionManager: coordinator.audioSessionManager,
             startCapture: { preRoll in
+                // Earliest app-code observation of this utterance's start.
+                let detectedAt = Date()
                 let settings = AppSettings.shared
                 guard HandsFreeDictationPolicy.supportsCapture(
                     modelID: settings.selectedModel,
@@ -398,7 +461,8 @@ public struct ContentView: View {
                 do {
                     try await coordinator.start(
                         preRollBuffers: preRoll,
-                        analyzerFallbackAllowed: false
+                        analyzerFallbackAllowed: false,
+                        entry: StartupEntry(origin: .handsFree, observedAt: detectedAt)
                     )
                     return .started
                 } catch {
@@ -863,6 +927,9 @@ public struct ContentView: View {
     // MARK: - Actions
 
     private func toggleRecording() async {
+        // Earliest app-code observation of this control's press; it survives
+        // every await between here and the start path (issue #972).
+        let pressedAt = Date()
         if handsFree.state == .recording {
             await handsFree.finishCurrentUtterance()
         } else if handsFree.isArmed {
@@ -898,7 +965,9 @@ public struct ContentView: View {
             // Clear previous text when starting new recording
             displayText = ""
             do {
-                try await coordinator.start()
+                try await coordinator.start(
+                    entry: StartupEntry(origin: .foreground, observedAt: pressedAt)
+                )
             } catch {
                 errorMessage = error.localizedDescription
                 showingError = true

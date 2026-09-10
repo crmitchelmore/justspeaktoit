@@ -1,6 +1,7 @@
 // swiftlint:disable file_length
 import AppKit
 import AVFoundation
+import Combine
 import SpeakCore
 import SpeakHotKeys
 import SwiftUI
@@ -130,7 +131,8 @@ final class OnboardingState: ObservableObject {
     @Published var apiKey = ""
     @Published var isValidating = false
     @Published var validationError: String?
-    @Published var permissionsGranted: Set<PermissionType> = []
+    @Published private(set) var permissionsGranted: Set<PermissionType> = []
+    private var permissionsObserver: AnyCancellable?
     @Published var selectedHotKey: HotKey = .fnKey
     @Published var hotKeyWasChosen = false
     
@@ -162,19 +164,23 @@ final class OnboardingState: ObservableObject {
         self.transcriptionManager = transcriptionManager
         self.selectedHotKey = settings.selectedHotKey
         self.hotKeyWasChosen = settings.hasConfiguredGlobalHotKey
+        // Consume the emitted snapshot: @Published emits before the manager's
+        // stored dictionary changes. Guide polling and activation refreshes must
+        // update onboarding too, without a separate confirmation button.
+        permissionsObserver = permissionsManager.$statuses
+            .map { statuses in
+                Set(PermissionType.availablePermissions(for: DistributionChannel.current)
+                    .filter { statuses[$0]?.isGranted == true })
+            }
+            .removeDuplicates()
+            .sink { [weak self] granted in self?.permissionsGranted = granted }
         refreshPermissions()
     }
-    
+
     func refreshPermissions() {
-        permissionsGranted = []
-        for perm in PermissionType.availablePermissions(for: DistributionChannel.current) {
-            // Force a fresh computation; cached statuses go stale when the user
-            // toggles a permission in System Settings (the OS never notifies us).
-            permissionsManager.refresh(perm)
-            if permissionsManager.status(for: perm).isGranted {
-                permissionsGranted.insert(perm)
-            }
-        }
+        // Cached statuses go stale when the user toggles a permission in System
+        // Settings (the OS never notifies us); the subscription above publishes the result.
+        permissionsManager.refreshAll()
     }
     
     var allPermissionsGranted: Bool {
@@ -542,6 +548,7 @@ struct PermissionsStepView: View {
     @ObservedObject var state: OnboardingState
     
     var body: some View {
+        ScrollView {
         VStack(spacing: 20) {
             Image(systemName: "checkmark.shield.fill")
                 .font(.system(size: 60))
@@ -551,7 +558,7 @@ struct PermissionsStepView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("Just Speak to It needs a few permissions to work")
+            Text("\(RunningAppIdentity.current.name) needs a few permissions to work")
                 .foregroundColor(.secondary)
             
             VStack(spacing: 12) {
@@ -586,7 +593,7 @@ struct PermissionsStepView: View {
                 PermissionRow(
                     type: .inputMonitoring,
                     title: "Input Monitoring",
-                    description: "For global hotkey detection",
+                    description: "For the Fn hotkey while using other apps",
                     isGranted: state.permissionsGranted.contains(.inputMonitoring),
                     isOptional: true,
                     onRequest: {
@@ -600,10 +607,10 @@ struct PermissionsStepView: View {
             .padding(.horizontal, 40)
             .padding(.top, 10)
             
-            Text("A guide stays visible while you enable access in System Settings.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, 10)
+            PermissionRecoveryHelp(permissions: state.permissionsManager)
+                .padding(.horizontal, 40)
+        }
+        .frame(maxWidth: .infinity)
         }
         .task {
             // Accessibility and Input Monitoring are granted in System Settings
@@ -866,7 +873,10 @@ struct HotKeyStepView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     TroubleshootingRow(icon: "globe", text: "If Fn opens emoji picker: go to System Settings → Keyboard → \"Press 🌐 key to\" and change it to \"Do Nothing\"")
                     TroubleshootingRow(icon: "keyboard", text: "External keyboards may not send Fn events — use a custom shortcut instead")
-                    TroubleshootingRow(icon: "lock.shield", text: "Accessibility and Input Monitoring permissions are required for hotkey detection")
+                    TroubleshootingRow(
+                        icon: "lock.shield",
+                        text: "Input Monitoring enables Fn. Accessibility enables typing into other apps."
+                    )
                 }
                 .padding(.top, 8)
             } label: {
@@ -1093,7 +1103,7 @@ struct CompleteStepView: View {
                     .font(.title)
                     .fontWeight(.bold)
             
-                Text("Just Speak to It is ready to use")
+                Text("\(ReleaseTrain.current.displayName) is ready to use")
                     .foregroundColor(.secondary)
 
                 if AppEnvironment.shared?.analyticsAvailable == true {

@@ -118,6 +118,22 @@ final class PermissionGuidanceTests: XCTestCase {
         }
     }
 
+    func testRunningAppIdentity_prefersTheBundleDisplayNameSystemSettingsShows() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let appURL = directory.appendingPathComponent("JustSpeakToIt.app")
+        let contents = appURL.appendingPathComponent("Contents")
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let info: [String: Any] = [
+            "CFBundleIdentifier": "com.justspeaktoit.test",
+            "CFBundleDisplayName": "Just Speak to It",
+            "CFBundleName": "Just Speak to It"
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
+        XCTAssertEqual(RunningAppIdentity(bundleURL: appURL).name, "Just Speak to It")
+    }
+
     func testFinderReveal_keepsBlockingWorkspaceWorkOffTheMainThread() async {
         let appURL = URL(fileURLWithPath: "/Applications/Just Speak to It Alpha.app")
         let identity = RunningAppIdentity(bundleURL: appURL)

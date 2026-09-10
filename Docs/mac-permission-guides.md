@@ -34,12 +34,15 @@ access, and no permission is reset by this feature.
 
 ## Verification
 
-`script/build_and_run.sh --verify` builds a separate development bundle and checks
-that it launches. The Codex Run action uses the same script. For isolated UI
-inspection, set `SPEAK_CORE_JOURNEY_PROFILE` to a fresh UUID; the existing Debug
-fixture isolates data and reports denied permission states. Use a normal test
-identity when checking real grants.
-
+`script/build_and_run.sh --verify` builds the Alpha-train development bundle
+(`dist/JustSpeakToItAlpha.app`, bundle id `com.justspeaktoit.mac.alpha`; set
+`TUIST_RELEASE_TRAIN=stable` for the Stable identity) and checks that it launches
+beside the installed release. The Codex Run action uses the same script. macOS
+keeps a separate permission grant per bundle, so a development bundle never
+inherits or disturbs the installed app's grants. For isolated UI inspection,
+launch the bundle's executable directly with `SPEAK_CORE_JOURNEY_PROFILE` set to
+a fresh UUID; the existing Debug fixture isolates data and reports denied
+permission states. Use a normal test identity when checking real grants.
 
 - `make test`: permission recovery policy and existing permission tests; package
   manifest parity includes PermissionFlow.
@@ -61,8 +64,9 @@ permission section observes the manager directly. Polling and app activation
 refreshes therefore update all permission surfaces. Checks never infer a grant
 from a confirmation click. Silent Accessibility checks use the public
 `AXIsProcessTrustedWithOptions(nil)` API; a denied result still remains denied.
-All permission copy and the onboarding app name use the current bundle's Finder
-name, retaining Alpha/Dev suffixes. Recovery help reveals that exact bundle and
+All permission copy uses the running bundle's display name (`CFBundleDisplayName`,
+then `CFBundleName`, then the Finder name), which is the label System Settings
+shows in its privacy lists, so Alpha and development suffixes are retained. Recovery help reveals that exact bundle and
 reports the result of Check Again, with toggle/relaunch instructions for a stale
 OS grant. No TCC reset or automatic relaunch is performed.
 

@@ -12,7 +12,23 @@ struct RunningAppIdentity: Sendable {
 
     init(bundleURL: URL) {
         self.bundleURL = bundleURL
-        name = FileManager.default.displayName(atPath: bundleURL.path)
+        name = Self.displayName(for: bundleURL)
+    }
+
+    /// System Settings labels an app by its bundle display name (VS Code appears as
+    /// "Code"), while Finder shows the file name ("JustSpeakToIt" for the Stable
+    /// install). Prefer the name the privacy lists use; fall back to Finder's.
+    static func displayName(for bundleURL: URL) -> String {
+        let bundle = Bundle(url: bundleURL)
+        for key in ["CFBundleDisplayName", "CFBundleName"] {
+            if let name = bundle?.localizedInfoDictionary?[key] as? String, !name.isEmpty {
+                return name
+            }
+            if let name = bundle?.infoDictionary?[key] as? String, !name.isEmpty {
+                return name
+            }
+        }
+        return FileManager.default.displayName(atPath: bundleURL.path)
     }
 
     func revealInFinder(

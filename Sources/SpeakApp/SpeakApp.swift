@@ -78,7 +78,10 @@ struct SpeakApp: App {
                                     showingAnalyticsConsent = true
                                 }
                             }
-                            .alert("Help improve Just Speak to It?", isPresented: $showingAnalyticsConsent) {
+                            .alert(
+                                "Help improve \(ReleaseTrain.current.displayName)?",
+                                isPresented: $showingAnalyticsConsent
+                            ) {
                                 Button("Share Anonymous Analytics") {
                                     hasAnsweredAnalyticsConsent = true
                                     environment.settings.analyticsEnabled = true
@@ -177,7 +180,7 @@ struct SpeakCommands: Commands {
         }
 
         CommandGroup(replacing: .help) {
-            Button("Just Speak to It Help") {
+            Button("\(ReleaseTrain.current.displayName) Help") {
                 if let url = URL(string: "https://github.com/speak-app/speak") {
                     NSWorkspace.shared.open(url)
                 }
@@ -339,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showMoveToApplicationsAlert() {
         let alert = NSAlert()
         alert.messageText = "Move to Applications?"
-        alert.informativeText = "Just Speak to It is running from a disk image. "
+        alert.informativeText = "\(RunningAppIdentity.current.name) is running from a disk image. "
             + "Would you like to move it to your Applications folder for better performance?"
         alert.addButton(withTitle: "Move to Applications")
         alert.addButton(withTitle: "Not Now")
@@ -378,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             let errorAlert = NSAlert()
             errorAlert.messageText = "Could not move application"
-            errorAlert.informativeText = "Please manually drag Just Speak to It to your Applications folder. "
+            errorAlert.informativeText = "Please drag \(RunningAppIdentity.current.name) to your Applications folder. "
                 + "Error: \(error.localizedDescription)"
             errorAlert.runModal()
         }
@@ -423,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showEjectDMGAlert(volumeName: String) {
         let alert = NSAlert()
         alert.messageText = "Eject Installer?"
-        alert.informativeText = "Just Speak to It has been installed. "
+        alert.informativeText = "\(RunningAppIdentity.current.name) has been installed. "
             + "Would you like to eject the installer disk image and move it to Trash?"
         alert.addButton(withTitle: "Eject & Trash")
         alert.addButton(withTitle: "Just Eject")

@@ -16,7 +16,7 @@ struct PermissionRecoveryHelp: View {
                     .font(.caption2)
                 if didCheck {
                     Text(remainingPermissions.isEmpty
-                         ? "Access is detected for this app."
+                         ? "All permissions are detected for this app."
                          : "Still not detected: \(remainingPermissions.joined(separator: ", ")).")
                         .accessibilityIdentifier("permissions.recheckResult")
                 }
@@ -35,8 +35,10 @@ struct PermissionRecoveryHelp: View {
     }
 
     private var remainingPermissions: [String] {
+        // Check Again refreshes every permission, so report every one still missing;
+        // never claim access is detected while any listed permission is not.
         PermissionType.availablePermissions(for: .current)
-            .filter { $0.dragGuidancePane != nil && !permissions.status(for: $0).isGranted }
+            .filter { !permissions.status(for: $0).isGranted }
             .map(\.displayName)
     }
 }

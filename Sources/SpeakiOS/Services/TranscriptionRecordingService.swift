@@ -267,10 +267,11 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     /// Starts a headless recording session with Live Activity.
     ///
-    /// `modelOverride` and `languageOverride` are the `model=` and `lang=`
-    /// parameters of a capture link, and apply to this session only. Both are
-    /// already validated against the catalogues by the caller, so an
-    /// unrecognised value never reaches here — it fails the link instead.
+    /// A capture link's `model=`, `lang=` and `destination=` arrive as
+    /// `parameters`, the same channel a Shortcut's per-run parameters use, and
+    /// apply to this session only. Every value is validated against its
+    /// catalogue by the caller, so an unrecognised one never reaches here — it
+    /// fails the link instead.
     ///
     /// - Parameter entry: the earliest app-code entry the caller observed —
     ///   an intent's `perform()` entry, or the moment the app began handling a
@@ -389,8 +390,9 @@ public final class TranscriptionRecordingService: ObservableObject {
                 settings: settings,
                 // Either source counts as the caller naming a model: a
                 // Shortcut parameter (#1076) or a capture link's `model=`
-                // (#1070). Both must fail visibly rather than be substituted.
-                requestedModelID: runParameters.modelID ?? modelOverride,
+                // (#1070). Both arrive as `CaptureRunParameters.modelID` here,
+                // and both must fail visibly rather than be substituted.
+                requestedModelID: runParameters.modelID,
                 run: runID
             )
         }

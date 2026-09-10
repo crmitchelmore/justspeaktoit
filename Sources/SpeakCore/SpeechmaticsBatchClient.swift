@@ -26,8 +26,13 @@ public struct SpeechmaticsBatchClient: Sendable {
 
     public init(session: URLSession = .shared, baseURL: URL = SpeechmaticsBatchClient.defaultBaseURL) {
         self.baseURL = baseURL
-        self.upload = { request, file in try await session.upload(for: request, fromFile: file) }
-        self.send = { request in try await session.data(for: request) }
+        // The bearer key must not follow a redirect off the Speechmatics
+        // origin; declining the hop delivers the 3xx, which `validate` rejects.
+        let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: baseURL)
+        self.upload = { request, file in
+            try await session.upload(for: request, fromFile: file, delegate: redirects)
+        }
+        self.send = { request in try await session.data(for: request, delegate: redirects) }
     }
 
     public func transcribeFile(
@@ -44,12 +49,19 @@ public struct SpeechmaticsBatchClient: Sendable {
         }
         try Task.checkCancellation()
         let jobID = try await self.createJob(at: url, apiKey: key, model: modelID, language: language)
+        // Speechmatics has accepted a job that bills until it finishes, so
+        // every abandonment from here -- including a cancellation observed the
+        // instant the create response lands -- must try to delete it.
         do {
+            try Task.checkCancellation()
             try await self.awaitCompletion(jobID: jobID, apiKey: key)
             return try await self.fetchTranscript(jobID: jobID, apiKey: key, model: modelID)
-        } catch is CancellationError {
-            await self.deleteJob(jobID, apiKey: key)
-            throw CancellationError()
+        } catch {
+            let abandonment = BatchTranscriptionJob.mapCancellation(error)
+            if BatchTranscriptionJob.abandonsAcceptedJob(abandonment) {
+                await self.deleteJob(jobID, apiKey: key)
+            }
+            throw abandonment
         }
     }
 
@@ -80,7 +92,8 @@ public struct SpeechmaticsBatchClient: Sendable {
         } catch {
             throw BatchTranscriptionJob.mapCancellation(error)
         }
-        try Task.checkCancellation()
+        // No cancellation check here: once the response is in hand the job id
+        // must reach the caller, or the created job can never be deleted.
         try BatchTranscriptionJob.validate(response, data: data, provider: Self.providerName)
         return try Self.decodeJobID(data)
     }
@@ -109,7 +122,13 @@ public struct SpeechmaticsBatchClient: Sendable {
         guard let url = components?.url else { throw TranscriptionProviderError.invalidResponse }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await self.send(request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await self.send(request)
+        } catch {
+            throw BatchTranscriptionJob.mapCancellation(error)
+        }
         try Task.checkCancellation()
         try BatchTranscriptionJob.validate(response, data: data, provider: Self.providerName)
         return try Self.decodeTranscript(data, model: model)
@@ -117,6 +136,10 @@ public struct SpeechmaticsBatchClient: Sendable {
 
     /// Best effort: a cancelled dictation should not leave a job running that
     /// nobody will read. A failure here is deliberately swallowed.
+    ///
+    /// The request runs detached because the usual reason to be here is that
+    /// this task is already cancelled, and URLSession fails a request started
+    /// on a cancelled task immediately.
     private func deleteJob(_ jobID: String, apiKey: String) async {
         var components = URLComponents(
             url: self.baseURL.appendingPathComponent("v2/jobs/\(jobID)"), resolvingAgainstBaseURL: false)
@@ -125,7 +148,9 @@ public struct SpeechmaticsBatchClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        _ = try? await self.send(request)
+        let send = self.send
+        let deletion = request
+        _ = await Task.detached { _ = try? await send(deletion) }.value
     }
 
     // MARK: - Wire format
@@ -182,6 +207,12 @@ public struct SpeechmaticsBatchClient: Sendable {
     /// json-v2 is a flat item list. Punctuation carries `attaches_to`, so words
     /// are joined with spaces and punctuation is appended to the word it
     /// attaches to; only `word` items become timed segments.
+    ///
+    /// Both attachment directions are honoured: `previous` punctuation (a full
+    /// stop, a closing bracket) follows its word with no space, and `next`
+    /// punctuation (an opening bracket or quote) takes the space *before* it
+    /// and suppresses the one that would otherwise follow, so an opening
+    /// parenthesis reads `Hello (world` rather than `Hello ( world`.
     static func decodeTranscript(_ data: Data, model: String) throws -> TranscriptionResult {
         struct Alternative: Decodable {
             let content: String
@@ -206,15 +237,18 @@ public struct SpeechmaticsBatchClient: Sendable {
         var text = ""
         var segments: [TranscriptionSegment] = []
         var confidences: [Double] = []
+        var attachesToFollowing = false
         for item in items {
             guard let alternative = item.alternatives?.first else { continue }
-            if item.type == "punctuation", item.attachesTo != "next" {
+            let isPunctuation = item.type == "punctuation"
+            if isPunctuation, item.attachesTo != "next" {
                 text += alternative.content
                 continue
             }
-            if !text.isEmpty { text += " " }
+            if !text.isEmpty, !attachesToFollowing { text += " " }
             text += alternative.content
-            if item.type != "punctuation" {
+            attachesToFollowing = isPunctuation
+            if !isPunctuation {
                 segments.append(TranscriptionSegment(
                     startTime: item.startTime ?? 0, endTime: item.endTime ?? 0, text: alternative.content))
                 if let confidence = alternative.confidence { confidences.append(confidence) }

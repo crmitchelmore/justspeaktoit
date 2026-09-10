@@ -19,16 +19,27 @@ public enum BatchTranscriptionJob {
     /// Polls `step` until it reports a value. Cancellation is checked both
     /// before each attempt and before each wait, so cancelling dictation stops
     /// the polling immediately rather than at the end of the current interval.
+    ///
+    /// `timeout` bounds the whole operation *and* each individual attempt: a
+    /// `step` that stalls is abandoned at the deadline rather than being left
+    /// to URLSession's own, much longer, request and resource limits.
+    ///
+    /// The timing arguments are validated because this is a public boundary; a
+    /// negative or non-finite interval would otherwise spin the loop with no
+    /// wait, turning one pending job into unbounded request traffic.
     public static func poll<Value: Sendable>(
         interval: TimeInterval,
         timeout: TimeInterval,
-        sleep: @Sendable (TimeInterval) async throws -> Void,
-        step: @Sendable () async throws -> Poll<Value>
+        sleep: @escaping @Sendable (TimeInterval) async throws -> Void,
+        step: @escaping @Sendable () async throws -> Poll<Value>
     ) async throws -> Value {
+        guard interval.isFinite, interval >= 0, timeout.isFinite, timeout > 0 else {
+            throw BatchTranscriptionJobError.invalidPollingSchedule
+        }
         let deadline = Date().addingTimeInterval(timeout)
         while true {
             try Task.checkCancellation()
-            if case .finished(let value) = try await step() {
+            if case .finished(let value) = try await Self.attempt(step, before: deadline) {
                 return value
             }
             guard Date() < deadline else { throw BatchTranscriptionJobError.timedOut }
@@ -37,10 +48,41 @@ public enum BatchTranscriptionJob {
         }
     }
 
+    /// One polling attempt, raced against the operation's deadline so an
+    /// in-flight request cannot outlive it. Losing the race cancels the
+    /// attempt, which cancels the underlying URLSession task.
+    private static func attempt<Value: Sendable>(
+        _ step: @escaping @Sendable () async throws -> Poll<Value>,
+        before deadline: Date
+    ) async throws -> Poll<Value> {
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 0 else { throw BatchTranscriptionJobError.timedOut }
+        return try await withThrowingTaskGroup(of: Poll<Value>.self) { group in
+            group.addTask { try await step() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: Self.nanoseconds(remaining))
+                throw BatchTranscriptionJobError.timedOut
+            }
+            defer { group.cancelAll() }
+            guard let outcome = try await group.next() else {
+                throw BatchTranscriptionJobError.timedOut
+            }
+            return outcome
+        }
+    }
+
+    /// Seconds as nanoseconds, clamped so a very large interval saturates
+    /// rather than trapping on the `UInt64` conversion.
+    static func nanoseconds(_ seconds: TimeInterval) -> UInt64 {
+        let nanoseconds = (max(0, seconds) * 1_000_000_000).rounded()
+        guard nanoseconds.isFinite else { return .max }
+        return nanoseconds >= Double(UInt64.max) ? .max : UInt64(nanoseconds)
+    }
+
     /// The default wait between polls, backed by `Task.sleep` so a cancelled
     /// task stops waiting straight away.
     public static let defaultSleep: @Sendable (TimeInterval) async throws -> Void = { seconds in
-        try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+        try await Task.sleep(nanoseconds: BatchTranscriptionJob.nanoseconds(seconds))
     }
 
     /// The recording part of a multipart body.
@@ -129,6 +171,67 @@ public enum BatchTranscriptionJob {
         return error
     }
 
+    /// True when `error` means this client is walking away from a job the
+    /// provider has already accepted: cancellation in either spelling, or the
+    /// local polling deadline. Those are exactly the cases where a paid job
+    /// would otherwise keep running with nobody left to read it, so the client
+    /// should make a best-effort cancellation before it returns.
+    public static func abandonsAcceptedJob(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return true }
+        return (error as? BatchTranscriptionJobError) == .timedOut
+    }
+
+    // MARK: - Credential boundary
+
+    /// True when `url` sits on the same scheme, host and port as `origin`.
+    ///
+    /// Batch clients carry a reusable account key on every request, so a URL
+    /// that arrives inside a provider response — Gladia's `result_url`, or any
+    /// redirect target — may only be requested with that key attached when it
+    /// is still the provider's own endpoint. Comparison is case-insensitive on
+    /// scheme and host and treats an omitted port as the scheme's default.
+    public static func isSameOrigin(_ url: URL, as origin: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(),
+              let originScheme = origin.scheme?.lowercased(), let originHost = origin.host?.lowercased()
+        else { return false }
+        guard scheme == originScheme, host == originHost else { return false }
+        return (url.port ?? Self.defaultPort(for: scheme)) == (origin.port ?? Self.defaultPort(for: originScheme))
+    }
+
+    private static func defaultPort(for scheme: String) -> Int? {
+        ["https": 443, "http": 80, "wss": 443, "ws": 80][scheme]
+    }
+
+    /// Refuses any redirect that would leave `origin`. Without it a 302 from a
+    /// compromised provider response would walk an authenticated request — and
+    /// the account key in its headers — onto an attacker's host, because a
+    /// custom credential header such as `x-gladia-key` is not one URLSession
+    /// strips on a cross-origin hop. Declining the redirect delivers the 3xx
+    /// itself, which `validate(_:data:provider:)` then rejects.
+    public final class OriginBoundRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        private let origin: URL
+
+        public init(origin: URL) {
+            self.origin = origin
+            super.init()
+        }
+
+        public func urlSession(
+            _ session: URLSession,
+            task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            guard let url = request.url, BatchTranscriptionJob.isSameOrigin(url, as: self.origin) else {
+                completionHandler(nil)
+                return
+            }
+            completionHandler(request)
+        }
+    }
+
     /// Content types for the containers the recorder and the file importer can
     /// produce. Both providers sniff the container themselves, but an accurate
     /// part header avoids a rejected upload.
@@ -159,6 +262,7 @@ public enum BatchTranscriptionJobError: LocalizedError, Equatable {
     case jobFailed(String, String)
     case emptyTranscript(String)
     case timedOut
+    case invalidPollingSchedule
 
     public var errorDescription: String? {
         switch self {
@@ -174,6 +278,8 @@ public enum BatchTranscriptionJobError: LocalizedError, Equatable {
             return "\(provider) returned no speech for this recording."
         case .timedOut:
             return "The transcription job did not finish in time."
+        case .invalidPollingSchedule:
+            return "The transcription job was given an invalid polling interval or timeout."
         }
     }
 }

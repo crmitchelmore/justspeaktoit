@@ -212,11 +212,11 @@ final class GladiaBatchClientTests: XCTestCase {
         XCTAssertThrowsError(try GladiaBatchClient.decodeTranscript(Data(#"{"result":{}}"#.utf8)))
     }
 
-    func testTheResultURLFromTheJobResponseWinsOverAConstructedOne() throws {
+    func testAnOnOriginResultURLFromTheJobResponseWinsOverAConstructedOne() throws {
         let explicit = try GladiaBatchClient.decodeJob(
-            Data(#"{"id":"abc","result_url":"https://other.test/v2/transcription/abc"}"#.utf8),
+            Data(#"{"id":"abc","result_url":"https://gladia.test/v2/transcription/abc"}"#.utf8),
             baseURL: baseURL)
-        XCTAssertEqual(explicit.resultURL.absoluteString, "https://other.test/v2/transcription/abc")
+        XCTAssertEqual(explicit.resultURL.absoluteString, "https://gladia.test/v2/transcription/abc")
         let derived = try GladiaBatchClient.decodeJob(Data(#"{"id":"abc"}"#.utf8), baseURL: baseURL)
         XCTAssertEqual(derived.resultURL.absoluteString, "https://gladia.test/v2/pre-recorded/abc")
         XCTAssertThrowsError(try GladiaBatchClient.decodeJob(Data(#"{}"#.utf8), baseURL: baseURL))
@@ -262,6 +262,29 @@ actor BatchRequestRecorder {
     private(set) var requests: [URLRequest] = []
     func record(_ request: URLRequest) { self.requests.append(request) }
     func count(forPath path: String) -> Int { self.requests.filter { $0.url?.path == path }.count }
+}
+
+/// Cancels a task from inside one of its own network doubles. `fire()` waits
+/// until the handle is armed, so "cancelled the instant the create response
+/// lands" is deterministic rather than a race with the test body.
+actor DeferredCanceller {
+    private var cancel: (@Sendable () -> Void)?
+    private var waiting: CheckedContinuation<Void, Never>?
+
+    func arm(_ cancel: @escaping @Sendable () -> Void) {
+        self.cancel = cancel
+        if let waiting = self.waiting {
+            self.waiting = nil
+            waiting.resume()
+        }
+    }
+
+    func fire() async {
+        if self.cancel == nil {
+            await withCheckedContinuation { self.waiting = $0 }
+        }
+        self.cancel?()
+    }
 }
 
 func assertThrowsAsync(

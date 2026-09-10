@@ -125,7 +125,7 @@ public enum KeyboardPickupPolicy {
         }
     }
 
-    public static let previewLimit = 42
+    public static let previewLimit = TranscriptPreview.defaultLimit
 
     // swiftlint:disable:next function_parameter_count
     public static func offering(
@@ -174,14 +174,7 @@ public enum KeyboardPickupPolicy {
     /// A short, single-line preview. The full transcript is never rendered in
     /// the strip: it sits above whatever app the user is in.
     public static func preview(_ text: String, limit: Int = previewLimit) -> String {
-        let flattened = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .split(separator: " ", omittingEmptySubsequences: true)
-            .joined(separator: " ")
-        guard flattened.count > limit else { return flattened }
-        let clipped = String(flattened.prefix(limit)).trimmingCharacters(in: .whitespaces)
-        return clipped + "\u{2026}"
+        TranscriptPreview.short(text, limit: limit)
     }
 
     public static func ageDescription(since createdAt: Date, now: Date) -> String {

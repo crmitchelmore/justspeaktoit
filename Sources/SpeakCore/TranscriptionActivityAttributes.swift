@@ -186,18 +186,23 @@ public final class TranscriptionActivityManager: ObservableObject {
 
     /// Marks the activity as completed. Headless recordings keep it primed so
     /// the next Action Button invocation can start entirely in the background.
+    ///
+    /// `completionMessage` is the capture receipt (issue #1008): what the
+    /// transcript's delivery actually did, built from observed results. When
+    /// none is supplied the row keeps its neutral "Transcription complete".
     public func completeActivity(
         finalWordCount: Int,
         duration: Int,
         keepPrimed: Bool = false,
         primedMessage: String = "Ready for the Action Button",
-        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle
+        primedStatus: TranscriptionActivityAttributes.TranscriptionStatus = .idle,
+        completionMessage: String? = nil
     ) {
         guard let activity = currentActivity else { return }
 
         let finalState = TranscriptionActivityAttributes.ContentState(
             status: .completed,
-            lastSnippet: "Transcription complete",
+            lastSnippet: completionMessage ?? "Transcription complete",
             wordCount: finalWordCount,
             duration: duration,
             provider: activity.content.state.provider

@@ -9,10 +9,18 @@ import UIKit
 
 // MARK: - Audio Recording Intent (Action Button / Shortcuts)
 
+/// The spoken and Shortcuts result of a stop.
+///
+/// `receipt` is what the delivery actually did (issue #1008) and always wins:
+/// it is built from observed results, so it cannot claim a copy that failed or
+/// a field insert that never happened. The per-destination strings below remain
+/// for the fixed destinations, where they say the same thing with the word
+/// count Siri reads out.
 @available(iOS 18, *)
 private func stopResultDialog(
     for result: TranscriptionResult,
     destination: HardwareTriggerDestination,
+    receipt: CaptureReceipt?,
     canPostProcess: Bool = true
 ) -> IntentDialog {
     let wordCount = result.text.split(separator: " ").count
@@ -20,6 +28,9 @@ private func stopResultDialog(
         return "Recording stopped. No speech detected."
     }
     switch destination {
+    case .auto:
+        guard let receipt else { return "Recording stopped." }
+        return IntentDialog(stringLiteral: "\(receipt.headline). \(wordCount) words.")
     case .clipboard:
         return "Copied \(wordCount) words to clipboard."
     case .clipboardAndPostProcess:
@@ -230,6 +241,7 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
         return .result(dialog: stopResultDialog(
             for: result,
             destination: destination,
+            receipt: await service.lastCaptureReceipt,
             canPostProcess: canPostProcess
         ))
     }

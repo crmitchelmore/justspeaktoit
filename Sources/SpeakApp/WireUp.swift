@@ -55,6 +55,9 @@ final class AppEnvironment: ObservableObject {
   /// because `HistorySyncEngine` only holds its delegate weakly; without this
   /// owner the adapter deallocates after bootstrap and sync stops (#685).
   fileprivate(set) var historySyncAdapter: MacHistorySyncAdapter?
+  /// Posts and acts on notifications for transcripts arriving from an iPhone
+  /// or Apple Watch (issue #1007).
+  fileprivate(set) var remoteTranscriptDelivery: RemoteTranscriptDelivery?
 
   private(set) var statusBarController: StatusBarController?
   /// Voice-edit controller; created by `installVoiceEdit()` in AppEnvironment+VoiceEdit.
@@ -680,6 +683,19 @@ enum WireUp {
 
     let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
     environment.historySyncAdapter = syncAdapter
+    // Phone and watch captures arriving through CloudKit history sync (#1007).
+    let remoteTranscripts = RemoteTranscriptDelivery(
+      settings: settings,
+      paste: { text in
+        SmartTextOutput(permissionsManager: environment.permissions, appSettings: settings)
+          .output(text: text, target: nil)
+      }
+    )
+    environment.remoteTranscriptDelivery = remoteTranscripts
+    syncAdapter.onRemoteEntryArrived = { [weak remoteTranscripts] entry, isNew in
+      remoteTranscripts?.handle(entry: entry, isNewToThisMac: isNew)
+    }
+    remoteTranscripts.start()
     Task { await syncAdapter.start() }
 
     Task { await secureStorage.preloadTrackedSecrets() }

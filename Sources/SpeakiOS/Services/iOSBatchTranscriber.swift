@@ -21,6 +21,9 @@ public final class IOSBatchTranscriber {
     /// Raised on the main actor at most once per start, when this run's own
     /// input tap accepts a buffer with a positive frame count.
     public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972). Batch
+    /// has no live partial, so its timeline ends at the session start.
+    public var onStartupObservation: ((StartupObservation) -> Void)?
 
     /// Hopped to from the audio thread once, never per buffer.
     private func reportFirstInputBuffer(_ captureID: UUID) {
@@ -85,6 +88,7 @@ public final class IOSBatchTranscriber {
         }
         ownsAudioSession = true
         try await audioSessionManager.configureForRecording()
+        onStartupObservation?(.stage(.audioSessionConfigured))
         try Task.checkCancellation()
 
         let inputNode = audioEngine.inputNode
@@ -101,6 +105,8 @@ public final class IOSBatchTranscriber {
         do {
             audioEngine.prepare()
             try audioEngine.start()
+            // Only after the engine actually returned.
+            onStartupObservation?(.stage(.engineStarted))
             startTime = Date()
         } catch {
             removeInputTap()

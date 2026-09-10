@@ -81,6 +81,8 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     /// Raised on the main actor at most once per start, when this run's own
     /// input tap accepts a buffer with a positive frame count (issue #983).
     public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972).
+    public var onStartupObservation: ((StartupObservation) -> Void)?
 
     // MARK: - Private
 
@@ -394,6 +396,7 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     private func configureAudioSession() async throws {
         do {
             try await audioSessionManager.configureForRecording()
+            onStartupObservation?(.stage(.audioSessionConfigured))
             SpeakLogger.audio.info("Audio session configured for OpenAI Realtime")
         } catch {
             if Task.isCancelled || error is CancellationError { throw CancellationError() }
@@ -463,6 +466,8 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
 
         audioEngine.prepare()
         try audioEngine.start()
+        // Only after the engine actually returned.
+        onStartupObservation?(.stage(.engineStarted))
         observeCaptureConfiguration()
         try? audioRecorder.startRecording(format: nativeFormat)
     }

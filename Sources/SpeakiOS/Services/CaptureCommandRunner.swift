@@ -28,6 +28,18 @@ public enum CaptureCommandRunner {
     /// honoured for a capture the same vocabulary began.
     private static var startedDestination: HardwareTriggerDestination?
 
+    /// Which capture the override above belongs to.
+    ///
+    /// The override alone is not enough: a capture started here can be stopped
+    /// from a surface that never consults this runner — the Action Button, the
+    /// Live Activity — and that path leaves `startedDestination` set. A later
+    /// capture started from somewhere else would then be finalised with the
+    /// earlier link's destination if a `justspeaktoit://stop` reached it, which
+    /// is the same "an arbitrary caller redirects a recording it did not start"
+    /// hole from the other end. Pinning the capture's identity means a stale
+    /// override simply does not match and is discarded.
+    private static var startedCaptureID: UUID?
+
     /// Runs a parsed capture link: the verb plus its per-capture overrides.
     ///
     /// `dictate` is handled here rather than in `perform(_:destinationOverride:)`
@@ -158,9 +170,11 @@ public enum CaptureCommandRunner {
                 languageOverride: languageOverride
             )
             startedDestination = destinationOverride
+            startedCaptureID = service.currentSessionID
             return .started
         } catch {
             startedDestination = nil
+            startedCaptureID = nil
             // The recorder's own refusals are preserved rather than flattened:
             // a `model=` this device cannot honour throws
             // `CaptureLinkFailure.modelUnavailable`, and that is what the
@@ -246,8 +260,15 @@ public enum CaptureCommandRunner {
     ///   its caller. Every other caller discards it.
     /// Internal rather than private: `dictate` owns its own stop.
     static func stop(_ service: TranscriptionRecordingService) async -> String {
-        let destination = startedDestination ?? AppSettings.shared.hardwareTriggerDestination
+        // Honoured only for the capture this runner actually started. Anything
+        // else — a capture begun elsewhere, or a stale override left behind when
+        // a runner-started capture was stopped from another surface — falls back
+        // to the configured destination.
+        let ownsCapture = startedCaptureID != nil && startedCaptureID == service.currentSessionID
+        let destination = (ownsCapture ? startedDestination : nil)
+            ?? AppSettings.shared.hardwareTriggerDestination
         startedDestination = nil
+        startedCaptureID = nil
         return await service.stopRecording(destination: destination).text
     }
 }

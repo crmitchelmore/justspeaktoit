@@ -38,8 +38,11 @@ final class InterruptionFinalisationTests: XCTestCase {
         XCTAssertEqual(harness.history.items.count, 1)
         XCTAssertEqual(harness.history.items.first?.transcription, "Raw words")
         XCTAssertEqual(harness.history.items.first?.postProcessedTranscription, "Polished Raw words")
-        XCTAssertEqual(harness.pasteboard.string, "Polished Raw words")
-        XCTAssertEqual(harness.pasteboard.writes, 2)
+        // The raw transcript is copied once at stop; polish lands in History and
+        // the shared result, never as a delayed clipboard rewrite (issue #934).
+        XCTAssertEqual(harness.pasteboard.string, "Raw words")
+        XCTAssertEqual(harness.pasteboard.writes, 1)
+        XCTAssertEqual(harness.shared.lastCompletedTranscript, "Polished Raw words")
         XCTAssertNil(harness.service.lastSessionError)
     }
 
@@ -231,7 +234,7 @@ private final class Harness {
                                     syncEnabled: false, userDefaults: defaults)
         service = TranscriptionRecordingService(
             sharedState: shared, historyManager: history,
-            polishClipboard: PolishClipboard(pasteboard: pasteboard, now: { 100 }, isActive: { true }),
+            polishClipboard: PolishClipboard(pasteboard: pasteboard),
             hasPolishingKey: { polishing }, polish: { text, _, _ in "Polished \(text)" }
         )
         service.makeSession = { [session] in session }
@@ -251,10 +254,16 @@ private final class Harness {
 @MainActor
 final class InterruptionSession: IOSRecordingSession {
     let isBatch = false
+    let resolution = IOSTranscriptionSession.Resolution(modelID: "test", backend: .apple, route: nil)
     var partialText = ""
     let confidence: Double? = nil
     var onPartialResult: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
+    var onFirstInputBuffer: (() -> Void)?
+    var onStartupObservation: ((StartupObservation) -> Void)?
+    var inputLevelSample = CaptureInputLevelSample(levelDBFS: -160, sequence: 0)
+    let safetyRecordingID: UUID? = nil
+    var discards = 0
     var stops = 0
     var finish: (() async throws -> TranscriptionResult)?
     private let observer = CaptureDisruptionObserver()
@@ -273,6 +282,12 @@ final class InterruptionSession: IOSRecordingSession {
         return Self.result(partialText)
     }
     func cancel() { observer.stop() }
+    func resetInputLevel() {}
+    @discardableResult
+    func discardTemporaryRecording() -> Bool {
+        discards += 1
+        return true
+    }
     func emitPartial(_ text: String) {
         partialText = text
         onPartialResult?(text, false)
@@ -293,14 +308,10 @@ final class InterruptionSession: IOSRecordingSession {
 
 @MainActor
 private final class InterruptionPasteboard: PolishPasteboard {
-    var changeCount = 0
-    var ownershipToken: String?
     var string: String? = "Original"
     var writes = 0
-    func write(_ text: String, token: String) {
+    func write(_ text: String) {
         string = text
-        ownershipToken = token
-        changeCount += 1
         writes += 1
     }
 }

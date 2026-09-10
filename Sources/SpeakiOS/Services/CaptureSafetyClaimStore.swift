@@ -98,10 +98,15 @@ public final class CaptureSafetyClaimStore: @unchecked Sendable {
     /// *other* processes are never touched either — this process cannot know
     /// what became of their transcripts.
     public func markDelivered(recording: UUID) {
-        self.mutate(recording) { claim in
-            guard claim.owner == self.owner else { return }
-            claim.deliveredTranscript = true
-        }
+        self.lock.lock()
+        defer { self.lock.unlock() }
+        self.migrateLegacyLocked()
+        // Ownership is checked before the write, not inside it, so a claim this
+        // process does not own is never rewritten at all — not even with
+        // identical bytes, which would still race another process's update.
+        guard var claim = self.loadLocked(recording), claim.owner == self.owner else { return }
+        claim.deliveredTranscript = true
+        self.saveLocked(claim)
     }
 
     /// Drops a claim record. Never touches the audio file — the caller does

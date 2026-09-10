@@ -78,10 +78,15 @@ final class CaptureSafetyClaimStoreTests: XCTestCase {
         store(owner: firstProcess).open(recording: mine, fileName: "mine.m4a", startedAt: now, now: now)
         store(owner: secondProcess).open(recording: theirs, fileName: "theirs.m4a", startedAt: now, now: now)
 
+        let theirsKey = "captureSafetyClaim.v1.\(theirs.uuidString)"
+        let theirsBefore = defaults.data(forKey: theirsKey)
+
         // Another process's claim, named explicitly, is still not this
-        // process's to close.
+        // process's to close — and is not rewritten at all, so a concurrent
+        // update by its real owner cannot be lost to this call.
         store(owner: firstProcess).markDelivered(recording: mine)
         store(owner: firstProcess).markDelivered(recording: theirs)
+        XCTAssertEqual(defaults.data(forKey: theirsKey), theirsBefore)
 
         let claims = Dictionary(
             uniqueKeysWithValues: store(owner: firstProcess).claims().map { ($0.run, $0) }

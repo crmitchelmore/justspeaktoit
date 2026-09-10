@@ -77,6 +77,7 @@ final class KeyboardViewModelTests: XCTestCase {
         let handoffStore: KeyboardHandoffStore
         let instantStore: KeyboardInstantDictationStore
         let preferences: KeyboardDictationPreferencesStore
+        let deliveryStore: KeyboardDeliveryStore
     }
 
     func testDisabledDirectCapture_plansHandoffWithoutReadingPermissions() {
@@ -454,6 +455,153 @@ final class KeyboardViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Delivery into the field (issues #1002, #1003, #1005)
+
+    func testKeyboardAppearance_advertisesItsOpenFieldAndWithdrawsItOnDismissal() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "Host")
+
+        activate(harness.model, document: document)
+        XCTAssertEqual(harness.deliveryStore.openTarget()?.documentIdentifier, Self.documentID)
+
+        harness.model.deactivate()
+        XCTAssertNil(harness.deliveryStore.openTarget())
+    }
+
+    func testSecureField_isNeverAdvertisedAsADeliveryTarget() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "")
+
+        activate(harness.model, document: document, isSecureField: true)
+        XCTAssertNil(harness.deliveryStore.openTarget())
+    }
+
+    func testTargetedInsert_landsInTheFieldItWasAimedAtAndIsClaimedOnce() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "Hi ")
+        activate(harness.model, document: document)
+        harness.deliveryStore.publishOffer(
+            offer(mode: .targetedInsert, origin: Self.documentID, text: "there")
+        )
+
+        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+
+        XCTAssertEqual(document.text, "Hi there")
+        XCTAssertEqual(harness.deliveryStore.claim()?.offerID, harness.deliveryStore.pendingOffer()?.offerID)
+        // A second pass must not insert it again.
+        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        XCTAssertEqual(document.text, "Hi there")
+    }
+
+    func testTargetedInsert_neverReachesADifferentField() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "Other field")
+        activate(harness.model, document: document, documentIdentifier: UUID())
+        harness.deliveryStore.publishOffer(
+            offer(mode: .targetedInsert, origin: Self.documentID, text: "not for you")
+        )
+
+        harness.model.updateDocumentContext(documentIdentifier: UUID(), selectionChanged: false)
+
+        XCTAssertEqual(document.text, "Other field")
+        XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
+        XCTAssertNil(harness.deliveryStore.claim())
+    }
+
+    func testLatePickup_waitsAsAChipAndOnlyInsertsWhenTapped() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "")
+        activate(harness.model, document: document)
+        harness.deliveryStore.publishOffer(offer(mode: .latePickup, origin: nil, text: "Remind Sam"))
+
+        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+
+        guard case .chip = harness.model.pickupOffering else {
+            return XCTFail("a late pickup should wait as a chip")
+        }
+        XCTAssertEqual(document.text, "", "nothing may be inserted without the user asking")
+
+        harness.model.insertPendingPickup()
+        XCTAssertEqual(document.text, "Remind Sam")
+        XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
+    }
+
+    func testDismissingTheChip_claimsItSoItDoesNotComeBack() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "")
+        activate(harness.model, document: document)
+        let published = harness.deliveryStore.publishOffer(offer(mode: .latePickup, origin: nil))
+        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+
+        harness.model.dismissPendingPickup()
+
+        XCTAssertEqual(harness.deliveryStore.claim()?.offerID, published?.offerID)
+        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
+        XCTAssertEqual(document.text, "")
+    }
+
+    func testWithoutFullAccess_nothingIsAdvertisedAndNoChipAppears() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "")
+        harness.deliveryStore.publishOffer(offer(mode: .latePickup, origin: nil))
+
+        harness.model.activate(
+            hasFullAccess: false,
+            documentIdentifier: Self.documentID,
+            insertText: document.insertText,
+            deleteBackward: document.deleteBackward,
+            contextBeforeInput: { document.contextBeforeInput },
+            contextAfterInput: { document.after }
+        )
+
+        XCTAssertEqual(harness.model.mode, .blocked(.fullAccessRequired))
+        XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
+        XCTAssertNil(harness.deliveryStore.openTarget())
+        XCTAssertEqual(document.text, "")
+    }
+
+    func testHandBack_firesAfterAnInsertOnlyWithExactlyTwoKeyboards() {
+        for (count, expected) in [(2, 1), (3, 0)] {
+            let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+            let document = DocumentProxy(before: "")
+            var handBacks = 0
+            activate(
+                harness.model,
+                document: document,
+                activeInputModeCount: count,
+                handBack: { handBacks += 1 }
+            )
+            harness.deliveryStore.publishOffer(
+                offer(mode: .targetedInsert, origin: Self.documentID, text: "done")
+            )
+
+            harness.model.updateDocumentContext(
+                documentIdentifier: Self.documentID,
+                selectionChanged: false
+            )
+
+            XCTAssertEqual(document.text, "done")
+            XCTAssertEqual(handBacks, expected, "with \(count) keyboards enabled")
+        }
+    }
+
+    private func offer(
+        mode: KeyboardPickupOffer.Mode,
+        origin: UUID?,
+        text: String = "pending words"
+    ) -> KeyboardPickupOffer {
+        let now = Date()
+        return KeyboardPickupOffer(
+            text: text,
+            source: .hardwareTrigger,
+            mode: mode,
+            createdAt: now,
+            expiresAt: now.addingTimeInterval(KeyboardPickupOffer.latePickupLifetime),
+            originDocumentIdentifier: origin
+        )
+    }
+
     private func makeModel(
         engine: FakeEngine,
         policy: KeyboardCapturePlanner.DirectCapturePolicy = .enabled,
@@ -474,6 +622,7 @@ final class KeyboardViewModelTests: XCTestCase {
         let handoffStore = KeyboardHandoffStore(defaults: defaults)
         let instantStore = KeyboardInstantDictationStore(defaults: defaults)
         let preferences = KeyboardDictationPreferencesStore(defaults: defaults)
+        let deliveryStore = KeyboardDeliveryStore(defaults: defaults)
         configurePreferences(preferences)
         if instantReady {
             _ = instantStore.start(enabling: true)
@@ -483,6 +632,7 @@ final class KeyboardViewModelTests: XCTestCase {
             handoff: KeyboardHandoffController(store: handoffStore, instantSessionStore: instantStore),
             handoffStore: handoffStore,
             preferences: preferences,
+            deliveryStore: deliveryStore,
             directCapturePolicy: policy,
             directCaptureCapabilities: capabilities ?? { Self.availableCapabilities }
         )
@@ -490,14 +640,25 @@ final class KeyboardViewModelTests: XCTestCase {
             model: model,
             handoffStore: handoffStore,
             instantStore: instantStore,
-            preferences: preferences
+            preferences: preferences,
+            deliveryStore: deliveryStore
         )
     }
 
-    private func activate(_ model: KeyboardViewModel, document: DocumentProxy) {
+    private func activate(
+        _ model: KeyboardViewModel,
+        document: DocumentProxy,
+        documentIdentifier: UUID? = nil,
+        isSecureField: Bool = false,
+        activeInputModeCount: Int = 0,
+        handBack: (() -> Void)? = nil
+    ) {
         model.activate(
             hasFullAccess: true,
-            documentIdentifier: Self.documentID,
+            documentIdentifier: documentIdentifier ?? Self.documentID,
+            isSecureField: isSecureField,
+            activeInputModeCount: activeInputModeCount,
+            handBack: handBack,
             insertText: document.insertText,
             deleteBackward: document.deleteBackward,
             contextBeforeInput: { document.contextBeforeInput },

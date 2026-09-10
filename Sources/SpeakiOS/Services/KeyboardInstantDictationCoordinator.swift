@@ -132,6 +132,26 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         }
     }
 
+    /// Finishes the keyboard's in-flight dictation on behalf of a hardware
+    /// trigger (issue #1002), so a physical press lands the transcript in the
+    /// field the keyboard opened it for instead of colliding with it.
+    ///
+    /// Nothing about the destination changes: the result travels the existing
+    /// nonce-scoped hand-off, which refuses to insert unless the keyboard is
+    /// still in the same document.
+    @discardableResult
+    public func finishKeyboardSession(requestID: UUID) -> Bool {
+        guard activeRequestID == requestID || handoffStore.activeRecord()?.requestID == requestID else {
+            return false
+        }
+        // `requestFinish` is idempotent, so a second press while the app is
+        // already finalising is a safe no-op rather than a second stop.
+        guard (try? handoffStore.requestFinish(requestID: requestID)) != nil else { return false }
+        KeyboardHandoffSignal.postRequestChanged()
+        handleRequestChange()
+        return true
+    }
+
     public func endSession(disable: Bool = true) {
         startTask?.cancel()
         startTask = nil
@@ -266,7 +286,11 @@ public final class KeyboardInstantDictationCoordinator: ObservableObject {
         let result = await recordingService.stopRecording(
             destination: .historyOnly,
             saveToHistory: false,
-            primedActivityMessage: "Keyboard ready"
+            primedActivityMessage: "Keyboard ready",
+            // The keyboard's own result travels the nonce-scoped hand-off
+            // record; publishing a second copy as a pickup offer would insert
+            // it twice.
+            keyboardDeliverySource: nil
         )
         activeRequestID = nil
         activeProfile = nil

@@ -246,7 +246,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     public func stopRecording(
         destination: HardwareTriggerDestination? = nil,
         saveToHistory: Bool = true,
-        primedActivityMessage: String = "Ready for the Action Button"
+        primedActivityMessage: String = "Ready for the Action Button",
+        keyboardDeliverySource: KeyboardPickupOffer.Source? = .app
     ) async -> TranscriptionResult {
         // A stop during startup cancels the pending run and waits for it to
         // unwind (issue #701): retiring `activeStartRunID` makes the suspended
@@ -356,6 +357,16 @@ public final class TranscriptionRecordingService: ObservableObject {
             }
         } else {
             assertion.end()
+        }
+
+        // Offer the transcript to the keyboard: straight into the field when
+        // it is on screen right now, otherwise as a one-tap chip for late
+        // pickup (issues #1002, #1003). Nothing above changes — the clipboard,
+        // History and Live Activity are untouched — so this can only add a
+        // delivery, never remove one. The keyboard hand-off passes `nil`
+        // because its result already travels the nonce-scoped record.
+        if let keyboardDeliverySource {
+            KeyboardDeliveryPublisher.publish(transcript: text, source: keyboardDeliverySource)
         }
 
         // Clear per-session live state so a duplicate stop or a later fallback

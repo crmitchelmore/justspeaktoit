@@ -32,6 +32,28 @@ private func stopResultDialog(
     }
 }
 
+/// A keyboard-owned dictation shares the microphone with every hardware
+/// trigger. Rather than colliding with it — refusing with "already recording",
+/// or stopping it into the *hardware* destination and losing the field the
+/// keyboard was aiming at — a physical press finishes it into that field
+/// (issue #1002).
+///
+/// Returns `true` when the press was consumed by the keyboard session.
+@available(iOS 18, *)
+@MainActor
+private func finishedKeyboardSessionIfActive() -> Bool {
+    switch KeyboardDeliveryPublisher.sessionRouting() {
+    case let .finishKeyboardSession(requestID):
+        return KeyboardInstantDictationCoordinator.shared.finishKeyboardSession(requestID: requestID)
+    case .keyboardSessionStarting:
+        // The keyboard has asked for a recording that has not begun. Racing
+        // its start-up would either double-start or silently drop it.
+        return true
+    case .proceed:
+        return false
+    }
+}
+
 /// Starts recording, transparently recovering when the *background* Live Activity
 /// can't be started.
 ///
@@ -142,9 +164,15 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, Foregroun
         // than treating the service as free and double-starting (issue #701).
         let isActive = await service.isActive
 
+        // Share one session with the keyboard: a physical press finishes its
+        // dictation into its own field instead of colliding with it (#1002).
+        if await finishedKeyboardSessionIfActive() {
+            return .result()
+        }
+
         if isActive {
             let destination = await AppSettings.shared.hardwareTriggerDestination
-            await service.stopRecording(destination: destination)
+            await service.stopRecording(destination: destination, keyboardDeliverySource: .hardwareTrigger)
             return .result()
         } else if SharedTranscriptionState.shared.isRecording {
             throw ToggleRecordingError.alreadyRecordingInApp
@@ -184,6 +212,11 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
         // `starting` is cancellable, not "no active recording" (issue #701).
         let isActive = await service.isActive
 
+        // A keyboard-owned dictation finishes into its own field (#1002).
+        if await finishedKeyboardSessionIfActive() {
+            return .result(dialog: "Finishing into the keyboard's text field.")
+        }
+
         guard isActive else {
             if SharedTranscriptionState.shared.isRecording {
                 return .result(dialog: "A recording is active in the app. Use the in-app stop button.")
@@ -193,7 +226,7 @@ public struct StopTranscriptionRecordingIntent: AudioRecordingIntent, LiveActivi
 
         let destination = await AppSettings.shared.hardwareTriggerDestination
         let canPostProcess = await AppSettings.shared.hasOpenRouterKey
-        let result = await service.stopRecording(destination: destination)
+        let result = await service.stopRecording(destination: destination, keyboardDeliverySource: .hardwareTrigger)
         return .result(dialog: stopResultDialog(
             for: result,
             destination: destination,
@@ -235,7 +268,10 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
         if value {
             try await startRecordingContinuingInForegroundIfNeeded(from: self)
         } else {
-            await service.stopRecording(destination: AppSettings.shared.hardwareTriggerDestination)
+            await service.stopRecording(
+                destination: AppSettings.shared.hardwareTriggerDestination,
+                keyboardDeliverySource: .hardwareTrigger
+            )
         }
         return .result()
     }

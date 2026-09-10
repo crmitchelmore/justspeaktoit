@@ -29,6 +29,16 @@ final class KeyboardHandoffController: ObservableObject {
     @Published private(set) var liveTranscript = ""
     @Published private(set) var isInstantReady = false
 
+    /// Called immediately after a completed transcript reaches the document,
+    /// so the keyboard can hand itself back (issue #1005).
+    var onDidInsert: (() -> Void)?
+
+    /// Whether a keyboard-owned dictation currently owns the caret. A pending
+    /// pickup chip must not compete with words the user is saying right now.
+    var isInFlight: Bool {
+        requestID != nil
+    }
+
     private let store: KeyboardHandoffStore
     private let instantSessionStore: KeyboardInstantDictationStore
     private let consumer: KeyboardHandoffConsumer
@@ -241,6 +251,7 @@ final class KeyboardHandoffController: ObservableObject {
                 self.requestID = nil
                 liveTranscript = ""
                 presentation = .inserted
+                onDidInsert?()
             }
         case .cancelled:
             self.requestID = nil

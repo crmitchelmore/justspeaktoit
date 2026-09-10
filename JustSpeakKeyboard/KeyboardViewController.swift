@@ -50,6 +50,16 @@ final class KeyboardViewController: UIInputViewController {
         model.activate(
             hasFullAccess: hasFullAccess,
             documentIdentifier: textDocumentProxy.documentIdentifier,
+            // Optional on `UITextInputMode`'s traits; an unreported trait is
+            // treated as "not secure", matching what the host actually shows.
+            isSecureField: textDocumentProxy.isSecureTextEntry ?? false,
+            // `advanceToNextInputMode()` moves to the *next* enabled keyboard;
+            // the model only calls back when exactly two are enabled, where
+            // "next" is provably the one the user was typing on (issue #1005).
+            activeInputModeCount: UITextInputMode.activeInputModes.count,
+            handBack: { [weak self] in
+                self?.advanceToNextInputMode()
+            },
             insertText: { [weak self] text in
                 self?.textDocumentProxy.insertText(text)
             },

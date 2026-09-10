@@ -64,7 +64,7 @@ struct StopDictationIntent: AudioRecordingIntent {
             throw AutomationIntentError.noActiveRecording
         }
         let destination = await AppSettings.shared.hardwareTriggerDestination
-        let result = await service.stopRecording(destination: destination)
+        let result = await service.stopRecording(destination: destination, keyboardDeliverySource: .hardwareTrigger)
         // A duplicate stop (second Shortcut, Action Button race) intentionally
         // yields an empty no-op result, and a silent or failed recording can
         // finish empty too. Neither is a transcript, so fail the Shortcut

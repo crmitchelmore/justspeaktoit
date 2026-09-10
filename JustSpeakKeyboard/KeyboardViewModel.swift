@@ -25,6 +25,10 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var liveText = ""
     @Published private(set) var languageChipLabel: String?
     @Published private(set) var profileChipLabel: String?
+    /// What the keyboard may do with a transcript the app has left pending
+    /// (issues #1002, #1003). Recomputed on appearance, on every document
+    /// change, and on each poll tick.
+    @Published private(set) var pickupOffering: KeyboardPickupPolicy.Offering = .none
 
     let handoff: KeyboardHandoffController
 
@@ -43,6 +47,19 @@ final class KeyboardViewModel: ObservableObject {
 
     private var currentDocumentIdentifier: UUID?
     private var proxyInsert: ((String) -> Void)?
+    private let deliveryStore: KeyboardDeliveryStore
+    private var deliveryPreferences: KeyboardDeliveryPreferences = .default
+    private var isSecureField = false
+    private var activeInputModeCount = 0
+    private var handBack: (() -> Void)?
+    private var pickupTask: Task<Void, Never>?
+    private var isDelivering = false
+
+    /// Cadence for noticing an offer the app published while the keyboard was
+    /// already on screen, and for refreshing the open-target advertisement.
+    /// The store throttles the target rewrite, so this costs one small read
+    /// per tick. Issue #990 separately owns pushing this over Darwin.
+    private static let deliveryPollInterval = Duration.milliseconds(500)
 
     convenience init() {
         self.init(
@@ -50,6 +67,7 @@ final class KeyboardViewModel: ObservableObject {
             handoff: KeyboardHandoffController(),
             handoffStore: .shared,
             preferences: .shared,
+            deliveryStore: .shared,
             directCapturePolicy: Self.buildDirectCapturePolicy,
             directCaptureCapabilities: {
                 DirectCaptureCapabilities(
@@ -68,6 +86,7 @@ final class KeyboardViewModel: ObservableObject {
         handoff: KeyboardHandoffController,
         handoffStore: KeyboardHandoffStore,
         preferences: KeyboardDictationPreferencesStore,
+        deliveryStore: KeyboardDeliveryStore = .shared,
         directCapturePolicy: KeyboardCapturePlanner.DirectCapturePolicy,
         directCaptureCapabilities: @escaping @MainActor () -> DirectCaptureCapabilities
     ) {
@@ -75,6 +94,7 @@ final class KeyboardViewModel: ObservableObject {
         self.handoff = handoff
         self.handoffStore = handoffStore
         self.preferences = preferences
+        self.deliveryStore = deliveryStore
         self.directCapturePolicy = directCapturePolicy
         self.directCaptureCapabilities = directCaptureCapabilities
         engine.onEvent = { [weak self] runID, event in
@@ -83,6 +103,9 @@ final class KeyboardViewModel: ObservableObject {
         // Republish nested handoff changes so the shared root view refreshes.
         handoffForwarder = handoff.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
+        }
+        handoff.onDidInsert = { [weak self] in
+            self?.handBackAfterInsertIfPermitted()
         }
     }
 
@@ -137,9 +160,13 @@ final class KeyboardViewModel: ObservableObject {
 
     // MARK: - Lifecycle from the input view controller
 
+    // swiftlint:disable:next function_parameter_count
     func activate(
         hasFullAccess: Bool,
         documentIdentifier: UUID,
+        isSecureField: Bool = false,
+        activeInputModeCount: Int = 0,
+        handBack: (() -> Void)? = nil,
         insertText: @escaping (String) -> Void,
         deleteBackward: @escaping () -> Void,
         contextBeforeInput: @escaping () -> String?,
@@ -147,6 +174,9 @@ final class KeyboardViewModel: ObservableObject {
     ) {
         self.hasFullAccess = hasFullAccess
         self.currentDocumentIdentifier = documentIdentifier
+        self.isSecureField = isSecureField
+        self.activeInputModeCount = activeInputModeCount
+        self.handBack = handBack
         self.proxyInsert = insertText
         self.documentSession = KeyboardDocumentSession(
             insertText: insertText,
@@ -158,9 +188,12 @@ final class KeyboardViewModel: ObservableObject {
 
         languageSelection = preferences.selection()
         profileSelection = preferences.profileSelection()
+        deliveryPreferences = deliveryStore.preferences()
         refreshChips()
 
         configureCaptureMode(autoStartHandoff: true)
+        refreshDelivery()
+        startDeliveryLoop()
     }
 
     private func configureCaptureMode(autoStartHandoff: Bool) {
@@ -203,7 +236,14 @@ final class KeyboardViewModel: ObservableObject {
     func deactivate() {
         dispatch(.dismissed)
         handoff.deactivate()
+        pickupTask?.cancel()
+        pickupTask = nil
+        // Withdraw the open-target advertisement. Its short lifetime covers
+        // the case where the extension is killed before this ever runs.
+        deliveryStore.clearTarget()
+        pickupOffering = .none
         proxyInsert = nil
+        handBack = nil
         documentSession?.invalidate()
         documentSession = nil
     }
@@ -211,6 +251,7 @@ final class KeyboardViewModel: ObservableObject {
     func updateDocumentContext(documentIdentifier: UUID, selectionChanged: Bool) {
         let changedDocument = currentDocumentIdentifier != documentIdentifier
         currentDocumentIdentifier = documentIdentifier
+        defer { refreshDelivery() }
         switch mode {
         case .direct:
             // Extension-authored edits update the session anchor before UIKit
@@ -257,6 +298,20 @@ final class KeyboardViewModel: ObservableObject {
         case .blocked:
             break
         }
+    }
+
+    /// Explicit one-tap pickup of the chip (#1003).
+    func insertPendingPickup() {
+        guard case let .chip(chip) = pickupOffering else { return }
+        deliver(chip.text, offerID: chip.offerID)
+    }
+
+    /// The user declining the chip. The claim is recorded so it does not come
+    /// back on the next appearance; the transcript stays in History.
+    func dismissPendingPickup() {
+        guard case let .chip(chip) = pickupOffering else { return }
+        deliveryStore.claimOffer(chip.offerID)
+        pickupOffering = .none
     }
 
     func cancelTapped() {
@@ -413,6 +468,87 @@ final class KeyboardViewModel: ObservableObject {
             autoStart: autoStart,
             insertText: proxyInsert
         )
+    }
+
+    // MARK: - Delivery (issues #1002, #1003, #1005)
+
+    /// Advertises the open field and watches for a transcript the app has left
+    /// pending. Both halves are cheap reads of the App Group; the store
+    /// throttles the target rewrite.
+    private func startDeliveryLoop() {
+        guard pickupTask == nil else { return }
+        pickupTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                self.refreshDelivery()
+                try? await Task.sleep(for: Self.deliveryPollInterval)
+            }
+        }
+    }
+
+    private func refreshDelivery() {
+        if case .blocked = mode {
+            // Without Full Access there is no shared container to advertise
+            // into and nothing to offer; the blocked strip already says so.
+            pickupOffering = .none
+            return
+        }
+        publishTargetIfPossible()
+        evaluatePickup()
+    }
+
+    private func publishTargetIfPossible() {
+        guard let currentDocumentIdentifier else { return }
+        deliveryStore.publishTarget(
+            documentIdentifier: currentDocumentIdentifier,
+            isSecureField: isSecureField
+        )
+    }
+
+    private func evaluatePickup() {
+        let offering = KeyboardPickupPolicy.offering(
+            offer: deliveryStore.pendingOffer(),
+            claim: deliveryStore.claim(),
+            currentDocumentIdentifier: currentDocumentIdentifier,
+            isSecureField: isSecureField,
+            handoffInFlight: handoff.isInFlight || machine.isCapturing,
+            preferences: deliveryPreferences
+        )
+        if case let .autoInsert(text) = offering,
+           let offerID = deliveryStore.pendingOffer()?.offerID {
+            deliver(text, offerID: offerID)
+            return
+        }
+        pickupOffering = offering
+    }
+
+    /// Inserts once and records the claim afterwards, so a death between the
+    /// two leaves the offer retryable rather than losing the transcript.
+    private func deliver(_ text: String, offerID: UUID) {
+        // The insertion makes the host call back into `updateDocumentContext`.
+        // Claiming happens after the proxy accepts the text, so guard the
+        // window in between rather than letting a re-entrant pass insert twice.
+        guard let proxyInsert, !isDelivering else { return }
+        isDelivering = true
+        defer { isDelivering = false }
+        proxyInsert(text)
+        deliveryStore.claimOffer(offerID)
+        pickupOffering = .none
+        handBackAfterInsertIfPermitted()
+    }
+
+    /// Hands the keyboard back after a successful insertion (#1005). Only when
+    /// exactly two keyboards are enabled: `advanceToNextInputMode()` moves to
+    /// the *next* one, and with three or more that is not the one the user was
+    /// typing on.
+    private func handBackAfterInsertIfPermitted() {
+        guard KeyboardHandBackPolicy.shouldAdvanceToNextInputMode(
+            preferences: deliveryPreferences,
+            activeInputModeCount: activeInputModeCount
+        ) else {
+            return
+        }
+        handBack?()
     }
 
     private func refreshChips() {

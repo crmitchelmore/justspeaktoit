@@ -80,6 +80,51 @@ Primary sources:
 9. The app immediately returns to the discard-only readiness tap for the next
    keyboard appearance.
 
+## Delivery from outside the keyboard (issues #1002, #1003, #1005)
+
+A dictation that did not start in the keyboard can still finish in the field.
+Three App Group keys carry it, each with exactly one writing process, as with
+the hand-off itself:
+
+| Key | Writer | Contents |
+|---|---|---|
+| `keyboardDelivery.target.v1` | keyboard extension | which document is open, and for how long |
+| `keyboardDelivery.offer.v1` | containing app | one completed transcript awaiting delivery |
+| `keyboardDelivery.claim.v1` | keyboard extension | the offer it inserted or dismissed |
+
+1. While it is on screen the keyboard advertises its current
+   `documentIdentifier`. The advertisement lapses after 8 seconds unless it is
+   refreshed, because `viewDidDisappear` is not guaranteed to run before the
+   extension is suspended or killed. A secure field is never advertised.
+2. A hardware trigger (Action Button, Siri, Shortcuts) checks the hand-off
+   first. A keyboard-owned dictation that is recording, finishing or
+   transcribing is **finished** by the press, so the transcript lands in the
+   field the keyboard opened it for — instead of the old collision, where the
+   press either refused with "already recording" or stopped into the hardware
+   destination. A request that has not begun recording is left alone.
+3. Every completed capture then leaves an offer. With a fresh target it is a
+   `targetedInsert`, valid for 60 seconds and bound to that exact document; it
+   auto-inserts there and **nowhere else** — a different field gets nothing,
+   not even a chip. Otherwise it is a `latePickup`, valid for 10 minutes,
+   offered as a one-tap chip in the keyboard strip. Watch imports publish one
+   too.
+4. `latePickup` auto-insertion is off by default and, when enabled, still
+   requires the current document to be the exact one the capture started in.
+   Nothing else ever inserts without a tap.
+5. Insertion happens before the claim is written, so a death in between leaves
+   the offer retryable rather than losing the transcript — the same trade the
+   hand-off consumer makes, and with the same exactly-once caveat.
+6. After any insertion the keyboard calls `advanceToNextInputMode()` **only**
+   when exactly two keyboards are enabled. iOS offers "next", never "previous",
+   and with three or more that would land the user somewhere they did not
+   choose. The setup screen shows the count and says why hand-back is off.
+
+None of this changes where a transcript otherwise goes: the clipboard, the
+History entry, and the Live Activity are untouched, so an expired or missed
+offer costs the user nothing they had before. Everything here lives behind Full
+Access — without it the App Group is unavailable, no target is advertised, no
+offer is readable, and hardware triggers behave exactly as they do today.
+
 ## Why App Intents are not the primary cold-start route
 
 `LiveActivityIntent` can force an interactive intent to execute in the app

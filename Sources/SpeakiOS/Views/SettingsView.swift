@@ -1310,6 +1310,25 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("Capture Health") {
+                NavigationLink {
+                    CaptureHealthView()
+                } label: {
+                    Label("Check capture is working", systemImage: "stethoscope")
+                }
+                .accessibilityIdentifier("captureHealthNavLink")
+
+                if !usesInlineDensityLayout {
+                    Text(
+                        "Checks the things a capture needs, runs a microphone self-test, and offers back "
+                            + "any recording that was interrupted before its transcript was saved. "
+                            + "Nothing on that screen leaves this device."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Recordings") {
                 NavigationLink {
                     RecordingsView()
@@ -1319,8 +1338,8 @@ public struct SettingsView: View {
 
                 if !usesInlineDensityLayout {
                     Text(
-                        "Audio is saved locally during transcription so you can "
-                            + "replay or re-transcribe if connectivity was lost."
+                        "Audio is saved locally during transcription so you can replay it, "
+                            + "or transcribe it again if connectivity was lost."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -394,16 +394,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let volumes = try fileManager.contentsOfDirectory(atPath: "/Volumes")
+            let imageMounts = DiskImageMounts.current()
 
             for volume in volumes {
                 let volumePath = "/Volumes/\(volume)"
                 let appPath = "\(volumePath)/\(Bundle.main.bundleURL.lastPathComponent)"
 
                 // Check if this looks like our DMG
-                if fileManager.fileExists(atPath: appPath) {
+                if imageMounts.contains(volumePath), fileManager.fileExists(atPath: appPath) {
                     // Skip if we've already asked about this volume
                     if askedVolumes.contains(volume) {
-                        return
+                        continue
                     }
 
                     // Remember we asked about this volume

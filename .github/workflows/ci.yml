@@ -45,7 +45,7 @@ jobs:
         run: git diff --exit-code Package.resolved
 
       - name: Test (Debug)
-        run: swift test --enable-code-coverage
+        run: python3 scripts/with-test-keychain.py swift test --enable-code-coverage
 
       # Snapshot mismatches write the freshly rendered PNG to the process
       # temporary directory. Publishing it is the only way to inspect a CI-only
@@ -265,7 +265,7 @@ jobs:
             ${{ runner.os }}-swift-release-
 
       - name: Test (Release)
-        run: swift test -c release
+        run: python3 scripts/with-test-keychain.py swift test -c release
 
   build-ios:
     name: Build iOS Library

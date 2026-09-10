@@ -42,7 +42,7 @@ Apple Silicon installs update to arm64-only builds; Intel installs keep receivin
 
 ### Alpha testing
 
-Stable is recommended for everyday use. Alpha receives successful changes from
+Stable is recommended for everyday use. After commissioning, Alpha will receive successful changes from
 `main` and installs alongside Stable with a purple icon, separate app data,
 credentials and iCloud storage. Alpha does not take over your existing hotkey.
 

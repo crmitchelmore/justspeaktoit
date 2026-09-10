@@ -123,7 +123,7 @@ jobs:
             security cms -D -i "$KEYBOARD_PROFILE_PATH" > "$KEYBOARD_PROFILE_PLIST"
             plutil -extract Entitlements xml1 -o - "$KEYBOARD_PROFILE_PLIST" \
               | grep -Fq "<string>$IOS_APP_GROUP</string>" || {
-              echo "::error::Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios. Associate that App Group with com.justspeaktoit.ios.keyboard in the Apple Developer portal, then rerun this workflow."
+              echo "::error::Keyboard provisioning profile does not authorize $IOS_APP_GROUP. Associate that App Group with $BUNDLE_ID.keyboard in the Apple Developer portal, then rerun this workflow."
               exit 1
             }
             KEYBOARD_PROFILE_UUID=$(security cms -D -i "$KEYBOARD_PROFILE_PATH" | plutil -extract UUID raw -)
@@ -325,19 +325,19 @@ jobs:
             "$RUNNER_TEMP/app-entitlements.plist" 2>/dev/null || true)
 
           [ "$APP_GROUP" = "$IOS_APP_GROUP" ] \
-            || { echo "App group mismatch: expected 'group.com.justspeaktoit.ios', got '${APP_GROUP:-missing}'"; exit 1; }
+            || { echo "App group mismatch: expected '$IOS_APP_GROUP', got '${APP_GROUP:-missing}'"; exit 1; }
           [ "$WIDGET_GROUP" = "$IOS_APP_GROUP" ] \
-            || { echo "Widget group mismatch: expected 'group.com.justspeaktoit.ios', got '${WIDGET_GROUP:-missing}'"; exit 1; }
+            || { echo "Widget group mismatch: expected '$IOS_APP_GROUP', got '${WIDGET_GROUP:-missing}'"; exit 1; }
           if [ "$TUIST_IOS_KEYBOARD" = "1" ]; then
             codesign -d --entitlements - --xml "$KEYBOARD_PATH" > "$RUNNER_TEMP/keyboard-entitlements.plist"
             KEYBOARD_GROUP=$(/usr/libexec/PlistBuddy \
               -c 'Print :com.apple.security.application-groups:0' \
               "$RUNNER_TEMP/keyboard-entitlements.plist" 2>/dev/null || true)
             [ "$KEYBOARD_GROUP" = "$IOS_APP_GROUP" ] \
-              || { echo "Keyboard group mismatch: expected 'group.com.justspeaktoit.ios', got '${KEYBOARD_GROUP:-missing}'"; exit 1; }
+              || { echo "Keyboard group mismatch: expected '$IOS_APP_GROUP', got '${KEYBOARD_GROUP:-missing}'"; exit 1; }
           fi
           [ "$APP_ICLOUD_CONTAINER" = "$IOS_CLOUD_CONTAINER" ] \
-            || { echo "iCloud container mismatch: expected 'iCloud.com.justspeaktoit.ios', got '${APP_ICLOUD_CONTAINER:-missing}'"; exit 1; }
+            || { echo "iCloud container mismatch: expected '$IOS_CLOUD_CONTAINER', got '${APP_ICLOUD_CONTAINER:-missing}'"; exit 1; }
 
       - name: Export IPA
         if: steps.preflight.outputs.skip_upload != 'true'

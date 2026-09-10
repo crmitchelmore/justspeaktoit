@@ -285,6 +285,10 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
         return ReleaseNotesVersion.normalised(version ?? "")
     }
 
+    public static func installedBuild(bundle: Bundle = .main) -> String {
+        bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+    }
+
     private struct Payload: Decodable {
         let generatedAt: String?
         let entries: [ReleaseNoteEntry]
@@ -298,18 +302,22 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
 public struct ReleaseNotesBrowser: Equatable, Sendable {
     public let entries: [ReleaseNoteEntry]
     public let installedVersion: String
+    public let installedBuild: String
     public private(set) var selectedVersion: String?
 
     public init(
         catalog: ReleaseNotesCatalog = .bundled,
         installedVersion: String = ReleaseNotesCatalog.installedVersion(),
         platform: ReleaseNotesPlatform = .current,
-        train: ReleaseTrain = .current
+        train: ReleaseTrain = .current,
+        installedBuild: String = ReleaseNotesCatalog.installedBuild()
     ) {
         self.entries = catalog.entries(for: platform, train: train)
         self.installedVersion = ReleaseNotesVersion.normalised(installedVersion)
+        self.installedBuild = installedBuild
         self.selectedVersion = self.entries.first {
             $0.version == ReleaseNotesVersion.normalised(installedVersion)
+                && ($0.train == .stable || $0.build == installedBuild)
         }?.selectionKey
             ?? self.entries.first?.selectionKey
     }
@@ -317,7 +325,9 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     public var isEmpty: Bool { entries.isEmpty }
 
     public var installedEntry: ReleaseNoteEntry? {
-        entries.first { $0.version == installedVersion }
+        entries.first {
+            $0.version == installedVersion && ($0.train == .stable || $0.build == installedBuild)
+        }
     }
     /// True when the catalogue carries notes for the running build. It is false
     /// for development and unreleased builds, and for builds older than the

@@ -16,8 +16,11 @@ export default {
       cf: {cacheTtl: 30}, headers: {'Accept': 'application/json'},
     });
     if (!response.ok) return new Response('Alpha build not yet available', {status: 503});
-    const pointer = await response.json();
-    if (!/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) return new Response('Invalid Alpha pointer', {status: 503});
+    let pointer;
+    try { pointer = await response.json(); } catch {
+      return new Response('Invalid Alpha pointer', {status: 503});
+    }
+    if (!pointer || typeof pointer !== 'object' || !/^alpha-build-[1-9][0-9]*$/.test(pointer.tag)) return new Response('Invalid Alpha pointer', {status: 503});
     return new Response(null, {status: 302, headers: {
       Location: `https://github.com/crmitchelmore/justspeaktoit/releases/download/${pointer.tag}/${assets[path]}`,
       'Cache-Control': 'public, max-age=30',

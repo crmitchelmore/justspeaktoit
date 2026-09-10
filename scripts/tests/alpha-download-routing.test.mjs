@@ -24,3 +24,11 @@ test('deployment invokes the Worker only for Alpha paths',()=>{
  const routes=JSON.parse(readFileSync(new URL('../../landing-page/_routes.json',import.meta.url),'utf8'));
  assert.deepEqual(routes,{version:1,include:['/alpha/*'],exclude:[]});
 });
+
+for (const body of ['null', '{broken', '42', '[]']) {
+ test(`malformed Alpha pointer returns unavailable: ${body}`, async t => {
+  t.mock.method(globalThis, 'fetch', async () => new Response(body));
+  const response = await worker.fetch(new Request('https://justspeaktoit.com/alpha/appcast.xml'), {});
+  assert.equal(response.status, 503);
+ });
+}

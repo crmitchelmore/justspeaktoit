@@ -26,7 +26,7 @@ import SpeakCore
 /// then this runs inside the ordinary `perform()` budget, which is what caps
 /// ``CaptureEndPointingPolicy/intentMaximumDurationRange``.
 @available(iOS 18, *)
-struct DictateIntent: AudioRecordingIntent {
+struct DictateIntent: AudioRecordingIntent, ForegroundContinuableIntent {
     static var title: LocalizedStringResource = "Dictate"
     static var description = IntentDescription(
         "Records, finishes on its own once you stop speaking, and returns the transcript."
@@ -126,19 +126,37 @@ struct DictateIntent: AudioRecordingIntent {
         )
 
         do {
-            try await service.startRecording(
+            // A background Shortcut run that cannot create a Live Activity is
+            // an expected system state, not a microphone problem: continue in
+            // the foreground exactly as the Start and Toggle intents do,
+            // rather than reporting `couldNotStart` and sending the user to
+            // check permissions that are fine.
+            try await startRecordingContinuingInForegroundIfNeeded(
+                from: self,
                 trigger: .shortcut,
                 parameters: parameters,
                 endPointing: endPointing
             )
         } catch let failure as CaptureParameterFailure {
             throw failure
+        } catch let systemError as AppIntentError {
+            // The system's own request to continue in the foreground (and any
+            // other AppIntents error) has to reach AppIntents intact. Masking
+            // it as `couldNotStart` is what turned a supported state into a
+            // wrong message about microphone access.
+            throw systemError
         } catch {
             throw DictateIntentError.couldNotStart
         }
 
+        // The identity of the capture just started. Everything below claims
+        // *this* run's transcript and nothing else's.
+        guard let runID = await service.activeCaptureID else {
+            throw DictateIntentError.couldNotStart
+        }
         let transcript = await Self.awaitTranscript(
             service,
+            runID: runID,
             maximumDuration: endPointing.maximumDuration
         )
         guard let text = AutomationIntentSupport.bestTranscript(raw: transcript, polished: nil) else {
@@ -157,29 +175,44 @@ struct DictateIntent: AudioRecordingIntent {
     ///
     /// These are the semantics the `dictate` URL verb established in #1070:
     /// poll rather than observe, so exactly one owner ever performs the stop
-    /// and a dictation cannot be stopped twice, and read the completed
-    /// transcript from shared state when somebody else was that owner. #1070 is
-    /// on a parallel stack and cannot be imported, so this is a matching copy
-    /// carried the way #1076 carried its parameter validation: whichever of the
-    /// two stacks lands second deletes its copy and forwards to the other, so
+    /// and a dictation cannot be stopped twice. #1070 is on a parallel stack
+    /// and cannot be imported, so this is a matching copy carried the way
+    /// #1076 carried its parameter validation: whichever of the two stacks
+    /// lands second deletes its copy and forwards to the other, so
     /// `justspeaktoit://dictate` and the Dictate action can never come to mean
     /// different things.
+    ///
+    /// Two things make the returned text this run's and no other's. The wait
+    /// polls `isSettling` rather than `isActive`, because a stop leaves
+    /// `recording` for `stopping` *before* it drains the session and commits
+    /// the result — a poll on `isActive` returns while finalisation is still
+    /// running. And the result is claimed by run identity through
+    /// `completedTranscript(forRun:)`, so an earlier capture's transcript can
+    /// never satisfy this wait, and an empty result for this run stays empty
+    /// instead of being replaced by an older non-empty one.
     private static func awaitTranscript(
         _ service: TranscriptionRecordingService,
+        runID: UUID,
         maximumDuration: TimeInterval
     ) async -> String {
         // Past the monitor's own cap, so in the ordinary case the stop comes
         // through `stopRecording` from the end-pointing monitor and this is
-        // only ever the backstop.
-        let deadline = Date().addingTimeInterval(maximumDuration + Self.graceSeconds)
-        while await service.isActive, Date() < deadline {
+        // only ever the backstop. Monotonic, for the same reason the monitor's
+        // own cap is: a wall-clock correction must not extend the wait.
+        let deadline = ContinuousClock.now.advanced(
+            by: .seconds(maximumDuration + Self.graceSeconds)
+        )
+        while await service.isSettling, ContinuousClock.now < deadline {
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
-        guard await service.isActive else {
-            return SharedTranscriptionState.shared.lastCompletedTranscript ?? ""
+        if await service.isActive {
+            // Neither end-pointing nor any other surface stopped it in time.
+            // Stop it ourselves so a returning intent never leaves a
+            // microphone open, and use the result of that stop directly.
+            let destinationOverride = await service.resolvedStopDestination()
+            return await service.stopRecording(destination: destinationOverride).text
         }
-        let destinationOverride = await service.resolvedStopDestination()
-        return await service.stopRecording(destination: destinationOverride).text
+        return await service.completedTranscript(forRun: runID) ?? ""
     }
 
     /// How long past the capture's own cap the wait allows for the stop to

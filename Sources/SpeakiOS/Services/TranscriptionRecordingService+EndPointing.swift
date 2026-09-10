@@ -25,20 +25,35 @@ extension TranscriptionRecordingService {
         SpeakLogger.transcription.info(
             "End-pointing armed: \(request.logDescription, privacy: .public)"
         )
-        let startedAt = Date()
+        // Monotonic, not wall clock. The maximum duration exists so a failed
+        // detector cannot leave the microphone open; measuring it with `Date`
+        // meant a backward clock correction reduced the observed elapsed time
+        // and deferred the cap until the wall clock caught up. `ContinuousClock`
+        // cannot be moved and keeps counting while the device is asleep, which
+        // is the direction that keeps the cap honest.
+        let startedAt = ContinuousClock.now
         endPointingTask = Task { [weak self, weak session] in
             var monitor = CaptureEndPointingMonitor(request)
+            // Carried between samples so a level that has stopped being
+            // refreshed is not counted as new silence: no new buffer means no
+            // new evidence, not evidence of quiet. The elapsed clock still
+            // advances, so the maximum-duration cap still fires either way.
+            var lastObservedSequence: UInt64?
+            var speechDetected = false
             while !Task.isCancelled {
                 try? await Task.sleep(
                     nanoseconds: UInt64(CaptureEndPointingPolicy.sampleIntervalSeconds * 1_000_000_000)
                 )
                 guard !Task.isCancelled, let self, let session,
                       self.ownsEndPointedSession(session) else { return }
+                let sample = session.inputLevelSample
+                if sample.sequence != lastObservedSequence {
+                    lastObservedSequence = sample.sequence
+                    speechDetected = CaptureEndPointingPolicy.speechDetected(levelDBFS: sample.levelDBFS)
+                }
                 let decision = monitor.observe(
-                    speechDetected: CaptureEndPointingPolicy.speechDetected(
-                        levelDBFS: session.currentInputLevelDBFS
-                    ),
-                    atSeconds: Date().timeIntervalSince(startedAt)
+                    speechDetected: speechDetected,
+                    atSeconds: Self.elapsedSeconds(since: startedAt)
                 )
                 switch decision {
                 case .waiting:
@@ -51,6 +66,14 @@ extension TranscriptionRecordingService {
                 }
             }
         }
+    }
+
+    /// Monotonic elapsed seconds. `Duration` is exact; this is the only place
+    /// it is turned back into the `TimeInterval` the pure policy speaks.
+    private static func elapsedSeconds(since start: ContinuousClock.Instant) -> TimeInterval {
+        let elapsed = ContinuousClock.now - start
+        return TimeInterval(elapsed.components.seconds)
+            + TimeInterval(elapsed.components.attoseconds) / 1_000_000_000_000_000_000
     }
 
     /// Cancels any armed monitor. Safe to call when nothing is armed, and

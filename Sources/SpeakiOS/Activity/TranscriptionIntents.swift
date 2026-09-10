@@ -50,19 +50,25 @@ private func stopResultDialog(
 /// The foreground hop only happens on that specific failure — when the headless
 /// background start succeeds, recording stays fully headless.
 @available(iOS 18, *)
-private func startRecordingContinuingInForegroundIfNeeded(
+func startRecordingContinuingInForegroundIfNeeded(
     from intent: some ForegroundContinuableIntent,
     trigger: CaptureTrigger,
-    parameters: CaptureRunParameters = .none
+    parameters: CaptureRunParameters = .none,
+    endPointing: CaptureEndPointingRequest? = nil
 ) async throws {
     let service = await TranscriptionRecordingService.shared
     do {
-        try await service.startRecording(trigger: trigger, parameters: parameters)
+        try await service.startRecording(
+            trigger: trigger,
+            parameters: parameters,
+            endPointing: endPointing
+        )
     } catch iOSTranscriptionError.liveActivityUnavailable {
         try await intent.requestToContinueInForeground {
             try await TranscriptionRecordingService.shared.startRecording(
                 trigger: trigger,
-                parameters: parameters
+                parameters: parameters,
+                endPointing: endPointing
             )
         }
     }

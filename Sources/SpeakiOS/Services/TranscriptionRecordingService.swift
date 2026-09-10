@@ -49,6 +49,19 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// — finishes where the caller asked, not where the global setting says.
     /// `.none` is the pre-parameter behaviour in every respect.
     private var currentRunParameters: CaptureRunParameters = .none
+    /// Identity of the capture in flight, so a caller that started one can
+    /// recognise its own result. `nil` once that capture has settled.
+    private var currentRunID: UUID?
+    /// The transcript the most recent capture committed, tagged with the
+    /// capture it belongs to.
+    ///
+    /// A waiter cannot read "the last completed transcript" and assume it is
+    /// its own: a stop leaves `recording` for `stopping` before it drains the
+    /// session, so a poll on liveness can return while finalisation is still
+    /// running, and an untagged slot would then hand back the *previous*
+    /// capture's text. Tagging also lets an empty result stay empty instead of
+    /// being satisfied by an older non-empty one.
+    private var lastRunCompletion: CaptureRunCompletion?
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
@@ -102,6 +115,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         endPointing: CaptureEndPointingRequest? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
+        // Claimed before the first suspension point, so every unwind below
+        // publishes an empty completion for *this* run rather than leaving a
+        // waiter to read an older one.
+        currentRunID = runID
         state = lifecycle.state
         defer { state = lifecycle.state }
 
@@ -425,6 +442,34 @@ public final class TranscriptionRecordingService: ObservableObject {
         currentRunParameters.destinationID.flatMap(HardwareTriggerDestination.init(rawValue:))
     }
 
+    /// The transcript committed by a specific capture, tagged with its
+    /// identity.
+    public struct CaptureRunCompletion: Sendable, Equatable {
+        public let runID: UUID
+        public let text: String
+    }
+
+    /// Identity of the capture in flight, or `nil` when none is. A caller that
+    /// starts a capture and then waits for it reads this immediately after
+    /// `startRecording` returns and uses it to claim its own result.
+    public var activeCaptureID: UUID? { currentRunID }
+
+    /// Whether anything is still in flight — including a stop that is draining
+    /// the transcriber and committing its result.
+    ///
+    /// `isActive` deliberately excludes `stopping`, because a stop has nothing
+    /// left to act on. A *waiter* needs the wider question: a poll on
+    /// `isActive` returns while finalisation is still running.
+    public var isSettling: Bool { state != .idle }
+
+    /// The transcript `runID` committed, or `nil` when that capture has not
+    /// completed (or a different one did). An empty string is a real answer:
+    /// the capture finished and produced no text.
+    public func completedTranscript(forRun runID: UUID) -> String? {
+        guard let lastRunCompletion, lastRunCompletion.runID == runID else { return nil }
+        return lastRunCompletion.text
+    }
+
     /// Reverts everything a cancelled startup run had published: timing,
     /// shared App Group recording state and the Live Activity. The run calls
     /// this itself so ownership never crosses runs.
@@ -437,8 +482,19 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.clearRecordingState()
         activityManager.endActivity()
         currentRunParameters = .none
+        // A capture that never went live completes empty rather than leaving a
+        // waiter to fall back on an older run's transcript.
+        completeRun(with: "")
         lifecycle.finishStartUnwind()
         state = lifecycle.state
+    }
+
+    /// Publishes the result of the capture in flight, if there is one, and
+    /// retires its identity.
+    private func completeRun(with text: String) {
+        guard let currentRunID else { return }
+        lastRunCompletion = CaptureRunCompletion(runID: currentRunID, text: text)
+        self.currentRunID = nil
     }
 
     /// Stops recording, applies the requested result destination, and returns the result.
@@ -532,6 +588,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         // The overrides belong to the run that just ended; the next capture
         // starts from the global settings again unless it brings its own.
         currentRunParameters = .none
+        // Tagged with the run, so a waiter that started this capture gets this
+        // capture's text — including when that text is empty.
+        completeRun(with: text)
         partialText = text
         wordCount = text.split(whereSeparator: \.isWhitespace).count
 
@@ -619,6 +678,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         wordCount = 0
         sharedState.clearRecordingState()
         activityManager.endActivity()
+        // A cancelled capture completes empty for its own run, so a waiter
+        // returns nothing rather than an earlier capture's transcript.
+        completeRun(with: "")
         lifecycle.finishStopping()
         state = lifecycle.state
     }

@@ -15,7 +15,7 @@ final class InterruptionFinalisationTests: XCTestCase {
             harness.session.interrupt()
             harness.session.interrupt()
             harness.session.endInterruption()
-            await settle()
+            await settle(until: harness.service.state == .idle)
             XCTAssertEqual(harness.session.stops, 1)
             XCTAssertEqual(harness.service.state, .idle)
             XCTAssertFalse(harness.shared.isRecording)
@@ -34,7 +34,7 @@ final class InterruptionFinalisationTests: XCTestCase {
         try await harness.start(destination: .clipboardAndPostProcess)
         harness.session.emitPartial("Raw words")
         harness.session.interrupt()
-        await settle()
+        await settle(until: harness.service.state == .idle && !harness.service.isPostProcessing)
         XCTAssertEqual(harness.history.items.count, 1)
         XCTAssertEqual(harness.history.items.first?.transcription, "Raw words")
         XCTAssertEqual(harness.history.items.first?.postProcessedTranscription, "Polished Raw words")
@@ -53,7 +53,7 @@ final class InterruptionFinalisationTests: XCTestCase {
             try await harness.start(destination: .clipboard)
             harness.session.emitPartial(text)
             harness.session.interrupt()
-            await settle()
+            await settle(until: harness.service.state == .idle)
             XCTAssertEqual(harness.pasteboard.string, "Original")
             XCTAssertEqual(harness.pasteboard.writes, 0)
             XCTAssertTrue(harness.history.items.allSatisfy { $0.transcription.isEmpty })
@@ -74,7 +74,7 @@ final class InterruptionFinalisationTests: XCTestCase {
         )
         harness.session.emitPartial("Keyboard words")
         harness.session.interrupt()
-        await settle()
+        await settle(until: harness.service.state == .idle)
         XCTAssertEqual(results, ["Keyboard words"])
         XCTAssertTrue(harness.history.items.isEmpty)
         XCTAssertEqual(harness.pasteboard.writes, 0)
@@ -103,7 +103,9 @@ final class InterruptionFinalisationTests: XCTestCase {
         XCTAssertFalse(harness.shared.isRecording)
         XCTAssertEqual(harness.service.state, .stopping)
         finish?.resume(throwing: TestFailure.drain)
-        await settle()
+        // The bounded stop unwinds a deadline task group before the owner can
+        // publish, so wait for the run to settle rather than a fixed number of hops.
+        await settle(until: harness.service.state == .idle)
         XCTAssertEqual(harness.session.stops, 1)
         XCTAssertEqual(harness.history.items.count, 1)
         XCTAssertEqual(harness.history.items.first?.transcription, "Available partial")
@@ -210,6 +212,13 @@ final class InterruptionFinalisationTests: XCTestCase {
 
     private func settle() async {
         for _ in 0..<30 { await Task.yield() }
+    }
+
+    private func settle(until condition: @autoclosure @MainActor () -> Bool) async {
+        for _ in 0..<200 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        await settle()
     }
 }
 

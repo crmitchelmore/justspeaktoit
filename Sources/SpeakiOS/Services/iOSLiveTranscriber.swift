@@ -318,7 +318,6 @@ public final class iOSLiveTranscriber: ObservableObject {
     @available(iOS 26.0, *)
     // One do/catch owns the analyzer session, its tap and its teardown; the
     // engine-start boundary must be reported from inside it (issue #972).
-    // swiftlint:disable:next function_body_length
     private func startSpeechAnalyzer(
         engine: AppleSpeechAnalyzerEngine,
         preRollBuffers: [AVAudioPCMBuffer],

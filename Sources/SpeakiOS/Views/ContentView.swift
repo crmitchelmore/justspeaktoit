@@ -10,7 +10,6 @@ private let logger = SpeakLogger.logger(category: "ContentView")
 /// Foreground recording coordinator backed by the shared iOS transcription factory.
 /// Integrates with Live Activity for lock screen presence.
 @MainActor
-// swiftlint:disable:next type_body_length
 final class TranscriberCoordinator: ObservableObject {
     private enum LifecycleError: LocalizedError {
         case sessionFinalising
@@ -51,6 +50,11 @@ final class TranscriberCoordinator: ObservableObject {
 
     /// Whether active-capture presentation may be shown for the current run.
     var isPresentingCapture: Bool { presentation.isPresentingCapture }
+    /// Why the capture in flight is being finished by its owner: a controlled
+    /// audio interruption when one has been noticed, else the engine changed.
+    var captureDisruptionReason: iOSTranscriptionError {
+        captureStopNotice == nil ? .microphoneChanged : .interrupted
+    }
     var makeSession: (() throws -> any IOSRecordingSession)?
     @Published private(set) var captureStopNotice: String?
     private var startTime: Date?
@@ -645,9 +649,7 @@ public struct ContentView: View {
         }
         coordinator.onCaptureDisruption = { [weak coordinator, weak handsFree] in
             if handsFree?.isArmed == true {
-                await handsFree?.stopForCaptureDisruption(
-                    reason: coordinator?.captureStopNotice == nil ? .microphoneChanged : .interrupted
-                )
+                await handsFree?.stopForCaptureDisruption(reason: coordinator?.captureDisruptionReason ?? .interrupted)
             } else {
                 _ = await coordinator?.stop()
             }

@@ -50,6 +50,10 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
 
     private static let sessionKey = "keyboardInstantDictation.session.v1"
     private static let enabledKey = "keyboardInstantDictation.enabled.v1"
+    // Kept in its own key rather than inside the session record: the record is
+    // schema-versioned and rejected wholesale on a mismatch, and a reason for
+    // an ended session has to outlive the session it describes.
+    private static let endReasonKey = "keyboardInstantDictation.lastEndReason.v1"
 
     private let defaults: UserDefaults?
     private let lock = NSLock()
@@ -115,6 +119,9 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
                 }
                 return nil
             }
+            // A live session explains itself; a reason left over from the
+            // previous one would not.
+            defaults.removeObject(forKey: Self.endReasonKey)
             return session
         }
     }
@@ -158,6 +165,31 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
     public func end() {
         lock.withLock {
             clearUnlocked()
+        }
+    }
+
+    /// Why the most recent readiness session ended, or `nil` when the last one
+    /// was ended by the user. Readable from the keyboard process, which never
+    /// sees the containing app's in-memory error state (issue #995).
+    public var lastEndReason: InstantDictationReadinessEndReason? {
+        lock.withLock {
+            guard let raw = defaults?.string(forKey: Self.endReasonKey) else { return nil }
+            return InstantDictationReadinessEndReason(rawValue: raw)
+        }
+    }
+
+    /// Records why readiness ended. Passing `nil` clears it, which every
+    /// successful start does, so a stale reason can never explain a live
+    /// session.
+    public func recordEndReason(_ reason: InstantDictationReadinessEndReason?) {
+        guard let defaults else { return }
+        lock.withLock {
+            if let reason {
+                defaults.set(reason.rawValue, forKey: Self.endReasonKey)
+            } else {
+                defaults.removeObject(forKey: Self.endReasonKey)
+            }
+            defaults.synchronize()
         }
     }
 

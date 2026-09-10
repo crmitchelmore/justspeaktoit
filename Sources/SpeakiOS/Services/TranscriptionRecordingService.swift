@@ -26,7 +26,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     @Published public private(set) var wordCount = 0
     /// Error that ended the most recent session mid-recording. Published so the
     /// app can surface it on next foreground instead of silently losing audio.
-    @Published public private(set) var lastSessionError: Error?
+    @Published public internal(set) var lastSessionError: Error?
     /// Non-nil when the session silently fell back to on-device transcription
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
@@ -36,12 +36,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let sharedState: SharedTranscriptionState
     private let historyManager: iOSHistoryManager
 
-    private var transcriptionSession: IOSTranscriptionSession?
+    private(set) var transcriptionSession: IOSTranscriptionSession?
     private var stoppingSession: IOSTranscriptionSession?
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
-    private var automaticStopDestination: HardwareTriggerDestination = .clipboard
+    private(set) var automaticStopDestination: HardwareTriggerDestination = .clipboard
     private var onCaptureDisruption: (() async -> Void)?
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
@@ -54,6 +54,13 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Local run-scoped startup timing (issue #972). Measurement only: it adds
     /// no network call, no vendor reporting and no behaviour change.
     private var diagnostics = StartupDiagnostics()
+    /// The bounds this run is held to (issue #993). Every rule lives in
+    /// SpeakCore's `CaptureWatchdogMonitor`; see
+    /// `TranscriptionRecordingService+Watchdogs.swift` for the wiring.
+    var watchdog = CaptureWatchdogMonitor()
+    var watchdogTask: Task<Void, Never>?
+    var watchdogRunID: UUID?
+    var watchdogStartedAt: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -152,6 +159,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         guard let runID = lifecycle.beginStart() else { return }
         presentation.begin(run: runID)
         diagnostics.begin(run: runID, entry: entry, localOrigin: .service)
+        // Armed before the first suspension point, so the start deadline covers
+        // the credentials wait as well as the backend start. Every teardown
+        // path below disarms it (issue #993).
+        armWatchdogs(run: runID, entry: entry)
         state = lifecycle.state
         defer { state = lifecycle.state }
 
@@ -213,6 +224,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             // gate explicitly so the harness never sits in preparation.
             presentation.noteBackendStarted(run: runID)
             presentation.noteInputObserved(run: runID)
+            // The stub has no audio session, no engine and no tap, so there is
+            // no start to bound and no microphone that could go silent.
+            disarmWatchdogs()
             noteSimulatorStubStartup(runID: runID)
             handlePartialResult(text: transcript)
             _ = lifecycle.activate(runID)
@@ -310,6 +324,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// shared App Group recording state and the Live Activity. The run calls
     /// this itself so ownership never crosses runs.
     private func unwindCancelledStart(outcome: StartupOutcome, run: UUID) {
+        disarmWatchdogs()
         // A start that stopped short still reports what it did reach; the
         // stages it never crossed stay absent rather than becoming zeroes.
         diagnostics.finish(outcome, run: run)
@@ -377,6 +392,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         isRunning = false
         presentation.finish()
         diagnostics.retire()
+        disarmWatchdogs()
         let duration = elapsedSeconds
         let completionID = UUID()
         latestCompletionID = completionID
@@ -495,6 +511,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         isRunning = false
         presentation.finish()
         diagnostics.retire()
+        disarmWatchdogs()
         startTime = nil
         partialText = ""
         wordCount = 0
@@ -542,6 +559,12 @@ public final class TranscriptionRecordingService: ObservableObject {
     private func bindStartupDiagnostics(session: IOSTranscriptionSession, runID: UUID) {
         session.onStartupObservation = { [weak self] observation in
             self?.diagnostics.note(observation, run: runID)
+            // Same seam, not a second one: the watchdogs' start deadline and
+            // no-audio detector are driven by the boundaries issue #972
+            // already reports (issue #993).
+            if case .stage(let stage) = observation {
+                self?.noteWatchdogStage(stage, run: runID)
+            }
         }
         if let backend = session.resolution.resolvedStartupBackend {
             diagnostics.note(.backend(backend), run: runID)
@@ -573,6 +596,9 @@ public final class TranscriptionRecordingService: ObservableObject {
                   self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
             else { return }
             self.notePresentation(self.presentation.noteInputObserved(run: runID))
+            // The no-audio detector consumes issue #983's first-input signal
+            // rather than installing a tap of its own (issue #993).
+            self.noteWatchdogInputObserved(run: runID)
         }
     }
 
@@ -616,7 +642,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     /// Finishes through the originating owner, which may own a keyboard nonce
     /// rather than a clipboard destination. Stop's lifecycle guard claims once.
-    func finishCaptureAfterDisruption() async {
+    func finishCaptureAfterDisruption(stoppedMessage: String = "Recording stopped") async {
         guard lifecycle.state == .recording else { return }
         if let finishOwnedCapture = onCaptureDisruption {
             await finishOwnedCapture()
@@ -624,7 +650,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
         await stopRecording(
             destination: automaticStopDestination,
-            primedActivityMessage: lastSessionError?.localizedDescription ?? "Recording stopped"
+            primedActivityMessage: lastSessionError?.localizedDescription ?? stoppedMessage
         )
     }
 
@@ -709,7 +735,10 @@ private extension TranscriptionRecordingService {
             stoppingSession = session
             defer { stoppingSession = nil }
             do {
-                return try await session.stop()
+                guard let result = try await boundedStop(of: session) else {
+                    return timedOutFinalisationResult(for: session, duration: duration)
+                }
+                return result
             } catch {
                 handleError(error, session: session)
                 return TranscriptionResult(

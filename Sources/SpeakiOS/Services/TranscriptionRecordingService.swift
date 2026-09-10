@@ -52,7 +52,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let hasPolishingKey: @MainActor () -> Bool
     private let polish: @MainActor (String, String, String) async throws -> String
     private var latestCompletionID: UUID?
-    typealias ActivityCompletion = @MainActor (Int, Int, String, TranscriptionCompletionOutcome) -> Void
+    typealias ActivityCompletion =
+        @MainActor (Int, Int, String, TranscriptionCompletionOutcome, String) -> Void
     private let completeActivity: ActivityCompletion
 
     private convenience init() {
@@ -74,13 +75,14 @@ public final class TranscriptionRecordingService: ObservableObject {
         polishClipboard: PolishClipboard,
         hasPolishingKey: @escaping @MainActor () -> Bool,
         polish: @escaping @MainActor (String, String, String) async throws -> String,
-        completeActivity: @escaping ActivityCompletion = { wordCount, duration, primedMessage, outcome in
+        completeActivity: @escaping ActivityCompletion = { wordCount, duration, primedMessage, outcome, preview in
             TranscriptionActivityManager.shared.completeActivity(
                 finalWordCount: wordCount,
                 duration: duration,
                 keepPrimed: true,
                 primedMessage: primedMessage,
-                completionOutcome: outcome
+                completionOutcome: outcome,
+                resultPreview: preview
             )
         }
     ) {
@@ -367,6 +369,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
+        // Read before the side effects reset the flag: only a shared completion
+        // leaves a transcript the result row's actions can retrieve.
+        let publishesCompletedTranscript = sharesLiveTranscript
         applyDestinationSideEffects(text: text, destination: resolvedDestination)
 
         // Update shared state. Live writes are throttled, so commit the
@@ -383,7 +388,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         completeRecordingActivity(
             duration: duration,
             primedMessage: primedActivityMessage,
-            outcome: .unconfirmed(transcript: text)
+            outcome: .unconfirmed(transcript: text),
+            // Keyboard handoffs publish nothing retrievable, so they carry no
+            // preview and the result row offers no actions it cannot honour.
+            resultPreview: publishesCompletedTranscript ? TranscriptionResultRow.preview(for: text) : ""
         )
 
         // Kick off background post-processing if the chosen destination + user
@@ -417,9 +425,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     private func completeRecordingActivity(
         duration: Int,
         primedMessage: String,
-        outcome: TranscriptionCompletionOutcome
+        outcome: TranscriptionCompletionOutcome,
+        resultPreview: String
     ) {
-        completeActivity(wordCount, duration, primedMessage, outcome)
+        completeActivity(wordCount, duration, primedMessage, outcome, resultPreview)
     }
 
     /// Cancels recording without saving. During startup this retires the

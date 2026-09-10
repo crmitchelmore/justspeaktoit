@@ -52,6 +52,7 @@ final class TranscriptionCompletionTests: XCTestCase {
         )
         let pasteboard = CompletionTestPasteboard(acceptsWrites: acceptsClipboardWrite)
         var outcomes: [TranscriptionCompletionOutcome] = []
+        var previews: [String] = []
         var textAtCompletion: String?
         let service = TranscriptionRecordingService(
             sharedState: sharedState,
@@ -59,10 +60,11 @@ final class TranscriptionCompletionTests: XCTestCase {
             polishClipboard: PolishClipboard(pasteboard: pasteboard),
             hasPolishingKey: { hasPolisher },
             polish: { _, _, _ in "Polished transcript" },
-            completeActivity: { count, _, _, outcome in
+            completeActivity: { count, _, _, outcome, preview in
                 XCTAssertEqual(count, 2)
                 textAtCompletion = pasteboard.string
                 outcomes.append(outcome)
+                previews.append(preview)
             }
         )
         defaults.set("Raw transcript", forKey: "simulatorValidationTranscript")
@@ -77,6 +79,11 @@ final class TranscriptionCompletionTests: XCTestCase {
         XCTAssertEqual(outcomes, [.ready], "Polish must not schedule another completion UI update")
         XCTAssertEqual(pasteboard.writes, destination == .historyOnly ? [] : ["Raw transcript"])
         XCTAssertEqual(pasteboard.string, expectedClipboard, "Polish must never rewrite the clipboard")
+        XCTAssertEqual(
+            previews,
+            [saveToHistory ? "Raw transcript" : ""],
+            "Only a published transcript may carry a preview, which is what enables the result row's actions"
+        )
         service.cancelRecording()
     }
 }

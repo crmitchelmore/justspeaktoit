@@ -231,7 +231,8 @@ final class TranscriberCoordinator: ObservableObject {
                     keepPrimed: rearmHandsFree,
                     primedMessage: "Hands-free armed",
                     primedStatus: rearmHandsFree ? .armed : .idle,
-                    completionOutcome: .unconfirmed(transcript: result.text)
+                    completionOutcome: .unconfirmed(transcript: result.text),
+                    resultPreview: TranscriptionResultRow.preview(for: result.text)
                 )
             }
             return finishStop(with: result)

@@ -28,6 +28,7 @@ public final class KeyboardDeliveryStore: @unchecked Sendable {
     private static let preferencesKey = "keyboardDelivery.preferences.v1"
 
     private let defaults: UserDefaults?
+    private let announceStatusChange: @Sendable () -> Void
     private let lock = NSLock()
 
     public convenience init() {
@@ -36,8 +37,12 @@ public final class KeyboardDeliveryStore: @unchecked Sendable {
 
     /// Injectable for deterministic tests. Passing `nil` models a missing or
     /// inaccessible App Group, which is what "no Full Access" looks like.
-    public init(defaults: UserDefaults?) {
+    public init(
+        defaults: UserDefaults?,
+        announceStatusChange: @escaping @Sendable () -> Void = KeyboardHandoffSignal.postStatusChanged
+    ) {
         self.defaults = defaults
+        self.announceStatusChange = announceStatusChange
     }
 
     public var isAvailable: Bool { defaults != nil }
@@ -113,11 +118,15 @@ public final class KeyboardDeliveryStore: @unchecked Sendable {
     /// extension owns `claim.v1`, and neither touches the other's key.
     @discardableResult
     public func publishOffer(_ offer: KeyboardPickupOffer) -> KeyboardPickupOffer? {
-        lock.withLock {
+        let published: KeyboardPickupOffer? = lock.withLock {
             guard let defaults else { return nil }
             writeUnlocked(offer, key: Self.offerKey, to: defaults)
             return offer
         }
+        // The offer key is app-owned, so wake the keyboard rather than making
+        // a targeted insert wait for its next poll tick (issue #990).
+        if published != nil { announceStatusChange() }
+        return published
     }
 
     /// Removes the offer entirely. Used when the app decides the transcript is

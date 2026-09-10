@@ -133,29 +133,7 @@ public struct KeyboardSetupView: View {
                 }
             }
 
-            Section("After Inserting") {
-                Toggle("Hand the keyboard back", isOn: handsBackAfterInsert)
-                    .accessibilityIdentifier("keyboardHandBackToggle")
-                Toggle("Insert a waiting transcript automatically", isOn: autoInsertsMatchingPickup)
-                    .accessibilityIdentifier("keyboardAutoInsertToggle")
-                if let coaching = KeyboardHandBackPolicy.coaching(
-                    preferences: deliveryPreferences,
-                    activeInputModeCount: activeInputModeCount
-                ) {
-                    Text(coaching)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text(
-                    "A transcript from any source waits in the keyboard as a one-tap chip for "
-                        + "\(Int(KeyboardPickupOffer.latePickupLifetime / 60)) minutes. "
-                        + "Automatic insertion only ever fires in the very same text field the "
-                        + "capture started in — never into whatever happens to be focused. "
-                        + "Everything else stays one deliberate tap."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
+            afterInsertingSection
 
             Section("Why Full Access?") {
                 Label(
@@ -270,27 +248,78 @@ public struct KeyboardSetupView: View {
 }
 
 private extension KeyboardSetupView {
+    /// Lives in an extension so the view body stays inside the type-length
+    /// budget; it is one section of the same form.
+    @ViewBuilder
+    var afterInsertingSection: some View {
+        Section("After Inserting") {
+            Toggle("Hand the keyboard back", isOn: handsBackAfterInsert)
+                .accessibilityIdentifier("keyboardHandBackToggle")
+            Toggle("Insert a waiting transcript automatically", isOn: autoInsertsMatchingPickup)
+                .accessibilityIdentifier("keyboardAutoInsertToggle")
+            Toggle("Show words while you speak", isOn: streamsMarkedText)
+                .accessibilityIdentifier("keyboardMarkedTextToggle")
+            if let coaching = KeyboardHandBackPolicy.coaching(
+                preferences: deliveryPreferences,
+                activeInputModeCount: activeInputModeCount
+            ) {
+                Text(coaching)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(
+                "A transcript from any source waits in the keyboard as a one-tap chip for "
+                    + "\(Int(KeyboardPickupOffer.latePickupLifetime / 60)) minutes. "
+                    + "Automatic insertion only ever fires in the very same text field the "
+                    + "capture started in \u{2014} never into whatever happens to be focused. "
+                    + "Everything else stays one deliberate tap."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text(
+                "While you speak, words appear in the field underlined, the way the system "
+                    + "keyboard shows dictation, and are confirmed when you stop. They are never "
+                    + "shown in a password field. If an app handles underlined text badly, turn "
+                    + "this off \u{2014} the transcript still arrives, all at once at the end."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
     /// Both delivery preferences live in the App Group so the extension can
     /// read them; the toggles write straight through.
     var handsBackAfterInsert: Binding<Bool> {
         Binding(
             get: { deliveryPreferences.handsBackAfterInsert },
-            set: { updatePreferences(handsBack: $0, autoInsert: deliveryPreferences.autoInsertsMatchingPickup) }
+            set: { updatePreferences(handsBack: $0) }
         )
     }
 
     var autoInsertsMatchingPickup: Binding<Bool> {
         Binding(
             get: { deliveryPreferences.autoInsertsMatchingPickup },
-            set: { updatePreferences(handsBack: deliveryPreferences.handsBackAfterInsert, autoInsert: $0) }
+            set: { updatePreferences(autoInsert: $0) }
         )
     }
 
-    func updatePreferences(handsBack: Bool, autoInsert: Bool) {
+    var streamsMarkedText: Binding<Bool> {
+        Binding(
+            get: { deliveryPreferences.streamsMarkedText },
+            set: { updatePreferences(streamsMarkedText: $0) }
+        )
+    }
+
+    func updatePreferences(
+        handsBack: Bool? = nil,
+        autoInsert: Bool? = nil,
+        streamsMarkedText: Bool? = nil
+    ) {
         deliveryPreferences = KeyboardDeliveryStore.shared.publishPreferences(
             KeyboardDeliveryPreferences(
-                handsBackAfterInsert: handsBack,
-                autoInsertsMatchingPickup: autoInsert
+                handsBackAfterInsert: handsBack ?? deliveryPreferences.handsBackAfterInsert,
+                autoInsertsMatchingPickup: autoInsert ?? deliveryPreferences.autoInsertsMatchingPickup,
+                streamsMarkedText: streamsMarkedText ?? deliveryPreferences.streamsMarkedText
             )
         )
     }

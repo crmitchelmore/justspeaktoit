@@ -158,15 +158,34 @@ public struct KeyboardDeliveryPreferences: Codable, Equatable, Sendable {
     /// did not just ask for is a data-corruption risk, so the chip is opt-out
     /// only by explicit choice.
     public let autoInsertsMatchingPickup: Bool
+    /// Show words in the field as they are spoken, as provisional marked text,
+    /// instead of only in the keyboard strip (issue #1004). On by default: it
+    /// is what the system keyboard does. A host app that handles marked text
+    /// badly is the reason it can be turned off — with it off, the transcript
+    /// still arrives, in one insertion at the end.
+    public let streamsMarkedText: Bool
 
     public init(
         schemaVersion: Int = Self.schemaVersion,
         handsBackAfterInsert: Bool = true,
-        autoInsertsMatchingPickup: Bool = false
+        autoInsertsMatchingPickup: Bool = false,
+        streamsMarkedText: Bool = true
     ) {
         self.schemaVersion = schemaVersion
         self.handsBackAfterInsert = handsBackAfterInsert
         self.autoInsertsMatchingPickup = autoInsertsMatchingPickup
+        self.streamsMarkedText = streamsMarkedText
+    }
+
+    /// A record written before `streamsMarkedText` existed keeps its other two
+    /// choices and takes the default for the new one, rather than being
+    /// discarded as undecodable and silently resetting the user's toggles.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        handsBackAfterInsert = try container.decode(Bool.self, forKey: .handsBackAfterInsert)
+        autoInsertsMatchingPickup = try container.decode(Bool.self, forKey: .autoInsertsMatchingPickup)
+        streamsMarkedText = try container.decodeIfPresent(Bool.self, forKey: .streamsMarkedText) ?? true
     }
 
     public static let `default` = KeyboardDeliveryPreferences()

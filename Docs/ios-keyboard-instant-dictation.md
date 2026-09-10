@@ -125,6 +125,77 @@ offer costs the user nothing they had before. Everything here lives behind Full
 Access — without it the App Group is unavailable, no target is advertised, no
 offer is readable, and hardware triggers behave exactly as they do today.
 
+## Both directions are pushed, not polled (issue #990)
+
+There are two payload-free Darwin notifications, one per direction. Neither
+carries data — Darwin notifications cannot — so both are only "look again,
+now"; the command, the nonce, the phase and the text still cross in the App
+Group and are still validated there.
+
+| Notification | Posted by | On | Read by |
+|---|---|---|---|
+| `…keyboardHandoff.requestChanged` | keyboard extension | create, finish, cancel | the app's `KeyboardInstantDictationCoordinator` |
+| `…keyboardHandoff.statusChanged` | containing app | every app-owned write: phase transition, interim update, new pickup offer | the keyboard's hand-off controller and delivery loop |
+
+The keyboard used to learn about a phase change or a new interim only on its
+next poll tick: 120 ms while a request was in flight, 500 ms otherwise. It now
+reads the record the moment the app says it changed, and **polling stays purely
+as a safety net at 500 ms** — one cadence, no in-flight tier. The tighter tier
+existed only to shorten that wait, and cost the extension a wake-up eight times
+a second inside a hard memory and CPU budget; a dropped notification now costs
+at most one 500 ms tick instead of losing the update.
+
+The app-side interim throttle is deliberately **unchanged at 120 ms**. It is
+already faster than transcription providers emit partials, so tightening it
+would double the extension wake-ups and the host-app text mutations without
+producing an update there was anything new to show. Separately, an interim no
+longer rewrites the status expiry on every tick: the rewrite is skipped while
+more than two minutes of the three-minute lifetime remain, so a long dictation
+still cannot time out mid-sentence but a burst of partials writes one key
+instead of two.
+
+## Words in the field while you speak (issue #1004)
+
+With **Show words while you speak** on (the default), the keyboard streams each
+interim into the host field as *marked* text — the provisional, underlined text
+Apple dictation and CJK input methods use — via
+`UITextDocumentProxy.setMarkedText(_:selectedRange:)`, and commits it with
+`unmarkText()` when the transcript is final. The user sees words from the first
+partial instead of a strip that fills while the field stays empty.
+
+Marked text sits in the user's document, so the governing rule is that it is
+never left behind. Every decision lives in `KeyboardMarkedTextSession`, a pure
+value type in SpeakCore, and the extension is a thin `switch` over the actions
+it returns — which is why the abandonment paths are proved by `swift test`
+rather than argued about:
+
+| Ending | Action |
+|---|---|
+| transcript is ready | `setMarkedText(final)` + `unmarkText()` — committed in place |
+| cancelled, failed, timed out | `setMarkedText("")` + `unmarkText()` — removed |
+| keyboard dismissed | same, on `deactivate()`, before the proxy callbacks are released |
+| document changed | same, and streaming stops for the rest of the run |
+| caret moved by the user | same, and streaming stops for the rest of the run |
+
+Every one of those is idempotent, so a double dismissal, or a completed record
+read again on the next tick, does nothing the second time. Once a session has
+abandoned streaming it never resumes it: the run finishes with the ordinary
+single insertion, which is exactly what #1030 guarantees still arrives after a
+dismissal or a caret move. Exactly one of "finalise" and "plain insert" ever
+happens for a given transcript, so the words can be neither doubled nor lost.
+
+A **secure field is never marked into**, whatever the preference says — the
+session is created disabled — matching the rule that a secure field is never a
+delivery target either. A `setMarkedText` of the keyboard's own makes the host
+report a selection change; at most one such echo is swallowed per write, so a
+genuine caret move still abandons the stream, and a host that reports more than
+one only makes the keyboard fall back to plain insertion. It cannot make it
+insert in the wrong place.
+
+What no host test can settle is how individual apps treat marked text. The
+preference exists for that: with it off, behaviour is exactly what it was
+before the feature — one insertion at the end.
+
 ## Why App Intents are not the primary cold-start route
 
 `LiveActivityIntent` can force an interactive intent to execute in the app

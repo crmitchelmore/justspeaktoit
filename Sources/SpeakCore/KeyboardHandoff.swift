@@ -28,6 +28,13 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     public static let transcriptionLifetime: TimeInterval = 90
     public static let resultLifetime: TimeInterval = 60
 
+    /// An interim update refreshes the app-owned status expiry so a long
+    /// dictation cannot time out mid-sentence. Rewriting it on *every* interim
+    /// costs an encode plus an App Group write several times a second for no
+    /// benefit, so it is skipped while this much of the lifetime still remains
+    /// (issue #990).
+    public static let statusExpiryRefreshThreshold: TimeInterval = 2 * 60
+
     /// Which process this store instance is running in. Writes are routed to
     /// the process's own key so cross-process ownership is structural.
     public enum Role: Sendable {
@@ -46,10 +53,13 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     static let observationKey = "keyboardHandoff.extensionObservation.v3"
 
     let defaults: UserDefaults?
-    private let role: Role
+    let role: Role
+    /// Wakes the keyboard extension after an app-side write (issue #990).
+    /// Injectable so host tests can count the wakes without a Darwin centre.
+    let announceStatusChange: @Sendable () -> Void
     /// Serialises this process's own writes; cross-process safety comes from
     /// per-key ownership, not from this lock.
-    private let lock = NSLock()
+    let lock = NSLock()
 
     public convenience init() {
         self.init(defaults: AppGroupAvailability.verifiedDefaults())
@@ -58,9 +68,21 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     /// Injectable for deterministic tests. Passing `nil` models a missing or
     /// inaccessible App Group. Tests pass explicit roles to model the two
     /// processes as two independent store instances.
-    public init(defaults: UserDefaults?, role: Role = .detected) {
+    public init(
+        defaults: UserDefaults?,
+        role: Role = .detected,
+        announceStatusChange: @escaping @Sendable () -> Void = KeyboardHandoffSignal.postStatusChanged
+    ) {
         self.defaults = defaults
         self.role = role
+        self.announceStatusChange = announceStatusChange
+    }
+
+    /// Only the containing app owns `status` and `interim`, so only the app
+    /// ever has something for the extension to wake up and read.
+    func announceIfContainingApp() {
+        guard case .containingApp = role else { return }
+        announceStatusChange()
     }
 
     /// The pre-v4 initializer, kept for source and API compatibility (#790):
@@ -166,7 +188,7 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
         transcript: String,
         now: Date = Date()
     ) throws -> KeyboardHandoffRecord {
-        try lock.withLock {
+        let updated = try lock.withLock {
             guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
             guard let current = mergedRecordUnlocked(now: now) else {
                 throw KeyboardHandoffStoreError.noActiveRequest
@@ -184,7 +206,9 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
                 updatedAt: now
             )
             defaults.set(try JSONEncoder().encode(interim), forKey: Self.interimKey)
-            if var status = readStatusUnlocked(), status.requestID == requestID {
+            if var status = readStatusUnlocked(),
+               status.requestID == requestID,
+               Self.statusExpiryNeedsRefresh(expiresAt: status.expiresAt, now: now) {
                 status.expiresAt = now.addingTimeInterval(Self.requestLifetime)
                 status.updatedAt = now
                 writeStatusRecordUnlocked(status)
@@ -195,6 +219,15 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
             }
             return updated
         }
+        announceIfContainingApp()
+        return updated
+    }
+
+    /// Pure: whether an interim update should also push the status expiry out.
+    /// Skipped while more than `statusExpiryRefreshThreshold` remains, so a
+    /// burst of interims writes one key instead of two (issue #990).
+    public static func statusExpiryNeedsRefresh(expiresAt: Date, now: Date) -> Bool {
+        expiresAt.timeIntervalSince(now) <= statusExpiryRefreshThreshold
     }
 
     // MARK: - Reading
@@ -277,118 +310,5 @@ public final class KeyboardHandoffStore: @unchecked Sendable {
     public func extensionObservation() -> KeyboardExtensionObservation? {
         guard let data = defaults?.data(forKey: Self.observationKey) else { return nil }
         return try? JSONDecoder().decode(KeyboardExtensionObservation.self, from: data)
-    }
-}
-
-// MARK: - Writes
-
-extension KeyboardHandoffStore {
-    /// Records an extension intent in the extension-owned command channel.
-    /// Commands only escalate (`finish` → `cancel`); a stale lower command can
-    /// never replace a newer one, and terminal app phases refuse commands.
-    func issueCommand(
-        _ command: Command,
-        requestID: UUID,
-        allowedFrom: Set<KeyboardHandoffRecord.Phase>,
-        now: Date
-    ) throws -> KeyboardHandoffRecord {
-        try lock.withLock {
-            guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
-            guard var intent = readIntentUnlocked() else {
-                throw KeyboardHandoffStoreError.noActiveRequest
-            }
-            guard intent.requestID == requestID else {
-                throw KeyboardHandoffStoreError.mismatchedRequest
-            }
-            guard let current = mergedRecordUnlocked(now: now),
-                  allowedFrom.contains(current.phase) else {
-                throw KeyboardHandoffStoreError.invalidTransition
-            }
-            // Monotonic command channel: cancel outranks finish outranks none.
-            guard commandRank(command) > commandRank(intent.command) else {
-                guard let record = mergedRecordUnlocked(now: now) else {
-                    throw KeyboardHandoffStoreError.noActiveRequest
-                }
-                return record
-            }
-            intent.command = command
-            intent.commandSequence += 1
-            intent.commandIssuedAt = now
-            intent.expiresAt = now.addingTimeInterval(Self.transcriptionLifetime)
-            defaults.set(try JSONEncoder().encode(intent), forKey: Self.intentKey)
-            defaults.synchronize()
-            guard let record = mergedRecordUnlocked(now: now) else {
-                throw KeyboardHandoffStoreError.noActiveRequest
-            }
-            return record
-        }
-    }
-
-    func commandRank(_ command: Command) -> Int {
-        switch command {
-        case .none: return 0
-        case .finish: return 1
-        case .cancel: return 2
-        }
-    }
-
-    /// App-owned status write. Transitions validate against the merged view
-    /// (so a pending extension cancel blocks app transitions) and are
-    /// monotonic: a terminal phase is absorbing.
-    func writeStatus(
-        requestID: UUID,
-        allowedFrom: Set<KeyboardHandoffRecord.Phase>,
-        phase: KeyboardHandoffRecord.Phase,
-        transcript: String? = nil,
-        failureCode: KeyboardHandoffRecord.FailureCode? = nil,
-        now: Date,
-        lifetime: TimeInterval
-    ) throws -> KeyboardHandoffRecord {
-        try lock.withLock {
-            guard let defaults else { throw KeyboardHandoffStoreError.unavailable }
-            guard let current = mergedRecordUnlocked(now: now) else {
-                throw KeyboardHandoffStoreError.noActiveRequest
-            }
-            guard current.requestID == requestID else {
-                throw KeyboardHandoffStoreError.mismatchedRequest
-            }
-            guard allowedFrom.contains(current.phase) else {
-                throw KeyboardHandoffStoreError.invalidTransition
-            }
-            let status = StatusRecord(
-                requestID: requestID,
-                phase: phase,
-                updatedAt: now,
-                expiresAt: now.addingTimeInterval(lifetime),
-                transcript: transcript,
-                failureCode: failureCode
-            )
-            writeStatusRecordUnlocked(status)
-            if !phaseKeepsInterim(phase) {
-                defaults.removeObject(forKey: Self.interimKey)
-            }
-            defaults.synchronize()
-            guard let record = mergedRecordUnlocked(now: now) else {
-                throw KeyboardHandoffStoreError.noActiveRequest
-            }
-            return record
-        }
-    }
-
-    func phaseKeepsInterim(_ phase: KeyboardHandoffRecord.Phase) -> Bool {
-        phase == .recording || phase == .finishRequested || phase == .transcribing
-    }
-
-    func writeStatusRecordUnlocked(_ status: StatusRecord) {
-        guard let data = try? JSONEncoder().encode(status) else { return }
-        defaults?.set(data, forKey: Self.statusKey)
-    }
-
-    func removeAllUnlocked() {
-        defaults?.removeObject(forKey: Self.intentKey)
-        defaults?.removeObject(forKey: Self.statusKey)
-        defaults?.removeObject(forKey: Self.interimKey)
-        defaults?.removeObject(forKey: Self.legacyRecordKey)
-        defaults?.synchronize()
     }
 }

@@ -25,10 +25,26 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let resultTask: Task<TranscriptionResult, Error>
 
+    /// The original install-capable entry point, kept so package consumers
+    /// built against it keep compiling; it forwards to the policy-aware
+    /// initialiser with the behaviour they always had.
+    public convenience init(
+        localeIdentifier: String?,
+        engine: AppleSpeechAnalyzerEngine = .speechTranscriber,
+        onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
+    ) async throws {
+        try await self.init(
+            localeIdentifier: localeIdentifier,
+            engine: engine,
+            assetPolicy: .installIfNeeded,
+            onUpdate: onUpdate
+        )
+    }
+
     public init(
         localeIdentifier: String?,
         engine: AppleSpeechAnalyzerEngine = .speechTranscriber,
-        assetPolicy: AppleSpeechAssetPolicy = .installIfNeeded,
+        assetPolicy: AppleSpeechAssetPolicy,
         onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
     ) async throws {
         try Task.checkCancellation()

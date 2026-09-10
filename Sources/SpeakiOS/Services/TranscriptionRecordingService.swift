@@ -133,6 +133,17 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
 
+        // Before the microphone opens: a named model this device cannot run —
+        // no iOS route for the mode this run will use, or no credential for it
+        // — refuses the whole capture rather than recording and failing later.
+        // Batch and live are both covered here; the live path additionally has
+        // its own on-device-fallback check below.
+        try refuseUnusableRequestedModel(
+            runParameters.modelID,
+            usesBatch: usesBatchTranscription,
+            settings: settings
+        )
+
         if !usesBatchTranscription && keyboardProfile == nil {
             try resolveLiveModelHonouringRequest(
                 settings: settings,
@@ -233,8 +244,15 @@ public final class TranscriptionRecordingService: ObservableObject {
         let adopted = keyboardProfile == nil ? parameters : .none
         currentRunParameters = adopted
         if !adopted.isEmpty {
+            // Destination, language and model come from closed vocabularies
+            // and are safe as public diagnostics. The source tag is free text
+            // a Shortcut variable can fill with anything, so it is logged
+            // privately: a caller's label must not become collectable log data.
             SpeakLogger.transcription.info(
-                "Capture parameters: \(adopted.logDescription, privacy: .public)"
+                """
+                Capture parameters: \(adopted.redactedLogDescription, privacy: .public) \
+                source=\(adopted.sourceTag ?? "none", privacy: .private)
+                """
             )
         }
         return adopted
@@ -243,20 +261,79 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Which model this run uses and whether it has to run in batch mode.
     ///
     /// Precedence: the keyboard's own profile, then the caller's per-run
-    /// parameters, then the configured settings. A batch-only model forces
-    /// batch mode; a live-capable one leaves the configured mode alone.
-    private static func modelSelection(
+    /// parameters, then the configured settings.
+    ///
+    /// When the caller *named* a model, the mode follows the model rather than
+    /// the Settings toggle. Letting `transcriptionMode == .batch` stand for a
+    /// live-only identifier is how a named model reaches the batch uploader,
+    /// whose router falls through to OpenRouter for anything it does not
+    /// recognise — the recording would then be sent to a provider and in a
+    /// mode the caller never asked for. With no model parameter, the
+    /// configured mode is used exactly as before.
+    static func modelSelection(
         keyboardProfile: KeyboardDictationProfileOption?,
         parameters: CaptureRunParameters,
         settings: AppSettings
     ) -> (modelID: String, usesBatch: Bool) {
-        let usesBatch = keyboardProfile?.transcriptionMode == .batch
-            || (keyboardProfile == nil
-                && (parameters.requiresBatchMode || settings.transcriptionMode == .batch))
+        let usesBatch: Bool
+        if let keyboardProfile {
+            usesBatch = keyboardProfile.transcriptionMode == .batch
+        } else if parameters.modelID != nil {
+            usesBatch = parameters.requiresBatchMode
+        } else {
+            usesBatch = settings.transcriptionMode == .batch
+        }
         let modelID = keyboardProfile?.transcriptionModelIdentifier
             ?? parameters.modelID
             ?? (usesBatch ? settings.batchTranscriptionModel : settings.selectedModel)
         return (modelID, usesBatch)
+    }
+
+    /// Refuses a named model this device cannot honour, before any microphone
+    /// is opened.
+    ///
+    /// Two ways a request can be unhonourable: the model has no execution path
+    /// on iOS for the mode this run will use, or it has one but the credential
+    /// it needs is not on the device. Both used to be discovered late — the
+    /// first by falling through to a different route, the second by throwing
+    /// at stop, after the audio had been captured and with a history entry
+    /// already written. The parameter contract is that an unusable named value
+    /// fails visibly instead, so both are checked here.
+    ///
+    /// Only applies when a model was actually named: a run with no model
+    /// parameter keeps the configured behaviour, including the deliberate
+    /// on-device fallback the app makes for its own setting.
+    private func refuseUnusableRequestedModel(
+        _ requestedModelID: String?,
+        usesBatch: Bool,
+        settings: AppSettings
+    ) throws {
+        guard let requestedModelID else { return }
+        guard CaptureModelSupport.canRun(requestedModelID, usesBatch: usesBatch) else {
+            unwindCancelledStart()
+            SpeakLogger.transcription.error(
+                """
+                Refusing capture: \(requestedModelID, privacy: .public) has no iOS \
+                \(usesBatch ? "batch" : "live", privacy: .public) route
+                """
+            )
+            throw CaptureParameterFailure.modelUnsupported
+        }
+        guard usesBatch else { return }
+        // Mirrors the check `IOSBatchTranscriptionClient.requireAPIKey` makes
+        // at stop. Apple's on-device analyzer needs no key and returns "".
+        let requirement = ModelCredentialResolver.requirement(
+            for: requestedModelID,
+            purpose: .batchTranscription
+        )
+        guard case .apiKey = requirement else { return }
+        let key = settings.batchAPIKey(for: requestedModelID)
+        guard key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        unwindCancelledStart()
+        SpeakLogger.transcription.error(
+            "Refusing capture: no API key for \(requestedModelID, privacy: .public)"
+        )
+        throw CaptureParameterFailure.modelUnavailable
     }
 
     /// Resolves the live model, refusing a silent substitution when the caller
@@ -556,9 +633,13 @@ public final class TranscriptionRecordingService: ObservableObject {
         Task { [weak self] in
             guard let self, self.isRunning else { return }
             await self.stopRecording(
-                // Nil when the run carried no override, which keeps the
-                // pre-existing default for an unparameterised session.
-                destination: self.runDestinationOverride,
+                // The same precedence every other stop path uses: the run's
+                // override, then the global setting. Passing the override
+                // alone left an unparameterised run on `stopRecording`'s
+                // legacy clipboard default, so a capture configured as
+                // history-only could still copy its partial transcript to the
+                // clipboard after a provider failure.
+                destination: self.resolvedStopDestination(),
                 primedActivityMessage: "Stopped: \(error.localizedDescription)"
             )
         }

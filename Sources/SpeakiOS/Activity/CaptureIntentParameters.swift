@@ -70,11 +70,63 @@ public struct CaptureModelOptionsProvider: DynamicOptionsProvider {
     public init() {}
 
     public func results() async throws -> [String] {
-        let options = ModelCatalog.liveTranscription
-            + ModelCatalog.batchTranscription
+        CaptureModelSupport.executableModelIDs
+    }
+}
+
+// MARK: - What iOS can actually execute
+
+/// The models with a real iOS execution path, and the mode each one runs in.
+///
+/// The shared `ModelCatalog` is cross-platform: it lists streaming providers
+/// whose clients only exist in the Mac app and batch entries whose upload
+/// route is not implemented here. Settings has always narrowed it with
+/// `AppSettings.supportedLiveModels` / `supportedBatchModels`; the intent
+/// surface now uses exactly the same two lists rather than a third, wider
+/// idea of what is runnable. Anything not in here is refused before the
+/// microphone opens instead of failing after the recording, or falling
+/// through to the OpenRouter route under a name the caller did not choose.
+public enum CaptureModelSupport {
+    /// Models this app can stream: on-device transcription plus the remote
+    /// live models whose route reports iOS support.
+    public static var liveModelIDs: Set<String> {
+        Set((ModelCatalog.onDeviceLiveTranscription + AppSettings.supportedLiveModels).map(\.id))
+    }
+
+    /// Models this app can upload for batch transcription.
+    public static var batchModelIDs: Set<String> {
+        Set(AppSettings.supportedBatchModels.map(\.id))
+    }
+
+    /// Every executable identifier, catalogue order, deduplicated — the model
+    /// picker Shortcuts renders.
+    public static var executableModelIDs: [String] {
+        let live = liveModelIDs
+        let batch = batchModelIDs
+        let ordered = ModelCatalog.liveTranscription
             + ModelCatalog.localTranscriptionOptions
+            + ModelCatalog.batchTranscription
         var seen = Set<String>()
-        return options.map(\.id).filter { seen.insert($0).inserted }
+        return ordered
+            .map(\.id)
+            .filter { live.contains($0) || batch.contains($0) }
+            .filter { seen.insert($0).inserted }
+    }
+
+    /// Whether the identifier can run in the mode the session will use. A
+    /// model that is only live cannot be uploaded as a batch job, and a
+    /// batch-only model cannot be streamed.
+    public static func canRun(_ modelID: String, usesBatch: Bool) -> Bool {
+        usesBatch ? batchModelIDs.contains(modelID) : liveModelIDs.contains(modelID)
+    }
+
+    /// The vocabulary the intent surface validates against, so a value the
+    /// picker offers and a value the resolver accepts are the same set.
+    public static var vocabulary: CaptureParameterVocabulary {
+        CaptureParameterVocabulary(
+            destinationIDs: Set(HardwareTriggerDestination.allCases.map(\.rawValue)),
+            executableModelIDs: Set(executableModelIDs)
+        )
     }
 }
 

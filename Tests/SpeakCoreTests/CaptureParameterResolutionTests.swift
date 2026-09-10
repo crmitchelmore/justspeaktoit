@@ -177,3 +177,78 @@ final class CaptureParameterResolutionTests: XCTestCase {
         }
     }
 }
+
+/// The vocabulary narrows what a *platform* will accept, on top of what the
+/// shared catalogue can spell. Without it a caller can name a model that
+/// exists in the catalogue but has no execution path here, and the recording
+/// then runs as something else.
+final class CaptureParameterVocabularyTests: XCTestCase {
+    func testUnconstrainedVocabularyLeavesResolutionUnchanged() throws {
+        let model = try XCTUnwrap(ModelCatalog.liveTranscription.first?.id)
+        let withDefault = try CaptureParameterResolution.resolve(destinationID: "anything", model: model)
+        let explicit = try CaptureParameterResolution.resolve(
+            destinationID: "anything",
+            model: model,
+            vocabulary: .unconstrained
+        )
+        XCTAssertEqual(withDefault, explicit)
+        XCTAssertEqual(withDefault.modelID, model)
+    }
+
+    func testACatalogueModelWithNoExecutionPathIsRefused() throws {
+        let executable = try XCTUnwrap(ModelCatalog.liveTranscription.first?.id)
+        let unsupported = try XCTUnwrap(
+            ModelCatalog.batchTranscription.first { $0.id != executable }?.id
+        )
+        let vocabulary = CaptureParameterVocabulary(executableModelIDs: [executable])
+        XCTAssertEqual(
+            try CaptureParameterResolution.resolve(model: executable, vocabulary: vocabulary).modelID,
+            executable
+        )
+        XCTAssertThrowsError(
+            try CaptureParameterResolution.resolve(model: unsupported, vocabulary: vocabulary)
+        ) { error in
+            XCTAssertEqual(error as? CaptureParameterFailure, .modelUnsupported)
+        }
+    }
+
+    func testAnUnknownDestinationIsRefusedRatherThanBecomingTheGlobalOne() {
+        let vocabulary = CaptureParameterVocabulary(destinationIDs: ["clipboard", "historyOnly"])
+        XCTAssertEqual(
+            try? CaptureParameterResolution.resolve(
+                destinationID: "historyOnly",
+                vocabulary: vocabulary
+            ).destinationID,
+            "historyOnly"
+        )
+        XCTAssertThrowsError(
+            try CaptureParameterResolution.resolve(destinationID: "nowhere", vocabulary: vocabulary)
+        ) { error in
+            XCTAssertEqual(error as? CaptureParameterFailure, .unknownDestination)
+        }
+    }
+
+    /// Supplying nothing still produces `.none` whatever the vocabulary says,
+    /// so a saved Shortcut that sets no parameters cannot start failing.
+    func testAVocabularyNeverRefusesAnEmptyParameterSet() throws {
+        let vocabulary = CaptureParameterVocabulary(destinationIDs: [], executableModelIDs: [])
+        XCTAssertEqual(try CaptureParameterResolution.resolve(vocabulary: vocabulary), .none)
+    }
+
+    /// The source tag is caller-supplied free text and must not reach a public
+    /// log line; the closed-vocabulary parameters still must.
+    func testRedactedLogDescriptionOmitsTheSourceTag() throws {
+        let model = try XCTUnwrap(ModelCatalog.liveTranscription.first?.id)
+        let parameters = try CaptureParameterResolution.resolve(
+            destinationID: "historyOnly",
+            language: "fr-FR",
+            model: model,
+            source: "secret tag"
+        )
+        XCTAssertFalse(parameters.redactedLogDescription.contains("secret tag"))
+        XCTAssertTrue(parameters.redactedLogDescription.contains("destination=historyOnly"))
+        XCTAssertTrue(parameters.redactedLogDescription.contains("language=fr_FR"))
+        XCTAssertTrue(parameters.redactedLogDescription.contains("model=\(model)"))
+        XCTAssertTrue(parameters.logDescription.contains("source=secret tag"))
+    }
+}

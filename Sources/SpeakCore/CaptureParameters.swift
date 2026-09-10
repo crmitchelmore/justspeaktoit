@@ -18,10 +18,17 @@ public enum CaptureParameterFailure: String, Error, LocalizedError, Equatable, S
     case unknownLanguage
     /// A model parameter named something outside the transcription catalogue.
     case unknownModel
+    /// A named model exists in the shared catalogue but has no execution path
+    /// on this platform, so running it would mean using a different provider
+    /// or a different mode than the caller named.
+    case modelUnsupported
     /// A named model exists, but no credential for it is available on this
     /// device, so honouring the request would mean recording with a different
     /// model than the caller asked for.
     case modelUnavailable
+    /// A destination parameter named something outside the destination
+    /// vocabulary the app can honour.
+    case unknownDestination
     /// A source tag was present but unusable (blank, or control characters).
     case invalidSource
 
@@ -31,13 +38,50 @@ public enum CaptureParameterFailure: String, Error, LocalizedError, Equatable, S
             return "That language is not one this app knows. The recording was not started."
         case .unknownModel:
             return "That transcription model is not one this app knows. The recording was not started."
+        case .modelUnsupported:
+            return "That transcription model cannot run on this device. The recording was not started."
         case .modelUnavailable:
             return "That transcription model needs an API key this device does not have. "
                 + "The recording was not started."
+        case .unknownDestination:
+            return "That destination is not one this app knows. The recording was not started."
         case .invalidSource:
             return "The source tag was blank or contained characters this app will not store."
         }
     }
+}
+
+// MARK: - Vocabulary
+
+/// What the *running platform* can honour, as opposed to what the shared
+/// catalogues can spell.
+///
+/// The catalogues are cross-platform: they list streaming providers and batch
+/// routes that only the Mac app implements. Validating a caller's model
+/// against them alone accepts a name this app has no way to execute, and the
+/// recording then either fails after the microphone has already been open or —
+/// worse — falls through to whichever route is the default. The same is true
+/// of destinations, whose vocabulary lives in the app layer.
+///
+/// A `nil` set means "do not constrain this parameter", which is the
+/// behaviour every caller had before this type existed.
+public struct CaptureParameterVocabulary: Sendable, Equatable {
+    /// Destination identifiers the caller's platform can honour, or `nil` to
+    /// accept any catalogue-shaped value.
+    public let destinationIDs: Set<String>?
+    /// Model identifiers with an implemented execution path on the caller's
+    /// platform, or `nil` to accept anything the shared catalogue lists.
+    public let executableModelIDs: Set<String>?
+
+    public init(destinationIDs: Set<String>? = nil, executableModelIDs: Set<String>? = nil) {
+        self.destinationIDs = destinationIDs
+        self.executableModelIDs = executableModelIDs
+    }
+
+    /// Spelling is checked, executability is not. This is what a caller with
+    /// no platform vocabulary of its own gets, and it is the pre-existing
+    /// behaviour of `resolve`.
+    public static let unconstrained = CaptureParameterVocabulary()
 }
 
 // MARK: - Resolution
@@ -83,6 +127,12 @@ public enum CaptureParameterResolution {
     /// Accepts a transcription model identifier that the catalogue lists for
     /// live or batch transcription. The "custom model" placeholder is not a
     /// real identifier, so it is rejected too.
+    ///
+    /// The shared catalogue is what a name is *spelled* against. Whether the
+    /// running platform can execute it is a separate question, answered by
+    /// `executableModelIDs` in a vocabulary — the catalogue holds macOS-only
+    /// providers, and offering one on iOS is how a named model quietly becomes
+    /// a different one.
     public static func model(from raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed != ModelCatalog.customOptionID else { return nil }
@@ -144,8 +194,15 @@ public enum CaptureParameterResolution {
         destinationID: String? = nil,
         language rawLanguage: String? = nil,
         model rawModel: String? = nil,
-        source rawSource: String? = nil
+        source rawSource: String? = nil,
+        vocabulary: CaptureParameterVocabulary = .unconstrained
     ) throws -> CaptureRunParameters {
+        if let destinationID, let destinations = vocabulary.destinationIDs {
+            guard destinations.contains(destinationID) else {
+                throw CaptureParameterFailure.unknownDestination
+            }
+        }
+
         var languageIdentifier: String?
         if let rawLanguage {
             guard let resolved = self.language(from: rawLanguage) else {
@@ -158,6 +215,11 @@ public enum CaptureParameterResolution {
         if let rawModel {
             guard let resolved = self.model(from: rawModel) else {
                 throw CaptureParameterFailure.unknownModel
+            }
+            if let executable = vocabulary.executableModelIDs {
+                guard executable.contains(resolved) else {
+                    throw CaptureParameterFailure.modelUnsupported
+                }
             }
             modelID = resolved
         }
@@ -233,14 +295,27 @@ public struct CaptureRunParameters: Equatable, Sendable {
         return CaptureParameterResolution.requiresBatchMode(modelID)
     }
 
-    /// One-line description for the log, so a capture's parameters are
-    /// recoverable after the fact. Empty when nothing was overridden.
+    /// One-line description of the whole run, source tag included. Empty when
+    /// nothing was overridden.
+    ///
+    /// The source tag is caller-supplied free text, so this string is *not*
+    /// safe to publish as public unified-log data. Use `redactedLogDescription`
+    /// for the public half and log the tag separately as private.
     public var logDescription: String {
+        var parts: [String] = []
+        if !redactedLogDescription.isEmpty { parts.append(redactedLogDescription) }
+        if let sourceTag { parts.append("source=\(sourceTag)") }
+        return parts.joined(separator: " ")
+    }
+
+    /// The parameters that come from closed vocabularies — destination,
+    /// language and model — and are therefore safe as public diagnostic data.
+    /// Empty when none of the three was overridden.
+    public var redactedLogDescription: String {
         var parts: [String] = []
         if let destinationID { parts.append("destination=\(destinationID)") }
         if let languageIdentifier { parts.append("language=\(languageIdentifier)") }
         if let modelID { parts.append("model=\(modelID)") }
-        if let sourceTag { parts.append("source=\(sourceTag)") }
         return parts.joined(separator: " ")
     }
 }

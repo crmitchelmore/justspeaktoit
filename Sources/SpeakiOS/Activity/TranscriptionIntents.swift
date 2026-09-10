@@ -85,7 +85,12 @@ private func resolvedRunParameters(
         destinationID: destination?.rawValue,
         language: language,
         model: model,
-        source: source
+        source: source,
+        // Validate against what iOS can actually execute, not just what the
+        // cross-platform catalogue can spell. A Mac-only streaming provider or
+        // a batch entry with no iOS upload route is refused here rather than
+        // accepted and then run as something else.
+        vocabulary: CaptureModelSupport.vocabulary
     )
 }
 

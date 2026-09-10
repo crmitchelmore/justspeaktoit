@@ -34,12 +34,13 @@ public enum CaptureWatchdogPolicy {
     /// beyond the slowest legitimate case that does not involve a download,
     /// so nothing that is merely slow trips it.
     ///
-    /// The known exception is a first-use SpeechAnalyzer asset download, which
-    /// still runs inside the start path and can take minutes on a poor
-    /// connection (issue #938). Until that moves out of the start path, a
-    /// first-run start on a slow link can hit this deadline. That is recorded
-    /// as a known false positive rather than papered over: the outcome is a
-    /// cancelled start with the stalled stage named, not a lost recording.
+    /// A first-use SpeechAnalyzer asset download used to be the one known
+    /// false positive: it ran inside the start path and could take minutes on
+    /// a poor connection. Issue #938 moved it out — live capture now requires
+    /// already-installed assets (`AppleSpeechAssetPolicy.installedOnly`) with a
+    /// two-second inventory bound, and installation only happens through the
+    /// explicit Prepare Apple model action in Settings — so a missing model
+    /// fails a start in seconds instead of stalling it into this deadline.
     public static let startDeadlineSeconds: TimeInterval = 60
 
     /// How long after the audio engine reports started the capture may see no

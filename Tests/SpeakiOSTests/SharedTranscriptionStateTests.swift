@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import XCTest
 @testable import SpeakiOSLib
@@ -85,5 +84,55 @@ final class SharedTranscriptionStateTests: XCTestCase {
         XCTAssertEqual(laterReader.currentTranscriptText, "Live foreground words")
         XCTAssertTrue(foregroundOwner.isRecording)
     }
+
+    func testRecordingTransitions_publishBeforeTargetedReloadForEitherOwner() throws {
+        let readerDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let reader = SharedTranscriptionState(defaults: readerDefaults)
+        var observedFlags: [Bool] = []
+        let reload: (String) -> Void = { kind in
+            XCTAssertEqual(kind, "com.justspeaktoit.ios.JustSpeakToItWidgetExtension")
+            observedFlags.append(reader.isRecording)
+            if !reader.isRecording { XCTAssertNil(reader.recordingStartTime) }
+        }
+        let foregroundOwner = SharedTranscriptionState(defaults: defaults, reloadRecordingControl: reload)
+        let headlessOwner = SharedTranscriptionState(defaults: readerDefaults, reloadRecordingControl: reload)
+
+        foregroundOwner.isRecording = true
+        foregroundOwner.recordingStartTime = Date()
+        foregroundOwner.clearRecordingState()
+        headlessOwner.isRecording = true
+        headlessOwner.recordingStartTime = Date()
+        headlessOwner.clearRecordingState()
+
+        XCTAssertEqual(observedFlags, [true, false, true, false])
+    }
+
+    func testUnchangedFlagsAndTranscriptUpdates_doNotReload() {
+        var reloads = 0
+        let state = SharedTranscriptionState(defaults: defaults, reloadRecordingControl: { _ in reloads += 1 })
+        state.isRecording = false
+        state.clearRecordingState()
+        XCTAssertEqual(reloads, 0)
+
+        state.isRecording = true
+        state.isRecording = true
+        state.updateTranscript("Partial words.")
+        state.updateTranscript("Final words.")
+        state.lastCompletedTranscript = "Saved words."
+        state.clear()
+        XCTAssertEqual(reloads, 1)
+
+        state.clearRecordingState()
+        state.clearRecordingState()
+        XCTAssertEqual(reloads, 2)
+    }
+
+    func testUnavailableStore_doesNotRequestReloadForUnpublishedState() {
+        let state = SharedTranscriptionState(defaults: nil, reloadRecordingControl: { _ in
+            XCTFail("No state was published")
+        })
+        state.isRecording = true
+        state.clearRecordingState()
+        XCTAssertFalse(state.isRecording)
+    }
 }
-#endif

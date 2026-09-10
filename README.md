@@ -40,6 +40,20 @@ Every release on the [Releases page](https://github.com/crmitchelmore/justspeakt
 
 Apple Silicon installs update to arm64-only builds; Intel installs keep receiving the universal build. Both update paths are notarised and signed.
 
+### Alpha testing
+
+Stable is recommended for everyday use. After commissioning, Alpha will receive successful changes from
+`main` and installs alongside Stable with a purple icon, separate app data,
+credentials and iCloud storage. Alpha does not take over your existing hotkey.
+
+- [iOS Alpha on TestFlight](https://testflight.apple.com/join/puF4WhdS)
+- [macOS Alpha on TestFlight](https://testflight.apple.com/join/8huvWyXq)
+- Direct macOS Alpha: [Apple Silicon](https://justspeaktoit.com/alpha/download/arm64) · [Intel / universal](https://justspeaktoit.com/alpha/download/universal)
+
+The Alpha train is being commissioned; these links become downloadable after
+signing, Apple processing and beta review finish. Alpha uses its own update feed
+and optional `speak-alpha` CLI. Website downloads and Homebrew remain Stable.
+
 ### Build from Source
 
 ```bash

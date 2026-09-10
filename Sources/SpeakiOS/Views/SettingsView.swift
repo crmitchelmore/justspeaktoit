@@ -16,13 +16,21 @@ import OSLog
 /// Control Center, Back Tap. The main in-app record-and-stop flow is
 /// unaffected — it always shows the result on screen.
 public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Sendable {
+    /// Resolve the destination at stop time (issue #1008): the field the Just
+    /// Speak keyboard is open in when there is one, otherwise the clipboard.
+    /// Every capture also goes to History and iCloud, whichever lane runs.
+    ///
+    /// There is no "Mac" branch: see `AutoDestinationPolicy` for why the phone
+    /// cannot tell a reachable Mac from a configured one.
+    case auto
+
     /// Copy the transcript to the clipboard. Default — matches behaviour
     /// prior to the destination setting being added.
     case clipboard
 
     /// Copy to clipboard and run the configured post-processor (OpenRouter)
-    /// in the background, replacing the clipboard with the polished version
-    /// when it lands. Falls back to plain `.clipboard` if no OpenRouter key.
+    /// asynchronously. Raw text is copied once and polished text is saved in
+    /// History. Without a key, the raw copy remains available.
     case clipboardAndPostProcess
 
     /// Save to history only — don't touch the clipboard, don't post-process.
@@ -34,6 +42,7 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
     public var displayName: String {
         switch self {
+        case .auto: return "Auto"
         case .clipboard: return "Copy to Clipboard"
         case .clipboardAndPostProcess: return "Copy & Polish"
         case .historyOnly: return "Save to History Only"
@@ -42,11 +51,14 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
     public var summary: String {
         switch self {
+        case .auto:
+            return "Decided when recording stops: straight into the field if the Just Speak keyboard is open "
+                + "there, otherwise the clipboard. Either way it is saved to History and pushed to iCloud, "
+                + "and the Live Activity says which one happened."
         case .clipboard:
             return "Transcript is copied to the clipboard immediately when recording stops."
         case .clipboardAndPostProcess:
-            return "Transcript is copied to the clipboard, then re-cleaned with your post-processing model "
-                + "and the polished version is re-copied."
+            return "Raw transcript is copied immediately. Polished text is saved in History."
         case .historyOnly:
             return "Transcript is saved to history. Clipboard and post-processing are skipped."
         }
@@ -349,6 +361,30 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    /// Whether a headless capture (Control, Action Button, Siri, Shortcuts)
+    /// finishes itself after a run of silence (issue #1012).
+    ///
+    /// Off by default and staying that way. Auto-stop is a genuine improvement
+    /// for people who dictate in bursts and a genuine regression for people who
+    /// think mid-sentence, and there is no way to tell which someone is without
+    /// asking. Turning this on for everybody would cut some of them off.
+    @Published public var autoStopOnSilenceEnabled: Bool {
+        didSet { defaults.set(autoStopOnSilenceEnabled, forKey: "autoStopOnSilenceEnabled") }
+    }
+
+    /// How long silence must hold before an auto-stopping capture finishes.
+    /// Clamped into `CaptureEndPointingPolicy.silenceWindowRange`.
+    @Published public var autoStopSilenceSeconds: TimeInterval {
+        didSet {
+            let clamped = CaptureEndPointingPolicy.silenceWindow(configured: autoStopSilenceSeconds)
+            if clamped != autoStopSilenceSeconds {
+                autoStopSilenceSeconds = clamped
+            } else {
+                defaults.set(autoStopSilenceSeconds, forKey: "autoStopSilenceSeconds")
+            }
+        }
+    }
+
     // MARK: - Post-Processing Settings
 
     @Published public var postProcessingEnabled: Bool {
@@ -425,9 +461,24 @@ public final class AppSettings: ObservableObject {
         )
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
-        // Default to .clipboard for backwards compatibility with prior versions.
-        let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination")
-        let hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw ?? "") ?? .clipboard
+        // `.auto` is the default only for users who never made a choice: an
+        // explicitly stored value is always honoured (issue #1008). Auto is a
+        // superset of the old default — it copies to the clipboard except when
+        // the Just Speak keyboard is demonstrably open in a text field, where
+        // the words go into that field instead.
+        //
+        // A stored value this build cannot parse is *not* the same thing as no
+        // stored value: it means a malformed, downgraded or migrated
+        // preference, and defaulting it to Auto would silently opt that user
+        // into suppressing the clipboard whenever a targeted keyboard offer
+        // exists. Missing keeps the new default; unrecognised keeps the
+        // pre-Auto behaviour it was last known to have.
+        let hardwareDest: HardwareTriggerDestination
+        if let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination") {
+            hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw) ?? .clipboard
+        } else {
+            hardwareDest = .auto
+        }
 
         // Post-processing settings
         let postEnabled = defaults.bool(forKey: "postProcessingEnabled")
@@ -477,6 +528,15 @@ public final class AppSettings: ObservableObject {
         self.handsFreeDictationEnabled = handsFree
         self.preferredLocaleIdentifier = preferredLocale
         self.hardwareTriggerDestination = hardwareDest
+        // An install that has never seen this setting gets the default window,
+        // not the zero `double(forKey:)` returns for a missing key — which the
+        // clamp would raise to the floor anyway, but reading it explicitly
+        // keeps the stored value and the default from ever disagreeing.
+        self.autoStopOnSilenceEnabled = defaults.bool(forKey: "autoStopOnSilenceEnabled")
+        self.autoStopSilenceSeconds = CaptureEndPointingPolicy.silenceWindow(
+            configured: defaults.object(forKey: "autoStopSilenceSeconds") as? TimeInterval
+                ?? CaptureEndPointingPolicy.defaultSilenceWindowSeconds
+        )
         self.postProcessingEnabled = postEnabled
         self.postProcessingModel = postModel
         self.autoPostProcess = autoPost
@@ -832,6 +892,7 @@ public final class AppSettings: ObservableObject {
     /// iCloud-syncable store. Additive and idempotent: legacy items are read but
     /// never deleted, and each key is only migrated when the new store lacks it.
     private static func migrateLegacyKeysIfNeeded() async {
+        guard ReleaseTrain.current == .stable else { return }
         let existing = Set(await credentialStorage.knownIdentifiers())
 
         for identifier in [deepgramKeyID, openRouterKeyID, openAIKeyID] where !existing.contains(identifier) {
@@ -1241,6 +1302,13 @@ public struct SettingsView: View {
                 }
                 .accessibilityIdentifier("hardwareTriggerSettingsLink")
 
+                NavigationLink {
+                    AutomationGalleryView()
+                } label: {
+                    Label("Shortcuts Gallery", systemImage: "square.stack.3d.up")
+                }
+                .accessibilityIdentifier("automationGalleryLink")
+
                 if !usesInlineDensityLayout {
                     Text(
                         "Trigger transcription from the Action Button, Siri, Lock Screen, "
@@ -1380,6 +1448,25 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("Capture Health") {
+                NavigationLink {
+                    CaptureHealthView()
+                } label: {
+                    Label("Check capture is working", systemImage: "stethoscope")
+                }
+                .accessibilityIdentifier("captureHealthNavLink")
+
+                if !usesInlineDensityLayout {
+                    Text(
+                        "Checks the things a capture needs, runs a microphone self-test, and offers back "
+                            + "any recording that was interrupted before its transcript was saved. "
+                            + "Nothing on that screen leaves this device."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Recordings") {
                 NavigationLink {
                     RecordingsView()
@@ -1389,19 +1476,11 @@ public struct SettingsView: View {
 
                 if !usesInlineDensityLayout {
                     Text(
-                        "Audio is saved locally during transcription so you can "
-                            + "replay or re-transcribe if connectivity was lost."
+                        "Audio is saved locally during transcription so you can replay it, "
+                            + "or transcribe it again if connectivity was lost."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Send to Mac") {
-                NavigationLink {
-                    SendToMacView()
-                } label: {
-                    Label("Configure Mac Connection", systemImage: "desktopcomputer")
                 }
             }
 
@@ -1679,10 +1758,25 @@ struct HardwareTriggerSettingsView: View {
                 }
             }
 
-            Section("Set Up the Action Button") {
+            autoStopSection
+
+            Section("Before You Start") {
                 Text(
-                    "On iPhone 15 Pro and later you can map the Action Button to start recording in one press — "
-                        + "even from the Lock Screen."
+                    "Open JustSpeakToIt before first use and grant the requested permissions, "
+                        + "including microphone access. You may need to unlock your iPhone or open the app "
+                        + "to start recording."
+                )
+                    .font(.callout)
+            }
+
+            if #available(iOS 18.0, *) {
+                nativeControlSetupSection
+            }
+
+            Section("Shortcuts & Automations") {
+                Text(
+                    "Use a shortcut for Back Tap or your existing automations. On an iPhone with an Action Button, "
+                        + "Shortcuts also works on iOS 17."
                 )
                     .font(.callout)
 
@@ -1690,14 +1784,15 @@ struct HardwareTriggerSettingsView: View {
                 StepRow(
                     number: 2,
                     text: "Search for JustSpeakToIt and choose Toggle Recording for a single-button flow. "
-                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt copies the transcript "
-                        + "when you stop. Use Start Recording only if you also create a separate Stop Recording "
-                        + "shortcut."
+                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt uses the destination "
+                        + "selected above when you stop. Use Start Recording only if you also create a separate "
+                        + "Stop Recording shortcut."
                 )
                 StepRow(number: 3, text: "Name the shortcut and tap Done.")
                 StepRow(
                     number: 4,
-                    text: "Open Settings → Action Button, swipe to Shortcut, and pick the shortcut you just made."
+                    text: "To use it with an Action Button, open Settings → Action Button, swipe to Shortcut, "
+                        + "and choose your shortcut. Press and hold the Action Button to run it."
                 )
 
                 Button {
@@ -1708,6 +1803,13 @@ struct HardwareTriggerSettingsView: View {
                     Label("Open Shortcuts App", systemImage: "arrow.up.right.square")
                 }
                 .accessibilityIdentifier("openShortcutsAppButton")
+
+                NavigationLink {
+                    AutomationGalleryView()
+                } label: {
+                    Label("Shortcuts Gallery", systemImage: "square.stack.3d.up")
+                }
+                .accessibilityIdentifier("hardwareTriggerGalleryLink")
             }
 
             Section("Other Trigger Options") {
@@ -1718,13 +1820,8 @@ struct HardwareTriggerSettingsView: View {
                 )
                 BulletRow(
                     icon: "square.grid.2x2.fill",
-                    title: "Control Center",
-                    detail: "On iOS 18 and later add the Shortcut control via Customise Controls → Add a Control."
-                )
-                BulletRow(
-                    icon: "lock.iphone",
-                    title: "Lock Screen / Home Screen widget",
-                    detail: "Add a Shortcuts widget and pick your Toggle Recording shortcut."
+                    title: "Home Screen Shortcuts Widget",
+                    detail: "Add a Shortcuts widget to the Home Screen and pick your Toggle Recording shortcut."
                 )
                 BulletRow(
                     icon: "hand.tap.fill",
@@ -1750,9 +1847,74 @@ struct HardwareTriggerSettingsView: View {
         .navigationTitle("Action Button & Shortcuts")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    /// Silence auto-stop (issue #1012). Deliberately explicit about the cost:
+    /// somebody who thinks in long pauses needs to know this will cut them off
+    /// before they turn it on, not after.
+    private var autoStopSection: some View {
+        Section("Stop On Silence") {
+            Toggle("Finish after a pause", isOn: $settings.autoStopOnSilenceEnabled)
+                .accessibilityIdentifier("autoStopOnSilenceToggle")
+
+            Text(
+                "Recordings started from a Control, the Action Button, Siri or a Shortcut finish "
+                    + "on their own once you stop speaking, so one press is the whole capture. "
+                    + "Recordings you start in the app or from the keyboard are unaffected."
+            )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if settings.autoStopOnSilenceEnabled {
+                Stepper(
+                    "Pause length: \(settings.autoStopSilenceSeconds, specifier: "%.0f")s",
+                    value: $settings.autoStopSilenceSeconds,
+                    in: CaptureEndPointingPolicy.silenceWindowRange,
+                    step: 1
+                )
+                    .accessibilityIdentifier("autoStopSilenceStepper")
+
+                Text(
+                    "Shorter finishes sooner but is likelier to cut you off while you are thinking. "
+                        + "A recording that never goes quiet still stops after "
+                        + "\(Int(CaptureEndPointingPolicy.defaultMaximumDurationSeconds / 60)) minutes."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @available(iOS 18.0, *)
+    private var nativeControlSetupSection: some View {
+        Section("Set Up Transcribe Voice") {
+            Text("On iOS 18 and later, add JustSpeakToIt’s Transcribe Voice control directly.")
+                .font(.callout)
+            BulletRow(
+                icon: "button.programmable",
+                title: "Action Button",
+                detail: "On an iPhone with an Action Button, open Settings → Action Button → Controls. "
+                    + "Tap the control picker and choose Transcribe Voice. Press and hold the Action Button "
+                    + "to start or stop dictation."
+            )
+            BulletRow(
+                icon: "square.grid.2x2.fill",
+                title: "Control Center",
+                detail: "Open Control Center, tap the + at the top left, then tap Add a Control. "
+                    + "Find JustSpeakToIt and choose Transcribe Voice."
+            )
+            BulletRow(
+                icon: "lock.iphone",
+                title: "Lock Screen Control",
+                detail: "Touch and hold the Lock Screen, unlock if asked, then tap Customise → Lock Screen. "
+                    + "Remove a bottom control with the minus button, tap the + in that slot, and choose "
+                    + "Transcribe Voice. Tap Done. This is a bottom control, separate from the widgets below the clock."
+            )
+        }
+    }
 }
 
 private struct StepRow: View {
+    @ScaledMetric(relativeTo: .headline) private var badgeSize = 24.0
     let number: Int
     let text: String
 
@@ -1760,12 +1922,13 @@ private struct StepRow: View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(number)")
                 .font(.headline)
-                .frame(width: 24, height: 24)
+                .frame(width: badgeSize, height: badgeSize)
                 .background(Color.accentColor.opacity(0.15), in: Circle())
                 .foregroundStyle(Color.accentColor)
             Text(text)
                 .font(.callout)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

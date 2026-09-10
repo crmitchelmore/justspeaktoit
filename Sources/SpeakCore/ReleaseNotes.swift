@@ -119,6 +119,8 @@ public enum ReleaseNotesPlatform: String, Codable, CaseIterable, Hashable, Senda
 public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
     /// The independently versioned release track these notes describe.
     public let platform: ReleaseNotesPlatform
+    public let train: ReleaseTrain
+    public let build: String?
     /// Marketing version without any tag prefix, for example `2.45.0`.
     public let version: String
     /// The Git tag the notes were generated from, for example `mac-v2.45.0`.
@@ -127,16 +129,28 @@ public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
     public let publishedAt: String
     public let markdown: String
 
-    public var id: String { "\(platform.rawValue):\(version)" }
+    public var id: String {
+        train == .stable
+            ? "\(platform.rawValue):\(version)"
+            : "\(platform.rawValue):alpha:\(version):\(build ?? tag)"
+    }
+    public var selectionKey: String { train == .stable ? version : id }
+    public var displayTitle: String {
+        train == .alpha ? "Version \(version) Alpha \(build ?? tag)" : "Version \(version)"
+    }
 
     public init(
         version: String,
         tag: String,
         publishedAt: String,
         markdown: String,
-        platform: ReleaseNotesPlatform? = nil
+        platform: ReleaseNotesPlatform? = nil,
+        train: ReleaseTrain,
+        build: String? = nil
     ) {
         self.platform = platform ?? ReleaseNotesPlatform(tag: tag)
+        self.train = train
+        self.build = build
         self.version = ReleaseNotesVersion.normalised(version)
         self.tag = tag
         self.publishedAt = publishedAt
@@ -150,7 +164,9 @@ public struct ReleaseNoteEntry: Identifiable, Hashable, Sendable, Codable {
             tag: try container.decodeIfPresent(String.self, forKey: .tag) ?? "",
             publishedAt: try container.decodeIfPresent(String.self, forKey: .publishedAt) ?? "",
             markdown: try container.decode(String.self, forKey: .markdown),
-            platform: try container.decodeIfPresent(ReleaseNotesPlatform.self, forKey: .platform)
+            platform: try container.decodeIfPresent(ReleaseNotesPlatform.self, forKey: .platform),
+            train: try container.decodeIfPresent(ReleaseTrain.self, forKey: .train) ?? .stable,
+            build: try container.decodeIfPresent(String.self, forKey: .build)
         )
     }
 
@@ -217,7 +233,10 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
 
     public init(entries: [ReleaseNoteEntry], generatedAt: Date? = nil) {
         self.entries = entries.sorted {
-            if $0.version == $1.version { return $0.platform.rawValue < $1.platform.rawValue }
+            if $0.version == $1.version {
+                if $0.platform != $1.platform { return $0.platform.rawValue < $1.platform.rawValue }
+                return ($0.build ?? "").compare($1.build ?? "", options: .numeric) == .orderedDescending
+            }
             return ReleaseNotesVersion.isDescending($0.version, $1.version)
         }
         self.generatedAt = generatedAt
@@ -242,8 +261,8 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
         )
     }
 
-    public func entries(for platform: ReleaseNotesPlatform) -> [ReleaseNoteEntry] {
-        entries.filter { $0.platform == platform }
+    public func entries(for platform: ReleaseNotesPlatform, train: ReleaseTrain) -> [ReleaseNoteEntry] {
+        entries.filter { $0.platform == platform && $0.train == train }
     }
 
     public var latest: ReleaseNoteEntry? { entries(for: .current).first }
@@ -257,13 +276,17 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
     ) -> ReleaseNoteEntry? {
         let wanted = ReleaseNotesVersion.normalised(version)
         guard !wanted.isEmpty else { return nil }
-        return entries.first { $0.platform == platform && $0.version == wanted }
+        return entries(for: platform).first { $0.version == wanted }
     }
 
     /// The marketing version of the running app, for example `2.45.0`.
     public static func installedVersion(bundle: Bundle = .main) -> String {
         let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         return ReleaseNotesVersion.normalised(version ?? "")
+    }
+
+    public static func installedBuild(bundle: Bundle = .main) -> String {
+        bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
     }
 
     private struct Payload: Decodable {
@@ -279,23 +302,32 @@ public struct ReleaseNotesCatalog: Sendable, Equatable {
 public struct ReleaseNotesBrowser: Equatable, Sendable {
     public let entries: [ReleaseNoteEntry]
     public let installedVersion: String
+    public let installedBuild: String
     public private(set) var selectedVersion: String?
 
     public init(
         catalog: ReleaseNotesCatalog = .bundled,
         installedVersion: String = ReleaseNotesCatalog.installedVersion(),
-        platform: ReleaseNotesPlatform = .current
+        platform: ReleaseNotesPlatform = .current,
+        train: ReleaseTrain,
+        installedBuild: String = ReleaseNotesCatalog.installedBuild()
     ) {
-        self.entries = catalog.entries(for: platform)
+        self.entries = catalog.entries(for: platform, train: train)
         self.installedVersion = ReleaseNotesVersion.normalised(installedVersion)
-        self.selectedVersion = catalog.entry(forVersion: installedVersion, platform: platform)?.version
-            ?? self.entries.first?.version
+        self.installedBuild = installedBuild
+        self.selectedVersion = self.entries.first {
+            $0.version == ReleaseNotesVersion.normalised(installedVersion)
+                && ($0.train == .stable || $0.build == installedBuild)
+        }?.selectionKey
+            ?? self.entries.first?.selectionKey
     }
 
     public var isEmpty: Bool { entries.isEmpty }
 
     public var installedEntry: ReleaseNoteEntry? {
-        entries.first { $0.version == installedVersion }
+        entries.first {
+            $0.version == installedVersion && ($0.train == .stable || $0.build == installedBuild)
+        }
     }
     /// True when the catalogue carries notes for the running build. It is false
     /// for development and unreleased builds, and for builds older than the
@@ -313,7 +345,7 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     public var installedVersionNotice: String? {
         guard !isEmpty, installedEntry == nil else { return nil }
         guard !isInstalledVersionOlderThanCatalog else {
-            guard selectedVersion == entries.first?.version else { return nil }
+            guard selectedVersion == entries.first?.selectionKey else { return nil }
             return "Showing the latest release notes."
         }
         return "Notes for the installed build (\(installedVersion)) are published with its release."
@@ -328,16 +360,16 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
 
     public var selectedEntry: ReleaseNoteEntry? {
         guard let selectedVersion else { return nil }
-        return entries.first { $0.version == selectedVersion }
+        return entries.first { $0.selectionKey == selectedVersion }
     }
 
     public var isShowingInstalledVersion: Bool {
-        selectedEntry != nil && selectedEntry?.version == installedVersion
+        selectedEntry != nil && selectedEntry?.id == installedEntry?.id
     }
 
     /// Versions other than the one on screen, newest first.
     public var otherEntries: [ReleaseNoteEntry] {
-        entries.filter { $0.version != selectedVersion }
+        entries.filter { $0.selectionKey != selectedVersion }
     }
 
     public var installedVersionTitle: String {
@@ -345,19 +377,21 @@ public struct ReleaseNotesBrowser: Equatable, Sendable {
     }
 
     public func title(for entry: ReleaseNoteEntry) -> String {
-        entry.version == installedVersion
+        entry.train == .alpha
+            ? entry.displayTitle
+            : entry.version == installedVersion
             ? "Version \(entry.version) (installed)"
             : "Version \(entry.version)"
     }
 
     public mutating func select(version: String) {
         let wanted = ReleaseNotesVersion.normalised(version)
-        guard entries.contains(where: { $0.version == wanted }) else { return }
-        selectedVersion = wanted
+        guard let entry = entries.first(where: { $0.selectionKey == version || $0.version == wanted }) else { return }
+        selectedVersion = entry.selectionKey
     }
 
     public mutating func selectInstalledVersion() {
         guard let installedEntry else { return }
-        selectedVersion = installedEntry.version
+        selectedVersion = installedEntry.selectionKey
     }
 }

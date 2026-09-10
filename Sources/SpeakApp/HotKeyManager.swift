@@ -97,7 +97,7 @@ final class HotKeyManager: ObservableObject {
 			return
 		}
 
-		if requestPermission {
+		if requestPermission && appSettings.hasConfiguredGlobalHotKey {
 			permissionRequestTask?.cancel()
 			permissionRequestTask = Task { [weak self] in
 				guard let self else { return }
@@ -136,7 +136,7 @@ final class HotKeyManager: ObservableObject {
 				doubleTapWindow: appSettings.doubleTapWindow
 			)
 		)
-		engine.start(for: hotKey)
+		if appSettings.hasConfiguredGlobalHotKey { engine.start(for: hotKey) }
 		refreshMonitoringState()
 	}
 
@@ -199,13 +199,13 @@ final class HotKeyManager: ObservableObject {
 					doubleTapWindow: appSettings.doubleTapWindow
 				)
 			)
-			engine.start(for: hotKey)
+			if appSettings.hasConfiguredGlobalHotKey { engine.start(for: hotKey) }
 			refreshMonitoringState()
 		}
 	}
 
 	private func refreshMonitoringState() {
-		guard monitoringRequested else {
+		guard monitoringRequested, appSettings.hasConfiguredGlobalHotKey else {
 			monitoringState = .stopped
 			return
 		}

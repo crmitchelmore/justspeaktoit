@@ -20,6 +20,15 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         }
     }
 
+    func testSharedDirectory_rejectsSymlinkOutsideTemporaryRoot() throws {
+        let identifier = UUID()
+        let directory = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            .appendingPathComponent("com.justspeaktoit.tests.core-journey.\(identifier.uuidString)")
+        try FileManager.default.createSymbolicLink(at: directory, withDestinationURL: URL(fileURLWithPath: "/Users"))
+        defer { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertNil(CoreJourneyLaunchProfile.validatedSharedDirectory(directory.path, identifier: identifier))
+    }
+
     func testProfile_disablesCaptureAndExternalActionsWithTypedDefaults() {
         let profile = makeProfile()
 

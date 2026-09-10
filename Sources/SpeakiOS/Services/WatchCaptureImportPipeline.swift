@@ -245,8 +245,19 @@ public final class WatchCaptureImportPipeline: ObservableObject {
 
         commitSuccessfulImport(of: job, audioURL: audioURL)
 
+        await offerToKeyboard(text)
+
         if settings.autoPostProcess && settings.hasOpenRouterKey {
             await iOSHistoryManager.shared.reprocess(item)
+        }
+    }
+
+    /// A watch capture is the pocket-to-desk journey issue #1003 exists for:
+    /// it waits in the keyboard as a one-tap chip. It has no document of its
+    /// own, so it can never auto-insert anywhere.
+    private func offerToKeyboard(_ text: String) async {
+        await MainActor.run {
+            _ = KeyboardDeliveryPublisher.publish(transcript: text, source: .watch)
         }
     }
 

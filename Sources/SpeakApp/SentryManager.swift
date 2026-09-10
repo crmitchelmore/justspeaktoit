@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 #if canImport(Sentry)
 import Sentry
 #endif
@@ -57,7 +58,7 @@ enum SentryManager {
             options.enabled = false
             options.environment = "test"
         } else {
-            options.environment = "production"
+            options.environment = ReleaseTrain.current == .alpha ? "alpha" : "production"
         }
         #endif
 

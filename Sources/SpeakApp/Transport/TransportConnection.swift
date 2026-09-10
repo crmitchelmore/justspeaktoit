@@ -110,6 +110,10 @@ final class TransportConnection {
 
     private func handleHello(_ hello: HelloMessage) async -> Bool {
         guard !self.isAuthenticated else { return false }
+        guard ReleaseTrain.current.acceptsPeer(hello.releaseTrain) else {
+            await self.send(.error(ErrorMessage(code: 400, message: "Release train mismatch")))
+            return false
+        }
         guard hello.isProtocolVersionCompatible else {
             SpeakLogger.transport.warning(
                 """

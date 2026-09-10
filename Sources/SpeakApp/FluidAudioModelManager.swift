@@ -76,7 +76,7 @@ final class FluidAudioModelManager: ObservableObject {
       ?? fileManager.homeDirectoryForCurrentUser
     self.modelsDirectory = modelsDirectory
       ?? applicationSupport
-        .appendingPathComponent("SpeakApp", isDirectory: true)
+        .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
         .appendingPathComponent("LocalModels", isDirectory: true)
         .appendingPathComponent("FluidAudio", isDirectory: true)
     refresh()

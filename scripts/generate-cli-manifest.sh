@@ -31,7 +31,7 @@ if [[ ! "$SCHEMA_VERSION" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-RELEASE_URL="https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v${VERSION}"
+RELEASE_URL="https://github.com/crmitchelmore/justspeaktoit/releases/download/${DOWNLOAD_TAG:-mac-v${VERSION}}"
 MANIFEST_SCHEMA_VERSION=1
 
 mkdir -p "$OUTPUT_DIR"
@@ -82,6 +82,7 @@ cat > "$MANIFEST_PATH" << EOF
 {
   "schemaVersion": ${MANIFEST_SCHEMA_VERSION},
   "version": "${VERSION}",
+  "releaseTrain": "${TUIST_RELEASE_TRAIN:-stable}",
   "automationSchemaVersion": ${SCHEMA_VERSION},
   "assets": [
 ${ASSETS}

@@ -30,7 +30,7 @@ test('aggregate never checks out or executes repository helper code', () => {
 
 function passing() {
   return Object.fromEntries([
-    'build-macos', 'build-ios', 'build-ios-keyboard-direct-capture', 'lint',
+    'build-macos', 'build-ios', 'build-ios-keyboard', 'lint',
     'release-paths', 'release-validation', 'core-journey-e2e',
     'core-journey-fixture-ui', 'api-compatibility',
   ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true' } }]));

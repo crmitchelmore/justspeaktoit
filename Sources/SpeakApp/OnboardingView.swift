@@ -132,6 +132,7 @@ final class OnboardingState: ObservableObject {
     @Published var validationError: String?
     @Published var permissionsGranted: Set<PermissionType> = []
     @Published var selectedHotKey: HotKey = .fnKey
+    @Published var hotKeyWasChosen = false
     
     // Test recording state
     @Published var isTestRecording = false
@@ -160,6 +161,7 @@ final class OnboardingState: ObservableObject {
         self.audioFileManager = audioFileManager
         self.transcriptionManager = transcriptionManager
         self.selectedHotKey = settings.selectedHotKey
+        self.hotKeyWasChosen = settings.hasConfiguredGlobalHotKey
         refreshPermissions()
     }
     
@@ -425,13 +427,18 @@ struct OnboardingView: View {
         }
     }
     
+    private func saveHotKeySelection() {
+        // Alpha must not claim Stable's default shortcut just by pressing Next.
+        guard ReleaseTrain.current == .stable || state.hotKeyWasChosen else { return }
+        state.settings.chooseGlobalHotKey(state.selectedHotKey)
+        state.hotKeyManager.restartWithCurrentHotKey()
+    }
+
     private func advanceStep() async {
         let completedStep = state.currentStep
         switch state.currentStep {
         case .hotkey:
-            // Save the selected hotkey to settings
-            state.settings.selectedHotKey = state.selectedHotKey
-            state.hotKeyManager.restartWithCurrentHotKey()
+            saveHotKeySelection()
             if let next = OnboardingStep(rawValue: state.currentStep.rawValue + 1) {
                 withAnimation {
                     state.currentStep = next
@@ -489,7 +496,7 @@ struct WelcomeStepView: View {
                 .resizable()
                 .frame(width: 100, height: 100)
             
-            Text("Just Speak to It")
+            Text(ReleaseTrain.current.displayName)
                 .font(.largeTitle)
                 .fontWeight(.bold)
             
@@ -867,6 +874,8 @@ struct APIKeyStepView: View {
 
 struct HotKeyStepView: View {
     @ObservedObject var state: OnboardingState
+    private var isFnSelected: Bool { state.hotKeyWasChosen && state.selectedHotKey == .fnKey }
+    private var isCustomSelected: Bool { state.hotKeyWasChosen && state.selectedHotKey != .fnKey }
     
     var body: some View {
         VStack(spacing: 20) {
@@ -878,7 +887,9 @@ struct HotKeyStepView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("This is the key you'll press to start and stop recording")
+            Text(ReleaseTrain.current == .alpha
+                ? "Optional: choose a different shortcut from Stable, or continue without one"
+                : "This is the key you'll press to start and stop recording")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             
@@ -886,6 +897,7 @@ struct HotKeyStepView: View {
                 // Fn key option
                 Button {
                     state.selectedHotKey = .fnKey
+                    state.hotKeyWasChosen = true
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -900,7 +912,7 @@ struct HotKeyStepView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        if state.selectedHotKey == .fnKey {
+                        if isFnSelected {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
                                 .font(.title2)
@@ -909,11 +921,11 @@ struct HotKeyStepView: View {
                     .padding()
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(state.selectedHotKey == .fnKey ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
+                            .fill(isFnSelected ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(state.selectedHotKey == .fnKey ? Color.accentColor : Color.clear, lineWidth: 2)
+                            .stroke(isFnSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                     )
                 }
                 .buttonStyle(.plain)
@@ -929,7 +941,7 @@ struct HotKeyStepView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        if state.selectedHotKey != .fnKey {
+                        if isCustomSelected {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
                                 .font(.title2)
@@ -937,15 +949,16 @@ struct HotKeyStepView: View {
                     }
                     
                     HotKeyRecorder("Record shortcut", hotKey: $state.selectedHotKey)
+                        .onChange(of: state.selectedHotKey) { _, _ in state.hotKeyWasChosen = true }
                 }
                 .padding()
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(state.selectedHotKey != .fnKey ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
+                        .fill(isCustomSelected ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(state.selectedHotKey != .fnKey ? Color.accentColor : Color.clear, lineWidth: 2)
+                        .stroke(isCustomSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                 )
             }
             .padding(.horizontal, 40)
@@ -1207,7 +1220,9 @@ struct CompleteStepView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 16) {
-                    TipRow(icon: "keyboard", text: "Press \(state.selectedHotKey.displayString) to start recording")
+                    TipRow(icon: "keyboard", text: state.settings.hasConfiguredGlobalHotKey
+                        ? "Press \(state.selectedHotKey.displayString) to start recording"
+                        : "Use the record button; assign an Alpha shortcut in Settings when ready")
                     TipRow(icon: "text.cursor", text: "Click in any text field, then record")
                     TipRow(icon: "gearshape.fill", text: "Click the menu bar icon for quick actions and Settings")
                 }

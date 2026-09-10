@@ -50,6 +50,10 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
 
     private static let sessionKey = "keyboardInstantDictation.session.v1"
     private static let enabledKey = "keyboardInstantDictation.enabled.v1"
+    // Kept in its own key rather than inside the session record: the record is
+    // schema-versioned and rejected wholesale on a mismatch, and a reason for
+    // an ended session has to outlive the session it describes.
+    private static let endReasonKey = "keyboardInstantDictation.lastEndReason.v1"
 
     private let defaults: UserDefaults?
     private let lock = NSLock()
@@ -81,6 +85,11 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
             defaults.set(enabled, forKey: Self.enabledKey)
             if !enabled {
                 clearUnlocked()
+                // The store's contract is that a nil reason means "ended by the
+                // user". A readiness failure recorded before the user turned
+                // Instant Dictation off describes a session they have since
+                // replaced with a decision, so it must not outlive it.
+                defaults.removeObject(forKey: Self.endReasonKey)
             }
             defaults.synchronize()
         }
@@ -115,6 +124,9 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
                 }
                 return nil
             }
+            // A live session explains itself; a reason left over from the
+            // previous one would not.
+            defaults.removeObject(forKey: Self.endReasonKey)
             return session
         }
     }
@@ -161,6 +173,31 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
         }
     }
 
+    /// Why the most recent readiness session ended, or `nil` when the last one
+    /// was ended by the user. Readable from the keyboard process, which never
+    /// sees the containing app's in-memory error state (issue #995).
+    public var lastEndReason: InstantDictationReadinessEndReason? {
+        lock.withLock {
+            guard let raw = defaults?.string(forKey: Self.endReasonKey) else { return nil }
+            return InstantDictationReadinessEndReason(rawValue: raw)
+        }
+    }
+
+    /// Records why readiness ended. Passing `nil` clears it, which every
+    /// successful start does, so a stale reason can never explain a live
+    /// session.
+    public func recordEndReason(_ reason: InstantDictationReadinessEndReason?) {
+        guard let defaults else { return }
+        lock.withLock {
+            if let reason {
+                defaults.set(reason.rawValue, forKey: Self.endReasonKey)
+            } else {
+                defaults.removeObject(forKey: Self.endReasonKey)
+            }
+            defaults.synchronize()
+        }
+    }
+
     private var isEnabledUnlocked: Bool {
         defaults?.bool(forKey: Self.enabledKey) ?? false
     }
@@ -187,21 +224,35 @@ public final class KeyboardInstantDictationStore: @unchecked Sendable {
     }
 }
 
-/// A payload-free Darwin notification used only as a wake-up hint. The actual
-/// command and nonce remain in the App Group record and are validated there.
+/// Payload-free Darwin notifications used only as wake-up hints. Darwin
+/// notifications carry no payload at all, so the command, nonce and text stay
+/// in the App Group records and are validated there; these say only "look
+/// again, now".
+///
+/// There are two, one per direction:
+/// * `requestChanged` — extension → app (issue #712).
+/// * `statusChanged` — app → extension (issue #990). Without it the keyboard
+///   learned about a phase change or a new interim only on its next poll tick.
 public enum KeyboardHandoffSignal {
     // Stored as String (Sendable) and bridged to CFString at each use site,
     // so the shared static needs no concurrency escape hatch.
-    private static let requestChangedName = "com.justspeaktoit.keyboardHandoff.requestChanged"
+    private static let requestChangedName = ReleaseTrain.current.namespace(
+        "com.justspeaktoit.keyboardHandoff.requestChanged"
+    )
+    private static let statusChangedName = ReleaseTrain.current.namespace(
+        "com.justspeaktoit.keyboardHandoff.statusChanged"
+    )
 
     public static func postRequestChanged() {
-        CFNotificationCenterPostNotification(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(requestChangedName as CFString),
-            nil,
-            nil,
-            true
-        )
+        post(requestChangedName)
+    }
+
+    /// Posted by the containing app after every write the extension is waiting
+    /// on: a phase transition, an interim update, or a new pickup offer.
+    /// Fire-and-forget — a dropped notification costs only the poll interval,
+    /// which is why the safety-net poll remains.
+    public static func postStatusChanged() {
+        post(statusChangedName)
     }
 
     public static func observeRequestChanges(
@@ -209,16 +260,57 @@ public enum KeyboardHandoffSignal {
     ) -> KeyboardHandoffSignalObservation {
         KeyboardHandoffSignalObservation(name: requestChangedName as CFString, handler: handler)
     }
+
+    public static func observeStatusChanges(
+        _ handler: @escaping @Sendable () -> Void
+    ) -> KeyboardHandoffSignalObservation {
+        KeyboardHandoffSignalObservation(name: statusChangedName as CFString, handler: handler)
+    }
+
+    private static func post(_ name: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(name as CFString),
+            nil,
+            nil,
+            true
+        )
+    }
 }
 
+/// A Darwin notification subscription that delivers **at most one pending
+/// wake-up at a time**, and that can be switched off synchronously.
+///
+/// Both properties matter because a Darwin name is globally postable and
+/// carries no payload. Enqueuing one main-queue block, and one main-actor
+/// task, per notification let any local process build an arbitrary backlog of
+/// stale refreshes on a keyboard extension's main actor simply by posting the
+/// name in a loop — the extension has a hard CPU and memory budget and would
+/// become unresponsive. Coalescing costs nothing in freshness: the handler
+/// re-reads the shared record when it runs, so one delivery after a burst
+/// observes exactly the same state as the last of N deliveries would.
+///
+/// The handler is always invoked on the **main queue**, so a `@MainActor`
+/// consumer can run straight through with `MainActor.assumeIsolated` rather
+/// than allocating a task per notification.
+///
+/// `invalidate()` exists because removing the last reference is not enough. A
+/// wake-up already sitting on the main queue would still run its handler after
+/// a keyboard has been dismissed, and that handler can re-advertise a target
+/// or act on a document the extension no longer owns.
 public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
     private let name: CFString
     private let handler: @Sendable () -> Void
+    private let lock = NSLock()
+    private var isDeliveryPending = false
+    private var isInvalidated = false
+    private var isObserving = false
 
     fileprivate init(name: CFString, handler: @escaping @Sendable () -> Void) {
         self.name = name
         self.handler = handler
         let pointer = Unmanaged.passUnretained(self).toOpaque()
+        isObserving = true
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             pointer,
@@ -227,7 +319,12 @@ public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
                 let observation = Unmanaged<KeyboardHandoffSignalObservation>
                     .fromOpaque(observer)
                     .takeUnretainedValue()
+                guard observation.beginDeliveryIfIdle() else { return }
                 DispatchQueue.main.async {
+                    // Cleared before the handler runs, so a notification posted
+                    // *while* it runs still schedules a fresh delivery and no
+                    // change is missed.
+                    guard observation.endDeliveryAndShouldRun() else { return }
                     observation.handler()
                 }
             },
@@ -237,12 +334,44 @@ public final class KeyboardHandoffSignalObservation: @unchecked Sendable {
         )
     }
 
-    deinit {
+    /// Stops delivering, including any wake-up already queued. Idempotent, and
+    /// safe to call from any thread.
+    public func invalidate() {
+        lock.withLock { isInvalidated = true }
+        removeObserver()
+    }
+
+    private func beginDeliveryIfIdle() -> Bool {
+        lock.withLock {
+            guard !isInvalidated, !isDeliveryPending else { return false }
+            isDeliveryPending = true
+            return true
+        }
+    }
+
+    private func endDeliveryAndShouldRun() -> Bool {
+        lock.withLock {
+            isDeliveryPending = false
+            return !isInvalidated
+        }
+    }
+
+    private func removeObserver() {
+        let shouldRemove = lock.withLock {
+            guard isObserving else { return false }
+            isObserving = false
+            return true
+        }
+        guard shouldRemove else { return }
         CFNotificationCenterRemoveObserver(
             CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(self).toOpaque(),
             CFNotificationName(name),
             nil
         )
+    }
+
+    deinit {
+        removeObserver()
     }
 }

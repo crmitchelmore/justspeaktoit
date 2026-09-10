@@ -19,6 +19,7 @@ enum AutomationIntentError: LocalizedError {
     case unsupportedBatchModel(String)
     case openRouterKeyMissing
     case noPolishOutput
+    case keyboardSessionFinished
 
     var errorDescription: String? {
         switch self {
@@ -35,6 +36,9 @@ enum AutomationIntentError: LocalizedError {
             return "Polish Text needs an OpenRouter API key. Add one in Settings."
         case .noPolishOutput:
             return "The model returned no text."
+        case .keyboardSessionFinished:
+            return "That dictation belongs to the Just Speak keyboard, so it was finished into its own "
+                + "text field. There is no transcript to hand back to this Shortcut."
         }
     }
 }
@@ -58,18 +62,82 @@ struct StopDictationIntent: AudioRecordingIntent {
     /// available for locked Action Button flows.)
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
+    /// The transcript comes back either way; this only redirects the
+    /// side-effects (clipboard, history, background polish).
+    @Parameter(
+        title: "Destination",
+        description: "Where the transcript goes. Leave unset to use the destination from Settings."
+    )
+    var destination: CaptureDestinationAppEnum?
+
+    /// Issue #1015: without this, a "Clipboard and Polish" run hands the
+    /// Shortcut the raw transcript and then quietly replaces the clipboard
+    /// with the polished one, so the chain and the clipboard disagree and the
+    /// user cannot tell which they pasted.
+    ///
+    /// Defaults to `false`, which is exactly what every saved Shortcut did
+    /// before this parameter existed: stop, return the raw text immediately.
+    @Parameter(
+        title: "Wait For Polish",
+        description: """
+            Wait for the polished version and return that instead of the raw transcript. \
+            Only has an effect when your destination polishes; if the polish fails or takes \
+            too long, the raw transcript is returned.
+            """,
+        default: false
+    )
+    var waitForPolish: Bool
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Stop dictation and get text") {
+            \.$destination
+            \.$waitForPolish
+        }
+    }
+
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
+        // The budget is the whole operation's, not the polish wait's alone.
+        // `stopRecording` awaits transcription finalisation, History and the
+        // destination side effects first; starting a full 12-second wait after
+        // a slow stop is how a Wait For Polish shortcut overran the system's
+        // limit and returned nothing at all — not even the raw transcript.
+        let startedAt = ContinuousClock.now
         let service = await TranscriptionRecordingService.shared
         guard await service.isActive else {
             throw AutomationIntentError.noActiveRecording
         }
-        let destination = await AppSettings.shared.hardwareTriggerDestination
-        let result = await service.stopRecording(destination: destination)
+        // A keyboard-owned dictation finishes into its own field (#1002). It
+        // must not be stopped with the hardware destination here: that would
+        // discard the field the keyboard is aiming at and publish a pickup
+        // offer instead. The words went to the field, not to this Shortcut, so
+        // say so rather than returning someone else's transcript or "".
+        if await finishedKeyboardSessionIfActive() {
+            throw AutomationIntentError.keyboardSessionFinished
+        }
+        // Captured before the stop: the polish that follows belongs to this
+        // capture, and the wait must not be satisfied by an earlier one's.
+        let runID = await service.activeCaptureID
+        let resolved = await service.resolvedStopDestination(explicit: destination?.destination)
+        let result = await service.stopRecording(
+            destination: resolved,
+            keyboardDeliverySource: .hardwareTrigger
+        )
+        let polishBudget = AutomationIntentSupport.PolishWait.remaining(
+            requested: AutomationIntentSupport.PolishWait.defaultSeconds,
+            elapsed: MonotonicClock.elapsedSeconds(since: startedAt)
+        )
+        let polished = waitForPolish && polishBudget > 0
+            ? await service.awaitPolishedTranscript(timeout: polishBudget, forRun: runID)
+            : nil
         // A duplicate stop (second Shortcut, Action Button race) intentionally
         // yields an empty no-op result, and a silent or failed recording can
         // finish empty too. Neither is a transcript, so fail the Shortcut
         // instead of handing "" to downstream actions as success.
-        guard let text = AutomationIntentSupport.bestTranscript(raw: result.text, polished: nil) else {
+        guard let text = AutomationIntentSupport.transcriptAfterPolishWait(
+            raw: result.text,
+            polished: polished,
+            didWait: waitForPolish
+        ) else {
             throw AutomationIntentError.emptyTranscript
         }
         return .result(value: text)
@@ -94,64 +162,121 @@ struct TranscribeAudioFileIntent: AppIntent {
     @Parameter(title: "Audio File")
     var file: IntentFile
 
+    /// Both optional and both defaulting to the Settings value, so a Shortcut
+    /// saved before they existed transcribes exactly as it did. The vocabulary
+    /// and the option providers are #1076's, not a second set.
+    @Parameter(
+        title: "Language",
+        description: "Language of the recording, such as en_GB. Leave unset to use the language from Settings.",
+        optionsProvider: CaptureLanguageOptionsProvider()
+    )
+    var language: String?
+
+    @Parameter(
+        title: "Model",
+        description: "Transcription model for this file. Leave unset to use the model from Settings.",
+        optionsProvider: CaptureModelOptionsProvider()
+    )
+    var model: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Transcribe \(\.$file)") {
+            \.$language
+            \.$model
+        }
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        let fileExtension = try AutomationIntentSupport.validatedAudioExtension(
-            forFilename: file.filename
-        )
+        // One judgement for a file however it arrives — picked in Shortcuts,
+        // received from the Share Sheet, or handed over by the Share extension
+        // (issue #1020) — so the same recording gets the same answer and the
+        // same message everywhere.
+        let acceptance = try Self.acceptance(for: file)
         let settings = AppSettings.shared
         await settings.ensureKeysLoaded()
-        let model = settings.batchTranscriptionModel
+        let overrides = try CaptureParameterResolution.resolve(language: language, model: model)
+        let modelID = overrides.modelID ?? settings.batchTranscriptionModel
         // Only models with an iOS upload client may run. A retained direct-
         // provider identifier (for example a Soniox model configured on Mac)
         // would otherwise fall through to OpenRouter with the wrong credential.
-        guard AppSettings.supportedBatchModels.contains(where: { $0.id == model }) else {
-            throw AutomationIntentError.unsupportedBatchModel(model)
+        guard AppSettings.supportedBatchModels.contains(where: { $0.id == modelID }) else {
+            throw AutomationIntentError.unsupportedBatchModel(modelID)
         }
         let temporaryURL = try await Self.stageAudioForTranscription(
             file: file,
-            fileExtension: fileExtension
+            acceptance: acceptance
         )
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
 
         let result = try await IOSBatchTranscriber.transcribeFile(
             at: temporaryURL,
-            model: model,
+            model: modelID,
             apiKey: settings.batchAPIKey,
-            language: settings.preferredModelLanguage,
+            language: overrides.languageIdentifier ?? settings.preferredModelLanguage,
             keywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
         iOSHistoryManager.shared.recordTranscription(
             text: result.text,
-            model: model,
+            model: modelID,
             duration: result.duration
         )
         return .result(value: result.text)
     }
 
-    /// Stages the intent's audio in a uniquely named temporary file, enforcing
-    /// the automation size cap first. Non-isolated async, so the copy runs off
-    /// the main actor and a large payload never stalls the UI; the file-backed
-    /// representation is preferred over materializing `IntentFile.data` in
-    /// memory when available.
+    /// Judges the incoming file before a byte is staged. When Shortcuts hands
+    /// over a URL the file system is asked (so an undownloaded iCloud item and
+    /// an unreadable one report themselves rather than failing later as
+    /// "empty"); when it hands over data only, the size is already known.
+    private static func acceptance(for file: IntentFile) throws -> SharedAudioAcceptance {
+        guard let sourceURL = file.fileURL else {
+            return try SharedAudioImport.evaluate(
+                SharedAudioCandidate(filename: file.filename, byteCount: file.data.count)
+            )
+        }
+        let scoped = sourceURL.startAccessingSecurityScopedResource()
+        defer { if scoped { sourceURL.stopAccessingSecurityScopedResource() } }
+        let inspected = SharedAudioImport.inspect(fileURL: sourceURL)
+        // `IntentFile.filename` is what the user named the recording;
+        // `sourceURL` is often a sandbox temp path with a generated name. Take
+        // the name from the intent and everything else from the file system.
+        return try SharedAudioImport.evaluate(
+            SharedAudioCandidate(
+                filename: file.filename,
+                byteCount: inspected.byteCount,
+                isDownloaded: inspected.isDownloaded,
+                isReadable: inspected.isReadable
+            )
+        )
+    }
+
+    /// Stages the intent's audio in a uniquely named temporary file.
+    ///
+    /// Non-isolated async, so the copy runs off the main actor and a large
+    /// payload never stalls the UI. The file-backed representation is
+    /// preferred and copied in 64 KiB chunks, so peak memory is one chunk
+    /// rather than the whole recording; `IntentFile.data` is only materialized
+    /// when Shortcuts gave no URL at all.
     private static func stageAudioForTranscription(
         file: IntentFile,
-        fileExtension: String
+        acceptance: SharedAudioAcceptance
     ) async throws -> URL {
+        let fileExtension = acceptance.fileExtension
         let temporaryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension(fileExtension)
         if let sourceURL = file.fileURL {
             let scoped = sourceURL.startAccessingSecurityScopedResource()
             defer { if scoped { sourceURL.stopAccessingSecurityScopedResource() } }
-            if let byteCount = try? sourceURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-                try AutomationIntentSupport.validateAudioFileSize(byteCount)
-            }
-            try FileManager.default.copyItem(at: sourceURL, to: temporaryURL)
+            try SharedAudioImport.stage(
+                from: sourceURL,
+                to: temporaryURL,
+                // The accepted size, re-applied while copying: a file that
+                // grows after inspection must not be staged past the limit.
+                expectedByteCount: acceptance.byteCount
+            )
         } else {
-            let data = file.data
-            try AutomationIntentSupport.validateAudioFileSize(data.count)
-            try data.write(to: temporaryURL)
+            try file.data.write(to: temporaryURL)
         }
         return temporaryURL
     }

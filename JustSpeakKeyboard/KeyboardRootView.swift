@@ -21,6 +21,9 @@ struct KeyboardRootView: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            if let chip = pendingPickupChip {
+                pickupChipRow(chip)
+            }
             transcriptStrip
             controlRow
         }
@@ -29,6 +32,56 @@ struct KeyboardRootView: View {
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(uiColor: .systemGroupedBackground))
+    }
+
+    // MARK: - Insert-pending chip (issue #1003)
+
+    private var pendingPickupChip: KeyboardPickupPolicy.Chip? {
+        guard case let .chip(chip) = model.pickupOffering else { return nil }
+        return chip
+    }
+
+    /// One tap inserts; one tap dismisses. Nothing here inserts on its own —
+    /// putting a transcript the user did not just ask for into whichever field
+    /// happens to be focused would corrupt their document.
+    private func pickupChipRow(_ chip: KeyboardPickupPolicy.Chip) -> some View {
+        HStack(spacing: 6) {
+            Button {
+                model.insertPendingPickup()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "text.insert")
+                        .font(.footnote.weight(.semibold))
+                        .accessibilityHidden(true)
+                    Text(chip.label)
+                        .font(.footnote.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+                .padding(.horizontal, 10)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(chip.label)
+            .accessibilityHint("Inserts this transcript at the cursor")
+            .accessibilityIdentifier("keyboardPickupChip")
+
+            Button {
+                model.dismissPendingPickup()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.footnote.weight(.semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss pending transcript")
+            .accessibilityIdentifier("keyboardPickupDismissButton")
+        }
+        .foregroundStyle(.primary)
+        .background(
+            Color.accentColor.opacity(0.16),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 
     // MARK: - Transcript strip
@@ -240,7 +293,10 @@ struct KeyboardRootView: View {
                 return Self.failureCopy(failure)
             }
         case .handoff:
-            return Self.handoffCopy(model.handoff.presentation)
+            return Self.handoffCopy(
+                model.handoff.presentation,
+                endReason: model.handoff.instantEndReason
+            )
         case let .blocked(reason):
             switch reason {
             case .fullAccessRequired:
@@ -267,14 +323,23 @@ struct KeyboardRootView: View {
         }
     }
 
-    private static func handoffCopy(_ presentation: KeyboardHandoffController.Presentation) -> String {
+    private static func handoffCopy(
+        _ presentation: KeyboardHandoffController.Presentation,
+        endReason: InstantDictationReadinessEndReason?
+    ) -> String {
         switch presentation {
         case .idle:
             return "Instant Dictation ready. Tap the mic to speak."
         case .starting:
             return "Connecting to Just Speak…"
         case .waitingForApp:
-            return "Open Just Speak once to reconnect Instant Dictation, then return here."
+            // A recorded terminal reason says which of microphone exhaustion,
+            // session-window expiry or store failure ended readiness; without
+            // one the generic reconnect prompt still stands (issue #995).
+            guard let endReason else {
+                return "Open Just Speak once to reconnect Instant Dictation, then return here."
+            }
+            return endReason.readinessMessage
         case .recording:
             return "Listening via Just Speak…"
         case .transcribing:

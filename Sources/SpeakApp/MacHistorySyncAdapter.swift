@@ -32,6 +32,11 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     /// than clearing its replacement's task handle and dirty flag (issue #870).
     private var saveGeneration: UInt64 = 0
 
+    /// Called for every entry a sync brings down, with whether this Mac had it
+    /// already. Wired to `RemoteTranscriptDelivery` at bootstrap (issue #1007);
+    /// left nil in tests so the adapter stays free of AppKit.
+    var onRemoteEntryArrived: ((SyncableHistoryEntry, Bool) -> Void)?
+
     init(
         historyManager: HistoryManager,
         defaults: UserDefaults = .standard,
@@ -90,6 +95,9 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
     func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
         isApplyingRemoteChange = true
         defer { isApplyingRemoteChange = false }
+        // Reported before the local store is touched, so "new to this Mac" is
+        // decided against what this Mac actually had.
+        onRemoteEntryArrived?(entry, historyManager.item(id: entry.id) == nil)
         if let local = historyManager.item(id: entry.id) {
             if entry.updatedAt > local.updatedAt {
                 await historyManager.update(HistoryItem.fromSyncable(entry))

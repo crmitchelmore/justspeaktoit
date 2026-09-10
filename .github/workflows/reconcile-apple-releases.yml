@@ -1,0 +1,32 @@
+name: Reconcile Apple release delivery
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 * * * *'
+permissions:
+  contents: write
+concurrency:
+  group: apple-release-observation
+  queue: max
+  cancel-in-progress: false
+jobs:
+  observe:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install existing Apple API key
+        env:
+          KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          umask 077
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          printf '%s' "$KEY_DATA" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_S747NJ9DZY.p8"
+      - name: Reconcile beta processing and public Stable boundaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: ruby scripts/reconcile-apple-releases.rb

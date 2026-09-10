@@ -1,4 +1,4 @@
-name: Laptop runner
+name: Laptop runner native CI
 on:
   push:
     branches: [codex/laptop-runner]
@@ -6,23 +6,34 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: laptop-native-ci
+  cancel-in-progress: false
 jobs:
-  verify:
-    if: github.actor == 'crmitchelmore' || github.actor == 'bravostation'
+  native:
+    name: Reviewed Alpha Intel build and tests
     runs-on: [macbook-intel-local, macOS, X64]
-    timeout-minutes: 5
+    timeout-minutes: 60
     steps:
-      - name: Verify laptop and shared build slot
-        shell: bash
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: a43520a51e4b0a9dbcfd40fa5b0222645b3101f6
+          persist-credentials: false
+      - name: Verify native toolchain and reviewed source
         run: |
-          set -euo pipefail
-          test "$RUNNER_ARCH" = X64
+          test "$(git rev-parse HEAD)" = a43520a51e4b0a9dbcfd40fa5b0222645b3101f6
           test "$(uname -m)" = x86_64
-          echo "Runner: $RUNNER_NAME"
+          xcodebuild -checkFirstLaunchStatus
           swift --version
-          git --version
-          test "$CMAKE_BUILD_PARALLEL_LEVEL" = 9
-          test "$MAKEFLAGS" = -j9
-          echo "Holding shared slot for 20 seconds"
-          sleep 20
-          echo "Laptop runner verified"
+          node --version
+      - name: Resolve pinned dependencies
+        run: swift package resolve --force-resolved-versions
+      - name: Build Intel app
+        run: swift build --disable-automatic-resolution
+      - name: Verify brand assets
+        run: node --test scripts/tests/brand-assets.test.mjs
+      - name: Test with disposable Keychain
+        run: python3 scripts/with-test-keychain.py swift test --disable-automatic-resolution
+      - name: Verify lockfile unchanged
+        if: always()
+        run: git diff --exit-code Package.resolved

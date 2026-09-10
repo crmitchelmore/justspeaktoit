@@ -27,6 +27,14 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Error that ended the most recent session mid-recording. Published so the
     /// app can surface it on next foreground instead of silently losing audio.
     @Published public private(set) var lastSessionError: Error?
+    /// Identifies the *publication* of `lastSessionError`, not its text.
+    ///
+    /// Two failures can carry identical words — a second capture link refused
+    /// for the same reason is the obvious case — and a presenter that
+    /// de-duplicates on the message would swallow the later one, because there
+    /// is no intervening `nil` to tell the two apart. This changes on every
+    /// publication, so it can.
+    @Published public private(set) var sessionErrorToken: UUID?
     /// Non-nil when the session silently fell back to on-device transcription
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
@@ -82,6 +90,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// its `x-error` callback; this is the half the user can see.
     public func reportCaptureFailure(_ failure: Error) {
         lastSessionError = failure
+        sessionErrorToken = UUID()
     }
 
     /// Starts a headless recording session with Live Activity.
@@ -116,6 +125,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
 
         lastSessionError = nil
+        sessionErrorToken = nil
         providerFallbackNotice = nil
         // A model the catalogue only lists for batch transcription cannot run in
         // streaming mode, so an explicit `model=` decides the mode rather than
@@ -453,6 +463,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         // publish the error so the app can surface it on next foreground.
         guard lifecycle.state == .recording else { return }
         lastSessionError = error
+        sessionErrorToken = UUID()
         Task { [weak self] in
             guard let self, self.isRunning else { return }
             await self.stopRecording(

@@ -77,7 +77,18 @@ public enum CaptureCommandRunner {
             modelOverride: link.modelIdentifier,
             languageOverride: link.languageIdentifier
         )
-        if case .failed(let surfaced) = outcome {
+        switch outcome {
+        case .started:
+            break
+        case .cancelled:
+            // A stop retired this startup, which is the user getting what they
+            // asked for. `x-cancel` is exactly this case in the
+            // x-callback-url convention, and no alert is raised: telling
+            // someone their cancellation failed is the contradiction the
+            // cancellation policy exists to avoid.
+            self.open(link.callback?.cancelURL, reason: "x-cancel")
+            return false
+        case .failed(let surfaced):
             // `notifyUser: !surfaced`: when the start already published the
             // real reason it failed, a generic `recordingFailed` on top of it
             // would be a second alert for one failure — and the vaguer of the
@@ -224,6 +235,13 @@ public enum CaptureCommandRunner {
     /// failure.
     enum StartOutcome: Equatable {
         case started
+        /// The start was cancelled — a stop, or a second press while start-up
+        /// was still in flight. The user asked for this; it is not a failure
+        /// and must not be reported as one.
+        case cancelled
+        /// Nothing is recording. `surfaced` says whether the user has already
+        /// been shown the real reason, so nothing downstream stacks a vaguer
+        /// alert on top of it.
         case failed(surfaced: Bool)
 
         var didStart: Bool { self == .started }
@@ -254,7 +272,14 @@ public enum CaptureCommandRunner {
             return .started
         } catch {
             startedDestination = nil
-            return .failed(surfaced: surfaceStartFailure(error, service: service))
+            switch surfaceStartFailure(error, service: service) {
+            case .logOnly(.cancelled):
+                return .cancelled
+            case .logOnly:
+                return .failed(surfaced: false)
+            case .surface:
+                return .failed(surfaced: true)
+            }
         }
     }
 
@@ -272,14 +297,17 @@ public enum CaptureCommandRunner {
     /// - Parameter publish: the sink for a terminal failure; defaults to the
     ///   service's existing published error, which is the same alert path a
     ///   refused capture link and a failed mid-session recording already use.
-    /// - Returns: whether the user was told.
+    /// - Returns: what the policy decided, so callers can tell "the user has
+    ///   been told the real reason" from "this is deliberately silent" —
+    ///   a cancelled start in particular must not have a generic failure
+    ///   reported over the top of it.
     @discardableResult
     static func surfaceStartFailure(
         _ error: Error,
         laterCaptureInFlight: Bool,
         microphoneOwnedElsewhere: Bool,
         publish: (Error) -> Void
-    ) -> Bool {
+    ) -> CaptureStartFailurePolicy.Disposition {
         SpeakLogger.logError(
             error,
             context: "Capture command start",
@@ -296,17 +324,19 @@ public enum CaptureCommandRunner {
             SpeakLogger.transcription.info(
                 "Capture start failure not shown: \(reason.rawValue, privacy: .public)"
             )
-            return false
-        case .surface:
-            publish(error)
-            return true
+        case .surface(let message):
+            // The policy's message, not the original error: that is where a
+            // blank or padded `localizedDescription` has already been replaced
+            // by the fallback or trimmed. The original is in the log above.
+            publish(CaptureStartFailurePolicy.PresentedFailure(message: message))
         }
+        return disposition
     }
 
     private static func surfaceStartFailure(
         _ error: Error,
         service: TranscriptionRecordingService
-    ) -> Bool {
+    ) -> CaptureStartFailurePolicy.Disposition {
         self.surfaceStartFailure(
             error,
             // Asked *after* the failure: a capture active now is a newer run

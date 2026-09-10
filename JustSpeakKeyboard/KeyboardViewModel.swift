@@ -164,7 +164,10 @@ final class KeyboardViewModel: ObservableObject {
     func activate(
         hasFullAccess: Bool,
         documentIdentifier: UUID,
-        isSecureField: Bool = false,
+        // No default: "is this a password field?" is never a question the
+        // caller may leave unanswered, and the safe answer to "unknown" is
+        // `true` (see `KeyboardViewController.documentIsSecure`).
+        isSecureField: Bool,
         activeInputModeCount: Int = 0,
         handBack: (() -> Void)? = nil,
         insertText: @escaping (String) -> Void,
@@ -248,9 +251,34 @@ final class KeyboardViewModel: ObservableObject {
         documentSession = nil
     }
 
-    func updateDocumentContext(documentIdentifier: UUID, selectionChanged: Bool) {
+    /// Every host callback carries the *current* secure-entry answer, not the
+    /// one that was true when the keyboard appeared. A field can turn into a
+    /// password field — or focus can move to one — without the keyboard being
+    /// dismissed, and the whole delivery surface has to follow that.
+    func updateDocumentContext(
+        documentIdentifier: UUID,
+        selectionChanged: Bool,
+        isSecureField: Bool
+    ) {
         let changedDocument = currentDocumentIdentifier != documentIdentifier
+        let becameSecure = isSecureField && !self.isSecureField
         currentDocumentIdentifier = documentIdentifier
+        self.isSecureField = isSecureField
+        if becameSecure {
+            // Nothing may keep aiming at a field that is now collecting a
+            // secret: withdraw the advertisement, drop the chip, and abandon
+            // any capture that was going to write into it.
+            deliveryStore.clearTarget()
+            pickupOffering = .none
+            switch mode {
+            case .direct:
+                if machine.isCapturing { dispatch(.targetChanged) }
+            case .handoff:
+                if handoff.isInFlight { handoff.cancel() }
+            case .blocked:
+                break
+            }
+        }
         defer { refreshDelivery() }
         switch mode {
         case .direct:
@@ -493,30 +521,47 @@ final class KeyboardViewModel: ObservableObject {
             pickupOffering = .none
             return
         }
+        guard !isSecureField else {
+            // Not merely "do not advertise": actively withdraw, because the
+            // advertisement outlives its last refresh by design and the app
+            // would otherwise still see an open target for a password field.
+            deliveryStore.clearTarget()
+            pickupOffering = .none
+            return
+        }
+        // Preferences are app-owned and the user can change them while this
+        // keyboard stays on screen. Re-reading them here is one small App Group
+        // read per tick, and it stops hand-back or auto-pickup decisions
+        // applying a choice the user has already superseded.
+        deliveryPreferences = deliveryStore.preferences()
         publishTargetIfPossible()
         evaluatePickup()
     }
 
     private func publishTargetIfPossible() {
-        guard let currentDocumentIdentifier else { return }
+        guard let currentDocumentIdentifier, !isSecureField else { return }
         deliveryStore.publishTarget(
             documentIdentifier: currentDocumentIdentifier,
-            isSecureField: isSecureField
+            isSecureField: false
         )
     }
 
+    /// The decision, the text, and the claimed identifier all come from **one**
+    /// snapshot of the offer. Reading the store twice let the app replace the
+    /// offer in between, so the keyboard could insert offer A's text while
+    /// claiming — and so silently burning — offer B.
     private func evaluatePickup() {
+        let offer = deliveryStore.pendingOffer()
         let offering = KeyboardPickupPolicy.offering(
-            offer: deliveryStore.pendingOffer(),
+            offer: offer,
             claim: deliveryStore.claim(),
             currentDocumentIdentifier: currentDocumentIdentifier,
             isSecureField: isSecureField,
             handoffInFlight: handoff.isInFlight || machine.isCapturing,
             preferences: deliveryPreferences
         )
-        if case let .autoInsert(text) = offering,
-           let offerID = deliveryStore.pendingOffer()?.offerID {
-            deliver(text, offerID: offerID)
+        if case let .autoInsert(text) = offering, let offer {
+            deliver(text, offerID: offer.offerID)
             return
         }
         pickupOffering = offering

@@ -19,6 +19,7 @@ enum AutomationIntentError: LocalizedError {
     case unsupportedBatchModel(String)
     case openRouterKeyMissing
     case noPolishOutput
+    case keyboardSessionFinished
 
     var errorDescription: String? {
         switch self {
@@ -35,6 +36,9 @@ enum AutomationIntentError: LocalizedError {
             return "Polish Text needs an OpenRouter API key. Add one in Settings."
         case .noPolishOutput:
             return "The model returned no text."
+        case .keyboardSessionFinished:
+            return "That dictation belongs to the Just Speak keyboard, so it was finished into its own "
+                + "text field. There is no transcript to hand back to this Shortcut."
         }
     }
 }
@@ -62,6 +66,14 @@ struct StopDictationIntent: AudioRecordingIntent {
         let service = await TranscriptionRecordingService.shared
         guard await service.isActive else {
             throw AutomationIntentError.noActiveRecording
+        }
+        // A keyboard-owned dictation finishes into its own field (#1002). It
+        // must not be stopped with the hardware destination here: that would
+        // discard the field the keyboard is aiming at and publish a pickup
+        // offer instead. The words went to the field, not to this Shortcut, so
+        // say so rather than returning someone else's transcript or "".
+        if await finishedKeyboardSessionIfActive() {
+            throw AutomationIntentError.keyboardSessionFinished
         }
         let destination = await AppSettings.shared.hardwareTriggerDestination
         let result = await service.stopRecording(destination: destination, keyboardDeliverySource: .hardwareTrigger)

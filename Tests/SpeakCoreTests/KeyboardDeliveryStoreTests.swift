@@ -71,7 +71,7 @@ final class KeyboardDeliveryStoreTests: XCTestCase {
         XCTAssertNil(app.openTarget(now: now))
     }
 
-    func testOffer_agesOutAndItsClaimSurvivesUntilTheNextOfferReplacesIt() throws {
+    func testOffer_agesOutAndAStaleClaimDoesNotSuppressAReplacement() throws {
         let offer = try XCTUnwrap(app.publishOffer(sampleOffer()))
         XCTAssertEqual(keyboard.pendingOffer(now: now)?.offerID, offer.offerID)
         XCTAssertNil(
@@ -81,10 +81,42 @@ final class KeyboardDeliveryStoreTests: XCTestCase {
         keyboard.claimOffer(offer.offerID, now: now)
         XCTAssertEqual(app.claim()?.offerID, offer.offerID)
 
-        // A fresh offer clears the stale claim, so the keyboard can take it.
+        // Publishing does not touch the extension-owned claim key. The claim
+        // names the offer it settled, so the replacement is still takeable —
+        // suppression is identifier-scoped, never "a claim exists".
         let next = try XCTUnwrap(app.publishOffer(sampleOffer()))
-        XCTAssertNil(keyboard.claim())
         XCTAssertEqual(keyboard.pendingOffer(now: now)?.offerID, next.offerID)
+        XCTAssertNotEqual(keyboard.claim()?.offerID, next.offerID)
+    }
+
+    /// The app must not erase a claim the keyboard wrote for an offer that had
+    /// already become visible. Deleting the claim key on publish made this
+    /// interleaving lose the claim, so the next poll re-inserted the same
+    /// transcript into the user's field a second time.
+    func testPublishingAReplacement_cannotEraseAClaimWrittenForTheVisibleOffer() throws {
+        let first = try XCTUnwrap(app.publishOffer(sampleOffer()))
+        keyboard.claimOffer(first.offerID, now: now)
+
+        // The keyboard observes the replacement and claims it *before* the
+        // publishing app has finished its own write sequence.
+        let replacement = sampleOffer()
+        app.publishOffer(replacement)
+        keyboard.claimOffer(replacement.offerID, now: now)
+        app.publishOffer(replacement)
+
+        XCTAssertEqual(app.claim()?.offerID, replacement.offerID)
+        XCTAssertEqual(
+            KeyboardPickupPolicy.offering(
+                offer: keyboard.pendingOffer(now: now),
+                claim: keyboard.claim(),
+                currentDocumentIdentifier: documentA,
+                isSecureField: false,
+                handoffInFlight: false,
+                preferences: .default,
+                now: now
+            ),
+            .none
+        )
     }
 
     func testPreferences_defaultToHandBackOnAndAutoInsertOff() {

@@ -254,7 +254,7 @@ final class KeyboardViewModelTests: XCTestCase {
 
         document.moveCursor(characterOffset: 3)
         let textAtMutation = document.text
-        model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: true)
+        model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: true, isSecureField: false)
         engine.emit(.hypothesis("revised words"), for: runID)
 
         XCTAssertEqual(model.directState, .finished)
@@ -274,7 +274,7 @@ final class KeyboardViewModelTests: XCTestCase {
 
         document.after = " external text"
         let textAtMutation = document.text
-        model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false, isSecureField: false)
         engine.emit(.hypothesis("revised words"), for: runID)
 
         XCTAssertEqual(document.text, textAtMutation)
@@ -427,7 +427,11 @@ final class KeyboardViewModelTests: XCTestCase {
         engine.emit(.hypothesis(" "), for: runID)
         let textAtFieldChange = document.text
 
-        model.updateDocumentContext(documentIdentifier: Self.otherDocumentID, selectionChanged: false)
+        model.updateDocumentContext(
+            documentIdentifier: Self.otherDocumentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
 
         XCTAssertEqual(document.text, textAtFieldChange)
         XCTAssertEqual(model.directState, .failed(.targetChanged))
@@ -476,6 +480,55 @@ final class KeyboardViewModelTests: XCTestCase {
         XCTAssertNil(harness.deliveryStore.openTarget())
     }
 
+    /// The dangerous case is not "the keyboard appeared in a password field",
+    /// it is "focus moved into one while the keyboard stayed up". Nothing may
+    /// survive that transition: no advertisement, no chip, no auto-insert.
+    func testFocusMovingIntoASecureField_withdrawsTheTargetAndDropsTheOffer() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "")
+        activate(harness.model, document: document)
+        harness.deliveryStore.publishOffer(offer(mode: .latePickup, origin: nil, text: "hunter2"))
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
+        guard case .chip = harness.model.pickupOffering else {
+            return XCTFail("a late pickup should wait as a chip in a normal field")
+        }
+
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.otherDocumentID,
+            selectionChanged: false,
+            isSecureField: true
+        )
+
+        XCTAssertNil(harness.deliveryStore.openTarget())
+        XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
+        XCTAssertEqual(document.text, "")
+    }
+
+    /// A targeted offer aimed at this very document still must not auto-insert
+    /// once the document has turned into a secure field.
+    func testTargetedInsert_isRefusedOnceTheFieldTurnsSecure() {
+        let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
+        let document = DocumentProxy(before: "")
+        activate(harness.model, document: document)
+        harness.deliveryStore.publishOffer(
+            offer(mode: .targetedInsert, origin: Self.documentID, text: "secret words")
+        )
+
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: true
+        )
+
+        XCTAssertEqual(document.text, "")
+        XCTAssertNil(harness.deliveryStore.claim())
+        XCTAssertNil(harness.deliveryStore.openTarget())
+    }
+
     func testTargetedInsert_landsInTheFieldItWasAimedAtAndIsClaimedOnce() {
         let harness = makeHarness(engine: FakeEngine(), policy: .disabled)
         let document = DocumentProxy(before: "Hi ")
@@ -484,12 +537,20 @@ final class KeyboardViewModelTests: XCTestCase {
             offer(mode: .targetedInsert, origin: Self.documentID, text: "there")
         )
 
-        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
 
         XCTAssertEqual(document.text, "Hi there")
         XCTAssertEqual(harness.deliveryStore.claim()?.offerID, harness.deliveryStore.pendingOffer()?.offerID)
         // A second pass must not insert it again.
-        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
         XCTAssertEqual(document.text, "Hi there")
     }
 
@@ -501,7 +562,7 @@ final class KeyboardViewModelTests: XCTestCase {
             offer(mode: .targetedInsert, origin: Self.documentID, text: "not for you")
         )
 
-        harness.model.updateDocumentContext(documentIdentifier: UUID(), selectionChanged: false)
+        harness.model.updateDocumentContext(documentIdentifier: UUID(), selectionChanged: false, isSecureField: false)
 
         XCTAssertEqual(document.text, "Other field")
         XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
@@ -514,7 +575,11 @@ final class KeyboardViewModelTests: XCTestCase {
         activate(harness.model, document: document)
         harness.deliveryStore.publishOffer(offer(mode: .latePickup, origin: nil, text: "Remind Sam"))
 
-        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
 
         guard case .chip = harness.model.pickupOffering else {
             return XCTFail("a late pickup should wait as a chip")
@@ -531,12 +596,20 @@ final class KeyboardViewModelTests: XCTestCase {
         let document = DocumentProxy(before: "")
         activate(harness.model, document: document)
         let published = harness.deliveryStore.publishOffer(offer(mode: .latePickup, origin: nil))
-        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
 
         harness.model.dismissPendingPickup()
 
         XCTAssertEqual(harness.deliveryStore.claim()?.offerID, published?.offerID)
-        harness.model.updateDocumentContext(documentIdentifier: Self.documentID, selectionChanged: false)
+        harness.model.updateDocumentContext(
+            documentIdentifier: Self.documentID,
+            selectionChanged: false,
+            isSecureField: false
+        )
         XCTAssertEqual(harness.model.pickupOffering, KeyboardPickupPolicy.Offering.none)
         XCTAssertEqual(document.text, "")
     }
@@ -549,6 +622,7 @@ final class KeyboardViewModelTests: XCTestCase {
         harness.model.activate(
             hasFullAccess: false,
             documentIdentifier: Self.documentID,
+            isSecureField: false,
             insertText: document.insertText,
             deleteBackward: document.deleteBackward,
             contextBeforeInput: { document.contextBeforeInput },
@@ -578,7 +652,8 @@ final class KeyboardViewModelTests: XCTestCase {
 
             harness.model.updateDocumentContext(
                 documentIdentifier: Self.documentID,
-                selectionChanged: false
+                selectionChanged: false,
+                isSecureField: false
             )
 
             XCTAssertEqual(document.text, "done")

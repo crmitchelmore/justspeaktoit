@@ -23,6 +23,17 @@ public enum KeyboardSessionRouting {
         case proceed
     }
 
+    /// How long a `.requested` handoff may swallow a hardware trigger.
+    ///
+    /// The suppression exists to avoid racing an app start-up that is already
+    /// under way, and a start-up either progresses past `.requested` or fails
+    /// within a couple of seconds. The request itself lives for three minutes,
+    /// though, so keying suppression to its expiry meant a request the app
+    /// never picked up (app not launched, start-up failed silently) left every
+    /// hardware press succeeding without starting or stopping anything for
+    /// three minutes. Past this grace the press gets its ordinary behaviour.
+    public static let startupGrace: TimeInterval = 5
+
     public static func decision(
         handoff: KeyboardHandoffRecord?,
         now: Date = Date()
@@ -30,6 +41,9 @@ public enum KeyboardSessionRouting {
         guard let handoff, handoff.expiresAt > now else { return .proceed }
         switch handoff.phase {
         case .requested:
+            guard now.timeIntervalSince(handoff.updatedAt) <= startupGrace else {
+                return .proceed
+            }
             return .keyboardSessionStarting
         case .recording, .finishRequested, .transcribing:
             // `requestFinish` is idempotent, so repeating it while the app is

@@ -689,6 +689,13 @@ enum WireUp {
       paste: { text in
         SmartTextOutput(permissionsManager: environment.permissions, appSettings: settings)
           .output(text: text, target: nil)
+      },
+      // A notification stays actionable across a relaunch; its identifier is
+      // the History entry id, so the durable local entry answers the action
+      // even when the posting process is long gone.
+      transcriptForEntry: { [weak history = environment.history] entryID in
+        guard let item = history?.items.first(where: { $0.id == entryID }) else { return nil }
+        return item.postProcessedTranscription ?? item.rawTranscription
       }
     )
     environment.remoteTranscriptDelivery = remoteTranscripts

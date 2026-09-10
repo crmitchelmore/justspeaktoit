@@ -53,9 +53,16 @@ private func stopResultDialog(
 /// (issue #1002).
 ///
 /// Returns `true` when the press was consumed by the keyboard session.
+///
+/// Every supported stop entry point must run this **before** its own generic
+/// stop: `StopTranscriptionRecordingIntent`, the Action Button toggle, the
+/// Control Center toggle's off position, and `StopDictationIntent`. Stopping
+/// the service directly would finalise a keyboard-owned capture with the
+/// *hardware* destination and publish a pickup offer, instead of completing
+/// the nonce-scoped handoff into the field the keyboard opened it for.
 @available(iOS 18, *)
 @MainActor
-private func finishedKeyboardSessionIfActive() -> Bool {
+func finishedKeyboardSessionIfActive() -> Bool {
     switch KeyboardDeliveryPublisher.sessionRouting() {
     case let .finishKeyboardSession(requestID):
         return KeyboardInstantDictationCoordinator.shared.finishKeyboardSession(requestID: requestID)
@@ -465,6 +472,12 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
                 entry: entry
             )
         case .stop:
+            // A keyboard-owned dictation finishes into its own field (#1002);
+            // only a capture nobody else owns falls through to the generic
+            // hardware-destination stop.
+            if await finishedKeyboardSessionIfActive() {
+                return .result()
+            }
             // The Control itself takes no parameters (a configurable Control
             // would change what an already-placed one means), but a Control
             // stop still honours the override the start carried.

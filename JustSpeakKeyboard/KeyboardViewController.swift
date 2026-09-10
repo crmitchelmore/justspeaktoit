@@ -50,9 +50,7 @@ final class KeyboardViewController: UIInputViewController {
         model.activate(
             hasFullAccess: hasFullAccess,
             documentIdentifier: textDocumentProxy.documentIdentifier,
-            // Optional on `UITextInputMode`'s traits; an unreported trait is
-            // treated as "not secure", matching what the host actually shows.
-            isSecureField: textDocumentProxy.isSecureTextEntry ?? false,
+            isSecureField: documentIsSecure,
             // `advanceToNextInputMode()` moves to the *next* enabled keyboard;
             // the model only calls back when exactly two are enabled, where
             // "next" is provably the one the user was typing on (issue #1005).
@@ -105,11 +103,30 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    /// Whether the field the proxy currently addresses collects a secret.
+    ///
+    /// `isSecureTextEntry` is an optional trait: hosts that never set it, and
+    /// proxies the system has not populated yet, report `nil`. An unknown
+    /// answer is treated as **secure**, because the two failure modes are not
+    /// symmetric — guessing "not secure" can push a transcript into a password
+    /// field, which is unrecoverable, while guessing "secure" only withholds
+    /// delivery for that field, leaving the transcript in History and on the
+    /// clipboard where the user can still reach it.
+    ///
+    /// It is read fresh on every host callback rather than latched at
+    /// appearance: focus can move from a normal field to a password field, and
+    /// a field can flip `isSecureTextEntry` under a "show password" toggle,
+    /// without the keyboard ever being dismissed.
+    private var documentIsSecure: Bool {
+        textDocumentProxy.isSecureTextEntry ?? true
+    }
+
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         model.updateDocumentContext(
             documentIdentifier: textDocumentProxy.documentIdentifier,
-            selectionChanged: false
+            selectionChanged: false,
+            isSecureField: documentIsSecure
         )
     }
 
@@ -117,7 +134,8 @@ final class KeyboardViewController: UIInputViewController {
         super.selectionDidChange(textInput)
         model.updateDocumentContext(
             documentIdentifier: textDocumentProxy.documentIdentifier,
-            selectionChanged: true
+            selectionChanged: true,
+            isSecureField: documentIsSecure
         )
     }
 

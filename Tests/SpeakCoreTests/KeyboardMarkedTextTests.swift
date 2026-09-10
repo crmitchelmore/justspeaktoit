@@ -74,12 +74,19 @@ final class KeyboardMarkedTextTests: XCTestCase {
         XCTAssertEqual(session.finish("Hello there."), .none)
     }
 
-    func testDocumentChange_clearsAndStopsStreamingForGood() {
+    /// The one abandonment that must issue no proxy call. The extension only
+    /// learns the document changed once `textDocumentProxy` already addresses
+    /// the new field, so clearing here would run `setMarkedText("")` and
+    /// `unmarkText()` against a document this session never wrote to — erasing
+    /// or force-committing whatever composition the user has there.
+    func testDocumentChange_stopsStreamingWithoutReachingThroughTheNewProxy() {
         var session = streaming()
         _ = session.interim("hello")
-        XCTAssertEqual(session.documentChanged(), .clear)
+        XCTAssertEqual(session.documentChanged(), .none)
+        XCTAssertNil(session.outstanding)
         XCTAssertFalse(session.isStreaming)
-        // The run does not resume streaming into the new field.
+        // The run does not resume streaming into the new field, and the final
+        // transcript arrives as a plain insertion.
         XCTAssertEqual(session.interim("hello again"), .none)
         XCTAssertEqual(session.finish("Hello again."), .none)
     }
@@ -93,6 +100,9 @@ final class KeyboardMarkedTextTests: XCTestCase {
     }
 
     func testEveryEnding_isIdempotent() {
+        // `documentChanged` is the exception on the *first* action only: it
+        // never touches the proxy at all. Every ending is still terminal, and
+        // none of them may act twice.
         for ending in ["abandon", "documentChanged", "caretMoved"] {
             var session = streaming()
             _ = session.interim("hello")
@@ -109,8 +119,10 @@ final class KeyboardMarkedTextTests: XCTestCase {
                 first = session.abandon()
                 second = session.abandon()
             }
-            XCTAssertEqual(first, .clear, ending)
+            XCTAssertEqual(first, ending == "documentChanged" ? .none : .clear, ending)
             XCTAssertEqual(second, .none, "\(ending) must not clear twice")
+            XCTAssertNil(session.outstanding, ending)
+            XCTAssertFalse(session.isStreaming, ending)
         }
     }
 

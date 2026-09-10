@@ -99,11 +99,22 @@ public struct KeyboardMarkedTextSession: Equatable, Sendable {
         return .clear
     }
 
-    /// The keyboard moved to a different text document. The marked range
-    /// belongs to a field we can no longer address, so nothing is committed
-    /// there and streaming stops for good.
+    /// The keyboard moved to a different text document.
+    ///
+    /// Returns `.none` — deliberately, and this is the one abandonment path
+    /// that issues no proxy call at all. By the time the extension learns the
+    /// document changed, `textDocumentProxy` already addresses the **new**
+    /// field, so a `.clear` here would run `setMarkedText("")` and
+    /// `unmarkText()` against a document this session never wrote to: at best
+    /// a no-op, at worst it erases or force-commits the user's own in-progress
+    /// composition in the field they just moved to. The old provisional range
+    /// is unreachable from here either way — the host resolves it when the
+    /// field resigns first responder — so the correct action is to forget the
+    /// ledger and stop streaming, not to reach through the wrong proxy.
     public mutating func documentChanged() -> Action {
-        abandon()
+        isStreaming = false
+        outstanding = nil
+        return .none
     }
 
     /// The caret moved for a reason the keyboard did not cause. UIKit's own

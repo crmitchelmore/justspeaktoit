@@ -22,6 +22,18 @@ public enum RemoteTranscriptArrival {
     /// How new an arriving capture has to be to be worth a notification.
     public static let freshnessWindow: TimeInterval = 60
 
+    /// How far ahead of this Mac's clock an entry may be dated and still be
+    /// treated as a live arrival.
+    ///
+    /// The age check alone accepted *every* negative age, so an entry dated
+    /// arbitrarily far in the future passed the backlog guard permanently.
+    /// Anything with write access to the account's private history zone could
+    /// label such an entry `ios` and have it notify — or, with auto-paste
+    /// enabled, paste into whatever the user has focused — on this and every
+    /// later sync. Real devices disagree by seconds, so a bound of one
+    /// freshness window covers honest clock skew and nothing else.
+    public static let futureSkewAllowance: TimeInterval = freshnessWindow
+
     public struct Input: Equatable, Sendable {
         public let originPlatform: String
         public let createdAt: Date
@@ -51,6 +63,8 @@ public enum RemoteTranscriptArrival {
         case notAPhoneOrWatchCapture
         case alreadyKnown
         case tooOld
+        /// Dated further into the future than clock skew can explain.
+        case datedInTheFuture
     }
 
     public struct Alert: Equatable, Sendable {
@@ -82,9 +96,9 @@ public enum RemoteTranscriptArrival {
             return .ignore(.notAPhoneOrWatchCapture)
         }
         guard input.isNewToThisMac else { return .ignore(.alreadyKnown) }
-        guard now.timeIntervalSince(input.createdAt) <= freshnessWindow else {
-            return .ignore(.tooOld)
-        }
+        let age = now.timeIntervalSince(input.createdAt)
+        guard age <= freshnessWindow else { return .ignore(.tooOld) }
+        guard age >= -futureSkewAllowance else { return .ignore(.datedInTheFuture) }
 
         let alert = Alert(
             title: "New from \(deviceName(for: input.originPlatform))",

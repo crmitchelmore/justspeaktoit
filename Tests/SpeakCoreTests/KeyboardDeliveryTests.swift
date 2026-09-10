@@ -38,6 +38,27 @@ final class KeyboardDeliveryTests: XCTestCase {
         )
     }
 
+    /// A request the app never progressed must not keep swallowing presses for
+    /// the whole three-minute request lifetime; after the start-up grace the
+    /// trigger gets its ordinary start/stop behaviour back.
+    func testKeyboardRequestNobodyProgressed_stopsSwallowingTriggersAfterTheGrace() {
+        let record = handoff(phase: .requested, expiresAt: now.addingTimeInterval(3 * 60))
+        XCTAssertEqual(
+            KeyboardSessionRouting.decision(
+                handoff: record,
+                now: now.addingTimeInterval(KeyboardSessionRouting.startupGrace - 0.5)
+            ),
+            .keyboardSessionStarting
+        )
+        XCTAssertEqual(
+            KeyboardSessionRouting.decision(
+                handoff: record,
+                now: now.addingTimeInterval(KeyboardSessionRouting.startupGrace + 0.5)
+            ),
+            .proceed
+        )
+    }
+
     func testSettledOrExpiredKeyboardSession_hardwareTriggerProceedsUnchanged() {
         for phase in [KeyboardHandoffRecord.Phase.completed, .cancelled, .failed] {
             XCTAssertEqual(

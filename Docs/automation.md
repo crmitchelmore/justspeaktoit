@@ -31,6 +31,7 @@ configured in the app — nothing is duplicated.
 | --- | --- | --- | --- |
 | Start Dictation | Yes | Yes (as "Start Recording" / "Toggle Recording", iOS 18+) | — |
 | Stop Dictation ("Stop Dictation and Get Text" on iOS, iOS 18+) | Yes | Yes | Final transcript text |
+| Dictate (iOS 18+) | — | Yes | Final transcript text |
 | Transcribe Audio File | Yes | Yes | Transcript text |
 | Get Last Transcription | Yes | Yes | Most recent history entry (polished text preferred) |
 | Polish Text | Yes | Yes | Cleaned-up (or custom-prompt-processed) text |
@@ -46,6 +47,17 @@ Notes:
   recording). The existing "Start Recording" / "Toggle Recording" /
   "Stop Recording" actions remain; "Stop Dictation and Get Text" is the
   variant that hands the transcript to the next action in your shortcut.
+- **Dictate (iOS)** is the one-shot version: it records, finishes on its own
+  once you stop speaking, and returns the transcript — one trigger instead of
+  the Start / "Stop Dictation and Get Text" pair. *Pause Length* is how long
+  silence must hold before it finishes (2–8 seconds, 3 by default; shorter
+  finishes sooner but is likelier to cut you off mid-thought). *Maximum Length*
+  is the hard stop whatever happens (5–60 seconds, 25 by default). Values above
+  25 may not return before the system ends the action, because below iOS 27
+  there is no long-running-intent API to host the recording in. Destination,
+  language, model and source work as they do on the other recording actions.
+  A Dictate that arrives while something is already recording is refused rather
+  than opening a second microphone.
 - **Transcribe Audio File** accepts common audio containers (m4a, mp3, wav,
   aac, flac, ogg, opus, aiff, caf, mp4, webm). On macOS it uses your configured
   file-transcription provider; on iOS it uses your batch model. On both
@@ -88,9 +100,22 @@ system-wide push-to-talk that ends with the transcript on your clipboard.
 
 **Action Button dictation that lands in a draft (iOS)**
 
-1. Assign the Action Button to a shortcut containing **Start Recording**
-2. A second shortcut runs **Stop Dictation and Get Text** → **New Draft**
-   (Drafts, Notes, Mail — anything that accepts text input)
+1. Assign the Action Button to a shortcut containing **Dictate**
+2. Follow it with **New Draft** (Drafts, Notes, Mail — anything that accepts
+   text input)
+
+One press, and the shortcut finishes on its own once you stop talking. The
+older two-shortcut form still works: **Start Recording**, then a second
+shortcut running **Stop Dictation and Get Text**.
+
+**Finish headless recordings without a second press**
+
+Settings → Action Button & Shortcuts → **Stop On Silence**. Recordings started
+from a Control, the Action Button, Siri or a Shortcut then finish on their own
+after the pause length you choose. It is off by default: it saves a press for
+people who dictate in bursts and gets in the way of people who think in long
+pauses. Recordings you start in the app or from the keyboard are unaffected,
+and a recording that never goes quiet still stops after 15 minutes.
 
 **"What did I just say?"**
 

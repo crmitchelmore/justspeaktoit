@@ -35,7 +35,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState = SharedTranscriptionState.shared
 
-    private var transcriptionSession: IOSTranscriptionSession?
+    private(set) var transcriptionSession: IOSTranscriptionSession?
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
@@ -53,6 +53,10 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
     private let lifecycle = RecordingLifecycleCoordinator()
+    /// The armed silence end-pointing monitor's poll loop (issue #1012), or
+    /// `nil` when this capture runs until somebody stops it. See
+    /// `TranscriptionRecordingService+EndPointing.swift`.
+    var endPointingTask: Task<Void, Never>?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -94,7 +98,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil,
         trigger: CaptureTrigger? = nil,
-        parameters: CaptureRunParameters = .none
+        parameters: CaptureRunParameters = .none,
+        endPointing: CaptureEndPointingRequest? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
         state = lifecycle.state
@@ -220,6 +225,20 @@ public final class TranscriptionRecordingService: ObservableObject {
             }
             transcriptionSession = session
             isRunning = true
+            // Armed only after activation, so a capture that never went live
+            // leaves no monitor behind and the run identity the monitor checks
+            // is the session that is actually recording (issue #1012). A `nil`
+            // request arms nothing and the capture behaves exactly as it did
+            // before end-pointing existed.
+            armEndPointing(
+                Self.endPointingRequest(
+                    explicit: endPointing,
+                    trigger: trigger,
+                    keyboardProfile: keyboardProfile,
+                    settings: settings
+                ),
+                for: session
+            )
         } catch {
             // Unwind runs for the retired case too: a stop that cancelled this
             // startup is awaiting settlement, and this run still owns whatever
@@ -410,6 +429,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// shared App Group recording state and the Live Activity. The run calls
     /// this itself so ownership never crosses runs.
     private func unwindCancelledStart() {
+        disarmEndPointing()
         startTime = nil
         sharesLiveTranscript = true
         partialText = ""
@@ -435,6 +455,13 @@ public final class TranscriptionRecordingService: ObservableObject {
         saveToHistory: Bool = true,
         primedActivityMessage: String = "Ready for the Action Button"
     ) async -> TranscriptionResult {
+        // Disarmed first, before anything can suspend: a monitor that is still
+        // polling while this stop runs would find the session gone and do
+        // nothing, but cancelling here means it cannot even observe the
+        // teardown. The auto-stop path re-enters this method, and the
+        // reentrancy guard below is what makes that safe either way.
+        disarmEndPointing()
+
         // A stop during startup cancels the pending run and waits for it to
         // unwind (issue #701): retiring `activeStartRunID` makes the suspended
         // start release everything it allocated instead of activating the
@@ -578,6 +605,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// startup task unwinds before another run can begin (issues #701, #786).
     public func cancelRecording() {
         currentTrigger = nil
+        disarmEndPointing()
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return

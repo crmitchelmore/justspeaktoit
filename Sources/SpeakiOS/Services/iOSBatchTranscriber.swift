@@ -25,7 +25,7 @@ public final class IOSBatchTranscriber {
         hasInputTap = false
     }
     private let audioEngine = AVAudioEngine()
-    private let audioRecorder = AudioRecordingPersistence()
+    let audioRecorder = AudioRecordingPersistence()
     private let client: IOSBatchTranscriptionClient
     private let retainRecording: Bool
     private var startTime: Date?

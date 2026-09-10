@@ -9,23 +9,49 @@ public final class SharedTranscriptionState {
     private let defaults: UserDefaults?
     private let reloadRecordingControl: (String) -> Void
 
+    #if DEBUG && targetEnvironment(simulator)
+    /// The launch-environment seed, captured at construction. Held rather than
+    /// read on demand so a test can isolate itself from whatever the *test*
+    /// process inherited: the process environment is not something a test can
+    /// unset for itself, and it takes precedence over the injected defaults.
+    private let environmentTranscript: String?
+    #endif
+
     private convenience init() {
         // Verified centrally so a missing effective entitlement fails the same
         // way here as in every other App Group store: a logged fault and an
         // unavailable, no-op store.
+        #if DEBUG && targetEnvironment(simulator)
+        let seed = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]
+        self.init(
+            defaults: AppGroupAvailability.verifiedDefaults(),
+            reloadRecordingControl: CaptureSurfaceRefresher.recordingStateChanged(controlKind:),
+            environmentTranscript: seed
+        )
+        if let value = seed?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
+            defaults?.set(value, forKey: "simulatorValidationTranscript")
+        }
+        #else
         self.init(
             defaults: AppGroupAvailability.verifiedDefaults(),
             reloadRecordingControl: CaptureSurfaceRefresher.recordingStateChanged(controlKind:)
         )
-        #if DEBUG && targetEnvironment(simulator)
-        if let value = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-            !value.isEmpty {
-            defaults?.set(value, forKey: "simulatorValidationTranscript")
-        }
         #endif
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+    /// Allows tests to isolate shared state from the real App Group, and from
+    /// the launch environment of the test process itself.
+    init(
+        defaults: UserDefaults?,
+        reloadRecordingControl: @escaping (String) -> Void = { _ in },
+        environmentTranscript: String? = nil
+    ) {
+        self.defaults = defaults
+        self.reloadRecordingControl = reloadRecordingControl
+        self.environmentTranscript = environmentTranscript
+    }
+    #else
     /// Allows tests to isolate shared state from the real App Group.
     init(
         defaults: UserDefaults?,
@@ -34,14 +60,15 @@ public final class SharedTranscriptionState {
         self.defaults = defaults
         self.reloadRecordingControl = reloadRecordingControl
     }
+    #endif
 
     #if DEBUG && targetEnvironment(simulator)
     /// Deterministic transcript used only by Simulator UX validation. App Intent
     /// execution does not reliably inherit launchd environment variables, so the
     /// App Group value keeps the real Shortcut lifecycle testable across hosts.
     var simulatorValidationTranscript: String? {
-        let environmentValue = ProcessInfo.processInfo.environment["JUSTSPEAKTOIT_SIMULATOR_TRANSCRIPT"]
-        let value = environmentValue ?? defaults?.string(forKey: "simulatorValidationTranscript")
+        let value = self.environmentTranscript
+            ?? defaults?.string(forKey: "simulatorValidationTranscript")
         let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedValue?.isEmpty == false ? trimmedValue : nil
     }

@@ -193,6 +193,37 @@ struct TranscribeWidget: Widget {
     }
 }
 
+/// The kind the Xcode-template widget shipped under, before the Dictate widget
+/// replaced it.
+///
+/// WidgetKit persists a placement by its widget *kind*. `JustSpeakToItWidget`
+/// `Extension` — the unmodified template widget, the one that showed a
+/// favourite emoji — shipped in every release up to v0.9.0, so a Home Screen
+/// that still has one placed would, after this update, hold a widget with no
+/// implementation: permanently blank, un-refreshable, and only fixable by the
+/// user noticing and removing it by hand.
+///
+/// Registering the Dictate view under the retired kind turns those placements
+/// into working Dictate widgets at the next refresh instead. It is deliberately
+/// identical to `TranscribeWidget` in everything but its kind, and limited to
+/// the families the template supported, because its only job is continuity for
+/// widgets that are already placed.
+struct LegacyTemplateTranscribeWidget: Widget {
+    /// Must never change: it is the identifier already written into people's
+    /// Home Screen layouts.
+    static let kind = "JustSpeakToItWidgetExtension"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: Self.kind, provider: TranscribeProvider()) { entry in
+            TranscribeWidgetEntryView(entry: entry)
+                .containerBackground(.fill.tertiary, for: .widget)
+        }
+        .configurationDisplayName("Dictate")
+        .description("Start or stop a recording. The transcript goes to the destination you chose in Settings.")
+        .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
 #Preview(as: .systemSmall) {
     TranscribeWidget()
 } timeline: {

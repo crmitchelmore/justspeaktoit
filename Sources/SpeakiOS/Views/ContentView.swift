@@ -423,6 +423,8 @@ private extension TranscriberCoordinator {
 
 // swiftlint:disable:next type_body_length
 public struct ContentView: View {
+    @StateObject private var recovery = CaptureRecoveryCoordinator.shared
+    @State private var showingRecoveryPrompt = false
     @StateObject private var coordinator: TranscriberCoordinator
     @StateObject private var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject private var settings = AppSettings.shared
@@ -632,6 +634,18 @@ public struct ContentView: View {
             } message: {
                 Text(errorMessage)
             }
+            // Audio that survived a crash, offered back once per launch
+            // (issue #992). "Not now" keeps the recording exactly where it is;
+            // nothing on this path deletes audio.
+            .alert("Recording interrupted", isPresented: $showingRecoveryPrompt) {
+                Button("Transcribe it") {
+                    guard let finding = recovery.recoverable.first else { return }
+                    Task { await recovery.recover(finding) }
+                }
+                Button("Not now", role: .cancel) {}
+            } message: {
+                Text(recovery.recoverable.first.map(recovery.promptMessage) ?? "")
+            }
             .onChange(of: coordinator.error?.localizedDescription) { _, newError in
                 if let error = newError {
                     errorMessage = error
@@ -666,7 +680,10 @@ public struct ContentView: View {
                     }
                 }
             }
-            .onAppear { refreshBackgroundState() }
+            .onAppear {
+                refreshBackgroundState()
+                offerCaptureRecoveryIfNeeded()
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     refreshBackgroundState()
@@ -895,6 +912,17 @@ public struct ContentView: View {
     /// transcript as the current view and updates the History badge. Called on
     /// appear and whenever the app returns to the foreground so a headless
     /// recording is never lost behind a stale in-app transcript.
+    /// Offers the oldest interrupted capture back, once per launch, and only
+    /// when nothing is recording — a question about yesterday's audio must not
+    /// interrupt today's capture.
+    private func offerCaptureRecoveryIfNeeded() {
+        guard !recovery.hasPromptedThisLaunch, !coordinator.isRunning else { return }
+        let plan = recovery.refresh()
+        guard !plan.hasLiveCapture, !plan.recoverable.isEmpty else { return }
+        recovery.hasPromptedThisLaunch = true
+        showingRecoveryPrompt = true
+    }
+
     private func refreshBackgroundState() {
         let shared = SharedTranscriptionState.shared
         showHistoryBadge = shared.hasUnseenBackgroundTranscript

@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import SpeakCore
 
 // swiftlint:disable type_name
 /// Error types for iOS live transcription.
@@ -8,8 +9,21 @@ public enum iOSTranscriptionError: LocalizedError {
     case recognizerUnavailable
     case audioSessionFailed(Error)
     case recognitionFailed(Error)
+    case microphoneChanged
     case interrupted
     case liveActivityUnavailable
+    /// A start never reached its backend inside
+    /// `CaptureWatchdogPolicy.startDeadlineSeconds`. Carries the last startup
+    /// boundary the run actually crossed, so the failure names where it stalled
+    /// (issue #993).
+    case startTimedOut(after: StartupStage?)
+    /// The audio engine started and its input tap then delivered no buffer at
+    /// all. A silent room still delivers buffers, so this is a dead microphone
+    /// rather than a quiet one (issue #993).
+    case microphoneDeliveredNoAudio
+    /// A stop waited out `CaptureWatchdogPolicy.finalisationDeadlineSeconds`
+    /// without the provider finalising (issue #993).
+    case finalisationTimedOut
 
     public enum Permission {
         case microphone
@@ -28,11 +42,34 @@ public enum iOSTranscriptionError: LocalizedError {
             return "Failed to configure audio: \(error.localizedDescription)"
         case .recognitionFailed(let error):
             return "Recognition failed: \(error.localizedDescription)"
+        case .microphoneChanged:
+            return "The microphone changed and recording stopped."
         case .interrupted:
             return "Transcription was interrupted (e.g., by a phone call)."
         case .liveActivityUnavailable:
             return "Turn on Live Activities for Just Speak to It in Settings to record with the "
                 + "Action Button."
+        case .startTimedOut(let stage):
+            guard let stage else {
+                return "Recording did not start in time and was cancelled before it got going."
+            }
+            return "Recording did not start in time and was cancelled after \(Self.describe(stage))."
+        case .microphoneDeliveredNoAudio:
+            return "The microphone delivered no audio, so recording stopped."
+        case .finalisationTimedOut:
+            return "The transcript did not finish in time. Any text already received was kept."
+        }
+    }
+
+    /// Names the last start boundary a stalled run crossed, in the words a
+    /// user can act on rather than the log's closed-set label.
+    static func describe(_ stage: StartupStage) -> String {
+        switch stage {
+        case .credentialsReady: return "loading credentials"
+        case .audioSessionConfigured: return "configuring audio"
+        case .engineStarted: return "starting the microphone"
+        case .sessionStarted: return "starting the transcriber"
+        case .firstPartial: return "receiving the first words"
         }
     }
 }

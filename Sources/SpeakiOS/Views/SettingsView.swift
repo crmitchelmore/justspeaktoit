@@ -21,8 +21,9 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
     case clipboard
 
     /// Copy to clipboard and run the configured post-processor (OpenRouter)
-    /// in the background, replacing the clipboard with the polished version
-    /// when it lands. Falls back to plain `.clipboard` if no OpenRouter key.
+    /// asynchronously. Raw text is copied first; a timely polish may replace
+    /// it while the foreground app still owns the clipboard. Without a key,
+    /// the raw copy remains available.
     case clipboardAndPostProcess
 
     /// Save to history only — don't touch the clipboard, don't post-process.
@@ -45,8 +46,8 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
         case .clipboard:
             return "Transcript is copied to the clipboard immediately when recording stops."
         case .clipboardAndPostProcess:
-            return "Transcript is copied to the clipboard, then re-cleaned with your post-processing model "
-                + "and the polished version is re-copied."
+            return "Raw transcript is copied immediately. While the app is active and the clipboard stays unchanged, "
+                + "the polished version may replace it within 20 seconds. Polished text is also saved in History."
         case .historyOnly:
             return "Transcript is saved to history. Clipboard and post-processing are skipped."
         }
@@ -1309,6 +1310,25 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("Capture Health") {
+                NavigationLink {
+                    CaptureHealthView()
+                } label: {
+                    Label("Check capture is working", systemImage: "stethoscope")
+                }
+                .accessibilityIdentifier("captureHealthNavLink")
+
+                if !usesInlineDensityLayout {
+                    Text(
+                        "Checks the things a capture needs, runs a microphone self-test, and offers back "
+                            + "any recording that was interrupted before its transcript was saved. "
+                            + "Nothing on that screen leaves this device."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Recordings") {
                 NavigationLink {
                     RecordingsView()
@@ -1318,8 +1338,8 @@ public struct SettingsView: View {
 
                 if !usesInlineDensityLayout {
                     Text(
-                        "Audio is saved locally during transcription so you can "
-                            + "replay or re-transcribe if connectivity was lost."
+                        "Audio is saved locally during transcription so you can replay it, "
+                            + "or transcribe it again if connectivity was lost."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)

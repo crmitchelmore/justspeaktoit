@@ -353,8 +353,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(instantCoordinator.contains(".write("))
         XCTAssertFalse(instantCoordinator.contains(".upload("))
         XCTAssertTrue(instantCoordinator.contains("saveToHistory: false"))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory(transcript, result: result)"))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory(result.text, result: result)"))
+        // History outcomes across drain/polish races are exercised by KeyboardInstantFinalisationTests.
         XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 

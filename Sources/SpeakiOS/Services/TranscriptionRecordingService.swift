@@ -26,30 +26,85 @@ public final class TranscriptionRecordingService: ObservableObject {
     @Published public private(set) var wordCount = 0
     /// Error that ended the most recent session mid-recording. Published so the
     /// app can surface it on next foreground instead of silently losing audio.
-    @Published public private(set) var lastSessionError: Error?
+    @Published public internal(set) var lastSessionError: Error? {
+        didSet {
+            // One funnel for every capture failure, so the health screen can
+            // report how the last real run ended rather than only what is
+            // true this second (issue #997). The journal keeps a closed-set
+            // label and a date — never the error's text.
+            guard let lastSessionError else { return }
+            CaptureOutcomeJournal.record(CaptureOutcomeJournal.outcome(for: lastSessionError))
+        }
+    }
     /// Non-nil when the session silently fell back to on-device transcription
     /// because the selected cloud model had no API key available.
     @Published public private(set) var providerFallbackNotice: String?
 
     private let audioSessionManager = AudioSessionManager()
     private let activityManager = TranscriptionActivityManager.shared
-    private let sharedState = SharedTranscriptionState.shared
+    private let sharedState: SharedTranscriptionState
+    private let historyManager: iOSHistoryManager
 
-    private var transcriptionSession: IOSTranscriptionSession?
+    private(set) var transcriptionSession: IOSTranscriptionSession?
+    private var stoppingSession: IOSTranscriptionSession?
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
+    private(set) var automaticStopDestination: HardwareTriggerDestination = .clipboard
+    private var onCaptureDisruption: (() async -> Void)?
     /// Run-identity state machine for cancellable startup (issue #701); the
     /// pure mechanics live in SpeakCore so they are testable on every
     /// platform. `state` mirrors it for observers.
     private let lifecycle = RecordingLifecycleCoordinator()
+    /// Truthful capture presentation (issue #983): startup stays visibly
+    /// "preparing" until this run has both started its backend and observed a
+    /// buffer from its own live input tap.
+    private var presentation = CapturePresentationGate()
+    /// Local run-scoped startup timing (issue #972). Measurement only: it adds
+    /// no network call, no vendor reporting and no behaviour change.
+    private var diagnostics = StartupDiagnostics()
+    /// The bounds this run is held to (issue #993). Every rule lives in
+    /// SpeakCore's `CaptureWatchdogMonitor`; see
+    /// `TranscriptionRecordingService+Watchdogs.swift` for the wiring.
+    var watchdog = CaptureWatchdogMonitor()
+    var watchdogTask: Task<Void, Never>?
+    var watchdogRunID: UUID?
+    var watchdogStartedAt: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
 
-    static let polishingClipboardPlaceholder = "Polishing… please wait"
+    private let polishClipboard: PolishClipboard
+    private let hasPolishingKey: @MainActor () -> Bool
+    private let polish: @MainActor (String, String, String) async throws -> String
+    private var latestCompletionID: UUID?
 
-    private init() {}
+    private convenience init() {
+        self.init(
+            sharedState: .shared,
+            historyManager: .shared,
+            polishClipboard: PolishClipboard(),
+            hasPolishingKey: { AppSettings.shared.hasOpenRouterKey },
+            polish: { text, model, apiKey in
+                try await iOSPostProcessingManager.shared.polish(text: text, model: model, apiKey: apiKey)
+            }
+        )
+    }
+
+    /// Keeps recording lifecycle tests isolated from the real clipboard, History and provider.
+    init(
+        sharedState: SharedTranscriptionState,
+        historyManager: iOSHistoryManager,
+        polishClipboard: PolishClipboard,
+        hasPolishingKey: @escaping @MainActor () -> Bool,
+        polish: @escaping @MainActor (String, String, String) async throws -> String
+    ) {
+        self.sharedState = sharedState
+        self.historyManager = historyManager
+        self.polishClipboard = polishClipboard
+        self.hasPolishingKey = hasPolishingKey
+        self.polish = polish
+    }
 
     /// Picks the first non-blank candidate, else the fallback. Extracted as a
     /// pure function so the stop-time text-selection priority
@@ -90,15 +145,51 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// parameters of a capture link, and apply to this session only. Both are
     /// already validated against the catalogues by the caller, so an
     /// unrecognised value never reaches here — it fails the link instead.
-    public func startRecording( // swiftlint:disable:this function_body_length
+    ///
+    /// - Parameter entry: the earliest app-code entry the caller observed —
+    ///   an intent's `perform()` entry, or the moment the app began handling a
+    ///   keyboard request. Callers with no earlier observation pass `nil` and
+    ///   the service times its own entry (issue #972).
+    public func startRecording(
         retainBatchRecording: Bool = true,
         sharesLiveTranscript: Bool = true,
         requiresLiveActivity: Bool = true,
         keyboardProfile: KeyboardDictationProfileOption? = nil,
         modelOverride: String? = nil,
-        languageOverride: String? = nil
+        languageOverride: String? = nil,
+        entry: StartupEntry? = nil
+    ) async throws {
+        try await startRecording(
+            retainBatchRecording: retainBatchRecording,
+            sharesLiveTranscript: sharesLiveTranscript,
+            requiresLiveActivity: requiresLiveActivity,
+            keyboardProfile: keyboardProfile,
+            modelOverride: modelOverride,
+            languageOverride: languageOverride,
+            destination: nil,
+            entry: entry
+        )
+    }
+
+    /// Internal callers can retain their destination and request ownership for an automatic stop.
+    func startRecording( // swiftlint:disable:this function_body_length
+        retainBatchRecording: Bool = true,
+        sharesLiveTranscript: Bool = true,
+        requiresLiveActivity: Bool = true,
+        keyboardProfile: KeyboardDictationProfileOption? = nil,
+        modelOverride: String? = nil,
+        languageOverride: String? = nil,
+        destination: HardwareTriggerDestination?,
+        entry: StartupEntry? = nil,
+        onCaptureDisruption: (() async -> Void)? = nil
     ) async throws {
         guard let runID = lifecycle.beginStart() else { return }
+        presentation.begin(run: runID)
+        diagnostics.begin(run: runID, entry: entry, localOrigin: .service)
+        // Armed before the first suspension point, so the start deadline covers
+        // the credentials wait as well as the backend start. Every teardown
+        // path below disarms it (issue #993).
+        armWatchdogs(run: runID, entry: entry)
         state = lifecycle.state
         defer { state = lifecycle.state }
 
@@ -108,10 +199,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Button could read those empty keys and silently fall back to Apple
         // Speech, so wait for the initial load before resolving the model.
         await settings.ensureKeysLoaded()
+        diagnostics.note(.stage(.credentialsReady), run: runID)
         // A stop/cancel during the suspension above retires the run; nothing
         // has been allocated yet, so unwinding only settles the state machine.
         guard lifecycle.isCurrentStartRun(runID) else {
-            unwindCancelledStart()
+            unwindCancelledStart(outcome: .cancelled, run: runID)
             throw CancellationError()
         }
 
@@ -131,6 +223,8 @@ public final class TranscriptionRecordingService: ObservableObject {
         lastSharedStateWriteAt = .distantPast
         startTime = Date()
         self.sharesLiveTranscript = sharesLiveTranscript
+        self.automaticStopDestination = destination ?? settings.hardwareTriggerDestination
+        self.onCaptureDisruption = onCaptureDisruption
         sharedState.clear()
         sharedState.isRecording = true
         sharedState.recordingStartTime = startTime
@@ -148,15 +242,24 @@ public final class TranscriptionRecordingService: ObservableObject {
             ? modelDisplayName
             : "\(modelDisplayName) (no API key)"
         let activityStarted = (requiresLiveActivity || appIsActive)
-            ? activityManager.startActivity(provider: activityProvider)
+            ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)
             : false
         if requiresLiveActivity && !activityStarted && !appIsActive {
-            unwindCancelledStart()
+            unwindCancelledStart(outcome: .failed, run: runID)
             throw iOSTranscriptionError.liveActivityUnavailable
         }
 
         #if DEBUG && targetEnvironment(simulator)
         if let transcript = sharedState.simulatorValidationTranscript {
+            // A synthetic transcript is not observed microphone input, but this
+            // DEBUG-only simulator stub has no input tap at all. Resolve the
+            // gate explicitly so the harness never sits in preparation.
+            presentation.noteBackendStarted(run: runID)
+            presentation.noteInputObserved(run: runID)
+            // The stub has no audio session, no engine and no tap, so there is
+            // no start to bound and no microphone that could go silent.
+            disarmWatchdogs()
+            noteSimulatorStubStartup(runID: runID)
             handlePartialResult(text: transcript)
             _ = lifecycle.activate(runID)
             state = lifecycle.state
@@ -182,39 +285,49 @@ public final class TranscriptionRecordingService: ObservableObject {
                 liveAPIKey: settings.liveAPIKey(for:),
                 transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
             )
-            session.onPartialResult = { [weak self, weak session] text, _ in
+            session.onPartialResult = { [weak self, weak session] text, isFinal in
                 guard let self, let session,
-                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
+                        || self.stoppingSession === session else { return }
+                self.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
                 self.handlePartialResult(text: text)
             }
             session.onError = { [weak self, weak session] error in
                 guard let self, let session,
-                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session else { return }
-                self.handleError(error)
+                      self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
+                        || self.stoppingSession === session else { return }
+                self.handleError(error, session: session)
             }
+            bindFirstInput(session: session, runID: runID)
+            bindStartupDiagnostics(session: session, runID: runID)
             startedSession = session
             guard lifecycle.installStartCancellation(for: runID, cancel: { session.cancel() }) else {
                 throw CancellationError()
             }
             try await session.start()
+            diagnostics.note(.stage(.sessionStarted), run: runID)
             // The session this run allocated is published only while the run
             // is still current; a stop during start() retires the run, and the
             // cleanup below tears down exactly what this run owns without
             // touching any replacement run's session (issue #701).
             guard lifecycle.activate(runID) else {
                 session.cancel()
-                unwindCancelledStart()
+                unwindCancelledStart(outcome: .cancelled, run: runID)
                 throw CancellationError()
             }
             transcriptionSession = session
             isRunning = true
+            // The tap can deliver before `start()` returns, so this may be the
+            // second half of the pair rather than the first.
+            notePresentation(presentation.noteBackendStarted(run: runID))
+            diagnostics.finish(.started, run: runID)
         } catch {
             // Unwind runs for the retired case too: a stop that cancelled this
             // startup is awaiting settlement, and this run still owns whatever
             // it allocated. `transcriptionSession` is untouched — it is only
             // ever assigned after successful activation.
             startedSession?.cancel()
-            unwindCancelledStart()
+            unwindCancelledStart(outcome: outcome(for: error), run: runID)
             throw error
         }
     }
@@ -243,12 +356,17 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// Reverts everything a cancelled startup run had published: timing,
     /// shared App Group recording state and the Live Activity. The run calls
     /// this itself so ownership never crosses runs.
-    private func unwindCancelledStart() {
+    private func unwindCancelledStart(outcome: StartupOutcome, run: UUID) {
+        disarmWatchdogs()
+        // A start that stopped short still reports what it did reach; the
+        // stages it never crossed stay absent rather than becoming zeroes.
+        diagnostics.finish(outcome, run: run)
         startTime = nil
         sharesLiveTranscript = true
         partialText = ""
         wordCount = 0
         sharedState.clearRecordingState()
+        presentation.finish()
         activityManager.endActivity()
         lifecycle.finishStartUnwind()
         state = lifecycle.state
@@ -305,7 +423,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
         state = lifecycle.state
         isRunning = false
+        presentation.finish()
+        diagnostics.retire()
+        disarmWatchdogs()
         let duration = elapsedSeconds
+        let completionID = UUID()
+        latestCompletionID = completionID
 
         // Keep the (often headless / backgrounded) process alive long enough for
         // the clipboard write — and any post-processing — to actually commit.
@@ -334,7 +457,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         // Specialized callers may opt out when their result is intentionally transient.
         let historyItem = saveToHistory
-            ? iOSHistoryManager.shared.recordTranscription(
+            ? historyManager.recordTranscription(
                 text: text,
                 model: currentModel,
                 duration: result.duration
@@ -344,7 +467,16 @@ public final class TranscriptionRecordingService: ObservableObject {
         // Resolve the destination. When nil (legacy callers), preserve the
         // pre-destination behaviour: clipboard + post-process if user opted in.
         let resolvedDestination: HardwareTriggerDestination = destination ?? .clipboard
-        await applyDestinationSideEffects(text: text, destination: resolvedDestination)
+        let receipt = applyDestinationSideEffects(text: text, destination: resolvedDestination)
+
+        // The transcript has landed, so this capture's safety audio no longer
+        // needs recovering (issue #992). Marking it here rather than at stop is
+        // deliberate: a kill anywhere above this line leaves the claim
+        // un-delivered and the recording offered back on the next launch.
+        CaptureSafetyClaimStore.shared.markDeliveredForThisProcess()
+        if lastSessionError == nil {
+            CaptureOutcomeJournal.record(text.isEmpty ? .cancelled : .delivered)
+        }
 
         // Update shared state. Live writes are throttled, so commit the
         // complete transcript exactly once at stop.
@@ -355,7 +487,10 @@ public final class TranscriptionRecordingService: ObservableObject {
         sharesLiveTranscript = true
 
         // Complete Live Activity with clipboard confirmation
-        completeRecordingActivity(duration: duration, primedMessage: primedActivityMessage)
+        completeRecordingActivity(
+            duration: duration,
+            primedMessage: lastSessionError?.localizedDescription ?? primedActivityMessage
+        )
 
         // Kick off background post-processing if the chosen destination + user
         // settings call for it. The polished clipboard write must also survive
@@ -364,16 +499,15 @@ public final class TranscriptionRecordingService: ObservableObject {
         if shouldPostProcess(destination: resolvedDestination, isLegacyCaller: destination == nil)
             && !text.isEmpty {
             if let historyItem {
-                iOSHistoryManager.shared.beginPostProcessing(for: historyItem.id)
+                historyManager.beginPostProcessing(for: historyItem.id)
             }
-            Task { [resolvedDestination, assertion] in
-                await postProcess(
-                    text: text,
-                    historyItemID: historyItem?.id,
-                    replacingClipboard: resolvedDestination != .historyOnly
-                )
-                assertion.end()
-            }
+            startPostProcessing(
+                text: text,
+                historyItemID: historyItem?.id,
+                completionID: completionID,
+                receipt: receipt,
+                assertion: assertion
+            )
         } else {
             assertion.end()
         }
@@ -401,6 +535,14 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// pending run and cancels its allocated provider immediately. The owned
     /// startup task unwinds before another run can begin (issues #701, #786).
     public func cancelRecording() {
+        // A completed recording's polish has its own lifetime. Cancelling a
+        // subsequent capture must not cancel that work or invalidate its result.
+        if lifecycle.state == .stopping {
+            latestCompletionID = nil
+            // The current finalisation keeps ownership until its drain ends.
+            // A replacement must not start while it can still publish output.
+            return
+        }
         if lifecycle.state == .starting {
             lifecycle.retireStartRun()
             return
@@ -409,6 +551,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         transcriptionSession = nil
         sharesLiveTranscript = true
         isRunning = false
+        presentation.finish()
+        diagnostics.retire()
+        disarmWatchdogs()
         startTime = nil
         partialText = ""
         wordCount = 0
@@ -436,6 +581,13 @@ public final class TranscriptionRecordingService: ObservableObject {
             }
         }
 
+        // Presentation only: the transcript above is delivered either way. A
+        // partial can arrive from pre-roll before this run has seen its own
+        // input, and it must not announce active capture (issue #983).
+        guard presentation.isPresentingCapture else {
+            publishPreparingActivity()
+            return
+        }
         activityManager.updateActivity(
             status: .listening,
             lastSnippet: text,
@@ -444,54 +596,144 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
     }
 
-    private func handleError(_ error: Error) {
+    /// Wires this run to the session's existing observation boundary, and
+    /// labels the backend when routing already settled it (issue #972).
+    private func bindStartupDiagnostics(session: IOSTranscriptionSession, runID: UUID) {
+        session.onStartupObservation = { [weak self] observation in
+            self?.diagnostics.note(observation, run: runID)
+            // Same seam, not a second one: the watchdogs' start deadline and
+            // no-audio detector are driven by the boundaries issue #972
+            // already reports (issue #993).
+            if case .stage(let stage) = observation {
+                self?.noteWatchdogStage(stage, run: runID)
+            }
+        }
+        if let backend = session.resolution.resolvedStartupBackend {
+            diagnostics.note(.backend(backend), run: runID)
+        }
+    }
+
+    /// The measured boundary is the first *live* partial: a final result is a
+    /// delivery, not evidence that streaming began.
+    private func noteFirstLivePartial(text: String, isFinal: Bool, runID: UUID) {
+        guard !isFinal, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        diagnostics.noteFirstPartial(run: runID)
+    }
+
+    /// Explicitly synthetic: the DEBUG simulator stub has no audio session, no
+    /// engine and no measured engine start.
+    private func noteSimulatorStubStartup(runID: UUID) {
+        diagnostics.note(.backend(.simulatorStub), run: runID)
+        diagnostics.finish(.started, run: runID)
+    }
+
+    private func outcome(for error: Error) -> StartupOutcome {
+        (error is CancellationError || Task.isCancelled) ? .cancelled : .failed
+    }
+
+    /// Routes this run's own first live buffer into the presentation gate.
+    private func bindFirstInput(session: IOSTranscriptionSession, runID: UUID) {
+        session.onFirstInputBuffer = { [weak self, weak session] in
+            guard let self, let session,
+                  self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
+            else { return }
+            self.notePresentation(self.presentation.noteInputObserved(run: runID))
+            // The no-audio detector consumes issue #983's first-input signal
+            // rather than installing a tap of its own (issue #993).
+            self.noteWatchdogInputObserved(run: runID)
+        }
+    }
+
+    /// Publishes the one arming → recording transition, and only that one.
+    private func notePresentation(_ promoted: Bool) {
+        guard promoted else { return }
+        activityManager.updateActivity(
+            status: .recording,
+            lastSnippet: partialText,
+            wordCount: wordCount,
+            duration: elapsedSeconds
+        )
+    }
+
+    /// Keeps preparation truthful: no snippet, no elapsed time, no recording
+    /// indicator until this run's own tap has delivered.
+    private func publishPreparingActivity() {
+        activityManager.updateActivity(
+            status: .arming,
+            lastSnippet: CapturePresentationGate.preparingMessage,
+            wordCount: 0,
+            duration: 0
+        )
+    }
+
+    private func handleError(_ error: Error, session: IOSTranscriptionSession) {
         activityManager.reportError(error.localizedDescription)
 
         // A mid-session failure previously only updated the Live Activity —
         // the mic stayed hot while the user dictated into a dead session.
         // Tear the session down, preserving the accumulated transcript, and
         // publish the error so the app can surface it on next foreground.
-        guard lifecycle.state == .recording else { return }
+        guard lifecycle.state == .recording || stoppingSession === session else { return }
         lastSessionError = error
+        guard lifecycle.state == .recording else { return }
         Task { [weak self] in
-            guard let self, self.isRunning else { return }
-            await self.stopRecording(
-                primedActivityMessage: "Stopped: \(error.localizedDescription)"
-            )
+            guard let self, self.isRunning, self.transcriptionSession === session else { return }
+            await self.finishCaptureAfterDisruption()
         }
     }
 
-    private func postProcess(
+    /// Finishes through the originating owner, which may own a keyboard nonce
+    /// rather than a clipboard destination. Stop's lifecycle guard claims once.
+    func finishCaptureAfterDisruption(stoppedMessage: String = "Recording stopped") async {
+        guard lifecycle.state == .recording else { return }
+        if let finishOwnedCapture = onCaptureDisruption {
+            await finishOwnedCapture()
+            return
+        }
+        await stopRecording(
+            destination: automaticStopDestination,
+            primedActivityMessage: lastSessionError?.localizedDescription ?? stoppedMessage
+        )
+    }
+
+    private func startPostProcessing(
         text: String,
         historyItemID: UUID?,
-        replacingClipboard: Bool = true
-    ) async {
+        completionID: UUID,
+        receipt: PolishClipboard.Receipt?,
+        assertion: BackgroundTaskAssertion
+    ) {
         let settings = AppSettings.shared
-        let processor = iOSPostProcessingManager.shared
-
-        do {
-            let polished = try await processor.polish(
-                text: text,
-                model: settings.postProcessingModel,
-                apiKey: settings.openRouterAPIKey
-            )
-            guard !polished.isEmpty else { throw PostProcessingError.emptyResult }
-            if replacingClipboard {
-                await Self.writeClipboardReliably(polished)
+        let model = settings.postProcessingModel
+        let apiKey = settings.openRouterAPIKey
+        let historyManager = self.historyManager
+        let polish = self.polish
+        let operation = AutomaticPolishOperation(
+            clipboard: polishClipboard,
+            receipt: receipt,
+            isCurrent: { [weak self] in self?.latestCompletionID == completionID },
+            success: { [weak self] polished, current in
+                if current {
+                    self?.sharedState.lastCompletedTranscript = polished
+                }
+                if let historyItemID {
+                    historyManager.setPostProcessed(polished, for: historyItemID)
+                }
+            },
+            failure: { error in
+                if let historyItemID {
+                    historyManager.setError(error.localizedDescription, for: historyItemID)
+                }
+            },
+            completion: {
+                if let historyItemID {
+                    historyManager.endPostProcessing(for: historyItemID)
+                }
+                assertion.end()
             }
-            sharedState.lastCompletedTranscript = polished
-            if let historyItemID {
-                iOSHistoryManager.shared.setPostProcessed(polished, for: historyItemID)
-            }
-        } catch {
-            // Never strand the user with the temporary polishing message.
-            if replacingClipboard {
-                await Self.writeClipboardReliably(text)
-            }
-            if let historyItemID {
-                iOSHistoryManager.shared.setError(error.localizedDescription, for: historyItemID)
-                iOSHistoryManager.shared.endPostProcessing(for: historyItemID)
-            }
+        )
+        operation.start(under: assertion, isActive: UIApplication.shared.applicationState == .active) {
+            try await polish(text, model, apiKey)
         }
     }
 }
@@ -500,20 +742,15 @@ public final class TranscriptionRecordingService: ObservableObject {
 
 @MainActor
 extension TranscriptionRecordingService {
-    /// The pasteboard value that should be committed synchronously when the
-    /// recording stops. Polishing gets a non-sensitive placeholder only when a
-    /// post-processor can actually replace it; without a key, the raw transcript
-    /// must be copied instead of leaving "Polishing… please wait" forever.
+    /// Raw text is usable immediately, including while polishing or without a key.
     static func clipboardTextAtStop(
         transcript: String,
-        destination: HardwareTriggerDestination,
-        canPostProcess: Bool
+        destination: HardwareTriggerDestination
     ) -> String? {
+        guard !transcript.isEmpty else { return nil }
         switch destination {
-        case .clipboard:
+        case .clipboard, .clipboardAndPostProcess:
             return transcript
-        case .clipboardAndPostProcess:
-            return canPostProcess ? polishingClipboardPlaceholder : transcript
         case .historyOnly:
             return nil
         }
@@ -537,10 +774,15 @@ private extension TranscriptionRecordingService {
     func drainActiveTranscriber(duration: Int) async -> TranscriptionResult {
         if let session = transcriptionSession {
             transcriptionSession = nil
+            stoppingSession = session
+            defer { stoppingSession = nil }
             do {
-                return try await session.stop()
+                guard let result = try await boundedStop(of: session) else {
+                    return timedOutFinalisationResult(for: session, duration: duration)
+                }
+                return result
             } catch {
-                handleError(error)
+                handleError(error, session: session)
                 return TranscriptionResult(
                     text: "",
                     segments: [],
@@ -572,14 +814,14 @@ private extension TranscriptionRecordingService {
         text: String,
         destination: HardwareTriggerDestination,
         sharesCompletedTranscript: Bool? = nil
-    ) async {
-        guard !text.isEmpty else { return }
+    ) -> PolishClipboard.Receipt? {
+        guard !text.isEmpty else { return nil }
+        var receipt: PolishClipboard.Receipt?
         if let clipboardText = Self.clipboardTextAtStop(
             transcript: text,
-            destination: destination,
-            canPostProcess: AppSettings.shared.hasOpenRouterKey
+            destination: destination
         ) {
-            await Self.writeClipboardReliably(clipboardText)
+            receipt = polishClipboard.copyRaw(clipboardText)
         }
 
         // Keyboard handoffs keep their result solely in the nonce-scoped store.
@@ -591,19 +833,7 @@ private extension TranscriptionRecordingService {
         ) {
             sharedState.lastCompletedTranscript = sharedTranscript
         }
-    }
-
-    /// Pasteboard writes from a background AppIntent can race process
-    /// suspension. Verify the value and retry briefly before reporting success.
-    static func writeClipboardReliably(_ text: String) async {
-        for attempt in 0..<3 {
-            UIPasteboard.general.string = text
-            await Task.yield()
-            if UIPasteboard.general.string == text { return }
-            if attempt < 2 {
-                try? await Task.sleep(for: .milliseconds(80))
-            }
-        }
+        return receipt
     }
 
     /// The most complete transcript we can produce at stop time. The transcriber
@@ -639,16 +869,16 @@ private extension TranscriptionRecordingService {
         let settings = AppSettings.shared
         switch destination {
         case .clipboardAndPostProcess:
-            return settings.hasOpenRouterKey
+            return hasPolishingKey()
         case .clipboard:
-            return isLegacyCaller && settings.autoPostProcess && settings.hasOpenRouterKey
+            return isLegacyCaller && settings.autoPostProcess && hasPolishingKey()
         case .historyOnly:
             return false
         }
     }
 }
 
-private extension TranscriptionResult {
+extension TranscriptionResult {
     /// Returns a copy with `text` replaced, preserving all other metadata. Used
     /// so the returned result, history entry, clipboard, and spoken dialog all
     /// agree on the same best-available transcript.
@@ -673,16 +903,43 @@ private extension TranscriptionResult {
 @MainActor
 final class BackgroundTaskAssertion {
     private var identifier: UIBackgroundTaskIdentifier = .invalid
+    private var ended = false
+    private var expired = false
+    private let endTask: @MainActor (UIBackgroundTaskIdentifier) -> Void
+    var isValid: Bool { !ended && identifier != .invalid }
+    var onExpiration: (() -> Void)? {
+        didSet {
+            if expired { onExpiration?() }
+        }
+    }
 
-    init(name: String) {
-        identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
-            self?.end()
+    init(
+        name: String,
+        begin: @MainActor (String, @escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier = {
+            UIApplication.shared.beginBackgroundTask(withName: $0, expirationHandler: $1)
+        },
+        end: @escaping @MainActor (UIBackgroundTaskIdentifier) -> Void = { UIApplication.shared.endBackgroundTask($0) }
+    ) {
+        endTask = end
+        let allocated = begin(name) { [weak self] in
+            guard let self else { return }
+            self.expired = true
+            self.onExpiration?()
+            self.end()
+        }
+        // Expiration can arrive before begin returns its identifier.
+        if ended {
+            if allocated != .invalid { endTask(allocated) }
+        } else {
+            identifier = allocated
         }
     }
 
     func end() {
-        guard identifier != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(identifier)
+        guard !ended else { return }
+        ended = true
+        onExpiration = nil
+        if identifier != .invalid { endTask(identifier) }
         identifier = .invalid
     }
 }

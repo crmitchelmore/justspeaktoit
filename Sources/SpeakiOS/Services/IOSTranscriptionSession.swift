@@ -26,10 +26,35 @@ final class IOSTranscriptionSession {
 
         var isBatch: Bool { backend == .batch }
         var sampleRate: Int? { route?.sampleRate }
+
+        /// The backend this routing decision already settled, for local
+        /// startup diagnostics (issue #972). `nil` for Apple, which chooses
+        /// between the analyzer and the legacy recogniser at start time and
+        /// labels itself once it has.
+        var resolvedStartupBackend: StartupBackend? {
+            switch backend {
+            case .batch: return .batch
+            case .openAI: return .openAIRealtime
+            case .shared: return .sharedClient
+            case .apple: return nil
+            }
+        }
     }
 
     var onPartialResult: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
+    /// Raised at most once per session, on the main actor, when this session's
+    /// own live input tap accepts a buffer with a positive frame count. Every
+    /// backend supplies it — batch included, which has no partial result — so
+    /// recording presentation never waits on a signal that cannot arrive
+    /// (issue #983).
+    var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations from whichever backend is running
+    /// (issue #972). Reuses this boundary rather than adding a second one, so
+    /// all five paths — Apple analyzer, the legacy Apple fallback, OpenAI
+    /// Realtime, the shared client and batch — report through one seam.
+    /// Measurement only: nothing here changes capture, ordering or delivery.
+    var onStartupObservation: ((StartupObservation) -> Void)?
 
     let resolution: Resolution
 
@@ -231,19 +256,38 @@ final class IOSTranscriptionSession {
             self?.onError?(error)
         }
 
+        let firstInputHandler: () -> Void = { [weak self] in
+            self?.onFirstInputBuffer?()
+        }
+
+        let startupHandler: (StartupObservation) -> Void = { [weak self] observation in
+            self?.onStartupObservation?(observation)
+        }
+
         switch backend {
-        case .batch:
-            break
+        case .batch(let transcriber):
+            transcriber.onFirstInputBuffer = firstInputHandler
+            transcriber.onStartupObservation = startupHandler
         case .apple(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
+            // The Apple backend labels itself when it takes the analyzer or
+            // the legacy branch, so a start that fails before that decision
+            // reports no backend rather than the one it meant to use.
+            transcriber.onStartupObservation = startupHandler
         case .openAI(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
+            transcriber.onStartupObservation = startupHandler
         case .shared(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
+            transcriber.onStartupObservation = startupHandler
         }
+
     }
 }
 #endif

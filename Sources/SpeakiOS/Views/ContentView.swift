@@ -32,6 +32,22 @@ final class TranscriberCoordinator: ObservableObject {
 
     private var transcriptionSession: IOSTranscriptionSession?
     private var stoppingSession: IOSTranscriptionSession?
+    private var stopWasCancelled = false
+    var onCaptureDisruption: (() async -> Void)?
+    /// Truthful capture presentation (issue #983): startup stays visibly
+    /// "preparing" until this run has both started its backend and observed a
+    /// buffer from its own live input tap.
+    private var presentation = CapturePresentationGate()
+    /// Local run-scoped startup timing (issue #972). Measurement only: it adds
+    /// no network call, no vendor reporting and no behaviour change.
+    private var diagnostics = StartupDiagnostics()
+    private var presentationRunID: UUID?
+    /// Raised when this coordinator's capture presentation changes, so an
+    /// owner presenting on its behalf (hands-free) can re-publish.
+    var onCapturePresentationChanged: (() -> Void)?
+
+    /// Whether active-capture presentation may be shown for the current run.
+    var isPresentingCapture: Bool { presentation.isPresentingCapture }
     private var startTime: Date?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
@@ -54,16 +70,21 @@ final class TranscriberCoordinator: ObservableObject {
         return Int(Date().timeIntervalSince(start))
     }
 
-    // swiftlint:disable:next function_body_length
-    func start(
+    /// - Parameter entry: the earliest app-code entry the caller observed.
+    ///   Callers with no earlier observation pass `nil` and the coordinator
+    ///   times its own entry (issue #972).
+    func start( // swiftlint:disable:this function_body_length
         preRollBuffers: [AVAudioPCMBuffer] = [],
-        analyzerFallbackAllowed: Bool = true
+        analyzerFallbackAllowed: Bool = true,
+        entry: StartupEntry? = nil
     ) async throws {
         guard stoppingSession == nil else { throw LifecycleError.sessionFinalising }
+        let runID = beginRun(entry: entry)
         let settings = AppSettings.shared
         // Wait for the initial keychain load so auto-start on a cold launch
         // doesn't read empty API keys and fall back to Apple Speech.
         await settings.ensureKeysLoaded()
+        diagnostics.note(.stage(.credentialsReady), run: runID)
         error = nil
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
@@ -84,11 +105,17 @@ final class TranscriberCoordinator: ObservableObject {
 
         // Start Live Activity (if enabled)
         if settings.liveActivitiesEnabled {
-            activityManager.startActivity(provider: modelDisplayName)
+            activityManager.startActivity(provider: modelDisplayName, initialStatus: .arming)
         }
 
         #if DEBUG && targetEnvironment(simulator)
         if let transcript = sharedState.simulatorValidationTranscript {
+            // A synthetic transcript is not observed microphone input, but this
+            // DEBUG-only simulator stub has no input tap at all. Resolve the
+            // gate explicitly so the harness never sits in preparation.
+            presentation.noteBackendStarted(run: runID)
+            notePresentation(presentation.noteInputObserved(run: runID))
+            noteSimulatorStubStartup(runID: runID)
             handlePartialResult(text: transcript, isFinal: true)
             markRecordingStarted()
             return
@@ -108,28 +135,49 @@ final class TranscriberCoordinator: ObservableObject {
             transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
         session.onPartialResult = { [weak self, weak session] text, isFinal in
+            self?.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
             self?.handlePartialResult(text: text, isFinal: isFinal)
             self?.confidence = session?.confidence
         }
-        session.onError = { [weak self] error in
-            self?.handleError(error)
+        session.onError = { [weak self, weak session] error in
+            guard let self, let session,
+                  self.transcriptionSession === session || self.stoppingSession === session else { return }
+            self.handleError(error)
+            guard case iOSTranscriptionError.microphoneChanged = error else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.transcriptionSession === session, self.isRunning else { return }
+                if let onCaptureDisruption = self.onCaptureDisruption {
+                    await onCaptureDisruption()
+                } else {
+                    _ = await self.stop()
+                }
+            }
         }
+        bindFirstInput(session: session, runID: runID)
+        bindStartupDiagnostics(session: session, runID: runID)
         transcriptionSession = session
         do {
             try await session.start(
                 preRollBuffers: preRollBuffers,
                 analyzerFallbackAllowed: analyzerFallbackAllowed
             )
+            diagnostics.note(.stage(.sessionStarted), run: runID)
         } catch {
             session.cancel()
             transcriptionSession = nil
             startTime = nil
+            finishStartupDiagnostics(runID: runID, error: error)
+            finishPresentation()
             if settings.liveActivitiesEnabled {
                 activityManager.endActivity()
             }
             throw error
         }
         markRecordingStarted()
+        // The tap can deliver before `start()` returns, so this may be the
+        // second half of the pair rather than the first.
+        notePresentation(presentation.noteBackendStarted(run: runID))
+        diagnostics.finish(.started, run: runID)
     }
 
     private func markRecordingStarted() {
@@ -152,15 +200,7 @@ final class TranscriberCoordinator: ObservableObject {
             sharedState.updateTranscript(text)
         }
 
-        // Update Live Activity (if enabled)
-        if AppSettings.shared.liveActivitiesEnabled {
-            activityManager.updateActivity(
-                status: .recording,
-                lastSnippet: text,
-                wordCount: wordCount,
-                duration: elapsedSeconds
-            )
-        }
+        publishTranscriptActivity(text: text)
     }
 
     private func handleError(_ error: Error) {
@@ -172,6 +212,7 @@ final class TranscriberCoordinator: ObservableObject {
 
     func stop(rearmHandsFree: Bool = false) async -> TranscriptionResult {
         isRunning = false
+        finishPresentation()
         sharedState.clearRecordingState()
         let duration = elapsedSeconds
 
@@ -209,21 +250,23 @@ final class TranscriberCoordinator: ObservableObject {
     ) async -> TranscriptionResult? {
         transcriptionSession = nil
         stoppingSession = session
+        stopWasCancelled = false
         defer {
             if stoppingSession === session {
                 stoppingSession = nil
             }
         }
         do {
-            let result = try await session.stop()
-            guard !Task.isCancelled else {
+            let drained = try await session.stop()
+            let result = drained.replacingText(TranscriptionRecordingService.bestTranscript(
+                candidates: [drained.text, partialText], fallback: ""
+            ))
+            guard !Task.isCancelled, !stopWasCancelled, stoppingSession === session else {
                 startTime = nil
                 return result
             }
-            if session.isBatch {
-                partialText = result.text
-                wordCount = result.text.split(whereSeparator: \.isWhitespace).count
-            }
+            partialText = result.text
+            wordCount = result.text.split(whereSeparator: \.isWhitespace).count
             if AppSettings.shared.liveActivitiesEnabled {
                 activityManager.completeActivity(
                     finalWordCount: wordCount,
@@ -255,10 +298,12 @@ final class TranscriberCoordinator: ObservableObject {
 
     func cancel() {
         transcriptionSession?.cancel()
+        stopWasCancelled = stoppingSession != nil
         stoppingSession?.cancel()
         transcriptionSession = nil
-        stoppingSession = nil
+        // A stopping session retains ownership until its suspended drain returns.
         isRunning = false
+        finishPresentation()
         startTime = nil
         if AppSettings.shared.liveActivitiesEnabled {
             activityManager.endActivity()
@@ -268,8 +313,118 @@ final class TranscriberCoordinator: ObservableObject {
     }
 }
 
+// MARK: - Truthful capture presentation (issue #983)
+
+private extension TranscriberCoordinator {
+    /// Routes this run's own first live buffer into the presentation gate.
+    func bindFirstInput(session: IOSTranscriptionSession, runID: UUID) {
+        session.onFirstInputBuffer = { [weak self, weak session] in
+            guard let self, let session, self.transcriptionSession === session else { return }
+            self.notePresentation(self.presentation.noteInputObserved(run: runID))
+        }
+    }
+
+    /// Publishes the one arming → recording transition, and only that one.
+    func notePresentation(_ promoted: Bool) {
+        guard promoted else { return }
+        if AppSettings.shared.liveActivitiesEnabled {
+            activityManager.updateActivity(
+                status: .recording,
+                lastSnippet: partialText,
+                wordCount: wordCount,
+                duration: elapsedSeconds
+            )
+        }
+        onCapturePresentationChanged?()
+    }
+
+    /// Ends the run's presentation: stop, cancel, or a failed start. A run that
+    /// never saw input therefore resolves to a terminal state, not to
+    /// permanent preparation.
+    func finishPresentation() {
+        guard presentationRunID != nil else { return }
+        presentationRunID = nil
+        presentation.finish()
+        // A late partial cannot report against a run that is over.
+        diagnostics.retire()
+        onCapturePresentationChanged?()
+    }
+
+    /// Presentation only: the transcript is delivered either way. A partial can
+    /// arrive from pre-roll before this run has seen its own input, and it must
+    /// not announce active capture.
+    func publishTranscriptActivity(text: String) {
+        guard AppSettings.shared.liveActivitiesEnabled else { return }
+        guard presentation.isPresentingCapture else {
+            activityManager.updateActivity(
+                status: .arming,
+                lastSnippet: CapturePresentationGate.preparingMessage,
+                wordCount: 0,
+                duration: 0
+            )
+            return
+        }
+        activityManager.updateActivity(
+            status: .recording,
+            lastSnippet: text,
+            wordCount: wordCount,
+            duration: elapsedSeconds
+        )
+    }
+}
+
+/// Local run-scoped startup measurement for this coordinator (issue #972).
+/// Measurement only — nothing here changes capture, ordering or delivery.
+private extension TranscriberCoordinator {
+    /// Opens a run: one identity shared by the presentation gate and the
+    /// startup measurement, so neither can attribute work to the other's run.
+    func beginRun(entry: StartupEntry?) -> UUID {
+        let runID = UUID()
+        presentationRunID = runID
+        presentation.begin(run: runID)
+        diagnostics.begin(run: runID, entry: entry, localOrigin: .coordinator)
+        return runID
+    }
+
+    /// Wires this run to the session's existing observation boundary, and
+    /// labels the backend when routing already settled it.
+    func bindStartupDiagnostics(session: IOSTranscriptionSession, runID: UUID) {
+        session.onStartupObservation = { [weak self] observation in
+            self?.diagnostics.note(observation, run: runID)
+        }
+        if let backend = session.resolution.resolvedStartupBackend {
+            diagnostics.note(.backend(backend), run: runID)
+        }
+    }
+
+    /// The measured boundary is the first *live* partial: a final result is a
+    /// delivery, not evidence that streaming began.
+    func noteFirstLivePartial(text: String, isFinal: Bool, runID: UUID) {
+        guard !isFinal, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        diagnostics.noteFirstPartial(run: runID)
+    }
+
+    /// A start that stopped short still reports what it did reach; the stages
+    /// it never crossed stay absent rather than becoming zeroes.
+    func finishStartupDiagnostics(runID: UUID, error: Error) {
+        diagnostics.finish(
+            (error is CancellationError || Task.isCancelled) ? .cancelled : .failed,
+            run: runID
+        )
+    }
+
+    /// Explicitly synthetic: the DEBUG simulator stub has no audio session, no
+    /// engine and no measured engine start.
+    func noteSimulatorStubStartup(runID: UUID) {
+        diagnostics.note(.backend(.simulatorStub), run: runID)
+        diagnostics.finish(.started, run: runID)
+    }
+}
+
 // swiftlint:disable:next type_body_length
 public struct ContentView: View {
+    @StateObject private var recovery = CaptureRecoveryCoordinator.shared
+    @State private var showingRecoveryPrompt = false
     @StateObject private var coordinator: TranscriberCoordinator
     @StateObject private var handsFree: IOSHandsFreeDictationCoordinator
     @ObservedObject private var settings = AppSettings.shared
@@ -297,44 +452,60 @@ public struct ContentView: View {
     public init() {
         let coordinator = TranscriberCoordinator()
         _coordinator = StateObject(wrappedValue: coordinator)
-        _handsFree = StateObject(
-            wrappedValue: IOSHandsFreeDictationCoordinator(
-                audioSessionManager: coordinator.audioSessionManager,
-                startCapture: { preRoll in
-                    let settings = AppSettings.shared
-                    guard HandsFreeDictationPolicy.supportsCapture(
-                        modelID: settings.selectedModel,
-                        isStreaming: settings.transcriptionMode == .streaming
+        let handsFree = IOSHandsFreeDictationCoordinator(
+            audioSessionManager: coordinator.audioSessionManager,
+            startCapture: { preRoll in
+                // Earliest app-code observation of this utterance's start.
+                let detectedAt = Date()
+                let settings = AppSettings.shared
+                guard HandsFreeDictationPolicy.supportsCapture(
+                    modelID: settings.selectedModel,
+                    isStreaming: settings.transcriptionMode == .streaming
+                )
+                else { return .rejected(.unsupportedConfiguration) }
+                do {
+                    try await coordinator.start(
+                        preRollBuffers: preRoll,
+                        analyzerFallbackAllowed: false,
+                        entry: StartupEntry(origin: .handsFree, observedAt: detectedAt)
                     )
-                    else { return .rejected(.unsupportedConfiguration) }
-                    do {
-                        try await coordinator.start(
-                            preRollBuffers: preRoll,
-                            analyzerFallbackAllowed: false
-                        )
-                        return .started
-                    } catch {
-                        return .rejected(HandsFreeDictationMachine.Failure(error))
-                    }
-                },
-                stopCapture: {
-                    _ = await coordinator.stop(rearmHandsFree: true)
-                    return coordinator.error == nil ? .completed : .failed(.captureFailed)
-                },
-                cancelCapture: { coordinator.cancel() },
-                // iOS has no silence-hold setting, so the shared policy value is
-                // the only source. The macOS "silenceDuration" preference lives
-                // in the Mac app's own defaults and never reaches this app.
-                silenceDuration: { HandsFreeDictationPolicy.defaultSilenceHoldSeconds },
-                captureIsSupported: {
-                    HandsFreeDictationPolicy.supportsCapture(
-                        modelID: AppSettings.shared.selectedModel,
-                        isStreaming: AppSettings.shared.transcriptionMode == .streaming
-                    )
-                },
-                liveActivitiesEnabled: { AppSettings.shared.liveActivitiesEnabled }
-            )
+                    return .started
+                } catch {
+                    return .rejected(HandsFreeDictationMachine.Failure(error))
+                }
+            },
+            stopCapture: {
+                _ = await coordinator.stop(rearmHandsFree: true)
+                if case .microphoneChanged? = coordinator.error as? iOSTranscriptionError { return .completed }
+                return coordinator.error == nil ? .completed : .failed(.captureFailed)
+            },
+            cancelCapture: { coordinator.cancel() },
+            // iOS has no silence-hold setting, so the shared policy value is
+            // the only source. The macOS "silenceDuration" preference lives
+            // in the Mac app's own defaults and never reaches this app.
+            silenceDuration: { HandsFreeDictationPolicy.defaultSilenceHoldSeconds },
+            captureIsSupported: {
+                HandsFreeDictationPolicy.supportsCapture(
+                    modelID: AppSettings.shared.selectedModel,
+                    isStreaming: AppSettings.shared.transcriptionMode == .streaming
+                )
+            },
+            liveActivitiesEnabled: { AppSettings.shared.liveActivitiesEnabled }
         )
+        _handsFree = StateObject(wrappedValue: handsFree)
+        // A hands-free utterance presents through the coordinator's capture, so
+        // it inherits the same proof gate rather than keeping a second one.
+        handsFree.captureIsProven = { [weak coordinator] in coordinator?.isPresentingCapture ?? false }
+        coordinator.onCapturePresentationChanged = { [weak handsFree] in
+            handsFree?.refreshCapturePresentation()
+        }
+        coordinator.onCaptureDisruption = { [weak coordinator, weak handsFree] in
+            if handsFree?.isArmed == true {
+                await handsFree?.stopForCaptureDisruption()
+            } else {
+                _ = await coordinator?.stop()
+            }
+        }
     }
 
     public var body: some View {
@@ -466,6 +637,18 @@ public struct ContentView: View {
             } message: {
                 Text(errorMessage)
             }
+            // Audio that survived a crash, offered back once per launch
+            // (issue #992). "Not now" keeps the recording exactly where it is;
+            // nothing on this path deletes audio.
+            .alert("Recording interrupted", isPresented: $showingRecoveryPrompt) {
+                Button("Transcribe it") {
+                    guard let finding = recovery.recoverable.first else { return }
+                    Task { await recovery.recover(finding) }
+                }
+                Button("Not now", role: .cancel) {}
+            } message: {
+                Text(recovery.recoverable.first.map(recovery.promptMessage) ?? "")
+            }
             .onChange(of: coordinator.error?.localizedDescription) { _, newError in
                 if let error = newError {
                     errorMessage = error
@@ -506,6 +689,7 @@ public struct ContentView: View {
                 // (issue #944). `presentSessionError` de-duplicates, so the
                 // two routes cannot raise two alerts for one failure.
                 presentSessionError(backgroundService.lastSessionError?.localizedDescription)
+                offerCaptureRecoveryIfNeeded()
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
@@ -756,6 +940,17 @@ public struct ContentView: View {
     /// transcript as the current view and updates the History badge. Called on
     /// appear and whenever the app returns to the foreground so a headless
     /// recording is never lost behind a stale in-app transcript.
+    /// Offers the oldest interrupted capture back, once per launch, and only
+    /// when nothing is recording — a question about yesterday's audio must not
+    /// interrupt today's capture.
+    private func offerCaptureRecoveryIfNeeded() {
+        guard !recovery.hasPromptedThisLaunch, !coordinator.isRunning else { return }
+        let plan = recovery.refresh()
+        guard !plan.hasLiveCapture, !plan.recoverable.isEmpty else { return }
+        recovery.hasPromptedThisLaunch = true
+        showingRecoveryPrompt = true
+    }
+
     private func refreshBackgroundState() {
         let shared = SharedTranscriptionState.shared
         showHistoryBadge = shared.hasUnseenBackgroundTranscript
@@ -788,6 +983,9 @@ public struct ContentView: View {
     // MARK: - Actions
 
     private func toggleRecording() async {
+        // Earliest app-code observation of this control's press; it survives
+        // every await between here and the start path (issue #972).
+        let pressedAt = Date()
         if handsFree.state == .recording {
             await handsFree.finishCurrentUtterance()
         } else if handsFree.isArmed {
@@ -823,7 +1021,9 @@ public struct ContentView: View {
             // Clear previous text when starting new recording
             displayText = ""
             do {
-                try await coordinator.start()
+                try await coordinator.start(
+                    entry: StartupEntry(origin: .foreground, observedAt: pressedAt)
+                )
             } catch {
                 errorMessage = error.localizedDescription
                 showingError = true

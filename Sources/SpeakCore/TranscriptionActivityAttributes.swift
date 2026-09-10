@@ -121,13 +121,13 @@ public final class TranscriptionActivityManager: ObservableObject {
     /// older `.arming` write — or a previous run's snippet — can complete after
     /// the capture-proof state and leave proven capture displayed as
     /// preparation.
-    private var order = ActivityPublicationOrder()
+    var order = ActivityPublicationOrder()
     /// Publications are applied in submission order by chaining them: ActivityKit
     /// gives no ordering guarantee across concurrent `update` calls.
-    private var publishChain: Task<Void, Never>?
+    var publishChain: Task<Void, Never>?
     /// The most recently *submitted* state. `activity.content.state` lags behind
     /// anything still queued, so derived fields (provider, error) read this.
-    private var latestState: TranscriptionActivityAttributes.ContentState?
+    var latestState: TranscriptionActivityAttributes.ContentState?
 
     private init() {}
 

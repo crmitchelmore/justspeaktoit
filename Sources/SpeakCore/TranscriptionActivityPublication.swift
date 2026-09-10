@@ -15,7 +15,7 @@ import Foundation
 extension TranscriptionActivityManager {
     /// Submits one content publication, ordered behind everything already
     /// queued and skipped if a newer publication supersedes it before it runs.
-    private func publish(
+    func publish(
         _ state: TranscriptionActivityAttributes.ContentState,
         to activity: Activity<TranscriptionActivityAttributes>
     ) {
@@ -28,7 +28,7 @@ extension TranscriptionActivityManager {
     }
 
     /// Chains asynchronous activity work so it is applied in submission order.
-    private func enqueuePublication(_ body: @escaping @MainActor () async -> Void) {
+    func enqueuePublication(_ body: @escaping @MainActor () async -> Void) {
         let previous = publishChain
         publishChain = Task { @MainActor in
             await previous?.value

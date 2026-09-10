@@ -25,7 +25,7 @@ enum GladiaLiveError: LocalizedError {
     case .connectionFailed:
       return "Failed to establish live transcription with Gladia."
     case .batchNotSupported:
-      return "Gladia Solaria-1 is currently only available for live streaming in Speak."
+      return "This Gladia model is only available for live streaming in Speak."
     case .serverError(let message):
       return "Gladia transcription failed: \(message)"
     }
@@ -56,7 +56,7 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
     language: String?
   ) async throws -> TranscriptionResult {
     guard model.trimmingCharacters(in: .whitespacesAndNewlines) == GladiaBatchClient.catalogID else {
-      throw GladiaLiveError.batchNotSupported
+      throw BatchTranscriptionJobError.unsupportedModel("Gladia")
     }
     return try await GladiaBatchClient(session: session, baseURL: baseURL).transcribeFile(
       at: url, apiKey: apiKey, model: model, language: language

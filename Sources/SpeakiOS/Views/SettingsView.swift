@@ -1074,14 +1074,25 @@ public struct SettingsView: View {
                    settings.transcriptionMode == .batch,
                    !AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel),
                    settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Label(
-                        AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
-                            ? "Add an OpenAI API key below to use this model."
-                            : settings.batchTranscriptionModel == MetaMuseVoiceTranscribe.batchCatalogID
-                                ? "Add a Meta Model API key below to use this model."
-                                : "Add an OpenRouter API key below to use this model.",
-                        systemImage: "exclamationmark.triangle"
-                    )
+                    // Name the key `batchAPIKey(for:)` resolves for this model, so the
+                    // hint never points at a provider whose key would not help.
+                    let batchModel = settings.batchTranscriptionModel
+                    let keyHint: String = {
+                        if AppSettings.openAIBatchModelIDs.contains(batchModel) {
+                            return "Add an OpenAI API key below to use this model."
+                        }
+                        if batchModel == MetaMuseVoiceTranscribe.batchCatalogID {
+                            return "Add a Meta Model API key below to use this model."
+                        }
+                        if batchModel == CartesiaBatchClient.catalogID {
+                            return "Add a Cartesia API key below to use this model."
+                        }
+                        if batchModel == GladiaBatchClient.catalogID {
+                            return "Add a Gladia API key below to use this model."
+                        }
+                        return "Add an OpenRouter API key below to use this model."
+                    }()
+                    Label(keyHint, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                     .font(.caption)
                 }

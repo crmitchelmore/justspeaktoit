@@ -22,7 +22,7 @@ enum SpeechmaticsLiveError: LocalizedError {
     case .invalidAPIKey:
       "Speechmatics API key is invalid. Check your key in Settings → Speechmatics."
     case .batchNotSupported:
-      "Speechmatics is currently only available for live streaming in Speak."
+      "This Speechmatics model is only available for live streaming in Speak."
     case .encodingFailed:
       "Failed to encode the Speechmatics realtime request."
     case .serverError(let message):
@@ -58,7 +58,7 @@ struct SpeechmaticsTranscriptionProvider: TranscriptionProvider {
     guard SpeechmaticsBatchClient.catalogIDs.contains(
       model.trimmingCharacters(in: .whitespacesAndNewlines)
     ) else {
-      throw SpeechmaticsLiveError.batchNotSupported
+      throw BatchTranscriptionJobError.unsupportedModel("Speechmatics")
     }
     return try await SpeechmaticsBatchClient(session: session).transcribeFile(
       at: url, apiKey: apiKey, model: model, language: language

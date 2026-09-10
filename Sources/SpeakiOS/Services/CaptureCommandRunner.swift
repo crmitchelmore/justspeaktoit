@@ -71,13 +71,18 @@ public enum CaptureCommandRunner {
             return false
         }
 
-        guard await self.start(
+        let outcome = await self.start(
             service,
             destinationOverride: link.destination,
             modelOverride: link.modelIdentifier,
             languageOverride: link.languageIdentifier
-        ) else {
-            self.report(.recordingFailed, to: link.callback)
+        )
+        if case .failed(let surfaced) = outcome {
+            // `notifyUser: !surfaced`: when the start already published the
+            // real reason it failed, a generic `recordingFailed` on top of it
+            // would be a second alert for one failure — and the vaguer of the
+            // two. The caller still gets its `x-error` either way.
+            self.report(.recordingFailed, to: link.callback, notifyUser: !surfaced)
             return false
         }
 
@@ -124,11 +129,17 @@ public enum CaptureCommandRunner {
     /// of it if it passed an `x-error`; the user always gets the alert, because
     /// a link that silently does nothing is the failure this vocabulary keeps
     /// running into.
-    private static func report(_ failure: CaptureLinkFailure, to callback: CaptureCallback?) {
+    private static func report(
+        _ failure: CaptureLinkFailure,
+        to callback: CaptureCallback?,
+        notifyUser: Bool = true
+    ) {
         SpeakLogger.transcription.warning(
             "Capture link refused: \(failure.rawValue, privacy: .public)"
         )
-        TranscriptionRecordingService.shared.reportCaptureFailure(failure)
+        if notifyUser {
+            TranscriptionRecordingService.shared.reportCaptureFailure(failure)
+        }
         self.open(callback?.errorURL(failure), reason: "x-error")
     }
 
@@ -185,7 +196,7 @@ public enum CaptureCommandRunner {
                 destinationOverride: destinationOverride,
                 modelOverride: modelOverride,
                 languageOverride: languageOverride
-            )
+            ).didStart
 
         case .stop:
             guard isActive else { return false }
@@ -202,8 +213,20 @@ public enum CaptureCommandRunner {
                 destinationOverride: destinationOverride,
                 modelOverride: modelOverride,
                 languageOverride: languageOverride
-            )
+            ).didStart
         }
+    }
+
+    /// The result of a start attempt.
+    ///
+    /// `failed` carries whether the user has already been told, so a caller
+    /// with a failure report of its own does not raise a second alert for one
+    /// failure.
+    enum StartOutcome: Equatable {
+        case started
+        case failed(surfaced: Bool)
+
+        var didStart: Bool { self == .started }
     }
 
     private static func start(
@@ -211,7 +234,7 @@ public enum CaptureCommandRunner {
         destinationOverride: HardwareTriggerDestination?,
         modelOverride: String? = nil,
         languageOverride: String? = nil
-    ) async -> Bool {
+    ) async -> StartOutcome {
         // The in-app recorder owns the microphone through its own coordinator,
         // which the headless service knows nothing about. Starting here anyway
         // would run two sessions against one input. The App Intents refuse for
@@ -220,7 +243,7 @@ public enum CaptureCommandRunner {
             SpeakLogger.transcription.info(
                 "Capture command ignored: a recording is already running in the app"
             )
-            return false
+            return .failed(surfaced: false)
         }
         do {
             try await service.startRecording(
@@ -228,16 +251,70 @@ public enum CaptureCommandRunner {
                 languageOverride: languageOverride
             )
             startedDestination = destinationOverride
-            return true
+            return .started
         } catch {
             startedDestination = nil
-            SpeakLogger.logError(
-                error,
-                context: "Capture command start",
-                logger: SpeakLogger.transcription
+            return .failed(surfaced: surfaceStartFailure(error, service: service))
+        }
+    }
+
+    /// Makes a terminal start failure visible.
+    ///
+    /// Without this a Home Screen quick action whose start throws produced a
+    /// log line and nothing else: the press looked like it worked, and no
+    /// recording ever began (issue #944). The classification is
+    /// `CaptureStartFailurePolicy`'s, so what counts as terminal is decided by
+    /// a pure unit rather than by this file, and the two silent cases —
+    /// cancellation and a superseded run — are read from the recorder's
+    /// existing run-identity guard (which turns a retired start into a
+    /// `CancellationError`) rather than from a second guard added here.
+    ///
+    /// - Parameter publish: the sink for a terminal failure; defaults to the
+    ///   service's existing published error, which is the same alert path a
+    ///   refused capture link and a failed mid-session recording already use.
+    /// - Returns: whether the user was told.
+    @discardableResult
+    static func surfaceStartFailure(
+        _ error: Error,
+        laterCaptureInFlight: Bool,
+        microphoneOwnedElsewhere: Bool,
+        publish: (Error) -> Void
+    ) -> Bool {
+        SpeakLogger.logError(
+            error,
+            context: "Capture command start",
+            logger: SpeakLogger.transcription
+        )
+        let disposition = CaptureStartFailurePolicy.disposition(
+            errorDescription: error.localizedDescription,
+            isCancellation: error is CancellationError,
+            laterCaptureInFlight: laterCaptureInFlight,
+            microphoneOwnedElsewhere: microphoneOwnedElsewhere
+        )
+        switch disposition {
+        case .logOnly(let reason):
+            SpeakLogger.transcription.info(
+                "Capture start failure not shown: \(reason.rawValue, privacy: .public)"
             )
             return false
+        case .surface:
+            publish(error)
+            return true
         }
+    }
+
+    private static func surfaceStartFailure(
+        _ error: Error,
+        service: TranscriptionRecordingService
+    ) -> Bool {
+        self.surfaceStartFailure(
+            error,
+            // Asked *after* the failure: a capture active now is a newer run
+            // that replaced this one, so this failure is stale.
+            laterCaptureInFlight: service.isActive,
+            microphoneOwnedElsewhere: SharedTranscriptionState.shared.isRecording,
+            publish: service.reportCaptureFailure
+        )
     }
 
     /// - Returns: the transcript this stop produced, which `dictate` returns to

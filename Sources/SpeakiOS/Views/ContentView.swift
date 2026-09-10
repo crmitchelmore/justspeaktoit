@@ -275,6 +275,9 @@ public struct ContentView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var showingError = false
     @State private var errorMessage = ""
+    /// The background session failure already alerted on, so the change
+    /// observer and the on-appear read cannot show it twice.
+    @State private var presentedSessionError: String?
     @State private var copied = false
     @State private var showingPostProcessing = false
     @State private var displayText = ""  // Text shown in UI (may be post-processed)
@@ -470,12 +473,10 @@ public struct ContentView: View {
                 }
             }
             .onChange(of: backgroundService.lastSessionError?.localizedDescription) { _, newError in
-                // A background (Action Button) session failed mid-recording;
-                // surface it instead of silently losing the user's dictation.
-                if let error = newError {
-                    errorMessage = error
-                    showingError = true
-                }
+                // A background session (Action Button, Home Screen quick
+                // action, capture link) failed; surface it instead of silently
+                // losing the user's dictation.
+                presentSessionError(newError)
             }
             .onChange(of: handsFree.failureMessage) { _, newError in
                 if let newError {
@@ -497,7 +498,15 @@ public struct ContentView: View {
                     }
                 }
             }
-            .onAppear { refreshBackgroundState() }
+            .onAppear {
+                refreshBackgroundState()
+                // A Home Screen quick action can cold-launch the app and fail
+                // to start before this view — and therefore the observer above
+                // — exists, so the failure has to be read as well as watched
+                // (issue #944). `presentSessionError` de-duplicates, so the
+                // two routes cannot raise two alerts for one failure.
+                presentSessionError(backgroundService.lastSessionError?.localizedDescription)
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     refreshBackgroundState()
@@ -721,6 +730,27 @@ public struct ContentView: View {
     }
 
     // MARK: - Background session surfacing
+
+    /// Presents a background session failure once.
+    ///
+    /// Called both when the published error changes and when this view
+    /// appears — the second is what covers a cold launch, where a quick action
+    /// can fail before any observer exists. `CaptureStartFailurePolicy` owns
+    /// the "is this new?" rule so both routes agree, and a `nil` (a fresh start
+    /// clearing the error) re-arms it, so the *same* failure happening twice is
+    /// still shown twice.
+    private func presentSessionError(_ description: String?) {
+        guard CaptureStartFailurePolicy.shouldPresent(
+            description,
+            lastPresented: presentedSessionError
+        ), let description else {
+            if description == nil { presentedSessionError = nil }
+            return
+        }
+        presentedSessionError = description
+        errorMessage = description
+        showingError = true
+    }
 
     /// Surfaces the most recent background (Action Button / Siri / Shortcuts)
     /// transcript as the current view and updates the History badge. Called on

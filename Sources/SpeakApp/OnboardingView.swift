@@ -1,6 +1,7 @@
 // swiftlint:disable file_length
 import AppKit
 import AVFoundation
+import Combine
 import SpeakCore
 import SpeakHotKeys
 import SwiftUI
@@ -130,7 +131,8 @@ final class OnboardingState: ObservableObject {
     @Published var apiKey = ""
     @Published var isValidating = false
     @Published var validationError: String?
-    @Published var permissionsGranted: Set<PermissionType> = []
+    @Published private(set) var permissionsGranted: Set<PermissionType> = []
+    private var permissionsObserver: AnyCancellable?
     @Published var selectedHotKey: HotKey = .fnKey
     @Published var hotKeyWasChosen = false
     
@@ -162,19 +164,23 @@ final class OnboardingState: ObservableObject {
         self.transcriptionManager = transcriptionManager
         self.selectedHotKey = settings.selectedHotKey
         self.hotKeyWasChosen = settings.hasConfiguredGlobalHotKey
+        // Consume the emitted snapshot: @Published emits before the manager's
+        // stored dictionary changes. Guide polling and activation refreshes must
+        // update onboarding too, without a separate confirmation button.
+        permissionsObserver = permissionsManager.$statuses
+            .map { statuses in
+                Set(PermissionType.availablePermissions(for: DistributionChannel.current)
+                    .filter { statuses[$0]?.isGranted == true })
+            }
+            .removeDuplicates()
+            .sink { [weak self] granted in self?.permissionsGranted = granted }
         refreshPermissions()
     }
-    
+
     func refreshPermissions() {
-        permissionsGranted = []
-        for perm in PermissionType.availablePermissions(for: DistributionChannel.current) {
-            // Force a fresh computation; cached statuses go stale when the user
-            // toggles a permission in System Settings (the OS never notifies us).
-            permissionsManager.refresh(perm)
-            if permissionsManager.status(for: perm).isGranted {
-                permissionsGranted.insert(perm)
-            }
-        }
+        // Cached statuses go stale when the user toggles a permission in System
+        // Settings (the OS never notifies us); the subscription above publishes the result.
+        permissionsManager.refreshAll()
     }
     
     var allPermissionsGranted: Bool {
@@ -540,10 +546,9 @@ struct FeatureRow: View {
 
 struct PermissionsStepView: View {
     @ObservedObject var state: OnboardingState
-    @State private var showAccessibilityHelper = false
-    @State private var accessibilityAttempted = false
     
     var body: some View {
+        ScrollView {
         VStack(spacing: 20) {
             Image(systemName: "checkmark.shield.fill")
                 .font(.system(size: 60))
@@ -553,7 +558,7 @@ struct PermissionsStepView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("Just Speak to It needs a few permissions to work")
+            Text("\(RunningAppIdentity.current.name) needs a few permissions to work")
                 .foregroundColor(.secondary)
             
             VStack(spacing: 12) {
@@ -564,7 +569,7 @@ struct PermissionsStepView: View {
                     isGranted: state.permissionsGranted.contains(.microphone),
                     onRequest: {
                         Task {
-                            _ = await state.permissionsManager.request(.microphone)
+                            _ = await state.permissionsManager.requestWithGuidance(.microphone)
                             state.refreshPermissions()
                         }
                     }
@@ -577,28 +582,9 @@ struct PermissionsStepView: View {
                         description: "To type text into other apps",
                         isGranted: state.permissionsGranted.contains(.accessibility),
                         onRequest: {
-                            accessibilityAttempted = true
                             Task {
-                                _ = await state.permissionsManager.request(.accessibility)
-                                // Wait a moment then check if it worked
-                                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                                _ = await state.permissionsManager.requestWithGuidance(.accessibility)
                                 state.refreshPermissions()
-                                // If still not granted after attempt, show helper
-                                if !state.permissionsGranted.contains(.accessibility) {
-                                    showAccessibilityHelper = true
-                                }
-                            }
-                        }
-                    )
-                }
-                
-                // Show manual add helper if accessibility wasn't auto-added
-                if showAccessibilityHelper && !state.permissionsGranted.contains(.accessibility) {
-                    AccessibilityManualHelper(
-                        onComplete: {
-                            state.refreshPermissions()
-                            if state.permissionsGranted.contains(.accessibility) {
-                                showAccessibilityHelper = false
                             }
                         }
                     )
@@ -607,12 +593,12 @@ struct PermissionsStepView: View {
                 PermissionRow(
                     type: .inputMonitoring,
                     title: "Input Monitoring",
-                    description: "For global hotkey detection",
+                    description: "For the Fn hotkey while using other apps",
                     isGranted: state.permissionsGranted.contains(.inputMonitoring),
                     isOptional: true,
                     onRequest: {
                         Task {
-                            _ = await state.permissionsManager.request(.inputMonitoring)
+                            _ = await state.permissionsManager.requestWithGuidance(.inputMonitoring)
                             state.refreshPermissions()
                         }
                     }
@@ -621,18 +607,10 @@ struct PermissionsStepView: View {
             .padding(.horizontal, 40)
             .padding(.top, 10)
             
-            if !showAccessibilityHelper {
-                Text("If permissions don't appear in System Settings, restart the app")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 10)
-                
-                Button("Open System Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")!)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
-            }
+            PermissionRecoveryHelp(permissions: state.permissionsManager)
+                .padding(.horizontal, 40)
+        }
+        .frame(maxWidth: .infinity)
         }
         .task {
             // Accessibility and Input Monitoring are granted in System Settings
@@ -643,79 +621,6 @@ struct PermissionsStepView: View {
                 state.refreshPermissions()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
-        }
-    }
-}
-
-// MARK: - Accessibility Manual Helper
-
-struct AccessibilityManualHelper: View {
-    let onComplete: () -> Void
-    @State private var currentStep = 0
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text("App not appearing? Add it manually:")
-                    .font(.headline)
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                ManualStep(number: 1, text: "Click the button below to open Accessibility settings", isActive: currentStep == 0)
-                ManualStep(number: 2, text: "Click the + button at the bottom of the app list", isActive: currentStep == 1)
-                ManualStep(number: 3, text: "Navigate to Applications → JustSpeakToIt", isActive: currentStep == 2)
-                ManualStep(number: 4, text: "Click Open, then enable the toggle", isActive: currentStep == 3)
-            }
-            
-            HStack(spacing: 12) {
-                Button("Open Accessibility Settings") {
-                    // Open directly to Accessibility pane
-                    NSWorkspace.shared.open(PermissionType.accessibility.settingsURL)
-                    currentStep = 1
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                
-                Button("I've Added It") {
-                    onComplete()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                
-                Button("Show App in Finder") {
-                    // Reveal the app in Finder
-                    let appPath = Bundle.main.bundlePath
-                    NSWorkspace.shared.selectFile(appPath, inFileViewerRootedAtPath: "")
-                }
-                .buttonStyle(.plain)
-                .controlSize(.small)
-                .foregroundColor(.accentColor)
-            }
-        }
-        .padding()
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(8)
-    }
-}
-
-struct ManualStep: View {
-    let number: Int
-    let text: String
-    let isActive: Bool
-    
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(number).")
-                .font(.caption)
-                .fontWeight(isActive ? .bold : .regular)
-                .foregroundColor(isActive ? .accentColor : .secondary)
-                .frame(width: 16)
-            
-            Text(text)
-                .font(.caption)
-                .foregroundColor(isActive ? .primary : .secondary)
         }
     }
 }
@@ -968,7 +873,10 @@ struct HotKeyStepView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     TroubleshootingRow(icon: "globe", text: "If Fn opens emoji picker: go to System Settings → Keyboard → \"Press 🌐 key to\" and change it to \"Do Nothing\"")
                     TroubleshootingRow(icon: "keyboard", text: "External keyboards may not send Fn events — use a custom shortcut instead")
-                    TroubleshootingRow(icon: "lock.shield", text: "Accessibility and Input Monitoring permissions are required for hotkey detection")
+                    TroubleshootingRow(
+                        icon: "lock.shield",
+                        text: "Input Monitoring enables Fn. Accessibility enables typing into other apps."
+                    )
                 }
                 .padding(.top, 8)
             } label: {
@@ -1195,7 +1103,7 @@ struct CompleteStepView: View {
                     .font(.title)
                     .fontWeight(.bold)
             
-                Text("Just Speak to It is ready to use")
+                Text("\(ReleaseTrain.current.displayName) is ready to use")
                     .foregroundColor(.secondary)
 
                 if AppEnvironment.shared?.analyticsAvailable == true {

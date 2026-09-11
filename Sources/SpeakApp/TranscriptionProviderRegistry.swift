@@ -10,6 +10,7 @@ actor TranscriptionProviderRegistry {
 
     private init() {
         // Register all providers here - adding a new provider automatically makes it available
+        providers["azure"] = AzureTranscriptionProvider()
         providers["openai"] = OpenAITranscriptionProvider()
         providers["revai"] = RevAITranscriptionProvider()
         providers["deepgram"] = DeepgramTranscriptionProvider()

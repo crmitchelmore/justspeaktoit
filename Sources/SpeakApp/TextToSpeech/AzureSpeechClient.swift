@@ -23,42 +23,21 @@ actor AzureSpeechClient: TextToSpeechClient {
       throw TTSError.apiKeyMissing(provider)
     }
 
-    let (apiKey, region) = parseCredentials(credentials)
-    let voiceID = voice.replacingOccurrences(of: "azure/", with: "")
+    let request = try AzureSpeechVoiceAPI.synthesisRequest(
+      credentials: credentials, text: text, voice: voice, format: outputFormat(for: settings),
+      speed: settings.speed, pitch: settings.pitch, useSSML: settings.useSSML
+    )
 
-    guard let baseURL = AzureSpeechEndpoint.baseURL(region: region) else {
-        throw TTSError.synthesisFailure("Invalid Azure Speech region")
-    }
-    let url = baseURL.appendingPathComponent("cognitiveservices/v1")
-
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue(apiKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
-    request.setValue("application/ssml+xml", forHTTPHeaderField: "Content-Type")
-    request.setValue(outputFormat(for: settings), forHTTPHeaderField: "X-Microsoft-OutputFormat")
-    request.setValue("speak-app", forHTTPHeaderField: "User-Agent")
-
-    // Build SSML
-    let ssml: String
-    if settings.useSSML && text.contains("<speak>") {
-      ssml = text
-    } else if settings.useSSML {
-      // Wrap in speak tags if SSML is enabled but not present
-      ssml = buildSSML(text: text, voice: voiceID, settings: settings)
-    } else {
-      ssml = buildSSML(text: text, voice: voiceID, settings: settings)
-    }
-
-    request.httpBody = ssml.data(using: .utf8)
-
-    let (data, response) = try await session.data(for: request)
+    // Keep the subscription key inside the regional Azure origin on any redirect.
+    let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: request.url!)
+    let (data, response) = try await session.data(for: request, delegate: redirects)
 
     guard let httpResponse = response as? HTTPURLResponse else {
       throw TTSError.synthesisFailure("Invalid response")
     }
 
     if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-      throw TTSError.apiKeyMissing(provider)
+      throw AzureSpeechError.service(httpResponse.statusCode)
     }
 
     guard httpResponse.statusCode == 200 else {
@@ -67,13 +46,13 @@ actor AzureSpeechClient: TextToSpeechClient {
     }
 
     // Save audio data to temporary file
-    let outputURL = try await saveAudioData(data, format: settings.format)
+    let outputURL = try await saveAudioData(data, format: settings.format == .m4a ? .mp3 : settings.format)
 
     // Calculate duration
     let duration = try await getAudioDuration(url: outputURL)
 
     // Estimate cost (Azure pricing: ~$16 per 1M characters for neural voices)
-    let cost = Decimal(text.count) * 16.0 / 1_000_000.0
+    let cost: Decimal? = voice.contains(":MAI-Voice-") ? nil : Decimal(text.count) * 16.0 / 1_000_000.0
 
     return TTSResult(
       audioURL: outputURL,
@@ -86,88 +65,26 @@ actor AzureSpeechClient: TextToSpeechClient {
   }
 
   func listVoices() async throws -> [TTSVoice] {
-    return VoiceCatalog.azureVoices
+    guard let key = try? await secureStorage.secret(identifier: provider.apiKeyIdentifier), !key.isEmpty else {
+      return VoiceCatalog.azureVoices
+    }
+    guard let voices = try? await AzureSpeechVoiceAPI(session: session).listVoices(credentials: key),
+          !voices.isEmpty else {
+      return VoiceCatalog.azureVoices
+    }
+    return voices.map { voice in
+      TTSVoice(id: voice.id, name: voice.name, provider: .azure,
+               traits: voice.gender == "Female" ? [.female] : [.male], previewURL: nil)
+    }
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let (apiKey, region) = parseCredentials(key)
-
-    guard !region.isEmpty else {
-      return .failure(
-        message:
-          "Azure requires both API key and region. Format: 'your-api-key:your-region' (e.g., 'abc123:eastus')"
-      )
-    }
-
-    guard let baseURL = AzureSpeechEndpoint.baseURL(region: region) else {
-        return .failure(message: "Invalid Azure Speech region")
-    }
-    let url = baseURL.appendingPathComponent("cognitiveservices/voices/list")
-
-    var request = URLRequest(url: url)
-    request.setValue(apiKey, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
-
     do {
-      let (_, response) = try await session.data(for: request)
-      guard let httpResponse = response as? HTTPURLResponse else {
-        return .failure(message: "Invalid response")
-      }
-
-      if httpResponse.statusCode == 200 {
-        return .success(message: "API key and region are valid")
-      } else if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-        return .failure(message: "Invalid API key or region")
-      } else {
-        return .failure(message: "HTTP \(httpResponse.statusCode)")
-      }
+      _ = try await AzureSpeechVoiceAPI(session: session).listVoices(credentials: key)
+      return .success(message: "Azure key and region are valid. Model access depends on your resource.")
     } catch {
       return .failure(message: error.localizedDescription)
     }
-  }
-
-  // MARK: - Private Helpers
-
-  private func parseCredentials(_ credentials: String) -> (apiKey: String, region: String) {
-    let parts = credentials.split(separator: ":", maxSplits: 1)
-    if parts.count == 2 {
-      return (String(parts[0]), String(parts[1]))
-    }
-    // Default to eastus if no region specified
-    return (credentials, "eastus")
-  }
-
-  private func buildSSML(text: String, voice: String, settings: TTSSettings) -> String {
-    let rate = rateAttribute(for: settings.speed)
-    let pitch = pitchAttribute(for: settings.pitch)
-
-    return """
-      <speak version='1.0' xml:lang='en-US'>
-        <voice name='\(voice)'>
-          <prosody rate='\(rate)' pitch='\(pitch)'>
-            \(text)
-          </prosody>
-        </voice>
-      </speak>
-      """
-  }
-
-  private func rateAttribute(for speed: Double) -> String {
-    let percentage = Int((speed - 1.0) * 100)
-    if percentage > 0 {
-      return "+\(percentage)%"
-    } else if percentage < 0 {
-      return "\(percentage)%"
-    }
-    return "0%"
-  }
-
-  private func pitchAttribute(for pitch: Double) -> String {
-    if pitch > 0 {
-      return "+\(Int(pitch))st"
-    } else if pitch < 0 {
-      return "\(Int(pitch))st"
-    }
-    return "0st"
   }
 
   private func outputFormat(for settings: TTSSettings) -> String {

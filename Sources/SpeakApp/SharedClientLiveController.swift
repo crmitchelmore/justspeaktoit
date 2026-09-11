@@ -74,7 +74,8 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       language: currentLanguage,
       keywords: [.meta, .google].contains(route.provider)
         ? MetaMuseVoiceTranscribe.keywords(from: appSettings.transcriptionKeywords)
-        : []
+        : [],
+      azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
     ) else {
       throw LiveTranscriptionClientError.providerNotAvailable(route.provider)
     }

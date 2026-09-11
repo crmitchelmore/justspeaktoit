@@ -8,7 +8,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let customOptionID = "__model_custom__"
 
-    public static let liveTranscription: [Option] = appleLiveTranscriptionOptions + [
+    public static let liveTranscription: [Option] =
+        appleLiveTranscriptionOptions + [
         Option(
             id: "apple/local/Dictation", displayName: "Apple Dictation",
             description: "Alternative on-device engine that mirrors system dictation.",
@@ -133,9 +134,10 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "accuracy on noisy or accented audio with keyterm prompt support. Reuses your "
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
-    ]
+    ] + AzureTranscriptionModels.liveOptions
 
-    public static let batchTranscription: [Option] = appleBatchTranscriptionOptions + [
+    public static let batchTranscription: [Option] =
+        appleBatchTranscriptionOptions + [
         Option(
             id: CartesiaBatchClient.catalogID, displayName: "Cartesia Ink Whisper (Batch)",
             description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",
@@ -273,7 +275,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "ElevenLabs Scribe v2: high-accuracy speech-to-text across 90+ languages "
                 + "with word-level timestamps.",
             estimatedLatencyMs: 800, latencyTier: .fast)
-    ]
+    ] + AzureTranscriptionModels.batchOptions
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.

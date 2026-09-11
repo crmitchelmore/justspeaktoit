@@ -64,6 +64,12 @@ extension ModelCatalog {
     /// silently rewrites the user's speed mode to `.instant` whenever that
     /// model is selected. `LiveModelCapabilitiesTests` asserts that parity.
     static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
+        AzureTranscriptionModels.speechLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
+        AzureTranscriptionModels.maiLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
         // Apple on-device — raw passthrough only.
         "apple/local/SFSpeechRecognizer": .default,
         "apple/local/SpeechTranscriber": .default,

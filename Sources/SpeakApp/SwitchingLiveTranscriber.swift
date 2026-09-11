@@ -217,6 +217,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       // needs no bespoke controller or audio processor.
       (GeminiTranscribeModels.liveCatalogID, controllers.sharedClient),
       ("xai/", controllers.sharedClient),
+      ("azure/", controllers.sharedClient),
       // Meta Muse Voice Transcribe streams through the shared SpeakCore client,
       // so it uses the same macOS capture controller as xAI.
       ("meta/", controllers.sharedClient),

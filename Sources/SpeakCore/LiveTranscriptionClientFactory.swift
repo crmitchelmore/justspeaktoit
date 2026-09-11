@@ -13,6 +13,19 @@ import Foundation
 /// return `nil` — callers fall back to a platform-native path or surface a
 /// "not available yet" message.
 public enum LiveTranscriptionClientFactory {
+    public static func makeClient(
+        for route: LiveTranscriptionRoute,
+        apiKey: String,
+        language: String?,
+        keywords: [String] = []
+    ) -> StreamingTranscriptionClient? {
+        makeClient(for: route, apiKey: apiKey, language: language, keywords: keywords, azureEndpoint: "")
+    }
+
+    // The Azure Voice Live route also needs the resource endpoint the settings
+    // store; every other provider ignores it. The original signature above is
+    // kept as a forwarding overload so the exported API stays compatible.
+    //
     // One case per provider is the point of this switch: the catalogue-to-transport
     // mapping stays auditable in one place, so its length grows with the provider list.
     // swiftlint:disable:next cyclomatic_complexity function_body_length
@@ -20,9 +33,14 @@ public enum LiveTranscriptionClientFactory {
         for route: LiveTranscriptionRoute,
         apiKey: String,
         language: String?,
-        keywords: [String] = []
+        keywords: [String],
+        azureEndpoint: String
     ) -> StreamingTranscriptionClient? {
         switch route.provider {
+        case .azure:
+            return AzureVoiceLiveClient(credentials: apiKey, endpoint: azureEndpoint,
+                                        model: route.apiModelName, language: language,
+                                        sampleRate: route.sampleRate)
         case .deepgram:
             return DeepgramLiveClient(
                 apiKey: apiKey,

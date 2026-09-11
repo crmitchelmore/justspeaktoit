@@ -235,6 +235,10 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(mistralAPIKey, identifier: Self.mistralKeyID) }
     }
 
+    @Published public var azureAPIKey: String {
+        didSet { persistSecret(azureAPIKey, identifier: Self.azureKeyID) }
+    }
+
     @Published public var metaAPIKey: String {
         didSet { persistSecret(metaAPIKey, identifier: Self.metaKeyID) }
     }
@@ -260,6 +264,7 @@ public final class AppSettings: ObservableObject {
     static let gladiaKeyID = "gladia.apiKey"
     static let googleKeyID = "google.apiKey"
     static let xAIKeyID = "xai.apiKey"
+    static let azureKeyID = AzureSpeechConfiguration.credentialIdentifier
     static let metaKeyID = "meta.apiKey"
     static let speechmaticsKeyID = "speechmatics.apiKey"
     static let revAIKeyID = "revai.apiKey"
@@ -535,6 +540,7 @@ public final class AppSettings: ObservableObject {
         self.gladiaAPIKey = ""
         self.googleAPIKey = ""
         self.xAIAPIKey = ""
+        self.azureAPIKey = ""
         self.metaAPIKey = ""
         self.speechmaticsAPIKey = ""
         self.revAIAPIKey = ""
@@ -689,6 +695,7 @@ public final class AppSettings: ObservableObject {
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAzureKey: Bool { !azureAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasSpeechmaticsKey: Bool {
         !speechmaticsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -712,6 +719,7 @@ public final class AppSettings: ObservableObject {
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
         if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
+        if hasAzureKey { identifiers.insert(Self.azureKeyID) }
         if hasMetaKey { identifiers.insert(Self.metaKeyID) }
         if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
         if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
@@ -719,6 +727,7 @@ public final class AppSettings: ObservableObject {
         return identifiers
     }
 
+    // Each credential is reloaded without overwriting a locked Keychain entry.
     @discardableResult
     public func reloadSyncedAPIKeys() async -> Bool {
         guard await credentials.preloadAndReportSuccess() else { return false }
@@ -777,6 +786,10 @@ public final class AppSettings: ObservableObject {
         xAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.xAIKeyID,
             currentValue: xAIAPIKey
+        )
+        azureAPIKey = await syncedAPIKeyValue(
+            identifier: Self.azureKeyID,
+            currentValue: azureAPIKey
         )
         metaAPIKey = await syncedAPIKeyValue(
             identifier: Self.metaKeyID,
@@ -864,7 +877,8 @@ public final class AppSettings: ObservableObject {
             Self.metaKeyID: metaAPIKey,
             Self.speechmaticsKeyID: speechmaticsAPIKey,
             Self.revAIKeyID: revAIAPIKey,
-            Self.mistralKeyID: mistralAPIKey
+            Self.mistralKeyID: mistralAPIKey,
+            Self.azureKeyID: azureAPIKey
         ]
     }
 
@@ -913,6 +927,7 @@ public final class AppSettings: ObservableObject {
         ModelCatalog.batchTranscription.filter { option in
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
+                || AzureTranscriptionModels.batchIDs.contains(option.id)
                 // OpenRouter-routed Gemini 2.x batch models upload through the
                 // OpenRouter client; Gemini 3.5 Transcribe uploads through the
                 // shared `GeminiInteractionsClient` with the Google key
@@ -2073,6 +2088,7 @@ struct APIKeysView: View {
     @State private var gladiaKey = ""
     @State private var googleKey = ""
     @State private var xAIKey = ""
+    @State private var azureKey = ""
     @State private var metaKey = ""
     @State private var speechmaticsKey = ""
     @State private var revAIKey = ""
@@ -2158,6 +2174,9 @@ struct APIKeysView: View {
             APIKeyListEntry(
                 id: "mistral", title: "Mistral", category: "Transcription & Voice Output",
                 isStored: settings.hasMistralKey
+            ),
+            APIKeyListEntry(
+                id: "azure", title: "Azure Speech", category: "Transcription", isStored: settings.hasAzureKey
             )
         ]
     }
@@ -2173,6 +2192,7 @@ struct APIKeysView: View {
 
     var body: some View {
         Form {
+            Section("Azure Speech resource") { AzureSpeechEndpointField() }
             if visibleEntries.isEmpty {
                 ContentUnavailableView(
                     "No API Keys",
@@ -2234,6 +2254,7 @@ struct APIKeysView: View {
                             && googleKey.isEmpty
                             && xAIKey.isEmpty
                             && metaKey.isEmpty
+                            && azureKey.isEmpty
                     )
                 }
             }
@@ -2335,6 +2356,9 @@ struct APIKeysView: View {
             return KeyPresentation(
                 title: "xAI", systemImage: "waveform.badge.mic", help: "Get your key from console.x.ai."
             )
+        case "azure":
+            return KeyPresentation(title: "Azure Speech", systemImage: "cloud",
+                                   help: "Enter your Azure key and region as key:region.")
         case "meta":
             return KeyPresentation(
                 title: "Meta", systemImage: "waveform.badge.mic",
@@ -2375,6 +2399,7 @@ struct APIKeysView: View {
         case "assemblyai": return $assemblyAIKey
         case "google": return $googleKey
         case "xai": return $xAIKey
+        case "azure": return $azureKey
         case "meta": return $metaKey
         case "speechmatics": return $speechmaticsKey
         case "revai": return $revAIKey
@@ -2413,6 +2438,7 @@ struct APIKeysView: View {
         case "assemblyai": settings.assemblyAIAPIKey = ""
         case "google": settings.googleAPIKey = ""
         case "xai": settings.xAIAPIKey = ""
+        case "azure": settings.azureAPIKey = ""
         case "meta": settings.metaAPIKey = ""
         case "speechmatics": settings.speechmaticsAPIKey = ""
         case "revai": settings.revAIAPIKey = ""
@@ -2427,6 +2453,14 @@ struct APIKeysView: View {
         Task {
             isValidating = true
             var messages: [String] = []
+            if !azureKey.isEmpty {
+                do {
+                    _ = try await AzureSpeechVoiceAPI().listVoices(credentials: azureKey)
+                    settings.azureAPIKey = azureKey
+                    azureKey = ""
+                    messages.append("Azure key and region saved; transcription access depends on your resource.")
+                } catch { messages.append(error.localizedDescription) }
+            }
 
             // Validate and save Deepgram key
             if !deepgramKey.isEmpty {

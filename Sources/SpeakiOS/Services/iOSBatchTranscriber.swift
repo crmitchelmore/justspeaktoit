@@ -44,6 +44,8 @@ public final class IOSBatchTranscriber {
     }
     private let audioEngine = AVAudioEngine()
     let audioRecorder = AudioRecordingPersistence()
+    let recordingLoss = RecordingLossReporting(isBatch: true)
+    var startCaptureAudio: (() throws -> Void)?
     private let client: IOSBatchTranscriptionClient
     private let retainRecording: Bool
     private var startTime: Date?
@@ -92,6 +94,7 @@ public final class IOSBatchTranscriber {
         let captureID = UUID()
         activeCaptureID = captureID
         firstInputSignal = FirstInputSignal()
+        recordingLoss.begin(recorder: audioRecorder)
         let permissionGranted = await ensureMicrophonePermission()
         try Task.checkCancellation()
         guard permissionGranted else {
@@ -102,6 +105,11 @@ public final class IOSBatchTranscriber {
         onStartupObservation?(.stage(.audioSessionConfigured))
         try Task.checkCancellation()
 
+        if let startCaptureAudio {
+            try startCaptureAudio()
+            startTime = Date()
+            return
+        }
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         try audioRecorder.startRecording(format: format)
@@ -128,11 +136,12 @@ public final class IOSBatchTranscriber {
     }
 
     public func stop(language: String?) async throws -> TranscriptionResult {
+        let lossRun = recordingLoss.currentReport
         audioEngine.stop()
         removeInputTap()
         activeCaptureID = nil
         startTime = nil
-        guard let recording = audioRecorder.stopRecording() else {
+        guard let recording = recordingLoss.finish(recorder: audioRecorder, run: lossRun) else {
             releaseAudioSession()
             throw IOSBatchTranscriptionError.missingRecording
         }
@@ -179,6 +188,7 @@ public final class IOSBatchTranscriber {
     }
 
     private func cleanupCapture() {
+        recordingLoss.cancel()
         audioEngine.stop()
         removeInputTap()
         audioRecorder.cancelRecording()

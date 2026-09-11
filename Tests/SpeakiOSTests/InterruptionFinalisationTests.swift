@@ -270,6 +270,9 @@ final class InterruptionSession: IOSRecordingSession {
     var onError: ((Error) -> Void)?
     var onFirstInputBuffer: (() -> Void)?
     var onStartupObservation: ((StartupObservation) -> Void)?
+    var onRecordingWarning: ((String) -> Void)?
+    /// This double persists nothing, so it never reports a loss (#950).
+    var recordingLossSummary: String? { nil }
     var inputLevelSample = CaptureInputLevelSample(levelDBFS: -160, sequence: 0)
     let safetyRecordingID: UUID? = nil
     var discards = 0

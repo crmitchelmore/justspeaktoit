@@ -22,6 +22,7 @@ final class TranscriberCoordinator: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var partialText = ""
     @Published private(set) var error: Error?
+    @Published private(set) var recordingWarning: String?
     @Published private(set) var currentModel: String = AppleLocalModels.preferredSpeechModelID
     @Published private(set) var confidence: Double?
     @Published private(set) var wordCount: Int = 0
@@ -123,6 +124,10 @@ final class TranscriberCoordinator: ObservableObject {
             self.handlePartialResult(text: text, isFinal: isFinal)
             self.confidence = session.confidence
         }
+        session.onRecordingWarning = { [weak self, weak session] message in
+            guard let self, let session, self.ownsSession(session) else { return }
+            self.handleRecordingWarning(message)
+        }
         session.onError = { [weak self, weak session] error in
             guard let self, let session,
                   self.ownsSession(session) else { return }
@@ -137,14 +142,6 @@ final class TranscriberCoordinator: ObservableObject {
                 }
             }
         }
-    }
-
-    private static func requiresControlledStop(_ error: Error) -> Bool {
-        // Interruption and microphone change both finalise through the owner
-        // (#936); a pre-ready startup overflow stops once (#949).
-        if (error as? iOSTranscriptionError)?.endsCapture == true { return true }
-        if case OpenAIRealtimeError.preReadyAudioOverflow = error { return true }
-        return false
     }
 
     private func ownsSession(_ session: any IOSRecordingSession) -> Bool {
@@ -217,6 +214,7 @@ final class TranscriberCoordinator: ObservableObject {
         stopWasCancelled = false
         defer {
             if stoppingSession === session {
+                recordingWarning = session.recordingLossSummary
                 stoppingSession = nil
             }
         }
@@ -256,7 +254,7 @@ final class TranscriberCoordinator: ObservableObject {
         partialText = result.text
         wordCount = result.text.split(whereSeparator: \.isWhitespace).count
         updateActivityAfterStop(duration: duration, result: result, rearmHandsFree: rearmHandsFree)
-        return finishStop(with: result)
+        return finishStop(with: result, recordingWarning: session.recordingLossSummary)
     }
 
     private func updateActivityAfterStop(
@@ -282,7 +280,9 @@ final class TranscriberCoordinator: ObservableObject {
         }
     }
 
-    private func finishStop(with result: TranscriptionResult) -> TranscriptionResult {
+    private func finishStop(
+        with result: TranscriptionResult, recordingWarning: String?
+    ) -> TranscriptionResult {
         // Live shared-state writes are throttled; commit the final transcript
         // once so the copy intents always see the complete text.
         sharedState.updateTranscript(result.text)
@@ -292,13 +292,17 @@ final class TranscriberCoordinator: ObservableObject {
         historyManager.recordTranscription(
             text: result.text,
             model: currentModel,
-            duration: result.duration
+            duration: result.duration,
+            errorMessage: recordingWarning.map { warning in
+                [warning, error?.localizedDescription].compactMap { $0 }.joined(separator: " ")
+            }
         )
         startTime = nil
         return result
     }
 
     func cancel() {
+        recordingWarning = nil
         transcriptionSession?.cancel()
         stopWasCancelled = stoppingSession != nil
         stoppingSession?.cancel()
@@ -350,6 +354,7 @@ private extension TranscriberCoordinator {
         diagnostics.note(.stage(.credentialsReady), run: runID)
         error = nil
         captureStopNotice = nil
+        recordingWarning = nil
         currentModel = settings.transcriptionMode == .batch
             ? settings.batchTranscriptionModel
             : settings.selectedModel
@@ -473,6 +478,21 @@ private extension TranscriberCoordinator {
 /// Live Activity presentation for the foreground coordinator. In an extension
 /// so the coordinator itself stays inside the type-length limit.
 extension TranscriberCoordinator {
+    /// Whether a provider error should finalise through the owner rather than
+    /// surface as a bare failure.
+    static func requiresControlledStop(_ error: Error) -> Bool {
+        // Interruption and microphone change both finalise through the owner
+        // (#936); a pre-ready startup overflow stops once (#949).
+        if (error as? iOSTranscriptionError)?.endsCapture == true { return true }
+        if case OpenAIRealtimeError.preReadyAudioOverflow = error { return true }
+        return false
+    }
+
+    /// Publishes a nonfatal capture or writer loss for this run (#950).
+    func handleRecordingWarning(_ message: String) {
+        recordingWarning = message
+    }
+
     /// Publishes a mid-session failure and mirrors it into the Live Activity.
     func handleError(_ error: Error) {
         // An audio interruption is a controlled stop (issue #936): a notice,
@@ -681,6 +701,13 @@ public struct ContentView: View {
                                     ) {
                                         onboarding.dismissCard(card)
                                     }
+                                }
+                                if let warning = backgroundService.isRunning
+                                    ? backgroundService.recordingWarning : coordinator.recordingWarning {
+                                    Label(warning, systemImage: "exclamationmark.triangle")
+                                        .font(.callout)
+                                        .foregroundStyle(.orange)
+                                        .accessibilityIdentifier("recordingLossWarning")
                                 }
                                 if currentText.isEmpty {
                                     Text(backgroundService.isRunning

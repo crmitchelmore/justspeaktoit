@@ -108,6 +108,8 @@ public final class AudioRecordingPersistence: ObservableObject {
     // deterministically. Set them before recording starts and leave them nil in
     // every non-test build.
 
+    nonisolated(unsafe) var beforeFileWrite: (@Sendable () throws -> Void)?
+
     /// Called from `writeBuffer` once admission has been granted and the buffer
     /// copied, i.e. exactly where the pre-fix code released `stateLock` before
     /// submitting to `ioQueue`. A test blocks here to hold a writer mid-flight
@@ -282,6 +284,9 @@ public final class AudioRecordingPersistence: ObservableObject {
                 return
             }
             do {
+                #if DEBUG
+                try self.beforeFileWrite?()
+                #endif
                 try file.write(from: copy)
                 controller.completeWrite(frameSeconds: frameSeconds, failed: false)
                 #if DEBUG

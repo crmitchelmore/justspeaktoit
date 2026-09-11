@@ -110,6 +110,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let activityManager = TranscriptionActivityManager.shared
     private let sharedState: SharedTranscriptionState
     private let historyManager: iOSHistoryManager
+    private let foregroundOwnership: ForegroundRecordingOwnership
+    private let ensureKeysLoaded: @MainActor () async -> Void
 
     private(set) var transcriptionSession: (any IOSRecordingSession)?
     private var stoppingSession: (any IOSRecordingSession)?
@@ -206,9 +208,13 @@ public final class TranscriptionRecordingService: ObservableObject {
         hasPolishingKey: @escaping @MainActor () -> Bool,
         polish: @escaping @MainActor (String, String, String) async throws -> String,
         completeActivity: @escaping ActivityCompletion = TranscriptionRecordingService.completeSharedActivity,
-        sessionFactory: (() throws -> IOSTranscriptionSession)? = nil
+        sessionFactory: (() throws -> IOSTranscriptionSession)? = nil,
+        foregroundOwnership: ForegroundRecordingOwnership? = nil,
+        ensureKeysLoaded: @escaping @MainActor () async -> Void = { await AppSettings.shared.ensureKeysLoaded() }
     ) {
         self.sessionFactory = sessionFactory
+        self.foregroundOwnership = foregroundOwnership ?? .shared
+        self.ensureKeysLoaded = ensureKeysLoaded
         self.sharedState = sharedState
         self.historyManager = historyManager
         self.polishClipboard = polishClipboard
@@ -324,6 +330,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         entry: StartupEntry? = nil,
         onCaptureDisruption: (() async -> Void)? = nil
     ) async throws {
+        try foregroundOwnership.requireUnowned()
         guard let runID = lifecycle.beginStart() else { return }
         presentation.begin(run: runID)
         diagnostics.begin(run: runID, entry: entry, localOrigin: .service)
@@ -344,8 +351,12 @@ public final class TranscriptionRecordingService: ObservableObject {
         // from the keychain asynchronously. A cold launch from the Action
         // Button could read those empty keys and silently fall back to Apple
         // Speech, so wait for the initial load before resolving the model.
-        await settings.ensureKeysLoaded()
+        await ensureKeysLoaded()
         diagnostics.note(.stage(.credentialsReady), run: runID)
+        // Revalidate at acquisition, even when an intent preflight preceded a
+        // suspension: a foreground claim made during the credentials wait must
+        // refuse this run before it allocates anything or publishes state.
+        try requireForegroundUnownedForAcquisition(run: runID)
         // A stop/cancel during the suspension above retires the run; nothing
         // has been allocated yet, so unwinding only settles the state machine.
         guard lifecycle.isCurrentStartRun(runID) else {
@@ -532,6 +543,29 @@ public final class TranscriptionRecordingService: ObservableObject {
             // ever assigned after successful activation.
             startedSession?.cancel()
             unwindCancelledStart(outcome: outcome(for: error), run: runID)
+            throw error
+        }
+    }
+
+    /// Refuses headless acquisition when the foreground claimed the microphone
+    /// while this run was suspended on credentials (#943).
+    ///
+    /// Only this run's own bookkeeping is unwound. Nothing it allocated has
+    /// reached the microphone, the App Group or the Live Activity, and the
+    /// activity and recording flag now belong to the foreground owner, so the
+    /// general cancelled-start unwind — which ends the activity and clears the
+    /// flag — must not run here.
+    private func requireForegroundUnownedForAcquisition(run runID: UUID) throws {
+        do {
+            try foregroundOwnership.requireUnowned()
+        } catch {
+            disarmWatchdogs()
+            diagnostics.finish(.failed, run: runID)
+            presentation.finish()
+            // A capture that never went live completes empty for its own run.
+            completeRun(with: "")
+            lifecycle.finishStartUnwind()
+            state = lifecycle.state
             throw error
         }
     }

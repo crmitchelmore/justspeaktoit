@@ -723,6 +723,10 @@ public final class iOSLiveTranscriber: ObservableObject {
         logger.info("Cancelled")
     }
 
+    func awaitCancellationSettled() async {
+        await finishAnalyzerCancellation()
+    }
+
     private func finishAnalyzerCancellation() async {
         guard let task = analyzerCancellationTask else { return }
         await task.value

@@ -282,6 +282,10 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         _ = cleanupCapture()
     }
 
+    func awaitCancellationSettled() async {
+        await cleanupTask?.value
+    }
+
     private func cleanupCapture() -> Task<Void, Never>? {
         configurationObserver.stop()
         captureInterruptionObserver.stop()

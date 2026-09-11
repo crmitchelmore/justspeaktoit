@@ -27,6 +27,10 @@ protocol IOSRecordingSession: AnyObject {
     func start(preRollBuffers: [AVAudioPCMBuffer], analyzerFallbackAllowed: Bool) async throws
     func stop() async throws -> TranscriptionResult
     func cancel()
+    /// Cancellation stops capture immediately; this waits for whatever the
+    /// provider drains afterwards, so an owner can hold its claim until the
+    /// microphone is really free (#943).
+    func awaitCancellationSettled() async
     /// Publishes a nonfatal capture or writer loss for this run (#950).
     var onRecordingWarning: ((String) -> Void)? { get set }
     /// A summary of this run's losses, once it has finished.

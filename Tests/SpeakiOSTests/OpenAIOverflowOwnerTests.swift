@@ -110,7 +110,10 @@ final class OpenAIOverflowOwnerTests: XCTestCase {
         let cancelledURL = try XCTUnwrap(fixture.transcriber.audioRecorder.currentFileURL)
         let oldSocket = fixture.socket
         fixture.overflow() // Queues a MainActor error; Cancel wins before it can be delivered.
-        coordinator.cancel()
+        // Foreground ownership outlives the cancel until the provider's own
+        // cleanup settles (#943), so the replacement waits for the release
+        // rather than racing a microphone that is still being handed back.
+        await coordinator.cancelAndWait()
         try await coordinator.start()
         oldSocket.acknowledge()
         await fixture.deliverPartial()

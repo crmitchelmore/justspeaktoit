@@ -365,6 +365,7 @@ extension IOSTranscriptionSession {
         let resolution = try Self.resolve(modelID: "openai/gpt-live-transcribe-streaming", mode: .streaming)
         self.init(resolution: resolution, language: nil, backend: .openAI(transcriber))
     }
+}
 
 // MARK: - Recording loss reporting (issue #950)
 

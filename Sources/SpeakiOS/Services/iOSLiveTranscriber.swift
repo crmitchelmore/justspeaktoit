@@ -265,10 +265,10 @@ public final class iOSLiveTranscriber: ObservableObject {
             }
         }
 
-        try startLegacyCapture(captureID: captureID)
+        try startLegacyCapture(captureID: captureID, analyzerAssetsMissing: analyzerAssetsMissing)
     }
 
-    private func startLegacyCapture(captureID: UUID) throws {
+    private func startLegacyCapture(captureID: UUID, analyzerAssetsMissing: Bool) throws {
         activeModelID = AppleLocalModels.legacySpeechModelID
         try startLegacyFallback(captureID: captureID, analyzerAssetsMissing: analyzerAssetsMissing)
 
@@ -352,9 +352,8 @@ public final class iOSLiveTranscriber: ObservableObject {
             )
             let lossReport = recordingLoss.currentReport
             installAnalyzerTap(
-                on: inputNode, format: recordingFormat,
-                converter: converter, session: session, captureID: captureID,
-                lossReport: lossReport
+                format: recordingFormat, converter: converter,
+                session: session, captureID: captureID, lossReport: lossReport
             )
             recordingLoss.startWriter(audioRecorder, format: recordingFormat)
             for buffer in preRollBuffers {
@@ -381,7 +380,6 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     @available(iOS 26.0, *)
     private func installAnalyzerTap(
-        on inputNode: AVAudioInputNode,
         format recordingFormat: AVAudioFormat,
         converter: AppleSpeechAudioConverter,
         session: AppleSpeechAnalyzerLiveSession,
@@ -389,7 +387,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         lossReport: RecordingLossReport
     ) {
         let signal = firstInputSignal
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+        audioEngine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             guard let self,
@@ -537,14 +535,16 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
 
         let captureID = activeCaptureID
-        let task = Task { await self.stopLegacyRecognition(captureID: captureID) }
+        let task = Task { await self.stopLegacyRecognition(captureID: captureID, lossRun: lossRun) }
         legacyStopTask = task
         let result = await task.value
         legacyStopTask = nil
         return result
     }
 
-    private func stopLegacyRecognition(captureID: UUID?) async -> TranscriptionResult {
+    private func stopLegacyRecognition(
+        captureID: UUID?, lossRun: RecordingLossReport
+    ) async -> TranscriptionResult {
         isShuttingDownRecognitionTask = true
 
         // Stop audio engine first, then let the buffers already queued on the

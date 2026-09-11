@@ -145,7 +145,6 @@ public final class OpenAIRealtimeLiveTranscriber: ObservableObject {
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
     let recordingLoss = RecordingLossReporting()
-    var startCaptureAudio: (() throws -> Void)?
 
     /// Serial queue that takes tap buffers off the real-time audio thread —
     /// persistence, resampling, and the base64/JSON encode inside

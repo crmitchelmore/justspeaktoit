@@ -144,14 +144,6 @@ final class TranscriberCoordinator: ObservableObject {
         }
     }
 
-    private static func requiresControlledStop(_ error: Error) -> Bool {
-        // Interruption and microphone change both finalise through the owner
-        // (#936); a pre-ready startup overflow stops once (#949).
-        if (error as? iOSTranscriptionError)?.endsCapture == true { return true }
-        if case OpenAIRealtimeError.preReadyAudioOverflow = error { return true }
-        return false
-    }
-
     private func ownsSession(_ session: any IOSRecordingSession) -> Bool {
         transcriptionSession === session || stoppingSession === session
     }
@@ -177,10 +169,6 @@ final class TranscriberCoordinator: ObservableObject {
         }
 
         publishTranscriptActivity(text: text)
-    }
-
-    func handleRecordingWarning(_ message: String) {
-        recordingWarning = message
     }
 
     func stop(rearmHandsFree: (@MainActor () -> Bool)? = nil) async -> TranscriptionResult {
@@ -490,6 +478,21 @@ private extension TranscriberCoordinator {
 /// Live Activity presentation for the foreground coordinator. In an extension
 /// so the coordinator itself stays inside the type-length limit.
 extension TranscriberCoordinator {
+    /// Whether a provider error should finalise through the owner rather than
+    /// surface as a bare failure.
+    static func requiresControlledStop(_ error: Error) -> Bool {
+        // Interruption and microphone change both finalise through the owner
+        // (#936); a pre-ready startup overflow stops once (#949).
+        if (error as? iOSTranscriptionError)?.endsCapture == true { return true }
+        if case OpenAIRealtimeError.preReadyAudioOverflow = error { return true }
+        return false
+    }
+
+    /// Publishes a nonfatal capture or writer loss for this run (#950).
+    func handleRecordingWarning(_ message: String) {
+        recordingWarning = message
+    }
+
     /// Publishes a mid-session failure and mirrors it into the Live Activity.
     func handleError(_ error: Error) {
         // An audio interruption is a controlled stop (issue #936): a notice,

@@ -1343,7 +1343,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// first notice may arrive while `start()` is still suspended, before
     /// `transcriptionSession` is assigned, so the starting run is accepted on
     /// the same terms as `onError` (issue #950).
-    private func bindRecordingWarning(_ session: IOSTranscriptionSession, runID: UUID) {
+    private func bindRecordingWarning(_ session: any IOSRecordingSession, runID: UUID) {
         session.onRecordingWarning = { [weak self, weak session] message in
             guard let self, let session,
                   self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session

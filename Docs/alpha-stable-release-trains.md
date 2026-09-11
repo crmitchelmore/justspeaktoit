@@ -29,7 +29,9 @@ Every successful main push CI allocates an immutable annotated
 `alpha-build-N` tag containing a manifest. Independent workers build direct Mac,
 Mac App Store and iOS from that exact source. Allocation is idempotent; manual
 `rebuild` creates a new build number for an expired or invalid Apple upload.
-Hourly reconciliation retries missing deliveries. Apple processing and beta
+Hourly reconciliation retries missing deliveries, dispatching at most three
+sources per pass and checking every page of active runs to avoid duplicate
+in-flight deliveries. Remaining sources stay in the successful-CI ledger. Apple processing and beta
 review are recorded as pending, never as successful shipment.
 
 Direct Mac releases are GitHub prereleases. A single `alpha-latest` JSON pointer
@@ -68,6 +70,16 @@ all three surfaces; install Alpha alongside Stable on target devices; verify dat
 and permission isolation; exercise direct Mac Alpha N to N+1 updates; and confirm
 public TestFlight availability. Store beta links without an available approved
 build are setup evidence only.
+
+Record observations in the existing [JSTI release tracker](https://app.notion.com/p/3d6ef116369981b98927fd8cddb95fa1).
+Each observation must identify the immutable Alpha tag, source SHA, surface,
+version/build, device where relevant, timestamp and release/workflow evidence.
+For Sparkle, record both the starting and installed Alpha builds. Keep upload,
+processing, beta review, public availability and device validation distinct.
+
+Once enabled, repository users authorised to dispatch Actions can retry a
+successful main Alpha source or request a rebuild. Owner-only dispatch while
+disabled is the commissioning exception; Stable publication remains owner-only.
 
 Required Alpha signing secrets are selected in the reusable Apple workflows.
 No signing material belongs in source control. Use the existing secure API key

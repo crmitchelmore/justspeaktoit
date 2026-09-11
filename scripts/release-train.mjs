@@ -244,7 +244,10 @@ if(command === 'allocate' || command === 'prepare') {
     const pointerAsset=existing.find(r=>r.tag_name==='alpha-latest')?.assets.find(a=>a.name==='alpha-pointer.json');
     const pointer=pointerAsset ? JSON.parse(gh('api',`repos/${repo}/releases/assets/${pointerAsset.id}`,'-H','Accept: application/octet-stream')) : null;
     const allocated=new Map(existing.filter(r=>r.tag_name.startsWith('alpha-build-')).sort((a,b)=>Number(a.tag_name.split('-').at(-1))-Number(b.tag_name.split('-').at(-1))).map(r=>[git('rev-parse',`${r.tag_name}^{commit}`),r]));
-    const active=api(`repos/${repo}/actions/workflows/alpha-release.yml/runs?per_page=100`).workflow_runs.filter(r=>r.status !== 'completed');
+    const active=JSON.parse(gh('api','--paginate','--slurp',`repos/${repo}/actions/workflows/alpha-release.yml/runs?per_page=100`)).flatMap(p=>p.workflow_runs).filter(r=>r.status !== 'completed');
+    // Bound catch-up work; undispatched sources remain in the successful-CI ledger.
+    let dispatched=0;
+    const dispatchLimit=3;
     const seen=new Set();
     for(const r of runs.reverse()) {
         try {git('merge-base','--is-ancestor',adoption,r.head_sha);} catch {continue;}
@@ -264,6 +267,11 @@ if(command === 'allocate' || command === 'prepare') {
             }
             if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) continue;
         }
+        if(dispatched >= dispatchLimit) {
+            console.log('Alpha reconciliation dispatch limit reached; remaining sources retained for the next pass.');
+            break;
+        }
         gh('workflow','run','alpha-release.yml','--repo',repo,'--ref','main','-f',`source=${r.head_sha}`);
+        dispatched++;
     }
 } else { throw Error(`Unknown command ${command}`); }

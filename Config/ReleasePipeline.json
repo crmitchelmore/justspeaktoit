@@ -1,5 +1,5 @@
 {
-  "enabled": false,
+  "enabled": true,
   "versions": {
     "mac": "3.2.0",
     "ios": "3.2.0"

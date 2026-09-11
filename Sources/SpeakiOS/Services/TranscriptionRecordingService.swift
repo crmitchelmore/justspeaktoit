@@ -108,8 +108,13 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let sharedState: SharedTranscriptionState
     private let historyManager: iOSHistoryManager
 
-    private(set) var transcriptionSession: IOSTranscriptionSession?
-    private var stoppingSession: IOSTranscriptionSession?
+    private(set) var transcriptionSession: (any IOSRecordingSession)?
+    private var stoppingSession: (any IOSRecordingSession)?
+    /// Test seam: lets lifecycle tests inject a session without a microphone or provider.
+    var makeSession: (() throws -> any IOSRecordingSession)?
+    /// A controlled stop reason (an audio interruption) that is not a failure.
+    /// Cleared at the start of every run; never populates `lastSessionError`.
+    @Published private(set) var captureStopNotice: String?
     private var startTime: Date?
     private var currentModel: String = ""
     private var sharesLiveTranscript = true
@@ -164,7 +169,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     /// progress. Held only across delivery so a non-retained batch capture's
     /// recording can be discarded *after* its transcript has landed, never at
     /// the moment the provider replied.
-    private var deliveringSession: IOSTranscriptionSession?
+    private var deliveringSession: (any IOSRecordingSession)?
     /// Last time the App Group shared state was written for a partial result.
     private var lastSharedStateWriteAt: Date = .distantPast
     private static let sharedStateWriteInterval: TimeInterval = 1.0
@@ -346,6 +351,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         lastSessionError = nil
         sessionErrorToken = nil
+        captureStopNotice = nil
         providerFallbackNotice = nil
         currentTrigger = keyboardProfile == nil ? trigger : .keyboard
         // A model the catalogue only lists for batch transcription cannot run in
@@ -441,7 +447,7 @@ public final class TranscriptionRecordingService: ObservableObject {
         }
         #endif
 
-        var startedSession: IOSTranscriptionSession?
+        var startedSession: (any IOSRecordingSession)?
         do {
             let mode: IOSTranscriptionSession.Mode = usesBatchTranscription
                 ? .batch(retainRecording: retainBatchRecording)
@@ -449,7 +455,12 @@ public final class TranscriptionRecordingService: ObservableObject {
             let languageIdentifier = keyboardProfile?.languageIdentifier
                 ?? runParameters.languageIdentifier
                 ?? settings.preferredLocaleIdentifier
-            let session = try sessionFactory?() ?? IOSTranscriptionSession(
+            // Both seams are honoured: `makeSession` (#936) injects any
+            // recording session so an interruption can finalise through its
+            // owner, while `sessionFactory` remains the concrete test seam.
+            let session: any IOSRecordingSession = try makeSession?()
+                ?? sessionFactory?()
+                ?? IOSTranscriptionSession(
                 modelID: currentModel,
                 mode: mode,
                 language: TranscriptionLanguageCatalog.providerLanguage(for: languageIdentifier),
@@ -856,6 +867,9 @@ public final class TranscriptionRecordingService: ObservableObject {
         presentation.finish()
         diagnostics.retire()
         disarmWatchdogs()
+        // Shared state stops claiming active capture as soon as the stop is
+        // claimed, before the drain; the transcript is committed below.
+        sharedState.clearRecordingState()
         let duration = elapsedSeconds
         let completionID = UUID()
         latestCompletionID = completionID
@@ -866,17 +880,34 @@ public final class TranscriptionRecordingService: ObservableObject {
         // landed, so "Copied N words" was reported but nothing arrived.
         let assertion = beginBackgroundAssertion("Finalise transcription")
 
-        if transcriptionSession?.isBatch == true {
-            activityManager.updateActivity(
-                status: .processing,
-                lastSnippet: "Transcribing recording…",
-                wordCount: 0,
-                duration: duration
-            )
-        }
+        let isBatch = transcriptionSession?.isBatch == true
+        activityManager.updateActivity(
+            status: isBatch ? .processing : .finalising,
+            lastSnippet: isBatch ? "Transcribing recording…" : "Finalising transcript…",
+            wordCount: wordCount,
+            duration: duration
+        )
 
         let drained = await drainActiveTranscriber(duration: duration)
         startTime = nil
+        guard latestCompletionID == completionID else {
+            // Explicit Cancel during the drain must not publish History or
+            // output. The run still settles for anything waiting on it, and
+            // its recording is not discarded: nothing delivered it.
+            deliveringSession = nil
+            currentTrigger = nil
+            currentRunParameters = .none
+            publishFinishedCapture(text: "", failure: nil)
+            completeRun(with: "")
+            partialText = ""
+            wordCount = 0
+            sharesLiveTranscript = true
+            activityManager.endActivity()
+            assertion.end()
+            lifecycle.finishStopping()
+            state = lifecycle.state
+            return drained.replacingText("")
+        }
 
         // Use the best available text and make the returned result, the history
         // entry, the clipboard, and the spoken dialog all agree on it.
@@ -1032,7 +1063,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
         completeRecordingActivity(
             duration: duration,
-            primedMessage: lastSessionError?.localizedDescription ?? primedActivityMessage,
+            primedMessage: lastSessionError?.localizedDescription ?? captureStopNotice ?? primedActivityMessage,
             outcome: .unconfirmed(transcript: text),
             // Keyboard handoffs publish nothing retrievable, so they carry no
             // preview and the result row offers no actions it cannot honour.
@@ -1182,7 +1213,7 @@ public final class TranscriptionRecordingService: ObservableObject {
 
     /// Wires this run to the session's existing observation boundary, and
     /// labels the backend when routing already settled it (issue #972).
-    private func bindStartupDiagnostics(session: IOSTranscriptionSession, runID: UUID) {
+    private func bindStartupDiagnostics(session: any IOSRecordingSession, runID: UUID) {
         session.onStartupObservation = { [weak self] observation in
             self?.diagnostics.note(observation, run: runID)
             // Same seam, not a second one: the watchdogs' start deadline and
@@ -1216,7 +1247,7 @@ public final class TranscriptionRecordingService: ObservableObject {
     }
 
     /// Routes this run's own first live buffer into the presentation gate.
-    private func bindFirstInput(session: IOSTranscriptionSession, runID: UUID) {
+    private func bindFirstInput(session: any IOSRecordingSession, runID: UUID) {
         session.onFirstInputBuffer = { [weak self, weak session] in
             guard let self, let session,
                   self.lifecycle.isCurrentStartRun(runID) || self.transcriptionSession === session
@@ -1250,16 +1281,22 @@ public final class TranscriptionRecordingService: ObservableObject {
         )
     }
 
-    private func handleError(_ error: Error, session: IOSTranscriptionSession) {
-        activityManager.reportError(error.localizedDescription)
-
+    private func handleError(_ error: Error, session: any IOSRecordingSession) {
         // A mid-session failure previously only updated the Live Activity —
         // the mic stayed hot while the user dictated into a dead session.
         // Tear the session down, preserving the accumulated transcript, and
         // publish the error so the app can surface it on next foreground.
         guard lifecycle.state == .recording || stoppingSession === session else { return }
-        lastSessionError = error
-        // The token is stamped by `lastSessionError`'s observer above.
+        // An audio interruption is a controlled stop, not a failure (issue
+        // #936): it becomes a stopped notice and never a deferred error alert.
+        // Anything else is a real provider or finalisation failure and stays
+        // visible through `lastSessionError`, whose observer stamps the token.
+        if (error as? iOSTranscriptionError)?.isControlledInterruption == true {
+            captureStopNotice = error.localizedDescription
+        } else {
+            lastSessionError = error
+            activityManager.reportError(error.localizedDescription)
+        }
         guard lifecycle.state == .recording else { return }
         Task { [weak self] in
             guard let self, self.isRunning, self.transcriptionSession === session else { return }
@@ -1534,7 +1571,7 @@ private extension TranscriptionRecordingService {
     func bestAvailableText(from result: TranscriptionResult) -> String {
         TranscriptionRecordingService.bestTranscript(
             candidates: [result.text, partialText],
-            fallback: result.text
+            fallback: ""
         )
     }
 

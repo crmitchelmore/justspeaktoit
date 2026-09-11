@@ -70,6 +70,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var client: StreamingTranscriptionClient?
     private let audioEngine = AVAudioEngine()
     private let configurationObserver = CaptureDisruptionObserver()
+    private let captureInterruptionObserver = CaptureDisruptionObserver()
     var configurationNotificationObject: AnyObject { audioEngine }
     private var startTime: Date?
     /// Finalised text so far, folded by the hosted client's declared final
@@ -108,7 +109,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         self.language = language
         self.keywords = keywords
         self.audioSessionManager = audioSessionManager
-        setupInterruptionHandling()
     }
 
     public func start() async throws {
@@ -200,16 +200,28 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
             self?.audioEngine.isRunning == true
         } onDisruption: { [weak self] in
-            guard let self, self.isRunning else { return }
-            self.audioEngine.stop()
-            self.removeInputTap()
-            self.error = iOSTranscriptionError.microphoneChanged
-            self.onError?(iOSTranscriptionError.microphoneChanged)
+            self?.handleCaptureDisruption(.microphoneChanged)
         }
+        captureInterruptionObserver.observeAudioInterruption { [weak self] in
+            self?.handleCaptureDisruption(.interrupted)
+        }
+    }
+
+    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
+        guard isRunning, !isStopping else { return }
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        audioEngine.stop()
+        removeInputTap()
+        // The owner drains the provider and recording once through its normal stop path.
+        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+        if !reason.isControlledInterruption { error = reason }
+        onError?(reason)
     }
 
     public func stop() async -> TranscriptionResult {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         guard isRunning, !isStopping else {
             await cleanupTask?.value
             let text = partialText.isEmpty ? accumulated.text : partialText
@@ -261,12 +273,14 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     public func cancel() {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         startup.cancel()
         _ = cleanupCapture()
     }
 
     private func cleanupCapture() -> Task<Void, Never>? {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         if let cleanupTask { return cleanupTask }
         guard isRunning || ownsAudioSession || hasInputTap else { return nil }
         audioEngine.stop()
@@ -391,17 +405,6 @@ extension SharedClientLiveTranscriber {
         error = nil
         startTime = Date()
         isRunning = true
-    }
-
-    private func setupInterruptionHandling() {
-        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
-            Task { @MainActor in
-                guard began, let self, self.isRunning else { return }
-                self.error = iOSTranscriptionError.interrupted
-                self.onError?(iOSTranscriptionError.interrupted)
-                _ = await self.stop()
-            }
-        }
     }
 
     private func handleTranscript(text: String, isFinal: Bool) {

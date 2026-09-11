@@ -18,7 +18,7 @@ extension TranscriptionRecordingService {
     /// that replaced it (issue #943).
     /// A `nil` request arms nothing, so the caller does not need a branch of
     /// its own: a capture with no end-pointing runs exactly as it always did.
-    func armEndPointing(_ request: CaptureEndPointingRequest?, for session: IOSTranscriptionSession) {
+    func armEndPointing(_ request: CaptureEndPointingRequest?, for session: any IOSRecordingSession) {
         disarmEndPointing()
         guard let request else { return }
         session.resetInputLevel()
@@ -77,7 +77,7 @@ extension TranscriptionRecordingService {
     }
 
     /// Whether the armed capture is still the one running.
-    private func ownsEndPointedSession(_ session: IOSTranscriptionSession) -> Bool {
+    private func ownsEndPointedSession(_ session: any IOSRecordingSession) -> Bool {
         transcriptionSession === session && state == .recording
     }
 
@@ -89,7 +89,7 @@ extension TranscriptionRecordingService {
     /// Nothing here is a second way to end a recording — it is the same one,
     /// called by a timer instead of a thumb. Its own reentrancy guard makes a
     /// race with a real stop a no-op rather than a second history entry.
-    private func endPoint(_ session: IOSTranscriptionSession, reason: CaptureEndPointingStopReason) async {
+    private func endPoint(_ session: any IOSRecordingSession, reason: CaptureEndPointingStopReason) async {
         guard ownsEndPointedSession(session) else { return }
         SpeakLogger.transcription.info(
             "Capture end-pointed: \(reason.rawValue, privacy: .public)"

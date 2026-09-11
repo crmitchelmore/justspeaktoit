@@ -85,6 +85,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     private var speechRecognizer: SFSpeechRecognizer?
     private let audioEngine = AVAudioEngine()
     private let configurationObserver = CaptureDisruptionObserver()
+    private let captureInterruptionObserver = CaptureDisruptionObserver()
     private var isStopping = false
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: LegacyAppleRecognitionTask?
@@ -140,7 +141,6 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     public init(audioSessionManager: AudioSessionManager) {
         self.audioSessionManager = audioSessionManager
-        setupInterruptionHandling()
     }
 
     // MARK: - Public API
@@ -238,6 +238,10 @@ public final class iOSLiveTranscriber: ObservableObject {
                     }
                     try Task.checkCancellation()
                     isRunning = true
+                    // Arm here as well as inside the engine start: an injected
+                    // analyzer session never reaches that path, and this is the
+                    // point at which the capture is live and interruptible.
+                    observeCaptureConfiguration()
                     logger.info("Started with SpeechAnalyzer (\(self.activeModelID))")
                     return
                 } catch {
@@ -263,6 +267,7 @@ public final class iOSLiveTranscriber: ObservableObject {
         try startLegacyFallback(captureID: captureID, analyzerAssetsMissing: analyzerAssetsMissing)
 
         isRunning = true
+        observeCaptureConfiguration()
         logger.info("Started")
     }
 
@@ -316,7 +321,6 @@ public final class iOSLiveTranscriber: ObservableObject {
     @available(iOS 26.0, *)
     // One do/catch owns the analyzer session, its tap and its teardown; the
     // engine-start boundary must be reported from inside it (issue #972).
-    // swiftlint:disable:next function_body_length
     private func startSpeechAnalyzer(
         engine: AppleSpeechAnalyzerEngine,
         preRollBuffers: [AVAudioPCMBuffer],
@@ -340,22 +344,10 @@ public final class iOSLiveTranscriber: ObservableObject {
                 sourceFormat: recordingFormat,
                 targetFormat: session.audioFormat
             )
-            let signal = firstInputSignal
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                // Copy the buffer and hop off the real-time audio thread —
-                // heavy work in the tap makes CoreAudio drop mic buffers.
-                guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
-                if copied.frameLength > 0, signal.markObserved() {
-                    Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
-                }
-                self.audioProcessingQueue.async {
-                    defer { self.tapBufferPool.recycle(copied) }
-                    self.audioRecorder.writeBuffer(copied)
-                    guard let converted = converter.convert(copied) else { return }
-                    session.send(converted)
-                }
-            }
-            hasInputTap = true
+            installAnalyzerTap(
+                on: inputNode, format: recordingFormat,
+                converter: converter, session: session, captureID: captureID
+            )
             _ = try? audioRecorder.startRecording(format: recordingFormat)
             for buffer in preRollBuffers {
                 if let converted = converter.convert(buffer) {
@@ -377,6 +369,32 @@ public final class iOSLiveTranscriber: ObservableObject {
             await session.cancel()
             throw error
         }
+    }
+
+    @available(iOS 26.0, *)
+    private func installAnalyzerTap(
+        on inputNode: AVAudioInputNode,
+        format recordingFormat: AVAudioFormat,
+        converter: AppleSpeechAudioConverter,
+        session: AppleSpeechAnalyzerLiveSession,
+        captureID: UUID
+    ) {
+        let signal = firstInputSignal
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            if copied.frameLength > 0, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                self.audioRecorder.writeBuffer(copied)
+                guard let converted = converter.convert(copied) else { return }
+                session.send(converted)
+            }
+        }
+        hasInputTap = true
     }
 
     @available(iOS 26.0, *)
@@ -420,7 +438,6 @@ public final class iOSLiveTranscriber: ObservableObject {
         // actually returned.
         onStartupObservation?(.backend(.appleLegacy))
         onStartupObservation?(.stage(.engineStarted))
-        observeCaptureConfiguration()
     }
 
     /// Installs the input tap appending to `request`. The request is captured
@@ -473,16 +490,28 @@ public final class iOSLiveTranscriber: ObservableObject {
         configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
             self?.audioEngine.isRunning == true
         } onDisruption: { [weak self] in
-            guard let self, self.isRunning else { return }
-            self.audioEngine.stop()
-            self.removeInputTap()
-            self.error = iOSTranscriptionError.microphoneChanged
-            self.onError?(iOSTranscriptionError.microphoneChanged)
+            self?.handleCaptureDisruption(.microphoneChanged)
         }
+        captureInterruptionObserver.observeAudioInterruption { [weak self] in
+            self?.handleCaptureDisruption(.interrupted)
+        }
+    }
+
+    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
+        guard isRunning, !isStopping else { return }
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        audioEngine.stop()
+        removeInputTap()
+        // The owner drains the provider and recording once through its normal stop path.
+        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+        if !reason.isControlledInterruption { error = reason }
+        onError?(reason)
     }
 
     public func stop() async -> TranscriptionResult {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         if let legacyStopTask { return await legacyStopTask.value }
         guard isRunning, !isStopping else { return buildFinalResult(duration: 0) }
 
@@ -628,12 +657,14 @@ public final class iOSLiveTranscriber: ObservableObject {
     /// Cancel transcription without returning result.
     public func cancel() {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         startup.cancel()
         cleanupCapture()
     }
 
     private func cleanupCapture() {
         configurationObserver.stop()
+        captureInterruptionObserver.stop()
         activeCaptureID = nil
         activeRecognitionID = nil
         completeLegacyFinalisation()
@@ -683,29 +714,6 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     // MARK: - Private
-
-    private func setupInterruptionHandling() {
-        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
-            Task { @MainActor in
-                if began {
-                    self?.handleInterruption()
-                }
-            }
-        }
-    }
-
-    private func handleInterruption() {
-        guard isRunning else { return }
-
-        logger.info("Handling interruption")
-        error = iOSTranscriptionError.interrupted
-        onError?(iOSTranscriptionError.interrupted)
-
-        // Stop but preserve what we have
-        Task {
-            _ = await stop()
-        }
-    }
 
     private func beginRecognitionTask(
         captureID: UUID,

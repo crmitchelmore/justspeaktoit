@@ -187,7 +187,7 @@ extension TranscriptionRecordingService {
     /// indefinitely.
     ///
     /// - Returns: `nil` when the budget elapsed first.
-    func boundedStop(of session: IOSTranscriptionSession) async throws -> TranscriptionResult? {
+    func boundedStop(of session: any IOSRecordingSession) async throws -> TranscriptionResult? {
         try await CaptureDeadline.result(
             of: { try await session.stop() },
             orNilAfter: CaptureWatchdogPolicy.finalisationDeadlineSeconds(isBatch: session.isBatch)
@@ -202,7 +202,7 @@ extension TranscriptionRecordingService {
     /// error is published, so the outcome is stated rather than presented as a
     /// successful stop with no words in it.
     func timedOutFinalisationResult(
-        for session: IOSTranscriptionSession,
+        for session: any IOSRecordingSession,
         duration: Int
     ) -> TranscriptionResult {
         session.cancel()

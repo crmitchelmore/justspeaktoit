@@ -18,10 +18,22 @@ public final class CaptureDisruptionObserver {
         isUsable: @escaping @MainActor () -> Bool,
         onDisruption: @escaping @MainActor () -> Void
     ) {
+        observe(name, object: object, matches: { _ in true }, isUsable: isUsable, onDisruption: onDisruption)
+    }
+
+    /// Filter the event before hopping to the owner, retaining this capture's identity.
+    public func observe(
+        _ name: Notification.Name,
+        object: AnyObject?,
+        matches: @escaping @Sendable (Notification) -> Bool,
+        isUsable: @escaping @MainActor () -> Bool,
+        onDisruption: @escaping @MainActor () -> Void
+    ) {
         stop()
         let id = UUID()
         captureID = id
-        token = center.addObserver(forName: name, object: object, queue: nil) { [weak self] _ in
+        token = center.addObserver(forName: name, object: object, queue: nil) { [weak self] notification in
+            guard matches(notification) else { return }
             // AVAudioEngine posts on its internal queue. Never stop or release
             // the engine there, and recheck capture ownership after the hop.
             Task { @MainActor [weak self] in

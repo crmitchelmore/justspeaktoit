@@ -60,6 +60,23 @@ final class CaptureDisruptionObserverTests: XCTestCase {
         XCTAssertEqual(finishes, 0)
     }
 
+    func testFilteredInterruption_beginOnlyFinishesOnceWithoutWaitingForEnd() async {
+        let center = NotificationCenter()
+        let observer = CaptureDisruptionObserver(center: center)
+        var finishes = 0
+        observer.observe(notificationName, object: nil, matches: { $0.userInfo?["began"] as? Bool == true },
+                         isUsable: { false }, onDisruption: { finishes += 1 })
+        center.post(name: notificationName, object: nil, userInfo: ["began": false, "shouldResume": true])
+        center.post(name: notificationName, object: nil)
+        await settle()
+        XCTAssertEqual(finishes, 0)
+        center.post(name: notificationName, object: nil, userInfo: ["began": true])
+        center.post(name: notificationName, object: nil, userInfo: ["began": true])
+        center.post(name: notificationName, object: nil, userInfo: ["began": false, "shouldResume": true])
+        await settle()
+        XCTAssertEqual(finishes, 1)
+    }
+
     private func settle() async {
         await Task { @MainActor in }.value
     }

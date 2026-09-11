@@ -17,6 +17,7 @@ public struct AppleSpeechAnalyzerUpdate: Sendable {
 
 @available(macOS 26.0, iOS 26.0, *)
 public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
+    public let modelIdentifier: String
     public let audioFormat: AVAudioFormat
 
     private let analyzer: SpeechAnalyzer
@@ -24,16 +25,34 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let resultTask: Task<TranscriptionResult, Error>
 
+    /// The original install-capable entry point, kept so package consumers
+    /// built against it keep compiling; it forwards to the policy-aware
+    /// initialiser with the behaviour they always had.
+    public convenience init(
+        localeIdentifier: String?,
+        engine: AppleSpeechAnalyzerEngine = .speechTranscriber,
+        onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
+    ) async throws {
+        try await self.init(
+            localeIdentifier: localeIdentifier,
+            engine: engine,
+            assetPolicy: .installIfNeeded,
+            onUpdate: onUpdate
+        )
+    }
+
     public init(
         localeIdentifier: String?,
         engine: AppleSpeechAnalyzerEngine = .speechTranscriber,
+        assetPolicy: AppleSpeechAssetPolicy,
         onUpdate: @escaping @Sendable (AppleSpeechAnalyzerUpdate) -> Void
     ) async throws {
         try Task.checkCancellation()
         let configuration = try await AppleSpeechAnalyzerTranscriber.makeModule(
             engine: engine,
             localeIdentifier: localeIdentifier,
-            progressive: true
+            progressive: true,
+            assetPolicy: assetPolicy
         )
         try Task.checkCancellation()
         let module = configuration.module
@@ -48,6 +67,7 @@ public final class AppleSpeechAnalyzerLiveSession: @unchecked Sendable {
         let analyzer = SpeechAnalyzer(modules: [module.speechModule])
         let cancellation = SpeechAnalyzerCancellation(analyzer: analyzer)
         self.cancellation = cancellation
+        self.modelIdentifier = configuration.engine.modelID
         self.audioFormat = format
         self.analyzer = analyzer
         self.inputContinuation = continuation

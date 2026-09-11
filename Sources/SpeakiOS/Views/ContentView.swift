@@ -99,6 +99,34 @@ final class TranscriberCoordinator: ObservableObject {
         }
     }
 
+    private func bindCallbacks(to session: IOSTranscriptionSession, runID: UUID) {
+        session.onPartialResult = { [weak self, weak session] text, isFinal in
+            guard let self, let session,
+                  self.ownsSession(session) else { return }
+            self.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
+            self.handlePartialResult(text: text, isFinal: isFinal)
+            self.confidence = session.confidence
+        }
+        session.onError = { [weak self, weak session] error in
+            guard let self, let session,
+                  self.ownsSession(session) else { return }
+            self.handleError(error)
+            guard case iOSTranscriptionError.microphoneChanged = error else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.transcriptionSession === session, self.isRunning else { return }
+                if let onCaptureDisruption = self.onCaptureDisruption {
+                    await onCaptureDisruption()
+                } else {
+                    _ = await self.stop()
+                }
+            }
+        }
+    }
+
+    private func ownsSession(_ session: IOSTranscriptionSession) -> Bool {
+        transcriptionSession === session || stoppingSession === session
+    }
+
     private func markRecordingStarted() {
         isRunning = true
         sharedState.isRecording = true
@@ -122,7 +150,7 @@ final class TranscriberCoordinator: ObservableObject {
         publishTranscriptActivity(text: text)
     }
 
-    func stop(rearmHandsFree: Bool = false) async -> TranscriptionResult {
+    func stop(rearmHandsFree: (@MainActor () -> Bool)? = nil) async -> TranscriptionResult {
         isRunning = false
         finishPresentation()
         sharedState.clearRecordingState()
@@ -158,7 +186,7 @@ final class TranscriberCoordinator: ObservableObject {
     private func stop(
         session: IOSTranscriptionSession,
         duration: Int,
-        rearmHandsFree: Bool
+        rearmHandsFree: (@MainActor () -> Bool)?
     ) async -> TranscriptionResult? {
         transcriptionSession = nil
         stoppingSession = session
@@ -169,7 +197,18 @@ final class TranscriberCoordinator: ObservableObject {
             }
         }
         do {
-            let drained = try await session.stop()
+            let drained: TranscriptionResult
+            if rearmHandsFree != nil {
+                drained = try await HandsFreeCaptureFinalisation().run {
+                    try await session.stop()
+                } cancelCapture: {
+                    session.onPartialResult = nil
+                    session.onError = nil
+                    session.cancel()
+                }
+            } else {
+                drained = try await session.stop()
+            }
             let result = drained.replacingText(TranscriptionRecordingService.bestTranscript(
                 candidates: [drained.text, partialText], fallback: ""
             ))
@@ -179,21 +218,44 @@ final class TranscriberCoordinator: ObservableObject {
             }
             partialText = result.text
             wordCount = result.text.split(whereSeparator: \.isWhitespace).count
-            if AppSettings.shared.liveActivitiesEnabled {
-                activityManager.completeActivity(
-                    finalWordCount: wordCount,
-                    duration: duration,
-                    keepPrimed: rearmHandsFree,
-                    primedMessage: "Hands-free armed",
-                    primedStatus: rearmHandsFree ? .armed : .idle,
-                    completionOutcome: .unconfirmed(transcript: result.text),
-                    resultPreview: TranscriptionResultRow.preview(for: result.text)
-                )
-            }
+            updateActivityAfterStop(duration: duration, result: result, rearmHandsFree: rearmHandsFree)
             return finishStop(with: result)
         } catch {
+            guard !Task.isCancelled, !stopWasCancelled, stoppingSession === session else { return nil }
             handleError(error)
+            // A hands-free drain failure must retain the same shared/History
+            // outcome as Stop. Explicit Cancel still clears content above.
+            if rearmHandsFree != nil {
+                return finishStop(with: TranscriptionResult(
+                    text: partialText, segments: [], confidence: confidence,
+                    duration: TimeInterval(duration), modelIdentifier: currentModel,
+                    cost: nil, rawPayload: nil, debugInfo: nil
+                ))
+            }
             return nil
+        }
+    }
+
+    private func updateActivityAfterStop(
+        duration: Int,
+        result: TranscriptionResult,
+        rearmHandsFree: (@MainActor () -> Bool)?
+    ) {
+        guard AppSettings.shared.liveActivitiesEnabled else { return }
+        let shouldRearm = rearmHandsFree?() == true
+        if rearmHandsFree != nil, !shouldRearm {
+            // End synchronously so an old completion cannot clear a later arm's activity.
+            activityManager.endActivity()
+        } else {
+            activityManager.completeActivity(
+                finalWordCount: wordCount,
+                duration: duration,
+                keepPrimed: shouldRearm,
+                primedMessage: "Hands-free armed",
+                primedStatus: shouldRearm ? .armed : .idle,
+                completionOutcome: .unconfirmed(transcript: result.text),
+                resultPreview: TranscriptionResultRow.preview(for: result.text)
+            )
         }
     }
 
@@ -313,25 +375,7 @@ private extension TranscriberCoordinator {
             liveAPIKey: settings.liveAPIKey(for:),
             transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
         )
-        session.onPartialResult = { [weak self, weak session] text, isFinal in
-            self?.noteFirstLivePartial(text: text, isFinal: isFinal, runID: runID)
-            self?.handlePartialResult(text: text, isFinal: isFinal)
-            self?.confidence = session?.confidence
-        }
-        session.onError = { [weak self, weak session] error in
-            guard let self, let session,
-                  self.transcriptionSession === session || self.stoppingSession === session else { return }
-            self.handleError(error)
-            guard case iOSTranscriptionError.microphoneChanged = error else { return }
-            Task { @MainActor [weak self] in
-                guard let self, self.transcriptionSession === session, self.isRunning else { return }
-                if let onCaptureDisruption = self.onCaptureDisruption {
-                    await onCaptureDisruption()
-                } else {
-                    _ = await self.stop()
-                }
-            }
-        }
+        bindCallbacks(to: session, runID: runID)
         bindFirstInput(session: session, runID: runID)
         bindStartupDiagnostics(session: session, runID: runID)
         transcriptionSession = session
@@ -546,8 +590,8 @@ public struct ContentView: View {
                     return .rejected(HandsFreeDictationMachine.Failure(error))
                 }
             },
-            stopCapture: {
-                _ = await coordinator.stop(rearmHandsFree: true)
+            stopCapture: { shouldRearm in
+                _ = await coordinator.stop(rearmHandsFree: shouldRearm)
                 if case .microphoneChanged? = coordinator.error as? iOSTranscriptionError { return .completed }
                 return coordinator.error == nil ? .completed : .failed(.captureFailed)
             },
@@ -771,6 +815,7 @@ public struct ContentView: View {
                 }
             }
             .onAppear {
+                handsFree.sceneActivityChanged(isActive: scenePhase == .active)
                 refreshBackgroundState()
                 // A Home Screen quick action can cold-launch the app and fail
                 // to start before this view — and therefore the observer above
@@ -782,11 +827,12 @@ public struct ContentView: View {
                 Task { await sharedImporter.drain() }
             }
             .onChange(of: scenePhase) { _, phase in
+                // Scene intent is recorded synchronously so an owned utterance
+                // finishes once through the controlled stop (issue #942).
+                handsFree.sceneActivityChanged(isActive: phase == .active)
                 if phase == .active {
                     refreshBackgroundState()
                     Task { await sharedImporter.drain() }
-                } else {
-                    Task { await handsFree.disarm() }
                 }
             }
             .onChange(of: backgroundService.isRunning) { wasRunning, isRunning in

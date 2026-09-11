@@ -42,7 +42,7 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
         var finishes = 0
         var finish: CheckedContinuation<HandsFreeCaptureEndOutcome, Never>?
         let finishing = expectation(description: "utterance finishing")
-        let coordinator = makeCoordinator(stopCapture: {
+        let coordinator = makeCoordinator(stopCapture: { _ in
             finishes += 1
             return await withCheckedContinuation { continuation in
                 finish = continuation
@@ -66,7 +66,7 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
     }
 
     private func makeCoordinator(
-        stopCapture: @escaping IOSHandsFreeDictationCoordinator.StopCapture = { .completed }
+        stopCapture: @escaping IOSHandsFreeDictationCoordinator.StopCapture = { _ in .completed }
     ) -> IOSHandsFreeDictationCoordinator {
         let manager = AudioSessionManager()
         manager.permissionStatus = { true }

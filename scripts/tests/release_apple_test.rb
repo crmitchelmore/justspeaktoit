@@ -3,16 +3,16 @@ require_relative '../release-apple'
 
 class ReleaseAppleTest < Minitest::Test
   class FakeClient
-    attr_accessor :processing, :beta_state, :review_busy, :assigned
+    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id
     attr_reader :posts
     def initialize
-      @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]
+      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]
     end
     def build
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
     end
     def get(path)
-      return {'data'=>{'attributes'=>{'bundleId'=>'com.justspeaktoit.ios.alpha'}}} if path.start_with?('/v1/apps/')
+      return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
     def list(path)
@@ -37,10 +37,26 @@ class ReleaseAppleTest < Minitest::Test
       (@receipts ||= []) << [status,extra]
     end
   end
-  def delivery(client)
+  def delivery(client, train: 'alpha')
     notes='Frozen notes'
-    manifest={'train'=>'alpha','source'=>'a'*40,'tag'=>'alpha-build-1','surfaces'=>{'ios'=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
+    manifest={'train'=>train,'source'=>'a'*40,'tag'=>'alpha-build-1','surfaces'=>{'ios'=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
     Delivery.new(client:client,manifest:manifest,surface:'ios')
+  end
+  def test_stable_candidate_never_assigns_testers
+    client=FakeClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha')
+    d=delivery(client, train: 'stable'); d.distribute(wait_seconds:0)
+    assert_equal 'verified', d.receipts.last.first
+    assert_equal 'app_store_candidate', d.receipts.last.last[:distribution]
+    assert_empty d.receipts.last.last[:groups]
+    assert_empty client.posts
+    refute client.assigned
+    assert_raises(RuntimeError) { d.assign(client.build) }
+  end
+  def test_alpha_cannot_enter_app_store_review
+    client=FakeClient.new
+    error=assert_raises(RuntimeError) { delivery(client).submit }
+    assert_match 'Alpha must never enter App Store review', error.message
+    assert_empty client.posts
   end
   def test_processing_is_pending_not_delivery
     client=FakeClient.new;client.processing='PROCESSING';d=delivery(client);d.distribute(wait_seconds:0)

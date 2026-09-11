@@ -10,7 +10,4 @@
 #
 # Prune an entry once its case is on the baseline branch, where it stops
 # being reported.
-API breakage: enumelement LiveTranscriptionProviderID.revai has been added as a new enum case
-API breakage: enumelement LiveTranscriptionProviderID.mistral has been added as a new enum case
 API breakage: enumelement StreamingClientError.transportStalled has been added as a new enum case
-API breakage: enumelement LiveTranscriptionProviderID.azure has been added as a new enum case

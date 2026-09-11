@@ -231,6 +231,12 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent
             )
         } catch let failure as CaptureParameterFailure {
             throw failure
+        } catch is ForegroundRecordingOwnership.OwnershipError {
+            // A foreground claim made after this intent's own preflight, while
+            // the service waited on credentials (#943), is the in-app owner —
+            // not a permissions problem. Report it as the same foreign-owner
+            // guidance the preflight gives, so the two answers cannot disagree.
+            return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         } catch {
             return .result(
                 dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."

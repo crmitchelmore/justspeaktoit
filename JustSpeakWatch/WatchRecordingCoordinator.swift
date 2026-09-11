@@ -17,6 +17,9 @@ final class WatchRecordingCoordinator {
 
     /// Starts a recording, or stops the one in progress.
     func toggleRecording() async {
+        // AudioRecordingIntent can run without a scene appearing. Start the
+        // session now; successful activation retries audio queued in the meantime.
+        WatchCaptureStore.shared.activate()
         await self.toggleSerialiser.run {
             await self.recorder.toggle()
         }

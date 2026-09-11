@@ -240,6 +240,9 @@ extension WatchCaptureStore: WCSessionDelegate {
         error: Error?
     ) {
         Task { @MainActor in
+            // An unsuccessful request may be retried by the next explicit entry.
+            // Pending requests and successful activation remain deduplicated.
+            self.activated = activationState == .activated
             self.isReachable = session.isReachable
             if activationState == .activated {
                 self.retryPending()

@@ -9,7 +9,7 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
     func testHarmlessRoutes_remainArmedButStoppedDetectorDisarms() async throws {
         let coordinator = makeCoordinator()
         await coordinator.toggle()
-        await settle()
+        await settle(coordinator, until: "the detector to arm") { coordinator.state == .armed }
         XCTAssertEqual(coordinator.state, .armed)
         for reason: AVAudioSession.RouteChangeReason in [.newDeviceAvailable, .oldDeviceUnavailable,
                                                        .categoryChange, .override] {
@@ -19,6 +19,9 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
         }
         coordinator.detectorIsRunning = { false }
         await coordinator.handleRouteChange(reason: .oldDeviceUnavailable)
+        await settle(coordinator, until: "the lost detector to disarm with its failure") {
+            coordinator.state == .off && coordinator.failureMessage != nil
+        }
         XCTAssertEqual(coordinator.state, .off)
         XCTAssertEqual(coordinator.failureMessage, "The microphone changed and recording stopped.")
     }
@@ -26,13 +29,14 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
     func testLostInput_disarmsAndLaterArmClearsNotice() async {
         let coordinator = makeCoordinator()
         await coordinator.toggle()
-        await settle()
+        await settle(coordinator, until: "the detector to arm") { coordinator.state == .armed }
         coordinator.inputIsUsable = { false }
         await coordinator.handleRouteChange(reason: .unknown)
+        await settle(coordinator, until: "the lost input to disarm") { coordinator.state == .off }
         XCTAssertEqual(coordinator.state, .off)
         coordinator.inputIsUsable = { true }
         await coordinator.toggle()
-        await settle()
+        await settle(coordinator, until: "the detector to re-arm") { coordinator.state == .armed }
         XCTAssertEqual(coordinator.state, .armed)
         XCTAssertNil(coordinator.failureMessage)
         await coordinator.disarm()
@@ -50,7 +54,7 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
             }
         })
         await coordinator.toggle()
-        await settle()
+        await settle(coordinator, until: "the detector to arm") { coordinator.state == .armed }
         await coordinator.handleActivity(AppleSpeechActivityUpdate(speechDetected: true, seconds: 1))
         XCTAssertEqual(coordinator.state, .recording)
         await coordinator.stopForCaptureDisruption()
@@ -60,23 +64,28 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
         XCTAssertEqual(coordinator.state, .finalising)
         XCTAssertEqual(finishes, 1)
         finish?.resume(returning: .completed)
-        await settle()
+        await settle(coordinator, until: "the finalised utterance to disarm with its disruption notice") {
+            coordinator.state == .off && coordinator.failureMessage != nil
+        }
         XCTAssertEqual(coordinator.state, .off)
         XCTAssertEqual(coordinator.failureMessage, "The microphone changed and recording stopped.")
+        XCTAssertEqual(finishes, 1)
     }
 
     func testInterruption_armedSessionDisarmsWithoutErrorAndDoesNotResume() async {
         let coordinator = makeCoordinator()
         await coordinator.toggle()
-        await settle()
+        await settle(coordinator, until: "the detector to arm") { coordinator.state == .armed }
         InterruptionSession.post(.began)
         InterruptionSession.post(.ended)
-        for _ in 0..<30 { await Task.yield() }
+        await settle(coordinator, until: "the interruption to disarm with its stop notice") {
+            coordinator.state == .off && coordinator.captureStopNotice != nil
+        }
         XCTAssertEqual(coordinator.state, .off)
         XCTAssertNil(coordinator.failureMessage)
         XCTAssertEqual(coordinator.captureStopNotice, iOSTranscriptionError.interrupted.localizedDescription)
         InterruptionSession.post(.ended)
-        await settle()
+        await drainPendingWork()
         XCTAssertEqual(coordinator.state, .off)
     }
 
@@ -93,7 +102,7 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
                 }
             })
             await coordinator.toggle()
-            await settle()
+            await settle(coordinator, until: "the detector to arm") { coordinator.state == .armed }
             await coordinator.handleActivity(AppleSpeechActivityUpdate(speechDetected: true, seconds: 1))
             InterruptionSession.post(.began)
             await fulfillment(of: [draining], timeout: 2)
@@ -103,7 +112,10 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
             XCTAssertEqual(coordinator.state, .finalising)
             XCTAssertEqual(finishes, 1)
             finish?.resume(returning: failure ? .failed(.captureFailed) : .completed)
-            for _ in 0..<30 { await Task.yield() }
+            await settle(coordinator, until: "the drained utterance to disarm") {
+                coordinator.state == .off
+                    && (failure ? coordinator.failureMessage != nil : coordinator.captureStopNotice != nil)
+            }
             XCTAssertEqual(coordinator.state, .off)
             if failure {
                 XCTAssertNotNil(coordinator.failureMessage)
@@ -136,8 +148,43 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
         return coordinator
     }
 
-    private func settle() async {
-        await Task { @MainActor in }.value
+    private static let settleTimeout: Duration = .seconds(5)
+
+    /// Waits for the coordinator to reach a settled condition. Arming and
+    /// finalisation each cross several async hops — the stop owner's
+    /// continuation, the machine transition, then the published notice — so a
+    /// fixed number of main-actor hops observes them mid-flight whenever the
+    /// runner is loaded. Timing out fails loudly and names what was observed.
+    private func settle(
+        _ coordinator: IOSHandsFreeDictationCoordinator,
+        until description: String,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        isSettled: () -> Bool
+    ) async {
+        let deadline = ContinuousClock.now + Self.settleTimeout
+        while !isSettled() {
+            guard ContinuousClock.now < deadline else {
+                XCTFail(
+                    "Timed out after \(Self.settleTimeout) waiting for \(description). "
+                        + "Observed state=\(coordinator.state), "
+                        + "failureMessage=\(String(describing: coordinator.failureMessage)), "
+                        + "captureStopNotice=\(String(describing: coordinator.captureStopNotice))",
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+    }
+
+    /// Lets any pending main-actor work run where the test asserts that
+    /// *nothing* further happens, so the absence is observed, not assumed.
+    private func drainPendingWork() async {
+        for _ in 0..<50 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(20))
     }
 }
 #endif

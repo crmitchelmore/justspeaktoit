@@ -204,7 +204,6 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
     }
 
-    // swiftlint:disable:next function_body_length
     private func startCapture(
         preRollBuffers: [AVAudioPCMBuffer],
         analyzerFallbackAllowed: Bool
@@ -341,22 +340,10 @@ public final class iOSLiveTranscriber: ObservableObject {
                 sourceFormat: recordingFormat,
                 targetFormat: session.audioFormat
             )
-            let signal = firstInputSignal
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                // Copy the buffer and hop off the real-time audio thread —
-                // heavy work in the tap makes CoreAudio drop mic buffers.
-                guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
-                if copied.frameLength > 0, signal.markObserved() {
-                    Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
-                }
-                self.audioProcessingQueue.async {
-                    defer { self.tapBufferPool.recycle(copied) }
-                    self.audioRecorder.writeBuffer(copied)
-                    guard let converted = converter.convert(copied) else { return }
-                    session.send(converted)
-                }
-            }
-            hasInputTap = true
+            installAnalyzerTap(
+                on: inputNode, format: recordingFormat,
+                converter: converter, session: session, captureID: captureID
+            )
             _ = try? audioRecorder.startRecording(format: recordingFormat)
             for buffer in preRollBuffers {
                 if let converted = converter.convert(buffer) {
@@ -378,6 +365,32 @@ public final class iOSLiveTranscriber: ObservableObject {
             await session.cancel()
             throw error
         }
+    }
+
+    @available(iOS 26.0, *)
+    private func installAnalyzerTap(
+        on inputNode: AVAudioInputNode,
+        format recordingFormat: AVAudioFormat,
+        converter: AppleSpeechAudioConverter,
+        session: AppleSpeechAnalyzerLiveSession,
+        captureID: UUID
+    ) {
+        let signal = firstInputSignal
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            if copied.frameLength > 0, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                self.audioRecorder.writeBuffer(copied)
+                guard let converted = converter.convert(copied) else { return }
+                session.send(converted)
+            }
+        }
+        hasInputTap = true
     }
 
     @available(iOS 26.0, *)

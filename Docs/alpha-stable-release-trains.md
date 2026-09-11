@@ -7,12 +7,15 @@ with `python3 scripts/generate-release-train-config.py` after changing it.
 
 ## Commissioning state
 
-The previous automatic Stable publisher is disabled. `Config/ReleasePipeline.json`
-keeps automatic Alpha allocation disabled until provisioning and archive/device
-verification are complete. This is an explicit commissioning gate, not a working
-production release claim. Existing Stable downloads remain available.
-The repository owner may manually dispatch a successful main SHA while this gate
-is off to commission the first Alpha; automatic allocation remains off.
+The previous automatic Stable publisher is disabled. Automatic Alpha allocation
+is enabled in `Config/ReleasePipeline.json`, authorised by Chris on 11 September
+2026. Successful main CI runs now enter the Alpha delivery pipeline; hourly
+reconciliation retries successful merges accumulated since the Alpha controller
+was introduced. Existing Stable downloads remain available.
+
+Activation does not establish successful distribution. Signed archive, device,
+public TestFlight and Alpha N-to-N+1 Sparkle verification remain delivery
+acceptance checks and must be recorded from actual release evidence.
 
 Apple Alpha records: iOS `6810300888`, macOS `6810302118`. Both have an external
 Public Alpha group. TestFlight distribution is Alpha-only; Stable candidates
@@ -22,11 +25,13 @@ Alpha links live in the README only; the website and Homebrew advertise Stable.
 
 ## Alpha
 
-After activation, every successful main push CI allocates an immutable annotated
+Every successful main push CI allocates an immutable annotated
 `alpha-build-N` tag containing a manifest. Independent workers build direct Mac,
 Mac App Store and iOS from that exact source. Allocation is idempotent; manual
 `rebuild` creates a new build number for an expired or invalid Apple upload.
-Hourly reconciliation retries missing deliveries. Apple processing and beta
+Hourly reconciliation retries missing deliveries, dispatching at most three
+sources per pass and checking every page of active runs to avoid duplicate
+in-flight deliveries. Remaining sources stay in the successful-CI ledger. Apple processing and beta
 review are recorded as pending, never as successful shipment.
 
 Direct Mac releases are GitHub prereleases. A single `alpha-latest` JSON pointer
@@ -59,12 +64,22 @@ notes; direct assets are checked against recorded SHA-256 before promotion.
 
 ## Required rollout evidence
 
-Before enabling allocation, verify Alpha profiles contain only Alpha groups and
+To complete distribution verification, verify Alpha profiles contain only Alpha groups and
 cloud containers; deploy the matching CloudKit schemas; build signed archives on
 all three surfaces; install Alpha alongside Stable on target devices; verify data
 and permission isolation; exercise direct Mac Alpha N to N+1 updates; and confirm
 public TestFlight availability. Store beta links without an available approved
 build are setup evidence only.
+
+Record observations in the existing [JSTI release tracker](https://app.notion.com/p/3d6ef116369981b98927fd8cddb95fa1).
+Each observation must identify the immutable Alpha tag, source SHA, surface,
+version/build, device where relevant, timestamp and release/workflow evidence.
+For Sparkle, record both the starting and installed Alpha builds. Keep upload,
+processing, beta review, public availability and device validation distinct.
+
+Once enabled, repository users authorised to dispatch Actions can retry a
+successful main Alpha source or request a rebuild. Owner-only dispatch while
+disabled is the commissioning exception; Stable publication remains owner-only.
 
 Required Alpha signing secrets are selected in the reusable Apple workflows.
 No signing material belongs in source control. Use the existing secure API key

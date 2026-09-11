@@ -85,7 +85,7 @@ final class HandsFreeCaptureDisruptionTests: XCTestCase {
             var finishes = 0
             var finish: CheckedContinuation<HandsFreeCaptureEndOutcome, Never>?
             let draining = expectation(description: "utterance drain")
-            let coordinator = makeCoordinator(stopCapture: {
+            let coordinator = makeCoordinator(stopCapture: { _ in
                 finishes += 1
                 return await withCheckedContinuation {
                     finish = $0

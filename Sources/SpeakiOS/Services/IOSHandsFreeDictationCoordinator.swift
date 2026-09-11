@@ -120,8 +120,10 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     }
 
     func stopForCaptureDisruption(reason: iOSTranscriptionError = .microphoneChanged) async {
-        disruptionReason = reason
+        // Set the reason only once the stop is actually begun: a duplicate
+        // disruption must preserve the original finalisation and its reason.
         guard beginControlledStop(reason: .captureDisruption) else { return }
+        disruptionReason = reason
         await continueControlledStop()
     }
 

@@ -67,12 +67,10 @@ final class TranscriberCoordinator: ObservableObject {
         historyManager: iOSHistoryManager = .shared,
         sessionFactory: (() throws -> IOSTranscriptionSession)? = nil
     ) {
-        self.sharedState = sharedState
-        self.historyManager = historyManager
-        self.sessionFactory = sessionFactory
         self.audioSessionManager = AudioSessionManager()
         self.sharedState = sharedState
         self.historyManager = historyManager
+        self.sessionFactory = sessionFactory
     }
 
     var modelDisplayName: String {
@@ -117,7 +115,7 @@ final class TranscriberCoordinator: ObservableObject {
         }
     }
 
-    private func bindCallbacks(to session: IOSTranscriptionSession, runID: UUID) {
+    private func bindCallbacks(to session: any IOSRecordingSession, runID: UUID) {
         session.onPartialResult = { [weak self, weak session] text, isFinal in
             guard let self, let session,
                   self.ownsSession(session) else { return }
@@ -149,7 +147,7 @@ final class TranscriberCoordinator: ObservableObject {
         return false
     }
 
-    private func ownsSession(_ session: IOSTranscriptionSession) -> Bool {
+    private func ownsSession(_ session: any IOSRecordingSession) -> Bool {
         transcriptionSession === session || stoppingSession === session
     }
 
@@ -239,8 +237,10 @@ final class TranscriberCoordinator: ObservableObject {
             guard !Task.isCancelled, !stopWasCancelled, stoppingSession === session else { return nil }
             handleError(error)
             // A hands-free drain failure must retain the same shared/History
-            // outcome as Stop. Explicit Cancel still clears content above.
-            guard rearmHandsFree != nil else { return nil }
+            // outcome as Stop (#942), and so must a capture the user did not
+            // end -- an interruption finalises through this owner and keeps its
+            // partial (#936). Explicit Cancel still clears content above.
+            guard rearmHandsFree != nil || captureStopNotice != nil else { return nil }
             drained = TranscriptionResult(
                 text: partialText, segments: [], confidence: confidence, duration: TimeInterval(duration),
                 modelIdentifier: currentModel, cost: nil, rawPayload: nil, debugInfo: nil

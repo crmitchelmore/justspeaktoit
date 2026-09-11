@@ -238,6 +238,10 @@ public final class iOSLiveTranscriber: ObservableObject {
                     }
                     try Task.checkCancellation()
                     isRunning = true
+                    // Arm here as well as inside the engine start: an injected
+                    // analyzer session never reaches that path, and this is the
+                    // point at which the capture is live and interruptible.
+                    observeCaptureConfiguration()
                     logger.info("Started with SpeechAnalyzer (\(self.activeModelID))")
                     return
                 } catch {

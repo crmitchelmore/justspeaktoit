@@ -221,7 +221,7 @@
             </li>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="13" height="9" rx="2"/><path d="M2 18h13"/><rect x="17" y="9" width="5" height="10" rx="1.5"/></svg>
-              <div><strong>Send to Mac</strong><span>Dictate on the phone and the words type themselves into the app in front of you on the Mac, over your own network with a pairing code. No cloud hop.</span></div>
+              <div><strong>To your Mac, through your own iCloud</strong><span>A capture on the phone lands in your Mac&rsquo;s History within seconds through your private iCloud, with a Continue-on-Mac Handoff pointer. The Mac offers a Paste action; pasting at the cursor is opt-in and reports what it actually did.</span></div>
             </li>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -277,8 +277,8 @@
               <span><code>speak mcp</code> exposes <code>start_dictation</code>, <code>stop_dictation</code>, <code>transcribe_file</code> and <code>get_history</code> over stdio to Claude Code and any other MCP client. Calls are idempotent, so a retrying agent cannot open a second microphone.</span>
             </li>
             <li>
-              <strong>Send to Mac</strong>
-              <span>A local WebSocket server on the Mac, discovered over Bonjour and paired with a code. The iPhone transcribes, the Mac types. Your audio and your text never leave your network.</span>
+              <strong>A URL scheme with callbacks</strong>
+              <span><code>justspeaktoit://</code> with <code>start</code>, <code>stop</code>, <code>toggle</code> and <code>dictate</code>, a per-capture destination, language, model and maximum duration, and x-callback-url so Drafts, Shortcuts and iOS 17 automations get the text back. Any app can open the scheme, so the microphone only starts with the app in front of you.</span>
             </li>
           </ul>
         </div>

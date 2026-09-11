@@ -87,6 +87,8 @@ module AppleRelease
         if found && found.dig('attributes', 'processingState') == 'VALID'
           raise 'Expired TestFlight build' if found.dig('attributes', 'expired')
           raise 'Internal-only archive cannot be publicly tested' if @train == 'alpha' && found.dig('attributes', 'buildAudienceType') == 'INTERNAL_ONLY'
+          # Stable processing validates the candidate, never distributes a beta.
+          return receipt('verified', found, distribution: 'app_store_candidate', groups: []) if @train == 'stable'
           return assign(found)
         end
         if found && %w[FAILED INVALID].include?(found.dig('attributes', 'processingState'))
@@ -103,6 +105,7 @@ module AppleRelease
     end
 
     def assign(found)
+      raise 'Only Alpha may be distributed through TestFlight' unless @train == 'alpha'
       id = found.fetch('id')
       locales = @client.list("/v1/builds/#{id}/betaBuildLocalizations")
       locale = locales.find { |l| l.dig('attributes', 'locale') == 'en-GB' }
@@ -113,10 +116,10 @@ module AppleRelease
         @client.post('/v1/betaBuildLocalizations', data: {type: 'betaBuildLocalizations', attributes: attrs.merge(locale: 'en-GB'), relationships: {build: AppleRelease.relationship('builds', id)}})
       end
       groups = @client.list("/v1/apps/#{@app}/betaGroups?limit=200")
-      targets = @train == 'alpha' ? groups.select { |g| g.dig('attributes', 'name') == 'Public Alpha' && !g.dig('attributes', 'isInternalGroup') } : groups.select { |g| g.dig('attributes', 'isInternalGroup') }
+      targets = groups.select { |g| g.dig('attributes', 'name') == 'Public Alpha' && !g.dig('attributes', 'isInternalGroup') }
       raise 'Expected tester group is missing; do not move existing testers' if targets.empty?
       detail = @client.get("/v1/builds/#{id}/buildBetaDetail").fetch('data')
-      state = detail.dig('attributes', @train == 'alpha' ? 'externalBuildState' : 'internalBuildState')
+      state = detail.dig('attributes', 'externalBuildState')
       if @train == 'alpha' && %w[BETA_REJECTED INVALID_BINARY].include?(state)
         receipt('beta_rejected', found, betaState: state)
         raise 'Apple beta review rejected this build; inspect the review feedback before rebuilding'
@@ -150,7 +153,7 @@ module AppleRelease
         raise 'Tester assignment was not observed' unless verified.any? { |b| b['id'] == id }
       end
       detail = @client.get("/v1/builds/#{id}/buildBetaDetail").fetch('data')
-      state = detail.dig('attributes', @train == 'alpha' ? 'externalBuildState' : 'internalBuildState')
+      state = detail.dig('attributes', 'externalBuildState')
       ready = %w[IN_BETA_TESTING READY_FOR_BETA_TESTING].include?(state)
       receipt(ready ? 'verified' : 'beta_processing', found, betaState: state,
         groups: targets.map { |g| g['id'] }, publicLinks: targets.map { |g| g.dig('attributes', 'publicLink') }.compact, expirationDate: found.dig('attributes', 'expirationDate'))

@@ -15,7 +15,9 @@ The repository owner may manually dispatch a successful main SHA while this gate
 is off to commission the first Alpha; automatic allocation remains off.
 
 Apple Alpha records: iOS `6810300888`, macOS `6810302118`. Both have an external
-Public Alpha group. Existing Stable TestFlight groups remain untouched. Public
+Public Alpha group. TestFlight distribution is Alpha-only; Stable candidates
+are processed for App Store submission without beta-group assignment. Existing
+tester membership is preserved. Public
 Alpha links live in the README only; the website and Homebrew advertise Stable.
 
 ## Alpha
@@ -40,8 +42,9 @@ Alpha starts without a global recording hotkey; configure one in Settings.
 2. Run **Prepare Stable**. It freezes source, dependency lock, per-surface
    publication baseline, versions, builds and exact release-note hashes in a
    `stable-candidate-N` manifest. It rebuilds using Stable identities.
-3. Test the candidate downloads and existing Stable TestFlight groups. Review
-   cumulative notes in its GitHub draft release. Alpha continues independently.
+3. Validate candidate downloads, Stable archive identity and runtime. Apple
+   candidates must finish processing, but are not distributed through TestFlight.
+   Review cumulative notes in the draft release. Alpha continues independently.
 4. The repository owner runs **Publish Stable**, supplying the candidate and
    exact reviewed manifest SHA-256. This is the publication approval.
 5. Direct Mac publishes verified candidate assets and updates Homebrew. Apple

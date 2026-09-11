@@ -91,7 +91,7 @@ extension MainManager {
       micPermission = .notDetermined
     }
 
-    let deviceName = audioInputDeviceManager.currentSelectionDisplayName
+    let deviceName = audioInputDeviceManager.preferredDeviceLabel
 
     let activeModel: String
     switch appSettings.transcriptionMode {

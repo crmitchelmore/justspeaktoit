@@ -166,7 +166,7 @@ extension ProfileEditorView {
       }
 
       Picker("Output Language", selection: $draft.outputLanguage) {
-        Text("Use Default").tag("")
+        Text("Use app setting").tag("")
         ForEach(Self.outputLanguages, id: \.self) { language in
           Text(language).tag(language)
         }
@@ -183,7 +183,7 @@ extension ProfileEditorView {
       Text("Spoken Language")
         .font(.subheadline.weight(.semibold))
       Picker("Spoken Language", selection: $draft.languageIdentifier) {
-        Text("Use Default").tag("")
+        Text("Use app setting").tag("")
         ForEach(TranscriptionLanguageCatalog.options) { option in
           Text(option.displayName).tag(option.id)
         }

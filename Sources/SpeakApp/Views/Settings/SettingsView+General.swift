@@ -10,16 +10,16 @@ extension SettingsView {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Microphone", systemImage: "mic.circle", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {
-          Picker("Input Device", selection: audioInputSelectionBinding) {
-            Text("System Default (\(audioDevices.systemDefaultDisplayName))")
+          Picker("Preferred microphone", selection: audioInputSelectionBinding) {
+            Text("Use macOS default")
               .tag(AudioInputDeviceManager.systemDefaultToken)
             ForEach(audioDevices.devices) { device in
               Text(device.displayName).tag(device.id)
             }
           }
           .settingsMenuPicker()
-          .speakTooltip("Choose which microphone Speak listens to when recording or transcribing.")
-          .accessibilityLabel("Audio input device picker")
+          .speakTooltip("Choose a microphone for new recording sessions, or follow the macOS default.")
+          .accessibilityLabel("Preferred microphone")
 
           if let details = audioDevices.currentSelectionDetails {
             Text(details)
@@ -30,22 +30,30 @@ extension SettingsView {
             HStack(spacing: 8) {
               Image(systemName: "waveform")
                 .foregroundStyle(Color.brandAccentWarm)
-              Text("Currently active: \(audioDevices.activeDeviceLabel)")
+              Text("macOS default now: \(audioDevices.systemDefaultDisplayName)")
               .font(.caption)
               .foregroundStyle(.secondary)
             Spacer()
             Button {
               audioDevices.refresh()
             } label: {
-              Label("Refresh", systemImage: "arrow.clockwise")
+              Label("Refresh microphones", systemImage: "arrow.clockwise")
                 .labelStyle(.titleAndIcon)
             }
             .buttonStyle(.bordered)
             .speakTooltip("Reload the list of connected microphones.")
           }
+          Text(
+            "Your preference applies when a new recording session starts. Speak temporarily switches "
+              + "the macOS default to your chosen microphone, then restores it when the session ends. "
+              + "If that microphone disconnects, the preference resets to Use macOS default."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
         }
       }
-      .speakTooltip("Pick the microphone Speak should use. We fall back to the system default if a device disconnects.")
+      .speakTooltip("Your preferred microphone and the current macOS default can differ between recording sessions.")
 
       SettingsCard(title: "Language", systemImage: "character.bubble", tint: Color.brandAccentWarm) {
         VStack(alignment: .leading, spacing: 12) {

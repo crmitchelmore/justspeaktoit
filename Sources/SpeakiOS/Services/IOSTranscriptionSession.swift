@@ -117,27 +117,10 @@ final class IOSTranscriptionSession {
     let backend: Backend
     private let language: String?
 
-    init(
-        modelID: String,
-        mode: Mode,
-        language: String? = nil,
-        audioSessionManager: AudioSessionManager,
-        batchAPIKey: String,
-        liveAPIKey: (LiveTranscriptionRoute) -> String,
-        transcriptionKeywords: [String] = []
-    ) throws {
-        let resolution = try Self.resolve(modelID: modelID, mode: mode)
+    private init(resolution: Resolution, language: String?, backend: Backend) {
         self.resolution = resolution
         self.language = language
-        backend = try Self.makeBackend(
-            resolution: resolution,
-            mode: mode,
-            language: language,
-            audioSessionManager: audioSessionManager,
-            batchAPIKey: batchAPIKey,
-            liveAPIKey: liveAPIKey,
-            transcriptionKeywords: transcriptionKeywords
-        )
+        self.backend = backend
         bindCallbacks()
     }
 
@@ -317,6 +300,38 @@ final class IOSTranscriptionSession {
             transcriber.onStartupObservation = startupHandler
         }
 
+    }
+}
+
+// Construction lives beside the class so both recording surfaces keep using
+// the same routing contract; the designated initialiser stays private.
+extension IOSTranscriptionSession {
+    convenience init(
+        modelID: String,
+        mode: Mode,
+        language: String? = nil,
+        audioSessionManager: AudioSessionManager,
+        batchAPIKey: String,
+        liveAPIKey: (LiveTranscriptionRoute) -> String,
+        transcriptionKeywords: [String] = []
+    ) throws {
+        let resolution = try Self.resolve(modelID: modelID, mode: mode)
+        let backend = try Self.makeBackend(
+            resolution: resolution,
+            mode: mode,
+            language: language,
+            audioSessionManager: audioSessionManager,
+            batchAPIKey: batchAPIKey,
+            liveAPIKey: liveAPIKey,
+            transcriptionKeywords: transcriptionKeywords
+        )
+        self.init(resolution: resolution, language: language, backend: backend)
+    }
+
+    /// Lifecycle tests wrap a transcriber whose client and capture are synthetic (issue #949).
+    convenience init(openAI transcriber: OpenAIRealtimeLiveTranscriber) throws {
+        let resolution = try Self.resolve(modelID: "openai/gpt-live-transcribe-streaming", mode: .streaming)
+        self.init(resolution: resolution, language: nil, backend: .openAI(transcriber))
     }
 }
 #endif

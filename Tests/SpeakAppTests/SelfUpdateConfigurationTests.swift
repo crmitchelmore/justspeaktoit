@@ -17,7 +17,7 @@ final class SelfUpdateConfigurationTests: XCTestCase {
     }
 
     func testMissingOrMalformedFeedAndKeyCannotUpdate() {
-        for feed in ["", "appcast.xml", "file:///tmp/appcast.xml", "https://"] {
+        for feed in ["", "appcast.xml", "file:///tmp/appcast.xml", "https://", "http://example.com/appcast.xml"] {
             XCTAssertFalse(SelfUpdateConfiguration.isConfigured(info: [
                 "SUFeedURL": feed, "SUPublicEDKey": key
             ]), feed)

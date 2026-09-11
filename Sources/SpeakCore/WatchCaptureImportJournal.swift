@@ -13,6 +13,10 @@ public struct WatchCaptureImportJob: Codable, Equatable, Sendable {
     public var attempts: Int
     public var lastErrorMessage: String?
     public var updatedAt: Date
+    /// Eligibility at the next execution opportunity, not a scheduled wakeup.
+    public var nextRetryAt: Date?
+    /// Optional so journals written before transient backoff still decode.
+    public var retryDelay: TimeInterval?
     /// First arrival on this phone, distinct from recording time. Optional
     /// so legacy journals decode using the original capture-time retention.
     let parkedAt: Date?
@@ -172,15 +176,43 @@ public final class WatchCaptureImportJournal: @unchecked Sendable {
         }
     }
 
-    /// Whether the job may still be retried under the bounded attempt policy.
+    /// Defers a temporary failure without spending the terminal-attempt budget.
+    /// Delay doubles from 30 seconds to a 15-minute cap. Persist it and the
+    /// reason atomically, preserving the retention origin.
+    @discardableResult
+    public func recordTransientFailure(
+        captureID: UUID,
+        message: String,
+        now: Date = Date()
+    ) -> Bool {
+        withState(now: now) { state in
+            guard let index = state.jobs.firstIndex(where: { $0.captureID == captureID }) else { return }
+            let delay = min(max((state.jobs[index].retryDelay ?? 15) * 2, 30), 15 * 60)
+            state.jobs[index].retryDelay = delay
+            state.jobs[index].nextRetryAt = now.addingTimeInterval(delay)
+            state.jobs[index].lastErrorMessage = message
+            state.jobs[index].updatedAt = now
+        }
+    }
+
+    /// Whether the job has attempts left and its persisted delay has elapsed.
     public func isRetryable(
         captureID: UUID,
         maximumAttempts: Int = WatchCaptureImportJournal.defaultMaximumAttempts
     ) -> Bool {
+        isRetryable(captureID: captureID, maximumAttempts: maximumAttempts, now: Date())
+    }
+
+    /// Clock-injected eligibility check; retains the original overload for API compatibility.
+    public func isRetryable(
+        captureID: UUID,
+        maximumAttempts: Int = WatchCaptureImportJournal.defaultMaximumAttempts,
+        now: Date
+    ) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         guard let job = state.jobs.first(where: { $0.captureID == captureID }) else { return false }
-        return job.attempts < maximumAttempts
+        return job.attempts < maximumAttempts && (job.nextRetryAt.map { $0 <= now } ?? true)
     }
 
     /// Removes a completed job. The acknowledgement lifecycle is separate.

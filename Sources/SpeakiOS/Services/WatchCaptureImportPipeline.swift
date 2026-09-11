@@ -46,7 +46,30 @@ public final class WatchCaptureImportPipeline: ObservableObject {
             await operation()
         }
     }
-    private var activeImportTask: Task<Void, Error>?
+    var now: () -> Date = Date.init
+    var transcribeAudio: (@MainActor (URL) async throws -> TranscriptionResult)?
+    var persistHistory: @MainActor (iOSHistoryItem) -> Bool = {
+        iOSHistoryManager.shared.upsertReportingDurability($0)
+    }
+    var beginBackgroundTask: (@escaping @MainActor @Sendable () -> Void) -> UIBackgroundTaskIdentifier = {
+        UIApplication.shared.beginBackgroundTask(withName: "WatchCaptureImport", expirationHandler: $0)
+    }
+    var endBackgroundTask: (UIBackgroundTaskIdentifier) -> Void = {
+        UIApplication.shared.endBackgroundTask($0)
+    }
+
+    /// Each allowance owns only its import. A late expiration callback cannot
+    /// cancel a later job or turn an unrelated cancellation into an expiration.
+    @MainActor
+    private final class ImportExecution {
+        var task: Task<Void, Error>?
+        var expired = false
+
+        func expire() {
+            expired = true
+            task?.cancel()
+        }
+    }
 
     public convenience init() {
         self.init(inboxDirectory: Self.inboxDirectory)
@@ -145,7 +168,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         // acknowledgement replay instead of joining this snapshot.
         let jobs = journal.pendingJobs()
         for job in jobs {
-            guard journal.isRetryable(captureID: job.captureID) else { continue }
+            guard journal.isRetryable(captureID: job.captureID, now: now()) else { continue }
             if let importJobExecutor {
                 await importJobExecutor(job)
             } else {
@@ -158,37 +181,45 @@ public final class WatchCaptureImportPipeline: ObservableObject {
     /// cancels the work cleanly, leaving the job journalled and retryable
     /// rather than assuming a network transcription fits the allowance.
     private func runImport(for job: WatchCaptureImportJob) async {
-        let backgroundTask = UIApplication.shared.beginBackgroundTask(
-            withName: "WatchCaptureImport"
-        ) { [weak self] in
-            self?.activeImportTask?.cancel()
-        }
+        let execution = ImportExecution()
+        let backgroundTask = beginBackgroundTask { execution.expire() }
         defer {
+            execution.task = nil
             if backgroundTask != .invalid {
-                UIApplication.shared.endBackgroundTask(backgroundTask)
+                endBackgroundTask(backgroundTask)
             }
         }
 
-        let importTask = Task { try await importOne(job) }
-        activeImportTask = importTask
-        defer { activeImportTask = nil }
+        let importTask = Task {
+            try Task.checkCancellation()
+            try await importOne(job)
+        }
+        execution.task = importTask
+        if execution.expired { importTask.cancel() }
         do {
             try await importTask.value
-        } catch is CancellationError {
-            journal.recordAttemptFailure(
-                captureID: job.captureID,
-                message: "Import interrupted by background expiration"
-            )
         } catch AppSettings.CredentialLoadingError.unavailable {
             // Loading failed before transcription began. Keep the existing
             // job and retry budget intact until Keychain access recovers.
             return
         } catch {
             SpeakLogger.logError(error, context: "WatchCaptureImportPipeline.import")
-            journal.recordAttemptFailure(
-                captureID: job.captureID,
-                message: error.localizedDescription
-            )
+            let urlError = error as? URLError
+            let ownedCancellation = execution.expired
+                && (error is CancellationError || urlError?.code == .cancelled)
+            let transientNetwork = urlError.map {
+                [.notConnectedToInternet, .networkConnectionLost, .timedOut].contains($0.code)
+            } ?? false
+            if ownedCancellation || transientNetwork {
+                journal.recordTransientFailure(
+                    captureID: job.captureID,
+                    message: ownedCancellation
+                        ? "Import interrupted by background expiration" : error.localizedDescription,
+                    now: now()
+                )
+            } else {
+                journal.recordAttemptFailure(captureID: job.captureID, message: error.localizedDescription)
+            }
         }
     }
 
@@ -209,13 +240,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         let model = settings.batchTranscriptionModel
         try settings.requireAvailableCredentials(for: model, purpose: .batchTranscription)
 
-        let result = try await IOSBatchTranscriber.transcribeFile(
-            at: audioURL,
-            model: model,
-            apiKey: settings.batchAPIKey,
-            language: settings.preferredModelLanguage,
-            keywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
-        )
+        let result = try await transcriptionResult(at: audioURL, settings: settings, model: model)
         try Task.checkCancellation()
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
@@ -236,7 +261,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         // Acknowledge and delete only after the history write is durable:
         // a full or unwritable store keeps the audio parked and the job
         // retryable instead of acknowledging data loss (issue #674).
-        guard iOSHistoryManager.shared.upsertReportingDurability(item) else {
+        guard persistHistory(item) else {
             journal.recordAttemptFailure(
                 captureID: job.captureID,
                 message: "History could not be written to disk."
@@ -265,6 +290,16 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         await MainActor.run {
             _ = KeyboardDeliveryPublisher.publish(transcript: text, source: .watch)
         }
+    }
+
+    private func transcriptionResult(at audioURL: URL, settings: AppSettings, model: String) async throws
+        -> TranscriptionResult {
+        if let transcribeAudio { return try await transcribeAudio(audioURL) }
+        return try await IOSBatchTranscriber.transcribeFile(
+            at: audioURL, model: model, apiKey: settings.batchAPIKey,
+            language: settings.preferredModelLanguage,
+            keywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
+        )
     }
 
     /// The audio is gone (e.g. reclaimed storage): the capture is
@@ -313,6 +348,9 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         journal.confirmAckDelivered(captureID: captureID)
     }
 
+}
+
+extension WatchCaptureImportPipeline {
     // MARK: - Retention
 
     func purgeOrphanedAudio(now: Date = Date()) {
@@ -341,7 +379,7 @@ public final class WatchCaptureImportPipeline: ObservableObject {
         // re-delivery must not create a replacement job between these steps.
         inboxLock.lock()
         defer { inboxLock.unlock() }
-        let purged = journal.purgeExpired()
+        let purged = journal.purgeExpired(now: now())
         for job in purged {
             let audioURL = inboxDirectory
                 .appendingPathComponent(job.captureID.uuidString)

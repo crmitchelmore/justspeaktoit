@@ -291,6 +291,9 @@ extension WatchCaptureImportJournalTests {
         let journal = makeJournal()
         XCTAssertEqual(journal.pendingJobs().map(\.captureID), [captureID])
         XCTAssertNil(journal.pendingJobs().first?.parkedAt)
+        XCTAssertNil(journal.pendingJobs().first?.nextRetryAt)
+        XCTAssertNil(journal.pendingJobs().first?.retryDelay)
+        XCTAssertTrue(journal.isRetryable(captureID: captureID))
         XCTAssertEqual(journal.purgeExpired(now: .distantFuture).map(\.captureID), [captureID])
     }
 

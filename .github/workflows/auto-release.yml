@@ -1,8 +1,0 @@
-name: Auto Release (retired)
-on:
-  workflow_dispatch:
-jobs:
-  guard:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo 'Stable releases require Prepare Stable then Publish Stable. Main builds use Alpha Release.'

@@ -17,7 +17,7 @@ import {
     markdownToHTML,
     parseCommits,
     releaseTrack,
-} from "../../scripts/release-notes-lib.mjs";
+} from "../release-notes-lib.mjs";
 
 const context = {
     tag: "mac-v2.0.0",

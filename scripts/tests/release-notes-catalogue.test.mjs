@@ -14,7 +14,7 @@ import {
     parseCatalogue,
     sanitiseNotes,
     serialiseCatalogue,
-} from "../../scripts/release-notes-catalogue-lib.mjs";
+} from "../release-notes-catalogue-lib.mjs";
 
 test("versions normalise across tag families", () => {
     assert.equal(normaliseVersion("mac-v2.45.0"), "2.45.0");
@@ -113,7 +113,7 @@ test("catalogue round-trips through the shipped JSON shape", () => {
 });
 
 test("an unusable --limit stops the run instead of emptying the catalogue", () => {
-    const script = fileURLToPath(new URL("../../scripts/update-release-notes-catalogue.mjs", import.meta.url));
+    const script = fileURLToPath(new URL("../update-release-notes-catalogue.mjs", import.meta.url));
     const existing = serialiseCatalogue(buildCatalogue({
         entries: [catalogueEntry({ version: "mac-v2.45.0", markdown: "## Overview\n\nShipped." })],
         generatedAt: "2026-08-09T00:00:00Z",
@@ -136,7 +136,7 @@ test("an unusable --limit stops the run instead of emptying the catalogue", () =
 });
 
 test("a malformed existing catalogue fails without rewriting it", () => {
-    const script = fileURLToPath(new URL("../../scripts/update-release-notes-catalogue.mjs", import.meta.url));
+    const script = fileURLToPath(new URL("../update-release-notes-catalogue.mjs", import.meta.url));
     const directory = mkdtempSync(join(tmpdir(), "release-notes-"));
     const cataloguePath = join(directory, "ReleaseNotes.json");
     const notesPath = join(directory, "notes.md");

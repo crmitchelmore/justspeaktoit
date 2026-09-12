@@ -76,7 +76,7 @@ placeholder would ship an invalid code.
 
 `https://justspeaktoit.com/privacy` is linked from Settings, both in the About
 section and at the foot of the Privacy screen, through
-`Sources/SpeakiOS/Views/PrivacyPolicy.swift`. App Review looks for the published
+the shared URL in `Sources/SpeakCore/PrivacyPolicy.swift`. App Review looks for the published
 policy from inside the app, not only in the listing metadata.
 
 ## The answers to every App Store Connect compliance question

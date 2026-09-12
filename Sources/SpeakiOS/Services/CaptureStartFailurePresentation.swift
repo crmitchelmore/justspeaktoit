@@ -92,6 +92,8 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
             return self.interrupted
         case .liveActivityUnavailable:
             return self.liveActivityUnavailable
+        case .offlineLocalRecognitionUnavailable:
+            return self.offlineLocalRecognitionUnavailable
         case .startTimedOut(let stage):
             let boundary = stage.map(iOSTranscriptionError.describe) ?? "starting"
             return CaptureStartFailurePresentation(
@@ -145,6 +147,12 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
         message: "Recording needs Live Activities. Open the app, or enable Live Activities in Settings, then try again.",
         code: "start_live_activity",
         recovery: .appPermissions
+    )
+    private static let offlineLocalRecognitionUnavailable = CaptureStartFailurePresentation(
+        message: "On-device speech recognition is unavailable for the selected language. "
+            + "Choose another language or try again when online.",
+        code: "start_offline_local_unavailable",
+        recovery: nil
     )
     private static let microphoneDeliveredNoAudio = CaptureStartFailurePresentation(
         message: "The microphone delivered no audio. Check the selected microphone and try again.",

@@ -62,6 +62,8 @@ final class TranscriberCoordinator: ObservableObject {
     private let ensureKeysLoaded: @MainActor () async -> Void
     private let liveActivitiesEnabled: @MainActor () -> Bool
     private let headlessState: @MainActor () -> RecordingServiceState
+    private let networkSnapshot: CaptureNetworkPathMonitor.SnapshotProvider
+    private let localRecognitionCapability: @MainActor (String) -> AppleLocalRecognitionCapability
 
     private var transcriptionSession: (any IOSRecordingSession)?
     private var stoppingSession: (any IOSRecordingSession)?
@@ -102,7 +104,10 @@ final class TranscriberCoordinator: ObservableObject {
         liveActivitiesEnabled: @escaping @MainActor () -> Bool = { AppSettings.shared.liveActivitiesEnabled },
         headlessState: @escaping @MainActor () -> RecordingServiceState = {
             TranscriptionRecordingService.shared.state
-        }
+        },
+        networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
+        localRecognitionCapability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability =
+            { _ in .available }
     ) {
         self.audioSessionManager = AudioSessionManager()
         self.sharedState = sharedState
@@ -112,6 +117,8 @@ final class TranscriberCoordinator: ObservableObject {
         self.ensureKeysLoaded = ensureKeysLoaded
         self.liveActivitiesEnabled = liveActivitiesEnabled
         self.headlessState = headlessState
+        self.networkSnapshot = networkSnapshot
+        self.localRecognitionCapability = localRecognitionCapability
     }
 
     var modelDisplayName: String {
@@ -597,6 +604,33 @@ private extension TranscriberCoordinator {
         startTime = Date()
         sharedState.clear()
 
+        let localeIdentifier = TranscriptionLanguageCatalog.localeIdentifier(
+            for: settings.preferredLocaleIdentifier
+        )
+        let usesBatch = settings.transcriptionMode == .batch
+        let connectivity = self.networkSnapshot()
+        let capability = OfflineCaptureRouting.needsLocalCapability(
+            usesBatch: usesBatch,
+            requestedModelID: self.currentModel,
+            connectivity: connectivity
+        ) ? self.localRecognitionCapability(localeIdentifier) : .unknown
+        let offlineDecision = OfflineCaptureRouting.decide(
+            usesBatch: usesBatch,
+            requestedModelID: self.currentModel,
+            binding: .ordinary,
+            connectivity: connectivity,
+            localCapability: capability
+        )
+        let strictOnDeviceRecognition: Bool
+        switch offlineDecision {
+        case .use(let route):
+            self.currentModel = route.modelID
+            self.recordingWarning = route.notice
+            strictOnDeviceRecognition = route.requiresStrictOnDeviceRecognition
+        case .refuse:
+            throw iOSTranscriptionError.offlineLocalRecognitionUnavailable
+        }
+
         if settings.transcriptionMode == .streaming {
             let route = LiveTranscriptionRouting.route(for: currentModel)
             currentModel = LiveTranscriptionRouting.resolvedModelID(
@@ -639,7 +673,8 @@ private extension TranscriberCoordinator {
             audioSessionManager: audioSessionManager,
             batchAPIKey: settings.batchAPIKey,
             liveAPIKey: settings.liveAPIKey(for:),
-            transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
+            transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords),
+            requiresStrictOnDeviceRecognition: strictOnDeviceRecognition
         )
         startingSession = session
         bindCallbacks(to: session, runID: runID)
@@ -848,7 +883,10 @@ public struct ContentView: View {
     @State private var lastSurfacedAt: Date?
 
     public init() {
-        let coordinator = TranscriberCoordinator()
+        let coordinator = TranscriberCoordinator(
+            networkSnapshot: CaptureNetworkPathMonitor.liveSnapshotProvider(),
+            localRecognitionCapability: AppleLegacyRecognitionCapabilityProbe.capability(for:)
+        )
         _coordinator = StateObject(wrappedValue: coordinator)
         // Binds hands-free stop/cancel to the run its start acquired (#943): a
         // rejected or finished utterance cannot act on somebody else's recording.

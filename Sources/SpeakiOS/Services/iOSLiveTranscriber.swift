@@ -25,6 +25,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     public var language: String = Locale.current.identifier
     public var preferOnDevice: Bool = true
     public var modelID: String = AppleLocalModels.preferredSpeechModelID
+    /// Hard privacy requirement for routes that promise local processing.
+    /// Unlike `preferOnDevice`, this may never fall through to Apple servers.
+    var requiresStrictOnDeviceRecognition = false
 
     // MARK: - Callbacks
 
@@ -115,6 +118,9 @@ public final class iOSLiveTranscriber: ObservableObject {
     var permissionCheck: (() async -> Bool)?
     var analyzerStart: (() async throws -> Void)?
     var legacyStart: (() throws -> Void)?
+    /// Capability seam for tests that replace the entire legacy recognizer.
+    /// Production leaves it nil and checks the concrete recognizer directly.
+    var injectedLegacyCapability: (() -> AppleLocalRecognitionCapability)?
     private var activeModelID = AppleLocalModels.legacySpeechModelID
     private var startTime: Date?
     private var accumulatedSegments: [TranscriptionSegment] = []
@@ -280,6 +286,7 @@ public final class iOSLiveTranscriber: ObservableObject {
     private func startLegacyFallback(captureID: UUID, analyzerAssetsMissing: Bool) throws {
         do {
             if let legacyStart {
+                try requireInjectedLegacyCapabilityIfStrict()
                 try legacyStart()
             } else {
                 try startLegacyRecognition(captureID: captureID)
@@ -301,11 +308,19 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     private func startLegacyRecognition(captureID: UUID) throws {
         if legacyRecognitionStart != nil {
+            try requireInjectedLegacyCapabilityIfStrict()
             beginRecognitionTask(captureID: captureID)
         } else {
             let (recognizer, request) = try setupRecognition()
             try startAudioEngine(request: request)
             beginRecognitionTask(captureID: captureID, recognizer: recognizer, request: request)
+        }
+    }
+
+    private func requireInjectedLegacyCapabilityIfStrict() throws {
+        guard self.requiresStrictOnDeviceRecognition else { return }
+        guard self.injectedLegacyCapability?() == .available else {
+            throw iOSTranscriptionError.offlineLocalRecognitionUnavailable
         }
     }
 
@@ -426,7 +441,13 @@ public final class iOSLiveTranscriber: ObservableObject {
             throw iOSTranscriptionError.recognizerUnavailable
         }
         request.shouldReportPartialResults = true
-        if preferOnDevice && recognizer.supportsOnDeviceRecognition {
+        let capability: AppleLocalRecognitionCapability = recognizer.supportsOnDeviceRecognition
+            ? .available : .unavailable
+        if try AppleLegacyRecognitionRequestPolicy.requiresOnDeviceRecognition(
+            strict: self.requiresStrictOnDeviceRecognition,
+            preferred: self.preferOnDevice,
+            capability: capability
+        ) {
             request.requiresOnDeviceRecognition = true
             SpeakLogger.transcription.info("Using on-device recognition")
         } else {
@@ -831,6 +852,13 @@ public final class iOSLiveTranscriber: ObservableObject {
         latestResult = nil
         lastFormattedString = ""
         if legacyRecognitionStart != nil {
+            do {
+                try self.requireInjectedLegacyCapabilityIfStrict()
+            } catch {
+                self.error = error
+                self.onError?(error)
+                return
+            }
             beginRecognitionTask(captureID: captureID)
             return
         }
@@ -838,8 +866,20 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         let newRequest = SFSpeechAudioBufferRecognitionRequest()
         newRequest.shouldReportPartialResults = true
-        if preferOnDevice && recognizer.supportsOnDeviceRecognition {
-            newRequest.requiresOnDeviceRecognition = true
+        do {
+            let capability: AppleLocalRecognitionCapability = recognizer.supportsOnDeviceRecognition
+                ? .available : .unavailable
+            if try AppleLegacyRecognitionRequestPolicy.requiresOnDeviceRecognition(
+                strict: self.requiresStrictOnDeviceRecognition,
+                preferred: self.preferOnDevice,
+                capability: capability
+            ) {
+                newRequest.requiresOnDeviceRecognition = true
+            }
+        } catch {
+            self.error = error
+            self.onError?(error)
+            return
         }
         recognitionRequest = newRequest
 

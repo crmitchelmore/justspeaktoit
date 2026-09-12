@@ -111,7 +111,9 @@ func makeForegroundTestCoordinator(
         ownership: ownership,
         ensureKeysLoaded: ensureKeysLoaded,
         liveActivitiesEnabled: { false },
-        headlessState: headlessState
+        headlessState: headlessState,
+        networkSnapshot: { .unknown },
+        localRecognitionCapability: { _ in .available }
     )
     coordinator.makeSession = { try session() }
     return coordinator

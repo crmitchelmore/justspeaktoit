@@ -17,6 +17,7 @@ final class CaptureStartFailurePresentationTests: XCTestCase {
             (.microphoneChanged, "start_microphone_changed", nil),
             (.interrupted, "start_interrupted", nil),
             (.liveActivityUnavailable, "start_live_activity", .appPermissions),
+            (.offlineLocalRecognitionUnavailable, "start_offline_local_unavailable", nil),
             (.startTimedOut(after: nil), "start_timeout", nil),
             (.startTimedOut(after: .credentialsReady), "start_timeout", nil),
             (.startTimedOut(after: .audioSessionConfigured), "start_timeout", nil),

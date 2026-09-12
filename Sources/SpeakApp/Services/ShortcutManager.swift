@@ -27,6 +27,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
     case openAPIKeysSettings
     case openKeyboardSettings
     case openPermissionsSettings
+    case openCompareModelsSettings
     case openAboutSettings
     case quickVoice1
     case quickVoice2
@@ -58,6 +59,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
         case .openAPIKeysSettings: return "Open API Keys Settings"
         case .openKeyboardSettings: return "Open Keyboard Settings"
         case .openPermissionsSettings: return "Open Permissions Settings"
+        case .openCompareModelsSettings: return "Open Compare Models"
         case .openAboutSettings: return "Open About Settings"
         case .quickVoice1: return "Quick Switch Voice 1"
         case .quickVoice2: return "Quick Switch Voice 2"
@@ -111,6 +113,9 @@ enum ShortcutAction: String, CaseIterable, Identifiable, Codable {
             return KeyBinding(keyCode: 26, modifiers: [.command], isGlobal: false)  // ⌘7
         case .openPermissionsSettings:
             return KeyBinding(keyCode: 28, modifiers: [.command], isGlobal: false)  // ⌘8
+        case .openCompareModelsSettings:
+            // Unbound by default, like Data & Migration: the ⌘-digit row is full.
+            return KeyBinding(keyCode: 0, modifiers: [], isGlobal: false, isEnabled: false)
         case .openAboutSettings:
             return KeyBinding(keyCode: 25, modifiers: [.command], isGlobal: false)  // ⌘9
         case .quickVoice1:

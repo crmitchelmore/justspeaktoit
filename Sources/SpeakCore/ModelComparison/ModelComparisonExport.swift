@@ -58,13 +58,13 @@ public enum ModelComparisonExport {
 
     public static func markdown(round: ModelComparisonRound) -> String {
         var lines: [String] = []
-        lines.append("## Comparison round \(round.sample.name)")
+        lines.append("## Comparison round \(escape(round.sample.name))")
         lines.append("")
         lines.append("- Recorded: \(iso8601.string(from: round.createdAt))")
         lines.append("- Input: \(round.inputMode.displayName)")
-        lines.append("- Sample: \(sampleDescription(round.sample))")
+        lines.append("- Sample: \(escape(sampleDescription(round.sample)))")
         if let language = round.language, !language.isEmpty {
-            lines.append("- Language: \(language)")
+            lines.append("- Language: \(escape(language))")
         }
         lines.append("- Judged: \(round.judgedAt.map(iso8601.string(from:)) ?? "not yet")")
         lines.append("")
@@ -156,8 +156,9 @@ public enum ModelComparisonExport {
 
     /// Keeps a transcript on one table row and stops it breaking the table.
     static func escape(_ text: String) -> String {
-        text.replacingOccurrences(of: "|", with: "\\|")
-            .replacingOccurrences(of: "\r\n", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
+        let flattened = text.replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+        let syntax = Set("\\`*_{}[]<>#!|")
+        return flattened.map { syntax.contains($0) ? "\\\($0)" : String($0) }.joined()
     }
 }

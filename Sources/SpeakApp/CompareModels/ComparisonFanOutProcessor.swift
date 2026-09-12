@@ -13,6 +13,7 @@ final class ComparisonFanOutProcessor: @unchecked Sendable {
     private struct Target {
         let format: AVAudioFormat
         let converter = LiveConverterCache()
+        let chunker: ComparisonPCMChunker
         var clients: [StreamingTranscriptionClient]
     }
 
@@ -44,7 +45,7 @@ final class ComparisonFanOutProcessor: @unchecked Sendable {
             captureFormat = Self.pcm16Format(sampleRate: ComparisonLiveFanOut.captureSampleRate)
             for (client, rate) in clients {
                 if targets[rate] == nil, let format = Self.pcm16Format(sampleRate: rate) {
-                    targets[rate] = Target(format: format, clients: [])
+                    targets[rate] = Target(format: format, chunker: ComparisonPCMChunker(sampleRate: rate), clients: [])
                 }
                 targets[rate]?.clients.append(client)
             }
@@ -60,9 +61,12 @@ final class ComparisonFanOutProcessor: @unchecked Sendable {
             for target in targets.values {
                 if let tail = target.converter.drainPCM16() {
                     if Int(target.format.sampleRate) == ComparisonLiveFanOut.captureSampleRate { capture.append(tail) }
-                    for client in target.clients {
-                        client.sendAudio(tail)
+                    target.chunker.append(tail) { packet in
+                        for client in target.clients { client.sendAudio(packet) }
                     }
+                }
+                target.chunker.finish { packet in
+                    for client in target.clients { client.sendAudio(packet) }
                 }
             }
             if targets[ComparisonLiveFanOut.captureSampleRate] == nil,
@@ -94,8 +98,8 @@ final class ComparisonFanOutProcessor: @unchecked Sendable {
                 buffer, from: inputFormat, to: target.format, cache: target.converter, logger: logger
             ) else { continue }
             if Int(target.format.sampleRate) == ComparisonLiveFanOut.captureSampleRate { capture.append(data) }
-            for client in target.clients {
-                client.sendAudio(data)
+            target.chunker.append(data) { packet in
+                for client in target.clients { client.sendAudio(packet) }
             }
         }
         if targets[ComparisonLiveFanOut.captureSampleRate] == nil, let captureFormat,

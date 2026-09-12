@@ -70,6 +70,13 @@ final class ModelComparisonExportTests: XCTestCase {
         XCTAssertEqual(markdown.components(separatedBy: "## Comparison round").count - 1, 2)
     }
 
+    func testMarkdownEscapesActiveTranscriptMarkup() {
+        let escaped = ModelComparisonExport.escape("![tracking](https://example.test/pixel) <img src='x'> **bold**")
+        XCTAssertFalse(escaped.contains("!["))
+        XCTAssertTrue(escaped.contains("\\<img"))
+        XCTAssertFalse(escaped.contains("**bold**"))
+    }
+
     func testMarkdown_forUnjudgedRound_keepsBlindOrderAndMarksFailures() {
         var entries = [ModelComparisonFixtures.entry("a"), ModelComparisonFixtures.entry("b")]
         entries[1].transcript = ""

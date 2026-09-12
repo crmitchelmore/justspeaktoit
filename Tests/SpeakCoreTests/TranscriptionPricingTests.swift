@@ -11,16 +11,24 @@ final class TranscriptionPricingTests: XCTestCase {
         }
     }
 
-    func testKnownRates_matchTheProvidersOwnCostHooks() {
-        // Deepgram and Modulate already estimate cost inside the app; the
-        // shared table must agree with them.
-        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "deepgram/nova-3"), Decimal(string: "0.0077"))
+    func testKnownRates_matchPublishedModeSpecificPrices() {
+        // The public September rates distinguish file and streaming modes.
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "deepgram/nova-3"), Decimal(string: "0.0043"))
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "deepgram/enhanced"), Decimal(string: "0.0165"))
         XCTAssertEqual(
             TranscriptionPricing.pricePerMinuteUSD(modelID: "modulate/velma-2-stt-streaming"),
             Decimal(string: "0.06")! / 60
         )
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "openai/whisper-1"), Decimal(string: "0.006"))
+    }
+
+    func testStreamingAndFileRatesRemainDistinct() {
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "deepgram/nova-3-streaming"),
+                       Decimal(string: "0.0048"))
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2"),
+                       Decimal(string: "0.22")! / 60)
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe-v2-streaming"),
+                       Decimal(string: "0.39")! / 60)
     }
 
     func testExactIdsWinOverProviderPrefixes() {

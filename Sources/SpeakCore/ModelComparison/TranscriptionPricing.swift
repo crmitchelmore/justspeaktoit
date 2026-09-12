@@ -64,15 +64,18 @@ public enum TranscriptionPricing {
         "openai/gpt-4o-mini-transcribe": rate("0.003"),
         "openai/gpt-4o-transcribe-streaming": rate("0.006"),
         "openai/gpt-4o-mini-transcribe-streaming": rate("0.003"),
-        // Deepgram pay-as-you-go: Nova-3 and Flux $0.0077, Nova $0.0058,
-        // Enhanced $0.0165, Base $0.0145 (matches the app's Deepgram cost hook).
-        "deepgram/nova-3": rate("0.0077"),
-        "deepgram/nova-3-streaming": rate("0.0077"),
-        "deepgram/flux-general-en-streaming": rate("0.0077"),
-        "deepgram/flux-general-multi-streaming": rate("0.0077"),
+        // Mode-specific PAYG rates, including current streaming promotions:
+        // https://deepgram.com/pricing (checked 2026-09-12).
+        "deepgram/nova-3": rate("0.0043"),
+        "deepgram/nova-3-streaming": rate("0.0048"),
+        "deepgram/flux-general-en-streaming": rate("0.0065"),
+        "deepgram/flux-general-multi-streaming": rate("0.0078"),
         "deepgram/nova": rate("0.0058"),
         "deepgram/enhanced": rate("0.0165"),
         "deepgram/base": rate("0.0145"),
+        // https://elevenlabs.io/pricing/api (checked 2026-09-12).
+        "elevenlabs/scribe_v2": perHour("0.22"),
+        "elevenlabs/scribe-v2-streaming": perHour("0.39"),
         // Modulate Velma: $0.03/hr batch, $0.025/hr English very-fast,
         // $0.06/hr streaming (matches ModulateTranscriptionProvider).
         "modulate/velma-2-stt-batch": perHour("0.03"),

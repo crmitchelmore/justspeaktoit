@@ -85,7 +85,7 @@ final class ComparisonLiveFanOut {
                 throw CancellationError()
             }
         }
-        guard lanes.contains(where: { $0.isOpen }) else {
+        guard lanes.filter(\.isOpen).count >= 2 else {
             await cleanup()
             throw ComparisonRunError.noUsableModels
         }

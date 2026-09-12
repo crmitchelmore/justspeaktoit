@@ -23,6 +23,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     private let callbackQueue = DispatchQueue(label: "com.speak.core.assemblyai.live.callbacks")
     private var run: Run?
     private var lastAssembler: AssemblyAIStreamingTranscriptAssembler?
+    private var lastFinishedTranscript: String?
     private var callbackGeneration = UUID()
     private var boundaryCallback: ((String) -> Void)?
 
@@ -109,6 +110,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
             guard let self else { return }
             if let previous = self.run { self.complete(previous, closeCode: .goingAway) }
             self.lastAssembler = nil
+            self.lastFinishedTranscript = nil
             let next = Run(
                 sampleRate: self.sampleRate,
                 onTranscript: onTranscript,
@@ -140,10 +142,13 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
         let deliveryQueue = callbackQueue
         return await withCheckedContinuation { continuation in
             queue.async { [weak self] in
-                guard let self, let run = self.run else {
-                    deliveryQueue.async {
-                        continuation.resume(returning: nil)
-                    }
+                guard let self else {
+                    deliveryQueue.async { continuation.resume(returning: nil) }
+                    return
+                }
+                guard let run = self.run else {
+                    let retained = self.lastFinishedTranscript
+                    deliveryQueue.async { continuation.resume(returning: retained) }
                     return
                 }
                 run.finishWaiters.append(continuation)
@@ -457,6 +462,7 @@ extension AssemblyAILiveClient {
         run.finishWaiters.removeAll()
         if self.run === run {
             lastAssembler = run.assembler
+            if run.finishing { lastFinishedTranscript = result }
             self.run = nil
         }
         callbackQueue.async {

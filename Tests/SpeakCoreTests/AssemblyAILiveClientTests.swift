@@ -66,6 +66,8 @@ final class AssemblyAILiveClientTests: XCTestCase {
 
         let transcript = await finish.value
         XCTAssertEqual(transcript, "First. Done.")
+        let repeatedTranscript = await client.finishAndWait()
+        XCTAssertEqual(repeatedTranscript, "First. Done.")
         _ = await eventually { lock.withLock { events.count == 3 } }
         XCTAssertEqual(lock.withLock { events }, [
             "boundary:First.", "transcript:First.", "boundary:Done."
@@ -123,6 +125,38 @@ final class AssemblyAILiveClientTests: XCTestCase {
         XCTAssertNil(transcript)
         XCTAssertTrue(socket.messages.isEmpty)
         XCTAssertEqual(socket.cancelCount, 1)
+    }
+
+    func testStartingAnotherRunClearsRetainedFinishedTranscript() async {
+        let firstSocket = TestLiveWebSocket()
+        let secondSocket = TestLiveWebSocket()
+        let factory = TestSocketFactory([firstSocket, secondSocket])
+        let client = makeClient(factory)
+        client.start(onTranscript: { _, _ in }, onError: { _ in })
+        let didStartFirst = await eventually { firstSocket.state == .running }
+        XCTAssertTrue(didStartFirst)
+        firstSocket.emit(#"{"type":"Begin"}"#)
+        let firstFinish = Task { await client.finishAndWait() }
+        let didForce = await eventually {
+            textMessages(firstSocket).contains(#"{"type":"ForceEndpoint"}"#)
+        }
+        XCTAssertTrue(didForce)
+        firstSocket.emit(
+            #"{"type":"Turn","turn_order":0,"turn_is_formatted":true,"end_of_turn":true,"transcript":"kept"}"#
+        )
+        let didTerminate = await eventually {
+            textMessages(firstSocket).contains(#"{"type":"Terminate"}"#)
+        }
+        XCTAssertTrue(didTerminate)
+        firstSocket.emit(#"{"type":"Termination"}"#)
+        let firstTranscript = await firstFinish.value
+        XCTAssertEqual(firstTranscript, "kept")
+
+        client.start(onTranscript: { _, _ in }, onError: { _ in })
+        let didStartSecond = await eventually { secondSocket.state == .running }
+        XCTAssertTrue(didStartSecond)
+        let secondTranscript = await client.finishAndWait()
+        XCTAssertNil(secondTranscript)
     }
 
     func testPreBeginFailureFallsBackWithoutSendingAudioOnFailedSocket() async {

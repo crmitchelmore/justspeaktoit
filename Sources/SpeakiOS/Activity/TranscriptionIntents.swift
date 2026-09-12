@@ -230,6 +230,8 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent
             )
         } catch let failure as CaptureParameterFailure {
             throw failure
+        } catch is CancellationError {
+            return .result(dialog: "Recording start was cancelled.")
         } catch is ForegroundRecordingOwnership.OwnershipError {
             // A foreground claim made after this intent's own preflight, while
             // the service waited on credentials (#943), is the in-app owner —
@@ -237,9 +239,8 @@ public struct StartTranscriptionIntent: AudioRecordingIntent, LiveActivityIntent
             // guidance the preflight gives, so the two answers cannot disagree.
             return .result(dialog: "A recording is already in progress in the app. Use the in-app stop button.")
         } catch {
-            return .result(
-                dialog: "Couldn’t start recording. Check microphone and speech-recognition access, then try again."
-            )
+            let presentation = CaptureStartFailurePresentation.make(for: error)
+            return .result(dialog: IntentDialog(stringLiteral: presentation.message))
         }
         return .result(dialog: "Recording started. Run \"Stop Recording\" to finish.")
     }
@@ -348,12 +349,22 @@ public struct StartTranscriptionRecordingIntent: AudioRecordingIntent, LiveActiv
                 model: model,
                 source: source
             )
-            try await startRecordingContinuingInForegroundIfNeeded(
-                from: self,
-                trigger: .shortcut,
-                parameters: parameters,
-                entry: entry
-            )
+            do {
+                try await startRecordingContinuingInForegroundIfNeeded(
+                    from: self,
+                    trigger: .shortcut,
+                    parameters: parameters,
+                    entry: entry
+                )
+            } catch is CancellationError {
+                return .result()
+            } catch is ForegroundRecordingOwnership.OwnershipError {
+                throw ToggleRecordingError.alreadyRecordingInApp
+            } catch let failure as CaptureParameterFailure {
+                throw failure
+            } catch {
+                throw CaptureStartFailurePresentation.make(for: error)
+            }
             return .result()
         }
     }
@@ -478,11 +489,19 @@ public struct ToggleTranscriptionControlIntent: SetValueIntent, AudioRecordingIn
         )
         switch action {
         case .start:
-            try await startRecordingContinuingInForegroundIfNeeded(
-                from: self,
-                trigger: .control,
-                entry: entry
-            )
+            do {
+                try await startRecordingContinuingInForegroundIfNeeded(
+                    from: self,
+                    trigger: .control,
+                    entry: entry
+                )
+            } catch is CancellationError {
+                return .result()
+            } catch let error as ForegroundRecordingOwnership.OwnershipError {
+                throw error
+            } catch {
+                throw CaptureStartFailurePresentation.make(for: error)
+            }
         case .stop:
             // A keyboard-owned dictation finishes into its own field (#1002);
             // only a capture nobody else owns falls through to the generic

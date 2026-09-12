@@ -1,7 +1,8 @@
 #if os(iOS)
 import AVFoundation
-import SwiftUI
 import SpeakCore
+import SwiftUI
+import UIKit
 import os.log
 
 private let logger = SpeakLogger.logger(category: "ContentView")
@@ -814,6 +815,8 @@ public struct ContentView: View {
     @ObservedObject private var settings = AppSettings.shared
     @State private var showingError = false
     @State private var errorMessage = ""
+    @State private var startFailureRecovery: CaptureStartFailureRecovery?
+    @State private var recoveryDestination: CaptureStartFailureRecovery?
     /// The background session failure already alerted on, identified by its
     /// publication rather than its text, so the change observer and the
     /// on-appear read cannot show one failure twice — and two failures that
@@ -933,6 +936,9 @@ public struct ContentView: View {
                                 alignment: .leading,
                                 spacing: density.isCompact ? density.cardContentSpacing : 12
                             ) {
+                                if self.settings.isTranscriptClipboardNoticePending {
+                                    ClipboardPrivacyNotice(settings: self.settings)
+                                }
                                 if let card = onboarding.offeredCard(hardware: captureHardware) {
                                     CaptureOnboardingCard(
                                         trigger: card,
@@ -998,6 +1004,9 @@ public struct ContentView: View {
             }
             .navigationTitle("Just Speak to It")
             .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
+            .navigationDestination(item: $recoveryDestination) { destination in
+                self.startFailureRecoveryView(destination)
+            }
             .toolbar {
                 // Status indicator in toolbar (system handles glass)
                 if coordinator.isRunning || backgroundService.isRunning {
@@ -1062,7 +1071,11 @@ public struct ContentView: View {
                 }
             }
             .alert("Error", isPresented: $showingError) {
-                Button("OK") {}
+                if let recovery = self.startFailureRecovery {
+                    Button(recovery.buttonTitle) { self.performStartFailureRecovery(recovery) }
+                        .accessibilityIdentifier("captureStartRecoveryButton")
+                }
+                Button("OK", role: .cancel) { self.startFailureRecovery = nil }
             } message: {
                 Text(errorMessage)
             }
@@ -1080,6 +1093,7 @@ public struct ContentView: View {
             }
             .onChange(of: coordinator.error?.localizedDescription) { _, newError in
                 if let error = newError {
+                    self.startFailureRecovery = nil
                     errorMessage = error
                     showingError = true
                 }
@@ -1094,6 +1108,7 @@ public struct ContentView: View {
             }
             .onChange(of: handsFree.failureMessage) { _, newError in
                 if let newError {
+                    self.startFailureRecovery = nil
                     errorMessage = newError
                     showingError = true
                 }
@@ -1102,6 +1117,7 @@ public struct ContentView: View {
             // never swallowed. Successes need no alert: they are in History.
             .onChange(of: sharedImporter.lastOutcome) { _, outcome in
                 guard case .failed = outcome, let outcome else { return }
+                self.startFailureRecovery = nil
                 errorMessage = outcome.message
                 showingError = true
                 sharedImporter.acknowledgeOutcome()
@@ -1394,8 +1410,7 @@ public struct ContentView: View {
         } catch is CancellationError {
             // A manual tap or view cancellation retired this auto-start.
         } catch {
-            errorMessage = error.localizedDescription
-            showingError = true
+            self.presentStartFailure(error)
         }
     }
 
@@ -1417,11 +1432,18 @@ public struct ContentView: View {
             if token == nil { presentedSessionError = nil }
             return
         }
-        guard let description = backgroundService.lastSessionError?.localizedDescription,
-              !description.isEmpty else { return }
-        presentedSessionError = token
-        errorMessage = description
-        showingError = true
+        guard let error = backgroundService.lastSessionError else { return }
+        let description = error.localizedDescription
+        guard !description.isEmpty else { return }
+        self.presentedSessionError = token
+        if let presentation = error as? CaptureStartFailurePresentation {
+            self.errorMessage = presentation.message
+            self.startFailureRecovery = presentation.recovery
+        } else {
+            self.errorMessage = description
+            self.startFailureRecovery = nil
+        }
+        self.showingError = true
     }
 
     /// Surfaces the most recent background (Action Button / Siri / Shortcuts)
@@ -1521,6 +1543,7 @@ public struct ContentView: View {
         // second, conflicting in-app recording. The user stops the background
         // one the same way they started it.
         guard !backgroundService.isRunning else {
+            self.startFailureRecovery = nil
             errorMessage = "A background recording is already in progress. "
                 + "Use the Action Button to stop it."
             showingError = true
@@ -1536,17 +1559,57 @@ public struct ContentView: View {
         } catch is CancellationError {
             // Intentional startup cancellation has no result or error alert.
         } catch {
-            errorMessage = error.localizedDescription
-            showingError = true
+            self.presentStartFailure(error)
+        }
+    }
+
+    private func presentStartFailure(_ error: Error) {
+        let presentation = CaptureStartFailurePresentation.make(for: error)
+        self.errorMessage = presentation.message
+        self.startFailureRecovery = presentation.recovery
+        self.showingError = true
+    }
+
+    private func performStartFailureRecovery(_ recovery: CaptureStartFailureRecovery) {
+        self.startFailureRecovery = nil
+        switch recovery {
+        case .appPermissions:
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        case .credentials, .prepareAppleModel:
+            self.recoveryDestination = recovery
+        }
+    }
+
+    @ViewBuilder
+    private func startFailureRecoveryView(_ recovery: CaptureStartFailureRecovery) -> some View {
+        switch recovery {
+        case .credentials:
+            APIKeysView(settings: self.settings)
+        case .prepareAppleModel:
+            Form {
+                if #available(iOS 26.0, *) {
+                    AppleSpeechPreparationView(
+                        modelID: self.settings.selectedModel,
+                        localeIdentifier: self.settings.preferredModelLanguage ?? Locale.current.identifier
+                    )
+                } else {
+                    Text("Apple model preparation requires iOS 26 or later.")
+                }
+            }
+            .navigationTitle("Prepare Apple Model")
+            .navigationBarTitleDisplayMode(.inline)
+        case .appPermissions:
+            EmptyView()
         }
     }
 
     private func copyToClipboard() {
-        UIPasteboard.general.string = currentText
-        copied = true
+        guard TranscriptClipboard.shared.copy(self.currentText) else { return }
+        self.copied = true
         Task {
             try? await Task.sleep(for: .seconds(2))
-            copied = false
+            self.copied = false
         }
     }
 }

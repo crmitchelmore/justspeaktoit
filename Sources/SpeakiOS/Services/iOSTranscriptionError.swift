@@ -50,10 +50,10 @@ public enum iOSTranscriptionError: LocalizedError {
             return "Speech recognition permission is required."
         case .recognizerUnavailable:
             return "Speech recognizer is not available for the selected language."
-        case .audioSessionFailed(let error):
-            return "Failed to configure audio: \(error.localizedDescription)"
-        case .recognitionFailed(let error):
-            return "Recognition failed: \(error.localizedDescription)"
+        case .audioSessionFailed:
+            return "The microphone audio session could not start. Try again after other audio activity finishes."
+        case .recognitionFailed:
+            return "Speech recognition failed. Try again, or open the app to check your setup."
         case .microphoneChanged:
             return "The microphone changed and recording stopped."
         case .interrupted:

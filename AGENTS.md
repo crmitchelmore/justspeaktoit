@@ -55,28 +55,9 @@ When a user reports that a freshly shipped macOS release won't install or launch
 
 ## Project Structure & Module Organization
 
-This project uses **Swift Package Manager** for modularization with cross-platform support:
-
-```
-Package.swift           # Defines all targets and dependencies
-Sources/
-├── SpeakCore/          # Shared cross-platform library (types, protocols, keychain)
-├── SpeakApp/           # macOS application (executable)
-└── SpeakiOS/           # iOS library (views, services, with #if os(iOS) guards)
-SpeakiOSApp/            # iOS app entry point (@main)
-Project.swift           # Tuist manifest (Xcode project generation)
-Workspace.swift         # Tuist workspace manifest
-Just Speak to It.xcodeproj/ # Generated Xcode project
-Tests/                  # XCTest suite
-```
-
-### Swift Package Targets
-
-| Target | Type | Platform | Description |
-|--------|------|----------|-------------|
-| `SpeakCore` | Library | macOS + iOS | Cross-platform types, protocols, secure storage |
-| `SpeakApp` | Executable | macOS | macOS SwiftUI application |
-| `SpeakiOSLib` | Library | iOS | iOS views and services (exported with `public` APIs) |
+The canonical current target inventory, build graphs and runtime map live in
+[Docs/Architecture.md](Docs/Architecture.md). Keep generated Xcode projects out
+of hand-maintained structure documentation.
 
 ### Modularization Patterns
 
@@ -84,13 +65,6 @@ Tests/                  # XCTest suite
 2. **Platform guards**: Use `#if os(iOS)` / `#if os(macOS)` for platform-specific code
 3. **Public APIs for libraries**: Types in `SpeakiOSLib` must be `public` for Xcode project to access
 4. **Tuist links packages**: `Project.swift` references the local Swift package for Xcode generation
-
-### iOS App Structure
-
-The iOS app is built via Xcode but sources come from Swift packages:
-- `SpeakiOSApp/SpeakiOSApp.swift` - Entry point with `@main`
-- Links `SpeakCore` and `SpeakiOSLib` as package dependencies
-- Run `tuist generate` and open `"Just Speak to It.xcworkspace"` in Xcode to build/run on device
 
 ## Build, Test, and Development Commands
 

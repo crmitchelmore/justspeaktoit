@@ -64,6 +64,23 @@ class ReleaseAppleTest < Minitest::Test
     refute_empty client.beta_locales.first['attributes']['description']
     assert_includes client.posts,'/v1/betaAppReviewSubmissions'
   end
+  def test_concurrent_localization_creation_is_verified_without_claiming_review_wait
+    client=FakeClient.new
+    def client.post(path,body)
+      super
+      raise IOSProfileBootstrap::ConflictError.new('created concurrently',status:409) if path == '/v1/betaAppLocalizations'
+    end
+    d=delivery(client); d.distribute(wait_seconds:0)
+    assert_equal 'beta_review_pending',d.receipts.last.first
+    assert_includes client.posts,'/v1/betaAppReviewSubmissions'
+  end
+  def test_existing_translated_description_is_preserved
+    client=FakeClient.new
+    client.beta_locales=[{'id'=>'french','attributes'=>{'locale'=>'fr-FR','description'=>'Version de test'}}]
+    delivery(client).ensure_beta_description
+    assert_empty client.posts
+    assert_equal 'Version de test',client.beta_locales.first['attributes']['description']
+  end
   def test_stable_candidate_never_assigns_testers
     client=FakeClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha')
     d=delivery(client, train: 'stable'); d.distribute(wait_seconds:0)

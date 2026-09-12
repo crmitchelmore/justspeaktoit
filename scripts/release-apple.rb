@@ -114,9 +114,13 @@ module AppleRelease
       path = "/v1/apps/#{@app}/betaAppLocalizations"
       locales = @client.list(path)
       if locales.empty?
-        @client.post('/v1/betaAppLocalizations', data: {type: 'betaAppLocalizations',
-          attributes: {locale: 'en-GB', description: description},
-          relationships: {app: AppleRelease.relationship('apps', @app)}})
+        begin
+          @client.post('/v1/betaAppLocalizations', data: {type: 'betaAppLocalizations',
+            attributes: {locale: 'en-GB', description: description},
+            relationships: {app: AppleRelease.relationship('apps', @app)}})
+        rescue IOSProfileBootstrap::ConflictError
+          # Another worker may have created it; the read-back below must prove it.
+        end
       else
         locales.each do |locale|
           next unless locale.dig('attributes', 'description').to_s.strip.empty?
@@ -158,8 +162,8 @@ module AppleRelease
           end
           # Apple enforces six submissions/day. A 409/429 remains pending and
           # the reconciler retries; it must not be reported as public delivery.
+          ensure_beta_description
           begin
-            ensure_beta_description
             @client.post('/v1/betaAppReviewSubmissions', data: {type: 'betaAppReviewSubmissions', relationships: {build: AppleRelease.relationship('builds', id)}})
           rescue IOSProfileBootstrap::ApiError => error
             raise unless [409, 429].include?(error.status)

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import XCTest
 
@@ -166,7 +167,11 @@ final class XAISpeechRoutingTests: XCTestCase {
   /// Cancellation before playback must not open an audio device or a paid stream.
   @MainActor
   func testProgressivePlayback_cancelledBeforeStartDoesNotStartTheProvider() async {
-    let player = TTSProgressivePlayer()
+    var enginesCreated = 0
+    let player = TTSProgressivePlayer(makeEngine: {
+      enginesCreated += 1
+      return AVAudioEngine()
+    })
     let client = FailingChunkProgressiveClient()
     let task = Task { @MainActor in
       try await player.speak(
@@ -181,6 +186,7 @@ final class XAISpeechRoutingTests: XCTestCase {
       _ = try await task.value
       XCTFail("cancelled playback must not succeed")
     } catch is CancellationError {
+      XCTAssertEqual(enginesCreated, 0)
       XCTAssertFalse(client.didStart)
       XCTAssertFalse(player.isActive)
     } catch {

@@ -12,6 +12,12 @@ import SpeakCore
 /// bytes arrive, because scheduling half a frame would click.
 @MainActor
 final class TTSProgressivePlayer {
+  private let makeEngine: () -> AVAudioEngine
+
+  init(makeEngine: @escaping () -> AVAudioEngine = { AVAudioEngine() }) {
+    self.makeEngine = makeEngine
+  }
+
   private var engine: AVAudioEngine?
   private var player: AVAudioPlayerNode?
   private var format: AVAudioFormat?
@@ -44,7 +50,7 @@ final class TTSProgressivePlayer {
     ) else {
       throw TTSError.audioPlaybackFailure
     }
-    let engine = AVAudioEngine()
+    let engine = makeEngine()
     let player = AVAudioPlayerNode()
     do {
       engine.attach(player)

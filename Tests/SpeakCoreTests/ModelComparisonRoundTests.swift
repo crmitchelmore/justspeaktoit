@@ -59,7 +59,7 @@ final class ModelComparisonRoundTests: XCTestCase {
         XCTAssertNotEqual(orderA, orderC, "A different seed should reorder five entries")
     }
 
-    func testEntriesInBlindOrder_hideNothing_evenWhenAnEntryIsMissingFromTheOrder() {
+    func testInvalidBlindOrderIsRejected() throws {
         let entries = (0..<3).map { ModelComparisonFixtures.entry("m\($0)") }
         let round = ModelComparisonRound(
             inputMode: .streaming,
@@ -70,10 +70,28 @@ final class ModelComparisonRoundTests: XCTestCase {
             blindOrder: [entries[2].id]
         )
 
-        let ordered = round.entriesInBlindOrder
-        XCTAssertEqual(ordered.first?.id, entries[2].id)
-        XCTAssertEqual(Set(ordered.map(\.id)), Set(entries.map(\.id)))
-        XCTAssertEqual(round.blindLabel(for: entries[2].id), "A")
+        XCTAssertFalse(round.isValid)
+        XCTAssertTrue(round.entriesInBlindOrder.isEmpty)
+        XCTAssertThrowsError(try JSONDecoder().decode(ModelComparisonRound.self, from: JSONEncoder().encode(round)))
+
+    }
+
+    func testDuplicateEntryIDsAreRejectedWithoutDictionaryTrap() throws {
+        let entry = ModelComparisonFixtures.entry("same")
+        let round = ModelComparisonFixtures.round(entries: [entry, entry])
+        XCTAssertFalse(round.isValid)
+        XCTAssertTrue(round.entriesInBlindOrder.isEmpty)
+        XCTAssertThrowsError(try JSONDecoder().decode(ModelComparisonRound.self, from: JSONEncoder().encode(round)))
+    }
+
+    func testFailedEntryCanBeRankedAlongsideSuccessfulEntries() {
+        var entries = (0..<3).map { ModelComparisonFixtures.entry("m\($0)") }
+        entries[2].errorDescription = "failed"
+        var round = ModelComparisonFixtures.round(entries: entries)
+        XCTAssertTrue(round.judge(rankings: entries.enumerated().map {
+            ModelComparisonRanking(entryID: $1.id, rank: $0 + 1)
+        }))
+        XCTAssertTrue(round.isJudged)
     }
 
     func testBlindLabels_runAThroughZThenWrap() {

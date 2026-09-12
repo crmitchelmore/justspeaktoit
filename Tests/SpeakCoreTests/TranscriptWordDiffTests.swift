@@ -57,6 +57,18 @@ final class TranscriptWordDiffTests: XCTestCase {
         XCTAssertTrue(WordDiffer.findChanges(original: reference, edited: candidate).isEmpty)
     }
 
+    func testTenThousandWordDiffPreservesBothTranscriptsWithBoundedMemory() {
+        let reference = (0..<10_000).map { "a\($0)" }
+        let candidate = (0..<10_000).map { "b\($0)" }
+        let tokens = TranscriptWordDiff.diff(reference: reference.joined(separator: " "),
+                                             candidate: candidate.joined(separator: " "))
+        XCTAssertEqual(tokens.filter { $0.kind != .inserted }.map(\.text), reference)
+        XCTAssertEqual(tokens.filter { $0.kind != .deleted }.map(\.text), candidate)
+        let identical = TranscriptWordDiff.diff(reference: reference.joined(separator: " "),
+                                                candidate: reference.joined(separator: " "))
+        XCTAssertTrue(identical.allSatisfy { $0.kind == .equal })
+    }
+
     func testEmptyInputs() {
         XCTAssertEqual(TranscriptWordDiff.diff(reference: "", candidate: "").count, 0)
         XCTAssertEqual(

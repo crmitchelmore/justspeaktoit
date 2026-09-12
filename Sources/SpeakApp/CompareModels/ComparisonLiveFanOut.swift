@@ -41,6 +41,7 @@ final class ComparisonLiveFanOut {
     private var activeInputSession: AudioInputDeviceManager.SessionContext?
     private var lanes: [ComparisonLiveLane] = []
     private var captureStartedAt: Date?
+    private var generation = UUID()
     private(set) var isRunning = false
 
     init(
@@ -65,10 +66,18 @@ final class ComparisonLiveFanOut {
         onUpdate: @escaping @MainActor (Update) -> Void
     ) async throws -> [ModelComparisonEntry] {
         guard !isRunning else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+        let runID = UUID()
+        generation = runID
         let permission = await permissionsManager.ensureGranted(.microphone)
+        guard generation == runID, !Task.isCancelled else { throw CancellationError() }
         guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
 
-        activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
+        let inputSession = await audioDeviceManager.beginUsingPreferredInput()
+        guard generation == runID, !Task.isCancelled else {
+            await audioDeviceManager.endUsingPreferredInput(session: inputSession)
+            throw CancellationError()
+        }
+        activeInputSession = inputSession
         audioEngine = AVAudioEngine()
         let inputNode = audioEngine.inputNode
         inputNode.removeTap(onBus: 0)
@@ -80,13 +89,17 @@ final class ComparisonLiveFanOut {
 
         lanes = []
         for candidate in candidates {
-            lanes.append(await openLane(
+            let lane = await openLane(
                 for: candidate,
                 inputFormat: inputFormat,
                 language: language,
                 localeIdentifier: localeIdentifier,
                 onUpdate: onUpdate
-            ))
+            )
+            guard generation == runID, !Task.isCancelled else {
+                lane.abandon()
+                throw CancellationError()
+            }
         }
         guard lanes.contains(where: { $0.isOpen }) else {
             await cleanup()
@@ -100,8 +113,12 @@ final class ComparisonLiveFanOut {
         do {
             try await startAudioEngineAfterInputDeviceSettles(audioEngine)
         } catch {
-            await cleanup()
+            if generation == runID { await cleanup() }
             throw normalisedAudioInputStartError(error)
+        }
+        guard generation == runID, !Task.isCancelled else {
+            if generation == runID { await cleanup() }
+            throw CancellationError()
         }
         captureStartedAt = Date()
         for lane in lanes {
@@ -114,6 +131,8 @@ final class ComparisonLiveFanOut {
     /// Stops the microphone, lets every session finish, and returns the
     /// entries with their final transcripts, latency and estimated cost.
     func stop() async -> Outcome {
+        let runID = generation
+        let finishingLanes = lanes
         let stoppedAt = Date()
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -122,11 +141,11 @@ final class ComparisonLiveFanOut {
         let hash = SHA256.hash(data: capture).map { String(format: "%02x", $0) }.joined()
 
         await withTaskGroup(of: Void.self) { group in
-            for lane in lanes where lane.isOpen {
+            for lane in finishingLanes where lane.isOpen {
                 group.addTask { await lane.finish(stoppedAt: stoppedAt) }
             }
         }
-        let entries = lanes.map { lane -> ModelComparisonEntry in
+        let entries = finishingLanes.map { lane -> ModelComparisonEntry in
             var entry = lane.entry
             if entry.errorDescription == nil {
                 entry.estimatedCostUSD = TranscriptionPricing.estimatedCostUSD(
@@ -135,15 +154,19 @@ final class ComparisonLiveFanOut {
             }
             return entry
         }
-        lanes = []
-        isRunning = false
-        captureStartedAt = nil
-        await endActiveInputSession()
+        for lane in finishingLanes { lane.abandon() }
+        if generation == runID {
+            lanes = []
+            isRunning = false
+            captureStartedAt = nil
+            await endActiveInputSession()
+        }
         return Outcome(entries: entries, pcm16: capture, durationSeconds: duration, contentHash: hash)
     }
 
     /// Abandons the capture without waiting for transcripts.
     func cancel() async {
+        generation = UUID()
         for lane in lanes {
             lane.abandon()
         }
@@ -173,6 +196,7 @@ final class ComparisonLiveFanOut {
         onUpdate: @escaping @MainActor (Update) -> Void
     ) async -> ComparisonLiveLane {
         let lane = ComparisonLiveLane(candidate: candidate)
+        lanes.append(lane)
         let entryID = lane.entry.id
         let deliver: @Sendable (String, Bool) -> Void = { text, isFinal in
             Task { @MainActor in
@@ -180,7 +204,7 @@ final class ComparisonLiveFanOut {
                 onUpdate(Update(entryID: entryID, text: lane.displayText, isFinal: isFinal))
             }
         }
-        do {
+        let outcome = await BoundedOperation.run(timeout: .seconds(30)) { [self] in
             switch candidate.engine {
             case .sharedStreamingClient(let route):
                 try await lane.openSharedClient(
@@ -201,9 +225,17 @@ final class ComparisonLiveFanOut {
             case .cloudBatch, .downloadedLocal:
                 throw ComparisonRunError.notStreamable(candidate.displayName)
             }
-        } catch {
-            lane.entry.errorDescription = error.localizedDescription
         }
+        switch outcome {
+        case .success: break
+        case .failure(let error):
+            lane.abandon()
+            lane.entry.errorDescription = error.localizedDescription
+        case nil:
+            lane.abandon()
+            lane.entry.errorDescription = "The model did not start within its time limit."
+        }
+
         return lane
     }
 
@@ -232,6 +264,7 @@ final class ComparisonLiveFanOut {
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         _ = processor.finish()
+        for lane in lanes { lane.abandon() }
         lanes = []
         isRunning = false
         captureStartedAt = nil

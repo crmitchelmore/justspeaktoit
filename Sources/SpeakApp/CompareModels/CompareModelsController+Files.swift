@@ -29,6 +29,8 @@ extension CompareModelsController {
             errorMessage = ComparisonRunError.noUsableModels.localizedDescription
             return
         }
+        let generation = UUID()
+        runID = generation
         phase = .transcribing
         errorMessage = nil
         liveTranscripts = [:]
@@ -36,8 +38,13 @@ extension CompareModelsController {
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         let sample: ModelComparisonSample
         do {
-            sample = try ComparisonFileRunner.sample(for: url)
+            sample = try await Task.detached(priority: .userInitiated) {
+                try ComparisonFileRunner.sample(for: url)
+            }.value
+            guard runID == generation else { return }
         } catch {
+            guard runID == generation else { return }
+            queuedFiles = []
             phase = .idle
             errorMessage = "Could not read \(url.lastPathComponent): \(error.localizedDescription)"
             return
@@ -59,10 +66,16 @@ extension CompareModelsController {
             localeIdentifier: environment.settings.resolvedPreferredLocaleIdentifier
         )
         let idsByModel = Dictionary(uniqueKeysWithValues: placeholders.map { ($0.modelID, $0.id) })
-        let entries = await fileRunner.run(request, candidates: selection) { [weak self] entry in
-            guard let id = idsByModel[entry.modelID] else { return }
-            self?.liveTranscripts[id] = entry.didFail ? "" : entry.transcript
+        let task = Task { [fileRunner] in
+            await fileRunner.run(request, candidates: selection) { [weak self] entry in
+                guard self?.runID == generation, let id = idsByModel[entry.modelID] else { return }
+                self?.liveTranscripts[id] = entry.didFail ? "" : entry.transcript
+            }
         }
+        fileTask = task
+        let entries = await task.value
+        guard runID == generation else { return }
+        fileTask = nil
         // Keep the placeholder ids so the blind order drawn up front holds.
         round.entries = entries.map { Self.rekeyed($0, idsByModel: idsByModel) }
         beginJudging(round)

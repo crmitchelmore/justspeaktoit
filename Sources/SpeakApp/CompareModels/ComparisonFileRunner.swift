@@ -14,7 +14,7 @@ struct ComparisonFileRunner {
     let secureStorage: SecureAppStorage
     let openRouter: OpenRouterAPIClient
 
-    struct Request {
+    struct Request: Sendable {
         let fileURL: URL
         let durationSeconds: Double
         let language: String?
@@ -29,7 +29,19 @@ struct ComparisonFileRunner {
         await withTaskGroup(of: ModelComparisonEntry.self) { group in
             for candidate in candidates {
                 group.addTask {
-                    let entry = await self.transcribe(request, with: candidate)
+                    let outcome = await BoundedOperation.run(timeout: .seconds(120)) {
+                        await self.transcribe(request, with: candidate)
+                    }
+                    let entry: ModelComparisonEntry
+                    if case .success(let result) = outcome {
+                        entry = result
+                    } else {
+                        entry = ModelComparisonEntry(
+                            modelID: candidate.modelID, modelDisplayName: candidate.displayName,
+                            providerDisplayName: candidate.providerDisplayName,
+                            errorDescription: "The model did not finish within its time limit.", timeToFinalMs: 120_000
+                        )
+                    }
                     await onEntry(entry)
                     return entry
                 }
@@ -129,8 +141,18 @@ struct ComparisonFileRunner {
     // MARK: Sample identity
 
     static func sample(for url: URL) throws -> ModelComparisonSample {
-        let data = try Data(contentsOf: url)
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= 100 * 1_024 * 1_024 else {
+            throw ComparisonRunError.captureFailed("Choose a recording smaller than 100 MB.")
+        }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hash = SHA256()
+        while let chunk = try handle.read(upToCount: 64 * 1_024), !chunk.isEmpty {
+            try Task.checkCancellation()
+            hash.update(data: chunk)
+        }
+        let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
         let audioFile = try AVAudioFile(forReading: url)
         let duration = audioFile.processingFormat.sampleRate > 0
             ? Double(audioFile.length) / audioFile.processingFormat.sampleRate

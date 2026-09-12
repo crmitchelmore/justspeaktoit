@@ -56,7 +56,7 @@ public struct ModelComparisonScore: Identifiable, Hashable, Sendable {
 public enum ModelComparisonScoreboard {
     public static func scores(for rounds: [ModelComparisonRound]) -> [ModelComparisonScore] {
         var accumulators: [String: Accumulator] = [:]
-        for round in rounds {
+        for round in rounds where round.isValid {
             for entry in round.entries {
                 var accumulator = accumulators[entry.modelID] ?? Accumulator(entry: entry)
                 accumulator.absorb(entry: entry, in: round)
@@ -69,8 +69,7 @@ public enum ModelComparisonScoreboard {
     }
 
     /// Best standing first: lowest mean rank, then most wins, then most
-    /// rounds, then name — so a model with one lucky win does not outrank a
-    /// consistent performer with more evidence.
+    /// rounds, then name. Round counts show how much evidence supports a rank.
     static func standingOrder(_ lhs: ModelComparisonScore, _ rhs: ModelComparisonScore) -> Bool {
         switch (lhs.meanRank, rhs.meanRank) {
         case let (left?, right?) where left != right:
@@ -95,6 +94,7 @@ public enum ModelComparisonScoreboard {
         var wins = 0
         var rankTotal = 0
         var failures = 0
+        var latestNameAt = Date.distantPast
         var firstPartialSamples: [Int] = []
         var finalSamples: [Int] = []
         var costSamples: [Decimal] = []
@@ -107,16 +107,16 @@ public enum ModelComparisonScoreboard {
 
         mutating func absorb(entry: ModelComparisonEntry, in round: ModelComparisonRound) {
             // Later rounds carry the freshest display names.
-            modelDisplayName = entry.modelDisplayName
-            providerDisplayName = entry.providerDisplayName
-            if entry.didFail {
-                failures += 1
-                return
+            if round.updatedAt >= latestNameAt {
+                latestNameAt = round.updatedAt
+                modelDisplayName = entry.modelDisplayName
+                providerDisplayName = entry.providerDisplayName
             }
             if let first = entry.timeToFirstPartialMs { firstPartialSamples.append(first) }
             if let final = entry.timeToFinalMs { finalSamples.append(final) }
             if let cost = entry.estimatedCostUSD { costSamples.append(cost) }
-            guard let rank = round.rank(for: entry.id) else { return }
+            if entry.didFail { failures += 1; return }
+            guard round.isJudged, let rank = round.rank(for: entry.id) else { return }
             roundsPlayed += 1
             rankTotal += rank
             if rank == 1 { wins += 1 }
@@ -139,7 +139,7 @@ public enum ModelComparisonScoreboard {
 
         private static func mean(_ samples: [Int]) -> Int? {
             guard !samples.isEmpty else { return nil }
-            return Int((Double(samples.reduce(0, +)) / Double(samples.count)).rounded())
+            return Int((samples.reduce(0.0) { $0 + Double($1) } / Double(samples.count)).rounded())
         }
 
         private static func mean(_ samples: [Decimal]) -> Decimal? {

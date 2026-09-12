@@ -9,6 +9,9 @@ struct CompareModelsView: View {
     var body: some View {
         CompareModelsContentView(controller: environment.compareModels)
             .onAppear { environment.compareModels.refreshCandidates() }
+            .onDisappear {
+                Task { await environment.compareModels.cancelStreaming() }
+            }
     }
 }
 
@@ -28,6 +31,12 @@ struct CompareModelsContentView: View {
                 }
                 if controller.phase == .idle {
                     setupCards
+                } else if controller.phase == .starting || controller.currentRound == nil {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text("Preparing comparison…")
+                        Button("Cancel") { Task { await controller.cancelStreaming() } }
+                    }
                 } else if let round = controller.currentRound {
                     CompareModelsRoundView(controller: controller, round: round)
                 }

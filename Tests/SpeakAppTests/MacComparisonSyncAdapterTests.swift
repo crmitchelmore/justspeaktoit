@@ -25,75 +25,75 @@ final class MacComparisonSyncAdapterTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testPendingRounds_excludeAcknowledgedIDsAndSurviveRelaunch() async {
-        let store = ComparisonRoundStore(directory: directory)
-        let adapter = MacComparisonSyncAdapter(store: store, defaults: defaults)
-        let first = makeRound(offset: 0)
-        let second = makeRound(offset: 1)
-        store.upsert(first)
-        store.upsert(second)
-        XCTAssertEqual(Set(adapter.pendingRounds().map(\.id)), [first.id, second.id])
-
-        await adapter.didAcknowledgeSyncedRounds(ids: [first.id])
-        XCTAssertEqual(adapter.pendingRounds().map(\.id), [second.id])
-
-        let relaunched = MacComparisonSyncAdapter(store: store, defaults: defaults)
-        XCTAssertEqual(relaunched.pendingRounds().map(\.id), [second.id])
-    }
-
-    func testRemoteRound_isAppliedWithoutBecomingPending() async {
-        let store = ComparisonRoundStore(directory: directory)
-        let adapter = MacComparisonSyncAdapter(store: store, defaults: defaults)
-        let remote = makeRound(offset: 0)
-
-        await adapter.didReceiveRemoteRound(remote)
-
-        XCTAssertEqual(store.rounds, [remote])
-        XCTAssertTrue(adapter.pendingRounds().isEmpty)
-    }
-
-    func testNewerLocalRound_staysPendingWhenAnOlderRemoteArrives() async {
-        let store = ComparisonRoundStore(directory: directory)
-        let adapter = MacComparisonSyncAdapter(store: store, defaults: defaults)
-        var local = makeRound(offset: 0)
-        local.updatedAt = local.createdAt.addingTimeInterval(100)
-        store.upsert(local)
-        await adapter.didAcknowledgeSyncedRounds(ids: [local.id])
-
-        var stale = local
-        stale.updatedAt = local.createdAt
-        await adapter.didReceiveRemoteRound(stale)
-
-        XCTAssertEqual(store.round(id: local.id)?.updatedAt, local.updatedAt)
-        XCTAssertEqual(adapter.pendingRounds().map(\.id), [local.id])
-    }
-
-    func testRemoteDeletion_removesLocally() async {
-        let store = ComparisonRoundStore(directory: directory)
-        let adapter = MacComparisonSyncAdapter(store: store, defaults: defaults)
-        let round = makeRound(offset: 0)
-        store.upsert(round)
-
-        await adapter.didDeleteRemoteRound(id: round.id)
-
-        XCTAssertTrue(store.rounds.isEmpty)
-        XCTAssertTrue(adapter.pendingRounds().isEmpty)
-    }
-
-    func testReJudgedRound_becomesPendingAgain() async {
+    func testPendingRevisionsSurviveRelaunchAndAcknowledgementIsExact() async throws {
         let store = ComparisonRoundStore(directory: directory)
         let adapter = MacComparisonSyncAdapter(store: store, defaults: defaults)
         var round = makeRound(offset: 0)
         store.upsert(round)
-        await adapter.didAcknowledgeSyncedRounds(ids: [round.id])
-        XCTAssertTrue(adapter.pendingRounds().isEmpty)
-
-        XCTAssertTrue(round.judge(rankings: round.entries.enumerated().map {
-            ModelComparisonRanking(entryID: $1.id, rank: $0 + 1)
-        }))
+        let submitted = try XCTUnwrap(adapter.pendingRevisions().first)
+        round.updatedAt = round.updatedAt.addingTimeInterval(0.125)
+        round.entries[0].transcript = "newer local edit"
         store.upsert(round)
+        try await adapter.acknowledgeRevisions([submitted])
+        XCTAssertEqual(adapter.pendingRevisions().first?.round, round)
+        let reloaded = ComparisonRoundStore(directory: directory)
+        XCTAssertEqual(reloaded.pendingRevisions.first?.round, round)
+        try reloaded.acknowledge(reloaded.pendingRevisions)
+        XCTAssertTrue(ComparisonRoundStore(directory: directory).pendingRevisions.isEmpty)
+    }
 
-        XCTAssertEqual(adapter.pendingRounds().map(\.id), [round.id])
+    func testDeletionPersistsUntilAcknowledgedAndCannotBeResurrectedByOldUpload() async throws {
+        let store = ComparisonRoundStore(directory: directory)
+        let round = makeRound(offset: 0)
+        store.upsert(round)
+        let old = try XCTUnwrap(store.pendingRevisions.first)
+        store.remove(id: round.id)
+        try store.acknowledge([old])
+        let reloaded = ComparisonRoundStore(directory: directory)
+        let deletion = try XCTUnwrap(reloaded.pendingRevisions.first)
+        XCTAssertNil(deletion.round)
+        try reloaded.applyRevision(old)
+        XCTAssertNil(reloaded.round(id: round.id))
+        XCTAssertEqual(reloaded.pendingRevisions, [deletion])
+    }
+
+    func testRemoteRevisionIsAppliedWithoutEchoAndLegacyDeletionPreservesPendingEdit() async throws {
+        let store = ComparisonRoundStore(directory: directory)
+        let adapter = MacComparisonSyncAdapter(store: store, defaults: defaults)
+        var round = makeRound(offset: 0)
+        try await adapter.applyRemoteRevision(ModelComparisonRevision(round: round))
+        XCTAssertTrue(store.pendingRevisions.isEmpty)
+        round.updatedAt = round.updatedAt.addingTimeInterval(1)
+        store.upsert(round)
+        try await adapter.applyLegacyDeletion(id: round.id)
+        XCTAssertEqual(store.round(id: round.id), round)
+    }
+
+    func testFailedPersistenceDoesNotAcknowledgeOrPublishRemoteData() async throws {
+        let store = ComparisonRoundStore(directory: directory, write: { _, _ in
+            throw CocoaError(.fileWriteOutOfSpace)
+        })
+        let revision = ModelComparisonRevision(round: makeRound(offset: 0))
+        XCTAssertThrowsError(try store.applyRevision(revision))
+        XCTAssertTrue(store.rounds.isEmpty)
+        XCTAssertNotNil(store.persistenceError)
+    }
+
+    func testDeletingRoundRemovesOwnedRecordingButNotImportedFile() throws {
+        let store = ComparisonRoundStore(directory: directory)
+        let round = makeRound(offset: 0)
+        store.upsert(round)
+        let audio = store.samplesDirectory.appendingPathComponent(round.sample.name)
+        try Data([1, 2, 3]).write(to: audio)
+        store.remove(id: round.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audio.path))
+        let template = makeRound(offset: 1)
+        let imported = ModelComparisonRound(inputMode: .file, sample: template.sample, language: nil,
+            originPlatform: "macos", entries: template.entries, blindOrder: template.blindOrder)
+        store.upsert(imported)
+        try Data([1]).write(to: audio)
+        store.remove(id: imported.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
     }
 
     private func makeRound(offset: TimeInterval) -> ModelComparisonRound {

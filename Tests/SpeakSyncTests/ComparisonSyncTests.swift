@@ -76,7 +76,7 @@ final class ComparisonSyncTests: XCTestCase {
 
         await engine.sync()
 
-        XCTAssertEqual(delegate.received.map(\.updatedAt), [newer.updatedAt], "Coalesced to the final event")
+        XCTAssertEqual(delegate.received.map(\.updatedAt), [remote.updatedAt, newer.updatedAt])
         XCTAssertEqual(delegate.deleted.count, 1)
         XCTAssertEqual(defaults.data(forKey: ComparisonSyncEngine.syncTokenKey), Data("t2".utf8))
         XCTAssertEqual(transport.requestedTokens, [nil, Data("t1".utf8)])
@@ -87,7 +87,7 @@ final class ComparisonSyncTests: XCTestCase {
     func testSync_uploadsPendingRoundsUntilAcknowledged() async {
         let pending = makeRound()
         let transport = FakeComparisonTransport(pages: [.empty])
-        let delegate = FakeComparisonDelegate(pending: [pending])
+        let delegate = FakeComparisonDelegate(pending: [ModelComparisonRevision(round: pending)])
         let engine = await makeEngine(transport: transport, delegate: delegate)
 
         await engine.sync()
@@ -100,19 +100,19 @@ final class ComparisonSyncTests: XCTestCase {
     func testSync_reportsAFailedUploadAndKeepsTheRoundPending() async {
         let pending = makeRound()
         let transport = FakeComparisonTransport(pages: [.empty], failUploads: true)
-        let delegate = FakeComparisonDelegate(pending: [pending])
+        let delegate = FakeComparisonDelegate(pending: [ModelComparisonRevision(round: pending)])
         let engine = await makeEngine(transport: transport, delegate: delegate)
 
         await engine.sync()
 
         XCTAssertTrue(delegate.acknowledged.isEmpty)
         XCTAssertNotNil(engine.lastError)
-        XCTAssertEqual(delegate.pendingRounds().map(\.id), [pending.id])
+        XCTAssertEqual(delegate.pendingRevisions().map(\.id), [pending.id])
     }
 
     func testSync_whenCloudIsUnavailable_doesNothing() async {
         let transport = FakeComparisonTransport(pages: [.empty])
-        let delegate = FakeComparisonDelegate(pending: [makeRound()])
+        let delegate = FakeComparisonDelegate(pending: [ModelComparisonRevision(round: makeRound())])
         let engine = ComparisonSyncEngine(transport: transport, defaults: defaults, cloudAvailability: { false })
         await engine.initialize(delegate: delegate)
 
@@ -127,13 +127,33 @@ final class ComparisonSyncTests: XCTestCase {
         var remote = local
         remote.updatedAt = local.updatedAt.addingTimeInterval(60)
         let transport = FakeComparisonTransport(pages: [], newerRemote: [remote.id: remote])
-        let delegate = FakeComparisonDelegate()
+        let delegate = FakeComparisonDelegate(pending: [ModelComparisonRevision(round: local)])
         let engine = await makeEngine(transport: transport, delegate: delegate)
 
-        try? await engine.upload(round: local)
+        await engine.sync()
 
         XCTAssertEqual(delegate.received.map(\.updatedAt), [remote.updatedAt])
         XCTAssertEqual(delegate.acknowledged, [local.id])
+    }
+
+    func testPersistenceFailureDoesNotAdvanceToken() async {
+        let transport = FakeComparisonTransport(pages: [ComparisonChangePage(
+            changes: [.changed(makeRound())], serverChangeTokenData: Data("new".utf8), moreComing: false
+        )])
+        let delegate = FakeComparisonDelegate()
+        delegate.failPersistence = true
+        let engine = await makeEngine(transport: transport, delegate: delegate)
+        await engine.sync()
+        XCTAssertNil(defaults.data(forKey: ComparisonSyncEngine.syncTokenKey))
+        XCTAssertNotNil(engine.lastError)
+    }
+
+    func testTombstoneAndFractionalRevisionRoundTrip() throws {
+        let revision = ModelComparisonRevision(deleting: UUID(), at: Date(timeIntervalSince1970: 1_800_000_000.125))
+        let record = try ComparisonSyncRecord.record(from: revision)
+        XCTAssertEqual(try ComparisonSyncRecord.revision(from: record), revision)
+        record["schemaVersion"] = ModelComparisonRound.schemaVersion + 1
+        XCTAssertThrowsError(try ComparisonSyncRecord.revision(from: record))
     }
 
     // MARK: Helpers
@@ -169,7 +189,7 @@ private final class FakeComparisonTransport: ComparisonSyncTransport {
     private let failUploads: Bool
     private let newerRemote: [UUID: ModelComparisonRound]
     private(set) var requestedTokens: [Data?] = []
-    private(set) var uploaded: [ModelComparisonRound] = []
+    private(set) var uploaded: [ModelComparisonRevision] = []
 
     init(pages: [ComparisonChangePage], failUploads: Bool = false, newerRemote: [UUID: ModelComparisonRound] = [:]) {
         self.pages = pages
@@ -182,48 +202,35 @@ private final class FakeComparisonTransport: ComparisonSyncTransport {
         return pages.isEmpty ? .empty : pages.removeFirst()
     }
 
-    func upload(rounds: [ModelComparisonRound]) async -> ComparisonUploadResult {
-        uploaded.append(contentsOf: rounds)
+    func upload(revisions: [ModelComparisonRevision]) async -> ComparisonUploadResult {
+        uploaded.append(contentsOf: revisions)
         if failUploads {
-            return ComparisonUploadResult(
-                acknowledgedIDs: [],
-                remoteRounds: [],
-                failures: Dictionary(uniqueKeysWithValues: rounds.map { ($0.id, SyncError.encodingFailed) })
-            )
+            return ComparisonUploadResult(failures: Dictionary(uniqueKeysWithValues:
+                revisions.map { ($0.id, SyncError.encodingFailed) }))
         }
-        return ComparisonUploadResult(
-            acknowledgedIDs: Set(rounds.map(\.id)),
-            remoteRounds: rounds.compactMap { newerRemote[$0.id] },
-            failures: [:]
-        )
+        return ComparisonUploadResult(acknowledged: revisions,
+            remote: revisions.compactMap { newerRemote[$0.id].map(ModelComparisonRevision.init(round:)) })
     }
 
-    func delete(roundID _: UUID) async throws {}
 }
 
 @MainActor
 private final class FakeComparisonDelegate: ComparisonSyncDelegate {
-    private var pending: [ModelComparisonRound]
-    private(set) var received: [ModelComparisonRound] = []
+    private var pending: [ModelComparisonRevision]
+    var failPersistence = false
+    private(set) var received: [ModelComparisonRevision] = []
     private(set) var deleted: [UUID] = []
     private(set) var acknowledged: Set<UUID> = []
 
-    init(pending: [ModelComparisonRound] = []) {
-        self.pending = pending
+    init(pending: [ModelComparisonRevision] = []) { self.pending = pending }
+    func pendingRevisions() -> [ModelComparisonRevision] { pending }
+    func applyRemoteRevision(_ revision: ModelComparisonRevision) async throws {
+        if failPersistence { throw CocoaError(.fileWriteOutOfSpace) }
+        received.append(revision)
     }
-
-    func pendingRounds() -> [ModelComparisonRound] { pending }
-
-    func didReceiveRemoteRound(_ round: ModelComparisonRound) async {
-        received.append(round)
-    }
-
-    func didDeleteRemoteRound(id: UUID) async {
-        deleted.append(id)
-    }
-
-    func didAcknowledgeSyncedRounds(ids: Set<UUID>) async {
-        acknowledged.formUnion(ids)
-        pending.removeAll { ids.contains($0.id) }
+    func applyLegacyDeletion(id: UUID) async throws { deleted.append(id) }
+    func acknowledgeRevisions(_ revisions: [ModelComparisonRevision]) async throws {
+        acknowledged.formUnion(revisions.map(\.id))
+        pending.removeAll { revisions.contains($0) }
     }
 }

@@ -87,6 +87,7 @@ struct CompareModelsRoundView: View {
             case .transcribing:
                 ProgressView().controlSize(.small)
                 Text("Waiting for transcripts…")
+                Button("Cancel") { Task { await controller.cancelStreaming() } }
             case .judging:
                 Button("Submit ranking") { controller.submitRanking() }
                     .buttonStyle(.borderedProminent)
@@ -124,6 +125,13 @@ struct CompareModelsColumnView: View {
     let referenceText: String?
     let isRevealed: Bool
 
+    @State private var diffTokens: [TranscriptWordDiff.Token]?
+
+    private struct DiffInput: Equatable {
+        let reference: String?
+        let candidate: String
+    }
+
     private var text: String {
         controller.liveTranscripts[entry.id] ?? entry.transcript
     }
@@ -132,7 +140,8 @@ struct CompareModelsColumnView: View {
         VStack(alignment: .leading, spacing: 8) {
             columnHeader
             if let error = entry.errorDescription, text.isEmpty {
-                Text(error).font(.caption).foregroundStyle(.red)
+                Text(isRevealed ? error : "This model could not transcribe the recording.")
+                    .font(.caption).foregroundStyle(.red)
             } else if text.isEmpty {
                 Text(controller.phase == .streaming ? "Listening…" : "Transcribing…")
                     .foregroundStyle(.tertiary)
@@ -142,8 +151,8 @@ struct CompareModelsColumnView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            metrics
-            if controller.phase == .judging, !entry.didFail {
+            if isRevealed { metrics }
+            if controller.phase == .judging {
                 rankPicker
             }
         }
@@ -157,6 +166,16 @@ struct CompareModelsColumnView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(borderColor, lineWidth: rank == 1 && isRevealed ? 2 : 1)
         )
+        .task(id: DiffInput(reference: referenceText, candidate: text)) {
+            diffTokens = nil
+            guard let referenceText else { return }
+            let candidate = text
+            let tokens = await Task.detached(priority: .userInitiated) {
+                TranscriptWordDiff.diff(reference: referenceText, candidate: candidate)
+            }.value
+            guard !Task.isCancelled else { return }
+            diffTokens = tokens
+        }
         .accessibilityIdentifier("compareModelsColumn-\(round.blindLabel(for: entry.id))")
     }
 
@@ -189,8 +208,8 @@ struct CompareModelsColumnView: View {
     }
 
     private var highlightedTranscript: Text {
-        guard let referenceText else { return Text(text) }
-        return TranscriptWordDiff.diff(reference: referenceText, candidate: text)
+        guard let diffTokens else { return Text(text) }
+        return diffTokens
             .reduce(Text("")) { partial, token in
                 partial + Self.styled(token) + Text(" ")
             }

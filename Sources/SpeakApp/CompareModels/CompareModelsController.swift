@@ -49,6 +49,9 @@ final class CompareModelsController: ObservableObject {
     let fileRunner: ComparisonFileRunner
     private let defaults: UserDefaults
     var captureOwnershipHeld = false
+    var runID = UUID()
+    var fileTask: Task<[ModelComparisonEntry], Never>?
+    var captureLimitTask: Task<Void, Never>?
 
     static let selectionDefaultsKey = "compareModels.selectedModelIDs"
 
@@ -121,6 +124,8 @@ final class CompareModelsController: ObservableObject {
     func startStreaming() async {
         guard canStart, mode == .streaming else { return }
         guard reserveCapture() else { return }
+        let generation = UUID()
+        runID = generation
         phase = .starting
         errorMessage = nil
         liveTranscripts = [:]
@@ -131,14 +136,23 @@ final class CompareModelsController: ObservableObject {
                 language: environment.settings.preferredModelLanguage,
                 localeIdentifier: environment.settings.resolvedPreferredLocaleIdentifier
             ) { [weak self] update in
+                guard self?.runID == generation else { return }
                 self?.liveTranscripts[update.entryID] = update.text
             }
+            guard runID == generation else { return }
             currentRound = makeRound(entries: entries, mode: .streaming, sample: ModelComparisonSample(
                 name: Self.captureName(), contentHash: nil, durationSeconds: 0
             ))
             phase = .streaming
+            captureLimitTask = Task { [weak self] in
+                guard (try? await Task.sleep(for: .seconds(600))) != nil else { return }
+                self?.captureLimitTask = nil
+                await self?.stopStreaming()
+            }
             statusMessage = "Listening… speak, then press Stop."
         } catch {
+            guard runID == generation else { return }
+            await fanOut.cancel()
             releaseCapture()
             phase = .idle
             errorMessage = error.localizedDescription
@@ -147,16 +161,24 @@ final class CompareModelsController: ObservableObject {
 
     func stopStreaming() async {
         guard phase == .streaming, let round = currentRound else { return }
+        let generation = runID
+        captureLimitTask?.cancel()
+        captureLimitTask = nil
         phase = .transcribing
         statusMessage = "Waiting for final transcripts…"
         let outcome = await fanOut.stop()
+        guard runID == generation else { return }
         releaseCapture()
         let sample = ModelComparisonSample(
             name: round.sample.name,
             contentHash: outcome.contentHash,
             durationSeconds: outcome.durationSeconds
         )
-        saveCapture(outcome.pcm16, named: round.sample.name)
+        do {
+            try saveCapture(outcome.pcm16, named: round.sample.name)
+        } catch {
+            errorMessage = "The recording could not be saved: \(error.localizedDescription)"
+        }
         beginJudging(ModelComparisonRound(
             id: round.id,
             createdAt: round.createdAt,
@@ -170,9 +192,15 @@ final class CompareModelsController: ObservableObject {
     }
 
     func cancelStreaming() async {
-        guard phase == .streaming || phase == .starting else { return }
+        guard phase == .streaming || phase == .starting || phase == .transcribing else { return }
+        runID = UUID()
+        fileTask?.cancel()
+        fileTask = nil
+        captureLimitTask?.cancel()
+        captureLimitTask = nil
         await fanOut.cancel()
         releaseCapture()
+        queuedFiles = []
         currentRound = nil
         liveTranscripts = [:]
         phase = .idle
@@ -215,7 +243,10 @@ final class CompareModelsController: ObservableObject {
         guard var round = currentRound, isRankingComplete else { return }
         let rankings = pendingRanks.map { ModelComparisonRanking(entryID: $0.key, rank: $0.value) }
         guard round.judge(rankings: rankings) else { return }
-        store.upsert(round)
+        guard store.upsert(round) else {
+            errorMessage = store.persistenceError ?? "Could not save the ranking. Please try again."
+            return
+        }
         currentRound = round
         phase = .revealed
         statusMessage = "Ranking saved. Model names revealed."
@@ -237,6 +268,9 @@ final class CompareModelsController: ObservableObject {
     func discardRound() async {
         if let round = currentRound, round.isJudged == false, store.round(id: round.id) != nil {
             store.remove(id: round.id)
+        }
+        if let round = currentRound, store.round(id: round.id) == nil {
+            store.discardSample(for: round)
         }
         queuedFiles = []
         await finishRound()

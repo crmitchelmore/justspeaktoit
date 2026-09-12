@@ -32,6 +32,14 @@ struct CompareModelsScoreboardView: View {
                     }
                     roundHistory
                 }
+                if let error = store.syncError {
+                    HStack {
+                        Text("Saved on this Mac. Sync needs attention: \(error)").font(.caption)
+                        Button("Retry sync") {
+                            Task { await controller.environment.comparisonSyncAdapter?.sync() }
+                        }
+                    }
+                }
                 if let error = store.persistenceError {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }

@@ -35,6 +35,17 @@ public enum TranscriptWordDiff {
         let candidateWords = words(in: candidate)
         let referenceKeys = referenceWords.map(normalize)
         let candidateKeys = candidateWords.map(normalize)
+        // Keep worst-case memory below ~8 MB. For long divergent transcripts,
+        // preserve all words using a coarse diff instead of allocating N*M cells.
+        if referenceKeys == candidateKeys {
+            return candidateWords.enumerated().map { Token(id: $0.offset, text: $0.element, kind: .equal) }
+        }
+        if referenceKeys.count > 1_000_000 / max(candidateKeys.count, 1) {
+            let removed = referenceWords.enumerated().map { Token(id: $0.offset, text: $0.element, kind: .deleted) }
+            return removed + candidateWords.enumerated().map {
+                Token(id: removed.count + $0.offset, text: $0.element, kind: .inserted)
+            }
+        }
         let table = lcsTable(referenceKeys, candidateKeys)
 
         var tokens: [Token] = []

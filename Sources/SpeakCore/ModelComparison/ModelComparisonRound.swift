@@ -141,12 +141,40 @@ public struct ModelComparisonRound: Codable, Identifiable, Hashable, Sendable {
         self.judgedAt = judgedAt
     }
 
-    public var isJudged: Bool { rankings != nil }
+    public var isValid: Bool {
+        let ids = Set(entries.map(\.id))
+        return !entries.isEmpty && ids.count == entries.count
+            && blindOrder.count == entries.count && Set(blindOrder) == ids
+            && sample.durationSeconds.isFinite && sample.durationSeconds >= 0
+            && (rankings == nil || Self.isCompleteRanking(rankings ?? [], for: entries))
+    }
+
+    public var isJudged: Bool { isValid && rankings != nil }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
+        inputMode = try values.decode(ModelComparisonInputMode.self, forKey: .inputMode)
+        sample = try values.decode(ModelComparisonSample.self, forKey: .sample)
+        language = try values.decodeIfPresent(String.self, forKey: .language)
+        originPlatform = try values.decode(String.self, forKey: .originPlatform)
+        entries = try values.decode([ModelComparisonEntry].self, forKey: .entries)
+        blindOrder = try values.decode([UUID].self, forKey: .blindOrder)
+        rankings = try values.decodeIfPresent([ModelComparisonRanking].self, forKey: .rankings)
+        judgedAt = try values.decodeIfPresent(Date.self, forKey: .judgedAt)
+        guard isValid else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "Invalid comparison identities or ranking"))
+        }
+    }
 
     /// Entries in blind display order. Entries missing from `blindOrder`
     /// (which cannot happen for rounds this code creates) trail in id order
     /// so nothing is ever hidden.
     public var entriesInBlindOrder: [ModelComparisonEntry] {
+        guard isValid else { return [] }
         let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
         var ordered = blindOrder.compactMap { byID[$0] }
         let seen = Set(ordered.map(\.id))
@@ -189,6 +217,7 @@ public struct ModelComparisonRound: Codable, Identifiable, Hashable, Sendable {
     ) -> Bool {
         guard rankings.count == entries.count, !entries.isEmpty else { return false }
         let entryIDs = Set(entries.map(\.id))
+        guard entryIDs.count == entries.count else { return false }
         let rankedIDs = Set(rankings.map(\.entryID))
         let ranks = Set(rankings.map(\.rank))
         return rankedIDs == entryIDs && ranks == Set(1...entries.count)

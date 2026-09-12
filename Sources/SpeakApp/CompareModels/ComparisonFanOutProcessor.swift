@@ -59,12 +59,14 @@ final class ComparisonFanOutProcessor: @unchecked Sendable {
             isRunning = false
             for target in targets.values {
                 if let tail = target.converter.drainPCM16() {
+                    if Int(target.format.sampleRate) == ComparisonLiveFanOut.captureSampleRate { capture.append(tail) }
                     for client in target.clients {
                         client.sendAudio(tail)
                     }
                 }
             }
-            if let tail = captureConverter.drainPCM16() {
+            if targets[ComparisonLiveFanOut.captureSampleRate] == nil,
+               let tail = captureConverter.drainPCM16() {
                 capture.append(tail)
             }
             targets = [:]
@@ -91,11 +93,12 @@ final class ComparisonFanOutProcessor: @unchecked Sendable {
             guard let data = Self.convertToPCM16(
                 buffer, from: inputFormat, to: target.format, cache: target.converter, logger: logger
             ) else { continue }
+            if Int(target.format.sampleRate) == ComparisonLiveFanOut.captureSampleRate { capture.append(data) }
             for client in target.clients {
                 client.sendAudio(data)
             }
         }
-        if let captureFormat,
+        if targets[ComparisonLiveFanOut.captureSampleRate] == nil, let captureFormat,
            let data = Self.convertToPCM16(
                buffer, from: inputFormat, to: captureFormat, cache: captureConverter, logger: logger
            ) {

@@ -80,18 +80,18 @@ extension CompareModelsController {
 
     /// Keeps the microphone sample as a WAV beside the rounds so it can be
     /// re-run through other models in File mode later.
-    func saveCapture(_ pcm16: Data, named name: String) {
+    func saveCapture(_ pcm16: Data, named name: String) throws {
         guard !pcm16.isEmpty,
               let wav = PCMWaveWriter.wavData(pcm: pcm16, sampleRate: ComparisonLiveFanOut.captureSampleRate) else {
             return
         }
         let url = store.samplesDirectory.appendingPathComponent(name, isDirectory: false)
-        try? wav.write(to: url, options: .atomic)
+        try wav.write(to: url, options: .atomic)
     }
 
     static func captureName(at date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HHmmss"
-        return "Capture \(formatter.string(from: date)).wav"
+        return "Capture \(formatter.string(from: date))-\(UUID().uuidString).wav"
     }
 }

@@ -45,6 +45,7 @@ final class ComparisonLiveLane {
         azureEndpoint: String,
         onTranscript: @escaping @Sendable (String, Bool) -> Void
     ) throws {
+        guard !abandoned, !Task.isCancelled else { throw CancellationError() }
         guard let client = LiveTranscriptionClientFactory.makeClient(
             for: route,
             apiKey: apiKey,
@@ -82,7 +83,17 @@ final class ComparisonLiveLane {
         ) { update in
             onTranscript(update.text, update.isFinal)
         }
-        let converter = try AppleSpeechAudioConverter(sourceFormat: inputFormat, targetFormat: session.audioFormat)
+        guard !abandoned, !Task.isCancelled else {
+            await session.cancel()
+            throw CancellationError()
+        }
+        let converter: AppleSpeechAudioConverter
+        do {
+            converter = try AppleSpeechAudioConverter(sourceFormat: inputFormat, targetFormat: session.audioFormat)
+        } catch {
+            await session.cancel()
+            throw error
+        }
         appleSession = AppleLiveSessionBox(session)
         appleConverter = AppleSpeechAudioConverterBox(converter)
         // Apple restates the whole transcript on every update.
@@ -121,10 +132,15 @@ final class ComparisonLiveLane {
             // allowance; the floor covers providers that declare none.
             let seconds = max(ModelCatalog.liveCapabilities(for: candidate.modelID).postStopFinalizeBudget, 8)
             let budget = Duration.seconds(seconds)
-            if let transcript = await Self.withTimeout(budget, operation: { await finalizing.finishAndWait() }) {
+            let outcome = await BoundedOperation.run(timeout: budget) { await finalizing.finishAndWait() }
+            guard !abandoned else { return }
+            if case .success(let transcript?) = outcome {
                 accumulated.replace(with: transcript)
                 entry.transcript = accumulated.text
+            } else {
+                entry.errorDescription = "The model did not finish within its time limit."
             }
+            client.stop()
         } else {
             client.stop()
         }
@@ -133,17 +149,17 @@ final class ComparisonLiveLane {
     }
 
     private func finishApple(_ box: AppleLiveSessionBox, stoppedAt: Date) async {
-        do {
-            let result = try await box.finish()
+        let outcome = await BoundedOperation.run(timeout: .seconds(10)) { try await box.finish() }
+        guard !abandoned else { return }
+        if case .success(let result) = outcome {
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
                 accumulated.replace(with: text)
                 entry.transcript = accumulated.text
             }
-        } catch {
-            if entry.transcript.isEmpty {
-                entry.errorDescription = error.localizedDescription
-            }
+        } else {
+            entry.errorDescription = "Apple Speech did not finish within its time limit."
+            Task { await box.cancel() }
         }
         entry.timeToFinalMs = SessionLatencyMetrics.milliseconds(from: stoppedAt, to: Date())
         appleSession = nil
@@ -159,23 +175,7 @@ final class ComparisonLiveLane {
         appleSession = nil
     }
 
-    /// Runs `operation` and gives up after `budget`, so one provider that
-    /// never answers cannot hold every other lane's result hostage.
-    private static func withTimeout<T: Sendable>(
-        _ budget: Duration,
-        operation: @escaping @Sendable () async -> T?
-    ) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await operation() }
-            group.addTask {
-                try? await Task.sleep(for: budget)
-                return nil
-            }
-            defer { group.cancelAll() }
-            if let first = await group.next() { return first }
-            return nil
-        }
-    }
+
 }
 
 /// Erases the OS-26 availability of the Apple live session so the lane can

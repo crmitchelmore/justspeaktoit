@@ -24,14 +24,14 @@ public enum ComparisonSyncRecord {
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting = [.sortedKeys]
         return encoder
     }()
 
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .secondsSince1970
         return decoder
     }()
 
@@ -69,7 +69,11 @@ public enum ComparisonSyncRecord {
               version <= ModelComparisonRound.schemaVersion else {
             return nil
         }
-        guard var round = try? decoder.decode(ModelComparisonRound.self, from: Data(payload.utf8)) else {
+        let legacy = JSONDecoder()
+        legacy.dateDecodingStrategy = .iso8601
+        guard var round = (try? decoder.decode(ModelComparisonRound.self, from: Data(payload.utf8)))
+            ?? (try? legacy.decode(ModelComparisonRound.self, from: Data(payload.utf8))),
+              round.id == roundID(fromRecordName: record.recordID.recordName) else {
             return nil
         }
         // The flat field is the sync ordering authority; the payload copy is
@@ -79,4 +83,29 @@ public enum ComparisonSyncRecord {
         }
         return round
     }
+    /// Tombstones use the same payload and flat fields, with no additional schema fields.
+    static func record(from revision: ModelComparisonRevision, existingRecord: CKRecord? = nil) throws -> CKRecord {
+        if let round = revision.round { return try record(from: round, existingRecord: existingRecord) }
+        let record = existingRecord ?? CKRecord(recordType: recordType, recordID: recordID(for: revision.id))
+        record[FieldKey.roundID] = revision.id.uuidString
+        record[FieldKey.createdAt] = revision.updatedAt
+        record[FieldKey.updatedAt] = revision.updatedAt
+        record[FieldKey.originPlatform] = "macos"
+        record[FieldKey.schemaVersion] = ModelComparisonRound.schemaVersion
+        record[FieldKey.payload] = String(data: try encoder.encode(revision), encoding: .utf8)
+        return record
+    }
+
+    static func revision(from record: CKRecord) throws -> ModelComparisonRevision {
+        guard record.recordType == recordType,
+              let version = record[FieldKey.schemaVersion] as? Int,
+              version == ModelComparisonRound.schemaVersion else { throw SyncError.decodingFailed }
+        if let round = round(from: record) { return ModelComparisonRevision(round: round) }
+        guard let payload = record[FieldKey.payload] as? String,
+              let revision = try? decoder.decode(ModelComparisonRevision.self, from: Data(payload.utf8)),
+              revision.isValid, revision.round == nil,
+              revision.id == roundID(fromRecordName: record.recordID.recordName) else { throw SyncError.decodingFailed }
+        return revision
+    }
+
 }

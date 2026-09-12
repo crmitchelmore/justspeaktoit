@@ -42,8 +42,12 @@ final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
         operation.recordWasChangedBlock = { _, result in
             switch result {
             case .success(let record):
-                if let round = ComparisonSyncRecord.round(from: record) {
-                    accumulator.append(change: .changed(round))
+                guard record.recordType == ComparisonSyncRecord.recordType else { return }
+                do {
+                    accumulator.append(change: .revision(try ComparisonSyncRecord.revision(from: record)))
+                } catch {
+                    // Do not consume unknown versions: a compatible build must replay this page.
+                    accumulator.append(error: error)
                 }
             case .failure(let error):
                 accumulator.append(error: error)
@@ -68,49 +72,39 @@ final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
         }
     }
 
-    func upload(rounds: [ModelComparisonRound]) async -> ComparisonUploadResult {
+    func upload(revisions: [ModelComparisonRevision]) async -> ComparisonUploadResult {
+        var result = ComparisonUploadResult()
         guard let database = SyncConfiguration.privateDatabase else {
-            return ComparisonUploadResult(
-                acknowledgedIDs: [],
-                remoteRounds: [],
-                failures: Dictionary(uniqueKeysWithValues: rounds.map { ($0.id, SyncError.cloudUnavailable) })
-            )
+            for revision in revisions { result.failures[revision.id] = SyncError.cloudUnavailable }
+            return result
         }
-        var result = ComparisonUploadResult(acknowledgedIDs: [], remoteRounds: [], failures: [:])
-        for round in rounds {
+        for revision in revisions {
             do {
-                let recordID = ComparisonSyncRecord.recordID(for: round.id)
+                let recordID = ComparisonSyncRecord.recordID(for: revision.id)
                 let existing: CKRecord?
                 do {
                     existing = try await database.record(for: recordID)
                 } catch let error as CKError where error.code == .unknownItem {
                     existing = nil
                 }
-                if let existing,
-                   let remote = ComparisonSyncRecord.round(from: existing),
-                   remote.updatedAt > round.updatedAt {
-                    result.acknowledgedIDs.insert(round.id)
-                    result.remoteRounds.append(remote)
-                    continue
+                if let existing {
+                    let remote = try ComparisonSyncRecord.revision(from: existing)
+                    if remote.updatedAt > revision.updatedAt
+                        || (remote.updatedAt == revision.updatedAt && remote.round == nil) {
+                        result.remote.append(remote)
+                        continue
+                    }
                 }
-                let record = try ComparisonSyncRecord.record(from: round, existingRecord: existing)
+                let record = try ComparisonSyncRecord.record(from: revision, existingRecord: existing)
                 _ = try await database.save(record)
-                result.acknowledgedIDs.insert(round.id)
+                result.acknowledged.append(revision)
             } catch {
-                result.failures[round.id] = error
+                result.failures[revision.id] = error
             }
         }
         return result
     }
 
-    func delete(roundID: UUID) async throws {
-        guard let database = SyncConfiguration.privateDatabase else { throw SyncError.cloudUnavailable }
-        do {
-            try await database.deleteRecord(withID: ComparisonSyncRecord.recordID(for: roundID))
-        } catch let error as CKError where error.code == .unknownItem {
-            // Already gone: the deletion is reconciled.
-        }
-    }
 }
 
 private final class ComparisonFetchAccumulator: @unchecked Sendable {

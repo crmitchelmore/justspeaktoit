@@ -99,38 +99,59 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
     // MARK: - ElevenLabs (segment-shaped finals)
 
     func testElevenLabs_finishAndWaitReturnsFullTranscriptNotTrailingSegment() async {
-        // Arrange
-        let client = ElevenLabsLiveClient(apiKey: "k")
-
-        // Act
-        client.parseTranscriptResponse(Self.elevenLabs("Hello there.", isFinal: true))
-        client.parseTranscriptResponse(Self.elevenLabs("this is", isFinal: false))
-        client.parseTranscriptResponse(Self.elevenLabs("This is a test.", isFinal: true))
-        let transcript = await client.finishAndWait()
-
-        // Assert
-        XCTAssertEqual(transcript, "Hello there. This is a test.")
+        let (client, socket) = Self.elevenLabsFixture()
+        socket.emit(#"{"message_type":"session_started"}"#)
+        socket.emit(Self.elevenLabs("Hello there.", isFinal: true))
+        socket.emit(Self.elevenLabs("this is", isFinal: false))
+        socket.emit(Self.elevenLabs("This is a test.", isFinal: true))
+        async let transcript = client.finishAndWait()
+        let condition1 = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(condition1)
+        let awaited2 = await transcript
+        XCTAssertEqual(awaited2, "Hello there. This is a test.")
     }
 
     func testElevenLabs_repeatedIdenticalStandaloneFinalsAreBothKept() async {
-        // Issue #700: "Yes." followed by "Yes." is two utterances.
-        let client = ElevenLabsLiveClient(apiKey: "k")
-
-        client.parseTranscriptResponse(Self.elevenLabs("Yes.", isFinal: true))
-        client.parseTranscriptResponse(Self.elevenLabs("Yes.", isFinal: true))
-        let transcript = await client.finishAndWait()
-
-        XCTAssertEqual(transcript, "Yes. Yes.")
+        let (client, socket) = Self.elevenLabsFixture()
+        socket.emit(#"{"message_type":"session_started"}"#)
+        socket.emit(Self.elevenLabs("Yes.", isFinal: true))
+        socket.emit(Self.elevenLabs("Yes.", isFinal: true))
+        async let transcript = client.finishAndWait()
+        let condition3 = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(condition3)
+        let awaited4 = await transcript
+        XCTAssertEqual(awaited4, "Yes. Yes.")
     }
 
     func testElevenLabs_finishAndWaitWithoutAnySpeechReturnsNil() async {
-        // Arrange
-        let client = ElevenLabsLiveClient(apiKey: "k")
+        let (client, socket) = Self.elevenLabsFixture()
+        socket.emit(#"{"message_type":"session_started"}"#)
+        socket.emit(Self.elevenLabs("partial", isFinal: false))
+        async let transcript = client.finishAndWait()
+        let condition5 = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(condition5)
+        let awaited6 = await transcript
+        XCTAssertNil(awaited6)
+    }
 
-        // Act / Assert
-        client.parseTranscriptResponse(Self.elevenLabs("partial", isFinal: false))
-        let transcript = await client.finishAndWait()
-        XCTAssertNil(transcript)
+    // MARK: - Soniox (cumulative final tokens)
+
+    func testSoniox_finishAndWaitReturnsAllFinalTokenBatches() async {
+        let socket = TestLiveWebSocket()
+        let client = SonioxLiveClient(
+            apiKey: "k", timing: .init(overall: 0.2),
+            socketFactory: TestSocketFactory([socket]).make
+        )
+        client.start(onTranscript: { _, _ in }, onError: { _ in })
+        let condition7 = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(condition7)
+        async let transcript = client.finishAndWait()
+        socket.emit(#"{"tokens":[{"text":"Hello","is_final":true}]}"#)
+        socket.emit(#"{"tokens":[{"text":" world","is_final":true}]}"#)
+        socket.emit(#"{"tokens":[],"finished":true}"#)
+        let awaited8 = await transcript
+        XCTAssertEqual(awaited8, "Hello world")
+        XCTAssertTrue(client.finishFlushesBufferedAudio)
     }
 
     // MARK: - xAI (cumulative finals)
@@ -508,8 +529,18 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
     }
 
     private static func elevenLabs(_ text: String, isFinal: Bool) -> String {
-        let event = isFinal ? "FINAL_TRANSCRIPT" : "PARTIAL_TRANSCRIPT"
-        return #"{"speech_event_type":"\#(event)","transcript":"\#(text)"}"#
+        let event = isFinal ? "committed_transcript" : "partial_transcript"
+        return #"{"message_type":"\#(event)","text":"\#(text)"}"#
+    }
+
+    private static func elevenLabsFixture() -> (ElevenLabsLiveClient, TestLiveWebSocket) {
+        let socket = TestLiveWebSocket()
+        let client = ElevenLabsLiveClient(
+            apiKey: "k", timing: .init(readiness: 0.1, postCommitDrain: 0.03, overall: 0.2),
+            socketFactory: TestSocketFactory([socket]).make
+        )
+        client.start(onTranscript: { _, _ in }, onError: { _ in })
+        return (client, socket)
     }
 
     private static func xai(_ text: String, type: String) -> String {

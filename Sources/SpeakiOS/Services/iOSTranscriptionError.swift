@@ -12,6 +12,9 @@ public enum iOSTranscriptionError: LocalizedError {
     case microphoneChanged
     case interrupted
     case liveActivityUnavailable
+    /// A strict local route was selected, but the concrete locale cannot use
+    /// Apple's on-device recognizer. No remote recognizer was started.
+    case offlineLocalRecognitionUnavailable
     /// A start never reached its backend inside
     /// `CaptureWatchdogPolicy.startDeadlineSeconds`. Carries the last startup
     /// boundary the run actually crossed, so the failure names where it stalled
@@ -37,7 +40,7 @@ public enum iOSTranscriptionError: LocalizedError {
 
     var endsCapture: Bool {
         switch self {
-        case .interrupted, .microphoneChanged: return true
+        case .interrupted, .microphoneChanged, .offlineLocalRecognitionUnavailable: return true
         default: return false
         }
     }
@@ -50,10 +53,10 @@ public enum iOSTranscriptionError: LocalizedError {
             return "Speech recognition permission is required."
         case .recognizerUnavailable:
             return "Speech recognizer is not available for the selected language."
-        case .audioSessionFailed(let error):
-            return "Failed to configure audio: \(error.localizedDescription)"
-        case .recognitionFailed(let error):
-            return "Recognition failed: \(error.localizedDescription)"
+        case .audioSessionFailed:
+            return "The microphone audio session could not start. Try again after other audio activity finishes."
+        case .recognitionFailed:
+            return "Speech recognition failed. Try again, or open the app to check your setup."
         case .microphoneChanged:
             return "The microphone changed and recording stopped."
         case .interrupted:
@@ -61,6 +64,9 @@ public enum iOSTranscriptionError: LocalizedError {
         case .liveActivityUnavailable:
             return "A Live Activity could not be started. Open Just Speak to It to continue recording. "
                 + "If Live Activities are disabled, enable them in Settings."
+        case .offlineLocalRecognitionUnavailable:
+            return "On-device speech recognition is unavailable for the selected language. "
+                + "Choose another language or try again when online."
         case .startTimedOut(let stage):
             guard let stage else {
                 return "Recording did not start in time and was cancelled before it got going."

@@ -1,6 +1,5 @@
 #if os(iOS)
 import Foundation
-import UIKit
 
 /// Raw output is written once at Stop. Polishing never receives this capability:
 /// UIKit cannot condition a later write atomically on cross-process ownership.
@@ -11,8 +10,18 @@ protocol PolishPasteboard: AnyObject {
 
 @MainActor
 final class SystemPolishPasteboard: PolishPasteboard {
+    private let clipboard: TranscriptClipboard
+
+    convenience init() {
+        self.init(clipboard: .shared)
+    }
+
+    init(clipboard: TranscriptClipboard) {
+        self.clipboard = clipboard
+    }
+
     func write(_ text: String) {
-        UIPasteboard.general.string = text
+        self.clipboard.copy(text)
     }
 }
 

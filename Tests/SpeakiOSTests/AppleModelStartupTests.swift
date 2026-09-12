@@ -127,6 +127,99 @@ final class AppleModelStartupTests: XCTestCase {
         XCTAssertEqual(releases, 2)
         inventory.reply?.resume(returning: .installed)
     }
+}
+
+extension AppleModelStartupTests {
+    func testStrictLegacyStartRefusesBeforeInjectedRecognizerCanUseServer() async {
+        let manager = AudioSessionManager()
+        manager.configureRecording = {}
+        var releases = 0
+        manager.deactivateRecording = { releases += 1 }
+        let transcriber = iOSLiveTranscriber(audioSessionManager: manager)
+        transcriber.permissionCheck = { true }
+        transcriber.modelID = AppleLocalModels.legacySpeechModelID
+        transcriber.requiresStrictOnDeviceRecognition = true
+        transcriber.injectedLegacyCapability = { .unavailable }
+        transcriber.legacyStart = { XCTFail("Strict capture must not begin an unsupported recognizer") }
+
+        do {
+            try await transcriber.start()
+            XCTFail("Expected strict local capability refusal")
+        } catch {
+            guard case iOSTranscriptionError.offlineLocalRecognitionUnavailable = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertFalse(transcriber.isRunning)
+        XCTAssertFalse(manager.isConfigured)
+        XCTAssertEqual(releases, 1)
+    }
+
+    func testStrictAnalyzerMissingAssetsDoesNotFallThroughToUnsupportedLegacyRecognition() async throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("SpeechAnalyzer requires iOS 26") }
+        let manager = AudioSessionManager()
+        manager.configureRecording = {}
+        manager.deactivateRecording = {}
+        let transcriber = iOSLiveTranscriber(audioSessionManager: manager)
+        transcriber.permissionCheck = { true }
+        transcriber.modelID = AppleLocalModels.speechTranscriberModelID
+        transcriber.requiresStrictOnDeviceRecognition = true
+        transcriber.analyzerStart = { throw AppleLocalModelError.modelAssetsUnavailable }
+        transcriber.injectedLegacyCapability = { .unavailable }
+        transcriber.legacyStart = { XCTFail("Unsupported legacy recognition must not start") }
+
+        do {
+            try await transcriber.start()
+            XCTFail("Expected strict local capability refusal")
+        } catch {
+            guard case iOSTranscriptionError.offlineLocalRecognitionUnavailable = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertFalse(transcriber.isRunning)
+        XCTAssertFalse(manager.isConfigured)
+    }
+
+    func testStrictRollingRestartRechecksCapabilityAndDoesNotBeginServerTask() async throws {
+        let manager = AudioSessionManager()
+        manager.configureRecording = {}
+        manager.deactivateRecording = {}
+        let transcriber = iOSLiveTranscriber(audioSessionManager: manager)
+        transcriber.permissionCheck = { true }
+        transcriber.modelID = AppleLocalModels.legacySpeechModelID
+        transcriber.requiresStrictOnDeviceRecognition = true
+        var capability: AppleLocalRecognitionCapability = .available
+        var capabilityChecks = 0
+        transcriber.injectedLegacyCapability = {
+            capabilityChecks += 1
+            return capability
+        }
+        var callbacks: [(LegacyAppleRecognitionUpdate?, Error?) -> Void] = []
+        transcriber.legacyRecognitionStart = { callback in
+            callbacks.append(callback)
+            return LegacyAppleRecognitionTask(endAudio: {}, finish: {}, cancel: {})
+        }
+        var errors: [Error] = []
+        transcriber.onError = { errors.append($0) }
+
+        try await transcriber.start()
+        XCTAssertEqual(callbacks.count, 1)
+        XCTAssertEqual(capabilityChecks, 1)
+        capability = .unavailable
+        callbacks[0](
+            LegacyAppleRecognitionUpdate(text: "first", isFinal: true, segments: [], confidence: 1),
+            nil
+        )
+
+        XCTAssertEqual(callbacks.count, 1)
+        XCTAssertEqual(capabilityChecks, 2)
+        guard let error = errors.first else { return XCTFail("Expected strict restart refusal") }
+        guard case iOSTranscriptionError.offlineLocalRecognitionUnavailable = error else {
+            return XCTFail("Unexpected error: \(error)")
+        }
+        XCTAssertTrue(TranscriberCoordinator.requiresControlledStop(error))
+        transcriber.cancel()
+    }
 
     @MainActor
     private final class SuspendedInventory {

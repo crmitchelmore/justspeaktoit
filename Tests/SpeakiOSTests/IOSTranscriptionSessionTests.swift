@@ -122,5 +122,63 @@ final class IOSTranscriptionSessionTests: XCTestCase {
         XCTAssertNil(resolution.route)
         XCTAssertTrue(resolution.isBatch)
     }
+
+    @MainActor
+    func testEveryCatalogueLocalSessionRequiresStrictOnDeviceRecognition() throws {
+        let modelIDs = ModelCatalog.liveTranscription.compactMap { model in
+            LiveTranscriptionRouting.route(for: model.id)?.provider == .apple ? model.id : nil
+        }
+        XCTAssertFalse(modelIDs.isEmpty)
+        for modelID in modelIDs {
+            let session = try IOSTranscriptionSession(
+                modelID: modelID,
+                mode: .streaming,
+                language: "en_US",
+                audioSessionManager: AudioSessionManager(),
+                batchAPIKey: "",
+                liveAPIKey: { _ in "" }
+            )
+            guard case .apple(let transcriber) = session.backend else {
+                return XCTFail("Expected Apple backend for \(modelID)")
+            }
+            XCTAssertTrue(transcriber.requiresStrictOnDeviceRecognition)
+            XCTAssertTrue(transcriber.preferOnDevice, "The legacy soft preference remains unchanged")
+        }
+    }
+
+    @MainActor
+    func testOrdinaryMissingKeyFallbackRemainsStrictForUnknownAndAvailablePaths() throws {
+        let requestedModel = "deepgram/nova-3-streaming"
+        XCTAssertEqual(try XCTUnwrap(LiveTranscriptionRouting.route(for: requestedModel)).provider, .deepgram)
+        for connectivity: CaptureConnectivitySnapshot in [.unknown, .available] {
+            let decision = OfflineCaptureRouting.decide(
+                usesBatch: false,
+                requestedModelID: requestedModel,
+                binding: .ordinary,
+                connectivity: connectivity,
+                localCapability: .unknown
+            )
+            guard case .use(let unchanged) = decision else {
+                return XCTFail("An advisory path must preserve ordinary credential routing")
+            }
+            let effectiveModel = LiveTranscriptionRouting.resolvedModelID(
+                for: unchanged.modelID,
+                apiKey: ""
+            )
+            XCTAssertEqual(effectiveModel, AppleLocalModels.legacySpeechModelID)
+            let session = try IOSTranscriptionSession(
+                modelID: effectiveModel,
+                mode: .streaming,
+                language: "en_US",
+                audioSessionManager: AudioSessionManager(),
+                batchAPIKey: "",
+                liveAPIKey: { _ in "" }
+            )
+            guard case .apple(let transcriber) = session.backend else {
+                return XCTFail("Missing key must resolve to the Apple backend")
+            }
+            XCTAssertTrue(transcriber.requiresStrictOnDeviceRecognition)
+        }
+    }
 }
 #endif

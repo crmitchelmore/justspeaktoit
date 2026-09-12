@@ -66,7 +66,7 @@ final class IOSAppStoreComplianceTests: XCTestCase {
         )
         XCTAssertTrue(
             manifest.contains("TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE"),
-            "The BIS approval code must be injectable rather than hard-coded as a placeholder"
+            "The App Store Connect key value must be injectable rather than hard-coded as a placeholder"
         )
     }
 
@@ -130,17 +130,23 @@ final class IOSAppStoreComplianceTests: XCTestCase {
 
     func testExtensionPrivacyManifests_declareTheSharedDefaultsTheyRead() throws {
         let paths = [
+            "SpeakiOSApp/PrivacyInfo.xcprivacy",
             "JustSpeakToItWidgetExtension/PrivacyInfo.xcprivacy",
             "JustSpeakKeyboard/PrivacyInfo.xcprivacy"
         ]
         for path in paths {
             let privacy = try plist(at: path)
             let declarations = try XCTUnwrap(privacy["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
-            let categories = declarations.compactMap { $0["NSPrivacyAccessedAPIType"] as? String }
-            XCTAssertTrue(
-                categories.contains("NSPrivacyAccessedAPICategoryUserDefaults"),
-                "\(path): both extensions link SpeakCore, which reads the App Group defaults"
-            )
+            for (category, reason) in [
+                ("NSPrivacyAccessedAPICategoryUserDefaults", "1C8F.1"),
+                ("NSPrivacyAccessedAPICategoryFileTimestamp", "C617.1")
+            ] {
+                let declaration = try XCTUnwrap(declarations.first {
+                    $0["NSPrivacyAccessedAPIType"] as? String == category
+                })
+                let reasons = try XCTUnwrap(declaration["NSPrivacyAccessedAPITypeReasons"] as? [String])
+                XCTAssertTrue(reasons.contains(reason), "\(path): missing \(category)/\(reason)")
+            }
         }
     }
 

@@ -57,12 +57,11 @@ Apple lists, which are authentication, digital signature, DRM, medical and
 banking. `ITSAppUsesNonExemptEncryption` is therefore `true`.
 
 Consequence: every build sits in Missing Compliance in App Store Connect until
-the export questions are answered. To stop the prompt, file the annual
-self-classification report with the Bureau of Industry and Security, then
-export the approval code before generating:
+the export questions are answered. If documentation is required, submit it in App Store Connect. After Apple
+approves it, use the key value shown beside the approved documentation:
 
 ```sh
-TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE=<code from BIS> tuist generate
+TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE=<code from App Store Connect> tuist generate
 ```
 
 An unset or empty value leaves the key out of the bundle, which is deliberate: a
@@ -147,32 +146,19 @@ The two questions and their answers:
    transactions, and short key lengths. Encrypting user secrets for
    confidentiality with AES-256-GCM is none of them.
 
-Answering No is what makes the rest of the work necessary. For a mass-market app
-using standard published algorithms, the route is License Exception ENC under
-15 CFR 740.17(b)(1), which has two parts:
-
-1. Submit an encryption registration through the Bureau of Industry and Security
-   SNAP-R system and receive an Encryption Registration Number.
-2. Submit the annual self-classification report to BIS and the NSA, due by
-   1 February each year.
-
-Then create the App Encryption Declaration in App Store Connect, and export the
-resulting code before generating so builds stop prompting:
+Use the questions in App Store Connect to determine which documentation is
+required for this app. Submit any required documents there and, after Apple
+approves them, inject the key value shown beside the approved documentation:
 
 ```sh
-TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE=<code> tuist generate
+TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE=<code from App Store Connect> tuist generate
 ```
 
-App Store Connect also asks whether the app will be available in France. The
-mass-market path normally covers it; confirm rather than assume.
-
-**The cheaper alternative, if the paperwork is unwelcome.** The declaration is
-`true` because the app implements its own encryption layer. Removing that layer
-and relying only on Keychain, iCloud Keychain and CloudKit's own field
-encryption would leave the app using nothing but the encryption built into
-Apple's operating system, which is the one case where `false` is
-straightforwardly right. That is a product change, not a paperwork change, and
-it would alter how key sync works. Worth weighing before filing with BIS.
+See [Apple's encryption documentation procedure](https://developer.apple.com/help/app-store-connect/manage-app-information/determine-and-upload-app-encryption-documentation).
+Any applicable export classification, reporting or country-specific obligations
+are separate from this Apple key. A BIS report does not issue the key used by
+`ITSEncryptionExportComplianceCode`. Confirm those obligations for the actual
+product and distribution territories before submission.
 
 ### App Review Information
 

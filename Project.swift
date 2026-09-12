@@ -346,8 +346,8 @@ let macAppTarget: Target = .target(
     settings: .settings(base: macAppSettings)
 )
 
-// BIS issues an export-compliance approval code once the annual
-// self-classification report is filed. Until then the key is absent and App
+// Apple supplies the key value after approving encryption documentation
+// in App Store Connect. Until then the key is absent and App
 // Store Connect asks the compliance questions per build; exporting
 // TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE before `tuist generate` stamps the
 // code into the bundle and stops the prompt. An empty or unset value is
@@ -392,8 +392,8 @@ var iosAppInfoPlist: [String: Plist.Value] = [
     // iCloud/CloudKit key sync. Confidentiality of user data is not one of
     // the U.S. EAR Category 5 Part 2 exemptions Apple lists (authentication,
     // digital signature, DRM, medical, banking), so this declares `true` and
-    // the compliance answers are supplied in App Store Connect. Once BIS
-    // issues an approval code, export it as
+    // the compliance answers are supplied in App Store Connect. Once Apple
+    // approves the documentation and supplies its key value, export it as
     // TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE before `tuist generate` and every
     // build stops prompting for compliance. See Docs/ios-app-store-submission.md.
     "ITSAppUsesNonExemptEncryption": true,

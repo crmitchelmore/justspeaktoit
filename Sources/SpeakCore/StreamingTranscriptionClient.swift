@@ -41,6 +41,67 @@ public protocol StreamingTranscriptionClient: AnyObject {
     func stop()
 }
 
+/// Optional signal for clients that know when a provider has closed an
+/// utterance. Consumers can use this instead of inferring boundaries from the
+/// provider's transcript shape.
+public protocol UtteranceBoundaryStreamingTranscriptionClient: StreamingTranscriptionClient {
+    var onUtteranceBoundary: ((String) -> Void)? { get set }
+}
+
+/// Provider-neutral, immutable view of a streaming session's current result.
+public struct StreamingTranscriptSnapshot: Sendable {
+    public let confirmedText: String?
+    public let pendingInterim: String?
+    public let displayText: String?
+    public let segments: [TranscriptionSegment]
+    public let latestUpdateConfidence: Double?
+    public let confidence: Double?
+    public let duration: TimeInterval?
+    public let cost: ChatCostBreakdown?
+    public let rawPayload: String?
+    public let isTerminal: Bool
+
+    public init(
+        confirmedText: String? = nil,
+        pendingInterim: String? = nil,
+        displayText: String? = nil,
+        segments: [TranscriptionSegment] = [],
+        latestUpdateConfidence: Double? = nil,
+        confidence: Double? = nil,
+        duration: TimeInterval? = nil,
+        cost: ChatCostBreakdown? = nil,
+        rawPayload: String? = nil,
+        isTerminal: Bool = false
+    ) {
+        self.confirmedText = confirmedText
+        self.pendingInterim = pendingInterim
+        self.displayText = displayText
+        self.segments = segments
+        self.latestUpdateConfidence = latestUpdateConfidence
+        self.confidence = confidence
+        self.duration = duration
+        self.cost = cost
+        self.rawPayload = rawPayload
+        self.isTerminal = isTerminal
+    }
+
+    /// Text consumers should present. A provider's explicit display value is
+    /// authoritative; otherwise confirmed and interim text are composed.
+    public var resolvedDisplayText: String? {
+        if let displayText { return displayText }
+        guard confirmedText != nil || pendingInterim != nil else { return nil }
+        return [confirmedText, pendingInterim]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
+/// Optional authoritative result surface for richer streaming providers.
+public protocol StreamingTranscriptSnapshotProviding: StreamingTranscriptionClient {
+    func transcriptSnapshot(captureDuration: TimeInterval) -> StreamingTranscriptSnapshot
+}
+
 /// Optional graceful-finalisation path for providers that only emit their
 /// definitive transcript after the input buffer is committed.
 ///

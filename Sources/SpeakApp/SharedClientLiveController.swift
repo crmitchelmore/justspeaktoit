@@ -72,9 +72,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       for: route,
       apiKey: apiKey,
       language: currentLanguage,
-      keywords: [.meta, .google].contains(route.provider)
-        ? MetaMuseVoiceTranscribe.keywords(from: appSettings.transcriptionKeywords)
-        : [],
+      options: appSettings.liveClientOptions,
       azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
     ) else {
       throw LiveTranscriptionClientError.providerNotAvailable(route.provider)
@@ -91,15 +89,32 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       // A preferred-input session may have been acquired while cancellation
       // was pending; from here every exit must release it through cleanup.
       try Task.checkCancellation()
+      let hasExplicitBoundaries = client is UtteranceBoundaryStreamingTranscriptionClient
+      if let boundaryClient = client as? UtteranceBoundaryStreamingTranscriptionClient {
+        boundaryClient.onUtteranceBoundary = { [weak self, weak client] text in
+          Task { @MainActor [weak self, weak client] in
+            guard let self,
+                  LiveTranscriptionRun.isCurrent(client, activeStream: self.client) else { return }
+            self.delegate?.liveTranscriber(self, didDetectUtteranceBoundary: text)
+          }
+        }
+      }
       client.start(
         onTranscript: { [weak self, weak client] text, isFinal in
+          let snapshot = (client as? StreamingTranscriptSnapshotProviding)?
+            .transcriptSnapshot(captureDuration: 0)
           Task { @MainActor [weak self, weak client] in
             guard let self else { return }
             // Cached controllers are reused between recordings, so a message
             // queued by the previous stream can land here after the next
             // recording started. Only the current stream owns this state.
             guard LiveTranscriptionRun.isCurrent(client, activeStream: self.client) else { return }
-            self.handleTranscript(text, isFinal: isFinal)
+            self.handleTranscript(
+              text,
+              isFinal: isFinal,
+              snapshot: snapshot,
+              inferBoundary: !hasExplicitBoundaries
+            )
           }
         },
         onError: { [weak self, weak client] error in
@@ -131,29 +146,35 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     }
     audioProcessor.setRunning(false)
 
-    if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
+    let finishingClient = client
+    let hasExplicitBoundaries = finishingClient is UtteranceBoundaryStreamingTranscriptionClient
+    if let finalizingClient = finishingClient as? FinalizingStreamingTranscriptionClient {
       // Contract: `finishAndWait()` returns the session's full transcript, so
       // this replaces what we have rather than appending to it — appending
       // would double every word the client already streamed.
       if let finalTranscript = await finalizingClient.finishAndWait(),
          latestTranscript != finalTranscript {
-        applyFullTranscript(finalTranscript)
+        applyFullTranscript(finalTranscript, inferBoundary: !hasExplicitBoundaries)
       }
     } else {
-      client?.stop()
+      finishingClient?.stop()
     }
+    let captureDuration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
+    let finalSnapshot = (finishingClient as? StreamingTranscriptSnapshotProviding)?
+      .transcriptSnapshot(captureDuration: captureDuration)
+    applySnapshotText(finalSnapshot)
     client = nil
     isRunning = false
     isStopping = false
 
     let result = TranscriptionResult(
       text: latestTranscript,
-      segments: [],
-      confidence: nil,
-      duration: startedAt.map { Date().timeIntervalSince($0) } ?? 0,
+      segments: finalSnapshot?.segments ?? [],
+      confidence: finalSnapshot?.confidence,
+      duration: finalSnapshot?.duration ?? captureDuration,
       modelIdentifier: currentModel ?? "",
-      cost: nil,
-      rawPayload: nil,
+      cost: finalSnapshot?.cost,
+      rawPayload: finalSnapshot?.rawPayload,
       debugInfo: nil
     )
     delegate?.liveTranscriber(self, didFinishWith: result)
@@ -181,31 +202,43 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   /// whole turn on every event), standalone segment finals append — including
   /// repeated identical text, which is a genuine repeat, so a segment-shaped
   /// provider routed here can no longer lose earlier segments.
-  private func handleTranscript(_ text: String, isFinal: Bool) {
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    let displayText: String
-    if isFinal {
-      displayText = accumulated.append(final: trimmed)
-    } else {
-      displayText = accumulated.display(withInterim: trimmed)
-    }
+  private func handleTranscript(
+    _ text: String,
+    isFinal: Bool,
+    snapshot: StreamingTranscriptSnapshot?,
+    inferBoundary: Bool
+  ) {
+    guard let displayText = SharedTranscriptProjection.apply(
+      eventText: text,
+      isFinal: isFinal,
+      snapshot: snapshot,
+      accumulator: &accumulated
+    ) else { return }
     latestTranscript = displayText
     delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
       text: displayText,
       isFinal: isFinal,
-      confidence: nil
+      confidence: snapshot?.latestUpdateConfidence
     ))
     delegate?.liveTranscriber(self, didUpdatePartial: displayText)
-    if isFinal {
+    if isFinal && inferBoundary {
       delegate?.liveTranscriber(self, didDetectUtteranceBoundary: displayText)
+    }
+  }
+
+  private func applySnapshotText(_ snapshot: StreamingTranscriptSnapshot?) {
+    guard let snapshot, let text = snapshot.resolvedDisplayText else { return }
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if snapshot.confirmedText != nil || !trimmed.isEmpty {
+      latestTranscript = trimmed
+      accumulated.replace(with: trimmed)
     }
   }
 
   /// Adopts a transcript that is already complete (the `finishAndWait()`
   /// return) as the whole session transcript — replace, never append, or every
   /// word the client already streamed would double.
-  private func applyFullTranscript(_ transcript: String) {
+  private func applyFullTranscript(_ transcript: String, inferBoundary: Bool = true) {
     let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
     accumulated.replace(with: trimmed)
@@ -216,7 +249,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       confidence: nil
     ))
     delegate?.liveTranscriber(self, didUpdatePartial: accumulated.text)
-    delegate?.liveTranscriber(self, didDetectUtteranceBoundary: accumulated.text)
+    if inferBoundary {
+      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: accumulated.text)
+    }
   }
 
   private func installAudioTap(
@@ -268,6 +303,24 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     guard let session = activeInputSession else { return }
     activeInputSession = nil
     await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+}
+
+enum SharedTranscriptProjection {
+  static func apply(
+    eventText: String,
+    isFinal: Bool,
+    snapshot: StreamingTranscriptSnapshot?,
+    accumulator: inout TranscriptAccumulator
+  ) -> String? {
+    if let authoritative = snapshot?.resolvedDisplayText {
+      let text = authoritative.trimmingCharacters(in: .whitespacesAndNewlines)
+      accumulator.replace(with: text)
+      return text
+    }
+    let text = eventText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return nil }
+    return isFinal ? accumulator.append(final: text) : accumulator.display(withInterim: text)
   }
 }
 

@@ -8,11 +8,12 @@ final class TestLiveWebSocket: LiveWebSocketTransport, @unchecked Sendable {
     private var inbound: [Result<URLSessionWebSocketTask.Message, Error>] = []
     private var sendCompletions: [@Sendable (Error?) -> Void] = []
     private var storedMessages: [URLSessionWebSocketTask.Message] = []
+    private var storedCancelCount = 0
     var automaticallyCompletesSends = true
-    private(set) var cancelCount = 0
 
     var state: URLSessionTask.State { lock.withLock { storedState } }
     var messages: [URLSessionWebSocketTask.Message] { lock.withLock { storedMessages } }
+    var cancelCount: Int { lock.withLock { storedCancelCount } }
 
     func resume() { lock.withLock { storedState = .running } }
 
@@ -36,7 +37,7 @@ final class TestLiveWebSocket: LiveWebSocketTransport, @unchecked Sendable {
 
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         lock.withLock {
-            cancelCount += 1
+            storedCancelCount += 1
             storedState = .canceling
         }
     }

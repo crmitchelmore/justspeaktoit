@@ -107,9 +107,11 @@ final class SonioxLiveClientTests: XCTestCase {
         old.completeNextSend()
         old.emit(#"{"tokens":[{"text":"stale","is_final":true}],"finished":true}"#)
         fresh.emit(#"{"tokens":[{"text":"fresh","is_final":true}],"finished":true}"#)
-        try? await Task.sleep(nanoseconds: 30_000_000)
+        let receivedFresh = await eventually {
+            lock.withLock { callbacks.contains(where: { $0.contains("fresh") }) }
+        }
+        XCTAssertTrue(receivedFresh)
         XCTAssertFalse(lock.withLock { callbacks.contains(where: { $0.contains("stale") }) })
-        XCTAssertTrue(lock.withLock { callbacks.contains(where: { $0.contains("fresh") }) })
         let awaited15 = await client.finishAndWait()
         XCTAssertEqual(awaited15, "fresh")
     }

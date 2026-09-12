@@ -42,6 +42,7 @@ Manual releases are still possible by creating and pushing a `mac-v*` tag direct
 2. For an iOS-only release, go to Actions → "Release iOS (TestFlight)" → Run workflow.
 3. Check App Store Connect for the current iOS version, then enter the intended semantic version explicitly. Never infer it from `VERSION`.
 4. Follow [`Docs/ios-testflight-release.md`](Docs/ios-testflight-release.md) for signing repair, upload, tester assignment, and physical-device verification.
+5. Before an App Store submission, read [`Docs/ios-app-store-submission.md`](Docs/ios-app-store-submission.md): it records which review requirements the repo already satisfies, and which ones (export compliance answers, nutrition label, review notes) still have to be answered by hand in App Store Connect.
 
 ### VERSION File
 

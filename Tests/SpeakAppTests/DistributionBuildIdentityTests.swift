@@ -148,8 +148,13 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(manifest.contains("iosActiveCompilationConditions.append(\"IOS_KEYBOARD_FEATURE\")"))
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("IOS_KEYBOARD_DIRECT_CAPTURE"))
-        XCTAssertTrue(manifest.contains("let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled"))
-        XCTAssertTrue(manifest.contains("? .file(path: \"JustSpeakKeyboard/Info.plist\")"))
+        // Both keyboard configurations now ship the checked-in plist: the
+        // extension binary references the record-permission and Speech APIs
+        // whether or not direct capture is on, so the purpose strings cannot be
+        // gated on the flag. See IOSAppStoreComplianceTests.
+        XCTAssertTrue(
+            manifest.contains("let iosKeyboardInfoPlist: InfoPlist = .file(path: \"JustSpeakKeyboard/Info.plist\")")
+        )
         XCTAssertTrue(manifest.contains("infoPlist: iosKeyboardInfoPlist"))
         XCTAssertTrue(manifest.contains("settings: .settings(base: iosTestSettings)"))
         XCTAssertTrue(
@@ -674,9 +679,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
             encoding: .utf8
         )
-        let iosTarget = try targetBlock(named: "SpeakiOS", in: manifest)
+        let infoPlist = try iosAppInfoPlistBlock(in: manifest)
 
-        XCTAssertTrue(iosTarget.contains("\"UIBackgroundModes\": [\"audio\", \"remote-notification\"]"))
+        XCTAssertTrue(infoPlist.contains("\"UIBackgroundModes\": [\"audio\", \"remote-notification\"]"))
     }
     // swiftlint:disable:next file_length
 }

@@ -25,6 +25,23 @@
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
             </array>
         </dict>
+        <!-- Transcript text leaves the device separately from the audio: post-
+             processing sends it to the chosen language model and voice output
+             sends it to the chosen speech provider. Apple counts that as
+             collection of other user content, and the nutrition label in App
+             Store Connect must agree with this entry. -->
+        <dict>
+            <key>NSPrivacyCollectedDataType</key>
+            <string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+            <key>NSPrivacyCollectedDataTypeLinked</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypeTracking</key>
+            <false/>
+            <key>NSPrivacyCollectedDataTypePurposes</key>
+            <array>
+                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+            </array>
+        </dict>
     </array>
 
     <!-- Required-reason API declarations. -->

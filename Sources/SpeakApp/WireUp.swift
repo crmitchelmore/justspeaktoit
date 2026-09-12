@@ -55,6 +55,15 @@ final class AppEnvironment: ObservableObject {
   /// because `HistorySyncEngine` only holds its delegate weakly; without this
   /// owner the adapter deallocates after bootstrap and sync stops (#685).
   fileprivate(set) var historySyncAdapter: MacHistorySyncAdapter?
+  /// Compare Models rounds and their CloudKit bridge (issue #1101). Created
+  /// at bootstrap so rounds judged on another Mac arrive before the section
+  /// is opened, and retained here for the same reason as the history adapter.
+  let comparisonRounds = ComparisonRoundStore()
+  fileprivate(set) var comparisonSyncAdapter: MacComparisonSyncAdapter?
+  /// Owned here rather than by the Settings view so leaving the section
+  /// mid-capture cannot deallocate a controller that still holds the
+  /// microphone; the section reattaches to the same in-flight round.
+  lazy var compareModels = CompareModelsController(environment: self, store: comparisonRounds)
   /// Posts and acts on notifications for transcripts arriving from an iPhone
   /// or Apple Watch (issue #1007).
   fileprivate(set) var remoteTranscriptDelivery: RemoteTranscriptDelivery?
@@ -326,6 +335,7 @@ final class AppEnvironment: ObservableObject {
       .openAPIKeysSettings: .settings(.apiKeys),
       .openKeyboardSettings: .settings(.shortcuts),
       .openPermissionsSettings: .settings(.permissions),
+      .openCompareModelsSettings: .settings(.compareModels),
       .openAboutSettings: .settings(.about)
     ]
     for (action, item) in navigationActions {
@@ -703,7 +713,13 @@ enum WireUp {
       remoteTranscripts?.handle(entry: entry, isNewToThisMac: isNew)
     }
     remoteTranscripts.start()
-    Task { await syncAdapter.start() }
+    let comparisonSync = MacComparisonSyncAdapter(store: environment.comparisonRounds)
+    environment.comparisonSyncAdapter = comparisonSync
+    Task {
+      await syncAdapter.start()
+      // After the history engine, which owns zone creation for the shared zone.
+      await comparisonSync.start()
+    }
 
     Task { await secureStorage.preloadTrackedSecrets() }
     if DistributionChannel.current.supportsEncryptedCloudKitKeySync {

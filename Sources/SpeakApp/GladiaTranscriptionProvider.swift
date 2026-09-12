@@ -25,7 +25,7 @@ enum GladiaLiveError: LocalizedError {
     case .connectionFailed:
       return "Failed to establish live transcription with Gladia."
     case .batchNotSupported:
-      return "Gladia Solaria-1 is currently only available for live streaming in Speak."
+      return "This Gladia model is only available for live streaming in Speak."
     case .serverError(let message):
       return "Gladia transcription failed: \(message)"
     }
@@ -55,8 +55,12 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
     model: String,
     language: String?
   ) async throws -> TranscriptionResult {
-    _ = (url, apiKey, model, language)
-    throw GladiaLiveError.batchNotSupported
+    guard model.trimmingCharacters(in: .whitespacesAndNewlines) == GladiaBatchClient.catalogID else {
+      throw BatchTranscriptionJobError.unsupportedModel("Gladia")
+    }
+    return try await GladiaBatchClient(session: session, baseURL: baseURL).transcribeFile(
+      at: url, apiKey: apiKey, model: model, language: language
+    )
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
@@ -98,6 +102,7 @@ struct GladiaTranscriptionProvider: TranscriptionProvider {
 
   func supportedModels() -> [ModelCatalog.Option] {
     ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
+      + ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 
   func createLiveTranscriber(

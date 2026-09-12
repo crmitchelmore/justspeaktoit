@@ -47,7 +47,7 @@ public enum KeychainSyncAvailability {
         let account = "sync-probe-\(UUID().uuidString)"
         var addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.justspeaktoit.keychain-sync-probe",
+            kSecAttrService as String: ReleaseTrain.current.namespace("com.justspeaktoit.keychain-sync-probe"),
             kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: kCFBooleanTrue as Any,
             kSecValueData as String: Data("probe".utf8)
@@ -61,7 +61,7 @@ public enum KeychainSyncAvailability {
 
         var deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.justspeaktoit.keychain-sync-probe",
+            kSecAttrService as String: ReleaseTrain.current.namespace("com.justspeaktoit.keychain-sync-probe"),
             kSecAttrAccount as String: account,
             kSecAttrSynchronizable as String: kCFBooleanTrue as Any
         ]

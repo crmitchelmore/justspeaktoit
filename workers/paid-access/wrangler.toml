@@ -139,3 +139,9 @@ class_name = "QuotaDurableObject"
 [[env.production.durable_objects.bindings]]
 name = "LIVE_SESSION"
 class_name = "LiveSessionDurableObject"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[env.production.triggers]
+crons = ["*/15 * * * *"]

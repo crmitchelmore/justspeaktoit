@@ -92,6 +92,7 @@ describe('entitlement transitions', () => {
     const revoked = makeEntitlement({
       status: 'revoked',
       revokedAt: NOW - 100,
+      source: 'stripe',
       sourceReference: 'sub_1',
     });
     expect(() =>
@@ -152,6 +153,8 @@ describe('entitlement transitions', () => {
   it('discards an update that is older than the state already stored', () => {
     const current = makeEntitlement({
       status: 'active',
+      source: 'stripe',
+      sourceReference: 'sub_1',
       sourceEventAt: NOW,
       currentPeriodEnd: NOW + 1_000,
     });
@@ -225,5 +228,28 @@ describe('billing period', () => {
   it('produces a stable YYYY-MM key in UTC', () => {
     expect(billingPeriod(Date.UTC(2026, 7, 12, 9, 0, 0) / 1_000)).toBe('2026-08');
     expect(billingPeriod(Date.UTC(2026, 0, 1, 0, 0, 0) / 1_000)).toBe('2026-01');
+  });
+});
+
+
+describe('billing source isolation', () => {
+  for (const source of ['stripe', 'storekit'] as const) {
+    it(`preserves active ${source} access when another purchase expires`, () => {
+      const current = makeEntitlement({ status: 'active', source, sourceReference: 'paid-current',
+        currentPeriodEnd: NOW + 1000, sourceEventAt: NOW });
+      const update = { ...current, status: 'expired' as const,
+        source: source === 'stripe' ? 'storekit' as const : 'stripe' as const,
+        sourceReference: 'unrelated-old', sourceEventAt: NOW + 1, currentPeriodEnd: NOW - 1 };
+      const outcome = applyUpdate(current, update, NOW);
+      expect(outcome.kind).toBe('stale');
+      expect(grantsAccess(current, NOW)).toBe(true);
+    });
+  }
+  it('compares event clocks only for the same purchase', () => {
+    const current = makeEntitlement({ status: 'expired', source: 'stripe', sourceReference: 'old',
+      sourceEventAt: NOW + 100, currentPeriodEnd: NOW - 1 });
+    const outcome = applyUpdate(current, { ...current, status: 'active', source: 'storekit',
+      sourceReference: 'new', sourceEventAt: NOW, currentPeriodEnd: NOW + 1000 }, NOW);
+    expect(outcome.kind).toBe('applied');
   });
 });

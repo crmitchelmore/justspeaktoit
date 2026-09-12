@@ -25,3 +25,8 @@ issues.jsonl
 # Cloudflare Worker (workers/paid-access)
 node_modules/
 .wrangler/
+.build-xc*/
+research/
+
+# Project-local Alpha run bundle
+/dist/

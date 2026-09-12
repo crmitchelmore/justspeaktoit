@@ -374,3 +374,26 @@ describe('quota release and finalisation', () => {
     expect(tokens.snapshot.audioSecondsUsed).toBe(100);
   });
 });
+
+
+describe('delayed and measured settlement', () => {
+  it('corrects an expired ceiling to actual duration exactly once', async () => {
+    const quota = client();
+    const userId = newUser();
+    const reservation = await quota.reserve({ userId, period: PERIOD, unitKind: 'audio_seconds',
+      units: 100, countsAsSession: true, nowSeconds: NOW });
+    expect((await quota.status(userId, PERIOD, NOW + 61)).audioSecondsUsed).toBe(100);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await quota.finalise({ userId, reservationId: reservation.reservationId, actualUnits: 7, nowSeconds: NOW + 62 });
+    }
+    expect((await quota.status(userId, PERIOD, NOW + 63)).audioSecondsUsed).toBe(7);
+  });
+  it('records a provider token overrun instead of clipping it to the estimate', async () => {
+    const quota = client();
+    const userId = newUser();
+    const reservation = await quota.reserve({ userId, period: PERIOD, unitKind: 'tokens',
+      units: 100, countsAsSession: false, nowSeconds: NOW });
+    await quota.finalise({ userId, reservationId: reservation.reservationId, actualUnits: 150, nowSeconds: NOW + 1 });
+    expect((await quota.status(userId, PERIOD, NOW + 2)).tokensUsed).toBe(150);
+  });
+});

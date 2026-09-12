@@ -35,9 +35,26 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
         tintColor: String = "blue",
         website: String = ""
     ) {
+        self.init(
+            id: id, displayName: displayName, systemImage: systemImage, tintColor: tintColor,
+            website: website, apiKeyIdentifier: "\(id).apiKey"
+        )
+    }
+
+    /// For providers whose Keychain item predates the `<id>.apiKey` convention:
+    /// Azure transcription reuses the `azure.speech.apiKey` entry voice output
+    /// already writes, so one saved key unlocks both.
+    public init(
+        id: String,
+        displayName: String,
+        systemImage: String = "network",
+        tintColor: String = "blue",
+        website: String = "",
+        apiKeyIdentifier: String
+    ) {
         self.id = id
         self.displayName = displayName
-        self.apiKeyIdentifier = "\(id).apiKey"
+        self.apiKeyIdentifier = apiKeyIdentifier
         self.apiKeyLabel = "\(displayName) API Key"
         self.systemImage = systemImage
         self.tintColor = tintColor
@@ -58,7 +75,7 @@ public struct TranscriptionProviderMetadata: Sendable, Identifiable {
 /// the diagnostics report. Keep the established wording. `httpError` keeps the
 /// status code and the response body, because that context is what makes a
 /// provider failure diagnosable.
-public enum TranscriptionProviderError: LocalizedError {
+public enum TranscriptionProviderError: LocalizedError, Equatable {
     case apiKeyMissing
     case invalidResponse
     case httpError(Int, String)

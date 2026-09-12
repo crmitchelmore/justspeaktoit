@@ -31,21 +31,93 @@ public final class iOSLiveTranscriber: ObservableObject {
     public var onPartialResult: ((String, Bool) -> Void)?
     public var onFinalResult: ((TranscriptionResult) -> Void)?
     public var onError: ((Error) -> Void)?
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count (issue #983).
+    public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972).
+    /// Measurement only: it changes no capture order, ordering guarantee or
+    /// audio behaviour.
+    public var onStartupObservation: ((StartupObservation) -> Void)?
 
     // MARK: - Private
 
     private let audioSessionManager: AudioSessionManager
+    private let startup = RecordingStartupOperation()
+    private var ownsAudioSession = false
+    private var hasInputTap = false
+    /// Replaced per start so a retired run's tap can never report input for
+    /// the run that replaced it.
+    private var firstInputSignal = FirstInputSignal()
+
+    /// Starts a fresh capture identity, so a retired run's tap can never
+    /// report input for the run that replaced it.
+    private func beginCapture() -> UUID {
+        let captureID = UUID()
+        activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
+        return captureID
+    }
+
+    /// The analyzer branch is the one that actually ran, and the engine has
+    /// actually returned (issue #972).
+    private func reportAnalyzerEngineStarted() {
+        onStartupObservation?(.backend(.appleAnalyzer))
+        onStartupObservation?(.stage(.engineStarted))
+    }
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
     private var speechRecognizer: SFSpeechRecognizer?
     private let audioEngine = AVAudioEngine()
+    private let configurationObserver = CaptureDisruptionObserver()
+    private let captureInterruptionObserver = CaptureDisruptionObserver()
+    private var isStopping = false
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private var latestResult: SFSpeechRecognitionResult?
+    private var recognitionTask: LegacyAppleRecognitionTask?
+    private var latestResult: LegacyAppleRecognitionUpdate?
+    private var activeRecognitionID: UUID?
+    private var legacyStopTask: Task<TranscriptionResult, Never>?
+    private var legacyFinalisationContinuation: CheckedContinuation<Void, Never>?
+    private var cancelLegacyDeadline: (() -> Void)?
+    var legacyRecognitionStart: ((@escaping (LegacyAppleRecognitionUpdate?, Error?) -> Void)
+        -> LegacyAppleRecognitionTask)?
+    /// Cap the recognizer wait at two seconds after queued audio drains, keeping
+    /// an unresponsive framework from holding Stop indefinitely. Return early on
+    /// a terminal callback; this ceiling still needs device latency validation.
+    /// Device latency/trailing-word coverage is tracked in issue #948.
+    var scheduleLegacyDeadline: (@escaping () -> Void) -> (() -> Void) = { completion in
+        let task = Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            completion()
+        }
+        return { task.cancel() }
+    }
     private var speechAnalyzerSession: Any?
+    private var analyzerCancellationTask: Task<Void, Never>?
+    private var activeCaptureID: UUID?
     private var speechAnalyzerConverter: Any?
+    // Isolates permission/analyzer boundaries in cancellation tests.
+    var permissionCheck: (() async -> Bool)?
+    var analyzerStart: (() async throws -> Void)?
+    var legacyStart: (() throws -> Void)?
     private var activeModelID = AppleLocalModels.legacySpeechModelID
     private var startTime: Date?
     private var accumulatedSegments: [TranscriptionSegment] = []
-    private var segments: [TranscriptionSegment] = []
     private var isShuttingDownRecognitionTask = false
     /// Accumulated text from recognition segments finalised mid-session (on pause).
     private var committedText: String = ""
@@ -58,6 +130,7 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     /// Persistent audio recorder — saves audio to disk alongside transcription.
     public let audioRecorder = AudioRecordingPersistence()
+    let recordingLoss = RecordingLossReporting()
 
     /// Serial queue that takes tap buffers off the real-time audio thread —
     /// recognition feeding and persistence run here, not in the tap callback.
@@ -69,16 +142,17 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     public init(audioSessionManager: AudioSessionManager) {
         self.audioSessionManager = audioSessionManager
-        setupInterruptionHandling()
     }
 
     // MARK: - Public API
 
     /// Check and request all required permissions.
     public func ensurePermissions() async -> Bool {
+        if let permissionCheck { return await permissionCheck() }
         // Check microphone
         if !audioSessionManager.hasMicrophonePermission() {
             let granted = await audioSessionManager.requestMicrophonePermission()
+            guard !Task.isCancelled else { return false }
             if !granted {
                 error = iOSTranscriptionError.permissionDenied(.microphone)
                 return false
@@ -86,13 +160,15 @@ public final class iOSLiveTranscriber: ObservableObject {
         }
 
         // Check speech recognition
+        guard !Task.isCancelled else { return false }
         let speechStatus = SFSpeechRecognizer.authorizationStatus()
         if speechStatus != .authorized {
-            let granted = await withCheckedContinuation { continuation in
+            let granted = await CancellablePermissionRequest.request { completion in
                 SFSpeechRecognizer.requestAuthorization { status in
-                    continuation.resume(returning: status == .authorized)
+                    completion(status == .authorized)
                 }
             }
+            guard !Task.isCancelled else { return false }
             if !granted {
                 error = iOSTranscriptionError.permissionDenied(.speechRecognition)
                 return false
@@ -111,96 +187,175 @@ public final class iOSLiveTranscriber: ObservableObject {
         preRollBuffers: [AVAudioPCMBuffer],
         analyzerFallbackAllowed: Bool = true
     ) async throws {
-        guard !isRunning else { return }
+        guard !isRunning, !isStopping, !startup.isStarting else { return }
+        do {
+            try await startup.run({
+                await self.finishAnalyzerCancellation()
+                try Task.checkCancellation()
+                try await self.startCapture(
+                    preRollBuffers: preRollBuffers, analyzerFallbackAllowed: analyzerFallbackAllowed
+                )
+            }, onFailure: {
+                self.cleanupCapture()
+                await self.finishAnalyzerCancellation()
+            })
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+    }
 
+    private func startCapture(
+        preRollBuffers: [AVAudioPCMBuffer],
+        analyzerFallbackAllowed: Bool
+    ) async throws {
+        recordingLoss.begin(recorder: audioRecorder)
+        let captureID = beginCapture()
         SpeakLogger.logTranscription(event: "start", model: "Apple Speech")
 
         // Verify permissions
-        guard await ensurePermissions() else {
+        let permissionsGranted = await ensurePermissions()
+        try Task.checkCancellation()
+        guard permissionsGranted else {
             let err = error ?? iOSTranscriptionError.permissionDenied(.microphone)
             SpeakLogger.logError(err, context: "iOSLiveTranscriber.start", logger: SpeakLogger.transcription)
             throw err
         }
 
-        // Configure audio session
-        do {
-            try await audioSessionManager.configureForRecording()
-            SpeakLogger.audio.info("Audio session configured for recording")
-        } catch {
-            SpeakLogger.logError(error, context: "Audio session setup", logger: SpeakLogger.audio)
-            throw iOSTranscriptionError.audioSessionFailed(error)
-        }
-
+        try await configureAudioSession()
         resetState()
 
+        var analyzerAssetsMissing = false
         if AppleLocalModels.isSpeechAnalyzerModel(modelID) {
             if #available(iOS 26.0, *) {
                 do {
                     let engine = AppleSpeechAnalyzerEngine(modelID: modelID)
-                    try await startSpeechAnalyzer(engine: engine, preRollBuffers: preRollBuffers)
-                    activeModelID = engine.modelID
+                    if let analyzerStart {
+                        try await analyzerStart()
+                        activeModelID = engine.modelID
+                    } else {
+                        try await startSpeechAnalyzer(
+                            engine: engine, preRollBuffers: preRollBuffers, captureID: captureID
+                        )
+                    }
+                    try Task.checkCancellation()
                     isRunning = true
-                    logger.info("Started with SpeechAnalyzer (\(engine.modelID))")
+                    // Arm here as well as inside the engine start: an injected
+                    // analyzer session never reaches that path, and this is the
+                    // point at which the capture is live and interruptible.
+                    observeCaptureConfiguration()
+                    logger.info("Started with SpeechAnalyzer (\(self.activeModelID))")
                     return
                 } catch {
+                    // Cancellation is a control action, never a reason to
+                    // activate the legacy recognizer after the user stopped.
+                    if Task.isCancelled || error is CancellationError { throw CancellationError() }
                     SpeakLogger.logError(
                         error,
                         context: "SpeechAnalyzer setup; falling back to SFSpeechRecognizer",
                         logger: SpeakLogger.transcription
                     )
-                    if !analyzerFallbackAllowed { throw error }
+                    if case AppleLocalModelError.modelAssetsUnavailable = error {
+                        analyzerAssetsMissing = true
+                    }
+                    if !analyzerFallbackAllowed {
+                        throw analyzerAssetsMissing ? Self.modelPreparationError : error
+                    }
                 }
             }
         }
 
-        activeModelID = AppleLocalModels.legacySpeechModelID
-        let (recognizer, request) = try setupRecognition()
-        try startAudioEngine(request: request)
+        try startLegacyCapture(captureID: captureID, analyzerAssetsMissing: analyzerAssetsMissing)
+    }
 
-        // Start recognition
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor in
-                self?.handleRecognitionResult(result, error: error)
-            }
-        }
+    private func startLegacyCapture(captureID: UUID, analyzerAssetsMissing: Bool) throws {
+        activeModelID = AppleLocalModels.legacySpeechModelID
+        try startLegacyFallback(captureID: captureID, analyzerAssetsMissing: analyzerAssetsMissing)
 
         isRunning = true
+        observeCaptureConfiguration()
         logger.info("Started")
     }
 
+    private func startLegacyFallback(captureID: UUID, analyzerAssetsMissing: Bool) throws {
+        do {
+            if let legacyStart {
+                try legacyStart()
+            } else {
+                try startLegacyRecognition(captureID: captureID)
+            }
+        } catch {
+            if analyzerAssetsMissing, case iOSTranscriptionError.recognizerUnavailable = error {
+                throw Self.modelPreparationError
+            }
+            throw error
+        }
+    }
+
+    private static var modelPreparationError: NSError {
+        NSError(domain: "AppleSpeechPreparation", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Apple's on-device speech model is not ready. "
+                + "Open Settings and tap Prepare Apple model, then try again."
+        ])
+    }
+
+    private func startLegacyRecognition(captureID: UUID) throws {
+        if legacyRecognitionStart != nil {
+            beginRecognitionTask(captureID: captureID)
+        } else {
+            let (recognizer, request) = try setupRecognition()
+            try startAudioEngine(request: request)
+            beginRecognitionTask(captureID: captureID, recognizer: recognizer, request: request)
+        }
+    }
+
+    private func configureAudioSession() async throws {
+        do {
+            ownsAudioSession = true
+            try await audioSessionManager.configureForRecording()
+            onStartupObservation?(.stage(.audioSessionConfigured))
+            try Task.checkCancellation()
+            SpeakLogger.audio.info("Audio session configured for recording")
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            SpeakLogger.logError(error, context: "Audio session setup", logger: SpeakLogger.audio)
+            throw iOSTranscriptionError.audioSessionFailed(error)
+        }
+    }
+
     @available(iOS 26.0, *)
+    // One do/catch owns the analyzer session, its tap and its teardown; the
+    // engine-start boundary must be reported from inside it (issue #972).
     private func startSpeechAnalyzer(
         engine: AppleSpeechAnalyzerEngine,
-        preRollBuffers: [AVAudioPCMBuffer]
+        preRollBuffers: [AVAudioPCMBuffer],
+        captureID: UUID
     ) async throws {
         let session = try await AppleSpeechAnalyzerLiveSession(
             localeIdentifier: language,
-            engine: engine
+            engine: engine,
+            assetPolicy: .installedOnly
         ) { [weak self] update in
             Task { @MainActor [weak self] in
+                guard self?.activeCaptureID == captureID else { return }
                 self?.handleSpeechAnalyzerUpdate(update)
             }
         }
-        let inputNode = audioEngine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-
         do {
+            try Task.checkCancellation()
+            let inputNode = audioEngine.inputNode
+            let recordingFormat = inputNode.outputFormat(forBus: 0)
             let converter = try AppleSpeechAudioConverter(
                 sourceFormat: recordingFormat,
                 targetFormat: session.audioFormat
             )
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-                // Copy the buffer and hop off the real-time audio thread —
-                // heavy work in the tap makes CoreAudio drop mic buffers.
-                guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
-                self.audioProcessingQueue.async {
-                    defer { self.tapBufferPool.recycle(copied) }
-                    self.audioRecorder.writeBuffer(copied)
-                    guard let converted = converter.convert(copied) else { return }
-                    session.send(converted)
-                }
-            }
-            _ = try? audioRecorder.startRecording(format: recordingFormat)
+            let lossReport = recordingLoss.currentReport
+            installAnalyzerTap(
+                format: recordingFormat, converter: converter,
+                session: session, captureID: captureID, lossReport: lossReport
+            )
+            recordingLoss.startWriter(audioRecorder, format: recordingFormat)
             for buffer in preRollBuffers {
                 if let converted = converter.convert(buffer) {
                     session.send(converted)
@@ -208,15 +363,46 @@ public final class iOSLiveTranscriber: ObservableObject {
             }
             audioEngine.prepare()
             try audioEngine.start()
+            reportAnalyzerEngineStarted()
+            observeCaptureConfiguration()
+            activeModelID = session.modelIdentifier
             speechAnalyzerSession = session
             speechAnalyzerConverter = converter
         } catch {
-            audioRecorder.cancelRecording()
             audioEngine.stop()
-            inputNode.removeTap(onBus: 0)
+            removeInputTap()
+            audioProcessingQueue.sync {}
+            audioRecorder.cancelRecording()
             await session.cancel()
             throw error
         }
+    }
+
+    @available(iOS 26.0, *)
+    private func installAnalyzerTap(
+        format recordingFormat: AVAudioFormat,
+        converter: AppleSpeechAudioConverter,
+        session: AppleSpeechAnalyzerLiveSession,
+        captureID: UUID,
+        lossReport: RecordingLossReport
+    ) {
+        let signal = firstInputSignal
+        audioEngine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
+            // Copy the buffer and hop off the real-time audio thread —
+            // heavy work in the tap makes CoreAudio drop mic buffers.
+            guard let self,
+                  let copied = lossReport.copyCapture(buffer, using: self.tapBufferPool) else { return }
+            if copied.frameLength > 0, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
+            self.audioProcessingQueue.async {
+                defer { self.tapBufferPool.recycle(copied) }
+                self.audioRecorder.writeBuffer(copied)
+                guard let converted = converter.convert(copied) else { return }
+                session.send(converted)
+            }
+        }
+        hasInputTap = true
     }
 
     @available(iOS 26.0, *)
@@ -250,10 +436,18 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     private func startAudioEngine(request: SFSpeechAudioBufferRecognitionRequest) throws {
-        let recordingFormat = installTap(appendingTo: request)
+        let recordingFormat = audioEngine.inputNode.outputFormat(forBus: 0)
+        // The safety writer opens before the tap and the engine, so the file
+        // covers the very first buffers instead of starting a beat late
+        // (issue #992); a writer failure is reported, never fatal (issue #950).
+        recordingLoss.startWriter(audioRecorder, format: recordingFormat)
+        installTap(appendingTo: request)
         audioEngine.prepare()
         try audioEngine.start()
-        _ = try? audioRecorder.startRecording(format: recordingFormat)
+        // The legacy branch is the one that actually ran, and the engine has
+        // actually returned.
+        onStartupObservation?(.backend(.appleLegacy))
+        onStartupObservation?(.stage(.engineStarted))
     }
 
     /// Installs the input tap appending to `request`. The request is captured
@@ -267,18 +461,25 @@ public final class iOSLiveTranscriber: ObservableObject {
         let recorder = audioRecorder
         let pool = tapBufferPool
         let queue = audioProcessingQueue
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
+        let lossReport = recordingLoss.currentReport
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
             // `request` is captured immutably; the tap is reinstalled with the
             // fresh request in `restartRecognitionTask()`.
-            guard let copied = pool.copy(buffer) else { return }
+            guard let copied = lossReport.copyCapture(buffer, using: pool) else { return }
+            if copied.frameLength > 0, let captureID, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
             queue.async {
                 defer { pool.recycle(copied) }
                 request.append(copied)
                 recorder.writeBuffer(copied)
             }
         }
+        hasInputTap = true
         return recordingFormat
     }
 
@@ -289,7 +490,6 @@ public final class iOSLiveTranscriber: ObservableObject {
         error = nil
         latestResult = nil
         accumulatedSegments = []
-        segments = []
         isShuttingDownRecognitionTask = false
         committedText = ""
         lastFormattedString = ""
@@ -297,45 +497,76 @@ public final class iOSLiveTranscriber: ObservableObject {
     }
 
     /// Stop transcription and return final result.
-    public func stop() async -> TranscriptionResult {
-        guard isRunning else {
-            return TranscriptionResult(
-                text: partialText,
-                segments: segments,
-                confidence: confidence,
-                duration: 0,
-                modelIdentifier: activeModelID,
-                cost: nil,
-                rawPayload: nil,
-                debugInfo: nil
-            )
+    private func observeCaptureConfiguration() {
+        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
+            self?.audioEngine.isRunning == true
+        } onDisruption: { [weak self] in
+            self?.handleCaptureDisruption(.microphoneChanged)
         }
+        captureInterruptionObserver.observeAudioInterruption { [weak self] in
+            self?.handleCaptureDisruption(.interrupted)
+        }
+    }
 
+    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
+        guard isRunning, !isStopping else { return }
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        audioEngine.stop()
+        removeInputTap()
+        // The owner drains the provider and recording once through its normal stop path.
+        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+        if !reason.isControlledInterruption { error = reason }
+        onError?(reason)
+    }
+
+    public func stop() async -> TranscriptionResult {
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        let lossRun = recordingLoss.currentReport
+        if let legacyStopTask { return await legacyStopTask.value }
+        guard isRunning, !isStopping else { return buildFinalResult(duration: 0) }
+
+        isStopping = true
+        defer { isStopping = false }
         if #available(iOS 26.0, *),
            let session = speechAnalyzerSession as? AppleSpeechAnalyzerLiveSession {
             return await stopSpeechAnalyzer(session)
         }
 
+        let captureID = activeCaptureID
+        let task = Task { await self.stopLegacyRecognition(captureID: captureID, lossRun: lossRun) }
+        legacyStopTask = task
+        let result = await task.value
+        legacyStopTask = nil
+        return result
+    }
+
+    private func stopLegacyRecognition(
+        captureID: UUID?, lossRun: RecordingLossReport
+    ) async -> TranscriptionResult {
         isShuttingDownRecognitionTask = true
 
         // Stop audio engine first, then let the buffers already queued on the
         // processing queue be appended to the request — `endAudio()` before the
         // drain would discard the last words spoken.
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         await audioProcessingQueue.drainPendingWork()
 
-        // Signal end of audio
-        recognitionRequest?.endAudio()
-
-        // Cancel recognition task
+        guard activeCaptureID == captureID, captureID != nil else { return cancelledStopResult() }
+        let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
+        recognitionTask?.endAudio()
+        await awaitLegacyFinalisation()
+        // Cancel may have discarded this capture while the actor was suspended.
+        guard activeCaptureID == captureID else { return cancelledStopResult() }
+        activeRecognitionID = nil
         recognitionTask?.cancel()
 
         // Stop persistent recording
-        _ = audioRecorder.stopRecording()
+        recordingLoss.finish(recorder: audioRecorder, run: lossRun)
 
         // Build final result
-        let duration = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let result = buildFinalResult(duration: duration)
 
         // Cleanup
@@ -343,8 +574,9 @@ public final class iOSLiveTranscriber: ObservableObject {
         recognitionTask = nil
         speechRecognizer = nil
         isRunning = false
+        activeCaptureID = nil
 
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         SpeakLogger.logTranscription(event: "stop", model: "Apple Speech", wordCount: result.text.split(separator: " ").count)
         onFinalResult?(result)
@@ -352,14 +584,47 @@ public final class iOSLiveTranscriber: ObservableObject {
         return result
     }
 
+    private func awaitLegacyFinalisation() async {
+        // A terminal callback may already have arrived during the buffer drain.
+        guard let recognitionID = activeRecognitionID, let recognitionTask else { return }
+        let captureID = activeCaptureID
+        let beganWaiting = Date()
+        await withCheckedContinuation { continuation in
+            legacyFinalisationContinuation = continuation
+            cancelLegacyDeadline = scheduleLegacyDeadline { [weak self] in
+                guard let self, self.activeCaptureID == captureID,
+                      self.activeRecognitionID == recognitionID else { return }
+                logger.warning("Legacy Apple finalisation deadline reached; retaining the latest usable result")
+                self.completeLegacyFinalisation()
+            }
+            recognitionTask.finish()
+        }
+        let elapsed = Date().timeIntervalSince(beganWaiting)
+        logger.info("Legacy Apple finalisation wait: \(elapsed, privacy: .public)s")
+    }
+
+    private func completeLegacyFinalisation() {
+        cancelLegacyDeadline?()
+        cancelLegacyDeadline = nil
+        let continuation = legacyFinalisationContinuation
+        legacyFinalisationContinuation = nil
+        continuation?.resume()
+    }
+
+    private func cancelledStopResult() -> TranscriptionResult {
+        TranscriptionResult(text: "", segments: [], confidence: nil, duration: 0,
+                            modelIdentifier: activeModelID, cost: nil, rawPayload: nil, debugInfo: nil)
+    }
+
     @available(iOS 26.0, *)
     private func stopSpeechAnalyzer(_ session: AppleSpeechAnalyzerLiveSession) async -> TranscriptionResult {
+        let lossRun = recordingLoss.currentReport
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         // Let queued buffers reach the analyser and the recorder before
         // `session.finish()` and the recorder close below.
         await audioProcessingQueue.drainPendingWork()
-        _ = audioRecorder.stopRecording()
+        recordingLoss.finish(recorder: audioRecorder, run: lossRun)
 
         let elapsed = startTime.map { Date().timeIntervalSince($0) } ?? 0
         let result: TranscriptionResult
@@ -393,7 +658,8 @@ public final class iOSLiveTranscriber: ObservableObject {
         speechAnalyzerSession = nil
         speechAnalyzerConverter = nil
         isRunning = false
-        audioSessionManager.deactivate()
+        activeCaptureID = nil
+        releaseAudioSession()
         SpeakLogger.logTranscription(
             event: "stop",
             model: activeModelID,
@@ -405,7 +671,20 @@ public final class iOSLiveTranscriber: ObservableObject {
 
     /// Cancel transcription without returning result.
     public func cancel() {
-        guard isRunning else { return }
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        startup.cancel()
+        cleanupCapture()
+    }
+
+    private func cleanupCapture() {
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        recordingLoss.cancel()
+        activeCaptureID = nil
+        activeRecognitionID = nil
+        completeLegacyFinalisation()
+        guard isRunning || ownsAudioSession || hasInputTap else { return }
 
         SpeakLogger.transcription.info("Cancelling transcription")
 
@@ -417,18 +696,18 @@ public final class iOSLiveTranscriber: ObservableObject {
         // main actor; the queued work never waits on the main actor, so it
         // cannot deadlock.
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         audioProcessingQueue.sync {}
 
-        recognitionRequest?.endAudio()
+        recognitionTask?.endAudio()
         recognitionTask?.cancel()
 
-        // Cancel persistent recording (keeps partial file by default)
+        // Explicit cancellation discards the partial recording.
         audioRecorder.cancelRecording()
 
         if #available(iOS 26.0, *),
            let session = speechAnalyzerSession as? AppleSpeechAnalyzerLiveSession {
-            Task { await session.cancel() }
+            analyzerCancellationTask = Task { await session.cancel() }
         }
 
         recognitionRequest = nil
@@ -437,91 +716,81 @@ public final class iOSLiveTranscriber: ObservableObject {
         speechAnalyzerSession = nil
         speechAnalyzerConverter = nil
         isRunning = false
+        activeCaptureID = nil
 
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         logger.info("Cancelled")
     }
 
+    func awaitCancellationSettled() async {
+        await finishAnalyzerCancellation()
+    }
+
+    private func finishAnalyzerCancellation() async {
+        guard let task = analyzerCancellationTask else { return }
+        await task.value
+        analyzerCancellationTask = nil
+    }
+
     // MARK: - Private
 
-    private func setupInterruptionHandling() {
-        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
-            Task { @MainActor in
-                if began {
-                    self?.handleInterruption()
-                }
+    private func beginRecognitionTask(
+        captureID: UUID,
+        recognizer: SFSpeechRecognizer? = nil,
+        request: SFSpeechAudioBufferRecognitionRequest? = nil
+    ) {
+        let recognitionID = UUID()
+        activeRecognitionID = recognitionID
+        isShuttingDownRecognitionTask = false
+        let receive: (LegacyAppleRecognitionUpdate?, Error?) -> Void = { [weak self] result, error in
+            guard let self, self.activeCaptureID == captureID,
+                  self.activeRecognitionID == recognitionID else { return }
+            self.handleRecognitionResult(result, error: error)
+        }
+        if let legacyRecognitionStart {
+            recognitionTask = legacyRecognitionStart(receive)
+        } else if let recognizer, let request {
+            let task = recognizer.recognitionTask(with: request) { result, error in
+                let update = result.map(LegacyAppleRecognitionUpdate.init)
+                Task { @MainActor in receive(update, error) }
             }
+            recognitionTask = LegacyAppleRecognitionTask(
+                endAudio: request.endAudio, finish: task.finish, cancel: task.cancel
+            )
         }
     }
 
-    private func handleInterruption() {
-        guard isRunning else { return }
-
-        logger.info("Handling interruption")
-        error = iOSTranscriptionError.interrupted
-        onError?(iOSTranscriptionError.interrupted)
-
-        // Stop but preserve what we have
-        Task {
-            _ = await stop()
+    private func handleRecognitionResult(_ result: LegacyAppleRecognitionUpdate?, error: Error?) {
+        let captureID = activeCaptureID
+        let terminal = result?.isFinal == true || error != nil
+        if terminal { activeRecognitionID = nil }
+        // Empty terminal payloads must not erase a usable preceding partial.
+        if let result, !terminal || !result.text.isEmpty || lastFormattedString.isEmpty {
+            commitIfImplicitReset(currentText: result.text, isFinal: result.isFinal)
+            latestResult = result
+            lastFormattedString = result.text
+            partialText = [committedText, result.text].filter { !$0.isEmpty }.joined(separator: " ")
+            isFinal = result.isFinal
+            confidence = result.confidence
+            if result.isFinal {
+                committedText = partialText
+                lastFormattedString = ""
+            }
+            onPartialResult?(partialText, result.isFinal)
         }
-    }
-
-    private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
-        if let error = error {
+        // Callbacks can synchronously Cancel; never resume/restart that capture.
+        guard activeCaptureID == captureID else { return }
+        if terminal { completeLegacyFinalisation() }
+        if let error {
             let nsError = error as NSError
             if nsError.domain == Self.assistantErrorDomain,
                nsError.code == Self.cancelledTaskErrorCode,
-               isShuttingDownRecognitionTask || !isRunning {
-                return
-            }
-            // Commit any in-progress text before propagating the error so a
-            // silence-timeout error doesn't silently drop the user's dictation.
-            if !isShuttingDownRecognitionTask, !lastFormattedString.isEmpty {
-                committedText = [committedText, lastFormattedString]
-                    .filter { !$0.isEmpty }.joined(separator: " ")
-                lastFormattedString = ""
-            }
+               isShuttingDownRecognitionTask || !isRunning { return }
             logger.error("Recognition error: \(error.localizedDescription, privacy: .public)")
             self.error = iOSTranscriptionError.recognitionFailed(error)
             onError?(self.error!)
-            return
-        }
-        guard let result = result else { return }
-
-        isShuttingDownRecognitionTask = false
-        latestResult = result
-        let currentText = result.bestTranscription.formattedString
-        let resultIsFinal = result.isFinal
-
-        // Detect implicit text reset (Apple silently clears after a pause)
-        commitIfImplicitReset(currentText: currentText, isFinal: resultIsFinal)
-        lastFormattedString = currentText
-
-        // Build display text from committed + current
-        let displayText = [committedText, currentText]
-            .filter { !$0.isEmpty }.joined(separator: " ")
-
-        // Calculate confidence
-        let avgConfidence: Double? = result.bestTranscription.segments.isEmpty
-            ? nil
-            : result.bestTranscription.segments.map {
-                Double($0.confidence)
-            }.reduce(0, +) / Double(result.bestTranscription.segments.count)
-
-        // Update state
-        partialText = displayText
-        self.isFinal = resultIsFinal
-        self.confidence = avgConfidence
-
-        // Callback
-        onPartialResult?(displayText, resultIsFinal)
-
-        if resultIsFinal {
-            logger.info("Mid-session isFinal – committing \(displayText.count) chars, restarting")
-            committedText = displayText
-            lastFormattedString = ""
+        } else if result?.isFinal == true, !isStopping {
             restartRecognitionTask()
         }
     }
@@ -537,12 +806,14 @@ public final class iOSLiveTranscriber: ObservableObject {
         logger.info("Implicit text reset – committing \(self.lastFormattedString.count) chars")
         committedText = [committedText, lastFormattedString]
             .filter { !$0.isEmpty }.joined(separator: " ")
+        appendLatestSegments()
     }
 
     /// Restart recognition after a mid-session `isFinal` so continued speech
     /// is captured without losing previously committed text.
     private func restartRecognitionTask() {
-        guard isRunning, let recognizer = speechRecognizer else { return }
+        guard isRunning, !isStopping, let captureID = activeCaptureID,
+              speechRecognizer != nil || legacyRecognitionStart != nil else { return }
 
         isShuttingDownRecognitionTask = true
         appendLatestSegments()
@@ -557,6 +828,13 @@ public final class iOSLiveTranscriber: ObservableObject {
 
         recognitionTask?.cancel()
         recognitionTask = nil
+        latestResult = nil
+        lastFormattedString = ""
+        if legacyRecognitionStart != nil {
+            beginRecognitionTask(captureID: captureID)
+            return
+        }
+        guard let recognizer = speechRecognizer else { return }
 
         let newRequest = SFSpeechAudioBufferRecognitionRequest()
         newRequest.shouldReportPartialResults = true
@@ -564,45 +842,30 @@ public final class iOSLiveTranscriber: ObservableObject {
             newRequest.requiresOnDeviceRecognition = true
         }
         recognitionRequest = newRequest
-        latestResult = nil
-        lastFormattedString = ""
 
         // Reinstall the tap so its closure captures the new request; the old
         // tap holds the previous (cancelled) request immutably.
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         installTap(appendingTo: newRequest)
 
-        recognitionTask = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
-            Task { @MainActor in
-                self?.handleRecognitionResult(result, error: error)
-            }
-        }
+        beginRecognitionTask(captureID: captureID, recognizer: recognizer, request: newRequest)
     }
     private func appendLatestSegments() {
         guard let latestResult else { return }
-        accumulatedSegments.append(contentsOf: mappedSegments(from: latestResult))
+        accumulatedSegments.append(contentsOf: latestResult.segments)
     }
 
-    private func mappedSegments(from result: SFSpeechRecognitionResult) -> [TranscriptionSegment] {
-        result.bestTranscription.segments.map { segment in
-            TranscriptionSegment(
-                startTime: segment.timestamp,
-                endTime: segment.timestamp + segment.duration,
-                text: segment.substring,
-                isFinal: true,
-                confidence: Double(segment.confidence)
-            )
-        }
-    }
     private func buildFinalResult(duration: TimeInterval) -> TranscriptionResult {
-        let latestSegments = latestResult.map(mappedSegments(from:)) ?? []
+        let latestSegments = latestResult?.segments ?? []
         let finalSegments = accumulatedSegments + latestSegments
+        let confidences = finalSegments.compactMap(\.confidence)
+        let finalConfidence = confidences.isEmpty ? confidence : confidences.reduce(0, +) / Double(confidences.count)
 
         // partialText already includes committedText from previous segments
         return TranscriptionResult(
             text: partialText,
             segments: finalSegments,
-            confidence: confidence,
+            confidence: finalConfidence,
             duration: duration,
             modelIdentifier: activeModelID,
             cost: nil,

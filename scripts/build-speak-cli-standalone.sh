@@ -13,6 +13,12 @@
 # caller notarises the archive.
 
 set -euo pipefail
+TRAIN_SWIFT_FLAGS=()
+case "${TUIST_RELEASE_TRAIN:-stable}" in
+  alpha) TRAIN_SWIFT_FLAGS=(-Xswiftc -DALPHA) ;;
+  stable) ;;
+  *) echo "Invalid release train" >&2; exit 1 ;;
+esac
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="${1:-}"
@@ -54,9 +60,9 @@ cd "$ROOT_DIR"
 # Each slice is built on its own, as build-speak-cli.sh does (issue #759); the
 # linker flags create the version section in this product's executable only.
 echo "==> Building speak (release, $ARCH, version $VERSION)"
-swift build --product speak --configuration release --arch "$ARCH" \
+xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch "$ARCH" \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __speak_ver -Xlinker "$VERSION_FILE"
-BUILT_BINARY="$(swift build --product speak --configuration release --arch "$ARCH" \
+BUILT_BINARY="$(xcrun swift build "${TRAIN_SWIFT_FLAGS[@]}" --product speak --configuration release --arch "$ARCH" \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __speak_ver -Xlinker "$VERSION_FILE" \
     --show-bin-path)/speak"
 if [[ ! -f "$BUILT_BINARY" ]]; then

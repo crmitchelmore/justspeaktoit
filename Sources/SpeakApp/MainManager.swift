@@ -336,6 +336,9 @@ final class MainManager: ObservableObject {
     )
   }
 
+  var migrationInProgress = false
+  private(set) var captureStarting = false
+
   var isBusy: Bool {
     switch state {
     case .idle, .completed, .failed:
@@ -450,8 +453,11 @@ final class MainManager: ObservableObject {
       await startSession(trigger: .doubleTap, triggerTiming: triggerTiming)
     }
   }
-
+  // swiftlint:disable:next function_body_length
   private func configureHotKeys() {
+    #if DEBUG
+    if CoreJourneyLaunchProfile.isRequested, CoreJourneyLaunchProfile.current?.runsBatchJourney != true { return }
+    #endif
     hotKeyTokens.append(
       hotKeyManager.register(gesture: .holdStart) { [weak self] in
         // Stamped here, before the actor hop, so the latency dashboard measures
@@ -488,6 +494,8 @@ final class MainManager: ObservableObject {
       }
     )
 
+    // ⌘R only retries a finished session, so it stays on the app-local monitor and never
+    // reaches Safari's reload or Xcode's run.
     shortcutTokens.append(
       hotKeyManager.register(shortcut: .commandR) { [weak self] in
         Task { @MainActor in
@@ -506,7 +514,15 @@ final class MainManager: ObservableObject {
       }
     )
 
+    // Escape has to arrive from whichever app is being dictated into, but only while there
+    // is a recording to cancel — outside that window Speak reads no system-wide key presses.
+    hotKeyManager.trackRecordingState($state.map { $0 == .recording })
+
+    #if DEBUG
+    hotKeyManager.startMonitoring(requestPermission: !CoreJourneyLaunchProfile.isRequested)
+    #else
     hotKeyManager.startMonitoring()
+    #endif
 
     // Pre-warm LLM connection at app launch
     warmUpConnectionIfEnabled()
@@ -559,7 +575,9 @@ final class MainManager: ObservableObject {
     preRollBuffers: [AVAudioPCMBuffer] = [],
     triggerTiming: SessionTriggerTiming = .nonHotKey()
   ) async -> HandsFreeCaptureStartOutcome {
-    guard activeSession == nil else { return .rejected(.captureFailed) }
+    guard !migrationInProgress, !captureStarting, activeSession == nil else { return .rejected(.captureFailed) }
+    captureStarting = true
+    defer { captureStarting = false }
     captureWarmer?.sessionWillBegin()
 
     // Per-app dictation profile: resolve the frontmost app and apply its
@@ -592,7 +610,7 @@ final class MainManager: ObservableObject {
       return .rejected(.captureFailed)
     }
 
-    if audioInputDeviceManager.devices.isEmpty {
+    if audioFileManager.requiresPhysicalInput && audioInputDeviceManager.devices.isEmpty {
       profileApplier.end(settings: appSettings, postProcessing: postProcessingManager)
       captureWarmer?.sessionDidEnd()
       let message = "No microphone connected. Plug in a USB or Bluetooth microphone and try again."

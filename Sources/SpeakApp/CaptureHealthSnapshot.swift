@@ -14,6 +14,7 @@ struct CaptureHealthSnapshot: Equatable {
     var microphonePermission: MicrophonePermission
     /// `true` when CoreAudio reports zero input devices with usable channels — e.g. a Mac Mini with no mic attached.
     var noInputDevicesAvailable: Bool
+    /// Resolved microphone preference, not a measurement of the live audio route.
     var inputDeviceName: String
     var providerLabel: String
     var latencyTier: LatencyTier

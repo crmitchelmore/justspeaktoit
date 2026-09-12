@@ -436,3 +436,19 @@ describe('refresh token rotation', () => {
     expect(await repo.consumeRefreshToken(hash, NOW)).toBeNull();
   });
 });
+
+
+describe('request claim retention', () => {
+  it('prunes expired claims while preserving retry protection for current requests', async () => {
+    const repo = repository();
+    const userId = await seedUser();
+    for (const [idempotencyKey, nowSeconds] of [['expired-key', NOW - REQUEST_CLAIM_TTL_SECONDS],
+      ['current-key', NOW]] as const) {
+      await repo.claimRequest({ userId, idempotencyKey, operation: 'post_processing',
+        correlationId: 'cleanup-test', nowSeconds });
+    }
+    expect(await repo.pruneExpiredRequestClaims(NOW)).toBe(1);
+    expect(await repo.claimRequest({ userId, idempotencyKey: 'current-key', operation: 'post_processing',
+      correlationId: 'cleanup-test', nowSeconds: NOW })).not.toBeNull();
+  });
+});

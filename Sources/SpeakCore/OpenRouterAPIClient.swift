@@ -284,6 +284,20 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         let cleanedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let key = await storedAPIKey() {
+            if cleanedModel.hasPrefix(OpenRouterTranscriptionSelection.prefix) {
+                guard let rawModel = OpenRouterTranscriptionSelection.modelID(from: cleanedModel) else {
+                    throw OpenRouterAudioError.invalidInput
+                }
+                let audioClient = OpenRouterAudioClient(
+                    apiKeyProvider: { key }, session: session,
+                    maximumInputBytes: Int(clamping: maximumInlineAudioBytes)
+                )
+                return try await audioClient.transcribe(
+                    audioFileURL: url,
+                    model: rawModel,
+                    language: language
+                )
+            }
             return try await performRemoteTranscription(
                 apiKey: key, url: url, model: cleanedModel, language: language)
         }

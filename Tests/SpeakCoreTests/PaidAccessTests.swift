@@ -686,6 +686,17 @@ final class PaidAudioPayloadTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    func testOversizedWAVIsRejectedBeforeReadingPayload() throws {
+        let url = self.scratch.appendingPathComponent("large.wav")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(PaidAudioPayload.maximumBytes + 1))
+        try handle.close()
+        XCTAssertThrowsError(try PaidAudioPayload.wavData(contentsOf: url)) { error in
+            XCTAssertEqual(error as? PaidAudioPayloadError, .tooLarge)
+        }
+    }
+
     /// Writes `seconds` of silence in whichever container `url`'s settings imply.
     private func writeAudio(
         to url: URL,

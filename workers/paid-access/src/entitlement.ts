@@ -128,7 +128,7 @@ function isFreshPurchase(current: Entitlement, update: EntitlementUpdate): boole
     // purchase, and treating it as one would hand back access for free.
     PURCHASED_STATUSES.includes(update.status) &&
     update.sourceReference !== null &&
-    update.sourceReference !== current.sourceReference
+    (update.source !== current.source || update.sourceReference !== current.sourceReference)
   );
 }
 
@@ -173,7 +173,14 @@ export function applyUpdate(
   update: EntitlementUpdate,
   nowSeconds: number,
 ): ApplyOutcome {
-  if (current.sourceEventAt !== null && update.sourceEventAt < current.sourceEventAt) {
+  const sameSubscription = current.source === update.source && current.sourceReference === update.sourceReference;
+  // Provider clocks are comparable only within the same subscription. An old
+  // subscription's cancellation must never revoke a different paid purchase.
+  if (!sameSubscription && current.sourceReference !== null &&
+      (grantsAccess(current, nowSeconds) || !GRANTING_STATUSES.has(update.status))) {
+    return { kind: 'stale', current };
+  }
+  if (sameSubscription && current.sourceEventAt !== null && update.sourceEventAt < current.sourceEventAt) {
     return { kind: 'stale', current };
   }
   if (!isFreshPurchase(current, update) && !canTransition(current.status, update.status)) {

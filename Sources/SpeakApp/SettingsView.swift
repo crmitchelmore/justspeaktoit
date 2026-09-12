@@ -37,11 +37,17 @@ struct SettingsView: View {
   @State var apiKeyValidationState: ValidationViewState = .idle
   @State var isDeletingRecordings: Bool = false
   @State private var transcriptionProviders: [TranscriptionProviderMetadata] = []
+  /// Voices only a keyed account lists — Mistral publishes no presets.
+  @State private var accountListedVoices: [TTSVoice] = []
   @State var providerAPIKeys: [String: String] = [:]
   @State var providerValidationStates: [String: ValidationViewState] = [:]
   @State var ttsProviderAPIKeys: [String: String] = [:]
   @State var ttsProviderValidationStates: [String: ValidationViewState] = [:]
   @State var apiKeySearchText = ""
+  /// Provider credit balances shown beside the saved keys. Deduplicated by
+  /// account, so one account is fetched and displayed once however many cards
+  /// its key powers.
+  @StateObject var providerBalances = ProviderBalanceStore()
   @State var apiKeyStatusFilter: APIKeyStatusFilter = .all
   @State var apiKeySortOrder: APIKeySortOrder = .name
   @State private var didResolveAPIKeyStorage = false
@@ -125,6 +131,16 @@ struct SettingsView: View {
     let isValidateDisabled: Bool
     let isRemoveDisabled: Bool
     let validationState: ValidationViewState
+    /// Keychain identifier of the credential this card manages, used to look up
+    /// the account's balance.
+    let credentialIdentifier: String
+    /// Whether this is the card that shows the account's balance.
+    ///
+    /// Two cards can manage the same Keychain item — Deepgram has a
+    /// transcription card and a voice-output card, both on `deepgram.apiKey` —
+    /// and the identifier cannot tell them apart, so the one that does not own
+    /// the account sets this to `false` and the figure appears exactly once.
+    var presentsAccountBalance = true
     let saveButtonTitle: String
     let saveTooltip: String
     let validateButtonTitle: String
@@ -185,14 +201,14 @@ struct SettingsView: View {
         entry: APIKeyListEntry(
           id: "general-openrouter",
           title: "OpenRouter",
-          category: "Post-processing",
+          category: "Transcription, Voice Output & Post-processing",
           isStored: isOpenRouterKeyStored
         ),
         source: .openRouter
       )
     ]
-    // ElevenLabs and Soniox each use one key for transcription and voice
-    // output; their combined card is contributed by the TTS list below.
+    // ElevenLabs, Soniox and Cartesia each use one key for transcription and
+    // voice output; their combined card is contributed by the TTS list below.
     let sharedCredentialProviderIDs = Set(
       TTSProvider.allCases.filter(\.sharesTranscriptionCredential).map(\.id)
     )
@@ -209,7 +225,10 @@ struct SettingsView: View {
           source: .transcription(provider)
         )
       }
-    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox].map { provider in
+    items += [
+      TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia,
+      .groq, .gemini, .mistral, .speechmatics, .xai
+    ].map { provider in
       let isShared = provider.sharesTranscriptionCredential
       return MacAPIKeyItem(
         entry: APIKeyListEntry(
@@ -449,6 +468,8 @@ struct SettingsView: View {
       keyboardSettings
     case .permissions:
       permissionsSettings
+    case .dataMigration:
+      DataMigrationView()
     case .about:
       aboutSettings
     }
@@ -716,9 +737,13 @@ struct SettingsView: View {
       presenting: missingTranscriptionAPIKeyAlert
     ) { alert in
       Button("Add API Key") {
-        environment.apiKeysScrollTarget = alert.provider.id == "elevenlabs"
-          ? "tts-elevenlabs"
-          : "transcription-\(alert.provider.id)"
+        // A provider whose single key also powers voice output has no
+        // transcription card; its combined card lives in the TTS list.
+        let sharedCredentialID = TTSProvider.allCases
+          .first { $0.sharesTranscriptionCredential && $0.id == alert.provider.id }?
+          .id
+        environment.apiKeysScrollTarget = sharedCredentialID.map { "tts-\($0)" }
+          ?? "transcription-\(alert.provider.id)"
         sidebarSelection = .settings(.apiKeys)
         missingTranscriptionAPIKeyAlert = nil
       }
@@ -739,13 +764,23 @@ struct SettingsView: View {
     }
   }
 
+  /// The Default Voice list: the offline catalogue plus whatever the stored
+  /// keys' accounts list, so a Mistral voice can be made the default here and
+  /// not only chosen ad hoc in Voice Output.
+  private var defaultVoicePickerOptions: [TTSVoice] {
+    VoiceCatalog.includingSelection(
+      settings.defaultTTSVoice,
+      in: VoiceCatalog.allVoices + accountListedVoices
+    )
+  }
+
   private var voiceOutputSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
             Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
-              ForEach(VoiceCatalog.allVoices) { voice in
+              ForEach(defaultVoicePickerOptions) { voice in
                 HStack {
                   Text(voice.displayName)
                   Spacer()
@@ -761,14 +796,10 @@ struct SettingsView: View {
                 .tag(voice.id)
               }
             }
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-              RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
-            )
+            .settingsMenuPicker()
             .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
+
+            OpenRouterSpeechPickerButton(selectedVoice: settingsBinding(\AppSettings.defaultTTSVoice))
 
             Text("Your default voice for converting text to speech")
               .font(.caption)
@@ -793,6 +824,9 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Select which voice to use by default when generating speech from text.")
+      .task {
+        accountListedVoices = await environment.tts.accountListedVoices()
+      }
 
       SettingsCard(title: "Audio Quality & Performance", systemImage: "waveform.circle", tint: Color.green) {
         VStack(alignment: .leading, spacing: 16) {
@@ -1100,12 +1134,7 @@ struct SettingsView: View {
   func settingsToggle(_ label: String, isOn: Binding<Bool>, tint: Color) -> some View {
     Toggle(label, isOn: isOn)
       .tint(tint)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      .background(
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill(Color(nsColor: .controlBackgroundColor))
-      )
+      .settingsControlChrome()
   }
 
   func speedModeIcon(for mode: AppSettings.SpeedMode) -> String {
@@ -1118,19 +1147,39 @@ struct SettingsView: View {
   }
 
   @MainActor
-  // swiftlint:disable:next function_body_length
   func generateSystemPromptPreview() {
-    if PostProcessingManager.isBuiltInLocalPostProcessingModel(settings.postProcessingModel) {
-      self.systemPromptPreview = """
+    self.systemPromptPreview = Self.systemPromptPreviewText(
+      model: settings.postProcessingModel,
+      outputLanguage: settings.postProcessingOutputLanguage,
+      lexiconRuleCount: environment.personalLexicon.rules.count,
+      includeLexiconDirectives: settings.postProcessingIncludeLexiconDirectives,
+      includeContextTags: settings.postProcessingIncludeContextTags
+    )
+  }
+
+  /// Renders the Cleanup Context prompt preview.
+  ///
+  /// Pure so the preview can be exercised in tests: in particular the
+  /// downloaded-local branch consumes `outputLanguage` exactly like the remote
+  /// branch does, which is why the Output Language picker has to be reachable for
+  /// both post-processing locations (issue #852).
+  static func systemPromptPreviewText(
+    model: String,
+    outputLanguage: String,
+    lexiconRuleCount: Int,
+    includeLexiconDirectives: Bool,
+    includeContextTags: Bool
+  ) -> String {
+    if PostProcessingManager.isBuiltInLocalPostProcessingModel(model) {
+      return """
       The built-in rules cleaner does not send a prompt.
 
       It runs deterministic local cleanup rules on the raw transcript. Lexicon directives and context tags apply to \
       remote models and downloaded local LLMs only.
       """
-      return
     }
 
-    let rawLanguage = self.settings.postProcessingOutputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+    let rawLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
     let language: String
     if rawLanguage.uppercased() == "ENGB" || rawLanguage.lowercased() == "en_gb" {
       language = "British English"
@@ -1138,23 +1187,22 @@ struct SettingsView: View {
       language = rawLanguage
     }
 
-    let lexiconCount = self.environment.personalLexicon.rules.count
     let effectiveSystemPrompt = TranscriptCleanupPolicy.systemPrompt(
       outputLanguage: language,
-      lexiconDirectives: self.settings.postProcessingIncludeLexiconDirectives
-        ? ["[Example: \(lexiconCount) active correction rules will be inserted here]"]
+      lexiconDirectives: includeLexiconDirectives
+        ? ["[Example: \(lexiconRuleCount) active correction rules will be inserted here]"]
         : [],
-      lexiconContextTags: self.settings.postProcessingIncludeContextTags
+      lexiconContextTags: includeContextTags
         ? ["Tags will be inserted based on active app context"]
         : []
     )
 
-    if PostProcessingManager.isDownloadedLocalPostProcessingModel(settings.postProcessingModel) {
+    if PostProcessingManager.isDownloadedLocalPostProcessingModel(model) {
       let localUserPrompt = LocalPostProcessingModelManager.localUserPrompt(
         systemPrompt: effectiveSystemPrompt,
         rawText: "{{RAW_TRANSCRIPT}}"
       )
-      self.systemPromptPreview = """
+      return """
       System prompt sent to the local model:
 
       \(LocalPostProcessingModelManager.localSystemPrompt(effectiveSystemPrompt))
@@ -1163,10 +1211,9 @@ struct SettingsView: View {
 
       \(localUserPrompt)
       """
-      return
     }
 
-    self.systemPromptPreview = """
+    return """
     System prompt:
 
     \(effectiveSystemPrompt)

@@ -22,9 +22,11 @@ public final class iOSHistoryManager: ObservableObject {
     /// IDs currently being reprocessed (drives per-row progress in the UI).
     @Published public private(set) var reprocessingIDs: Set<UUID> = []
 
-    private let fileURL: URL
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
+    private let persistence: IOSHistoryPersistence
+    @Published public private(set) var persistenceError: String?
+    @Published public private(set) var isStorageReady = false
+    private var syncStarted = false
+    private let startSync: ((iOSHistoryManager) async -> Void)?
     private let userDefaults: UserDefaults
 
     /// Whether CloudKit sync is wired up. Disabled in unit tests so persistence
@@ -35,6 +37,7 @@ public final class iOSHistoryManager: ObservableObject {
     /// unloaded (empty) state — the root cause of background-recording history
     /// loss (see `loadHistoryFromDiskIfNeeded`).
     private var hasLoadedFromDisk = false
+    private var hasAttemptedDiskLoad = false
 
     /// IDs of entries that have been synced to CloudKit.
     @Published private(set) var syncedIDs: Set<UUID> = []
@@ -91,13 +94,15 @@ public final class iOSHistoryManager: ObservableObject {
     /// Designated initializer. `fileURL` and `syncEnabled` are injectable so
     /// tests can exercise persistence against a temporary file without touching
     /// CloudKit.
-    init(fileURL: URL, syncEnabled: Bool, userDefaults: UserDefaults = .standard) {
-        self.fileURL = fileURL
+    init(
+        fileURL: URL, syncEnabled: Bool, userDefaults: UserDefaults = .standard,
+        storageIO: IOSHistoryPersistence.StorageIO = .init(),
+        startSync: ((iOSHistoryManager) async -> Void)? = nil
+    ) {
+        self.persistence = IOSHistoryPersistence(fileURL: fileURL, storageIO: storageIO)
+        self.startSync = startSync
         self.syncEnabled = syncEnabled
         self.userDefaults = userDefaults
-
-        encoder.dateEncodingStrategy = .iso8601
-        decoder.dateDecodingStrategy = .iso8601
 
         loadSyncedIDs()
 
@@ -110,10 +115,7 @@ public final class iOSHistoryManager: ObservableObject {
 
         registerLifecycleFlushObservers()
 
-        guard syncEnabled else { return }
-        Task {
-            await initializeSync()
-        }
+        startSyncIfReady()
     }
 
     deinit {
@@ -137,21 +139,36 @@ public final class iOSHistoryManager: ObservableObject {
                 self?.flushPendingChanges()
             }
         }
+        lifecycleObservers.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil, queue: .main
+        ) { @MainActor [weak self] _ in
+            self?.retryPersistence()
+        })
     }
 
     /// Forces the lazy disk load so out-of-UI readers (App Intents) see the
     /// persisted history instead of the empty pre-load state.
     public func ensureLoaded() {
-        loadHistoryFromDiskIfNeeded()
+        if !isStorageReady { retryPersistence() }
     }
 
     /// Persists any debounced remote sync changes immediately. Called from the
     /// lifecycle observers; safe to call at any time.
     public func flushPendingChanges() {
         commitRemoteChangesNow()
+        if persistenceError != nil { retryPersistence() }
     }
 
     // MARK: - CloudKit Sync Init
+
+    private func startSyncIfReady() {
+        guard syncEnabled, isStorageReady, !syncStarted else { return }
+        syncStarted = true
+        Task {
+            if let startSync { await startSync(self) } else { await initializeSync() }
+        }
+    }
 
     private func initializeSync() async {
         await HistorySyncEngine.shared.initialize(delegate: self)
@@ -173,17 +190,30 @@ public final class iOSHistoryManager: ObservableObject {
     @discardableResult
     public func upsertReportingDurability(_ item: iOSHistoryItem) -> Bool {
         loadHistoryFromDiskIfNeeded()
-        if let existing = items.firstIndex(where: { $0.id == item.id }) {
-            items[existing] = item
+        let current: iOSHistoryItem
+        if let index = items.firstIndex(where: { $0.id == item.id }) {
+            current = items[index].updatedAt > item.updatedAt ? items[index] : item
+            if items[index].createdAt == current.createdAt {
+                items[index] = current
+            } else {
+                items.remove(at: index)
+                let insertion = items.firstIndex { $0.createdAt < current.createdAt } ?? items.endIndex
+                items.insert(current, at: insertion)
+            }
         } else {
-            items.insert(item, at: 0)
+            current = item
+            let index = items.firstIndex { $0.createdAt < item.createdAt } ?? items.endIndex
+            items.insert(item, at: index)
         }
+        persistence.remember(current)
+        syncedIDs.remove(item.id)
+        saveSyncedIDs()
         guard saveHistoryReportingDurability() else { return false }
 
-        guard syncEnabled else { return true }
+        guard syncEnabled, isStorageReady else { return true }
         Task {
             do {
-                try await HistorySyncEngine.shared.upload(entry: item.toSyncable())
+                try await HistorySyncEngine.shared.upload(entry: current.toSyncable())
                 syncedIDs.insert(item.id)
                 saveSyncedIDs()
             } catch {
@@ -195,12 +225,27 @@ public final class iOSHistoryManager: ObservableObject {
         return true
     }
 
-    /// Creates and adds a history item from transcription result.
+    /// Creates and adds a history item from a transcription result.
+    ///
+    /// Returns the item **only when the write reached disk**. Callers use the
+    /// returned item to decide whether to say "Saved to History" and whether
+    /// to publish a Handoff pointer at it, and neither may be claimed for an
+    /// entry that exists only in this process's memory: the receipt would be
+    /// false and the pointer would send a Mac to an entry that is gone after
+    /// the next relaunch (issue #674's durability signal, applied to #1006 and
+    /// #1008). The item stays in `items` for the current session either way,
+    /// and `persistenceError` already surfaces the failure in the UI.
     @discardableResult
-    public func recordTranscription(
+    public func recordTranscription(text: String, model: String, duration: TimeInterval) -> iOSHistoryItem? {
+        recordTranscription(text: text, model: model, duration: duration, errorMessage: nil)
+    }
+
+    @discardableResult
+    func recordTranscription(
         text: String,
         model: String,
-        duration: TimeInterval
+        duration: TimeInterval,
+        errorMessage: String?
     ) -> iOSHistoryItem? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -209,19 +254,29 @@ public final class iOSHistoryManager: ObservableObject {
             transcription: text,
             model: model,
             duration: duration,
-            wordCount: text.split(separator: " ").count
+            wordCount: text.split(separator: " ").count,
+            errorMessage: errorMessage
         )
-        add(item)
+        guard upsertReportingDurability(item) else { return nil }
         return item
     }
 
     /// Removes an item from history.
     public func remove(_ item: iOSHistoryItem) {
         loadHistoryFromDiskIfNeeded()
+        guard isStorageReady else { return }
+        let previous = items
         items.removeAll { $0.id == item.id }
-        saveHistory()
+        guard saveHistoryReportingDurability() else {
+            items = previous
+            return
+        }
         syncedIDs.remove(item.id)
         saveSyncedIDs()
+        // A Handoff pointer must never outlive the entry it points at
+        // (issue #1006) — deleting the advertised entry individually counts
+        // just as much as clearing everything.
+        TranscriptHandoffPublisher.invalidateIfAdvertising(entryID: item.id)
 
         guard syncEnabled else { return }
         Task {
@@ -232,12 +287,20 @@ public final class iOSHistoryManager: ObservableObject {
     /// Clears all history.
     public func clearAll() {
         loadHistoryFromDiskIfNeeded()
+        guard isStorageReady else { return }
+        let previous = items
         let allIDs = items.map(\.id)
         items.removeAll()
-        saveHistory()
+        guard saveHistoryReportingDurability() else {
+            items = previous
+            return
+        }
         syncedIDs.removeAll()
         saveSyncedIDs()
 
+        // A Handoff pointer must never outlive the entry it points at
+        // (issue #1006).
+        TranscriptHandoffPublisher.invalidate()
         guard syncEnabled else { return }
         Task {
             for entryID in allIDs {
@@ -246,8 +309,18 @@ public final class iOSHistoryManager: ObservableObject {
         }
     }
 
+    /// What this device can honestly say about the CloudKit lane for a capture
+    /// (issue #1007). Never a claim that a Mac received anything — the phone
+    /// has no evidence of that (issue #952).
+    public func macLaneOutcome(for item: iOSHistoryItem?) -> MacLaneOutcome {
+        guard item != nil, syncEnabled else { return .notAttempted }
+        return HistorySyncEngine.shared.state.isCloudAvailable ? .queuedForICloud : .iCloudUnavailable
+    }
+
     /// Trigger a manual sync.
     public func triggerSync() async {
+        retryPersistence()
+        guard syncEnabled, isStorageReady else { return }
         await HistorySyncEngine.shared.sync()
     }
 
@@ -284,28 +357,15 @@ public final class iOSHistoryManager: ObservableObject {
 
     /// Stores a polished transcript on an entry and re-syncs it.
     public func setPostProcessed(_ processed: String, for id: UUID) {
+        setPostProcessed(processed, for: id, preservingError: nil)
+    }
+
+    func setPostProcessed(_ processed: String, for id: UUID, preservingError: String?) {
         loadHistoryFromDiskIfNeeded()
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        items[index] = items[index].withPostProcessed(processed)
+        let updated = items[index].withPostProcessed(processed).withError(preservingError)
         reprocessingIDs.remove(id)
-        saveHistory()
-
-        guard syncEnabled else { return }
-        let entry = items[index].toSyncable()
-        // Mark the entry unsynced until the updated version uploads, so a failed
-        // upload is retried by the next full sync instead of silently desyncing.
-        syncedIDs.remove(id)
-        saveSyncedIDs()
-        Task {
-            do {
-                try await HistorySyncEngine.shared.upload(entry: entry)
-                syncedIDs.insert(id)
-                saveSyncedIDs()
-            } catch {
-                logger.error(
-                    "Failed to upload reprocessed item: \(error.localizedDescription, privacy: .public)")
-            }
-        }
+        upsertReportingDurability(updated)
     }
 
     public func beginPostProcessing(for id: UUID) {
@@ -321,6 +381,7 @@ public final class iOSHistoryManager: ObservableObject {
         loadHistoryFromDiskIfNeeded()
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index] = items[index].withError(message)
+        persistence.remember(items[index])
         saveHistory()
     }
 
@@ -336,51 +397,43 @@ public final class iOSHistoryManager: ObservableObject {
     /// list and clobber the file. Called eagerly from `init` and defensively
     /// from `add`/`remove`/`clearAll`.
     private func loadHistoryFromDiskIfNeeded() {
-        guard !hasLoadedFromDisk else { return }
-
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            // Nothing to load — safe to start from an empty list.
-            hasLoadedFromDisk = true
+        guard !hasAttemptedDiskLoad else { return }
+        hasAttemptedDiskLoad = true
+        items = persistence.load(visible: items)
+        refreshPersistenceState()
+        if isStorageReady {
+            syncedIDs.subtract(persistence.recoveredIDs)
             pruneStaleSyncedIDs()
-            return
+            saveSyncedIDs()
         }
+        startSyncIfReady()
+    }
 
-        do {
-            let data = try Data(contentsOf: fileURL)
-            items = try decoder.decode([iOSHistoryItem].self, from: data)
-            // Only mark loaded once we've actually read the file. A transient
-            // failure (e.g. file protection while the device is locked during a
-            // background recording) must be retried, never treated as "loaded"
-            // and then clobbered by the next save.
-            hasLoadedFromDisk = true
-            pruneStaleSyncedIDs()
-        } catch {
-            logger.error("Failed to load history: \(error.localizedDescription, privacy: .public)")
+    public func retryPersistence() {
+        if !isStorageReady {
+            hasAttemptedDiskLoad = false
+            loadHistoryFromDiskIfNeeded()
+        } else {
+            saveHistory()
         }
+    }
+
+    private func refreshPersistenceState() {
+        isStorageReady = persistence.isReady
+        hasLoadedFromDisk = isStorageReady
+        persistenceError = persistence.errorMessage
     }
 
     private func saveHistory() {
         _ = saveHistoryReportingDurability()
     }
 
-    /// Persists history and reports whether the write reached disk, so
-    /// import paths can refuse to acknowledge data that was never saved.
     @discardableResult
     private func saveHistoryReportingDurability() -> Bool {
-        do {
-            let data = try encoder.encode(items)
-            // `completeUntilFirstUserAuthentication` keeps the file readable and
-            // writable from a background (Action Button) recording after the
-            // first unlock, so headless sessions can persist without data loss.
-            try data.write(
-                to: fileURL,
-                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-            )
-            return true
-        } catch {
-            logger.error("Failed to save history: \(error.localizedDescription, privacy: .public)")
-            return false
-        }
+        let durable = persistence.save(items)
+        refreshPersistenceState()
+        startSyncIfReady()
+        return durable
     }
 
     // MARK: - Batched Remote Commits
@@ -400,16 +453,18 @@ public final class iOSHistoryManager: ObservableObject {
     }
 
     /// Sorts once and persists once for however many remote changes accumulated.
-    private func commitRemoteChangesNow() {
+    @discardableResult
+    private func commitRemoteChangesNow() -> Bool {
         pendingRemoteCommit?.cancel()
         pendingRemoteCommit = nil
-        guard hasPendingRemoteChanges else { return }
-        hasPendingRemoteChanges = false
+        guard hasPendingRemoteChanges else { return true }
 
         items.sort { $0.createdAt > $1.createdAt }
-        saveHistory()
+        guard saveHistoryReportingDurability() else { return false }
+        hasPendingRemoteChanges = false
         pruneStaleSyncedIDs()
         saveSyncedIDs()
+        return true
     }
 
     // MARK: - Synced IDs Tracking
@@ -438,7 +493,11 @@ public final class iOSHistoryManager: ObservableObject {
 
 // MARK: - HistorySyncDelegate
 
-extension iOSHistoryManager: HistorySyncDelegate {
+extension iOSHistoryManager: HistorySyncDurabilityDelegate {
+    public func persistRemoteChanges() async throws {
+        guard commitRemoteChangesNow() else { throw CocoaError(.fileWriteUnknown) }
+    }
+
     public func pendingEntries() -> [SyncableHistoryEntry] {
         pruneStaleSyncedIDs()
         return items
@@ -453,6 +512,7 @@ extension iOSHistoryManager: HistorySyncDelegate {
             let local = items[index]
             if entry.updatedAt > local.updatedAt {
                 items[index] = iOSHistoryItem.fromSyncable(entry)
+                persistence.remember(items[index])
                 syncedIDs.insert(entry.id)
             } else if entry.updatedAt == local.updatedAt {
                 // An already-present duplicate is an acknowledgement.
@@ -467,6 +527,7 @@ extension iOSHistoryManager: HistorySyncDelegate {
 
         let item = iOSHistoryItem.fromSyncable(entry)
         items.insert(item, at: 0)
+        persistence.remember(item)
         syncedIDs.insert(entry.id)
         scheduleRemoteCommit()
     }
@@ -476,12 +537,17 @@ extension iOSHistoryManager: HistorySyncDelegate {
         // the persisted acknowledgement set), so they bypass the debounced
         // remote-commit path used for entry bursts.
         items.removeAll { $0.id == id }
+        persistence.rememberDeletion(id)
         syncedIDs.remove(id)
-        saveHistory()
-        saveSyncedIDs()
+        hasPendingRemoteChanges = true
+        commitRemoteChangesNow()
+        // Same rule as a local delete: the pointer cannot outlive its entry
+        // (issue #1006). A remote tombstone is still a deliberate deletion.
+        TranscriptHandoffPublisher.invalidateIfAdvertising(entryID: id)
     }
 
     public func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
+        guard commitRemoteChangesNow() else { return }
         syncedIDs.formUnion(ids.intersection(currentItemIDs))
         pruneStaleSyncedIDs()
         saveSyncedIDs()

@@ -9,11 +9,57 @@ import SpeakCore
 @MainActor
 public final class IOSBatchTranscriber {
     private let audioSessionManager: AudioSessionManager
+    private let startup = RecordingStartupOperation()
+    private var ownsAudioSession = false
+    private var hasInputTap = false
+    /// Batch has no live partial result, so its input tap is the only signal
+    /// that capture is really running. Replaced per start so a retired run's
+    /// tap can never report input for the run that replaced it (issue #983).
+    private var firstInputSignal = FirstInputSignal()
+    private var activeCaptureID: UUID?
+
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count.
+    public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972). Batch
+    /// has no live partial, so its timeline ends at the session start.
+    public var onStartupObservation: ((StartupObservation) -> Void)?
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
     private let audioEngine = AVAudioEngine()
-    private let audioRecorder = AudioRecordingPersistence()
+    let audioRecorder = AudioRecordingPersistence()
+    let recordingLoss = RecordingLossReporting(isBatch: true)
+    var startCaptureAudio: (() throws -> Void)?
     private let client: IOSBatchTranscriptionClient
     private let retainRecording: Bool
     private var startTime: Date?
+    /// The completed file this capture wrote, from `stop()` closing it until
+    /// its owner discards it. `nil` for a retained recording's lifetime is
+    /// meaningless: `discardRecordingIfNotRetained` never deletes one the user
+    /// asked to keep.
+    public private(set) var finishedRecordingURL: URL?
+
+    /// Whether this capture's recording is the user's to keep.
+    public var retainsRecording: Bool { retainRecording }
+
+    /// The safety claim this capture's recording was written under, if any.
+    public var safetyRecordingID: UUID? { audioRecorder.lastClaim }
 
     public let model: String
 
@@ -21,72 +67,133 @@ public final class IOSBatchTranscriber {
         audioSessionManager: AudioSessionManager,
         model: String,
         apiKey: String,
+        keywords: [String] = [],
         retainRecording: Bool = true,
         session: URLSession = .shared
     ) {
         self.audioSessionManager = audioSessionManager
-        self.model = model
+        self.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         self.retainRecording = retainRecording
-        self.client = IOSBatchTranscriptionClient(apiKey: apiKey, session: session)
+        self.client = IOSBatchTranscriptionClient(apiKey: apiKey, keywords: keywords, session: session)
     }
 
     public func start() async throws {
-        guard await ensureMicrophonePermission() else {
+        guard startTime == nil, !startup.isStarting else { return }
+        do {
+            try await startup.run(
+                { try await self.startCapture() },
+                onFailure: { self.cleanupCapture() }
+            )
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+    }
+
+    private func startCapture() async throws {
+        let captureID = UUID()
+        activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
+        recordingLoss.begin(recorder: audioRecorder)
+        let permissionGranted = await ensureMicrophonePermission()
+        try Task.checkCancellation()
+        guard permissionGranted else {
             throw iOSTranscriptionError.permissionDenied(.microphone)
         }
+        ownsAudioSession = true
         try await audioSessionManager.configureForRecording()
+        onStartupObservation?(.stage(.audioSessionConfigured))
+        try Task.checkCancellation()
 
+        if let startCaptureAudio {
+            try startCaptureAudio()
+            startTime = Date()
+            return
+        }
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         try audioRecorder.startRecording(format: format)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder] buffer, _ in
+        let signal = firstInputSignal
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [audioRecorder, weak self] buffer, _ in
             audioRecorder.writeBuffer(buffer)
+            guard buffer.frameLength > 0, signal.markObserved() else { return }
+            Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
         }
+        hasInputTap = true
 
         do {
             audioEngine.prepare()
             try audioEngine.start()
+            // Only after the engine actually returned.
+            onStartupObservation?(.stage(.engineStarted))
             startTime = Date()
         } catch {
-            inputNode.removeTap(onBus: 0)
+            removeInputTap()
             audioRecorder.cancelRecording()
-            audioSessionManager.deactivate()
+            releaseAudioSession()
             throw error
         }
     }
 
     public func stop(language: String?) async throws -> TranscriptionResult {
+        let lossRun = recordingLoss.currentReport
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        guard let recording = audioRecorder.stopRecording() else {
-            audioSessionManager.deactivate()
+        removeInputTap()
+        activeCaptureID = nil
+        startTime = nil
+        guard let recording = recordingLoss.finish(recorder: audioRecorder, run: lossRun) else {
+            releaseAudioSession()
             throw IOSBatchTranscriptionError.missingRecording
         }
-        audioSessionManager.deactivate()
-        startTime = nil
+        releaseAudioSession()
 
         // A non-retained recording is temporary, but it is still the only copy
-        // of what the user said. Delete it after the transcript is safely in
-        // hand, never on the error path: the keyboard reports the failure to
-        // the user, and the preserved file stays visible in the Recordings
-        // screen, which lists every file in the recordings directory. From
-        // there the user can play it back, retry it, or delete it.
-        let result = try await client.transcribeFile(
+        // of what the user said, and a transcript in hand is not a transcript
+        // delivered. Deleting here lost the audio whenever the caller never
+        // used this result — a finalisation deadline that already gave up on
+        // the stop, or a process killed between this reply and the History
+        // write. The file is therefore kept until its owner says delivery of
+        // this capture is complete (`discardRecordingIfNotRetained`), and kept
+        // for good on the error path: the keyboard reports the failure to the
+        // user, and the preserved file stays visible in the Recordings screen,
+        // which lists every file in the recordings directory. From there the
+        // user can play it back, retry it, or delete it.
+        finishedRecordingURL = recording.url
+        return try await client.transcribeFile(
             at: recording.url,
             model: model,
             language: language
         )
-        if !retainRecording {
-            AudioRecordingPersistence.deleteRecording(at: recording.url)
-        }
-        return result
+    }
+
+    /// Discards the temporary recording of a capture whose transcript has been
+    /// delivered. Called by the owner of the result, never by the upload — a
+    /// result nobody used must leave its audio recoverable.
+    ///
+    /// - Returns: `true` when a file was actually removed.
+    @discardableResult
+    public func discardRecordingIfNotRetained() -> Bool {
+        guard !retainRecording, let url = finishedRecordingURL else { return false }
+        finishedRecordingURL = nil
+        AudioRecordingPersistence.deleteRecording(at: url)
+        // The file is gone, so its claim has nothing left to point at
+        // (issue #992). The transcript was delivered before this ran.
+        audioRecorder.forgetLastClaim()
+        return true
     }
 
     public func cancel() {
+        startup.cancel()
+        cleanupCapture()
+    }
+
+    private func cleanupCapture() {
+        recordingLoss.cancel()
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         audioRecorder.cancelRecording()
-        audioSessionManager.deactivate()
+        releaseAudioSession()
+        activeCaptureID = nil
         startTime = nil
     }
 
@@ -105,198 +212,53 @@ public final class IOSBatchTranscriber {
         model: String,
         apiKey: String,
         language: String?,
+        keywords: [String] = [],
         session: URLSession = .shared
     ) async throws -> TranscriptionResult {
-        try await IOSBatchTranscriptionClient(apiKey: apiKey, session: session)
+        try await IOSBatchTranscriptionClient(apiKey: apiKey, keywords: keywords, session: session)
             .transcribeFile(at: url, model: model, language: language)
     }
 }
 
-private struct IOSBatchTranscriptionClient {
-    let apiKey: String
-    let session: URLSession
+/// Which upload path a batch model takes on iOS.
+///
+/// A named decision rather than a chain of `if`s inside the request path, so
+/// the routing is assertable without a network round trip and adding a
+/// provider is one case rather than one more branch.
+enum IOSBatchTranscriptionRoute: Equatable, Sendable {
+    case appleSpeechAnalyzer
+    case openAI
+    case metaMuse
+    case azure
+    case cartesia
+    /// Gladia's asynchronous pre-recorded job API, through the shared
+    /// `GladiaBatchClient` with the `gladia.apiKey` this app already stores for
+    /// the live Solaria provider.
+    case gladia
+    /// Google's own Interactions API, through the shared
+    /// `GeminiInteractionsClient`. Matched on the direct-batch identifiers
+    /// only: the `google/gemini-2.0-flash-*` catalogue entries share the
+    /// `google/` prefix but are OpenRouter-routed.
+    case gemini
+    /// xAI's dedicated speech-to-text endpoint, through the shared
+    /// `XAIBatchTranscriptionClient`. The Grok Voice streaming identifier
+    /// shares the `xai/` prefix but has no file mode, so this matches on the
+    /// batch identifier alone.
+    case xai
+    case openRouter
 
-    func transcribeFile(at url: URL, model: String, language: String?) async throws -> TranscriptionResult {
-        if AppleLocalModels.isSpeechAnalyzerModel(model) {
-            if #available(iOS 26.0, *) {
-                return try await AppleSpeechAnalyzerTranscriber.transcribeFile(
-                    at: url,
-                    localeIdentifier: language,
-                    engine: AppleSpeechAnalyzerEngine(modelID: model)
-                )
-            }
-            throw AppleLocalModelError.speechTranscriberUnavailable
-        }
-
-        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKey.isEmpty else { throw IOSBatchTranscriptionError.apiKeyMissing }
-
-        if AppSettings.openAIBatchModelIDs.contains(model) {
-            return try await transcribeWithOpenAI(
-                at: url,
-                model: model,
-                language: language,
-                apiKey: trimmedKey
-            )
-        }
-        return try await transcribeWithOpenRouter(
-            at: url,
-            model: model,
-            language: language,
-            apiKey: trimmedKey
-        )
-    }
-
-    private func transcribeWithOpenAI(
-        at url: URL,
-        model: String,
-        language: String?,
-        apiKey: String
-    ) async throws -> TranscriptionResult {
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        let boundary = "Boundary-\(UUID().uuidString)"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        let modelName = model.split(separator: "/").last.map(String.init) ?? model
-        var body = Data()
-        body.appendFormField(name: "model", value: modelName, boundary: boundary)
-        body.appendFormField(
-            name: "response_format",
-            value: modelName == "gpt-4o-transcribe-diarize" ? "diarized_json" : "json",
-            boundary: boundary
-        )
-        if modelName == "gpt-4o-transcribe-diarize" {
-            body.appendFormField(name: "chunking_strategy", value: "auto", boundary: boundary)
-        }
-        if let languageCode = language?.split(whereSeparator: { $0 == "_" || $0 == "-" }).first {
-            body.appendFormField(
-                name: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
-                value: String(languageCode),
-                boundary: boundary
-            )
-        }
-        body.appendFile(
-            name: "file",
-            filename: url.lastPathComponent,
-            mimeType: "audio/m4a",
-            data: try Data(contentsOf: url),
-            boundary: boundary
-        )
-        body.appendString("--\(boundary)--\r\n")
-        request.httpBody = body
-
-        let (data, response) = try await session.data(for: request)
-        try validate(response: response, data: data, service: "OpenAI")
-        let payload = try JSONDecoder().decode(OpenAIResponse.self, from: data)
-        let text = payload.transcriptText
-        guard !text.isEmpty else { throw IOSBatchTranscriptionError.emptyTranscript }
-        return await result(text: text, url: url, model: model, rawPayload: data)
-    }
-
-    private func transcribeWithOpenRouter(
-        at url: URL,
-        model: String,
-        language: String?,
-        apiKey: String
-    ) async throws -> TranscriptionResult {
-        let client = OpenRouterAPIClient(apiKey: apiKey, session: session)
-        do {
-            return try await client.transcribeFile(at: url, model: model, language: language)
-        } catch OpenRouterClientError.audioFileTooLarge {
-            throw IOSBatchTranscriptionError.audioTooLarge
-        } catch OpenRouterClientError.invalidResponse {
-            throw IOSBatchTranscriptionError.invalidResponse
-        } catch let OpenRouterClientError.httpStatus(statusCode, body) {
-            throw IOSBatchTranscriptionError.httpError("OpenRouter", statusCode, body)
-        }
-    }
-
-    private func validate(response: URLResponse, data: Data, service: String) throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw IOSBatchTranscriptionError.invalidResponse
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? "No response body"
-            throw IOSBatchTranscriptionError.httpError(service, http.statusCode, body)
-        }
-    }
-
-    private func result(text: String, url: URL, model: String, rawPayload: Data) async -> TranscriptionResult {
-        let asset = AVURLAsset(url: url)
-        let duration = (try? await asset.load(.duration).seconds) ?? 0
-        return TranscriptionResult(
-            text: text,
-            segments: [.init(startTime: 0, endTime: duration, text: text)],
-            confidence: nil,
-            duration: duration,
-            modelIdentifier: model,
-            cost: nil,
-            rawPayload: String(data: rawPayload, encoding: .utf8),
-            debugInfo: nil
-        )
+    static func route(for model: String) -> IOSBatchTranscriptionRoute {
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if AppleLocalModels.isSpeechAnalyzerModel(model) { return .appleSpeechAnalyzer }
+        if AppSettings.openAIBatchModelIDs.contains(model) { return .openAI }
+        if model == CartesiaBatchClient.catalogID { return .cartesia }
+        if model == GladiaBatchClient.catalogID { return .gladia }
+        if AzureTranscriptionModels.batchIDs.contains(model) { return .azure }
+        if model == MetaMuseVoiceTranscribe.batchCatalogID { return .metaMuse }
+        if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .gemini }
+        if model == XAISpeechToText.batchCatalogID { return .xai }
+        return .openRouter
     }
 }
 
-private struct OpenAIResponse: Decodable {
-    let text: String?
-    let segments: [OpenAIResponseSegment]?
-
-    var transcriptText: String {
-        guard let segments, segments.contains(where: { $0.speaker != nil }) else {
-            return text ?? segments?.map(\.text).joined(separator: " ") ?? ""
-        }
-        return segments.map { segment in
-            guard let speaker = segment.speaker else { return segment.text }
-            return "\(speaker.replacingOccurrences(of: "_", with: " ").capitalized): \(segment.text)"
-        }.joined(separator: "\n")
-    }
-}
-
-private struct OpenAIResponseSegment: Decodable {
-    let text: String
-    let speaker: String?
-}
-
-public enum IOSBatchTranscriptionError: LocalizedError {
-    case apiKeyMissing
-    case missingRecording
-    case audioTooLarge
-    case invalidResponse
-    case emptyTranscript
-    case httpError(String, Int, String)
-
-    public var errorDescription: String? {
-        switch self {
-        case .apiKeyMissing: return "The selected batch model needs an API key."
-        case .missingRecording: return "The audio recording could not be saved."
-        case .audioTooLarge: return "This recording is too large for OpenRouter's 50 MB upload limit."
-        case .invalidResponse: return "The transcription service returned an invalid response."
-        case .emptyTranscript: return "The transcription service returned an empty transcript."
-        case .httpError(let service, let status, let body):
-            return "\(service) returned HTTP \(status): \(body)"
-        }
-    }
-}
-
-private extension Data {
-    mutating func appendString(_ value: String) {
-        if let data = value.data(using: .utf8) { append(data) }
-    }
-
-    mutating func appendFormField(name: String, value: String, boundary: String) {
-        appendString("--\(boundary)\r\n")
-        appendString("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
-        appendString("\(value)\r\n")
-    }
-
-    mutating func appendFile(name: String, filename: String, mimeType: String, data: Data, boundary: String) {
-        appendString("--\(boundary)\r\n")
-        appendString("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
-        appendString("Content-Type: \(mimeType)\r\n\r\n")
-        append(data)
-        appendString("\r\n")
-    }
-}
 #endif

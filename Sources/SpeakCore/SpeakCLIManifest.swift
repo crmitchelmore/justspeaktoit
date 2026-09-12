@@ -31,6 +31,7 @@ public struct SpeakCLIManifest: Codable, Equatable, Sendable {
         }
     }
 
+    public let releaseTrain: ReleaseTrain?
     public let schemaVersion: Int
     /// Marketing version of the CLI, identical to the app release it shipped with.
     public let version: String
@@ -40,10 +41,20 @@ public struct SpeakCLIManifest: Codable, Equatable, Sendable {
 
     public init(
         schemaVersion: Int = SpeakCLIManifest.currentSchemaVersion,
+        version: String, automationSchemaVersion: Int, assets: [Asset]
+    ) {
+        self.init(schemaVersion: schemaVersion, version: version,
+                  automationSchemaVersion: automationSchemaVersion, assets: assets, releaseTrain: nil)
+    }
+
+    public init(
+        schemaVersion: Int = SpeakCLIManifest.currentSchemaVersion,
         version: String,
         automationSchemaVersion: Int,
-        assets: [Asset]
+        assets: [Asset],
+        releaseTrain: ReleaseTrain?
     ) {
+        self.releaseTrain = releaseTrain
         self.schemaVersion = schemaVersion
         self.version = version
         self.automationSchemaVersion = automationSchemaVersion
@@ -111,6 +122,9 @@ public enum SpeakCLIManifestVerifier {
         }
         guard manifest.schemaVersion == SpeakCLIManifest.currentSchemaVersion else {
             throw SpeakCLIManifestError.unsupportedSchema(manifest.schemaVersion)
+        }
+        guard (manifest.releaseTrain ?? .stable) == ReleaseTrain.current else {
+            throw SpeakCLIManifestError.malformed("CLI belongs to a different release train")
         }
         return manifest
     }

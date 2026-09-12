@@ -114,6 +114,9 @@ struct ModelPicker: View {
         .pickerStyle(.segmented)
 
         List {
+          if isShowingNoSearchResults {
+            ContentUnavailableView.search(text: trimmedQuery)
+          }
           ForEach(filteredOptions) { option in
             Button {
               selection = option.id
@@ -182,12 +185,22 @@ struct ModelPicker: View {
       .frame(minWidth: 780, minHeight: 520)
     }
 
+    private var trimmedQuery: String {
+      query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True when a search is active but matched nothing, so the sheet can say so
+    /// instead of showing a bare list with only the Custom row.
+    private var isShowingNoSearchResults: Bool {
+      !trimmedQuery.isEmpty && filteredOptions.isEmpty
+    }
+
     private var filteredOptions: [ModelCatalog.Option] {
       var result = options
       if let selectedTag {
         result = result.filter { $0.tags.contains(selectedTag) }
       }
-      let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+      let trimmed = trimmedQuery
       if !trimmed.isEmpty {
         let lowered = trimmed.lowercased()
         result = result.filter {
@@ -288,13 +301,12 @@ struct ModelPicker: View {
           }
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsControlChrome()
         .speakTooltip(tooltipText)
+        .accessibilityLabel(title)
+        .accessibilityValue(selectedDisplayName)
+        .accessibilityIdentifier("modelPicker.\(Self.accessibilityIdentifierComponent(for: title))")
+        .accessibilityAddTraits(.isButton)
         .sheet(isPresented: $isShowingChooser) {
           ModelChooserSheet(
             title: title,
@@ -327,13 +339,7 @@ struct ModelPicker: View {
             .tag(ModelCatalog.customOptionID)
           }
         }
-        .pickerStyle(.menu)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-          RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .settingsMenuPicker()
         .speakTooltip(tooltipText)
       }
 
@@ -404,6 +410,23 @@ struct ModelPicker: View {
     options.first { option in
       option.id.caseInsensitiveCompare(selection) == .orderedSame
     }
+  }
+
+  /// The label VoiceOver reads as the picker's current value.
+  private var selectedDisplayName: String {
+    selectedOption?.displayName ?? (customValue.isEmpty ? "Custom" : customValue)
+  }
+
+  /// Stable, UI-test friendly component derived from the picker's title,
+  /// e.g. "Post-processing model" -> "postProcessingModel".
+  static func accessibilityIdentifierComponent(for title: String) -> String {
+    let words = title
+      .components(separatedBy: CharacterSet.alphanumerics.inverted)
+      .filter { !$0.isEmpty }
+    guard let first = words.first else { return "model" }
+    return ([first.prefix(1).lowercased() + first.dropFirst()]
+      + words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() })
+      .joined()
   }
 
   private var selectedCredentialAvailability: ModelCredentialAvailability {

@@ -186,3 +186,185 @@ final class TranscriptionSelectionPersistenceTests: XCTestCase {
         XCTAssertTrue(AppSettings(defaults: defaults).hasExplicitLiveTranscriptionModelChoice)
     }
 }
+
+extension TranscriptionSelectionPersistenceTests {
+    @MainActor
+    func testSharedModelRemoval_withoutAnyReplacementFallsBackToAppleFromEitherLocalMode() {
+        for mode in AppSettings.LocalTranscriptionMode.allCases {
+            let settings = AppSettings(defaults: defaults)
+            settings.selectLocalTranscriptionSource(.downloaded)
+            settings.localTranscriptionMode = mode
+            settings.localTranscriptionModel = "local/whisperkit/removed"
+            settings.localStreamingModelSource = "removed-stream"
+
+            settings.repairRemovedWhisperKitSelection(
+                modelID: "local/whisperkit/removed", streamingSourceID: "removed-stream",
+                fallbackBatchModelID: nil, fallbackStreamingSourceID: nil
+            )
+
+            XCTAssertTrue(settings.isAppleOnDeviceTranscriptionSelected)
+            XCTAssertEqual(settings.localStreamingModelSource, "")
+            XCTAssertTrue(AppSettings(defaults: defaults).isAppleOnDeviceTranscriptionSelected)
+        }
+    }
+
+    @MainActor
+    func testRemovingSelectedStreamingModel_usesInstalledBatchReplacementAcrossRelaunch() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectLocalTranscriptionSource(.downloaded)
+        settings.localTranscriptionMode = .streaming
+        settings.localTranscriptionModel = "local/whisperkit/removed"
+        settings.localStreamingModelSource = "local/whisperkit/streaming/removed"
+
+        settings.repairDownloadedStreamingSelection(
+            fallbackSourceID: nil, fallbackBatchModelID: "local/whisperkit/base"
+        )
+
+        let relaunched = AppSettings(defaults: defaults)
+        XCTAssertEqual(relaunched.localTranscriptionModel, "local/whisperkit/base")
+        XCTAssertEqual(relaunched.localTranscriptionMode, .batch)
+        XCTAssertEqual(settings.localStreamingModelSource, "")
+        XCTAssertEqual(defaults.string(forKey: AppSettings.DefaultsKey.localStreamingModelSource.rawValue), "")
+        XCTAssertEqual(relaunched.transcriptionMode, .localModel)
+    }
+
+    @MainActor
+    func testRemovingSelectedStreamingModel_withoutDownloadedReplacementUsesAppleSpeech() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectLocalTranscriptionSource(.downloaded)
+        settings.localTranscriptionMode = .streaming
+
+        settings.repairDownloadedStreamingSelection(fallbackSourceID: nil, fallbackBatchModelID: nil)
+
+        XCTAssertTrue(settings.isAppleOnDeviceTranscriptionSelected)
+        let relaunched = AppSettings(defaults: defaults)
+        XCTAssertEqual(relaunched.rememberedLocalTranscriptionSource, .apple)
+        XCTAssertTrue(relaunched.isAppleOnDeviceTranscriptionSelected)
+    }
+
+    @MainActor
+    func testRemovingSelectedStreamingModel_prefersAnotherInstalledStreamingSource() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectLocalTranscriptionSource(.downloaded)
+        settings.localTranscriptionMode = .streaming
+
+        settings.repairDownloadedStreamingSelection(fallbackSourceID: "installed-source", fallbackBatchModelID: nil)
+
+        XCTAssertEqual(settings.localStreamingModelSource, "installed-source")
+        XCTAssertEqual(settings.localTranscriptionMode, .streaming)
+        XCTAssertEqual(settings.transcriptionMode, .localModel)
+    }
+
+    @MainActor
+    func testRemovingSelectedStreamingModel_doesNotSwitchAnActiveRemoteSessionToLocal() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectRemoteTranscriptionMode(.streaming)
+        settings.liveTranscriptionModel = soniox
+
+        settings.repairDownloadedStreamingSelection(fallbackSourceID: nil, fallbackBatchModelID: nil)
+
+        XCTAssertEqual(settings.transcriptionLocation, .remote)
+        XCTAssertEqual(settings.liveTranscriptionModel, soniox)
+        XCTAssertEqual(settings.rememberedLocalTranscriptionSource, .apple)
+    }
+}
+
+extension TranscriptionSelectionPersistenceTests {
+    @MainActor
+    func testSharedModelRemoval_repairsBothIDsAndPreservesEachUsableLocalMode() {
+        for mode in AppSettings.LocalTranscriptionMode.allCases {
+            let settings = AppSettings(defaults: defaults)
+            settings.selectLocalTranscriptionSource(.downloaded)
+            settings.localTranscriptionMode = mode
+            settings.localTranscriptionModel = "local/whisperkit/removed"
+            settings.localStreamingModelSource = "removed-stream"
+
+            settings.repairRemovedWhisperKitSelection(
+                modelID: "local/whisperkit/removed", streamingSourceID: "removed-stream",
+                fallbackBatchModelID: "local/whisperkit/base", fallbackStreamingSourceID: "installed-stream"
+            )
+
+            let relaunched = AppSettings(defaults: defaults)
+            XCTAssertEqual(relaunched.localTranscriptionModel, "local/whisperkit/base")
+            XCTAssertEqual(settings.localStreamingModelSource, "installed-stream")
+            XCTAssertEqual(defaults.string(forKey: "localStreamingModelSource"), "installed-stream")
+            XCTAssertEqual(relaunched.localTranscriptionMode, mode)
+            XCTAssertEqual(relaunched.transcriptionMode, .localModel)
+        }
+    }
+
+    @MainActor
+    func testSharedModelRemoval_preservesUnrelatedBatchChoiceWhenStreamingHasNoReplacement() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectLocalTranscriptionSource(.downloaded)
+        settings.localTranscriptionMode = .batch
+        settings.localTranscriptionModel = "local/whisperkit/chosen"
+        settings.localStreamingModelSource = "removed-stream"
+
+        settings.repairRemovedWhisperKitSelection(
+            modelID: "local/whisperkit/removed", streamingSourceID: "removed-stream",
+            fallbackBatchModelID: "local/whisperkit/other", fallbackStreamingSourceID: nil
+        )
+
+        XCTAssertEqual(settings.localTranscriptionModel, "local/whisperkit/chosen")
+        XCTAssertEqual(settings.localStreamingModelSource, "")
+        XCTAssertEqual(settings.localTranscriptionMode, .batch)
+        XCTAssertEqual(settings.transcriptionMode, .localModel)
+    }
+
+    @MainActor
+    func testSharedModelRemoval_preservesUnrelatedStreamingChoiceWhenBatchHasNoReplacement() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectLocalTranscriptionSource(.downloaded)
+        settings.localTranscriptionMode = .streaming
+        settings.localTranscriptionModel = "local/whisperkit/removed"
+        settings.localStreamingModelSource = "chosen-stream"
+
+        settings.repairRemovedWhisperKitSelection(
+            modelID: "local/whisperkit/removed", streamingSourceID: "removed-stream",
+            fallbackBatchModelID: nil, fallbackStreamingSourceID: "other-stream"
+        )
+
+        XCTAssertEqual(settings.localStreamingModelSource, "chosen-stream")
+        XCTAssertEqual(settings.localTranscriptionMode, .streaming)
+        XCTAssertEqual(settings.transcriptionMode, .localModel)
+    }
+
+    @MainActor
+    func testSharedModelRemoval_preservesRemoteBatchWhileRepairingBothRememberedIDs() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectRemoteTranscriptionMode(.batch)
+        let remoteModel = settings.batchTranscriptionModel
+        settings.localTranscriptionModel = "local/whisperkit/removed"
+        settings.localStreamingModelSource = "removed-stream"
+
+        settings.repairRemovedWhisperKitSelection(
+            modelID: "local/whisperkit/removed", streamingSourceID: "removed-stream",
+            fallbackBatchModelID: "local/whisperkit/base", fallbackStreamingSourceID: "installed-stream"
+        )
+
+        let relaunched = AppSettings(defaults: defaults)
+        XCTAssertEqual(relaunched.transcriptionMode, .batchRemote)
+        XCTAssertEqual(relaunched.batchTranscriptionModel, remoteModel)
+        XCTAssertEqual(relaunched.localTranscriptionModel, "local/whisperkit/base")
+        XCTAssertEqual(defaults.string(forKey: "localStreamingModelSource"), "installed-stream")
+    }
+
+    @MainActor
+    func testSharedModelRemoval_usesRemainingStreamingSourceWhenSelectedBatchBecomesUnavailable() {
+        let settings = AppSettings(defaults: defaults)
+        settings.selectLocalTranscriptionSource(.downloaded)
+        settings.localTranscriptionMode = .batch
+        settings.localTranscriptionModel = "local/whisperkit/removed"
+        settings.localStreamingModelSource = "removed-stream"
+
+        settings.repairRemovedWhisperKitSelection(
+            modelID: "local/whisperkit/removed", streamingSourceID: "removed-stream",
+            fallbackBatchModelID: nil, fallbackStreamingSourceID: "installed-stream"
+        )
+
+        XCTAssertEqual(settings.localStreamingModelSource, "installed-stream")
+        XCTAssertEqual(settings.localTranscriptionMode, .streaming)
+        XCTAssertEqual(settings.transcriptionMode, .localModel)
+    }
+}

@@ -23,7 +23,7 @@ private final class ScriptedPermissions: KeychainPermissionsChecking, @unchecked
 /// Transactional configuration import (issue #699): parity with the canonical
 /// credential catalogue, all-or-nothing application, rollback reporting, and
 /// idempotent retry.
-final class ConfigTransferImportTests: XCTestCase {
+final class ConfigTransferImportTests: XCTestCase { // swiftlint:disable:this type_body_length
     private let manager = ConfigTransferManager(pbkdf2Iterations: 1_000)
     private var service: String!
     private var defaultsSuite: String!
@@ -82,11 +82,56 @@ final class ConfigTransferImportTests: XCTestCase {
     func testPreviouslyOmittedProviders_areNowTransferable() {
         let identifiers = Set(ConfigTransferManager.transferableSecretIdentifiers)
         for required in [
-            "assemblyai.apiKey", "cartesia.apiKey", "gladia.apiKey", "groq.apiKey",
+            "assemblyai.apiKey", "cartesia.apiKey", "gladia.apiKey", "google.apiKey", "groq.apiKey",
             "mistral.apiKey", "modulate.apiKey", "revai.apiKey", "soniox.apiKey",
             "speechmatics.apiKey", "xai.apiKey"
         ] {
             XCTAssertTrue(identifiers.contains(required), "\(required) must transfer")
+        }
+    }
+
+    /// Keywords are one list under one key on both platforms (issue #849), so
+    /// a device-to-device transfer carries them verbatim.
+    func testTranscriptionKeywords_areATransferableSetting() {
+        XCTAssertTrue(
+            ConfigTransferManager.transferableSettingKeys.contains(
+                ConfigTransferManager.transcriptionKeywordsKey))
+        XCTAssertEqual(ConfigTransferManager.transcriptionKeywordsKey, "transcriptionKeywords")
+    }
+
+    func testGatherSettings_carriesTheKeywordListButNeverAnEmptyOne() {
+        defaults.set("deepgram/nova-3-streaming", forKey: "selectedModel")
+
+        XCTAssertNil(manager.gatherSettings(defaults: defaults)["transcriptionKeywords"])
+
+        defaults.set("JustSpeakToIt, Muse", forKey: "transcriptionKeywords")
+        let settings = manager.gatherSettings(defaults: defaults)
+
+        XCTAssertEqual(settings["transcriptionKeywords"], "JustSpeakToIt, Muse")
+        XCTAssertEqual(settings["selectedModel"], "deepgram/nova-3-streaming")
+    }
+
+    func testApplyImport_writesTheKeywordListUnderTheSharedKey() async throws {
+        let payload = ConfigTransferPayload(
+            secrets: [:],
+            settings: ["transcriptionKeywords": "JustSpeakToIt, Muse"]
+        )
+
+        try await manager.applyImport(payload: payload, storage: makeStorage(), defaults: defaults)
+
+        XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "JustSpeakToIt, Muse")
+    }
+
+    func testKeywordImportReplacesLegacyEditEvenWhenTextMatchesPreviousMigration() async throws {
+        defaults.set("Original", forKey: "transcriptionKeywords")
+        defaults.set("Original", forKey: "transcriptionKeywordsLastReconciled")
+        for legacyValue in ["Replacement", ""] {
+            defaults.set(legacyValue, forKey: "assemblyAIKeyterms")
+            let payload = ConfigTransferPayload(secrets: [:], settings: ["transcriptionKeywords": "Original"])
+            try await manager.applyImport(payload: payload, storage: makeStorage(), defaults: defaults)
+            XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "Original")
+            XCTAssertEqual(defaults.string(forKey: "assemblyAIKeyterms"), "Original")
+            XCTAssertEqual(defaults.string(forKey: "transcriptionKeywordsLastReconciled"), "Original")
         }
     }
 

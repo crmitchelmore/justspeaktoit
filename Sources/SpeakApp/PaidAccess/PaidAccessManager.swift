@@ -378,7 +378,15 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     self.isBusy = true
     defer { self.isBusy = false }
 
-    switch self.billingChannel {
+    if self.entitlement.provider == .manual {
+      self.lastError = "This access was granted manually and has no subscription to manage."
+      return
+    }
+    if self.entitlement.provider == .stripe && self.billingChannel == .storeKit {
+      self.lastError = "This subscription was purchased on the website. Manage it in your Just Speak to It web account."
+      return
+    }
+    switch self.entitlement.provider == .storeKit ? PaidBillingChannel.storeKit : .stripeCheckout {
     case .stripeCheckout:
       guard let session = await self.currentSession() else {
         self.lastError = PaidAccessError.notSignedIn.errorDescription
@@ -495,15 +503,11 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     _ result: VerificationResult<Transaction>,
     session: PaidAccessSession
   ) async -> Bool {
-    guard case .verified(let transaction) = result else { return false }
-    guard Self.subscriptionProductIDs.contains(transaction.productID) else { return false }
-
     do {
-      self.entitlement = try await self.client.syncStoreKitTransaction(
-        session: session,
-        signedTransaction: result.jwsRepresentation,
-        signedRenewalInfo: nil
-      )
+      guard let entitlement = try await PaidStoreKitSync.entitlement(
+        for: result, session: session, client: self.client
+      ) else { return false }
+      self.entitlement = entitlement
       return true
     } catch {
       self.lastError = (error as? PaidAccessError)?.errorDescription

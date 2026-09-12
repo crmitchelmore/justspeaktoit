@@ -20,13 +20,40 @@ struct SpeakApp: App {
     @Environment(\.openWindow) private var openWindow
 
     init() {
+        // A Sparkle smoke run (scripts/sparkle-update-smoke.sh) is headless and
+        // throw-away: no crash reporting, no windows, no onboarding. Bail out
+        // before anything else initialises.
+        guard !SparkleSmokeSession.isActive else { return }
         // Initialize Sentry as early as possible
         SentryManager.start()
     }
 
     var body: some Scene {
-        WindowGroup("Just Speak to It", id: "main") {
+        WindowGroup(ReleaseTrain.current.displayName, id: "main") {
             Group {
+                if SparkleSmokeSession.isActive {
+                    // A zero-size placeholder: SwiftUI still needs a scene, but
+                    // the smoke run must not bootstrap the environment, show
+                    // onboarding, or install the HUD and menu bar.
+                    Color.clear.frame(width: 1, height: 1)
+                } else {
+                    normalLaunchContent
+                }
+            }
+            .tint(.brandAccent)
+            .preferredColorScheme(environmentHolder.environment?.settings.appearance.colorScheme)
+        }
+        .defaultSize(width: 1080, height: 720)
+        .commands {
+            if let environment = environmentHolder.environment {
+                SpeakCommands(environment: environment)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var normalLaunchContent: some View {
+        Group {
                 if let environment = environmentHolder.environment {
                     if hasCompletedOnboarding {
                         MainView()
@@ -52,7 +79,10 @@ struct SpeakApp: App {
                                     showingAnalyticsConsent = true
                                 }
                             }
-                            .alert("Help improve Just Speak to It?", isPresented: $showingAnalyticsConsent) {
+                            .alert(
+                                "Help improve \(ReleaseTrain.current.displayName)?",
+                                isPresented: $showingAnalyticsConsent
+                            ) {
                                 Button("Share Anonymous Analytics") {
                                     hasAnsweredAnalyticsConsent = true
                                     environment.settings.analyticsEnabled = true
@@ -96,7 +126,7 @@ struct SpeakApp: App {
                         }
                     }
                 } else {
-                    ProgressView("Loading...")
+                    ProgressView("Loading…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .task {
                             environmentHolder.bootstrap()
@@ -106,15 +136,6 @@ struct SpeakApp: App {
                         }
                 }
             }
-            .tint(.brandAccent)
-            .preferredColorScheme(environmentHolder.environment?.settings.appearance.colorScheme)
-        }
-        .defaultSize(width: 1080, height: 720)
-        .commands {
-            if let environment = environmentHolder.environment {
-                SpeakCommands(environment: environment)
-            }
-        }
     }
 }
 
@@ -138,6 +159,15 @@ final class EnvironmentHolder: ObservableObject {
 struct SpeakCommands: Commands {
     let environment: AppEnvironment
     @ObservedObject private var updaterManager = UpdaterManager.shared
+    /// Observed so that if the App menu ever reclaims a binding (see
+    /// `installedShortcutActions`), rebinding it in Settings re-renders the menu
+    /// item, the same way `MenuBarManager` rebuilds its menu.
+    @ObservedObject private var shortcuts: ShortcutManager
+
+    init(environment: AppEnvironment) {
+        self.environment = environment
+        _shortcuts = ObservedObject(wrappedValue: environment.shortcuts)
+    }
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -147,18 +177,43 @@ struct SpeakCommands: Commands {
             CheckForUpdatesView()
 #endif
             Divider()
-            Button("Start/Stop Recording") {
-                environment.main.toggleRecordingFromUI()
-            }
-            .keyboardShortcut("s", modifiers: [.command, .shift])
+            startStopRecordingButton
         }
 
         CommandGroup(replacing: .help) {
-            Button("Just Speak to It Help") {
+            Button("\(ReleaseTrain.current.displayName) Help") {
                 if let url = URL(string: "https://github.com/speak-app/speak") {
                     NSWorkspace.shared.open(url)
                 }
             }
+        }
+    }
+
+    /// Configurable shortcuts this command set installs on the App menu.
+    ///
+    /// Empty by design. `MenuBarManager` installs every configurable binding on
+    /// the Speak menu, and AppKit fires only the *first* main-menu item carrying
+    /// a given key equivalent while every such item still draws it — so
+    /// Start/Stop Recording used to render its shortcut on two menus and fire
+    /// from one of them. The App menu keeps the command for discoverability,
+    /// without a shortcut; the Speak menu owns the binding.
+    static let installedShortcutActions: Set<ShortcutAction> = []
+
+    /// The App menu's Start/Stop Recording item. It carries a shortcut only when
+    /// `installedShortcutActions` claims `.startStopRecording`, which it does
+    /// not; a disabled or unmappable binding would leave it bare as well.
+    @ViewBuilder
+    private var startStopRecordingButton: some View {
+        let binding = Self.installedShortcutActions.contains(.startStopRecording)
+            ? shortcuts.binding(for: .startStopRecording)
+            : nil
+        let button = Button("Start/Stop Recording") {
+            environment.main.toggleRecordingFromUI()
+        }
+        if let binding, let key = binding.keyEquivalent {
+            button.keyboardShortcut(key, modifiers: binding.eventModifiers)
+        } else {
+            button
         }
     }
 }
@@ -167,13 +222,13 @@ struct SpeakCommands: Commands {
 /// SwiftUI view that wraps Sparkle's check for updates action
 struct CheckForUpdatesView: View {
     @StateObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
-    
+
     init(updater: SPUUpdater) {
         _checkForUpdatesViewModel = StateObject(
             wrappedValue: CheckForUpdatesViewModel(updater: updater)
         )
     }
-    
+
     var body: some View {
         Button("Check for Updates…") {
             checkForUpdatesViewModel.checkForUpdates()
@@ -186,15 +241,15 @@ struct CheckForUpdatesView: View {
 @MainActor
 final class CheckForUpdatesViewModel: ObservableObject {
     @Published var canCheckForUpdates = false
-    
+
     private let updater: SPUUpdater
-    
+
     init(updater: SPUUpdater) {
         self.updater = updater
         updater.publisher(for: \.canCheckForUpdates)
             .assign(to: &$canCheckForUpdates)
     }
-    
+
     func checkForUpdates() {
         updater.checkForUpdates()
     }
@@ -214,12 +269,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Headless Sparkle self-update (scripts/sparkle-update-smoke.sh). Nothing
+        // else in the app runs in this mode: no dock icon, no windows, no audio
+        // engine warm-up, no DMG-cleanup prompts. The process is either killed by
+        // Sparkle as it installs, or exits with a verdict of its own.
+        if SparkleSmokeSession.isActive {
+            NSApp.setActivationPolicy(.accessory)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            SparkleSmokeSession.begin()
+            return
+        }
+
         NSApp.setActivationPolicy(.regular)
+        // Keep SwiftPM runs and packaged apps on the same multi-resolution artwork.
         NSApp.applicationIconImage = AppIconProvider.applicationIcon()
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)
         }
+        #if DEBUG
+        if CoreJourneyLaunchProfile.isRequested { return }
+        #endif
         DispatchQueue.global(qos: .utility).async { _ = AVAudioEngine() } // Sentry JUSTSPEAKTOIT-A
         // Raw-audio multipart bodies abandoned by a crash or force quit (#706).
         DispatchQueue.global(qos: .utility).async {
@@ -229,16 +299,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let mainManager = environment?.main else { return .terminateNow }
+        guard let environment else { return .terminateNow }
         guard terminationTask == nil else { return .terminateLater }
 
         terminationTask = Task { @MainActor in
-            await mainManager.prepareForTermination()
+            await environment.prepareForTermination()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
     }
-    
+
     private func checkAndOfferDMGCleanup() {
         // DMG installs exist only on the direct-download channel. The App Store
         // build is installed by the store and sandboxed, so probing /Volumes,
@@ -247,9 +317,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard DistributionChannel.current == .direct else { return }
 
         let bundlePath = Bundle.main.bundlePath
-        
-        // Check if running from a DMG (mounted volume that's not /Applications)
-        if bundlePath.hasPrefix("/Volumes/") && !bundlePath.hasPrefix("/Applications") {
+
+        // Only a read-only mount (an installer DMG or an App Translocation
+        // image) counts. External drives mount under /Volumes too, and a
+        // build living there must not be nagged to move.
+        if DiskImageDetector.isRunningFromDiskImage(bundleURL: Bundle.main.bundleURL) {
             // Running from DMG - suggest moving to Applications
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self.showMoveToApplicationsAlert()
@@ -267,39 +339,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    
+
     private func showMoveToApplicationsAlert() {
         let alert = NSAlert()
         alert.messageText = "Move to Applications?"
-        alert.informativeText = "Just Speak to It is running from a disk image. Would you like to move it to your Applications folder for better performance?"
+        alert.informativeText = "\(RunningAppIdentity.current.name) is running from a disk image. "
+            + "Would you like to move it to your Applications folder for better performance?"
         alert.addButton(withTitle: "Move to Applications")
         alert.addButton(withTitle: "Not Now")
         alert.alertStyle = .informational
-        
+
         if alert.runModal() == .alertFirstButtonReturn {
             moveToApplications()
         }
     }
-    
+
     private func moveToApplications() {
         let bundlePath = Bundle.main.bundlePath
         let appName = (bundlePath as NSString).lastPathComponent
         let destinationPath = "/Applications/\(appName)"
-        
+
         do {
             // Remove existing app if present
             if FileManager.default.fileExists(atPath: destinationPath) {
                 try FileManager.default.removeItem(atPath: destinationPath)
             }
-            
+
             // Copy to Applications
             try FileManager.default.copyItem(atPath: bundlePath, toPath: destinationPath)
-            
+
             // Launch from new location
             let url = URL(fileURLWithPath: destinationPath)
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
-            
+
             NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in
                 // Quit the current instance
                 DispatchQueue.main.async {
@@ -309,37 +382,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             let errorAlert = NSAlert()
             errorAlert.messageText = "Could not move application"
-            errorAlert.informativeText = "Please manually drag Just Speak to It to your Applications folder. Error: \(error.localizedDescription)"
+            errorAlert.informativeText = "Please drag \(RunningAppIdentity.current.name) to your Applications folder. "
+                + "Error: \(error.localizedDescription)"
             errorAlert.runModal()
         }
     }
-    
+
     private func checkForMountedDMG() {
         let fileManager = FileManager.default
-        
+
         // Only show eject dialog once per volume - track which volumes we've asked about
         // This prevents the dialog from appearing after Sparkle auto-updates
         let askedVolumesKey = "justspeaktoit.askedToEjectVolumes"
         var askedVolumes = Set(UserDefaults.standard.stringArray(forKey: askedVolumesKey) ?? [])
-        
+
         do {
             let volumes = try fileManager.contentsOfDirectory(atPath: "/Volumes")
-            
+            let imageMounts = DiskImageMounts.current()
+
             for volume in volumes {
                 let volumePath = "/Volumes/\(volume)"
-                let appPath = "\(volumePath)/JustSpeakToIt.app"
-                
+                let appPath = "\(volumePath)/\(Bundle.main.bundleURL.lastPathComponent)"
+
                 // Check if this looks like our DMG
-                if volume.contains("Just Speak") || fileManager.fileExists(atPath: appPath) {
+                if imageMounts.contains(volumePath), fileManager.fileExists(atPath: appPath) {
                     // Skip if we've already asked about this volume
                     if askedVolumes.contains(volume) {
-                        return
+                        continue
                     }
-                    
+
                     // Remember we asked about this volume
                     askedVolumes.insert(volume)
                     UserDefaults.standard.set(Array(askedVolumes), forKey: askedVolumesKey)
-                    
+
                     showEjectDMGAlert(volumeName: volume)
                     break
                 }
@@ -348,18 +423,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Ignore errors reading volumes
         }
     }
-    
+
     private func showEjectDMGAlert(volumeName: String) {
         let alert = NSAlert()
         alert.messageText = "Eject Installer?"
-        alert.informativeText = "Just Speak to It has been installed. Would you like to eject the installer disk image and move it to Trash?"
+        alert.informativeText = "\(RunningAppIdentity.current.name) has been installed. "
+            + "Would you like to eject the installer disk image and move it to Trash?"
         alert.addButton(withTitle: "Eject & Trash")
         alert.addButton(withTitle: "Just Eject")
         alert.addButton(withTitle: "Keep Mounted")
         alert.alertStyle = .informational
-        
+
         let response = alert.runModal()
-        
+
         if response == .alertFirstButtonReturn {
             // Eject and trash
             ejectAndTrashDMG(volumeName: volumeName)
@@ -368,42 +444,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ejectDMG(volumeName: volumeName)
         }
     }
-    
+
     private func ejectDMG(volumeName: String) {
         let volumePath = "/Volumes/\(volumeName)"
         NSWorkspace.shared.unmountAndEjectDevice(atPath: volumePath)
     }
-    
+
     private func ejectAndTrashDMG(volumeName: String) {
         // First, find the DMG file path before ejecting
         let volumePath = "/Volumes/\(volumeName)"
-        
+
         // Get disk info to find source DMG
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
         task.arguments = ["info", "-plist"]
-        
+
         let pipe = Pipe()
         task.standardOutput = pipe
-        
+
         do {
             try task.run()
             task.waitUntilExit()
-            
+
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
                let images = plist["images"] as? [[String: Any]] {
-                
+
                 for image in images {
                     if let systemEntities = image["system-entities"] as? [[String: Any]] {
                         for entity in systemEntities {
                             if let mountPoint = entity["mount-point"] as? String,
                                mountPoint == volumePath,
                                let imagePath = image["image-path"] as? String {
-                                
+
                                 // Eject first
                                 NSWorkspace.shared.unmountAndEjectDevice(atPath: volumePath)
-                                
+
                                 // Then trash the DMG
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                                     let dmgURL = URL(fileURLWithPath: imagePath)
@@ -521,7 +597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openHistoryItem(_ sender: NSMenuItem) {
-        guard sender.representedObject as? UUID != nil else { return }
+        guard sender.representedObject is UUID else { return }
         Task { @MainActor in
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first?.makeKeyAndOrderFront(nil)

@@ -11,6 +11,7 @@ import { ApiError, errorResponse, jsonResponse } from './http.js';
 import { ConfigurationError, type Env } from './env.js';
 import { authenticate, createContext } from './context.js';
 import { describeError } from './logging.js';
+import { Repository } from './data/repository.js';
 import { handleAppleSignIn, handleRefresh, handleSignOut } from './routes/auth.js';
 import {
   handleEntitlement,
@@ -33,6 +34,9 @@ export { LiveSessionDurableObject } from './do/live-session.js';
 type Route = `${'GET' | 'POST'} ${string}`;
 
 export default {
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    await new Repository(env.DB).pruneExpiredRequestClaims(Math.floor(controller.scheduledTime / 1000));
+  },
   async fetch(request: Request, env: Env): Promise<Response> {
     const context = (() => {
       try {

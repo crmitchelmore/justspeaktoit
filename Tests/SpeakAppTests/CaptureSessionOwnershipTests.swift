@@ -50,4 +50,14 @@ final class CaptureSessionOwnershipTests: XCTestCase {
     )
     XCTAssertTrue(ownership.mayTearDownCapture(.voiceEdit))
   }
+  func testMigration_excludesCaptureAcrossSuspensionAndCannotStealCapture() async {
+    let ownership = CaptureSessionOwnership()
+    XCTAssertTrue(ownership.reserve(.migration))
+    await Task.yield()
+    XCTAssertFalse(ownership.reserve(.dictation))
+    XCTAssertFalse(ownership.reserve(.voiceEdit))
+    ownership.release(.migration)
+    XCTAssertTrue(ownership.reserve(.voiceEdit))
+    XCTAssertFalse(ownership.reserve(.migration))
+  }
 }

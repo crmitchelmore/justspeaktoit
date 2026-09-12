@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import SpeakCore
 import XCTest
 
 @testable import SpeakiOSLib
@@ -36,6 +37,7 @@ final class HardwareTriggerDestinationTests: XCTestCase {
         XCTAssertEqual(HardwareTriggerDestination.clipboard.rawValue, "clipboard")
         XCTAssertEqual(HardwareTriggerDestination.clipboardAndPostProcess.rawValue, "clipboardAndPostProcess")
         XCTAssertEqual(HardwareTriggerDestination.historyOnly.rawValue, "historyOnly")
+        XCTAssertEqual(HardwareTriggerDestination.auto.rawValue, "auto")
     }
 
     func testAllCasesHaveNonEmptyDisplayName() {
@@ -70,13 +72,48 @@ final class HardwareTriggerDestinationTests: XCTestCase {
         }
     }
 
-    func testMissingDefaultsValueFallsBackToClipboard() {
-        // Mirrors the init logic in AppSettings: when the key is absent
-        // (fresh install / pre-feature user) we fall back to `.clipboard`
-        // so the previous behaviour is preserved.
+    func testMissingDefaultsValueFallsBackToAuto() {
+        // Mirrors the init logic in AppSettings: with no stored choice the
+        // destination is resolved per capture (issue #1008). An explicitly
+        // stored choice is always honoured — see the round-trip test above.
         let raw = defaults.string(forKey: "hardwareTriggerDestination") ?? ""
-        let restored = HardwareTriggerDestination(rawValue: raw) ?? .clipboard
-        XCTAssertEqual(restored, .clipboard)
+        let restored = HardwareTriggerDestination(rawValue: raw) ?? .auto
+        XCTAssertEqual(restored, .auto)
+    }
+
+    // MARK: - Auto (#1008)
+
+    /// The keyboard lane skips the pasteboard only once the keyboard has been
+    /// observed inserting the words; History still holds every capture.
+    func testAutoMapsAConfirmedKeyboardInsertionToAHistoryOnlySideEffect() {
+        let plan = AutoDestinationPolicy.plan(
+            AutoDestinationPolicy.Inputs(
+                transcriptIsEmpty: false,
+                keyboardInsertedIntoField: true,
+                keyboardOfferAvailable: true
+            )
+        )
+        XCTAssertEqual(TranscriptionRecordingService.concreteDestination(for: plan), .historyOnly)
+    }
+
+    func testAutoMapsEveryOtherCaseToTheClipboard() {
+        let plan = AutoDestinationPolicy.plan(
+            AutoDestinationPolicy.Inputs(
+                transcriptIsEmpty: false,
+                keyboardInsertedIntoField: false,
+                keyboardOfferAvailable: true
+            )
+        )
+        XCTAssertEqual(TranscriptionRecordingService.concreteDestination(for: plan), .clipboard)
+    }
+
+    /// `.auto` must never reach a side-effect switch; the mapping runs first.
+    func testAutoNeverSurvivesIntoTheClipboardDecision() {
+        let text = TranscriptionRecordingService.clipboardTextAtStop(
+            transcript: "hello",
+            destination: .historyOnly
+        )
+        XCTAssertNil(text)
     }
 
     func testUnknownRawValueFallsBackToClipboard() {

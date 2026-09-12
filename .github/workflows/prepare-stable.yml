@@ -1,0 +1,58 @@
+name: Prepare Stable
+on:
+  workflow_dispatch:
+    inputs:
+      alpha:
+        description: Tested immutable Alpha tag (alpha-build-N)
+        required: true
+        type: string
+      mac_version:
+        description: Intended numeric macOS version, checked against published releases
+        required: true
+        type: string
+      ios_version:
+        description: Intended numeric iOS version, checked against App Store Connect
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: read
+jobs:
+  prepare:
+    if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-manifest-allocation
+      queue: max
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALPHA: ${{ inputs.alpha }}
+          MAC_VERSION: ${{ inputs.mac_version }}
+          IOS_VERSION: ${{ inputs.ios_version }}
+        run: node scripts/release-train.mjs prepare --alpha "$ALPHA" --mac-version "$MAC_VERSION" --ios-version "$IOS_VERSION"
+  mac-direct:
+    needs: prepare
+    uses: ./.github/workflows/release-mac.yml
+    with:
+      manifest: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  ios:
+    needs: prepare
+    uses: ./.github/workflows/release-ios.yml
+    with:
+      manifest: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+  mac-store:
+    needs: prepare
+    uses: ./.github/workflows/release-appstore.yml
+    with:
+      manifest: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit

@@ -5,8 +5,8 @@ export const DEFAULT_REASONING_EFFORT = "medium";
 
 export const commitPlatform = (subject) => {
     const match = String(subject ?? "").match(/^[a-z]+\(([^)]*)\)!?:/i);
-    if (!match) return "shared";
-    const scopes = match[1].toLowerCase().split(/[\s,/]+/).filter(Boolean);
+    const bracket = String(subject ?? "").match(/^[a-z]+(?:\([^)]*\))?!?:\s*\[([^\]]+)\]/i);
+    const scopes = [match?.[1], bracket?.[1]].filter(Boolean).join(",").toLowerCase().split(/[\s,/]+/).filter(Boolean);
     const targetsIOS = scopes.includes("ios");
     const targetsMac = scopes.includes("mac") || scopes.includes("macos");
     if (targetsIOS && !targetsMac) return "ios";

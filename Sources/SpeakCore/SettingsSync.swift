@@ -209,9 +209,11 @@ public struct ConfigTransfer: Equatable, Sendable {
 ///
 /// Uses Crockford Base32, whose alphabet omits `I`, `L`, `O` and `U`, so the
 /// characters a user is most likely to mistype have a single defined meaning
-/// (`I`/`l` → `1`, `O` → `0`). Eight characters give 40 bits of entropy, which
-/// combined with PBKDF2 stretching and the 10-minute expiry keeps an offline
-/// attack on a captured QR code impractical.
+/// (`I`/`l` → `1`, `O` → `0`). Eight characters give 40 bits of entropy, and
+/// PBKDF2 stretching slows a brute-force attempt, but neither prevents offline
+/// decryption once both factors have been captured. The source UI therefore
+/// shows the code only after the QR has left the screen
+/// (see `ConfigTransferPresentation`).
 public enum ConfigTransferCode {
     static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
     public static let length = 8
@@ -288,8 +290,15 @@ public final class ConfigTransferManager: Sendable {
 
     private var encoder: JSONEncoder { Self.makeCoderEncoder() }
     private var decoder: JSONDecoder { Self.makeCoderDecoder() }
-    private var envelopeEncoder: JSONEncoder { Self.makeCoderEncoder() }
     private var envelopeDecoder: JSONDecoder { Self.makeCoderDecoder() }
+
+    static func encodeEnvelope(_ envelope: ConfigTransferEnvelope) throws -> Data {
+        let encoder = Self.makeCoderEncoder()
+        // Base64 ciphertext contains random slashes. Escaping them adds a
+        // random number of bytes and can push a valid transfer over QR capacity.
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        return try encoder.encode(envelope)
+    }
 
     private static func makeCoderEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
@@ -311,33 +320,19 @@ public final class ConfigTransferManager: Sendable {
     /// of the keys either platform can hold, so exporting from one platform
     /// and importing on the other never silently drops a stored credential.
     ///
-    /// This list is deliberately explicit rather than derived: it is the
-    /// bounded transfer policy (issue #699). A parity test asserts it equals
-    /// `ModelCredentialResolver.allKnownAPIKeyIdentifiers`, so adding a
-    /// provider to any catalogue fails the test until its transfer capability
-    /// is defined here. Dynamically registered identifiers are never exported.
-    public static let transferableSecretIdentifiers: [String] = [
-        "assemblyai.apiKey",
-        "azure.speech.apiKey",
-        "cartesia.apiKey",
-        "deepgram.apiKey",
-        "elevenlabs.apiKey",
-        "gladia.apiKey",
-        "groq.apiKey",
-        "mistral.apiKey",
-        "modulate.apiKey",
-        "openai.apiKey",
-        "openai.tts.apiKey",
-        "openrouter.apiKey",
-        "revai.apiKey",
-        "soniox.apiKey",
-        "speechmatics.apiKey",
-        "xai.apiKey"
-    ]
 
     /// Non-secret settings keys a transfer payload may carry. Import refuses
     /// anything else so a payload cannot write arbitrary defaults.
-    public static let transferableSettingKeys: Set<String> = ["selectedModel"]
+    ///
+    /// `transcriptionKeywords` is the one keyword list both platforms store
+    /// under that defaults key, so it transfers verbatim.
+    public static let transferableSettingKeys: Set<String> = [
+        "selectedModel",
+        transcriptionKeywordsKey
+    ]
+
+    /// Shared UserDefaults key for the user's transcription keywords.
+    public static let transcriptionKeywordsKey = "transcriptionKeywords"
 
     /// Collects the transferable secrets currently stored in `storage`,
     /// skipping identifiers that are missing or empty.
@@ -373,6 +368,11 @@ public final class ConfigTransferManager: Sendable {
         if let model = defaults.string(forKey: liveModelDefaultsKey) {
             settings["selectedModel"] = model
         }
+        // Import refuses empty values, and an empty keyword list carries
+        // nothing worth transferring anyway.
+        if let keywords = defaults.string(forKey: Self.transcriptionKeywordsKey), !keywords.isEmpty {
+            settings[Self.transcriptionKeywordsKey] = keywords
+        }
         return settings
     }
 
@@ -393,7 +393,7 @@ public final class ConfigTransferManager: Sendable {
     // MARK: - Export
 
     /// Builds an encrypted QR payload together with the one-time code that
-    /// unlocks it. The exporting device displays the code beside the QR; it is
+    /// unlocks it. The exporting device reveals the code after removing the QR; it is
     /// never encoded into the QR, so scanning the image alone reveals nothing.
     public func makeTransfer(
         secrets: [String: String],
@@ -450,7 +450,7 @@ public final class ConfigTransferManager: Sendable {
             nonce: Data(nonce),
             ciphertext: sealedBox.ciphertext + sealedBox.tag
         )
-        let encoded = try envelopeEncoder.encode(envelope)
+        let encoded = try Self.encodeEnvelope(envelope)
         let base64 = encoded.base64EncodedString()
         // The doubly-encoded form stays the default so older importers keep
         // working, but it cannot fit a full credential set in one QR code
@@ -724,6 +724,12 @@ extension ConfigTransferManager {
         for (key, value) in payload.settings {
             let localKey = key == "selectedModel" ? liveModelDefaultsKey : key
             defaults.set(value, forKey: localKey)
+            if key == Self.transcriptionKeywordsKey {
+                // An import is an intentional write, even when its text equals
+                // an earlier migration. Keep the legacy macOS mirror in sync.
+                defaults.set(value, forKey: "assemblyAIKeyterms")
+                defaults.set(value, forKey: "transcriptionKeywordsLastReconciled")
+            }
         }
     }
 
@@ -958,4 +964,34 @@ public struct SyncStatus: Equatable, Sendable {
             pendingChanges: false
         )
     }
+}
+
+// The bounded transfer policy lives in an extension so the manager's type body
+// stays under the lint limit as providers are added.
+extension ConfigTransferManager {
+    /// This list is deliberately explicit rather than derived: it is the
+    /// bounded transfer policy (issue #699). A parity test asserts it equals
+    /// `ModelCredentialResolver.allKnownAPIKeyIdentifiers`, so adding a
+    /// provider to any catalogue fails the test until its transfer capability
+    /// is defined here. Dynamically registered identifiers are never exported.
+    public static let transferableSecretIdentifiers: [String] = [
+        "assemblyai.apiKey",
+        "azure.speech.apiKey",
+        "cartesia.apiKey",
+        "deepgram.apiKey",
+        "elevenlabs.apiKey",
+        "gladia.apiKey",
+        "google.apiKey",
+        "groq.apiKey",
+        "meta.apiKey",
+        "mistral.apiKey",
+        "modulate.apiKey",
+        "openai.apiKey",
+        "openai.tts.apiKey",
+        "openrouter.apiKey",
+        "revai.apiKey",
+        "soniox.apiKey",
+        "speechmatics.apiKey",
+        "xai.apiKey"
+    ]
 }

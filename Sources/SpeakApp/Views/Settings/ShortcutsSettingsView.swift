@@ -19,7 +19,7 @@ struct ShortcutsSettingsView: View {
                         .foregroundStyle(.secondary)
 
                     LazyVGrid(columns: shortcutColumns, alignment: .leading, spacing: density.inlineSpacing) {
-                        ForEach(ShortcutAction.availableCases().filter { $0.isGlobalByDefault }) { action in
+                        ForEach(ShortcutAction.availableCases().filter { $0.supportsGlobalShortcut }) { action in
                             shortcutRow(for: action)
                         }
                     }
@@ -34,7 +34,7 @@ struct ShortcutsSettingsView: View {
                         .foregroundStyle(.secondary)
 
                     LazyVGrid(columns: shortcutColumns, alignment: .leading, spacing: density.inlineSpacing) {
-                        ForEach(ShortcutAction.availableCases().filter { !$0.isGlobalByDefault }) { action in
+                        ForEach(ShortcutAction.availableCases().filter { !$0.supportsGlobalShortcut }) { action in
                             shortcutRow(for: action)
                         }
                     }
@@ -64,7 +64,12 @@ struct ShortcutsSettingsView: View {
 
             ShortcutSettingsCard(title: "Actions", systemImage: "arrow.counterclockwise", tint: .brandAccent) {
                 HStack(spacing: 12) {
-                    Button("Reset to Defaults") {
+                    DestructiveConfirmButton(
+                        "Reset to Defaults",
+                        dialogTitle: "Reset All Shortcuts?",
+                        message: "Every shortcut you have customised returns to its original setting.",
+                        confirmTitle: "Reset to Defaults"
+                    ) {
                         shortcutManager.resetToDefaults()
                     }
                     .buttonStyle(.bordered)
@@ -113,7 +118,7 @@ struct ShortcutsSettingsView: View {
 
                     Spacer(minLength: 0)
 
-                    if action.isGlobalByDefault {
+                    if action.supportsGlobalShortcut {
                         Button {
                             shortcutManager.setGlobal(!binding.isGlobal, for: action)
                         } label: {
@@ -158,7 +163,7 @@ struct ShortcutsSettingsView: View {
                         .font(.subheadline)
                         .foregroundStyle(binding.isEnabled ? .primary : .secondary)
 
-                    if action.isGlobalByDefault {
+                    if action.supportsGlobalShortcut {
                         Toggle("Global", isOn: Binding(
                             get: { binding.isGlobal },
                             set: { shortcutManager.setGlobal($0, for: action) }
@@ -201,7 +206,7 @@ struct ShortcutsSettingsView: View {
             if isRecording {
                 HStack(spacing: 4) {
                     Image(systemName: "keyboard")
-                    Text("Press keys...")
+                    Text("Press keys…")
                 }
                 .font(.caption)
                 .padding(.horizontal, density.isCompact ? 5 : 8)

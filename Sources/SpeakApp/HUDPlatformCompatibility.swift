@@ -43,6 +43,10 @@ enum HUDPlatformWorkarounds {
   }
   #endif
 
+  /// How often the full HUD's clock redraws. The label shows hundredths, so it
+  /// needs a sub-second cadence; the legacy renderer takes the coarser one.
+  /// This drives a `TimelineView` scoped to that one label - it is no longer a
+  /// timer that republishes the HUD's whole snapshot.
   static var elapsedTimerInterval: TimeInterval {
     isLegacyRenderingEnabled ? 0.1 : 0.02
   }

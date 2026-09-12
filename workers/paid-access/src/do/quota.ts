@@ -98,6 +98,7 @@ const LEGACY_PERIOD_KEY = 'period';
 /** The most recent period this user was seen in, used only for reporting. */
 const LATEST_PERIOD_KEY = 'latest_period';
 const RESERVATIONS_KEY = 'reservations';
+const EXPIRED_PREFIX = 'expired:';
 
 export class QuotaDurableObject implements DurableObject {
   private readonly state: DurableObjectState;
@@ -155,28 +156,6 @@ export class QuotaDurableObject implements DurableObject {
   }
 
   /**
-   * Adds committed usage to one period without touching any other.
-   *
-   * This is the only writer of committed usage, so a finalise arriving after a
-   * period boundary cannot silently reset the period now being metered.
-   */
-  private async commit(
-    period: string,
-    unitKind: QuotaUnitKind,
-    units: number,
-  ): Promise<PeriodState> {
-    const current = await this.loadPeriod(period);
-    const updated: PeriodState = {
-      period,
-      audioSecondsCommitted:
-        current.audioSecondsCommitted + (unitKind === 'audio_seconds' ? units : 0),
-      tokensCommitted: current.tokensCommitted + (unitKind === 'tokens' ? units : 0),
-    };
-    await this.state.storage.put(QuotaDurableObject.periodKey(period), updated);
-    return updated;
-  }
-
-  /**
    * Returns the reservations still under lease, committing any that expired.
    *
    * A lease expires only when nothing finalised or released it — a crashed
@@ -193,10 +172,18 @@ export class QuotaDurableObject implements DurableObject {
       (reservation.expiresAt > nowSeconds ? live : expired).push(reservation);
     }
     if (expired.length > 0) {
+      const periods: Record<string, PeriodState> = {};
       for (const reservation of expired) {
-        await this.commit(reservation.period, reservation.unitKind, reservation.units);
+        const key = QuotaDurableObject.periodKey(reservation.period);
+        const period = periods[key] ?? await this.loadPeriod(reservation.period);
+        if (reservation.unitKind === 'audio_seconds') period.audioSecondsCommitted += reservation.units;
+        else period.tokensCommitted += reservation.units;
+        periods[key] = period;
       }
-      await this.state.storage.put(RESERVATIONS_KEY, live);
+      // Charge and retire leases in one durable write, retaining reconciliation
+      // metadata so a late measured result can refund the unused reservation.
+      await this.state.storage.put({ ...periods, [RESERVATIONS_KEY]: live,
+        ...Object.fromEntries(expired.map((entry) => [EXPIRED_PREFIX + entry.id, entry])) });
     }
     return live;
   }
@@ -286,29 +273,31 @@ export class QuotaDurableObject implements DurableObject {
   }
 
   private async finalise(request: FinaliseRequest): Promise<QuotaResponse> {
-    const reservations = await this.loadReservations(request.nowSeconds);
-    const reservation = reservations.find((entry) => entry.id === request.reservationId);
-    const remaining = reservations.filter((entry) => entry.id !== request.reservationId);
-
-    if (reservation === undefined) {
-      // The lease already expired — and was therefore already committed above —
-      // or this is a duplicate finalise. Both are safe no-ops.
-      await this.state.storage.put(RESERVATIONS_KEY, remaining);
-      return {
-        ok: true,
-        snapshot: this.snapshot(await this.latestPeriod(), remaining, ZERO_LIMITS),
-      };
+    if (!Number.isSafeInteger(request.actualUnits) || request.actualUnits < 0) {
+      throw new Error('Invalid measured usage');
     }
-
-    // Charge the smaller of measured and reserved: the reservation was the
-    // agreed upper bound, so an over-reporting client cannot exceed it. The
-    // charge lands in the reservation's own period, which may no longer be the
-    // period the user is currently being metered in.
-    const charged = Math.max(0, Math.min(Math.ceil(request.actualUnits), reservation.units));
-    const updated = await this.commit(reservation.period, reservation.unitKind, charged);
-    await this.state.storage.put(RESERVATIONS_KEY, remaining);
-
-    return { ok: true, snapshot: this.snapshot(updated, remaining, ZERO_LIMITS) };
+    const reservations = await this.loadReservations(request.nowSeconds);
+    const expired = await this.state.storage.get<Reservation | null>(EXPIRED_PREFIX + request.reservationId);
+    const live = reservations.find((entry) => entry.id === request.reservationId);
+    const reservation = live ?? expired ?? undefined;
+    if (reservation === undefined) {
+      return { ok: true, snapshot: this.snapshot(await this.latestPeriod(), reservations, ZERO_LIMITS) };
+    }
+    const remaining = reservations.filter((entry) => entry.id !== request.reservationId);
+    const period = await this.loadPeriod(reservation.period);
+    // Only trusted Worker code can settle. Keep actual token overruns visible;
+    // audio remains capped by the server-enforced session duration.
+    const charged = reservation.unitKind === 'tokens'
+      ? request.actualUnits : Math.min(request.actualUnits, reservation.units);
+    const delta = charged - (live === undefined ? reservation.units : 0);
+    if (reservation.unitKind === 'audio_seconds') period.audioSecondsCommitted += delta;
+    else period.tokensCommitted += delta;
+    await this.state.storage.put({
+      [QuotaDurableObject.periodKey(period.period)]: period,
+      [RESERVATIONS_KEY]: remaining,
+      [EXPIRED_PREFIX + request.reservationId]: null,
+    });
+    return { ok: true, snapshot: this.snapshot(period, remaining, ZERO_LIMITS) };
   }
 
   private async release(request: ReleaseRequest): Promise<QuotaResponse> {

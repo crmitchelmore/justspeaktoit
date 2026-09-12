@@ -102,6 +102,8 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         let first = MacHistorySyncAdapter(historyManager: manager, defaults: defaults)
         await first.didAcknowledgeSyncedEntries(ids: [item.id])
         XCTAssertFalse(first.pendingEntries().contains { $0.id == item.id })
+        // The write is coalesced; a relaunch after a clean shutdown sees it.
+        first.flushPendingSyncedIDs()
 
         // A fresh adapter over the same defaults simulates app relaunch: the
         // acknowledgement must be durable so the item is not uploaded again.
@@ -125,7 +127,213 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         XCTAssertFalse(adapter.pendingEntries().contains { $0.id == item.id })
     }
 
+    // MARK: - Coalesced synced-ID bookkeeping
+
+    /// The sync engine hands a download pass to the delegate one entry at a
+    /// time. Each entry used to rewrite the whole synced-ID array to
+    /// UserDefaults; the pass must now cost a single write.
+    func testRemoteEntryPass_persistsSyncedIDsOnceForTheWholePass() async {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .seconds(30)
+        )
+        let entries = (0..<8).map { makeEntry(text: "remote-\($0)") }
+
+        for entry in entries {
+            await adapter.didReceiveRemoteEntry(entry)
+        }
+        let writesDuringPass = counting.writes.total
+        adapter.flushPendingSyncedIDs()
+
+        XCTAssertLessThanOrEqual(
+            writesDuringPass,
+            entries.count / 2,
+            "Per-entry bookkeeping writes must be coalesced, not one per entry"
+        )
+        XCTAssertEqual(
+            counting.writes.total,
+            1,
+            "The whole pass must cost exactly one synced-ID write"
+        )
+        XCTAssertEqual(
+            Set(counting.stringArray(forKey: syncedIDsKey) ?? []),
+            Set(entries.map(\.id.uuidString)),
+            "Every ID from the pass must be present in the single write"
+        )
+        for entry in entries {
+            XCTAssertTrue(
+                manager.allItems.contains { $0.id == entry.id },
+                "Every entry in the pass must still be applied locally"
+            )
+            XCTAssertFalse(
+                adapter.pendingEntries().contains { $0.id == entry.id },
+                "Coalescing must not make downloaded entries look unsynced"
+            )
+        }
+    }
+
+    /// The coalescing window must close on its own — nothing in the app calls
+    /// `flushPendingSyncedIDs()` during a normal sync.
+    func testCoalescedSyncedIDs_areWrittenWhenTheWindowElapses() async throws {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .milliseconds(20)
+        )
+        let entry = makeEntry(text: "remote")
+
+        await adapter.didReceiveRemoteEntry(entry)
+
+        let deadline = Date().addingTimeInterval(5)
+        while counting.writes.total == 0, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(counting.writes.total, 1)
+        XCTAssertEqual(counting.stringArray(forKey: syncedIDsKey), [entry.id.uuidString])
+    }
+
+    /// A remote record that lost to a newer local item drops its synced ID so
+    /// the local edit uploads. That removal must not sit in the coalescing
+    /// window: a quit before the window elapses would leave the stale ID on
+    /// disk and strand the edit for good (#851).
+    func testStaleRemoteEntry_persistsTheSyncedIDRemovalBeforeRelaunch() async {
+        let manager = await makeManager()
+        let local = makeItem(updatedAt: Date(timeIntervalSince1970: 100))
+        await manager.append(local)
+
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .seconds(30)
+        )
+        await adapter.didAcknowledgeSyncedEntries(ids: [local.id])
+        adapter.flushPendingSyncedIDs()
+        XCTAssertFalse(adapter.pendingEntries().contains { $0.id == local.id })
+
+        // The remote copy is older than the local item, so the local one wins
+        // and has to be uploaded again.
+        let stale = makeEntry(
+            id: local.id,
+            text: "older-remote",
+            updatedAt: Date(timeIntervalSince1970: 50)
+        )
+        await adapter.didReceiveRemoteEntry(stale)
+
+        XCTAssertFalse(
+            adapter.hasPendingSyncedIDWrites,
+            "A removal that decides what gets uploaded must be written through, not coalesced"
+        )
+        XCTAssertEqual(
+            counting.stringArray(forKey: syncedIDsKey),
+            [],
+            "The stale synced ID must already be gone from UserDefaults"
+        )
+        XCTAssertEqual(
+            manager.item(id: local.id)?.rawTranscription,
+            local.rawTranscription,
+            "The older remote entry must not overwrite the newer local item"
+        )
+
+        // No clean shutdown, no elapsed window: a fresh adapter over the same
+        // defaults is exactly what the next launch sees.
+        let relaunched = MacHistorySyncAdapter(historyManager: manager, defaults: counting)
+        XCTAssertTrue(
+            relaunched.pendingEntries().contains { $0.id == local.id },
+            "The locally newer item must be pending upload after relaunch"
+        )
+    }
+
+    /// Termination calls `flushPendingSyncedIDs()`; everything the window was
+    /// still holding has to reach UserDefaults in that one call.
+    func testFlushPendingSyncedIDs_persistsEverythingTheWindowWasHolding() async {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .seconds(30)
+        )
+        let acknowledged = (0..<3).map { _ in UUID() }
+        let remote = makeEntry(text: "remote")
+        await adapter.didAcknowledgeSyncedEntries(ids: Set(acknowledged))
+        await adapter.didReceiveRemoteEntry(remote)
+        XCTAssertTrue(adapter.hasPendingSyncedIDWrites)
+        XCTAssertNil(counting.stringArray(forKey: syncedIDsKey))
+
+        adapter.flushPendingSyncedIDs()
+
+        XCTAssertFalse(adapter.hasPendingSyncedIDWrites)
+        XCTAssertEqual(
+            Set(counting.stringArray(forKey: syncedIDsKey) ?? []),
+            Set((acknowledged + [remote.id]).map(\.uuidString)),
+            "The flush must persist every ID the window was still holding"
+        )
+        XCTAssertEqual(counting.writes.total, 1, "The flush must cost a single write")
+
+        adapter.flushPendingSyncedIDs()
+        XCTAssertEqual(counting.writes.total, 1, "A flush with nothing pending must not write")
+    }
+
+    /// A coalescing task that is already past its sleep when a later change
+    /// supersedes it still runs. It must not write, and above all must not
+    /// clear the replacement window's task handle and dirty flag, or the
+    /// replacement escapes `flushPendingSyncedIDs()` entirely (#870).
+    func testSupersededWindow_doesNotWriteOrClearItsReplacement() async throws {
+        let manager = await makeManager()
+        let counting = WriteCountingUserDefaults(suiteName: suiteName)!
+        let adapter = MacHistorySyncAdapter(
+            historyManager: manager,
+            defaults: counting,
+            saveInterval: .milliseconds(50)
+        )
+        let first = UUID()
+        let second = UUID()
+
+        await adapter.didAcknowledgeSyncedEntries(ids: [first])
+        // Let the first window's task actually start and reach its sleep, then
+        // block the main actor so the sleep elapses while its flush stays
+        // queued behind us — the exact interleaving from #870.
+        await Task.yield()
+        Thread.sleep(forTimeInterval: 0.15)
+        await adapter.didAcknowledgeSyncedEntries(ids: [second])
+        // Long enough to drain the superseded flush, short of the new window.
+        try await Task.sleep(for: .milliseconds(5))
+
+        XCTAssertEqual(
+            counting.writes.total,
+            0,
+            "A superseded window must not write; its replacement owns the write"
+        )
+        XCTAssertTrue(
+            adapter.hasPendingSyncedIDWrites,
+            "A superseded window must leave the replacement's dirty flag alone"
+        )
+
+        adapter.flushPendingSyncedIDs()
+
+        XCTAssertFalse(adapter.hasPendingSyncedIDWrites)
+        XCTAssertEqual(
+            Set(counting.stringArray(forKey: syncedIDsKey) ?? []),
+            Set([first, second].map(\.uuidString)),
+            "The flush must persist both windows' IDs"
+        )
+        XCTAssertEqual(counting.writes.total, 1, "The whole sequence must cost one write")
+
+        // The outstanding task must have been cancelled by the flush, not left
+        // running to write again once its window elapses.
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(counting.writes.total, 1, "The flush must cancel the outstanding window")
+    }
+
     // MARK: - Helpers
+
+    private let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
 
     private func makeManager() async -> HistoryManager {
         let manager = HistoryManager(
@@ -136,50 +344,39 @@ final class MacHistorySyncAdapterTests: XCTestCase {
         await manager.waitUntilLoaded()
         return manager
     }
+}
 
-    private func makeEntry(id: UUID = UUID(), text: String) -> SyncableHistoryEntry {
-        SyncableHistoryEntry(
-            id: id,
-            createdAt: Date(timeIntervalSince1970: 1),
-            rawTranscription: text,
-            postProcessedText: nil,
-            model: "test",
-            duration: 1,
-            wordCount: 1,
-            originPlatform: "ios",
-            updatedAt: Date(timeIntervalSince1970: 10)
-        )
-    }
+// MARK: - Fixtures
 
-    private func makeItem(id: UUID = UUID()) -> HistoryItem {
-        HistoryItem(
-            id: id,
-            createdAt: Date(),
-            modelsUsed: ["apple/local/SFSpeechRecognizer"],
-            rawTranscription: "raw transcript",
-            postProcessedTranscription: nil,
-            recordingDuration: 5,
-            cost: nil,
-            audioFileURL: nil,
-            networkExchanges: [],
-            events: [],
-            phaseTimestamps: PhaseTimestamps(
-                recordingStarted: nil,
-                recordingEnded: nil,
-                transcriptionStarted: nil,
-                transcriptionEnded: nil,
-                postProcessingStarted: nil,
-                postProcessingEnded: nil,
-                outputDelivered: nil
-            ),
-            trigger: HistoryTrigger(
-                gesture: .singleTap,
-                hotKeyDescription: "Fn",
-                outputMethod: .clipboard,
-                destinationApplication: nil
-            ),
-            personalCorrections: nil,
-            errors: []
-        )
-    }
+private func makeItem(id: UUID = UUID(), updatedAt: Date = Date()) -> HistoryItem {
+    HistoryItem(
+        id: id,
+        createdAt: Date(),
+        updatedAt: updatedAt,
+        modelsUsed: ["apple/local/SFSpeechRecognizer"],
+        rawTranscription: "raw transcript",
+        postProcessedTranscription: nil,
+        recordingDuration: 5,
+        cost: nil,
+        audioFileURL: nil,
+        networkExchanges: [],
+        events: [],
+        phaseTimestamps: PhaseTimestamps(
+            recordingStarted: nil,
+            recordingEnded: nil,
+            transcriptionStarted: nil,
+            transcriptionEnded: nil,
+            postProcessingStarted: nil,
+            postProcessingEnded: nil,
+            outputDelivered: nil
+        ),
+        trigger: HistoryTrigger(
+            gesture: .singleTap,
+            hotKeyDescription: "Fn",
+            outputMethod: .clipboard,
+            destinationApplication: nil
+        ),
+        personalCorrections: nil,
+        errors: []
+    )
 }

@@ -38,7 +38,8 @@ public enum AnalyticsOnboardingStep: String, Codable, Sendable {
 }
 
 public enum AnalyticsProviderType: String, Codable, Sendable {
-    case apple, azure, cartesia, deepgram, gladia, groq, local, mistral, modulate, soniox, speechmatics, other
+    case apple, azure, cartesia, deepgram, gladia, google, groq, local, meta, mistral, modulate, soniox
+    case speechmatics, other
     case assemblyAI = "assembly_ai"
     case elevenLabs = "eleven_labs"
     case openAI = "openai"
@@ -48,16 +49,21 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
 
     private static let liveProviderMapping: [LiveTranscriptionProviderID: AnalyticsProviderType] = [
         .apple: .apple,
+        .azure: .azure,
         .deepgram: .deepgram,
         .cartesia: .cartesia,
         .gladia: .gladia,
+        .google: .google,
         .modulate: .modulate,
         .assemblyai: .assemblyAI,
         .soniox: .soniox,
         .elevenlabs: .elevenLabs,
         .openai: .openAI,
         .speechmatics: .speechmatics,
-        .xai: .xAI
+        .xai: .xAI,
+        .meta: .meta,
+        .revai: .revAI,
+        .mistral: .mistral
     ]
 
     public init(liveProvider: LiveTranscriptionProviderID) {
@@ -177,64 +183,64 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
         }
     }
 
-    public var properties: [String: String] {
+    public var properties: [String: AnalyticsPropertyValue] {
         switch self {
         case .appActiveDaily: [:]
-        case let .onboardingStarted(entryPoint): ["entry_point": entryPoint.rawValue]
-        case let .onboardingStepCompleted(step): ["step": step.rawValue]
+        case let .onboardingStarted(entryPoint): ["entry_point": .string(entryPoint.rawValue)]
+        case let .onboardingStepCompleted(step): ["step": .string(step.rawValue)]
         case let .onboardingPermissionResult(permission, state):
-            ["permission": permission.rawValue, "state": state.rawValue]
-        case let .onboardingCompleted(stepsSkipped): ["steps_skipped_bucket": stepsSkipped.rawValue]
+            ["permission": .string(permission.rawValue), "state": .string(state.rawValue)]
+        case let .onboardingCompleted(stepsSkipped): ["steps_skipped_bucket": .string(stepsSkipped.rawValue)]
         case let .firstTranscriptionSucceeded(provider, engine, daysSinceInstall):
             [
-                "provider_type": provider.rawValue,
-                "engine_type": engine.rawValue,
-                "days_since_install_bucket": daysSinceInstall.rawValue
+                "provider_type": .string(provider.rawValue),
+                "engine_type": .string(engine.rawValue),
+                "days_since_install_bucket": .string(daysSinceInstall.rawValue)
             ]
         case let .transcriptionStarted(dimensions): dimensions.properties
         case let .transcriptionCompleted(dimensions, duration, wordCount, latency, output):
             dimensions.properties.merging([
-                "duration_bucket": duration.rawValue,
-                "word_count_bucket": wordCount.rawValue,
-                "latency_bucket": latency.rawValue,
-                "output_method": output.rawValue
+                "duration_bucket": .string(duration.rawValue),
+                "word_count_bucket": .string(wordCount.rawValue),
+                "latency_bucket": .string(latency.rawValue),
+                "output_method": .string(output.rawValue)
             ]) { current, _ in current }
         case let .transcriptionFailed(dimensions, error, stage):
             dimensions.properties.merging([
-                "error_category": error.rawValue,
-                "pipeline_stage": stage.rawValue
+                "error_category": .string(error.rawValue),
+                "pipeline_stage": .string(stage.rawValue)
             ]) { current, _ in current }
         case let .transcriptionCancelled(dimensions, duration):
-            dimensions.properties.merging(["duration_bucket": duration.rawValue]) { current, _ in current }
+            dimensions.properties.merging(["duration_bucket": .string(duration.rawValue)]) { current, _ in current }
         case let .polishCompleted(engine, provider, latency, preset):
             polishProperties(engine: engine, provider: provider, latency: latency, preset: preset)
         case let .polishFailed(engine, provider, latency, preset, error):
             polishProperties(engine: engine, provider: provider, latency: latency, preset: preset)
-                .merging(["error_category": error.rawValue]) { current, _ in current }
-        case let .correctionApplied(rulesMatched): ["rules_matched_bucket": rulesMatched.rawValue]
-        case let .correctionRuleCreated(totalRules): ["total_rules_bucket": totalRules.rawValue]
+                .merging(["error_category": .string(error.rawValue)]) { current, _ in current }
+        case let .correctionApplied(rulesMatched): ["rules_matched_bucket": .string(rulesMatched.rawValue)]
+        case let .correctionRuleCreated(totalRules): ["total_rules_bucket": .string(totalRules.rawValue)]
         case let .profileActivated(profileCount, isDefault):
-            ["profile_count_bucket": profileCount.rawValue, "is_default": String(isDefault)]
-        case let .insightsViewed(surface): ["surface": surface.rawValue]
-        case let .historyAction(action): ["action": action.rawValue]
+            ["profile_count_bucket": .string(profileCount.rawValue), "is_default": .boolean(isDefault)]
+        case let .insightsViewed(surface): ["surface": .string(surface.rawValue)]
+        case let .historyAction(action): ["action": .string(action.rawValue)]
         case let .voiceOutputUsed(engine, provider):
-            ["engine_type": engine.rawValue, "provider_type": provider.rawValue]
+            ["engine_type": .string(engine.rawValue), "provider_type": .string(provider.rawValue)]
         case let .sendToMacCompleted(success, latency):
-            ["success": String(success), "latency_bucket": latency.rawValue]
+            ["success": .boolean(success), "latency_bucket": .string(latency.rawValue)]
         case let .modelDownloadCompleted(modelFamily, size, success):
             [
-                "model_family": modelFamily.rawValue,
-                "size_bucket": size.rawValue,
-                "success": String(success)
+                "model_family": .string(modelFamily.rawValue),
+                "size_bucket": .string(size.rawValue),
+                "success": .boolean(success)
             ]
-        case let .keyboardEnabledState(enabled): ["enabled": String(enabled)]
+        case let .keyboardEnabledState(enabled): ["enabled": .boolean(enabled)]
         case let .providerConfigured(provider, method):
-            ["provider_type": provider.rawValue, "method": method.rawValue]
+            ["provider_type": .string(provider.rawValue), "method": .string(method.rawValue)]
         case let .settingsChanged(setting, category):
-            ["setting_id": setting.rawValue, "category": category.rawValue]
+            ["setting_id": .string(setting.rawValue), "category": .string(category.rawValue)]
         case let .errorDisplayed(error, surface):
-            ["error_category": error.rawValue, "surface": surface.rawValue]
-        case let .analyticsOptIn(surface): ["surface": surface.rawValue]
+            ["error_category": .string(error.rawValue), "surface": .string(surface.rawValue)]
+        case let .analyticsOptIn(surface): ["surface": .string(surface.rawValue)]
         }
     }
 
@@ -243,18 +249,18 @@ public enum ProductAnalyticsEvent: Sendable, Equatable {
         provider: AnalyticsProviderType,
         latency: AnalyticsLatencyBucket,
         preset: AnalyticsPolishPreset
-    ) -> [String: String] {
+    ) -> [String: AnalyticsPropertyValue] {
         [
-            "engine_type": engine.rawValue,
-            "provider_type": provider.rawValue,
-            "latency_bucket": latency.rawValue,
-            "preset": preset.rawValue
+            "engine_type": .string(engine.rawValue),
+            "provider_type": .string(provider.rawValue),
+            "latency_bucket": .string(latency.rawValue),
+            "preset": .string(preset.rawValue)
         ]
     }
 }
 
 public struct ProductAnalyticsContext: Equatable, Sendable {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
     public let platform: AnalyticsPlatform
     public let appVersion: String
     public let build: String
@@ -326,22 +332,23 @@ public struct ProductAnalyticsPayload: Encodable, Equatable, Sendable {
     public let event: String
     public let distinctID: UUID?
     public let privacyClass: AnalyticsPrivacyClass
-    public let properties: [String: String]
+    public let properties: [String: AnalyticsPropertyValue]
 
     public init(event: ProductAnalyticsEvent, context: ProductAnalyticsContext, distinctID: UUID?) {
         self.event = event.name
         self.distinctID = event.privacyClass == .pseudonymous ? distinctID : nil
         self.privacyClass = event.privacyClass
-        self.properties = event.properties.merging([
-            "platform": context.platform.rawValue,
-            "app_version": context.appVersion,
-            "build": context.build,
-            "os_major_minor": context.osMajorMinor,
-            "distribution_channel": context.distributionChannel.rawValue,
-            "locale_language_code": context.localeLanguageCode,
-            "architecture": context.architecture,
-            "analytics_schema_version": String(ProductAnalyticsContext.schemaVersion)
-        ]) { eventValue, _ in eventValue }
+        let contextProperties: [String: AnalyticsPropertyValue] = [
+            "platform": .string(context.platform.rawValue),
+            "app_version": .string(context.appVersion),
+            "build": .string(context.build),
+            "os_major_minor": .string(context.osMajorMinor),
+            "distribution_channel": .string(context.distributionChannel.rawValue),
+            "locale_language_code": .string(context.localeLanguageCode),
+            "architecture": .string(context.architecture),
+            "analytics_schema_version": .integer(ProductAnalyticsContext.schemaVersion)
+        ]
+        self.properties = event.properties.merging(contextProperties) { eventValue, _ in eventValue }
     }
 }
 
@@ -375,7 +382,9 @@ public actor ProductAnalyticsController {
     private let stateStore: any ProductAnalyticsStateStore
     private let forceDisabled: @Sendable () -> Bool
     private var consent: AnalyticsConsentState
-    private var sinkIsClosed = false
+    private var sinkIsClosed = true
+    private var consentRevision = UUID()
+    private var suspensionTask: Task<Void, Error>?
 
     public init(
         context: ProductAnalyticsContext,
@@ -395,7 +404,12 @@ public actor ProductAnalyticsController {
     /// Applies a consent transition fail-closed: collection is only ever enabled after the new state is persisted,
     /// and every opt-out cleanup step is attempted even when an earlier step fails.
     public func setConsent(_ newConsent: AnalyticsConsentState) async throws {
+        let revision = UUID()
+        consentRevision = revision
         guard newConsent != .optedIn else {
+            // A newer opt-in must not reopen a client whose withdrawal is still purging/closing it.
+            if let suspensionTask { try await suspensionTask.value }
+            guard consentRevision == revision else { return }
             try stateStore.saveConsent(newConsent)
             guard !forceDisabled() else {
                 consent = newConsent
@@ -403,6 +417,12 @@ public actor ProductAnalyticsController {
                 return
             }
             try await sink.reopen()
+            guard consentRevision == revision else { return }
+            guard !forceDisabled() else {
+                consent = newConsent
+                try await suspendCollection()
+                return
+            }
             sinkIsClosed = false
             consent = newConsent
             return
@@ -427,13 +447,25 @@ public actor ProductAnalyticsController {
 
     public func capture(_ event: ProductAnalyticsEvent) async throws {
         guard consent.permitsCollection else { return }
+        let revision = consentRevision
+        guard !forceDisabled() else {
+            try await suspendCollection()
+            return
+        }
+        if let suspensionTask { try await suspensionTask.value }
+        guard consentRevision == revision, consent.permitsCollection else { return }
         guard !forceDisabled() else {
             try await suspendCollection()
             return
         }
         if sinkIsClosed {
             try await sink.reopen()
+            guard consentRevision == revision, consent.permitsCollection else { return }
             sinkIsClosed = false
+        }
+        guard !forceDisabled() else {
+            try await suspendCollection()
+            return
         }
         let distinctID = event.privacyClass == .pseudonymous ? try installationID() : nil
         try await sink.capture(ProductAnalyticsPayload(event: event, context: context, distinctID: distinctID))
@@ -459,13 +491,21 @@ public actor ProductAnalyticsController {
     }
 
     private func suspendCollection(deleteIdentity: Bool = true) async throws {
+        if let suspensionTask { return try await suspensionTask.value }
+        sinkIsClosed = true
+        let cleanup = Task { try await self.performSuspension(deleteIdentity: deleteIdentity) }
+        suspensionTask = cleanup
+        defer { suspensionTask = nil }
+        try await cleanup.value
+    }
+
+    private func performSuspension(deleteIdentity: Bool) async throws {
         var firstFailure: Error?
         do { try await sink.purge() } catch { firstFailure = error }
         if deleteIdentity {
             do { try stateStore.deleteInstallationID() } catch { firstFailure = firstFailure ?? error }
         }
         await sink.close()
-        sinkIsClosed = true
         if let firstFailure { throw firstFailure }
     }
 }

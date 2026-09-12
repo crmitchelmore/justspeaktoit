@@ -91,7 +91,7 @@ export class LiveSessionDurableObject implements DurableObject {
   private client: WebSocket | null = null;
   private upstream: WebSocket | null = null;
   private metadata: SessionMetadata | null = null;
-  private settled = false;
+  private settlement: Promise<void> | null = null;
 
   constructor(state: DurableObjectState, env: LiveSessionEnv) {
     this.state = state;
@@ -276,43 +276,34 @@ export class LiveSessionDurableObject implements DurableObject {
    * `settled` (in memory, plus a durable copy for a restarted object) makes a
    * double close a no-op.
    */
-  private async settle(closed: boolean): Promise<void> {
-    // Set synchronously, before any await: settle is reachable from several
-    // socket listeners, the alarm and fetch failure paths, and two of them
-    // routinely fire together. A later caller must observe the guard before
-    // the first storage await can interleave.
-    if (this.settled) return;
-    this.settled = true;
-    // The in-memory flag is lost when the Durable Object is evicted, so the
-    // durable copy is what makes a double settle idempotent across restarts.
+  private settle(closed: boolean): Promise<void> {
+    if (this.settlement !== null) return this.settlement;
+    this.settlement = this.deliverSettlement(closed).finally(() => { this.settlement = null; });
+    return this.settlement;
+  }
+
+  private async deliverSettlement(closed: boolean): Promise<void> {
     if ((await this.state.storage.get<boolean>(SETTLED_KEY)) === true) return;
-
-    const metadata =
-      this.metadata ?? (await this.state.storage.get<StoredSessionMetadata>(METADATA_KEY)) ?? null;
-    // The credential only ever lived in memory; drop it as soon as the relay is over.
-    this.metadata = null;
-    if (metadata === null) {
-      await this.state.storage.put(SETTLED_KEY, true);
-      return;
+    // Install retry before writing the outcome, so a crash cannot strand it.
+    await this.state.storage.setAlarm(Date.now() + 30_000);
+    let outcome = await this.state.storage.get<LiveSessionOutcome>(OUTCOME_KEY);
+    if (outcome === undefined) {
+      const metadata = this.metadata ?? await this.state.storage.get<StoredSessionMetadata>(METADATA_KEY);
+      this.metadata = null; // Drop the in-memory provider credential.
+      if (metadata === undefined || metadata === null) {
+        await this.state.storage.deleteAlarm();
+        return;
+      }
+      outcome = {
+        userId: metadata.userId,
+        reservationId: metadata.reservationId,
+        billingPeriod: metadata.billingPeriod,
+        elapsedSeconds: Math.min(metadata.maxSessionSeconds,
+          Math.max(0, Math.ceil((Date.now() - metadata.startedAtMs) / 1_000))),
+        closed,
+      };
+      await this.state.storage.put(OUTCOME_KEY, outcome);
     }
-
-    const elapsedSeconds = Math.max(0, Math.ceil((Date.now() - metadata.startedAtMs) / 1_000));
-    const outcome: LiveSessionOutcome = {
-      userId: metadata.userId,
-      reservationId: metadata.reservationId,
-      billingPeriod: metadata.billingPeriod,
-      elapsedSeconds: Math.min(elapsedSeconds, metadata.maxSessionSeconds),
-      closed,
-    };
-    // One atomic write: a crash can never leave the session marked settled
-    // with no recorded outcome (which would strand reconciliation and leave
-    // metering to the coarser lease-expiry commit).
-    await this.state.storage.put({ [SETTLED_KEY]: true, [OUTCOME_KEY]: outcome });
-    await this.state.storage.deleteAlarm();
-
-    // Settle the reservation from the server's own measurement. A failure here
-    // must not stop the outcome being recorded — the quota lease expires into a
-    // commit anyway, so the usage is metered either way.
     try {
       await this.quota.finalise({
         userId: outcome.userId,
@@ -320,8 +311,11 @@ export class LiveSessionDurableObject implements DurableObject {
         actualUnits: outcome.elapsedSeconds,
         nowSeconds: Math.floor(Date.now() / 1_000),
       });
+      await this.state.storage.put(SETTLED_KEY, true);
+      await this.state.storage.deleteAlarm();
     } catch {
-      // Deliberately swallowed: see above.
+      // The durable outcome is retried by the alarm, with the same measurement.
+      await this.state.storage.setAlarm(Date.now() + 30_000);
     }
   }
 }

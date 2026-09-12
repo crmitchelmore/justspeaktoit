@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 import os.log
@@ -25,6 +26,9 @@ final class FnKeyBackend {
   private var eventTap: CFMachPort?
   private var eventTapRunLoopSource: CFRunLoopSource?
   private var hardwareStateTimer: Timer?
+  private var hardwareStateInterval: TimeInterval?
+  private var hardwareStatePollingEnabled = false
+  private var tapDisabledAtUptime: TimeInterval?
   private var fnIsPressed = false
 
   @discardableResult
@@ -58,6 +62,9 @@ final class FnKeyBackend {
     stopEventTap()
     hardwareStateTimer?.invalidate()
     hardwareStateTimer = nil
+    hardwareStateInterval = nil
+    hardwareStatePollingEnabled = false
+    tapDisabledAtUptime = nil
     fnIsPressed = false
   }
 
@@ -150,21 +157,81 @@ final class FnKeyBackend {
   /// Terminal and other secure-input clients can temporarily starve event-tap
   /// and global-monitor callbacks. Poll the Fn hardware state independently so
   /// the configured shortcut still receives balanced down/up edges there.
+  ///
+  /// The cadence is adaptive (see `FnKeyPollingPolicy`): a coalescable 20 Hz
+  /// baseline while nothing suggests the tap is unreliable — fast enough that a
+  /// short tap made just as secure input engages is still seen — and 50 Hz
+  /// while Fn is held, while secure input is enabled, or just after the tap was
+  /// disabled.
   private func startHardwareStatePolling() {
+    hardwareStatePollingEnabled = true
+    hardwareStateInterval = nil
+    updateHardwareStatePollingCadence()
+  }
+
+  /// Recreates the poll timer when the desired cadence changes. Cheap and
+  /// idempotent otherwise, so callers can invoke it on every state change.
+  ///
+  /// `secureInput` is a parameter so a caller that already sampled
+  /// `IsSecureEventInputEnabled()` earlier in the same tick can reuse that
+  /// reading instead of taking a second, later one.
+  private func updateHardwareStatePollingCadence(
+    secureInput: Bool = IsSecureEventInputEnabled()
+  ) {
+    guard hardwareStatePollingEnabled else { return }
+    let desired = desiredHardwareStateInterval(secureInput: secureInput)
+    guard desired != hardwareStateInterval else { return }
+
     hardwareStateTimer?.invalidate()
-    let timer = Timer(timeInterval: 0.02, repeats: true) { [weak self] _ in
+    let timer = Timer(timeInterval: desired, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated {
         self?.reconcileHardwareState()
       }
     }
+    timer.tolerance = FnKeyPollingPolicy.tolerance(for: desired)
     hardwareStateTimer = timer
+    hardwareStateInterval = desired
     RunLoop.main.add(timer, forMode: .common)
   }
 
+  private func desiredHardwareStateInterval(secureInput: Bool) -> TimeInterval {
+    let recentTapRecovery = FnKeyPollingPolicy.isWithinTapRecoveryWindow(
+      disabledAtUptime: tapDisabledAtUptime,
+      nowUptime: ProcessInfo.processInfo.systemUptime
+    )
+    if !recentTapRecovery {
+      tapDisabledAtUptime = nil
+    }
+    return FnKeyPollingPolicy.interval(
+      isPressed: fnIsPressed,
+      secureInput: secureInput,
+      recentTapRecovery: recentTapRecovery
+    )
+  }
+
+  /// The hardware poll's sole signal. Kept as a pure function so the rule
+  /// "the secondary-fn flag is never consulted" is pinned by a test.
+  nonisolated static func isFnKeyDown(keyState: Bool) -> Bool {
+    keyState
+  }
+
   private func reconcileHardwareState() {
-    let flagsDown = CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
-    let keyDown = CGEventSource.keyState(.hidSystemState, key: functionKeyCode)
-    updateFnState(isDown: flagsDown || keyDown, source: "hardwarePoll")
+    // Sampled before the probe, not after it: a password field that just took
+    // secure input has to escalate *this* tick, otherwise the escalation only
+    // starts a full baseline interval after the condition it exists for.
+    let secureInput = IsSecureEventInputEnabled()
+    // Only key code 63 counts. `.maskSecondaryFn` is NX_SECONDARYFNMASK, the
+    // same bit as NSEvent.ModifierFlags.function, which macOS sets for *any*
+    // function key: arrows, F-keys, Home/End/PageUp/PageDown. Trusting it made
+    // two quick arrow presses look like a double-tap of Fn (issue #863). The
+    // event-tap path below already requires key code 63; the poll must too.
+    let keyDown = Self.isFnKeyDown(
+      keyState: CGEventSource.keyState(.hidSystemState, key: functionKeyCode)
+    )
+    updateFnState(isDown: keyDown, source: "hardwarePoll")
+    // Re-evaluate every tick so secure-input toggles and expiring tap-recovery
+    // windows change the cadence without needing a separate timer.
+    updateHardwareStatePollingCadence(secureInput: secureInput)
   }
 
   private func handleCGEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -196,6 +263,10 @@ final class FnKeyBackend {
       if let tap = eventTap {
         CGEvent.tapEnable(tap: tap, enable: true)
       }
+      // Edges may have been dropped while the tap was off; poll fast for a
+      // short window so any missed down/up is reconciled quickly.
+      tapDisabledAtUptime = ProcessInfo.processInfo.systemUptime
+      updateHardwareStatePollingCadence()
     default:
       break
     }
@@ -205,6 +276,9 @@ final class FnKeyBackend {
   private func updateFnState(isDown: Bool, source: String) {
     guard isDown != fnIsPressed else { return }
     fnIsPressed = isDown
+    // A press escalates the poll so a missed key-up cannot strand a hold;
+    // a release drops it back to the coalescable baseline.
+    updateHardwareStatePollingCadence()
     if isDown {
       onKeyDown?(source)
     } else {

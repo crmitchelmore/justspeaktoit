@@ -32,6 +32,7 @@ export interface PostProcessingRequest {
   readonly userText: string;
   readonly upstreamModel: string;
   readonly temperature: number;
+  readonly maxOutputTokens: number;
 }
 
 export interface PostProcessingResult {
@@ -149,6 +150,7 @@ export class OpenRouterProxy {
           model: request.upstreamModel,
           messages,
           temperature: request.temperature,
+          max_tokens: request.maxOutputTokens,
         }),
       },
       this.timeoutMs,

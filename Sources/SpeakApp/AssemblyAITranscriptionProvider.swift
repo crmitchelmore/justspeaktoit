@@ -19,7 +19,6 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   /// "Socket is not connected" (ENOTCONN) failures during the wss handshake
   /// on macOS. A dedicated, default-configured session avoids that.
   private let session: URLSession
-  private let bufferPool: AudioBufferPool
   private let logger = SpeakLogger.logger(category: "AssemblyAILiveTranscriber")
   private let stateLock = NSLock()
   private let pendingSendGroup = DispatchGroup()
@@ -43,13 +42,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     apiKey: String,
     sampleRate: Int = 16000,
     keyterms: [String] = [],
-    session: URLSession? = nil,
-    bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
+    session: URLSession? = nil
   ) {
     self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     self.sampleRate = sampleRate
     self.keyterms = keyterms
-    self.bufferPool = bufferPool
     let delegate = AssemblyAIWebSocketDelegate()
     self.delegate = delegate
     if let session {
@@ -172,19 +169,16 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   }
 
   private func sendAudioFrame(_ audioData: Data, on webSocketTask: URLSessionWebSocketTask) {
-    var buffer = bufferPool.checkout()
-    buffer.append(audioData)
-
-    let dataToSend = buffer
-    let message = URLSessionWebSocketTask.Message.data(dataToSend)
     let sendGroup = pendingSendGroup
     sendGroup.enter()
 
-    webSocketTask.send(message) { [weak self] error in
+    // Send the caller's `Data` straight through. Copying it into a pooled
+    // buffer only to hand that buffer back while the send is still in flight
+    // forced a copy-on-write (plus a memset) per chunk, because `returnBuffer`
+    // zeroes storage the queued message still references.
+    webSocketTask.send(.data(audioData)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
-      var returnBuffer = buffer
-      self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
         if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
@@ -212,33 +206,20 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     guard let channelData = pcmBuffer.floatChannelData else { return }
 
     let frameLength = Int(pcmBuffer.frameLength)
-    var buffer = bufferPool.checkout()
-    buffer.reserveCapacity(frameLength * 2)
-
-    for i in 0..<frameLength {
-      let sample = channelData[0][i]
-      let clampedSample = max(-1.0, min(1.0, sample))
-      let int16Sample = Int16(clampedSample * Float(Int16.max))
-      withUnsafeBytes(of: int16Sample.littleEndian) { bytes in
-        buffer.append(contentsOf: bytes)
-      }
-    }
+    // One `Data` built from a contiguous `[Int16]` rather than a per-sample
+    // `Data.append`, with the same clamp-and-scale arithmetic as before.
+    let audioData = PCM16Converter.data(from: channelData[0], frameCount: frameLength)
 
     guard let webSocketTask = currentWebSocketTask(), webSocketTask.state == .running else {
-      bufferPool.returnBuffer(&buffer)
       return
     }
 
-    let dataToSend = buffer
-    let message = URLSessionWebSocketTask.Message.data(dataToSend)
     let sendGroup = pendingSendGroup
     sendGroup.enter()
 
-    webSocketTask.send(message) { [weak self] error in
+    webSocketTask.send(.data(audioData)) { [weak self] error in
       defer { sendGroup.leave() }
       guard let self else { return }
-      var returnBuffer = buffer
-      self.bufferPool.returnBuffer(&returnBuffer)
 
       if let error {
         if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
@@ -275,7 +256,6 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
       }
       return webSocketTask
     }
-    bufferPool.logMetrics()
 
     guard let task, task.state == .running else { return }
 
@@ -340,7 +320,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
           return
         }
         if self.retryWithFallbackEndpointIfNeeded(after: error) { return }
-        self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
+        SpeakLogger.logError(error, context: "AssemblyAI WebSocket receive", logger: self.logger)
         self.currentOnError()?(error)
       }
     }
@@ -367,10 +347,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     guard shouldRetry else { return false }
 
     let detail = error.localizedDescription
+    let code = (error as NSError).code
     let host = fallback.rawValue
     logger.warning(
       // swiftlint:disable:next line_length
-      "AssemblyAI endpoint failed before session begin (\(detail, privacy: .public)); retrying \(host, privacy: .public)"
+      "AssemblyAI endpoint failed before session begin (code=\(code), \(detail, privacy: .private)); retrying \(host, privacy: .public)"
     )
     taskToCancel?.cancel(with: .goingAway, reason: nil)
     connectWebSocket(using: fallback)
@@ -391,7 +372,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   }
 
   private func parseResponse(_ json: String) {
-    logger.info("AssemblyAI WS frame received (\(json.count) bytes)")
+    logger.info("AssemblyAI WS frame received (\(json.utf8.count) bytes)")
     guard let data = json.data(using: .utf8) else { return }
 
     do {
@@ -407,7 +388,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         withStateLock {
           sessionDidBegin = true
         }
-        logger.info("AssemblyAI session started — \(json.prefix(200), privacy: .public)")
+        logger.info("AssemblyAI session started — \(json.prefix(200), privacy: .private)")
         flushPreBeginAudio()
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
@@ -418,14 +399,15 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         break
       case "Error":
         // AssemblyAI sends an Error text frame just before closing with code 3006/4xxx.
-        // Surface it at .info so users can capture it from `log show` filters.
-        logger.error("AssemblyAI server Error frame: \(json.prefix(500), privacy: .public)")
+        // Keep the event visible while treating provider text as private: errors
+        // and unfamiliar frames can echo transcripts or credential-bearing URLs.
+        logger.error("AssemblyAI server Error frame: \(json.prefix(500), privacy: .private)")
       case "":
         // Unknown / typeless. Could be diagnostic text from server.
-        logger.info("AssemblyAI typeless WS message: \(json.prefix(500), privacy: .public)")
+        logger.info("AssemblyAI typeless WS message: \(json.prefix(500), privacy: .private)")
       default:
         let body = json.prefix(500)
-        logger.info("Unhandled AssemblyAI type=\(resolvedType, privacy: .public): \(body, privacy: .public)")
+        logger.info("Unhandled AssemblyAI type=\(resolvedType, privacy: .private): \(body, privacy: .private)")
       }
     } catch {
       logger.debug("Failed to parse AssemblyAI response: \(error.localizedDescription)")
@@ -505,11 +487,9 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
 
   private let baseURL = URL(string: "https://api.assemblyai.com/v2")!
   private let session: URLSession
-  private let bufferPool: AudioBufferPool
 
-  init(session: URLSession = .shared, bufferPool: AudioBufferPool? = nil) {
+  init(session: URLSession = .shared) {
     self.session = session
-    self.bufferPool = bufferPool ?? AudioBufferPool(poolSize: 10, bufferSize: 8192)
   }
 
   // MARK: - Batch Transcription
@@ -711,8 +691,7 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
       apiKey: apiKey,
       sampleRate: sampleRate,
       keyterms: keyterms,
-      session: nil,
-      bufferPool: bufferPool
+      session: nil
     )
   }
 
@@ -811,7 +790,7 @@ private final class AssemblyAIWebSocketDelegate: NSObject, URLSessionWebSocketDe
   ) {
     let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "<nil>"
     logger?.info(
-      "AssemblyAI WS didClose code=\(closeCode.rawValue, privacy: .public) reason=\(reasonStr, privacy: .public)"
+      "AssemblyAI WS didClose code=\(closeCode.rawValue, privacy: .public) reason=\(reasonStr, privacy: .private)"
     )
   }
 
@@ -826,7 +805,7 @@ private final class AssemblyAIWebSocketDelegate: NSObject, URLSessionWebSocketDe
       let desc = error.localizedDescription
       logger?.error(
         // swiftlint:disable:next line_length
-        "AssemblyAI WS didComplete error domain=\(domain, privacy: .public) code=\(code, privacy: .public) desc=\(desc, privacy: .public)"
+        "AssemblyAI WS didComplete error domain=\(domain, privacy: .public) code=\(code, privacy: .public) desc=\(desc, privacy: .private)"
       )
     } else {
       logger?.info("AssemblyAI WS didComplete (no error)")

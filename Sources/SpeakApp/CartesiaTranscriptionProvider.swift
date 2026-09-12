@@ -47,8 +47,12 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
     model: String,
     language: String?
   ) async throws -> TranscriptionResult {
-    _ = (url, apiKey, model, language)
-    throw CartesiaLiveError.batchNotSupported
+    guard model.trimmingCharacters(in: .whitespacesAndNewlines) == CartesiaBatchClient.catalogID else {
+      throw CartesiaLiveError.batchNotSupported
+    }
+    return try await CartesiaBatchClient(session: session).transcribeFile(
+      at: url, apiKey: apiKey, language: language
+    )
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
@@ -88,6 +92,7 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
 
   func supportedModels() -> [ModelCatalog.Option] {
     ModelCatalog.liveTranscriptionOptions(forProvider: metadata.id)
+      + ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
   }
 
   func createLiveTranscriber(

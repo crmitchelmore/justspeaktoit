@@ -181,3 +181,12 @@ Rules:
 - **StoreKit and Stripe are not interchangeable.** `channel:"direct"` is rejected for App Store builds server-side, not just hidden in the UI.
 - **Quota reservations are upper bounds.** Finalise with the measured amount or the user is over-billed against their monthly allowance.
 - **The kill switch is a var, not a secret.** `PAID_ROUTING_DISABLED = "true"` plus a redeploy fails paid routing closed with 503 while entitlements stay intact.
+
+
+### Review hardening
+
+Post-processing reserves UTF-8 prompt bytes plus framing overhead and a 4,096-token completion budget. The same completion limit is sent upstream. Provider-reported usage is recorded without clipping; missing usage uses the reserved ceiling. Live sessions persist their measured outcome before quota delivery and retry every 30 seconds until delivery succeeds. A delayed measured settlement corrects an expired reservation's provisional charge.
+
+Subscription event ordering is scoped to the purchase source and reference. An unrelated purchase cannot replace an active entitlement. Management uses the existing entitlement's purchase source; App Store builds explain where website subscriptions are managed.
+
+A scheduled job removes up to 1,000 expired request claims every 15 minutes using an expiry index. Apply both migrations before enabling the worker. Claims contain no response bodies or dictated text. Paid routing remains disabled by default pending staging and billing configuration.

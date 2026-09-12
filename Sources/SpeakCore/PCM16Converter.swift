@@ -6,8 +6,8 @@ import Foundation
 /// Kept in one place so every provider's sample path funnels into the same
 /// `sendAudio` entry point — and therefore the same pre-roll buffering for
 /// audio captured before the transport is ready (issue #641).
-enum PCM16Converter {
-    static func data(from samples: UnsafePointer<Float>, frameCount: Int) -> Data {
+public enum PCM16Converter {
+    public static func data(from samples: UnsafePointer<Float>, frameCount: Int) -> Data {
         guard frameCount > 0 else { return Data() }
         var int16Samples = [Int16](repeating: 0, count: frameCount)
         for index in 0..<frameCount {

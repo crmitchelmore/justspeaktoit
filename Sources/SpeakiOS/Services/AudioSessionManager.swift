@@ -16,6 +16,12 @@ public final class AudioSessionManager: ObservableObject {
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
 
+    // Injectable system boundaries for lifecycle tests; production uses AVAudioSession.
+    var permissionStatus: (() -> Bool)?
+    var permissionRequest: ((@escaping @Sendable (Bool) -> Void) -> Void)?
+    var configureRecording: (() async throws -> Void)?
+    var deactivateRecording: (() -> Void)?
+
     /// A registered audio-session callback. The owner is held weakly so
     /// entries registered by a transcriber are pruned automatically once that
     /// transcriber is deallocated.
@@ -25,7 +31,7 @@ public final class AudioSessionManager: ObservableObject {
     }
 
     private var interruptionObservers: [UUID: Observer<(Bool) -> Void>] = [:]
-    private var routeChangeObservers: [UUID: Observer<() -> Void>] = [:]
+    private var routeChangeObservers: [UUID: Observer<(AVAudioSession.RouteChangeReason) -> Void>] = [:]
 
     public init() {
         setupNotificationObservers()
@@ -53,9 +59,14 @@ public final class AudioSessionManager: ObservableObject {
     /// Registers a route-change handler. Same multicast semantics as
     /// `addInterruptionObserver(owner:_:)`.
     @discardableResult
-    public func addRouteChangeObserver(
+    public func addRouteChangeObserver(owner: AnyObject, _ handler: @escaping () -> Void) -> UUID {
+        addRouteChangeObserver(owner: owner) { _ in handler() }
+    }
+
+    @discardableResult
+    func addRouteChangeObserver(
         owner: AnyObject,
-        _ handler: @escaping () -> Void
+        _ handler: @escaping (AVAudioSession.RouteChangeReason) -> Void
     ) -> UUID {
         let token = UUID()
         routeChangeObservers[token] = Observer(owner: owner, handler: handler)
@@ -82,6 +93,13 @@ public final class AudioSessionManager: ObservableObject {
     /// ``AudioSessionConfigurationError`` carrying the decoded `OSStatus` code
     /// plus a snapshot of the live session state.
     public func configureForRecording() async throws {
+        try Task.checkCancellation()
+        if let configureRecording {
+            try await configureRecording()
+            try Task.checkCancellation()
+            isConfigured = true
+            return
+        }
         let session = AVAudioSession.sharedInstance()
 
         do {
@@ -107,6 +125,7 @@ public final class AudioSessionManager: ObservableObject {
             try await activate(session)
         }
 
+        try Task.checkCancellation()
         lastError = nil
         isConfigured = true
         updateCurrentRoute()
@@ -146,6 +165,8 @@ public final class AudioSessionManager: ObservableObject {
             try await AudioSessionActivation.activate(maxAttempts: maxAttempts) {
                 try session.setActive(true, options: .notifyOthersOnDeactivation)
             }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw configurationFailure(.setActive, error, session)
         }
@@ -207,6 +228,11 @@ public final class AudioSessionManager: ObservableObject {
 
     /// Deactivate audio session when done recording.
     public func deactivate() {
+        if let deactivateRecording {
+            deactivateRecording()
+            isConfigured = false
+            return
+        }
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             isConfigured = false
@@ -218,16 +244,15 @@ public final class AudioSessionManager: ObservableObject {
 
     /// Check if microphone permission is granted.
     public func hasMicrophonePermission() -> Bool {
-        AVAudioSession.sharedInstance().recordPermission == .granted
+        permissionStatus?() ?? (AVAudioSession.sharedInstance().recordPermission == .granted)
     }
 
     /// Request microphone permission.
     public func requestMicrophonePermission() async -> Bool {
-        await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
+        let request = permissionRequest ?? { completion in
+            AVAudioSession.sharedInstance().requestRecordPermission(completion)
         }
+        return await CancellablePermissionRequest.request(request)
     }
 
     // MARK: - Private
@@ -289,13 +314,13 @@ public final class AudioSessionManager: ObservableObject {
         }
     }
 
-    private func notifyRouteChangeObservers() {
+    private func notifyRouteChangeObservers(reason: AVAudioSession.RouteChangeReason) {
         for (token, observer) in routeChangeObservers {
             guard observer.owner != nil else {
                 routeChangeObservers.removeValue(forKey: token)
                 continue
             }
-            observer.handler()
+            observer.handler(reason)
         }
     }
 
@@ -307,7 +332,7 @@ public final class AudioSessionManager: ObservableObject {
 
         logger.info("Route changed: \(String(describing: reason), privacy: .public)")
         updateCurrentRoute()
-        notifyRouteChangeObservers()
+        notifyRouteChangeObservers(reason: reason)
     }
 
     private func updateCurrentRoute() {

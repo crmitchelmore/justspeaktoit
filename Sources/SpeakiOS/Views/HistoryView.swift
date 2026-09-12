@@ -43,6 +43,17 @@ public struct HistoryView: View {
                 historyList
             }
         }
+        .safeAreaInset(edge: .top) {
+            if let error = historyManager.persistenceError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(error).font(.callout)
+                    Button("Retry saving history") { historyManager.retryPersistence() }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.regularMaterial)
+            }
+        }
         .navigationTitle("History")
         .navigationBarTitleDisplayMode(usesInlineDensityLayout ? .inline : .automatic)
         .environment(\.defaultMinListRowHeight, density.minimumListRowHeight)
@@ -69,6 +80,7 @@ public struct HistoryView: View {
                     } label: {
                         Image(systemName: "trash")
                     }
+                    .disabled(!historyManager.isStorageReady)
                 }
             }
         }

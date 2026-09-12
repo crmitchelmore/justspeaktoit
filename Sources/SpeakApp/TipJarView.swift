@@ -37,7 +37,7 @@ struct TipJarView: View {
     @ViewBuilder
     private var productsSection: some View {
         if store.products.isEmpty {
-            ProgressView("Loading...")
+            ProgressView("Loading…")
                 .task { await store.loadProducts() }
         } else {
             VStack(spacing: 12) {

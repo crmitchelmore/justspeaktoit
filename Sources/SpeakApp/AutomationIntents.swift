@@ -23,7 +23,7 @@ enum AutomationIntentError: LocalizedError {
   var errorDescription: String? {
     switch self {
     case .appNotReady:
-      return "Just Speak to It is still starting up. Open the app and try again."
+      return "\(RunningAppIdentity.current.name) is still starting up. Open the app and try again."
     case .alreadyRecording:
       return "A dictation session is already in progress."
     case .noActiveRecording:

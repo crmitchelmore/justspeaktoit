@@ -39,7 +39,7 @@ jobs:
     timeout-minutes: 30
     steps:
       # v1.2.0, pinned so upstream changes require a deliberate update.
-      - uses: tesslio/code-review-action@e78605f36fcb282992e06713322b0dfaef36454f
+      - uses: tesslio/code-review-action@cf45aa42ecf2364b0a3e4b2614cc9f7e5582dd4a
         with:
           tessl-token: ${{ secrets.TESSL_TOKEN }}
           allowed-associations: OWNER,MEMBER,COLLABORATOR

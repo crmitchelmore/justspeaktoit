@@ -137,20 +137,33 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
   private final class DeepgramAudioProcessor: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.speak.app.deepgram.audioProcessing")
+    private let copyBufferPool = LivePCMBufferPool(
+      maximumBuffers: 4,
+      tapBufferSize: 1024,
+      label: "deepgram"
+    )
     private var isRunning: Bool = false
 
-    private var cachedConverter: AVAudioConverter?
-    private var cachedInputFormat: AVAudioFormat?
+    private let converterCache = LiveConverterCache()
     private var reusableOutputBuffer: AVAudioPCMBuffer?
 
     func setRunning(_ running: Bool) {
       queue.sync {
         isRunning = running
         if !running {
-          cachedConverter = nil
-          cachedInputFormat = nil
+          converterCache.reset()
           reusableOutputBuffer = nil
+          copyBufferPool.removeAll()
         }
+      }
+    }
+
+    /// Flushes the retained resampler's trailing frames down the live send path
+    /// before the converter is released (issue #849).
+    func drainConverterTail(to transcriber: DeepgramLiveClient) {
+      queue.sync {
+        guard let tail = converterCache.drainPCM16() else { return }
+        transcriber.sendAudio(tail)
       }
     }
 
@@ -163,7 +176,9 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     ) {
       guard let copied = copyPCMBuffer(buffer) else { return }
       queue.async { [weak self] in
-        guard let self, self.isRunning else { return }
+        guard let self else { return }
+        defer { self.copyBufferPool.recycle(copied) }
+        guard self.isRunning else { return }
         self.processAndSendAudio(
           copied,
           from: inputFormat,
@@ -176,7 +191,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
       let frameLength = buffer.frameLength
-      guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: frameLength) else {
+      guard let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
         return nil
       }
       copy.frameLength = frameLength
@@ -200,17 +215,9 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
       logger: Logger
     ) {
       // Get or create cached converter (avoids ~30 allocations/sec)
-      let converter: AVAudioConverter
-      if let cached = cachedConverter, cachedInputFormat == inputFormat {
-        converter = cached
-      } else {
-        guard let newConverter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
-          logger.error("Failed to create audio converter")
-          return
-        }
-        cachedConverter = newConverter
-        cachedInputFormat = inputFormat
-        converter = newConverter
+      guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+        logger.error("Failed to create audio converter")
+        return
       }
 
       // Calculate output buffer size based on sample rate ratio
@@ -231,10 +238,16 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
         outputBuffer = newBuffer
       }
 
-      // Convert audio
-      converter.reset()
+      // No `converter.reset()` between chunks: `LiveConverterCache` owns the
+      // retained converter and its end-of-stream drain (see issue #849).
       var error: NSError?
+      var didProvideInput = false
       let status = converter.convert(to: outputBuffer, error: &error) { _, outStatus in
+        guard !didProvideInput else {
+          outStatus.pointee = .noDataNow
+          return nil
+        }
+        didProvideInput = true
         outStatus.pointee = .haveData
         return buffer
       }
@@ -267,6 +280,9 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
 
+    if let transcriber {
+      audioProcessor.drainConverterTail(to: transcriber)
+    }
     audioProcessor.setRunning(false)
 
     await applyLiveStopGrace(appSettings.liveStopGracePeriod)

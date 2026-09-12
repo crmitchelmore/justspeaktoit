@@ -110,6 +110,12 @@ extension PaidAccessStore {
     /// Opens Apple's subscription management. App Store builds must never send
     /// the user to an external payment page.
     public func manageSubscription() {
+        guard self.entitlement.provider == .storeKit else {
+            self.lastError = self.entitlement.provider == .stripe
+                ? "This subscription was purchased on the website. Manage it in your Just Speak to It web account."
+                : "This access was granted manually and has no subscription to manage."
+            return
+        }
         guard let url = URL(string: "https://apps.apple.com/account/subscriptions") else { return }
         UIApplication.shared.open(url)
     }
@@ -127,17 +133,11 @@ extension PaidAccessStore {
         _ result: VerificationResult<Transaction>,
         session: PaidAccessSession
     ) async -> Bool {
-        guard case .verified(let transaction) = result else { return false }
-        guard Self.subscriptionProductIDs.contains(transaction.productID) else { return false }
-
         do {
-            // The server verifies the signature again; the device's own
-            // verification is never sufficient on its own.
-            self.entitlement = try await self.client.syncStoreKitTransaction(
-                session: session,
-                signedTransaction: result.jwsRepresentation,
-                signedRenewalInfo: nil
-            )
+            guard let entitlement = try await PaidStoreKitSync.entitlement(
+              for: result, session: session, client: self.client
+            ) else { return false }
+            self.entitlement = entitlement
             return true
         } catch {
             self.lastError = (error as? PaidAccessError)?.errorDescription

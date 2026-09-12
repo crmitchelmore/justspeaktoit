@@ -10,6 +10,7 @@ actor TranscriptionProviderRegistry {
 
     private init() {
         // Register all providers here - adding a new provider automatically makes it available
+        providers["azure"] = AzureTranscriptionProvider()
         providers["openai"] = OpenAITranscriptionProvider()
         providers["revai"] = RevAITranscriptionProvider()
         providers["deepgram"] = DeepgramTranscriptionProvider()
@@ -22,7 +23,9 @@ actor TranscriptionProviderRegistry {
         providers["cartesia"] = CartesiaTranscriptionProvider()
         providers["mistral"] = MistralTranscriptionProvider()
         providers["gladia"] = GladiaTranscriptionProvider()
+        providers["google"] = GeminiTranscriptionProvider()
         providers["xai"] = XAITranscriptionProvider()
+        providers["meta"] = MetaMuseTranscriptionProvider()
     }
 
     func allProviders() -> [TranscriptionProviderMetadata] {

@@ -172,8 +172,7 @@ final class WhisperKitLiveController: LiveTranscriptionController {
         if let streamProvider {
             return try await streamProvider(request, onEvent)
         }
-        let pipeline = try await modelManager.makeReadyPipeline(modelID: request.batchModelID)
-        return try WhisperKitLiveStream(pipeline: pipeline, request: request, onEvent: onEvent)
+        return try await modelManager.makeWhisperKitStream(request: request, onEvent: onEvent)
     }
 
     /// Runs the stream and suspends until its first audio arrives, a timeout

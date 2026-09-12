@@ -61,11 +61,60 @@ struct TranscriptionModeSegmentedPickerStyle: ViewModifier {
     content
       .pickerStyle(.segmented)
       .frame(minWidth: 260, idealWidth: 320, alignment: .leading)
+      .settingsControlChrome()
+  }
+}
+
+/// Shared chrome for inline settings controls: pickers, toggles and compact rows.
+struct SettingsControlChrome: ViewModifier {
+  func body(content: Content) -> some View {
+    content
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
       .background(
         RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(Color(nsColor: .controlBackgroundColor))
       )
+  }
+}
+
+extension View {
+  /// Applies the standard settings control background and padding.
+  func settingsControlChrome() -> some View {
+    modifier(SettingsControlChrome())
+  }
+
+  /// Menu picker styled with the standard settings control chrome.
+  func settingsMenuPicker() -> some View {
+    pickerStyle(.menu).settingsControlChrome()
+  }
+
+  /// Segmented picker styled with the standard settings control chrome.
+  func settingsSegmentedPicker() -> some View {
+    pickerStyle(.segmented).settingsControlChrome()
+  }
+}
+
+/// Pill badge summarising the mode a settings card configures.
+struct SettingsModeBadge: View {
+  let title: String
+  let systemImage: String
+  let tint: Color
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: systemImage)
+        .foregroundStyle(tint)
+        .imageScale(.small)
+      Text(title)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(tint)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+    .background(
+      Capsule()
+        .fill(tint.opacity(0.12))
+    )
   }
 }

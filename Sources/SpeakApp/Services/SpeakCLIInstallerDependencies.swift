@@ -32,7 +32,7 @@ struct SpeakCLIInstallerDependencies {
   var installDirectory: URL
 
   static var live: SpeakCLIInstallerDependencies {
-    let releases = URL(string: "https://github.com/crmitchelmore/justspeaktoit/releases/latest/download/")!
+    let releases = URL(string: ReleaseTrain.current.cliDownloadURL)!
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
     return SpeakCLIInstallerDependencies(
@@ -56,7 +56,7 @@ struct SpeakCLIInstallerDependencies {
       manifestURL: releases.appendingPathComponent(SpeakCLIManifest.manifestAssetName),
       signatureURL: releases.appendingPathComponent(SpeakCLIManifest.signatureAssetName),
       installDirectory: support
-        .appendingPathComponent("SpeakApp", isDirectory: true)
+        .appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
         .appendingPathComponent("bin", isDirectory: true)
     )
   }

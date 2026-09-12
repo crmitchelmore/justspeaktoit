@@ -102,6 +102,7 @@ extension Array where Element == HistoryItem {
       "elevenlabs": "ElevenLabs",
       "fluidaudio": "FluidAudio",
       "gladia": "Gladia",
+      "google": "Google Gemini",
       "groq": "Groq",
       "mistral": "Mistral",
       "modulate": "Modulate",

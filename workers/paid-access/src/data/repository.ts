@@ -490,6 +490,14 @@ export class Repository {
    * arrives while the first attempt is still running, or after it finished, must
    * not buy a second upstream call.
    */
+  async pruneExpiredRequestClaims(nowSeconds: number): Promise<number> {
+    const result = await this.db.prepare(
+      `DELETE FROM request_claims WHERE id IN
+       (SELECT id FROM request_claims WHERE expires_at <= ?1 ORDER BY expires_at LIMIT 1000)`,
+    ).bind(nowSeconds).run();
+    return result.meta.changes;
+  }
+
   async claimRequest(input: {
     userId: string;
     idempotencyKey: string;

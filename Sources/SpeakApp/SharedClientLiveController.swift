@@ -16,6 +16,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
+  private let appSettings: AppSettings
 
   private var currentLanguage: String?
   private var currentModel: String?
@@ -28,15 +29,19 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   /// re-created in start() once the client is known.
   private var accumulated = TranscriptAccumulator(shape: .cumulativeTranscript)
   private var isStopping = false
+  private var isStarting = false
+  private let audioProcessor = SharedClientAudioProcessor()
 
   init(
     permissionsManager: PermissionsManager,
     audioDeviceManager: AudioInputDeviceManager,
-    secureStorage: SecureAppStorage
+    secureStorage: SecureAppStorage,
+    appSettings: AppSettings
   ) {
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
     self.secureStorage = secureStorage
+    self.appSettings = appSettings
   }
 
   func configure(language: String?, model: String) {
@@ -44,11 +49,17 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
+  // swiftlint:disable:next function_body_length
   func start() async throws {
-    guard !isRunning else { return }
-    guard (await permissionsManager.ensureGranted(.microphone)).isGranted else {
-      throw TranscriptionManagerError.microphonePermissionMissing
-    }
+        guard !isRunning, !isStarting else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+        isStarting = true
+        defer { isStarting = false }
+        try Task.checkCancellation()
+        let permission = await permissionsManager.ensureGranted(.microphone)
+        try Task.checkCancellation()
+        guard permission.isGranted else {
+            throw TranscriptionManagerError.microphonePermissionMissing
+        }
     guard let model = currentModel,
           let route = LiveTranscriptionRouting.route(for: model),
           let keyIdentifier = route.apiKeyIdentifier else {
@@ -56,10 +67,15 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     }
 
     let apiKey = try await loadAPIKey(identifier: keyIdentifier)
+    try Task.checkCancellation()
     guard let client = LiveTranscriptionClientFactory.makeClient(
       for: route,
       apiKey: apiKey,
-      language: currentLanguage
+      language: currentLanguage,
+      keywords: [.meta, .google].contains(route.provider)
+        ? MetaMuseVoiceTranscribe.keywords(from: appSettings.transcriptionKeywords)
+        : [],
+      azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
     ) else {
       throw LiveTranscriptionClientError.providerNotAvailable(route.provider)
     }
@@ -72,6 +88,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     self.client = client
 
     do {
+      // A preferred-input session may have been acquired while cancellation
+      // was pending; from here every exit must release it through cleanup.
+      try Task.checkCancellation()
       client.start(
         onTranscript: { [weak self, weak client] text, isFinal in
           Task { @MainActor [weak self, weak client] in
@@ -93,6 +112,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       )
       try installAudioTap(route: route, client: client)
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      try Task.checkCancellation()
       startedAt = Date()
       isRunning = true
     } catch {
@@ -106,6 +126,10 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     isStopping = true
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
+    if let client {
+      audioProcessor.drainConverterTail(to: client)
+    }
+    audioProcessor.setRunning(false)
 
     if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
       // Contract: `finishAndWait()` returns the session's full transcript, so
@@ -206,50 +230,30 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       throw TranscriptionManagerError.noUsableAudioInput
     }
     guard let targetFormat = AVAudioFormat(
-      commonFormat: .pcmFormatFloat32,
+      commonFormat: .pcmFormatInt16,
       sampleRate: Double(route.sampleRate),
       channels: 1,
-      interleaved: false
-    ), let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+      interleaved: true
+    ), AVAudioConverter(from: inputFormat, to: targetFormat) != nil else {
       throw TranscriptionManagerError.noUsableAudioInput
     }
 
+    let processor = audioProcessor
+    processor.setRunning(true)
     inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-      let ratio = targetFormat.sampleRate / inputFormat.sampleRate
-      let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 1
-      guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
-        return
-      }
-      var conversionError: NSError?
-      var didProvideInput = false
-      let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
-        guard !didProvideInput else {
-          outStatus.pointee = .noDataNow
-          return nil
-        }
-        didProvideInput = true
-        outStatus.pointee = .haveData
-        return buffer
-      }
-      guard status != .error, conversionError == nil,
-            let channelData = output.floatChannelData?[0] else {
-        return
-      }
-
-      let frameCount = Int(output.frameLength)
-      guard frameCount > 0 else { return }
-      var samples = [Int16](repeating: 0, count: frameCount)
-      for index in 0..<frameCount {
-        let clamped = max(-1, min(1, channelData[index]))
-        samples[index] = Int16(clamped * Float(Int16.max))
-      }
-      client.sendAudio(samples.withUnsafeBufferPointer { Data(buffer: $0) })
+      processor.handleAudioTap(
+        buffer,
+        inputFormat: inputFormat,
+        outputFormat: targetFormat,
+        client: client
+      )
     }
   }
 
   private func cleanupAfterFailedStart() async {
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
+    audioProcessor.setRunning(false)
     client?.stop()
     client = nil
     isRunning = false
@@ -264,5 +268,129 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     guard let session = activeInputSession else { return }
     activeInputSession = nil
     await audioDeviceManager.endUsingPreferredInput(session: session)
+  }
+}
+
+/// Copies each tap buffer out of a pool and converts it off the render
+/// thread, so the audio callback never allocates or blocks.
+///
+/// Mirrors the per-provider controllers on macOS: one converter cached per
+/// input format, one reusable output buffer, and no `converter.reset()`
+/// between chunks.
+private final class SharedClientAudioProcessor: @unchecked Sendable {
+  private let queue = DispatchQueue(label: "com.speak.app.sharedClient.audioProcessing")
+  private let copyBufferPool = LivePCMBufferPool(
+    maximumBuffers: 4,
+    tapBufferSize: 4096,
+    label: "shared-client"
+  )
+  private let logger = SpeakLogger.logger(category: "SharedClientLiveController")
+  private var isRunning = false
+  private let converterCache = LiveConverterCache()
+  private var reusableOutputBuffer: AVAudioPCMBuffer?
+
+  func setRunning(_ running: Bool) {
+    queue.sync {
+      isRunning = running
+      if !running {
+        converterCache.reset()
+        reusableOutputBuffer = nil
+        copyBufferPool.removeAll()
+      }
+    }
+  }
+
+  /// Flushes the retained resampler's trailing frames down the live send path
+  /// before the converter is released (issue #849).
+  func drainConverterTail(to client: StreamingTranscriptionClient) {
+    queue.sync {
+      guard let tail = converterCache.drainPCM16() else { return }
+      client.sendAudio(tail)
+    }
+  }
+
+  func handleAudioTap(
+    _ buffer: AVAudioPCMBuffer,
+    inputFormat: AVAudioFormat,
+    outputFormat: AVAudioFormat,
+    client: StreamingTranscriptionClient
+  ) {
+    guard let copied = copyPCMBuffer(buffer) else { return }
+    queue.async { [weak self] in
+      guard let self else { return }
+      defer { self.copyBufferPool.recycle(copied) }
+      guard self.isRunning else { return }
+      self.convertAndSend(copied, from: inputFormat, to: outputFormat, client: client)
+    }
+  }
+
+  private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+    let frameLength = buffer.frameLength
+    guard frameLength > 0,
+          let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
+      return nil
+    }
+    copy.frameLength = frameLength
+    let source = UnsafeMutableAudioBufferListPointer(
+      UnsafeMutablePointer(mutating: buffer.audioBufferList)
+    )
+    let destination = UnsafeMutableAudioBufferListPointer(
+      UnsafeMutablePointer(mutating: copy.audioBufferList)
+    )
+    for index in 0..<min(source.count, destination.count) {
+      let sourceBuffer = source[index]
+      guard let sourceData = sourceBuffer.mData,
+            let destinationData = destination[index].mData else { continue }
+      destinationData.copyMemory(from: sourceData, byteCount: Int(sourceBuffer.mDataByteSize))
+      destination[index].mDataByteSize = sourceBuffer.mDataByteSize
+    }
+    return copy
+  }
+
+  private func convertAndSend(
+    _ buffer: AVAudioPCMBuffer,
+    from inputFormat: AVAudioFormat,
+    to outputFormat: AVAudioFormat,
+    client: StreamingTranscriptionClient
+  ) {
+    guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
+      logger.error("Failed to create audio converter")
+      return
+    }
+
+    let ratio = outputFormat.sampleRate / inputFormat.sampleRate
+    let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 1
+    let output: AVAudioPCMBuffer
+    if let reusable = reusableOutputBuffer, reusable.frameCapacity >= capacity {
+      reusable.frameLength = 0
+      output = reusable
+    } else {
+      guard let created = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
+        return
+      }
+      reusableOutputBuffer = created
+      output = created
+    }
+
+    // No `converter.reset()` between chunks: `LiveConverterCache` owns the
+    // retained converter and its end-of-stream drain (see issue #849).
+    var conversionError: NSError?
+    var didProvideInput = false
+    let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
+      guard !didProvideInput else {
+        outStatus.pointee = .noDataNow
+        return nil
+      }
+      didProvideInput = true
+      outStatus.pointee = .haveData
+      return buffer
+    }
+    guard status != .error, conversionError == nil else {
+      logger.error("Audio conversion failed")
+      return
+    }
+    let frameCount = Int(output.frameLength)
+    guard frameCount > 0, let samples = output.int16ChannelData else { return }
+    client.sendAudio(Data(bytes: samples[0], count: frameCount * 2))
   }
 }

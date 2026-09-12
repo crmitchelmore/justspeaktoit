@@ -5,7 +5,7 @@ import os.log
 
 // @Implement: This file manages the audio recording bit rate and other audio settings. It also depends on app settings to know where to write the audio files to. It never loses any data during recording. It also has the ability to manager audio files e.g. listing, deleting, accessing etc.
 
-struct RecordingSummary: Identifiable, Hashable {
+struct RecordingSummary: Identifiable, Hashable, Sendable {
   let id: UUID
   let url: URL
   let startedAt: Date
@@ -98,6 +98,10 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   private let appSettings: AppSettings
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
+  private let captureSource: (any RecordingCaptureSource)?
+  private var captureSourceGeneration: UUID?
+  private var sourceTeardownCount = 0
+  nonisolated var requiresPhysicalInput: Bool { captureSource == nil }
   // nonisolated(unsafe) allows thread-safe metering access from timer callbacks
   // AVAudioRecorder metering methods are documented as thread-safe
   nonisolated(unsafe) private var recorder: AVAudioRecorder?
@@ -125,11 +129,13 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   init(
     appSettings: AppSettings,
     permissionsManager: PermissionsManager,
-    audioDeviceManager: AudioInputDeviceManager
+    audioDeviceManager: AudioInputDeviceManager,
+    captureSource: (any RecordingCaptureSource)? = nil
   ) {
     self.appSettings = appSettings
     self.permissionsManager = permissionsManager
     self.audioDeviceManager = audioDeviceManager
+    self.captureSource = captureSource
   }
 
   /// Returns the current audio level (0.0 to 1.0) if recording is active.
@@ -165,7 +171,9 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   /// Keeping both together prevents auxiliary recording flows from invalidating
   /// the recorder while a separate coordinator still believes it is ready.
   func reconcileWarmRecorder(for context: CaptureWarmContext, enabled: Bool) {
-    guard self.recorder == nil, !self.isStartingRecording else {
+    guard captureSource == nil else { return }
+    guard self.recorder == nil, self.currentRecordingURL == nil,
+          !self.isStartingRecording, sourceTeardownCount == 0 else {
       self.applyWarmAction(self.warmMachine.recordingBeganWithoutClaim())
       return
     }
@@ -373,11 +381,16 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     warmContext: CaptureWarmContext? = nil,
     owner: AudioRecordingOwner = .auxiliary
   ) async throws -> RecordingStart {
-    guard self.recorder == nil, !self.isStartingRecording else {
+    guard self.recorder == nil, self.currentRecordingURL == nil,
+          !self.isStartingRecording, sourceTeardownCount == 0 else {
       throw AudioFileManagerError.alreadyRecording
     }
     self.isStartingRecording = true
     defer { self.isStartingRecording = false }
+
+    if let captureSource {
+      return try await startCaptureSource(captureSource, owner: owner)
+    }
 
     let permissionStatus = await MainActor.run {
       permissionsManager.refresh(.microphone)
@@ -446,6 +459,37 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     } catch {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw AudioFileManagerError.failedToCreateRecorder
+    }
+  }
+
+  /// Reserve ownership before either await: cancellation can arrive while the
+  /// directory is resolved or while an alternate source is still starting.
+  private func startCaptureSource(
+    _ source: any RecordingCaptureSource, owner: AudioRecordingOwner
+  ) async throws -> RecordingStart {
+    let generation = UUID()
+    captureSourceGeneration = generation
+    currentRecordingOwner = owner
+    do {
+      let directory = await MainActor.run { appSettings.recordingsDirectory }
+      guard captureSourceGeneration == generation, !Task.isCancelled else { throw CancellationError() }
+      let started = try await source.start(in: directory)
+      guard captureSourceGeneration == generation, !Task.isCancelled else {
+        // isStartingRecording still reserves admission until this cleanup ends,
+        // so source.cancel cannot tear down a replacement capture.
+        await source.cancel(deleteFile: true)
+        try? FileManager.default.removeItem(at: started.url)
+        throw CancellationError()
+      }
+      currentRecordingURL = started.url
+      if owner != .dictation { lifecycleHandler?(.auxiliaryStarted) }
+      return started
+    } catch {
+      if captureSourceGeneration == generation {
+        captureSourceGeneration = nil
+        currentRecordingOwner = nil
+      }
+      throw error
     }
   }
 
@@ -539,6 +583,20 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   }
 
   func stopRecording() async throws -> RecordingSummary {
+    if let captureSource {
+      guard currentRecordingURL != nil, let generation = captureSourceGeneration,
+            sourceTeardownCount == 0 else { throw AudioFileManagerError.noActiveRecording }
+      let owner = currentRecordingOwner
+      sourceTeardownCount += 1
+      defer { sourceTeardownCount -= 1 }
+      let summary = try await captureSource.stop()
+      guard captureSourceGeneration == generation, !Task.isCancelled else { throw CancellationError() }
+      captureSourceGeneration = nil
+      currentRecordingURL = nil
+      currentRecordingOwner = nil
+      if let owner, owner != .dictation { lifecycleHandler?(.auxiliaryEnded) }
+      return summary
+    }
     guard let recorder, let recordingID = currentRecordingID, let start = currentRecordingStart else {
       throw AudioFileManagerError.noActiveRecording
     }
@@ -588,6 +646,21 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     if let expectedOwner, let currentOwner = currentRecordingOwner, currentOwner != expectedOwner {
       return
     }
+    if let captureSource {
+      let owner = currentRecordingOwner
+      let url = currentRecordingURL
+      // Invalidate and clear synchronously. A suspended start/stop cannot
+      // republish this recording when the source resumes after cancellation.
+      captureSourceGeneration = nil
+      currentRecordingURL = nil
+      currentRecordingOwner = nil
+      sourceTeardownCount += 1
+      defer { sourceTeardownCount -= 1 }
+      await captureSource.cancel(deleteFile: deleteFile)
+      if deleteFile, let url { try? FileManager.default.removeItem(at: url) }
+      if url != nil, let owner, owner != .dictation { lifecycleHandler?(.auxiliaryEnded) }
+      return
+    }
     let session = activeInputSession
     let owner = currentRecordingOwner
 
@@ -614,12 +687,26 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     }
   }
 
+  /// Metadata-only listing for recording management. Listed durations are zero;
+  /// neither cleanup caller needs to open or decode the user's audio files.
   func listRecordings() async -> [RecordingSummary] {
     let directory = await MainActor.run { appSettings.recordingsDirectory }
+    // A start reserves ownership across awaits before currentRecordingURL is set
+    // (including claiming a warm file). Never snapshot that unfinished capture.
+    guard !isStartingRecording else { return [] }
+    // Keep the metadata walk on this actor: without a suspension, a new capture
+    // cannot enter the deletion snapshot halfway through enumeration. This also
+    // avoids accumulating detached walks against a slow or unavailable volume.
+    return Self.listRecordings(in: directory, excluding: currentRecordingURL)
+  }
+
+  nonisolated static func listRecordings(
+    in directory: URL, excluding activeRecordingURL: URL? = nil
+  ) -> [RecordingSummary] {
     guard
       let enumerator = FileManager.default.enumerator(
-        at: directory,
-        includingPropertiesForKeys: [.creationDateKey, .fileSizeKey],
+        at: directory.resolvingSymlinksInPath(),
+        includingPropertiesForKeys: [.creationDateKey, .fileSizeKey, .isRegularFileKey],
         // Keeps the hidden staging folder, which holds files no session has
         // claimed, out of the user's recordings list.
         options: [.skipsHiddenFiles])
@@ -628,26 +715,29 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
     }
 
     let allowedExtensions: Set<String> = ["m4a", "wav", "mp3", "aac", "m4b", "caf"]
+    let activeRecording = activeRecordingURL?.resolvingSymlinksInPath().standardizedFileURL
 
     var summaries: [RecordingSummary] = []
     while let next = enumerator.nextObject() as? URL {
       let url = next
-      guard allowedExtensions.contains(url.pathExtension.lowercased()) else { continue }
+      guard allowedExtensions.contains(url.pathExtension.lowercased()),
+        url.resolvingSymlinksInPath().standardizedFileURL != activeRecording
+      else { continue }
       do {
-        let resource = try url.resourceValues(forKeys: [.creationDateKey, .fileSizeKey])
+        let resource = try url.resourceValues(forKeys: [.creationDateKey, .fileSizeKey, .isRegularFileKey])
+        guard resource.isRegularFile == true else { continue }
         let creationDate = resource.creationDate ?? Date()
         let fileSize = Int64(resource.fileSize ?? 0)
         let stem = url.deletingPathExtension().lastPathComponent
           .replacingOccurrences(of: "Recording-", with: "")
           .replacingOccurrences(of: "Imported-", with: "")
         let id = UUID(uuidString: stem) ?? UUID()
-        let duration = try AVAudioPlayer(contentsOf: url).duration
         summaries.append(
           RecordingSummary(
             id: id,
             url: url,
             startedAt: creationDate,
-            duration: duration,
+            duration: 0,
             fileSize: fileSize
           )
         )
@@ -659,8 +749,19 @@ actor AudioFileManager { // swiftlint:disable:this type_body_length
   }
 
   func removeRecording(at url: URL) {
-    try? FileManager.default.removeItem(at: url)
+    // Capture can start between snapshot creation and this call. Reserve the
+    // entire startup interval, including a claimed warm file awaiting device setup.
+    guard !isStartingRecording else { return }
+    Self.removeRecording(at: url, excluding: currentRecordingURL)
   }
+
+    nonisolated static func removeRecording(at url: URL, excluding activeRecordingURL: URL?) {
+        // macOS can expose the same recording through /var and /private/var,
+        // or through a user-selected directory symlink. Neither alias is safe to delete.
+        guard url.resolvingSymlinksInPath().standardizedFileURL
+            != activeRecordingURL?.resolvingSymlinksInPath().standardizedFileURL else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
 
   func importRecording(from url: URL) async throws -> URL {
     let directory = await MainActor.run { appSettings.recordingsDirectory }

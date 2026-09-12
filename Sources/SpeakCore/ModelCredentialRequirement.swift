@@ -85,6 +85,19 @@ public enum ModelCredentialResolver {
             return .apiKey(identifier: "openai.apiKey", providerName: "OpenAI")
         }
 
+        // Gemini 3.5 Transcribe uses Google's own Interactions API. The other
+        // google/-prefixed batch entries are OpenRouter-routed Gemini models,
+        // so the prefix alone is not sufficient here either.
+        if GeminiTranscribeModels.directBatchModelIDs.contains(modelIdentifier) {
+            return .apiKey(
+                identifier: "google.apiKey",
+                providerName: GeminiTranscribeModels.providerDisplayName
+            )
+        }
+
+        if AzureTranscriptionModels.batchIDs.contains(modelIdentifier) {
+            return .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure Speech")
+        }
         let provider = providerPrefix(in: modelIdentifier)
         if directBatchProviderIdentifiers.contains(provider) {
             return .apiKey(
@@ -163,11 +176,14 @@ public enum ModelCredentialResolver {
 
     private static let providerDisplayNames = [
         "assemblyai": "AssemblyAI",
+        "cartesia": "Cartesia",
         "deepgram": "Deepgram",
         "elevenlabs": "ElevenLabs",
         "gladia": "Gladia",
+        "google": GeminiTranscribeModels.providerDisplayName,
         "groq": "Groq",
         "mistral": "Mistral",
+        "meta": "Meta",
         "modulate": "Modulate",
         "openai": "OpenAI",
         "openrouter": "OpenRouter",
@@ -183,16 +199,19 @@ public enum ModelCredentialResolver {
     )
 
     private static let directBatchProviderIdentifiers: Set<String> = [
+        "cartesia",
         "assemblyai",
         "deepgram",
         "elevenlabs",
         "gladia",
         "groq",
         "mistral",
+        "meta",
         "modulate",
         "revai",
         "soniox",
-        "speechmatics"
+        "speechmatics",
+        "xai"
     ]
 
     /// Every API-key identifier the canonical catalogues can require, derived

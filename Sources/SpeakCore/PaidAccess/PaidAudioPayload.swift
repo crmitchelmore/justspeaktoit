@@ -5,11 +5,14 @@ import Foundation
 public enum PaidAudioPayloadError: LocalizedError, Equatable {
     case unreadableAudio
     case conversionFailed
+    case tooLarge
 
     public var errorDescription: String? {
         switch self {
         case .unreadableAudio:
             return "That recording could not be read as audio."
+        case .tooLarge:
+            return "That recording exceeds the 25 MB paid upload limit."
         case .conversionFailed:
             return "That recording could not be converted for upload."
         }
@@ -30,12 +33,15 @@ public enum PaidAudioPayloadError: LocalizedError, Equatable {
 public enum PaidAudioPayload {
     /// The content type every payload this type produces is sent as.
     public static let contentType = "audio/wav"
+    public static let maximumBytes = 25 * 1_024 * 1_024
 
     /// Reads `url` and returns 16-bit PCM WAV bytes ready to upload.
     ///
     /// A file that is already WAV is passed through untouched rather than
     /// re-encoded, so the common case costs nothing and loses nothing.
     public static func wavData(contentsOf url: URL) throws -> Data {
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= maximumBytes else { throw PaidAudioPayloadError.tooLarge }
         if url.pathExtension.lowercased() == "wav" {
             return try Data(contentsOf: url)
         }
@@ -47,6 +53,8 @@ public enum PaidAudioPayload {
             throw PaidAudioPayloadError.unreadableAudio
         }
 
+        let estimatedBytes = Double(source.length) * Double(source.processingFormat.channelCount) * 2 + 4_096
+        guard estimatedBytes <= Double(maximumBytes) else { throw PaidAudioPayloadError.tooLarge }
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("wav")

@@ -237,7 +237,7 @@ struct PersonalCorrectionsView: View {
             HStack(spacing: 8) {
               ProgressView()
                 .scaleEffect(0.7)
-              Text("Monitoring for corrections...")
+              Text("Monitoring for corrections…")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }

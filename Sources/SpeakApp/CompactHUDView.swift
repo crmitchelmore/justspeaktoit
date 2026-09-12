@@ -19,6 +19,7 @@ struct CompactHUDContent: View {
   @ObservedObject var manager: HUDManager
   @EnvironmentObject private var settings: AppSettings
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -33,7 +34,8 @@ struct CompactHUDContent: View {
     }
     .padding(.horizontal, 18)
     .padding(.vertical, 12)
-    .frame(width: 244)
+    .frame(minWidth: 244, idealWidth: 244, maxWidth: cardMaxWidth)
+    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     .background(cardBackground)
     .overlay(
       RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -89,11 +91,16 @@ struct CompactHUDContent: View {
   @ViewBuilder
   private var timerLabel: some View {
     if phaseHasTimer {
-      Text(compactElapsed)
-        .font(.system(size: 15, weight: .medium).monospacedDigit())
-        .foregroundStyle(.secondary)
-        .accessibilityLabel("Elapsed time: \(compactElapsed)")
-        .accessibilityAddTraits(.updatesFrequently)
+      // The compact clock shows whole seconds, so it redraws once a second -
+      // and only this label redraws, rather than the whole card.
+      HUDElapsedClock(start: manager.sessionStart, interval: 1) { elapsed in
+        let label = Self.elapsedLabel(for: elapsed)
+        Text(label)
+          .font(.title3.weight(.medium).monospacedDigit())
+          .foregroundStyle(.secondary)
+          .accessibilityLabel("Elapsed time: \(label)")
+          .accessibilityAddTraits(.updatesFrequently)
+      }
     } else {
       // Reserve the trailing slot so the dot stays hard against the left edge.
       Color.clear.frame(width: 1, height: 1)
@@ -107,7 +114,7 @@ struct CompactHUDContent: View {
     if showsLiveTranscript {
       if let text = snapshot.liveText, !text.isEmpty {
         Text(text)
-          .font(.system(size: 14))
+          .font(.body)
           .foregroundStyle(.primary)
           .lineLimit(1)
           .truncationMode(.head)
@@ -116,7 +123,7 @@ struct CompactHUDContent: View {
       }
     } else if !Self.isLiveTranscriptPhase(phase), !statusText.isEmpty {
       Text(statusText)
-        .font(.system(size: 13))
+        .font(.callout)
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .truncationMode(.tail)
@@ -142,9 +149,14 @@ struct CompactHUDContent: View {
     if !health.providerLabel.isEmpty || !health.inputDeviceName.isEmpty {
       HStack(spacing: 6) {
         Image(systemName: health.noInputDevicesAvailable ? "mic.slash.fill" : "mic.fill")
-          .font(.system(size: 9, weight: .semibold))
+          .font(.caption2.weight(.semibold))
           .foregroundStyle(health.noInputDevicesAvailable ? Color.red : .secondary)
-        Text(deviceLabel(health))
+        Text(health.noInputDevicesAvailable ? deviceLabel(health) : "Preferred: \(deviceLabel(health))")
+          .help(
+            health.noInputDevicesAvailable
+              ? "No microphone connected. Connect a microphone to record."
+              : "Preferred microphone: \(deviceLabel(health)). Changes apply to new recording sessions."
+          )
           .font(.caption2)
           .foregroundStyle(.secondary)
           .lineLimit(1)
@@ -163,7 +175,12 @@ struct CompactHUDContent: View {
       }
       .frame(maxWidth: .infinity, alignment: .center)
       .accessibilityElement(children: .combine)
-      .accessibilityLabel("Input \(deviceLabel(health)), provider \(health.providerLabel)")
+      .accessibilityLabel(
+        (health.noInputDevicesAvailable
+          ? "No microphone connected"
+          : "Preferred microphone: \(deviceLabel(health))")
+          + ", provider: \(health.providerLabel)"
+      )
     }
   }
 
@@ -172,6 +189,14 @@ struct CompactHUDContent: View {
   }
 
   // MARK: - Derived state
+
+  /// The card keeps its 244pt design width at ordinary text sizes and is allowed
+  /// to grow at accessibility sizes so the timer and transcript still fit on one
+  /// line. Mirrors ``HUDOverlay``, which widens from 320 to 500 for the same
+  /// reason and caps its text at `.accessibility1`.
+  private var cardMaxWidth: CGFloat {
+    dynamicTypeSize.isAccessibilitySize ? 380 : 244
+  }
 
   /// The scrolling transcript line is shown only in the live-transcript phases
   /// (recording and voice-edit) and only when the "Show live transcript in HUD"
@@ -206,10 +231,6 @@ struct CompactHUDContent: View {
   /// except `armed`, which has no running clock.
   private var phaseHasTimer: Bool {
     phase.isTerminal == false && phase != .armed
-  }
-
-  private var compactElapsed: String {
-    Self.elapsedLabel(for: snapshot.elapsed)
   }
 
   /// Minutes and seconds with a trailing `s`, no fractional seconds:
@@ -327,6 +348,8 @@ struct CompactHUDContent_Previews: PreviewProvider {
       compact(name: "Compact – Recording")
       compact(name: "Compact – Dark")
         .preferredColorScheme(.dark)
+      compact(name: "Compact – Accessibility Text")
+        .dynamicTypeSize(.accessibility3)
     }
   }
 

@@ -34,14 +34,10 @@ import type { LiveSessionReconciliation } from '../do/live-session.js';
 
 const MAX_POST_PROCESSING_BODY_BYTES = 256 * 1024;
 const MAX_TEXT_CHARACTERS = 100_000;
-/** Rough characters-per-token ratio, used only to size the quota reservation. */
-const CHARACTERS_PER_TOKEN = 4;
-/**
- * Fixed allowance covering the model's own overhead and the completion, so the
- * reservation is a genuine upper bound even for a one-line transcript. Getting
- * this wrong the other way would silently under-bill short requests.
- */
+// UTF-8 bytes conservatively bound prompt tokens for the routed byte tokenizer;
+// fixed overhead covers message framing. Completion spending is capped upstream.
 const POST_PROCESSING_TOKEN_OVERHEAD = 1_024;
+const MAX_OUTPUT_TOKENS = 4_096;
 
 /**
  * Asserts the caller may use paid routing right now.
@@ -391,7 +387,7 @@ export async function handlePostProcessing(
   const period = billingPeriod(context.nowSeconds);
   const estimatedTokens =
     POST_PROCESSING_TOKEN_OVERHEAD +
-    Math.ceil(((body.text.length + (systemPrompt?.length ?? 0)) * 3) / CHARACTERS_PER_TOKEN);
+    new TextEncoder().encode(body.text + (systemPrompt ?? "")).byteLength + MAX_OUTPUT_TOKENS;
 
   const text = body.text;
   return underIdempotencyKey(
@@ -417,14 +413,16 @@ export async function handlePostProcessing(
           userText: text,
           upstreamModel: route.upstreamModel,
           temperature,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
         });
 
-        // Cost comes from the provider's usage report, never from the client. The
-        // reservation caps it, so the ledger and the quota always agree.
-        const measuredTokens = Math.min(
-          Math.max(1, result.promptTokens + result.completionTokens),
-          estimatedTokens,
-        );
+        // Preserve the provider's actual usage, including an unexpected overrun.
+        // Missing usage is conservatively charged at the reserved ceiling.
+        const reportedTokens = result.promptTokens + result.completionTokens;
+        if (!Number.isSafeInteger(reportedTokens) || reportedTokens < 0) {
+          throw new ApiError('upstream_error', 'Provider returned invalid token usage');
+        }
+        const measuredTokens = reportedTokens > 0 ? reportedTokens : estimatedTokens;
 
         await context.quota.finalise({
           userId: context.session.userId,

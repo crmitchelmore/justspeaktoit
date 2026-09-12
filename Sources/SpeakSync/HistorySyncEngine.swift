@@ -20,6 +20,13 @@ public protocol HistorySyncDelegate: AnyObject {
     func didAcknowledgeSyncedEntries(ids: Set<UUID>) async
 }
 
+/// Optional platform durability boundary. Existing delegates retain their
+/// behaviour; adopting stores must commit before the fetch token advances.
+@MainActor
+public protocol HistorySyncDurabilityDelegate: HistorySyncDelegate {
+    func persistRemoteChanges() async throws
+}
+
 enum HistoryRemoteChange {
     case changed(SyncableHistoryEntry)
     case deleted(UUID)
@@ -83,6 +90,8 @@ public final class HistorySyncEngine: ObservableObject {
     private let transport: HistorySyncTransport
     private let defaults: UserDefaults
     private let log = SpeakLogger.logger(category: "HistorySync")
+    /// A trigger observed while a pass was already running.
+    private var followUpRequested = false
 
     private convenience init() {
         self.init(
@@ -113,6 +122,12 @@ public final class HistorySyncEngine: ObservableObject {
     }
 
     /// Manually trigger a complete fetch, reconciliation, and upload pass.
+    ///
+    /// A trigger that arrives while a pass is running is not dropped. The
+    /// change it is about may already be behind the running fetch's cursor —
+    /// a push notification for exactly that record, consumed and never
+    /// reconciled, is how a phone stays stale until some unrelated later sync
+    /// — so it is remembered and a follow-up pass runs when this one ends.
     public func sync() async {
         state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
         state.pendingDownloadCount = 0
@@ -123,7 +138,8 @@ public final class HistorySyncEngine: ObservableObject {
             return
         }
         guard !state.isSyncing else {
-            log.info("Sync already in progress")
+            followUpRequested = true
+            log.info("Sync already in progress; queued a follow-up reconciliation")
             return
         }
         guard delegate != nil else {
@@ -135,6 +151,20 @@ public final class HistorySyncEngine: ObservableObject {
         state.error = nil
         defer { state.isSyncing = false }
 
+        var passes = 0
+        repeat {
+            followUpRequested = false
+            await runReconciliationPass()
+            passes += 1
+        } while followUpRequested && passes < Self.maxCoalescedPasses
+    }
+
+    /// An upper bound on back-to-back passes, so a burst of triggers cannot
+    /// keep one `sync()` call running indefinitely. A trigger that arrives
+    /// after the cap simply starts the next `sync()`.
+    static let maxCoalescedPasses = 3
+
+    private func runReconciliationPass() async {
         do {
             try await fetchRemoteChanges()
             try await uploadPendingEntries()
@@ -166,7 +196,7 @@ public final class HistorySyncEngine: ObservableObject {
             throw syncError
         }
         let result = await transport.upload(entries: [entry])
-        await applyUploadResult(result)
+        try await applyUploadResult(result)
         state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
         if let error = result.failures[entry.id] {
             let syncError = SyncError.cloudKit(error)
@@ -237,7 +267,7 @@ public final class HistorySyncEngine: ObservableObject {
 
     private func createSubscription() async throws {
         guard let database = SyncConfiguration.privateDatabase else { return }
-        let subscription = CKDatabaseSubscription(subscriptionID: "transcription-history-changes")
+        let subscription = CKDatabaseSubscription(subscriptionID: SyncConfiguration.historySubscriptionID)
         let info = CKSubscription.NotificationInfo()
         info.shouldSendContentAvailable = true
         subscription.notificationInfo = info
@@ -281,6 +311,7 @@ public final class HistorySyncEngine: ObservableObject {
             state.pendingDownloadCount -= 1
         }
 
+        try await (delegate as? HistorySyncDurabilityDelegate)?.persistRemoteChanges()
         if let finalTokenData {
             defaults.set(finalTokenData, forKey: SyncConfiguration.syncTokenKey)
         }
@@ -297,7 +328,7 @@ public final class HistorySyncEngine: ObservableObject {
 
             let batch = Array(pending.prefix(SyncConfiguration.batchSize))
             let result = await transport.upload(entries: batch)
-            await applyUploadResult(result)
+            try await applyUploadResult(result)
             state.pendingUploadCount = delegate.pendingEntries().count
 
             if !result.failures.isEmpty {
@@ -309,10 +340,11 @@ public final class HistorySyncEngine: ObservableObject {
         }
     }
 
-    private func applyUploadResult(_ result: HistoryUploadResult) async {
+    private func applyUploadResult(_ result: HistoryUploadResult) async throws {
         for entry in result.remoteEntries {
             await delegate?.didReceiveRemoteEntry(entry)
         }
+        try await (delegate as? HistorySyncDurabilityDelegate)?.persistRemoteChanges()
         if !result.acknowledgedIDs.isEmpty {
             await delegate?.didAcknowledgeSyncedEntries(ids: result.acknowledgedIDs)
         }

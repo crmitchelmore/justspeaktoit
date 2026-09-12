@@ -11,7 +11,7 @@ enum ProfileTranscriptionChoice: String, CaseIterable, Identifiable {
 
   var displayName: String {
     switch self {
-    case .useDefault: return "Use Default"
+    case .useDefault: return "Use app setting"
     case .streaming: return "Remote Streaming"
     case .batch: return "Remote Batch"
     case .local: return "Local Model"
@@ -50,7 +50,7 @@ enum ProfilePolishChoice: String, CaseIterable, Identifiable {
 
   var displayName: String {
     switch self {
-    case .useDefault: return "Use Default"
+    case .useDefault: return "Use app setting"
     case .enabled: return "Enabled"
     case .disabled: return "Disabled"
     }

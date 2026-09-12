@@ -14,11 +14,11 @@ import XCTest
 /// visible in CI.
 ///
 /// The listener binds loopback with Bonjour and peer-to-peer switched off: the
-/// tests need a socket, not the local network. If the environment refuses to
-/// bind a listening socket at all, they skip rather than fail.
+/// tests need a socket, not the local network. A listener that never becomes
+/// ready fails with its state so CI cannot silently skip a transport regression.
 @MainActor
 final class TransportLoopbackTests: XCTestCase {
-    private var server: TransportServer?
+    var server: TransportServer?
     private let codeKey = "speakTransportPairingCode"
     private let devicesKey = "speakTransportPairedDevices"
     private var savedCode: String?
@@ -158,29 +158,151 @@ final class TransportLoopbackTests: XCTestCase {
         XCTAssertNil(inbox.text, "Unauthenticated text must never reach the Mac's insertion point")
     }
 
+    // MARK: - Connection ownership
+
+    func testStop_closesAcceptedPeerBeforeAuthentication() async throws {
+        let endpoint = try await self.startServer()
+        let server = try XCTUnwrap(self.server)
+        let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        defer { channel.close() }
+        try await channel.start()
+        // The round trip proves the server owns this accepted channel before stop.
+        try await self.ping(channel)
+
+        server.stop()
+
+        let didClose = await self.waitForClosure(of: channel)
+        XCTAssertTrue(didClose, "An unpaired channel must not survive disabling Send to Mac")
+        XCTAssertTrue(server.connectedDevices.isEmpty)
+    }
+
+    func testUnpairedPeerClaimingConnectedDeviceId_cannotRemovePairedDevice() async throws {
+        let endpoint = try await self.startServer()
+        let server = try XCTUnwrap(self.server)
+        let paired = try await self.authenticatedChannel(to: endpoint, deviceId: "shared-id")
+        defer { paired.close() }
+        let unpaired = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        defer { unpaired.close() }
+        try await unpaired.start()
+        try await unpaired.send(.hello(HelloMessage(deviceName: "Unpaired", deviceId: "shared-id")))
+        // A session frame is rejected, triggering the unpaired peer's disconnect callback.
+        try await unpaired.send(.sessionStart(SessionStartMessage(sessionId: "rejected", model: "test")))
+        let didClose = await self.waitForClosure(of: unpaired)
+        XCTAssertTrue(didClose)
+        try await self.ping(paired)
+
+        XCTAssertEqual(server.connectedDevices.map(\.id), ["shared-id"])
+        server.disconnectDevice(id: "shared-id")
+        let pairedClosed = await self.waitForClosure(of: paired)
+        XCTAssertTrue(pairedClosed, "The paired channel must remain owned and disconnectable")
+    }
+
+    func testReconnectWithSameDeviceId_closesPreviousChannelAndKeepsReplacement() async throws {
+        let endpoint = try await self.startServer()
+        let server = try XCTUnwrap(self.server)
+        let previous = try await self.authenticatedChannel(to: endpoint, deviceId: "reconnecting-id")
+        defer { previous.close() }
+        let replacement = try await self.authenticatedChannel(to: endpoint, deviceId: "reconnecting-id")
+        defer { replacement.close() }
+
+        let previousClosed = await self.waitForClosure(of: previous)
+        XCTAssertTrue(previousClosed, "A reconnect must not orphan the old authenticated channel")
+        try await self.ping(replacement)
+        XCTAssertEqual(server.connectedDevices.map(\.id), ["reconnecting-id"])
+
+        server.stop()
+        let replacementClosed = await self.waitForClosure(of: replacement)
+        XCTAssertTrue(replacementClosed)
+    }
+
+    func testAuthenticatedPeerCannotChangeDeviceIdentity() async throws {
+        let endpoint = try await self.startServer()
+        let server = try XCTUnwrap(self.server)
+        let channel = try await self.authenticatedChannel(to: endpoint, deviceId: "original-id")
+        defer { channel.close() }
+
+        try await channel.send(.hello(HelloMessage(deviceName: "Changed", deviceId: "changed-id")))
+        let didClose = await self.waitForClosure(of: channel)
+
+        XCTAssertTrue(didClose, "An authenticated channel must not restart its handshake")
+        XCTAssertTrue(server.connectedDevices.isEmpty)
+        XCTAssertFalse(PairingManager.shared.isDevicePaired(id: "changed-id"))
+    }
+
+    func testImmediateRestart_ignoresPreviousListenerCancellation() async throws {
+        _ = try await self.startServer()
+        let server = try XCTUnwrap(self.server)
+        server.stop()
+        try server.start(on: .any, advertisesService: false)
+        let endpoint = try await self.readyEndpoint(for: server)
+        let channel = try await self.authenticatedChannel(to: endpoint, deviceId: "restarted-id")
+        defer { channel.close() }
+
+        XCTAssertTrue(server.isRunning, "The previous listener must not mark its replacement as stopped")
+        server.stop()
+        let didClose = await self.waitForClosure(of: channel)
+        XCTAssertTrue(didClose)
+    }
+
     // MARK: - Helpers
 
-    private func startServer() async throws -> NWEndpoint {
-        let server = TransportServer()
+    func startServer(configuredServer: TransportServer? = nil) async throws -> NWEndpoint {
+        let server = configuredServer ?? TransportServer()
         self.server = server
         try server.start(on: .any, advertisesService: false)
+        return try await self.readyEndpoint(for: server)
+    }
 
+    private func readyEndpoint(for server: TransportServer) async throws -> NWEndpoint {
         for _ in 0..<100 {
             if let port = server.port {
                 return try XCTUnwrap(SpeakTransportWire.endpoint(host: "127.0.0.1", port: port))
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        throw XCTSkip("The transport listener never became ready; this environment forbids listening sockets")
+        throw NSError(domain: "TransportLoopbackTests", code: 3, userInfo: [
+            NSLocalizedDescriptionKey: "Transport listener did not become ready within five seconds. "
+                + "Running: \(server.isRunning); error: \(server.error?.localizedDescription ?? "none")."
+        ])
+    }
+
+    func authenticatedChannel(to endpoint: NWEndpoint, deviceId: String) async throws -> TransportChannel {
+        let channel = TransportChannel.connecting(to: endpoint, includesPeerToPeer: false)
+        do {
+            try await channel.start()
+            try await channel.send(.hello(HelloMessage(deviceName: "Test Phone", deviceId: deviceId)))
+            try await channel.send(.authenticate(AuthenticateMessage(pairingCode: PairingManager.shared.pairingCode)))
+            guard case .authResult(let result) = try await channel.receive(), result.success else {
+                throw NSError(domain: "TransportLoopbackTests", code: 1)
+            }
+            // Auth sends its result before registering the device; ping is a barrier.
+            try await self.ping(channel)
+            return channel
+        } catch {
+            channel.close()
+            throw error
+        }
+    }
+
+    func ping(_ channel: TransportChannel) async throws {
+        try await channel.send(.ping)
+        guard case .pong = try await channel.receive() else {
+            throw NSError(domain: "TransportLoopbackTests", code: 2)
+        }
     }
 
     /// Waits for the Mac to hang up, and reports whether it did.
-    private func waitForClosure(of channel: TransportChannel, timeout: TimeInterval = 5) async -> Bool {
+    func waitForClosure(
+        of channel: TransportChannel, timeout: TimeInterval = 5, ignoringPongs: Bool = false
+    ) async -> Bool {
         let result = await withTaskGroup(of: Bool.self) { group in
             group.addTask {
                 do {
-                    _ = try await channel.receive()
-                    return false
+                    while true {
+                        let message = try await channel.receive()
+                        if ignoringPongs, case .pong = message { continue }
+                        return false
+                    }
                 } catch {
                     return true
                 }

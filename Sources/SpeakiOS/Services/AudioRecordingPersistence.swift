@@ -27,17 +27,21 @@ public final class AudioRecordingPersistence: ObservableObject {
         set { issueLock.withLock { storedIssueHandler = newValue } }
     }
 
+    /// The metered microphone level. Everything about it —  the type, the
+    /// lock and the accessors — lives in `AudioRecordingPersistence+Level.swift`.
+    let inputLevelMeter = CaptureInputLevelMeter()
+
     // MARK: - Private
 
     /// Serial queue that owns the write-side `AVAudioFile`. Every write and
     /// the close on stop/cancel run here, so the audio pipeline never races
     /// main-actor teardown while `AVAudioFile.write` is in flight.
-    private let ioQueue = DispatchQueue(label: "com.justspeaktoit.ios.audioPersistence.io")
+    let ioQueue = DispatchQueue(label: "com.justspeaktoit.ios.audioPersistence.io")
     /// Only touched on `ioQueue` after `startRecording` hands the file over.
-    nonisolated(unsafe) private var ioFile: AVAudioFile?
+    nonisolated(unsafe) var ioFile: AVAudioFile?
     /// Fast-path flag read by `writeBuffer` before copying; guarded by `stateLock`.
-    private let stateLock = NSLock()
-    nonisolated(unsafe) private var isWriterOpen = false
+    let stateLock = NSLock()
+    nonisolated(unsafe) var isWriterOpen = false
     /// Pool for buffer copies handed to `ioQueue` so writes never touch the
     /// caller's (reused) buffer.
     private let writeBufferPool = PCMBufferPool(maximumBuffers: 8)
@@ -52,16 +56,50 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// lock: a check-then-set on a bare flag would let both paths fire the
     /// callback, and `stateLock` cannot be taken on `ioQueue` without
     /// inverting the order against `closeWriter`'s barrier.
-    private let issueLock = NSLock()
+    let issueLock = NSLock()
     /// Guarded by `issueLock`.
-    nonisolated(unsafe) private var storedIssueHandler: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
+    nonisolated(unsafe) var storedIssueHandler: (@Sendable (RecordingPersistenceDiagnostics) -> Void)?
     /// Set once per session after the first drop/write failure so the
     /// owning-session callback fires exactly once, off the audio thread.
     /// Guarded by `issueLock`.
-    nonisolated(unsafe) private var didReportIssue = false
+    nonisolated(unsafe) var didReportIssue = false
     private var startTime: Date?
 
+    /// The claim record for the file currently being written, if any
+    /// (issue #992). The lifecycle lives in
+    /// `AudioRecordingPersistence+SafetyClaim.swift`.
+    public internal(set) var activeClaim: UUID?
+
+    /// The claim this recorder opened most recently, kept after
+    /// `stopRecording()` clears `activeClaim`. The owner of the transcript
+    /// settles *that* capture's claim with it, rather than every claim this
+    /// process happens to hold. Cleared when the file is deleted, because a
+    /// claim then has nothing left to point at.
+    public internal(set) var lastClaim: UUID?
+
+    /// Every claim being written right now, across every recorder instance.
+    ///
+    /// The recovery pass takes this as positive evidence of life, so a file a
+    /// capture is in the middle of writing can never be reached by any of the
+    /// scanner's age-based rules. Cleared on every exit from recording.
+    @MainActor static var openClaims: Set<UUID> = []
+
+    @MainActor public static var activeClaims: Set<UUID> { openClaims }
+
+    /// Repeats the claim's heartbeat so another process can see this capture
+    /// is alive. Invalidated on every exit from recording, which is what makes
+    /// the heartbeat go stale after a crash and only after a crash.
+    var claimHeartbeat: Timer?
+
     private let logger = SpeakLogger.logger(category: "AudioPersistence")
+
+    /// Where the in-flight claim is recorded (issue #992). Injectable so a
+    /// test can drive the claim lifecycle without the App Group container.
+    let claimStore: CaptureSafetyClaimStore
+
+    public init(claimStore: CaptureSafetyClaimStore = .shared) {
+        self.claimStore = claimStore
+    }
 
     #if DEBUG
     // MARK: - Test Seams
@@ -69,6 +107,8 @@ public final class AudioRecordingPersistence: ObservableObject {
     // Debug-only hooks that let a test drive the write/stop/start interleaving
     // deterministically. Set them before recording starts and leave them nil in
     // every non-test build.
+
+    nonisolated(unsafe) var beforeFileWrite: (@Sendable () throws -> Void)?
 
     /// Called from `writeBuffer` once admission has been granted and the buffer
     /// copied, i.e. exactly where the pre-fix code released `stateLock` before
@@ -87,24 +127,6 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// asserts on is observed rather than guessed at with a sleep.
     nonisolated(unsafe) public var writerCloseContentionHook: (@Sendable () -> Void)?
     #endif
-
-    // MARK: - Directory
-
-    /// Returns the persistent recordings directory, creating it if needed.
-    public static var recordingsDirectory: URL {
-        let docs = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        )[0]
-        let dir = docs.appendingPathComponent("Recordings", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(
-                at: dir,
-                withIntermediateDirectories: true
-            )
-        }
-        return dir
-    }
 
     // MARK: - Public API
 
@@ -151,10 +173,21 @@ public final class AudioRecordingPersistence: ObservableObject {
         issueLock.withLock { didReportIssue = false }
         stateLock.unlock()
 
-        startTime = Date()
+        let startedAt = Date()
+        startTime = startedAt
         currentFileURL = url
         isRecording = true
         lastDiagnostics = nil
+
+        // Claim the file while it is being written, so a launch after a crash
+        // can tell this recording apart from a finished one (issue #992). The
+        // identity is the same `stableRecordingID` the saved-recording library
+        // lists this file under, so no second scheme is introduced.
+        let recordingID = Self.stableRecordingID(for: url)
+        activeClaim = recordingID
+        lastClaim = recordingID
+        claimStore.open(recording: recordingID, fileName: filename, startedAt: startedAt)
+        startClaimHeartbeat(for: recordingID)
 
         logger.info("Started persistent recording: \(filename)")
         return url
@@ -166,6 +199,12 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// asynchronously on the persistence I/O queue.
     @discardableResult
     nonisolated public func writeBuffer(_ buffer: AVAudioPCMBuffer) -> RecordingPersistenceAdmission? {
+        // Metered before the writer guard below, and before admission can drop
+        // the frame: the level is an observation of what the microphone heard,
+        // not of what was persisted. A user with audio retention turned off, or
+        // a session backpressured by a slow disk, still gets end-pointing.
+        publishInputLevel(Self.level(of: buffer))
+
         // Admission and enqueue are one atomic step against `closeWriter`'s
         // barrier. Releasing the lock before `ioQueue.async` would let a stalled
         // caller enqueue *after* the session closed; that block would then
@@ -245,6 +284,9 @@ public final class AudioRecordingPersistence: ObservableObject {
                 return
             }
             do {
+                #if DEBUG
+                try self.beforeFileWrite?()
+                #endif
                 try file.write(from: copy)
                 controller.completeWrite(frameSeconds: frameSeconds, failed: false)
                 #if DEBUG
@@ -258,66 +300,6 @@ public final class AudioRecordingPersistence: ObservableObject {
                 self.logger.error("Write error: \(error.localizedDescription, privacy: .public)")
             }
         }
-    }
-
-    /// Controlled fallback allocation for a pool-exhausted frame within the
-    /// admission budget.
-    private nonisolated static func fallbackCopy(of buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let copy = AVAudioPCMBuffer(
-            pcmFormat: buffer.format,
-            frameCapacity: buffer.frameLength
-        ) else { return nil }
-        copy.frameLength = buffer.frameLength
-        let source = UnsafeMutableAudioBufferListPointer(
-            UnsafeMutablePointer(mutating: buffer.audioBufferList)
-        )
-        let destination = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
-        for index in 0..<min(source.count, destination.count) {
-            guard let sourceData = source[index].mData,
-                  let destinationData = destination[index].mData else { continue }
-            memcpy(destinationData, sourceData, Int(source[index].mDataByteSize))
-            destination[index].mDataByteSize = source[index].mDataByteSize
-        }
-        return copy
-    }
-
-    /// Surfaces the first drop/failure of the session to the owning session,
-    /// exactly once, without blocking the audio thread.
-    private nonisolated func reportIssueIfNeeded(_ controller: RecordingPersistenceAdmissionController) {
-        // Latch and handler are read under one lock hold so two threads can
-        // never both observe an unset latch (see `issueLock`).
-        let handler = issueLock.withLock { () -> (@Sendable (RecordingPersistenceDiagnostics) -> Void)? in
-            guard !didReportIssue else { return nil }
-            didReportIssue = true
-            return storedIssueHandler
-        }
-        guard let handler else { return }
-        let diagnostics = controller.diagnostics
-        DispatchQueue.global(qos: .utility).async {
-            handler(diagnostics)
-        }
-    }
-
-    /// Flips the fast-path flag and drains + closes the file on the I/O
-    /// queue. `sync` so pending writes finish and the file header is
-    /// finalised before callers read the file (size, playback, deletion).
-    private func closeWriter() {
-        acquireStateLockForClose()
-        isWriterOpen = false
-        stateLock.unlock()
-        ioQueue.sync { ioFile = nil }
-    }
-
-    /// Takes `stateLock` for the close path. A failed `try()` means an admitted
-    /// write still holds the lock across its `ioQueue` submit — the exact state
-    /// the lock scope exists to guarantee — so DEBUG builds report it before
-    /// blocking. Release builds just take the lock.
-    private func acquireStateLockForClose() {
-        #if DEBUG
-        if stateLock.try() { return }
-        writerCloseContentionHook?()
-        #endif
-        stateLock.lock()
     }
 
     /// Stop recording and return metadata about the saved file.
@@ -334,6 +316,11 @@ public final class AudioRecordingPersistence: ObservableObject {
         closeWriter()
         isRecording = false
         currentFileURL = nil
+        // The heartbeat stops here, but the claim deliberately does not: the
+        // audio is complete and the transcript has not been delivered yet, so
+        // a kill between this line and the History write must still leave a
+        // recoverable capture behind (issue #992).
+        stopClaimHeartbeat()
 
         let fileSize = (try? FileManager.default
             .attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
@@ -375,10 +362,20 @@ public final class AudioRecordingPersistence: ObservableObject {
     /// Cancel recording and delete the partial file.
     public func cancelRecording() {
         let url = currentFileURL
+        let claim = activeClaim
         closeWriter()
         isRecording = false
         currentFileURL = nil
         startTime = nil
+        stopClaimHeartbeat()
+        // A cancelled recording deletes its own file below, so its claim has
+        // nothing left to point at. This is the only place the claim is
+        // dropped without the transcript having been delivered, and it is the
+        // one case where the user asked for the audio to go.
+        if let claim {
+            claimStore.forget(recording: claim)
+            if lastClaim == claim { lastClaim = nil }
+        }
 
         if let url {
             try? FileManager.default.removeItem(at: url)

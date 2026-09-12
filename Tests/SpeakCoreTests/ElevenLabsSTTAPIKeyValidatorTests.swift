@@ -37,7 +37,7 @@ final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
         XCTAssertEqual(requests.last?.apiKeyHeader, "full-access-key")
         XCTAssertTrue(requests.last?.contentType?.hasPrefix("multipart/form-data; boundary=") == true)
         XCTAssertTrue(requests.last?.body?.contains(#"name="model_id""#) == true)
-        XCTAssertTrue(requests.last?.body?.contains("\r\nscribe_v1\r\n") == true)
+        XCTAssertTrue(requests.last?.body?.contains("\r\nscribe_v2\r\n") == true)
         XCTAssertFalse(requests.last?.body == "{}")
     }
 

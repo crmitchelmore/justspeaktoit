@@ -90,10 +90,10 @@ final class WatchCaptureProtocolTests: XCTestCase {
 
     func testStatusTransitions_allowOnlyTheDocumentedMatrix() {
         let allowed: [WatchCaptureStatus: Set<WatchCaptureStatus>] = [
-            .recorded: [.transferring],
-            .transferring: [.delivered, .failed],
-            .delivered: [.transcribed, .failed],
-            .failed: [.transferring],
+            .recorded: [.transferring, .transcribed, .failed],
+            .transferring: [.delivered, .failed, .transcribed],
+            .delivered: [.transcribed, .failed, .transferring],
+            .failed: [.transferring, .transcribed],
             .transcribed: []
         ]
 
@@ -105,6 +105,39 @@ final class WatchCaptureProtocolTests: XCTestCase {
                     "\(source) → \(target)"
                 )
             }
+        }
+    }
+
+    func testRelaunchAfterLostTransferCallback_requeuesRetainedAudio() throws {
+        // The on-disk state can still say transferring after WCSession has
+        // completed and removed its transfer while our process was dead.
+        let persisted = try JSONEncoder().encode(WatchCaptureStatus.transferring)
+        let recovered = try JSONDecoder().decode(WatchCaptureStatus.self, from: persisted)
+        XCTAssertTrue(recovered.shouldRetryTransfer(hasOutstandingTransfer: false))
+        XCTAssertFalse(recovered.shouldRetryTransfer(hasOutstandingTransfer: true))
+        XCTAssertFalse(recovered.canReleaseAudio)
+    }
+
+    func testDeliveredWithoutApplicationAck_keepsAudioAndRecoversOnActivation() {
+        // WCSession success does not prove the receiver durably parked audio.
+        XCTAssertFalse(WatchCaptureStatus.delivered.canReleaseAudio)
+        XCTAssertTrue(WatchCaptureStatus.delivered.shouldRetryTransfer(hasOutstandingTransfer: false))
+        XCTAssertTrue(WatchCaptureStatus.delivered.canTransition(to: .transferring))
+    }
+
+    func testEarlySuccessAck_survivesRelaunchAndRejectsLateTransportFailure() throws {
+        XCTAssertTrue(WatchCaptureStatus.transferring.canTransition(to: .transcribed))
+        let persisted = try JSONEncoder().encode(WatchCaptureStatus.transcribed)
+        let recovered = try JSONDecoder().decode(WatchCaptureStatus.self, from: persisted)
+        XCTAssertTrue(recovered.canReleaseAudio)
+        XCTAssertFalse(recovered.shouldRetryTransfer(hasOutstandingTransfer: false))
+        XCTAssertFalse(recovered.canTransition(to: .failed))
+        XCTAssertFalse(recovered.canTransition(to: .delivered))
+    }
+
+    func testRecoveryPolicy_neverDuplicatesAnOutstandingTransfer() {
+        for status in WatchCaptureStatus.allCases {
+            XCTAssertFalse(status.shouldRetryTransfer(hasOutstandingTransfer: true), "\(status)")
         }
     }
 

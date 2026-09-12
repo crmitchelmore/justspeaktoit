@@ -3,6 +3,10 @@ updates:
   # Swift Package Manager
   - package-ecosystem: "swift"
     directory: "/"
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
     schedule:
       interval: "weekly"
     commit-message:
@@ -12,6 +16,10 @@ updates:
   # Swift Package Manager (isolated lint tooling graph, issue #677)
   - package-ecosystem: "swift"
     directory: "/Tooling"
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
     schedule:
       interval: "weekly"
     commit-message:
@@ -21,6 +29,10 @@ updates:
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
     schedule:
       interval: "weekly"
     commit-message:
@@ -30,6 +42,10 @@ updates:
   # npm (landing page)
   - package-ecosystem: "npm"
     directory: "/landing-page"
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
     schedule:
       interval: "weekly"
     commit-message:

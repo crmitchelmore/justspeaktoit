@@ -9,14 +9,62 @@ Speak is designed with privacy in mind. This document explains what data is coll
 ### What is captured?
 - **Microphone audio** is captured only while actively transcribing (when you tap the record button)
 - Audio is processed in real-time and is **not stored** on your device after transcription
-- When using on-device Apple Speech, audio **never leaves your device**
+- Apple Speech processes microphone audio on-device when the device and selected language support it. Its fallback can
+  use Apple's speech-recognition servers. If you separately enable cloud post-processing or voice output, transcript or
+  assistant-response text is also sent to that feature's selected provider — see
+  [Voice Output](#voice-output-text-to-speech) for every provider that can receive spoken text.
 
 ### Where does audio go?
 
 | Provider | Data Location | Processing |
 |----------|---------------|------------|
-| Apple Speech | On-device | Audio stays on your iPhone/Mac |
-| Deepgram | Cloud (US) | Audio streamed to Deepgram servers |
+| Apple Speech | Device or Apple cloud | Audio is transcribed on-device when supported; otherwise Apple's speech service may process it |
+| Deepgram | Cloud | Audio streamed to Deepgram for transcription |
+| Cartesia | Cloud | Audio streamed to Cartesia for transcription |
+| Gladia | Cloud | Audio streamed to Gladia for transcription |
+| Google Gemini | Cloud | Audio streamed to Google for Gemini 3.5 Transcribe (live and recorded) |
+| Modulate | Cloud | Audio streamed to Modulate for transcription |
+| AssemblyAI | Cloud | Audio streamed to AssemblyAI for transcription |
+| Soniox | Cloud | Audio streamed to Soniox for transcription |
+| ElevenLabs | Cloud | Audio streamed to ElevenLabs for transcription |
+| OpenAI | Cloud | Audio streamed to OpenAI for transcription |
+| xAI | Cloud | Audio streamed to xAI for transcription |
+| Meta Model API | Cloud | Audio streamed or uploaded to Meta for Muse Voice Transcribe |
+
+This table covers live providers available in the iOS app. macOS also supports Speechmatics streaming. Selectable iOS
+batch models upload recorded audio to OpenAI for supported OpenAI models or through OpenRouter for other remote models.
+The in-app iOS live-provider disclosure derives its list from the same model catalogue and platform-support metadata
+used by the transcription picker, so newly supported live providers appear automatically. When enabled,
+post-processing sends transcript text to OpenRouter.
+
+## Voice Output (text-to-speech)
+
+Voice output sends the text it speaks — an assistant response, or the text you ask the app to read — to whichever
+provider you select. It is off until you turn it on, and no other provider in this table receives that text.
+
+| Platform | Selectable voice-output provider | Data sent |
+|----------|----------------------------------|-----------|
+| iOS | Deepgram Aura | The text to speak, plus the selected model, voice, speed and language |
+| iOS | Soniox | The text to speak, plus the selected voice, speed, language and region |
+| macOS | ElevenLabs | The text to speak, plus the selected model and voice |
+| macOS | OpenAI | The text to speak, plus the selected model and voice |
+| macOS | Azure Cognitive Services | The text to speak, plus the selected voice and region |
+| macOS | Deepgram Aura | The text to speak, plus the selected model and voice |
+| macOS | Soniox | The text to speak, plus the selected voice, speed, language and region |
+| macOS | Cartesia Sonic | The text to speak, plus the selected model and voice |
+| macOS | macOS System voices | Nothing leaves the device — synthesis is performed by macOS |
+
+The in-app iOS disclosure derives this list from the same `VoiceOutputProvider` catalogue the provider picker uses, so
+a newly supported voice-output provider is disclosed automatically. The macOS list is `TTSProvider` minus the built-in
+system voices, which need no network access.
+
+## Your Effective Workflow
+
+The iOS Privacy screen opens with **What happens with your recordings right now**: the microphone/recording, transcript
+clean-up and spoken-reply steps as your current settings actually route them, each naming the provider that receives
+that content (or saying the step is on-device or switched off). It is derived from the live settings, so changing a
+model, toggling post-processing or switching voice provider updates it immediately. The provider catalogues further
+down the screen are reference material describing what the app *can* use, not what your settings *do* use.
 
 ## API Keys
 
@@ -33,17 +81,25 @@ Speak is designed with privacy in mind. This document explains what data is coll
 ## Network Activity
 
 ### When does Speak connect to the internet?
-- **Apple Speech**: Only for initial language model download (if needed)
-- **Deepgram**: When actively transcribing via Deepgram
+- **Apple Speech**: For language-model download when needed, and for recognition when on-device processing is unavailable
+- **Cloud transcription providers**: When actively transcribing with a cloud model
 - **Send to Mac**: Only on your local network (no internet required)
 - **iCloud Sync**: When syncing settings (optional)
 
 ### What is sent to cloud providers?
 
-When using Deepgram:
+When using a cloud transcription provider:
 - Audio stream (in real-time)
 - Language/model selection
-- No personal identifiers
+- App-supplied language/model metadata, but no separate account identifier supplied by Speak. Spoken audio itself may
+  contain names or other personal information.
+
+When using Meta Muse Voice Transcribe:
+- Live microphone audio, or the selected recording converted to mono PCM16 WAV
+- The selected model, optional language hint, and user-configured recognition keywords
+- A generated session identifier used to correlate API logs
+- Meta's API limits file requests to 10 minutes and 32 MB; its handling and
+  retention are governed by the Meta Model API account policy
 
 ## Local Network (Send to Mac)
 
@@ -124,10 +180,30 @@ Speak to It does not set a Sentry user name or email address. Diagnostic data is
 not linked to a known identity and is not used for advertising or cross-app
 tracking.
 
+## Configuration transfer captures
+
+On both macOS and iOS, the source first displays only the encrypted QR. After
+scanning on the receiver, choose **I’ve scanned the QR** on the source. The QR is
+removed before the unlock code appears, with transition animations disabled.
+There is no back step for the same transfer; regenerating creates fresh encrypted
+material and a fresh code. Neither source UI offers a combined share sheet.
+
+This prevents a single screenshot or photograph of one step from collecting both
+factors. It does **not** protect a recording, screen share, or separate photographs
+of both steps. Keep screen sharing and recording off during transfer.
+
+New encrypted transfers authenticate the creation timestamp. The receiver
+requires that timestamp to differ from its own clock by less than ten minutes
+in either direction. Clock skew can reject a fresh transfer or extend its apparent
+real-time lifetime. Legacy imports instead check an unauthenticated payload
+timestamp and do not provide the encrypted format’s security guarantees. These
+client-side time checks do not prevent offline decryption after both factors
+have been captured.
+
 ## Questions?
 
 For privacy questions, contact: [hello@justspeaktoit.com](mailto:hello@justspeaktoit.com)
 
 ---
 
-*Last updated: August 2026*
+*Last updated: September 2026*

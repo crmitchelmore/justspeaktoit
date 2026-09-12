@@ -532,3 +532,19 @@ describe('paid routing usage accounting', () => {
     ]);
   });
 });
+
+
+describe('post-processing spending bounds', () => {
+  it('caps upstream output and keeps reported usage above the former estimate', async () => {
+    const userId = await seedEntitledUser();
+    fetchMock.get('https://openrouter.ai').intercept({ path: '/api/v1/chat/completions', method: 'POST',
+      body: (body) => JSON.parse(body as string).max_tokens === 4096,
+    }).reply(200, { choices: [{ message: { content: 'Cleaned.' } }],
+      usage: { prompt_tokens: 1500, completion_tokens: 2500 } });
+    const response = await postProcess(await tokenFor(userId), { operation: 'post_processing', text: 'hello' });
+    expect(response.status).toBe(200);
+    const row = await env.DB.prepare('SELECT units FROM usage_ledger WHERE user_id = ?1')
+      .bind(userId).first<{ units: number }>();
+    expect(row?.units).toBe(4000);
+  });
+});

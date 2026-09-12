@@ -1,3 +1,4 @@
+import Combine
 import SpeakCore
 import SwiftUI
 
@@ -8,8 +9,19 @@ struct DashboardView: View {
   @EnvironmentObject private var history: HistoryManager
   @Environment(\.appVisualDensity) private var density
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-  @State private var requestingPermission: PermissionType?
   @StateObject private var speechInsights = SpeechInsightsModel()
+
+  /// Chart inputs derived from the *whole* history. Cached in state and
+  /// refreshed on `history.contentRevision` (same reasoning as the speech
+  /// insights below) so that unrelated `HistoryManager` publishes — paging
+  /// flipping `isLoadingMore`, a persistence error, a load-state change — do
+  /// not re-walk every record on the main actor while the body evaluates.
+  @State private var aggregates = DashboardAggregates(items: [])
+  /// The day the cached `aggregates` were built for. The daily-usage series is
+  /// a rolling 30-day window ending "today", so a dashboard left open across
+  /// midnight has to rebuild even when history has not changed (issue: stale
+  /// axis after a day rollover). Refreshed from `NSCalendarDayChanged`.
+  @State private var aggregatesDay = Calendar.current.startOfDay(for: .now)
 
   var body: some View {
     ScrollView {
@@ -244,6 +256,31 @@ struct DashboardView: View {
         ttsProviderChartSection
       }
     }
+    // One pass over history per content revision *and* per day feeds all five
+    // charts. `contentRevision` is bumped by every mutator that touches
+    // `allItems` (load, append, update, remove, remove-all — CloudKit merges
+    // included), and paging only ever appends to the already-counted `items`
+    // page; the day is the other input, because `dailyUsageForLastMonth`
+    // derives its window from it.
+    .task(id: aggregatesKey) {
+      aggregates = DashboardAggregates(items: history.allItems, referenceDate: aggregatesDay)
+    }
+    // Posted on a background thread at midnight and on wake, so hop to main
+    // before touching view state.
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: .NSCalendarDayChanged)
+        .receive(on: DispatchQueue.main)
+    ) { _ in
+      let today = Calendar.current.startOfDay(for: .now)
+      if today != aggregatesDay {
+        aggregatesDay = today
+      }
+    }
+  }
+
+  private var aggregatesKey: DashboardAggregatesKey {
+    DashboardAggregatesKey(revision: history.contentRevision, startOfDay: aggregatesDay)
   }
 
   private func heroChip(title: String, value: String, systemImage: String) -> some View {
@@ -363,169 +400,7 @@ struct DashboardView: View {
   }
 
   private var permissionsSection: some View {
-    DashboardCard(title: "Permissions", systemImage: "lock.shield", tint: Color.brandAccentWarm) {
-      LazyVGrid(
-        columns: Array(
-          repeating: GridItem(.flexible(), spacing: density.groupSpacing),
-          count: 2
-        ),
-        spacing: density.groupSpacing
-      ) {
-        ForEach(PermissionType.availablePermissions(for: DistributionChannel.current)) { permission in
-          permissionCard(for: permission)
-        }
-      }
-    }
-    .speakTooltip("Review and grant the permissions Speak needs so recordings and shortcuts work reliably.")
-  }
-
-  private func permissionCard(for permission: PermissionType) -> some View {
-    let status = environment.permissions.status(for: permission)
-    return Group {
-      if density.prefersInlineLayout(dynamicTypeSize: dynamicTypeSize) {
-        compactPermissionCard(for: permission, status: status)
-      } else {
-        regularPermissionCard(for: permission, status: status)
-      }
-    }
-    .speakTooltip(permission.guidanceText)
-  }
-
-  private func compactPermissionCard(
-    for permission: PermissionType,
-    status: PermissionStatus
-  ) -> some View {
-    HStack(spacing: density.inlineSpacing) {
-      Image(systemName: permission.systemIconName)
-        .frame(width: 16)
-      VStack(alignment: .leading, spacing: 0) {
-        Text(permission.displayName)
-          .font(.caption.weight(.semibold))
-          .lineLimit(1)
-        Text(statusDescription(status))
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-      }
-      Spacer(minLength: 2)
-      Circle()
-        .fill(statusColor(status))
-        .frame(width: 7, height: 7)
-      compactPermissionAction(for: permission, status: status)
-    }
-    .padding(6)
-    .background(
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(.ultraThinMaterial)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .stroke(statusColor(status).opacity(0.35), lineWidth: 1)
-    )
-  }
-
-  @ViewBuilder
-  private func compactPermissionAction(
-    for permission: PermissionType,
-    status: PermissionStatus
-  ) -> some View {
-    if environment.permissions.requestIssue(for: permission) != nil {
-      Link(destination: permission.settingsURL) {
-        Label("Open Settings", systemImage: "gear")
-          .labelStyle(.iconOnly)
-      }
-      .buttonStyle(.borderless)
-    } else {
-      Button {
-        requestingPermission = permission
-        Task { await request(permission) }
-      } label: {
-        Label(
-          status.isGranted ? "Check" : "Request",
-          systemImage: status.isGranted ? "arrow.clockwise" : "plus.circle"
-        )
-        .labelStyle(.iconOnly)
-      }
-      .buttonStyle(.borderless)
-    }
-  }
-
-  private func regularPermissionCard(
-    for permission: PermissionType,
-    status: PermissionStatus
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Image(systemName: permission.systemIconName)
-          .imageScale(.large)
-        Text(permission.displayName)
-          .font(.headline)
-        Spacer()
-        Circle()
-          .fill(statusColor(status))
-          .frame(width: 12, height: 12)
-      }
-      Text(statusDescription(status))
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-
-      if let issue = environment.permissions.requestIssue(for: permission) {
-        Text(issue.guidance(for: permission))
-          .font(.caption)
-          .foregroundStyle(.orange)
-        Link("Open Settings", destination: permission.settingsURL)
-          .buttonStyle(.bordered)
-          .controlSize(.small)
-      } else {
-        Button(status.isGranted ? "Check" : "Request") {
-          requestingPermission = permission
-          Task { await request(permission) }
-        }
-        .controlSize(.small)
-        .speakTooltip(permission.guidanceText)
-      }
-    }
-    .padding()
-    .background(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .fill(.ultraThinMaterial)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .stroke(statusColor(status).opacity(0.4), lineWidth: 1)
-    )
-  }
-
-  private func request(_ permission: PermissionType) async {
-    _ = await environment.permissions.request(permission)
-    await MainActor.run {
-      requestingPermission = nil
-    }
-  }
-
-  private func statusColor(_ status: PermissionStatus) -> Color {
-    switch status {
-    case .granted:
-      return .green
-    case .denied:
-      return .red
-    case .restricted:
-      return .orange
-    case .notDetermined:
-      return .yellow
-    }
-  }
-
-  private func statusDescription(_ status: PermissionStatus) -> String {
-    switch status {
-    case .granted:
-      return "Granted"
-    case .denied:
-      return "Denied"
-    case .restricted:
-      return "Restricted"
-    case .notDetermined:
-      return "Not requested"
-    }
+    DashboardPermissionsSection(permissions: environment.permissions)
   }
 
   private var statisticsSection: some View {
@@ -645,7 +520,7 @@ struct DashboardView: View {
 
   private var dailyUsageChartSection: some View {
     DashboardCard(title: "Daily Usage", systemImage: "chart.bar.fill", tint: Color.brandLagoon) {
-      DailyRecordingsChart(data: history.allItems.dailyUsageForLastMonth())
+      DailyRecordingsChart(data: aggregates.dailyUsage)
     }
     .speakTooltip("See when you rely on Speak the most so you can plan deep work and reviews thoughtfully.")
   }
@@ -653,8 +528,8 @@ struct DashboardView: View {
   private var latencySection: some View {
     DashboardCard(title: "Latency", systemImage: "bolt.badge.clock", tint: Color.brandLagoonDeep) {
       LatencyInsightsView(
-        providers: history.allItems.latencyInsightsByProvider(),
-        overview: history.allItems.latencyOverview()
+        providers: aggregates.latencyProviders,
+        overview: aggregates.latencyOverview
       )
     }
     .speakTooltip(
@@ -666,7 +541,7 @@ struct DashboardView: View {
     DashboardCard(title: "Transcription Models", systemImage: "waveform", tint: Color.green) {
       ModelUsageChart(
         title: "Transcription Model Usage",
-        data: history.allItems.modelUsage(for: .transcription),
+        data: aggregates.transcriptionModels,
         color: .green
       )
     }
@@ -677,7 +552,7 @@ struct DashboardView: View {
     DashboardCard(title: "Post-Processing Models", systemImage: "wand.and.stars", tint: Color.brandAccent) {
       ModelUsageChart(
         title: "Post-Processing Model Usage",
-        data: history.allItems.modelUsage(for: .postProcessing),
+        data: aggregates.postProcessingModels,
         color: .brandAccent
       )
     }
@@ -763,16 +638,56 @@ struct DashboardView: View {
     .speakTooltip("See which TTS providers you use most frequently.")
   }
 
+  // One branch per provider; the switch is the whole body.
+  // swiftlint:disable:next cyclomatic_complexity
   private func providerColor(_ provider: TTSProvider) -> Color {
     switch provider {
     case .elevenlabs: return .brandAccent
     case .openai: return .green
+    case .openrouter: return .indigo
     case .azure: return .brandLagoonDeep
     case .deepgram: return .brandAccentWarm
     case .soniox: return .brandLagoon
+    case .cartesia: return .purple
+    case .groq: return .orange
+    case .gemini: return .blue
+    case .mistral: return .indigo
+    case .speechmatics: return .cyan
+    case .xai: return .black
     case .system: return .gray
     }
   }
+}
+
+/// The five full-history aggregations the dashboard charts render, computed
+/// together in one pass so the view body reads plain stored values.
+///
+/// Building it for an empty history is the same work the charts did on a cold
+/// dashboard before, so the initial value is identical to what the first
+/// refresh produces when there is nothing recorded yet.
+struct DashboardAggregates {
+  let dailyUsage: [DailyUsageData]
+  let latencyProviders: [ProviderLatencyInsight]
+  let latencyOverview: LatencyOverview
+  let transcriptionModels: [ModelUsageData]
+  let postProcessingModels: [ModelUsageData]
+
+  init(items: [HistoryItem], referenceDate: Date = .now) {
+    dailyUsage = items.dailyUsageForLastMonth(referenceDate: referenceDate)
+    latencyProviders = items.latencyInsightsByProvider()
+    latencyOverview = items.latencyOverview()
+    transcriptionModels = items.modelUsage(for: .transcription)
+    postProcessingModels = items.modelUsage(for: .postProcessing)
+  }
+}
+
+/// What `DashboardAggregates` actually depends on: the history content *and*
+/// the day the rolling 30-day usage window ends on. Keying the dashboard's
+/// `.task` on both is what makes the charts survive a midnight rollover with
+/// the window left open.
+struct DashboardAggregatesKey: Equatable {
+  let revision: UInt64
+  let startOfDay: Date
 }
 
 private func formattedModels(_ identifiers: [String]) -> String {
@@ -781,7 +696,7 @@ private func formattedModels(_ identifiers: [String]) -> String {
     .joined(separator: ", ")
 }
 
-private struct DashboardCard<Content: View>: View {
+struct DashboardCard<Content: View>: View {
   let title: String
   let systemImage: String
   let tint: Color

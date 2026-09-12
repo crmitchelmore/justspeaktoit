@@ -1,13 +1,40 @@
 import SwiftUI
 import SpeakCore
 import SpeakiOSLib
+import SpeakSync
 import UIKit
 
+/// Calls a background-fetch completion handler exactly once, whichever of the
+/// reconciliation and its time bound gets there first. Calling it twice is a
+/// UIKit contract violation; never calling it costs the app future background
+/// delivery opportunities.
+@MainActor
+private final class OneShotBackgroundFetchCompletion {
+    private var handler: ((UIBackgroundFetchResult) -> Void)?
+
+    init(_ handler: @escaping (UIBackgroundFetchResult) -> Void) {
+        self.handler = handler
+    }
+
+    func complete(_ result: UIBackgroundFetchResult) {
+        guard let handler else { return }
+        self.handler = nil
+        handler(result)
+    }
+}
+
 final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
+    /// Well inside iOS's background-notification allowance, and far longer
+    /// than a routine incremental sync needs.
+    static let historyPushCompletionBudget: TimeInterval = 20
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // A new app process cannot own the previous process's recording. Reset
+        // before launch actions can start a session, never on foreground entry.
+        SharedTranscriptionState.shared.clearRecordingState()
         application.registerForRemoteNotifications()
         // Watch file transfers launch the app in the background; the session
         // must be activated during launch so queued captures are delivered.
@@ -28,6 +55,33 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
+        // The history subscription's push was created but never handled, so a
+        // transcript made on the Mac or the watch only reached this phone at
+        // the next launch (issue #1007). Route it to the history engine and
+        // leave every other push to the API-key sync as before.
+        if HistorySyncPushRouting.isHistoryChange(userInfo) {
+            // A full CloudKit reconciliation is unbounded: it fetches every
+            // page and uploads every pending entry. iOS gives a background
+            // notification a limited allowance and reduces future delivery
+            // when a handler overruns it, so report a result on a bound of our
+            // own and let the reconciliation finish under a background task —
+            // an unfinished pass stays recoverable through the engine's queued
+            // follow-up and the next trigger.
+            let backgroundTask = application.beginBackgroundTask(withName: "HistoryPushReconciliation")
+            let completion = OneShotBackgroundFetchCompletion(completionHandler)
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(Self.historyPushCompletionBudget))
+                completion.complete(.newData)
+            }
+            Task { @MainActor in
+                await iOSHistoryManager.shared.triggerSync()
+                completion.complete(.newData)
+                if backgroundTask != .invalid {
+                    application.endBackgroundTask(backgroundTask)
+                }
+            }
+            return
+        }
         Task { @MainActor in
             let synced = await AppSettings.shared.syncCloudKitKeys()
             completionHandler(synced ? .newData : .noData)
@@ -52,16 +106,11 @@ final class SpeakiOSAppDelegate: NSObject, UIApplicationDelegate {
                     application.endBackgroundTask(backgroundTask)
                 }
             }
-            let service = TranscriptionRecordingService.shared
-            if service.isRunning {
-                _ = await service.stopRecording()
-            } else {
-                do {
-                    try await service.startRecording()
-                } catch {
-                    print("[SpeakiOSAppDelegate] Quick action failed: \(error.localizedDescription)")
-                }
-            }
+            // Shared with capture deep links so the two cannot drift. This used
+            // to branch on `isRunning` (so a press during start-up silently did
+            // nothing instead of cancelling) and stop with no destination, which
+            // copied to the clipboard even for "Save to History Only" users.
+            await CaptureCommandRunner.perform(.toggle)
         }
         return true
     }
@@ -87,8 +136,12 @@ struct SpeakiOSApp: App {
                 )
                 .onOpenURL { url in
                     deepLinkRouter.handle(url)
+                    runPendingCaptureAction()
                 }
                 .task {
+                    // A link that cold-launched the app is queued before the
+                    // scene is active; drain it once the view is up.
+                    runPendingCaptureAction()
                     guard FeatureFlags.iOSKeyboardEnabled else {
                         KeyboardInstantDictationStore.shared.setEnabled(false)
                         return
@@ -97,6 +150,7 @@ struct SpeakiOSApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     guard newPhase == .active else { return }
+                    runPendingCaptureAction()
                     if FeatureFlags.iOSKeyboardEnabled {
                         keyboardInstantDictation.activate()
                     }
@@ -106,6 +160,22 @@ struct SpeakiOSApp: App {
                         WatchCaptureReceiver.shared.reconcilePendingWork()
                     }
                 }
+        }
+    }
+
+    /// Performs a capture deep link once the scene is actually active.
+    ///
+    /// A `justspeaktoit://start` link can cold-launch the app, and the URL
+    /// arrives before the scene is foreground enough to open a microphone, so
+    /// the router queues the command and this drains it from `onOpenURL`, the
+    /// first `task`, and every return to `.active`.
+    private func runPendingCaptureAction() {
+        guard scenePhase == .active else { return }
+        guard let link = deepLinkRouter.consumePendingCaptureAction() else { return }
+        Task { @MainActor in
+            // The whole link, not just its verb: `dictate` also has to wait for
+            // the capture to end and hand the transcript back to the caller.
+            await CaptureCommandRunner.perform(link)
         }
     }
 }

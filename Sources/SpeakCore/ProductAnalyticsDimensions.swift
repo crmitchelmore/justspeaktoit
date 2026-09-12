@@ -131,8 +131,11 @@ public enum AnalyticsModelFamily: String, Codable, Sendable {
     case speechmatics
     /// Google Gemini audio models used as transcribers.
     case gemini
-    /// xAI Grok Voice models used in transcription-only mode.
+    /// xAI speech models: Grok Voice used in transcription-only mode, and the
+    /// dedicated speech-to-text and speech-generation services.
     case grok
+    /// Meta Muse Voice Transcribe.
+    case muse
     /// Rev.ai.
     case revAI = "rev_ai"
     /// Anything not in the list above — never the caller's own identifier.
@@ -163,14 +166,14 @@ public struct AnalyticsTranscriptionDimensions: Equatable, Sendable {
         self.trigger = trigger
     }
 
-    var properties: [String: String] {
+    var properties: [String: AnalyticsPropertyValue] {
         [
-            "mode": mode.rawValue,
-            "engine_type": engine.rawValue,
-            "provider_type": provider.rawValue,
-            "model_family": modelFamily.rawValue,
-            "language_code": languageCode,
-            "trigger": trigger.rawValue
+            "mode": .string(mode.rawValue),
+            "engine_type": .string(engine.rawValue),
+            "provider_type": .string(provider.rawValue),
+            "model_family": .string(modelFamily.rawValue),
+            "language_code": .string(languageCode),
+            "trigger": .string(trigger.rawValue)
         ]
     }
 

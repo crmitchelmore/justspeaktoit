@@ -1,6 +1,7 @@
 // swiftlint:disable file_length
 import AppKit
 import AVFoundation
+import Combine
 import SpeakCore
 import SpeakHotKeys
 import SwiftUI
@@ -18,6 +19,7 @@ extension OnboardingProvider {
         case .openai: return .openAI
         case .openrouter: return .openRouter
         case .revai: return .revAI
+        case .meta: return .meta
         }
     }
 }
@@ -44,6 +46,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
     case openai
     case openrouter
     case revai
+    case meta
     
     var id: String { rawValue }
     
@@ -52,6 +55,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .deepgram: return "Deepgram"
         case .soniox: return "Soniox"
         case .openai: return "OpenAI Whisper"
+        case .meta: return "Meta Muse"
         case .openrouter: return "OpenRouter"
         case .revai: return "Rev.ai"
         }
@@ -64,6 +68,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .openai: return URL(string: "https://platform.openai.com/signup")!
         case .openrouter: return URL(string: "https://openrouter.ai/keys")!
         case .revai: return URL(string: "https://www.rev.ai/auth/signup")!
+        case .meta: return URL(string: "https://llama.developer.meta.com")!
         }
     }
     
@@ -74,6 +79,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .openai: return "Go to API Keys → Create new secret key"
         case .openrouter: return "Go to Keys → Create Key"
         case .revai: return "Go to Access Token → Generate Token"
+        case .meta: return "Open the Model API dashboard → API Keys → Create key"
         }
     }
     
@@ -84,6 +90,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .openai: return nil
         case .openrouter: return "Pay-as-you-go with many model options"
         case .revai: return "Free tier includes 5 hours"
+        case .meta: return "Muse Voice Transcribe is billed by audio minute"
         }
     }
     
@@ -97,6 +104,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .deepgram: return "deepgram/nova-3-streaming"
         case .soniox: return "soniox/stt-rt-v5-streaming"
         case .openai, .openrouter, .revai: return nil
+        case .meta: return MetaMuseVoiceTranscribe.liveCatalogID
         }
     }
 
@@ -107,6 +115,7 @@ enum OnboardingProvider: String, CaseIterable, Identifiable {
         case .deepgram: return "Deepgram"
         case .soniox: return "Soniox"
         case .openai: return "OpenAI"
+        case .meta: return "Meta"
         case .openrouter: return "OpenRouter"
         case .revai: return "Rev.ai"
         }
@@ -122,8 +131,10 @@ final class OnboardingState: ObservableObject {
     @Published var apiKey = ""
     @Published var isValidating = false
     @Published var validationError: String?
-    @Published var permissionsGranted: Set<PermissionType> = []
+    @Published private(set) var permissionsGranted: Set<PermissionType> = []
+    private var permissionsObserver: AnyCancellable?
     @Published var selectedHotKey: HotKey = .fnKey
+    @Published var hotKeyWasChosen = false
     
     // Test recording state
     @Published var isTestRecording = false
@@ -152,19 +163,24 @@ final class OnboardingState: ObservableObject {
         self.audioFileManager = audioFileManager
         self.transcriptionManager = transcriptionManager
         self.selectedHotKey = settings.selectedHotKey
+        self.hotKeyWasChosen = settings.hasConfiguredGlobalHotKey
+        // Consume the emitted snapshot: @Published emits before the manager's
+        // stored dictionary changes. Guide polling and activation refreshes must
+        // update onboarding too, without a separate confirmation button.
+        permissionsObserver = permissionsManager.$statuses
+            .map { statuses in
+                Set(PermissionType.availablePermissions(for: DistributionChannel.current)
+                    .filter { statuses[$0]?.isGranted == true })
+            }
+            .removeDuplicates()
+            .sink { [weak self] granted in self?.permissionsGranted = granted }
         refreshPermissions()
     }
-    
+
     func refreshPermissions() {
-        permissionsGranted = []
-        for perm in PermissionType.availablePermissions(for: DistributionChannel.current) {
-            // Force a fresh computation; cached statuses go stale when the user
-            // toggles a permission in System Settings (the OS never notifies us).
-            permissionsManager.refresh(perm)
-            if permissionsManager.status(for: perm).isGranted {
-                permissionsGranted.insert(perm)
-            }
-        }
+        // Cached statuses go stale when the user toggles a permission in System
+        // Settings (the OS never notifies us); the subscription above publishes the result.
+        permissionsManager.refreshAll()
     }
     
     var allPermissionsGranted: Bool {
@@ -173,107 +189,45 @@ final class OnboardingState: ObservableObject {
           || permissionsGranted.contains(.accessibility))
     }
     
-    // swiftlint:disable:next cyclomatic_complexity function_body_length
     func validateAPIKey() async -> Bool {
         guard !apiKey.isEmpty else {
             validationError = "Please enter an API key"
             return false
         }
-        
+
         isValidating = true
         validationError = nil
-        
-        do {
-            switch selectedProvider {
-            case .deepgram:
-                let url = URL(string: "https://api.deepgram.com/v1/projects")!
-                var request = URLRequest(url: url)
-                request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-                
-            case .soniox:
-                let url = URL(string: "https://api.soniox.com/v1/auth/temporary-api-key")!
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.httpBody = Data("{\"usage_type\":\"transcribe_websocket\",\"expires_in_seconds\":60}".utf8)
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if (200...299).contains(httpResponse.statusCode) {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
 
-            case .openai:
-                let url = URL(string: "https://api.openai.com/v1/models")!
-                var request = URLRequest(url: url)
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-                
-            case .openrouter:
-                let url = URL(string: "https://openrouter.ai/api/v1/models")!
-                var request = URLRequest(url: url)
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-                
-            case .revai:
-                let url = URL(string: "https://api.rev.ai/speechtotext/v1/account")!
-                var request = URLRequest(url: url)
-                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                if let httpResponse = response as? HTTPURLResponse {
-                    if httpResponse.statusCode == 200 {
-                        isValidating = false
-                        return true
-                    } else if httpResponse.statusCode == 401 {
-                        validationError = "Invalid API key"
-                    } else {
-                        validationError = "Unexpected response (\(httpResponse.statusCode))"
-                    }
-                }
-            }
-        } catch {
-            validationError = "Network error: \(error.localizedDescription)"
-        }
-        
+        let result = await validationResult(for: apiKey)
         isValidating = false
-        return false
+
+        switch result.outcome {
+        case .success:
+            return true
+        case .failure(let message):
+            validationError = message
+            return false
+        }
+    }
+
+    /// Validates the entered key with whichever component owns the provider's
+    /// credential, mirroring how Settings validates the same keys.
+    ///
+    /// Transcription providers go through `TranscriptionProviderRegistry`.
+    /// OpenRouter is an LLM provider rather than a transcription provider, so it
+    /// has no registry entry; Settings validates it through `OpenRouterAPIClient`
+    /// and onboarding does the same.
+    private func validationResult(for key: String) async -> APIKeyValidationResult {
+        if selectedProvider == .openrouter {
+            return await OpenRouterAPIClient(secureStorage: secureStorage).validateAPIKey(key)
+        }
+
+        guard let provider = await TranscriptionProviderRegistry.shared
+            .provider(withID: selectedProvider.rawValue)
+        else {
+            return .failure(message: "Provider not found")
+        }
+        return await provider.validateAPIKey(key)
     }
     
     func saveAPIKey() async throws {
@@ -479,13 +433,18 @@ struct OnboardingView: View {
         }
     }
     
+    private func saveHotKeySelection() {
+        // Alpha must not claim Stable's default shortcut just by pressing Next.
+        guard ReleaseTrain.current == .stable || state.hotKeyWasChosen else { return }
+        state.settings.chooseGlobalHotKey(state.selectedHotKey)
+        state.hotKeyManager.restartWithCurrentHotKey()
+    }
+
     private func advanceStep() async {
         let completedStep = state.currentStep
         switch state.currentStep {
         case .hotkey:
-            // Save the selected hotkey to settings
-            state.settings.selectedHotKey = state.selectedHotKey
-            state.hotKeyManager.restartWithCurrentHotKey()
+            saveHotKeySelection()
             if let next = OnboardingStep(rawValue: state.currentStep.rawValue + 1) {
                 withAnimation {
                     state.currentStep = next
@@ -543,7 +502,7 @@ struct WelcomeStepView: View {
                 .resizable()
                 .frame(width: 100, height: 100)
             
-            Text("Just Speak to It")
+            Text(ReleaseTrain.current.displayName)
                 .font(.largeTitle)
                 .fontWeight(.bold)
             
@@ -587,10 +546,9 @@ struct FeatureRow: View {
 
 struct PermissionsStepView: View {
     @ObservedObject var state: OnboardingState
-    @State private var showAccessibilityHelper = false
-    @State private var accessibilityAttempted = false
     
     var body: some View {
+        ScrollView {
         VStack(spacing: 20) {
             Image(systemName: "checkmark.shield.fill")
                 .font(.system(size: 60))
@@ -600,7 +558,7 @@ struct PermissionsStepView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("Just Speak to It needs a few permissions to work")
+            Text("\(RunningAppIdentity.current.name) needs a few permissions to work")
                 .foregroundColor(.secondary)
             
             VStack(spacing: 12) {
@@ -611,7 +569,7 @@ struct PermissionsStepView: View {
                     isGranted: state.permissionsGranted.contains(.microphone),
                     onRequest: {
                         Task {
-                            _ = await state.permissionsManager.request(.microphone)
+                            _ = await state.permissionsManager.requestWithGuidance(.microphone)
                             state.refreshPermissions()
                         }
                     }
@@ -624,28 +582,9 @@ struct PermissionsStepView: View {
                         description: "To type text into other apps",
                         isGranted: state.permissionsGranted.contains(.accessibility),
                         onRequest: {
-                            accessibilityAttempted = true
                             Task {
-                                _ = await state.permissionsManager.request(.accessibility)
-                                // Wait a moment then check if it worked
-                                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                                _ = await state.permissionsManager.requestWithGuidance(.accessibility)
                                 state.refreshPermissions()
-                                // If still not granted after attempt, show helper
-                                if !state.permissionsGranted.contains(.accessibility) {
-                                    showAccessibilityHelper = true
-                                }
-                            }
-                        }
-                    )
-                }
-                
-                // Show manual add helper if accessibility wasn't auto-added
-                if showAccessibilityHelper && !state.permissionsGranted.contains(.accessibility) {
-                    AccessibilityManualHelper(
-                        onComplete: {
-                            state.refreshPermissions()
-                            if state.permissionsGranted.contains(.accessibility) {
-                                showAccessibilityHelper = false
                             }
                         }
                     )
@@ -654,12 +593,12 @@ struct PermissionsStepView: View {
                 PermissionRow(
                     type: .inputMonitoring,
                     title: "Input Monitoring",
-                    description: "For global hotkey detection",
+                    description: "For the Fn hotkey while using other apps",
                     isGranted: state.permissionsGranted.contains(.inputMonitoring),
                     isOptional: true,
                     onRequest: {
                         Task {
-                            _ = await state.permissionsManager.request(.inputMonitoring)
+                            _ = await state.permissionsManager.requestWithGuidance(.inputMonitoring)
                             state.refreshPermissions()
                         }
                     }
@@ -668,18 +607,10 @@ struct PermissionsStepView: View {
             .padding(.horizontal, 40)
             .padding(.top, 10)
             
-            if !showAccessibilityHelper {
-                Text("If permissions don't appear in System Settings, restart the app")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 10)
-                
-                Button("Open System Settings") {
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")!)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
-            }
+            PermissionRecoveryHelp(permissions: state.permissionsManager)
+                .padding(.horizontal, 40)
+        }
+        .frame(maxWidth: .infinity)
         }
         .task {
             // Accessibility and Input Monitoring are granted in System Settings
@@ -690,79 +621,6 @@ struct PermissionsStepView: View {
                 state.refreshPermissions()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
-        }
-    }
-}
-
-// MARK: - Accessibility Manual Helper
-
-struct AccessibilityManualHelper: View {
-    let onComplete: () -> Void
-    @State private var currentStep = 0
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text("App not appearing? Add it manually:")
-                    .font(.headline)
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                ManualStep(number: 1, text: "Click the button below to open Accessibility settings", isActive: currentStep == 0)
-                ManualStep(number: 2, text: "Click the + button at the bottom of the app list", isActive: currentStep == 1)
-                ManualStep(number: 3, text: "Navigate to Applications → JustSpeakToIt", isActive: currentStep == 2)
-                ManualStep(number: 4, text: "Click Open, then enable the toggle", isActive: currentStep == 3)
-            }
-            
-            HStack(spacing: 12) {
-                Button("Open Accessibility Settings") {
-                    // Open directly to Accessibility pane
-                    NSWorkspace.shared.open(PermissionType.accessibility.settingsURL)
-                    currentStep = 1
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                
-                Button("I've Added It") {
-                    onComplete()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                
-                Button("Show App in Finder") {
-                    // Reveal the app in Finder
-                    let appPath = Bundle.main.bundlePath
-                    NSWorkspace.shared.selectFile(appPath, inFileViewerRootedAtPath: "")
-                }
-                .buttonStyle(.plain)
-                .controlSize(.small)
-                .foregroundColor(.accentColor)
-            }
-        }
-        .padding()
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(8)
-    }
-}
-
-struct ManualStep: View {
-    let number: Int
-    let text: String
-    let isActive: Bool
-    
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(number).")
-                .font(.caption)
-                .fontWeight(isActive ? .bold : .regular)
-                .foregroundColor(isActive ? .accentColor : .secondary)
-                .frame(width: 16)
-            
-            Text(text)
-                .font(.caption)
-                .foregroundColor(isActive ? .primary : .secondary)
         }
     }
 }
@@ -894,7 +752,7 @@ struct APIKeyStepView: View {
                             HStack {
                                 ProgressView()
                                     .scaleEffect(0.7)
-                                Text("Validating...")
+                                Text("Validating…")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -921,6 +779,8 @@ struct APIKeyStepView: View {
 
 struct HotKeyStepView: View {
     @ObservedObject var state: OnboardingState
+    private var isFnSelected: Bool { state.hotKeyWasChosen && state.selectedHotKey == .fnKey }
+    private var isCustomSelected: Bool { state.hotKeyWasChosen && state.selectedHotKey != .fnKey }
     
     var body: some View {
         VStack(spacing: 20) {
@@ -932,7 +792,9 @@ struct HotKeyStepView: View {
                 .font(.title)
                 .fontWeight(.bold)
             
-            Text("This is the key you'll press to start and stop recording")
+            Text(ReleaseTrain.current == .alpha
+                ? "Optional: choose a different shortcut from Stable, or continue without one"
+                : "This is the key you'll press to start and stop recording")
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             
@@ -940,6 +802,7 @@ struct HotKeyStepView: View {
                 // Fn key option
                 Button {
                     state.selectedHotKey = .fnKey
+                    state.hotKeyWasChosen = true
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
@@ -954,7 +817,7 @@ struct HotKeyStepView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        if state.selectedHotKey == .fnKey {
+                        if isFnSelected {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
                                 .font(.title2)
@@ -963,11 +826,11 @@ struct HotKeyStepView: View {
                     .padding()
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(state.selectedHotKey == .fnKey ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
+                            .fill(isFnSelected ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(state.selectedHotKey == .fnKey ? Color.accentColor : Color.clear, lineWidth: 2)
+                            .stroke(isFnSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                     )
                 }
                 .buttonStyle(.plain)
@@ -983,7 +846,7 @@ struct HotKeyStepView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        if state.selectedHotKey != .fnKey {
+                        if isCustomSelected {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
                                 .font(.title2)
@@ -991,15 +854,16 @@ struct HotKeyStepView: View {
                     }
                     
                     HotKeyRecorder("Record shortcut", hotKey: $state.selectedHotKey)
+                        .onChange(of: state.selectedHotKey) { _, _ in state.hotKeyWasChosen = true }
                 }
                 .padding()
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(state.selectedHotKey != .fnKey ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
+                        .fill(isCustomSelected ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.1))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(state.selectedHotKey != .fnKey ? Color.accentColor : Color.clear, lineWidth: 2)
+                        .stroke(isCustomSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                 )
             }
             .padding(.horizontal, 40)
@@ -1009,7 +873,10 @@ struct HotKeyStepView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     TroubleshootingRow(icon: "globe", text: "If Fn opens emoji picker: go to System Settings → Keyboard → \"Press 🌐 key to\" and change it to \"Do Nothing\"")
                     TroubleshootingRow(icon: "keyboard", text: "External keyboards may not send Fn events — use a custom shortcut instead")
-                    TroubleshootingRow(icon: "lock.shield", text: "Accessibility and Input Monitoring permissions are required for hotkey detection")
+                    TroubleshootingRow(
+                        icon: "lock.shield",
+                        text: "Input Monitoring enables Fn. Accessibility enables typing into other apps."
+                    )
                 }
                 .padding(.top, 8)
             } label: {
@@ -1236,7 +1103,7 @@ struct CompleteStepView: View {
                     .font(.title)
                     .fontWeight(.bold)
             
-                Text("Just Speak to It is ready to use")
+                Text("\(ReleaseTrain.current.displayName) is ready to use")
                     .foregroundColor(.secondary)
 
                 if AppEnvironment.shared?.analyticsAvailable == true {
@@ -1261,9 +1128,11 @@ struct CompleteStepView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 16) {
-                    TipRow(icon: "keyboard", text: "Press \(state.selectedHotKey.displayString) to start recording")
+                    TipRow(icon: "keyboard", text: state.settings.hasConfiguredGlobalHotKey
+                        ? "Press \(state.selectedHotKey.displayString) to start recording"
+                        : "Use the record button; assign an Alpha shortcut in Settings when ready")
                     TipRow(icon: "text.cursor", text: "Click in any text field, then record")
-                    TipRow(icon: "gearshape.fill", text: "Right-click the menu bar icon for settings")
+                    TipRow(icon: "gearshape.fill", text: "Click the menu bar icon for quick actions and Settings")
                 }
                 .padding(.horizontal, 40)
                 .padding(.top, 20)

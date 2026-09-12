@@ -77,7 +77,6 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     private let modelID: String
     private let sampleRate: Int
     private let session: URLSession
-    private let bufferPool: AudioBufferPool
     private let logger = SpeakLogger.logger(category: "ElevenLabsLiveTranscriber")
     private let stateLock = NSLock()
     private let pendingSendGroup = DispatchGroup()
@@ -100,14 +99,12 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
         apiKey: String,
         modelID: String = "scribe_v2_realtime",
         sampleRate: Int = 16000,
-        session: URLSession = .shared,
-        bufferPool: AudioBufferPool = AudioBufferPool(poolSize: 10, bufferSize: 4096)
+        session: URLSession = .shared
     ) {
         self.apiKey = apiKey
         self.modelID = modelID
         self.sampleRate = sampleRate
         self.session = session
-        self.bufferPool = bufferPool
     }
 
     func start(
@@ -231,7 +228,6 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
             }
             return webSocketTask
         }
-        bufferPool.logMetrics()
 
         // Resume any in-flight commit awaiter so callers don't deadlock on stop().
         let pending = withStateLock { () -> CheckedContinuation<Void, Never>? in

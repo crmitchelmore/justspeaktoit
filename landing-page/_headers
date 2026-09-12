@@ -1,3 +1,9 @@
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
 /.well-known/apple-app-site-association
   Content-Type: application/json
   Access-Control-Allow-Origin: *
@@ -7,4 +13,13 @@
   Access-Control-Allow-Origin: *
 
 /download-architecture.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/site.css
+  Cache-Control: public, max-age=0, must-revalidate
+
+/favicon.svg
+  Cache-Control: public, max-age=0, must-revalidate
+
+/site.webmanifest
   Cache-Control: public, max-age=0, must-revalidate

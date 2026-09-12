@@ -104,11 +104,8 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
                 .foregroundStyle(.secondary)
                 .lineLimit(density.isCompact ? 1 : 2)
 
-              Button {
-                copyToPasteboard(transcript)
-              } label: {
-                Label("Copy", systemImage: "doc.on.doc")
-                  .labelStyle(.iconOnly)
+              CopyButton {
+                CopyFeedback.writeToPasteboard(transcript)
               }
               .buttonStyle(.borderless)
               .speakTooltip("Copy the best available transcript")
@@ -726,10 +723,8 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
     VStack(alignment: .leading, spacing: 6) {
       Text(text)
         .font(.body.monospaced())
-      Button {
-        copyToPasteboard(text)
-      } label: {
-        Label("Copy", systemImage: "doc.on.doc")
+      CopyButton(presentation: .titleAndIcon) {
+        CopyFeedback.writeToPasteboard(text)
       }
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
@@ -1013,9 +1008,9 @@ struct HistoryListRow: View { // swiftlint:disable:this type_body_length
   }
 
   private func copyToPasteboard(_ text: String) {
-    let board = NSPasteboard.general
-    board.clearContents()
-    board.setString(text, forType: .string)
+    // Announce here so every path (buttons, context menu, ⌘C) tells VoiceOver
+    // the copy happened; `CopyButton` also shows a transient checkmark.
+    CopyFeedback.copy(text)
   }
 
   private func copyIssueReport() {

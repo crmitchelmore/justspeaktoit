@@ -32,7 +32,12 @@ public final class StreamingAudioPreroll: @unchecked Sendable {
     /// Seconds of leading audio held while a transport connects.
     public static let defaultBudgetSeconds: Double = 5
 
-    private let maximumByteCount: Int
+    /// The ceiling this buffer enforces, in bytes, derived from the sample rate
+    /// and budget it was constructed with. Exposed so callers and tests can
+    /// assert against the bound a *particular* client configured rather than
+    /// against the largest bound any supported sample rate could produce.
+    public let maximumByteCount: Int
+
     private let lock = NSLock()
     private var chunks: [Data] = []
     private var bufferedByteCount = 0

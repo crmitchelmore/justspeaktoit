@@ -59,6 +59,9 @@ final class AppEnvironment: ObservableObject {
   /// because `HistorySyncEngine` only holds its delegate weakly; without this
   /// owner the adapter deallocates after bootstrap and sync stops (#685).
   fileprivate(set) var historySyncAdapter: MacHistorySyncAdapter?
+  /// Posts and acts on notifications for transcripts arriving from an iPhone
+  /// or Apple Watch (issue #1007).
+  fileprivate(set) var remoteTranscriptDelivery: RemoteTranscriptDelivery?
 
   private(set) var statusBarController: StatusBarController?
   /// Voice-edit controller; created by `installVoiceEdit()` in AppEnvironment+VoiceEdit.
@@ -210,8 +213,17 @@ final class AppEnvironment: ObservableObject {
       historyManager: history,
       mainManager: main,
       hotKeyManager: hotKeys,
-      openMainWindow: { [weak self] in self?.presentMainWindow() }
+      openMainWindow: { [weak self] in self?.presentMainWindow() },
+      openSettings: { [weak self] in self?.presentSettings() }
     )
+  }
+
+  /// Opens the main window on the General settings tab. This backs the status
+  /// bar item's "Settings…"; the navigation target is set first so a window
+  /// SwiftUI has yet to create still receives the selection when it subscribes.
+  func presentSettings() {
+    sidebarNavigationTarget = .settings(.general)
+    presentMainWindow()
   }
 
   /// Brings the main window to the front, reopening it if the app is running
@@ -297,6 +309,9 @@ final class AppEnvironment: ObservableObject {
     shortcuts.register(action: .editSelectionByVoice) { [weak self] in self?.toggleVoiceEdit() }
     registerNavigationShortcutHandlers()
     registerQuickVoiceShortcutHandlers()
+    #if DEBUG
+    if CoreJourneyLaunchProfile.isRequested { return }
+    #endif
     shortcuts.startMonitoring()
   }
 
@@ -310,6 +325,7 @@ final class AppEnvironment: ObservableObject {
       .openSettings: .settings(.general),
       .openTranscriptionSettings: .settings(.transcription),
       .openPostProcessingSettings: .settings(.postProcessing),
+      .openDataMigrationSettings: .settings(.dataMigration),
       .openProfilesSettings: .settings(.profiles),
       .openVoiceOutputSettings: .settings(.voiceOutput),
       .openPronunciationSettings: .settings(.pronunciation),
@@ -383,6 +399,18 @@ final class AppEnvironment: ObservableObject {
 extension AppEnvironment {
   /// Alias for permissions manager (for API consistency)
   var permissionsManager: PermissionsManager { permissions }
+
+  /// Makes every service durable before AppKit lets the process exit.
+  ///
+  /// The history sync adapter coalesces its synced-ID bookkeeping behind a
+  /// short window, so a quit inside that window would otherwise drop the
+  /// pending write and leave the next launch working from a stale set (#851).
+  /// The flush runs first and synchronously — termination does not wait for
+  /// work that is merely scheduled.
+  func prepareForTermination() async {
+    historySyncAdapter?.flushPendingSyncedIDs()
+    await main.prepareForTermination()
+  }
 
   fileprivate func switchToQuickVoice(_ index: Int) {
     let favorites = settings.ttsFavoriteVoices
@@ -476,19 +504,30 @@ enum WireUp {
 
   // swiftlint:disable:next function_body_length
   static func bootstrap(
-    options: BootstrapOptions = .default
+    options suppliedOptions: BootstrapOptions = .default
   ) -> AppEnvironment {
+    #if DEBUG
+    let profile = CoreJourneyLaunchProfile.current
+    let options = profile?.bootstrapOptions() ?? suppliedOptions
+    let fileManager = profile?.fileManager ?? FileManager.default
+    let profileDefaults = profile?.defaults ?? UserDefaults.standard
+    #else
+    let options = suppliedOptions
+    let fileManager = FileManager.default
+    let profileDefaults = UserDefaults.standard
+    #endif
     let settings = options.settingsOverride ?? AppSettings()
     let permissions = options.permissionsOverride
       ?? PermissionsManager()
-    let history = HistoryManager(flushInterval: settings.historyFlushInterval)
+    let history = HistoryManager(fileManager: fileManager, flushInterval: settings.historyFlushInterval)
     let hud = HUDManager(appSettings: settings)
     let hotKeys = HotKeyManager(permissionsManager: permissions, appSettings: settings)
     let audioDevices = AudioInputDeviceManager(appSettings: settings)
     let audio = AudioFileManager(
       appSettings: settings,
       permissionsManager: permissions,
-      audioDeviceManager: audioDevices
+      audioDeviceManager: audioDevices,
+      captureSource: captureSourceForLaunch()
     )
     if options.sweepsStagedLeftovers {
       AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
@@ -499,7 +538,12 @@ enum WireUp {
       keychainService: options.keychainServiceOverride
         ?? "com.github.speakapp.credentials"
     )
+    #if DEBUG
+    let openRouter = profile?.runsBatchJourney == true
+      ? CoreJourneyBatchFixture.makeClient() : OpenRouterAPIClient(secureStorage: secureStorage)
+    #else
     let openRouter = OpenRouterAPIClient(secureStorage: secureStorage)
+    #endif
 
     // Paid access wraps, rather than replaces, the bring-your-own-key client.
     // Without a verified entitlement every request goes straight through to
@@ -525,9 +569,9 @@ enum WireUp {
       openRouter: openRouter,
       secureStorage: secureStorage
     )
-    let personalLexiconStore = PersonalLexiconStore()
+    let personalLexiconStore = PersonalLexiconStore(fileManager: fileManager)
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
-    let pronunciationManager = PronunciationManager()
+    let pronunciationManager = PronunciationManager(defaults: profileDefaults)
     let postProcessing = PostProcessingManager(
       client: routedClient,
       settings: settings,
@@ -540,13 +584,13 @@ enum WireUp {
       appSettings: settings
     )
     let textProcessor = TranscriptionTextProcessor(appSettings: settings)
-    let autoCorrectionStore = AutoCorrectionStore()
+    let autoCorrectionStore = AutoCorrectionStore(fileManager: fileManager)
     let autoCorrectionTracker = AutoCorrectionTracker(
       store: autoCorrectionStore,
       lexiconService: personalLexicon,
       appSettings: settings
     )
-    let profiles = DictationProfileStore()
+    let profiles = DictationProfileStore(defaults: profileDefaults)
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -602,13 +646,29 @@ enum WireUp {
     return environment
   }
 
-  // MARK: - Service Configuration
+  private static func captureSourceForLaunch() -> (any RecordingCaptureSource)? {
+    #if DEBUG
+    if CoreJourneyLaunchProfile.current?.runsBatchJourney == true { return CoreJourneyRecordingSource() }
+    #endif
+    return nil
+  }
 
+  // MARK: - Service Configuration
+  // swiftlint:disable:next function_body_length
   private static func configureServices(
     environment: AppEnvironment,
     settings: AppSettings,
     secureStorage: SecureAppStorage
   ) {
+    #if DEBUG
+    // Construct production managers and UI, but never preload credentials,
+    // sync accounts, open listeners, or install voice-edit capture in this check.
+    if let profile = CoreJourneyLaunchProfile.current {
+        profile.startHotKeyProbe(manager: environment.hotKeys, main: environment.main)
+      logger.info("AppEnvironment.bootstrap complete (isolated UI launch profile)")
+      return
+    }
+    #endif
     environment.installVoiceEdit()
 
     restorePaidAccessEntitlement(in: environment)
@@ -649,6 +709,26 @@ enum WireUp {
 
     let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
     environment.historySyncAdapter = syncAdapter
+    // Phone and watch captures arriving through CloudKit history sync (#1007).
+    let remoteTranscripts = RemoteTranscriptDelivery(
+      settings: settings,
+      paste: { text in
+        SmartTextOutput(permissionsManager: environment.permissions, appSettings: settings)
+          .output(text: text, target: nil)
+      },
+      // A notification stays actionable across a relaunch; its identifier is
+      // the History entry id, so the durable local entry answers the action
+      // even when the posting process is long gone.
+      transcriptForEntry: { [weak history = environment.history] entryID in
+        guard let item = history?.items.first(where: { $0.id == entryID }) else { return nil }
+        return item.postProcessedTranscription ?? item.rawTranscription
+      }
+    )
+    environment.remoteTranscriptDelivery = remoteTranscripts
+    syncAdapter.onRemoteEntryArrived = { [weak remoteTranscripts] entry, isNew in
+      remoteTranscripts?.handle(entry: entry, isNewToThisMac: isNew)
+    }
+    remoteTranscripts.start()
     Task { await syncAdapter.start() }
 
     Task { await secureStorage.preloadTrackedSecrets() }
@@ -697,7 +777,8 @@ enum WireUp {
     let stateURL = (FileManager.default
       .urls(for: .applicationSupportDirectory, in: .userDomainMask)
       .first ?? FileManager.default.homeDirectoryForCurrentUser)
-      .appendingPathComponent("SpeakApp/analytics_state.json")
+      .appendingPathComponent(ReleaseTrain.current.supportDirectory)
+      .appendingPathComponent("analytics_state.json")
     let queueURL = stateURL.deletingLastPathComponent().appendingPathComponent("analytics_queue.json")
     let stateStore = FileProductAnalyticsStateStore(fileURL: stateURL)
     let context = buildAnalyticsContext()
@@ -745,9 +826,16 @@ enum WireUp {
     let clients: [TTSProvider: TextToSpeechClient] = [
       .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
       .openai: OpenAITTSClient(secureStorage: secureStorage),
+      .openrouter: OpenRouterTTSClient(secureStorage: secureStorage),
       .azure: AzureSpeechClient(secureStorage: secureStorage, appSettings: settings),
       .deepgram: DeepgramTTSClient(secureStorage: secureStorage),
       .soniox: SonioxTTSClient(secureStorage: secureStorage, appSettings: settings),
+      .cartesia: CartesiaTTSClient(secureStorage: secureStorage),
+      .groq: GroqTTSClient(secureStorage: secureStorage),
+      .gemini: GeminiTTSClient(secureStorage: secureStorage),
+      .mistral: MistralTTSClient(secureStorage: secureStorage),
+      .speechmatics: SpeechmaticsTTSClient(secureStorage: secureStorage),
+      .xai: XAITTSClient(secureStorage: secureStorage),
       .system: SystemTTSClient()
     ]
     return TextToSpeechManager(

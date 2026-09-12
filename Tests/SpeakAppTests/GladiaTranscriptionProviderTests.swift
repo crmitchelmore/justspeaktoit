@@ -27,11 +27,11 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(provider?.metadata.apiKeyIdentifier, "gladia.apiKey")
   }
 
-  func testProviderSupportedModels_returnsLiveSolariaModel() {
+  func testProviderSupportedModels_returnsLiveAndBatchSolariaModels() {
     let provider = GladiaTranscriptionProvider()
     let ids = provider.supportedModels().map(\.id)
 
-    XCTAssertEqual(ids, ["gladia/solaria-1-streaming"])
+    XCTAssertEqual(ids, ["gladia/solaria-1-streaming", GladiaBatchClient.catalogID])
   }
 
   func testInitRequest_usesDocumentedEndpointHeadersAndPCM16Config() throws {

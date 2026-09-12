@@ -3,9 +3,14 @@ import Foundation
 // MARK: - HUD feedback
 
 extension VoiceEditController {
+  /// A voice edit runs against another app's window, so its Escape has to be system-wide for
+  /// as long as the edit is in flight — but no longer. `setGlobalEscapeNeeded` is
+  /// reason-counted, so this window and a dictation recording can overlap without either one
+  /// tearing down the other's listener.
   func handle(_ event: VoiceEditOrchestrator.Event) {
     switch event {
     case .listeningStarted(let source):
+      hotKeyManager.setGlobalEscapeNeeded(true, for: .voiceEdit)
       hudManager.beginEditing(subheadline: Self.listeningSubheadline(for: source))
     case .transcribingInstruction:
       hudManager.beginEditing(subheadline: "Understanding your instruction")
@@ -14,12 +19,15 @@ extension VoiceEditController {
     case .applying:
       hudManager.beginEditing(subheadline: "Applying the edit")
     case .finished(let outcome):
+      hotKeyManager.setGlobalEscapeNeeded(false, for: .voiceEdit)
       pendingCapture = nil
       finish(outcome)
     case .failed(let reason):
+      hotKeyManager.setGlobalEscapeNeeded(false, for: .voiceEdit)
       pendingCapture = nil
       fail(reason)
     case .cancelled:
+      hotKeyManager.setGlobalEscapeNeeded(false, for: .voiceEdit)
       pendingCapture = nil
       hudManager.hide()
     }

@@ -33,6 +33,8 @@ final class AudioInputDeviceManager: ObservableObject {
   typealias SessionContext = AudioInputDeviceSessionTracker.Context
 
   static let systemDefaultToken = "__system_default_input__"
+  /// Shown when the system default input device cannot be resolved yet.
+  static let unknownSystemDefaultDisplayName = "Unavailable"
 
   @Published private(set) var devices: [Device] = []
   @Published private(set) var selectedDeviceUID: String?
@@ -97,9 +99,38 @@ final class AudioInputDeviceManager: ObservableObject {
 
   var systemDefaultDisplayName: String {
     guard let active = activeDeviceUID, let device = device(for: active) else {
-      return "System Default"
+      return Self.unknownSystemDefaultDisplayName
     }
     return device.displayName
+  }
+
+  /// The preferred microphone, resolved against currently available devices.
+  ///
+  /// This describes a preference, not a measured recording route. A specific
+  /// choice takes effect when a new input session begins; otherwise macOS chooses
+  /// the microphone (issue #852).
+  var preferredDeviceLabel: String {
+    Self.preferredDeviceLabel(
+      selectedUID: selectedDeviceUID,
+      systemDefaultDisplayName: systemDefaultDisplayName,
+      devices: devices
+    )
+  }
+
+  /// Pure form of ``preferredDeviceLabel`` so the label text can be exercised without
+  /// real Core Audio hardware.
+  nonisolated static func preferredDeviceLabel(
+    selectedUID: String?,
+    systemDefaultDisplayName: String,
+    devices: [Device]
+  ) -> String {
+    if let selectedUID, let device = devices.first(where: { $0.id == selectedUID }) {
+      return device.displayName
+    }
+    guard systemDefaultDisplayName != unknownSystemDefaultDisplayName else {
+      return "macOS default (unavailable)"
+    }
+    return "macOS default (\(systemDefaultDisplayName))"
   }
 
   var currentSelectionDetails: String? {

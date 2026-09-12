@@ -16,7 +16,9 @@ extension SettingsView {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Trigger Key", systemImage: "keyboard", tint: Color.blue) {
         VStack(alignment: .leading, spacing: 12) {
-          Text("Choose which key triggers recording.")
+          Text(settings.hasConfiguredGlobalHotKey
+            ? "Choose which key triggers recording."
+            : "Alpha has no global shortcut yet. Choose one different from Stable to avoid recording twice.")
             .font(.caption)
             .foregroundStyle(.secondary)
 
@@ -29,7 +31,7 @@ extension SettingsView {
               hotKey: Binding(
                 get: { self.settings.selectedHotKey },
                 set: { newKey in
-                  self.settings.selectedHotKey = newKey
+                  self.settings.chooseGlobalHotKey(newKey)
                   self.environment.hotKeys.restartWithCurrentHotKey()
                 }
               )
@@ -50,13 +52,7 @@ extension SettingsView {
               Text(style.displayName).tag(style)
             }
           }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-              .fill(Color(nsColor: .controlBackgroundColor))
-          )
+          .settingsSegmentedPicker()
           .speakTooltip("Decide whether you press, hold, or double-tap the hotkey to start a session.")
         }
       }

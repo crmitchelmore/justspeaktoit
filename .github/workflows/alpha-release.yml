@@ -1,0 +1,84 @@
+name: Alpha Release
+run-name: Alpha ${{ github.event.workflow_run.head_sha || inputs.source || 'reconciliation' }}
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Full main SHA with successful CI (blank reconciles missing builds)
+        type: string
+      rebuild:
+        description: Allocate a new build attempt for this source (expired or invalid Apple upload)
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 * * * *'
+permissions:
+  contents: write
+  actions: write
+jobs:
+  allocate:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-manifest-allocation
+      queue: max
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.allocate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+      # Dispatches with the workflow token: this workflow grants actions: write,
+      # and workflow_dispatch events created with GITHUB_TOKEN do start runs.
+      # The personal token used before lacked Actions write, so every hourly
+      # pass failed with HTTP 403 and no missed merge was ever retried.
+      - name: Reconcile missing successful merges
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source == '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-train.mjs reconcile
+      - name: Allocate immutable Alpha manifest
+        id: allocate
+        if: github.event_name == 'workflow_run' || inputs.source != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ github.event.workflow_run.head_sha || inputs.source }}
+          REBUILD: ${{ inputs.rebuild || false }}
+          OWNER_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner }}
+        run: |
+          if ! node -e 'process.exit(require("./Config/ReleasePipeline.json").enabled || process.env.OWNER_VALIDATION === "true" ? 0 : 1)'; then
+            echo 'Alpha remains in validation mode.'
+            exit 0
+          fi
+          node scripts/release-train.mjs allocate --source "$SOURCE" --rebuild "$REBUILD"
+  mac-direct:
+    needs: allocate
+    if: needs.allocate.outputs.tag != ''
+    uses: ./.github/workflows/release-mac.yml
+    with:
+      manifest: ${{ needs.allocate.outputs.tag }}
+    secrets: inherit
+  ios:
+    needs: allocate
+    if: needs.allocate.outputs.tag != ''
+    uses: ./.github/workflows/release-ios.yml
+    with:
+      manifest: ${{ needs.allocate.outputs.tag }}
+    secrets: inherit
+  mac-store:
+    needs: allocate
+    if: needs.allocate.outputs.tag != ''
+    uses: ./.github/workflows/release-appstore.yml
+    with:
+      manifest: ${{ needs.allocate.outputs.tag }}
+    secrets: inherit

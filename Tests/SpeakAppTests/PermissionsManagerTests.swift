@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SpeakCore
 import XCTest
 
@@ -145,5 +146,33 @@ final class PermissionsManagerTests: XCTestCase {
         await Task.yield()
 
         XCTAssertEqual(manager.status(for: .accessibility), .granted)
+    }
+
+    /// The Permissions tab only re-renders when the manager publishes. A grant
+    /// made in System Settings must therefore surface through `refreshAll()`
+    /// as a published change, not just a silent dictionary write (issue #860).
+    @MainActor
+    func testRefreshAll_publishesWhenASystemStatusChanges() {
+        var systemStatuses: [PermissionType: PermissionStatus] = [
+            .microphone: .granted,
+            .speechRecognition: .granted,
+            .accessibility: .denied,
+            .inputMonitoring: .granted
+        ]
+        let manager = PermissionsManager(
+            statusProvider: { systemStatuses[$0] ?? .notDetermined },
+            speechAuthorizationRequester: { $0(.authorized) }
+        )
+        XCTAssertEqual(manager.status(for: .accessibility), .denied)
+
+        var publishCount = 0
+        let subscription = manager.objectWillChange.sink { publishCount += 1 }
+        defer { subscription.cancel() }
+
+        systemStatuses[.accessibility] = .granted
+        manager.refreshAll()
+
+        XCTAssertEqual(manager.status(for: .accessibility), .granted)
+        XCTAssertGreaterThan(publishCount, 0, "refreshAll() must publish so observing views re-render")
     }
 }

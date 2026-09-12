@@ -131,31 +131,44 @@ extension SettingsView {
         Button("Check for update") { Task { await cliInstaller.checkForUpdate() } }
           .buttonStyle(.bordered)
         automationCLIPathButtons
-        Button("Uninstall", role: .destructive) { cliInstaller.uninstall() }
-          .buttonStyle(.bordered)
+        uninstallCLIButton
       case .updateAvailable:
         Button("Update CLI") { Task { await cliInstaller.install() } }
           .buttonStyle(.borderedProminent)
         automationCLIPathButtons
-        Button("Uninstall", role: .destructive) { cliInstaller.uninstall() }
-          .buttonStyle(.bordered)
+        uninstallCLIButton
       case .failed(_, let installed):
         Button(installed == nil ? "Retry install" : "Retry update") { Task { await cliInstaller.install() } }
           .buttonStyle(.borderedProminent)
         if installed != nil {
           automationCLIPathButtons
-          Button("Uninstall", role: .destructive) { cliInstaller.uninstall() }
-            .buttonStyle(.bordered)
+          uninstallCLIButton
         }
       }
     }
   }
 
+  private var uninstallCLIButton: some View {
+    DestructiveConfirmButton(
+      "Uninstall",
+      dialogTitle: "Uninstall the Speak CLI?",
+      message: "The speak command is removed from your Mac. Scripts and shortcuts that call it stop working.",
+      confirmTitle: "Uninstall",
+      triggerRole: .destructive
+    ) {
+      cliInstaller.uninstall()
+    }
+    .buttonStyle(.bordered)
+  }
+
   @ViewBuilder
   private var automationCLIPathButtons: some View {
-    Button("Copy PATH command") {
-      NSPasteboard.general.clearContents()
-      NSPasteboard.general.setString(cliInstaller.pathCommand, forType: .string)
+    CopyButton(
+      title: "Copy PATH command",
+      confirmationTitle: "PATH command copied",
+      presentation: .titleOnly
+    ) {
+      CopyFeedback.writeToPasteboard(cliInstaller.pathCommand)
     }
     .buttonStyle(.bordered)
     .speakTooltip(cliInstaller.pathCommand)

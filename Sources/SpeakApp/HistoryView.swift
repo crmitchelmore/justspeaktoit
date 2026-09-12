@@ -135,6 +135,20 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
     filteredItems = apply(filter: filter, to: historyItems)
   }
 
+  /// True when any search text, toggle, or picker is narrowing the list, so an
+  /// empty result means "nothing matched" rather than "nothing recorded yet".
+  private var isFilterActive: Bool {
+    !searchText.isEmpty || showErrorsOnly || dateRangeEnabled || selectedModelFilter != nil
+  }
+
+  private func clearFilters() {
+    searchText = ""
+    showErrorsOnly = false
+    dateRangeEnabled = false
+    selectedModelFilter = nil
+    recomputeFilteredItems()
+  }
+
   /// All unique models used across history items, cached to avoid re-computing on every render.
   private func computeAvailableModels(from items: [HistoryItem]) -> [String] {
     let unique = Set(items.flatMap { $0.modelsUsed })
@@ -154,7 +168,11 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
           if isInitialLoad {
             skeletonLoadingView
           } else if filteredItems.isEmpty {
-            emptyState
+            if isFilterActive {
+              filteredEmptyState
+            } else {
+              emptyState
+            }
           } else {
             LazyVStack(spacing: density.sectionSpacing) {
               ForEach(filteredItems) { item in
@@ -587,6 +605,38 @@ struct HistoryView: View { // swiftlint:disable:this type_body_length
       .buttonStyle(.borderedProminent)
       .disabled(environment.main.isBusy)
       .accessibilityIdentifier("historyStartRecordingButton")
+    }
+    .frame(maxWidth: .infinity)
+    .padding(density.isCompact ? 12 : 40)
+    .background(
+      RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
+        .fill(.ultraThinMaterial)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: density.cardCornerRadius, style: .continuous)
+        .stroke(Color.brandAccent.opacity(0.15), lineWidth: 1)
+    )
+  }
+
+  /// Shown when filters are active but nothing matched, so the view never claims
+  /// the history is empty when it is only filtered down to nothing.
+  private var filteredEmptyState: some View {
+    VStack(spacing: density.isCompact ? 6 : 12) {
+      if searchText.isEmpty {
+        ContentUnavailableView(
+          "No matching sessions",
+          systemImage: "line.3.horizontal.decrease.circle",
+          description: Text("No sessions match the current filters. Try widening the date range or clearing them.")
+        )
+      } else {
+        ContentUnavailableView.search(text: searchText)
+      }
+
+      Button("Clear filters") {
+        clearFilters()
+      }
+      .buttonStyle(.bordered)
+      .accessibilityIdentifier("historyClearFiltersButton")
     }
     .frame(maxWidth: .infinity)
     .padding(density.isCompact ? 12 : 40)

@@ -13,30 +13,37 @@ struct HUDOverlay: View {
 
   var body: some View {
     if manager.snapshot.phase.isVisible {
-      Group {
-        if settings.showCompactHUD {
-          CompactHUDContent(manager: manager)
-        } else {
-          presentedContent
-        }
+      presentedContent
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .ignoresSafeArea()
+        .accessibilityIdentifier("hudOverlay")
+    }
+  }
+
+  /// The entrance transition and the phase spring live here, on the container,
+  /// so the compact and full HUD styles animate identically. Attaching them
+  /// inside the full-HUD branch alone left the compact HUD snapping in and out.
+  @ViewBuilder
+  private var presentedContent: some View {
+    let styled = Group {
+      if settings.showCompactHUD {
+        CompactHUDContent(manager: manager)
+      } else {
+        content
       }
-      .padding(.bottom, 24)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-      .ignoresSafeArea()
-      .accessibilityIdentifier("hudOverlay")
+    }
+    if shouldUseLegacyRendering || reduceMotion {
+      styled
+    } else {
+      styled
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot.phase)
+        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
     }
   }
 
   @ViewBuilder
-  private var presentedContent: some View {
-    if shouldUseLegacyRendering || reduceMotion {
-      content
-    } else {
-      content
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-  }
-
   private var content: some View {
     let base = VStack(spacing: 12) {
       animatedGlyph
@@ -77,11 +84,20 @@ struct HUDOverlay: View {
           .accessibilityAddTraits(.updatesFrequently)
       }
       if manager.snapshot.phase.isTerminal == false, manager.snapshot.phase != .armed {
-        Text(elapsedText)
-          .font(.caption.monospacedDigit())
-          .foregroundStyle(.secondary)
-          .accessibilityLabel("Elapsed time: \(elapsedText)")
-          .accessibilityAddTraits(.updatesFrequently)
+        // Only this label redraws on the clock's schedule: it reads the phase's
+        // start instant off the manager and ticks itself, so the rest of the HUD
+        // is invalidated by phase transitions alone.
+        HUDElapsedClock(
+          start: manager.sessionStart,
+          interval: HUDPlatformWorkarounds.elapsedTimerInterval
+        ) { elapsed in
+          let label = Self.elapsedLabel(for: elapsed)
+          Text(label)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Elapsed time: \(label)")
+            .accessibilityAddTraits(.updatesFrequently)
+        }
       }
 
       // Live transcript section (recording and voice-edit listening phases with content)
@@ -108,14 +124,11 @@ struct HUDOverlay: View {
       .padding(.horizontal, 60)
       .accessibilityAddTraits(.isModal)
     if shouldUseLegacyRendering || reduceMotion {
-      return AnyView(shell)
+      shell
     } else {
-      return AnyView(
-        shell
-          .shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
-          .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.snapshot.phase)
-          .animation(.spring(response: 0.25, dampingFraction: 0.85), value: manager.isExpanded)
-      )
+      // The phase/expansion springs live on `presentedContent` so the compact
+      // HUD gets the same animation; only the shadow is specific to this shell.
+      shell.shadow(color: .black.opacity(0.25), radius: 18, x: 0, y: 12)
     }
   }
 
@@ -251,15 +264,21 @@ struct HUDOverlay: View {
         Image(systemName: micIcon)
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(micColor)
-          .accessibilityLabel("Microphone: \(microphonePermissionLabel)")
+          .accessibilityLabel("Microphone permission: \(microphonePermissionLabel)")
 
-        Text(deviceLabel)
+        Text(health.noInputDevicesAvailable ? deviceLabel : "Preferred: \(deviceLabel)")
           .font(.caption2)
           .foregroundStyle(health.noInputDevicesAvailable ? micColor : .secondary)
           .lineLimit(usesAccessibilityLayout ? 3 : 1)
           .truncationMode(.tail)
-          .help(deviceLabel)
-          .accessibilityLabel("Input device: \(deviceLabel)")
+          .help(
+            health.noInputDevicesAvailable
+              ? "No microphone connected. Connect a microphone to record."
+              : "Preferred microphone: \(deviceLabel). Changes apply to new recording sessions."
+          )
+          .accessibilityLabel(
+            health.noInputDevicesAvailable ? deviceLabel : "Preferred microphone: \(deviceLabel)"
+          )
       }
 
       if !usesAccessibilityLayout {
@@ -413,8 +432,12 @@ struct HUDOverlay: View {
     colorScheme == .dark ? Color.black.opacity(0.82) : Color.white.opacity(0.94)
   }
 
-  private var elapsedText: String {
-    let duration = max(manager.snapshot.elapsed, 0)
+  /// Seconds and hundredths, growing a minutes field once the clock passes a
+  /// minute: `07.24s`, `01:07.24`. Because it shows hundredths, the full HUD's
+  /// clock refreshes at `HUDPlatformWorkarounds.elapsedTimerInterval`.
+  /// Exposed at package scope so a test can pin the formatting.
+  static func elapsedLabel(for elapsed: TimeInterval) -> String {
+    let duration = max(elapsed, 0)
     let totalHundredths = max(0, Int((duration * 100).rounded()))
     let minutes = totalHundredths / 6000
     let seconds = (totalHundredths / 100) % 60
@@ -423,6 +446,41 @@ struct HUDOverlay: View {
       return String(format: "%02d:%02d.%02d", minutes, seconds, hundredths)
     } else {
       return String(format: "%02d.%02ds", seconds, hundredths)
+    }
+  }
+}
+
+/// Draws a HUD clock from the instant its phase started, on a schedule of its
+/// own, so the running time never has to be republished through the manager.
+///
+/// `start` comes from ``HUDManager/sessionStart``, which changes only on a
+/// phase transition; `interval` is the resolution the caller actually displays
+/// (hundredths for the full HUD, whole seconds for the compact one). Anchoring
+/// the schedule to `start` also lines every tick up with the moment the shown
+/// value changes. A `nil` start means the phase has no clock, so the label
+/// renders a static zero rather than a live one.
+struct HUDElapsedClock<Content: View>: View {
+  let start: Date?
+  let interval: TimeInterval
+  private let content: (TimeInterval) -> Content
+
+  init(
+    start: Date?,
+    interval: TimeInterval,
+    @ViewBuilder content: @escaping (TimeInterval) -> Content
+  ) {
+    self.start = start
+    self.interval = interval
+    self.content = content
+  }
+
+  var body: some View {
+    if let start {
+      TimelineView(.periodic(from: start, by: interval)) { context in
+        content(max(context.date.timeIntervalSince(start), 0))
+      }
+    } else {
+      content(0)
     }
   }
 }

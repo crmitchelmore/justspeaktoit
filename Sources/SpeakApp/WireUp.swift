@@ -62,7 +62,8 @@ final class AppEnvironment: ObservableObject {
   fileprivate(set) var comparisonSyncAdapter: MacComparisonSyncAdapter?
   /// Owned here rather than by the Settings view so leaving the section
   /// mid-capture cannot deallocate a controller that still holds the
-  /// microphone; the section reattaches to the same in-flight round.
+  /// microphone. Leaving cancels an in-flight capture (`CompareModelsView`
+  /// `onDisappear`); a round awaiting judgement is reattached on return.
   lazy var compareModels = CompareModelsController(environment: self, store: comparisonRounds)
   /// Posts and acts on notifications for transcripts arriving from an iPhone
   /// or Apple Watch (issue #1007).

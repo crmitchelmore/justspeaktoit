@@ -101,11 +101,19 @@ public enum ComparisonSyncRecord {
               let version = record[FieldKey.schemaVersion] as? Int,
               version == ModelComparisonRound.schemaVersion else { throw SyncError.decodingFailed }
         if let round = round(from: record) { return ModelComparisonRevision(round: round) }
+        // A round this build cannot validate must not be read as a deletion:
+        // `ModelComparisonRevision` decodes from any object carrying `id` and
+        // `updatedAt`, which every round payload does.
         guard let payload = record[FieldKey.payload] as? String,
+              !isRoundShaped(Data(payload.utf8)),
               let revision = try? decoder.decode(ModelComparisonRevision.self, from: Data(payload.utf8)),
               revision.isValid, revision.round == nil,
               revision.id == roundID(fromRecordName: record.recordID.recordName) else { throw SyncError.decodingFailed }
         return revision
     }
 
+    private static func isRoundShaped(_ payload: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else { return false }
+        return object["entries"] != nil
+    }
 }

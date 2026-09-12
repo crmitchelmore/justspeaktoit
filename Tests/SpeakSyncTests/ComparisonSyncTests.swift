@@ -156,6 +156,22 @@ final class ComparisonSyncTests: XCTestCase {
         XCTAssertThrowsError(try ComparisonSyncRecord.revision(from: record))
     }
 
+    func testRecord_withAnUnreadableRoundPayload_isNotATombstone() throws {
+        // The memberwise initialiser does not validate, so this encodes a
+        // round whose blind order this build rejects on decode.
+        let valid = makeRound()
+        let invalid = ModelComparisonRound(
+            id: valid.id, createdAt: valid.createdAt, inputMode: valid.inputMode, sample: valid.sample,
+            language: valid.language, originPlatform: valid.originPlatform, entries: valid.entries, blindOrder: []
+        )
+        let record = try ComparisonSyncRecord.record(from: invalid)
+        XCTAssertNil(ComparisonSyncRecord.round(from: record))
+        XCTAssertThrowsError(
+            try ComparisonSyncRecord.revision(from: record),
+            "A round that fails validation must not be mistaken for a deletion of the local copy"
+        )
+    }
+
     // MARK: Helpers
 
     private func makeEngine(

@@ -1,10 +1,10 @@
 # Issue value review — 12 September 2026
 
-This is review evidence, not a replacement for the canonical issue tracker. The initial inventory contained 98 open issues and four open PRs. This checkpoint contains 14 completed independent issue reviews; the remaining issues are not yet assessed. Implementation and validation are separate from these recommendations.
+This is review evidence, not a replacement for the canonical issue tracker. The initial inventory contained 98 open issues and four open PRs. This checkpoint contains 24 completed independent issue reviews; the remaining issues are not yet assessed. Implementation and validation are separate from these recommendations.
 
 ## Method and product goals
 
-Each issue receives its own value-review agent. Accepted scope goes to a different planning agent, then gpt-5.6-sol at medium reasoning for implementation. Reviews use source baseline `51286c58`, current issue bodies/comments, open PRs and recorded project decisions.
+Each issue receives its own value-review agent. Accepted scope goes to a different planning agent, then gpt-5.6-sol at medium reasoning for implementation. Reviews use source baseline `51286c58`, current issue bodies/comments, open PRs and recorded project decisions. During review, main advanced to `2ff982d` when Compare Models PR #1102 merged; relevant later plans account for those consumers.
 
 Priorities: reliable and fast dictation; preserve first and final words; privacy and on-device options; transparent BYOK costs; native accessible controls; shared catalogues with deliberate platform differences. Refactor incrementally rather than rewrite. Existing PRs, device acceptance, provider access and explicit owner decisions remain separate gates.
 
@@ -12,7 +12,11 @@ Native Apple builds and physical device checks cannot run on this Linux host. No
 
 ## Implementation evidence
 
-[Draft PR #1130](https://github.com/crmitchelmore/justspeaktoit/pull/1130) implements #1104. Its published tree matches the locally reviewed tree; Apple CI and real provider/device acceptance are pending.
+[Draft PR #1130](https://github.com/crmitchelmore/justspeaktoit/pull/1130) implements #1104. Its published tree matches the locally reviewed tree. Initial Apple CI found two initializer compiler errors and 15 lint findings; corrections are published at `2bb644d` for CI. Provider/device acceptance remains pending.
+
+[Draft PR #1131](https://github.com/crmitchelmore/justspeaktoit/pull/1131) implements #1115 settings extraction. The exact 17 persisted keys have a compatibility test, moved bodies were mechanically checked, and Apple CI plus simulator navigation remain pending. Published commit: `952756a`.
+
+Detailed accepted-scope plans are in `issue-plans-2026-09-12/`. [Runtime analytics qualification](issue-plans-2026-09-12/posthog-1121-evidence.md) found insufficient runtime-identifying production telemetry; unavailable usage is not zero usage.
 
 ## Decisions
 
@@ -32,6 +36,16 @@ Native Apple builds and physical device checks cannot run on this Linux host. No
 | [#1115](https://github.com/crmitchelmore/justspeaktoit/issues/1115) — refactor(ios): move AppSettings out of SettingsView.swift and replace raw defaults keys with a DefaultsKey enum | IMPLEMENT | A bounded mechanical separation makes reliability fixes to persisted transcription choices and settings safer to review. This supports reliable dictation and native settings without changing product behaviour; it also prepares the independently assessed B2/B3 work. |
 | [#1116](https://github.com/crmitchelmore/justspeaktoit/issues/1116) — refactor(core): one settings schema and one provider API-key identifier catalogue shared by mac and iOS; delete the dead SettingsSync class | NARROW | Proceed with the proven credential/settings seam consolidation to prevent missing BYOK credentials and inconsistent preferences across devices. The broad issue assumes identical semantics and dead code that current sources do not support; avoid combining persistence migration, observable-state redesign and transfer expansion in one mechanical refactor. |
 | [#1117](https://github.com/crmitchelmore/justspeaktoit/issues/1117) — iOS composition root and recording collaborator injection | NARROW | Proceed with completing the recording-service injection seam. Reliable tests for selected settings, delivery, recovery claims and foreground/background behaviour directly protect dictation and final transcript retention. Replacing all singletons and sweeping every view offers no demonstrated immediate user benefit and adds launch and observation risks. |
+| [#1118](https://github.com/crmitchelmore/justspeaktoit/issues/1118) — refactor: one HistoryRecord model and one store in SpeakCore for macOS and iOS; sync carries the full record | NARROW | Proceed with the local compatibility and responsiveness work. A shared record contract reduces divergent history behaviour and removing synchronous iOS disk work from the main actor supports reliable, responsive dictation. The proposed simultaneous model replacement, WAL migration and unrestricted full-record CloudKit payload is too broad: some fields are explicitly local-only and existing recovery protects transcripts against subtle partial-failure cases. |
+| [#1119](https://github.com/crmitchelmore/justspeaktoit/issues/1119) — feat(sync): one CloudKit container for macOS and iOS so history and keys actually sync across devices | DEFER | High product value: the current platform-specific private databases prevent the intended Mac/iPhone history continuity and BYOK setup continuity. However the surviving container is an explicit owner decision, and #1118 is narrowed to local compatibility with full-record cloud schema/privacy work still deferred. There is no justified independent production code change to make before that decision: unifying configuration already selects the destination, and a migration or token-reset framework would prebuild an unapproved migration. The useful preparation now is the evidence and decision packet in this review. |
+| [#1120](https://github.com/crmitchelmore/justspeaktoit/issues/1120) — chore: move the transcribe.cpp binary target and the local-transcription benchmark out of the root Package.swift | IMPLEMENT | Separating an experimental benchmark dependency from the shipping app graph reduces build dependency exposure and avoids unnecessary CTranscribe artifact resolution for app work. This supports faster, more reliable delivery of native dictation without changing user behaviour or retiring useful local-engine qualification tooling. |
+| [#1121](https://github.com/crmitchelmore/justspeaktoit/issues/1121) — decision: replace the pip-installed Python sherpa-onnx subprocess with a linked runtime, or remove the path | NARROW | Proceed only with a bounded usage-evidence qualification. Removing Python bootstrap can improve reliable first-use dictation and native deployment, but removal can harm privacy-focused users. Neither replacement nor removal is authorised until usage evidence is presented and Chris chooses. Current code also disproves two broad assumptions in the proposed scope. |
+| [#1122](https://github.com/crmitchelmore/justspeaktoit/issues/1122) — chore: strict concurrency on every target now; Swift 6 language mode module by module | NARROW | Proceed with warnings-only concurrency coverage and a measured baseline first. Compiler visibility into unsafe crossings supports reliable recording and transcript persistence. The issue bundles that useful safety measure with a large language migration, annotation churn, a semaphore-count target and a test-framework policy change whose user value is not yet established. |
+| [#1123](https://github.com/crmitchelmore/justspeaktoit/issues/1123) — chore: give the watch targets a real SpeakWatchCore package target instead of 12 file-path inclusions | IMPLEMENT | A small explicit shared module reduces watch-only build failures when shared dictation protocol and lifecycle types change. This supports reliable native capture without new UI, runtime dependencies or speculative abstractions. Value is build reliability and maintainability, not a proven runtime speed gain. |
+| [#1124](https://github.com/crmitchelmore/justspeaktoit/issues/1124) — test: one StubURLProtocol in a shared test-support target; delete the 31 per-file copies | NARROW | Proceed with shared support for ordinary request/response fixtures and scoped state isolation. Reliable provider regression tests support fast, dependable dictation and safer provider updates. The inspected protocols are not 31 equivalent copies: cancellation, partial responses and delayed completion exercise distinct reliability contracts. A forced one-class rewrite has poor value unless those contracts are preserved explicitly. |
+| [#1125](https://github.com/crmitchelmore/justspeaktoit/issues/1125) — chore: delete dead scripts, retired workflow stubs and the unratified patterns YAML; fix the README pointer | IMPLEMENT | Small, worthwhile maintenance change that prevents contributors following a broken versioning path and removes obsolete publication entry points. It supports reliable releases with low implementation risk; no app UX redesign is needed. |
+| [#1126](https://github.com/crmitchelmore/justspeaktoit/issues/1126) — ci: one composite action for the Xcode + Tuist + keychain setup block; one runner-selection scheme | NARROW | Proceed with a small behaviour-preserving toolchain extraction and removal of the obsolete PR-specific route. Shared setup reduces release drift and helps reliable delivery of native dictation fixes. The proposed union of every setup/signing step and one unconditional runner variable would erase intentional differences and exact-revision admission controls; that breadth has poor value. |
+| [#1127](https://github.com/crmitchelmore/justspeaktoit/issues/1127) — chore(tooling): consolidate release tooling from six languages to shell plus JavaScript | NARROW | Proceed with complete, discoverable tooling test coverage and a clear configuration boundary. These reduce release regressions and help users receive reliable dictation fixes. Do not make zero Python/Ruby files a success criterion: wholesale language ports add signing, provisioning and release risk without an evidenced user benefit. The issue's four-reader premise is stale: current Swift/Python catalogue generation reads ReleaseTrains.json, not ReleasePipeline.json, and projection freshness already runs in CI. |
 
 ## #1104: refactor(core): close the feature gaps between the mac-only live transcribers and the SpeakCore live clients
 
@@ -409,3 +423,333 @@ Reviewer: `/root/issue_review_queue/review_1117`.
 - An outer ObservableObject does not automatically forward nested objects changes; wholesale environment conversion can leave settings and history stale.
 - Linux cannot validate Apple frameworks; native CI and device checks remain gates.
 - Beads CLI is absent according to supplied session context; this JSON is review evidence only, not a substitute tracker.
+
+## #1118: refactor: one HistoryRecord model and one store in SpeakCore for macOS and iOS; sync carries the full record
+
+Reviewer: `/root/issue_review_queue/review_1118`.
+
+**Smallest worthwhile scope:** ['Stage one: introduce the shared, versioned local HistoryRecord and supporting portable types in SpeakCore with legacy macOS/iOS decoding fixtures and explicit platform adapters. Preserve existing on-disk representations through adapters until conversion is proven; do not force wholesale view renames or delete aliases for cosmetic reasons.', 'Stage two, separately reviewable: isolate the existing iOS persistence operations behind an actor while preserving snapshot/recovery format, protected-file writes and the current recovery decisions. Keep observable UI state on MainActor and serialize load/mutation/save to avoid async ordering regressions.', 'Defer the common WAL replacement and legacy-file rename to a later evidence-backed migration. Keep the current CloudKit projection in this phase. A future sync extension must distinguish portable user history/cost data from local file references, local-only errors and diagnostic/network payloads rather than blindly upload every field.']
+
+- `Sources/SpeakApp/HistoryItem.swift`: The macOS record already uses createdAt and updatedAt, but owns richer costs, modelUsages, networkExchanges, events, diagnostics, audioFileURL and latency; this confirms duplication while showing that some proposed renaming is stale.
+- `Sources/SpeakiOS/Views/iOSHistoryModels.swift`: The iOS record has transcription/model/duration names and originPlatform; errorMessage is explicitly documented as local-only, not synced. A superset model must preserve those deliberate semantics.
+- `Sources/SpeakSync/SyncModels.swift`: The current nine-field projection excludes diagnostics and costs. A shared local model does not require replacing this wire API.
+- `Sources/SpeakSync/SyncRecord.swift`: Both CKRecord directions use legacy scalar fields and permissive defaults. Replacing them outright with recordJSON would risk older-client interoperability and introduces a schema rollout distinct from local consolidation.
+- `Sources/SpeakiOS/Views/IOSHistoryPersistence.swift`: The @MainActor class performs synchronous read, encoding, hashing and writes. Its recovery logic preserves unreadable files, pending deletes, same-second updates, per-item digest bases, protected writes and failed-cleanup retry; a bare WAL swap is not demonstrated equivalent.
+
+**Dependencies**
+
+- #1103 consolidation umbrella; no dependency on provider/recording rewrites.
+- #1117 is narrowed recording dependency injection; do not introduce an app-wide dependency container.
+- #1119 owner must choose the surviving CloudKit container and complete provisioning/device gates. This local scope must neither choose nor migrate containers.
+- Separate CloudKit schema/payload expansion from this implementable local phase; coordinate future rollout with #1119 without treating local work as blocked.
+
+**Verification**
+
+- Fixtures derived from each actual legacy schema, with synthetic/scrubbed content, preserve identifiers, timestamps, raw/polished text, model selection, duration, costs and optional diagnostics after decode and platform round trip.
+- Fault-injection tests preserve primary and sidecar on read/decode failure, pending deletes, same-second edits, stale-sidecar cleanup failure, and retries without resurrecting or losing transcripts.
+- Concurrency tests exercise mutation arriving during initial load and overlapping save/delete requests; final persisted state must match the latest accepted operations.
+- Apple Swift CI builds both app targets and runs relevant history tests; inspect iOS isolation to ensure disk and hashing operations occur off MainActor.
+- Real upgrade checks on macOS/iOS confirm old history remains visible, new transcripts survive restart and existing sync banner behaviour is unchanged. This is a remaining device gate, not claimed evidence.
+
+**Risks and limits**
+
+- This read-only review inspected five targeted code excerpts; the planner must map supporting-type dependencies and actor call ordering before implementation.
+- The full original acceptance criteria are intentionally not satisfied by this narrow phase: common WAL storage and full-record sync remain separate follow-up decisions.
+- Do not invent real user records for fixtures or move personal diagnostic data into remote sync by default. Generate representative scrubbed fixtures from actual encoder shapes.
+- Linux cannot validate Apple frameworks or device upgrades; do not claim static review or portable tests establish device behaviour.
+- Beads CLI is absent per supplied session context; no tracker operations or repository changes were performed.
+
+## #1119: feat(sync): one CloudKit container for macOS and iOS so history and keys actually sync across devices
+
+Reviewer: `/root/issue_review_queue/review_1119`.
+
+**Smallest worthwhile scope:** Keep #1119 open as an owner-gated migration. Present the current four-container inventory and the issue recommendation (retain the existing Mac containers for each train) as a recommendation only. After Chris chooses, use a separate planning agent to resolve actual manifest source, supported history schema, key migration semantics, conflict/retry policy, and signing gates. Do not add a cloudContainer alias, change entitlements, reset live state, or build/activate migration in this pass.
+
+- `Sources/SpeakSync/SyncConfiguration.swift`: iOS and macOS choose separate ReleaseTrain container properties. History checkpoint keys are not container-scoped. macOS checks the chosen identifier against entitlements; iOS assumes managed provisioning.
+- `Sources/SpeakCore/ReleaseTrainCatalogue.swift`: Stable resolves to iCloud.com.justspeaktoit.ios versus iCloud.com.justspeaktoit; Alpha uses the analogous separate .alpha pair. Generated-file header names ReleaseTrains.json as source, so the issue reference to Config/ReleasePipeline.json must not be followed without checking the actual generator.
+- `Sources/SpeakSync/HistorySyncEngine.swift`: Engine injects UserDefaults and CloudKit transport; targeted initialisation excerpt has no container identity transition handling. Its zone/subscription state references shared SyncConfiguration keys.
+- `Sources/SpeakSync/CloudKitKeySync.swift`: Distinct EncryptedSecret and EncryptedSecretMetadata records plus derived-key verification/encryption paths mean a safe migration needs explicit key/passphrase and metadata semantics; opaque ciphertext copying is insufficient.
+- `/workspace/scratch/a8be40db3c71/comments/1119.json`: Cached live issue comments are empty; no owner destination decision is recorded there.
+
+**Dependencies**
+
+- #1103 consolidation epic C2
+- #1118 local compatibility only; full-record sync remains gated on privacy/schema
+- #1116 shared settings identifiers if future migration markers are added
+- Chris must select the surviving Stable and Alpha containers
+- Apple entitlement/provisioning configuration and physical Mac+iPhone verification
+
+**Verification**
+
+- Owner destination decision recorded before destination-dependent implementation.
+- Preserve Alpha/Stable separation and old-container data; migration resumes after interruption and marks success only after all required uploads succeed.
+- Future tests cover changed/unchanged container checkpoint behaviour, duplicate/conflicting records, unavailable cloud, interrupted migration and secret key/metadata failures.
+- Apple Swift CI must pass SpeakSync guards and key-sync tests plus both platform configuration checks.
+- Provisioned fresh and upgrading iPhone plus Mac on one iCloud account must demonstrate history/key behaviour, including existing old-container data; static Linux review cannot prove this.
+
+**Risks and limits**
+
+- Premature container changes can hide existing history or strand secrets; incorrect checkpoint reset or completion markers can lose migration progress.
+- The issue preparation section conflicts with its explicit owner-before-code gate; honour the gate.
+- Same-container history visibility also depends on deferred compatible schema/privacy decisions, not just matching strings.
+- No repository edits, native tests, portal operations or device tests performed. Beads CLI is unavailable per supplied session context; this JSON is review evidence only.
+
+## #1120: chore: move the transcribe.cpp binary target and the local-transcription benchmark out of the root Package.swift
+
+Reviewer: `/root/issue_review_queue/review_1120`.
+
+**Smallest worthwhile scope:** Move benchmark sources/tests and its unchanged binary URL/checksum into Benchmarks/LocalTranscription with a root SpeakCore path dependency. Remove root benchmark/binary targets, update checksum discovery, explicit make bench invocation and existing command/path references. Preserve transcribeCpp API. Repair or relocate the existing benchmark pin invariant so it checks the graph actually used by the benchmark. Preserve benchmark data and qualification gates.
+
+- `Package.swift`: Binary target and benchmark product/test targets remain in the root manifest; SpeakApp links WhisperKit and FluidAudio, not CTranscribe.
+- `scripts/verify-checksums.sh`: Checksum extraction is hard-coded to root Package.swift and must follow the moved manifest.
+- `Tests/SpeakCoreTests/ManifestParityTests.swift`: Root test reads the current benchmark runner path and root Package.resolved; relocation must preserve a meaningful runtime-version check against the benchmark's resolved dependency.
+- `Tests/SpeakCoreTests/ModelCatalogTests.swift`: Non-benchmark tests explicitly use transcribeCpp and legacy transcribe-cpp decoding. Keep the shared engine case/string mappings; deletion is unnecessary and breaks existing compatibility tests.
+- `Sources/LocalTranscriptionBenchmark/EngineRunners.swift`: Targeted reference search finds the CTranscribe importer only in benchmark code and no workflow benchmark-name references.
+
+**Dependencies**
+
+- Consolidation epic #1103 D1; independent of #1121 runtime removal/native-linking choice.
+- Coordinate any concurrent Package.swift, benchmark, checksum, or manifest-parity edits.
+
+**Verification**
+
+- Static manifest/reference audit: root has no benchmark/binary targets and shipping products retain required dependencies; relocated benchmark owns all former sources/tests.
+- Use Apple Swift/Xcode CI for clean root resolution/build and prove no CTranscribe root artifacts, then independently resolve/build/test the benchmark package.
+- Run make verify-checksums with the unchanged artifact URL/checksum and verify make bench invocation/help.
+- Validate the existing runtime-version pin invariant against the benchmark's own resolved graph; preserve transcribe-cpp decoding tests.
+
+**Risks and limits**
+
+- Read-only source inspection supports structural isolation, not quantified CI-time savings or a claim that every existing CI job downloads the artifact.
+- Moving tests out of default root test discovery needs an explicit benchmark validation path; do not silently lose assessment-gate coverage.
+- No Apple-native build or device results obtained on this Linux reviewer.
+- Beads CLI is absent per supplied context; this JSON is interim review evidence, not a task tracker.
+
+## #1121: decision: replace the pip-installed Python sherpa-onnx subprocess with a linked runtime, or remove the path
+
+Reviewer: `/root/issue_review_queue/review_1121`.
+
+**Smallest worthwhile scope:** A separate planning agent may qualify existing analytics schema and data coverage, retrieve 90-day observed usage grouped by verified sherpa-capable dimensions, separate ambiguous Parakeet counts, and return an evidence brief for Chris. Do not modify runtime, remove models, add telemetry, or select a branch during this scope.
+
+- `Sources/SpeakApp/SherpaOnnxRuntimeManager.swift`: Still creates a Python venv and installs sherpa-onnx==1.13.2 with pip; the runtime issue is real.
+- `Sources/SpeakApp/SwitchingLiveTranscriber.swift`: FluidAudioParakeetModel and WhisperKitStreamingModel route before the broad local/streaming prefix. Prefix-wide removal or usage counting would conflate separate native runtimes with sherpa.
+- `Sources/SpeakCore/ProductAnalyticsDimensions.swift`: Current typed events emit model_family, engine_type and provider_type rather than an arbitrary selected-model identifier. parakeet explicitly combines sherpa-onnx and FluidAudio builds; nemotron and zipformer are annotated as sherpa-backed.
+- `Sources/SpeakCore/ProductAnalytics.swift`: Collection is consent-gated, so absent observed events cannot establish absence of offline usage.
+- `Sources/SpeakApp/LocalPostProcessingModelManager.swift`: Another runtime independently invokes Python, installs llama-cpp-python and uses LocalProcessRunner. The issue-wide no Python under SpeakApp acceptance criterion cannot be met by sherpa-only work, and shared process helpers cannot simply be deleted.
+
+**Dependencies**
+
+- #1103 consolidation epic D2
+- Requires authenticated read-only PostHog evidence and explicit Chris branch choice
+- Related local post-processing runtime work must remain separately scoped; no linked-runtime or App Store guard decision inferred
+- Cached issue comments are empty
+
+**Verification**
+
+- Record exact observation window, query, event types, distinct observed users/installations, and telemetry coverage limitations. No usage query was run by this reviewer.
+- Establish which current or historical fields can distinguish sherpa from FluidAudio/WhisperKit. Report ambiguous or unavailable data explicitly instead of treating it as zero.
+- Present both retain/native-link and remove alternatives with observed impact; wait for Chris to choose before implementation.
+- Correct later acceptance scope to no Python in the sherpa path, unless separately approved work also replaces local post-processing. Any runtime branch needs native build and actual fixture/device validation.
+
+**Risks and limits**
+
+- No native runtime or physical-device results were obtained. Linux is not the decision blocker; absent usage evidence and owner choice are.
+- Opt-in analytics undercounts privacy/offline users and 90-day schema availability may be incomplete.
+- Broad local/streaming deletion would risk removing native FluidAudio/WhisperKit options.
+- Beads CLI is absent; this JSON is review evidence only, not a replacement tracker.
+
+## #1122: chore: strict concurrency on every target now; Swift 6 language mode module by module
+
+Reviewer: `/root/issue_review_queue/review_1122`.
+
+**Smallest worthwhile scope:** One PR enables complete concurrency checking in explicit Swift 5 language mode for owned Swift source/test targets and mirrors it across relevant Tuist targets, recording reproducible diagnostics per module. Preserve runtime code and existing XCTest policy. After measured diagnostics, choose individual small modules for separate Swift 6 migration PRs; do not pre-authorise a whole-app migration, blanket semaphore removal or default-main-actor annotation cleanup.
+
+- `Package.swift`: Tools version remains 5.9; only SpeakCore declares StrictConcurrency. App, iOS, sync, automation, hotkey, CLI, benchmark and test source targets lack the corresponding explicit setting. The binary CTranscribe target must not be treated as a Swift source target.
+- `Project.swift`: Separate settings dictionaries feed app, watch, keyboard, share, widget and test targets; the searched SWIFT_ settings do not show strict concurrency or a language-mode override.
+- `Sources/SpeakApp/HistoryManager.swift`: The previous main-actor/semaphore deadlock has already been removed. Termination deliberately writes synchronously, retains the WAL and guards startup load state; an automatic async rewrite could lose final transcript persistence.
+- `AGENTS.md`: Current conventions specify XCTest and prohibit the main-actor semaphore deadlock pattern. A compulsory new-test framework change would conflict with current guidance and is independent of concurrency coverage.
+
+**Dependencies**
+
+- Parent epic #1103; coordinate with other consolidation work touching Package.swift or Project.swift.
+- Apple Swift/Xcode CI is required to obtain real per-module diagnostics; Linux can support configuration inspection but cannot provide that baseline.
+- No live issue comments change the scope.
+
+**Verification**
+
+- Verify supported Apple Swift toolchain accepts the exact chosen StrictConcurrency setting and Swift 5 language-mode configuration; do not assume the proposed manifest syntax is correct.
+- Build macOS and actual iOS/watch/extension target configurations on Apple CI and publish warning totals per module with command/toolchain details; do not count a macOS build of iOS-guarded code as iOS coverage.
+- Existing native build/test gates pass with no mode-induced errors; report and stop expansion if diagnostics exceed the issue threshold of about 150.
+- Keep subsequent language-mode changes gated by measured diagnostic scope and relevant behavioural tests, especially recording shutdown and history persistence.
+
+**Risks and limits**
+
+- Warnings-only checking provides visibility rather than proof of race-free runtime behaviour.
+- Changing tools version can alter default language mode unless explicitly pinned; apply changes only to owned Swift targets.
+- A zero DispatchSemaphore count is not a sufficient correctness criterion; synchronous termination and callback contracts require individual analysis.
+- Physical microphone, Watch and shutdown behaviour remain native verification gates. No builds or device checks were performed for this value review.
+- Beads CLI is absent per parent context; this scratch JSON is review evidence, not a replacement tracker.
+
+## #1123: chore: give the watch targets a real SpeakWatchCore package target instead of 12 file-path inclusions
+
+Reviewer: `/root/issue_review_queue/review_1123`.
+
+**Smallest worthwhile scope:** Introduce dependency-free SpeakWatchCore target AND library product; move the seven existing sources and focused tests, preserve SpeakCore import compatibility, replace watch source inclusions with product imports, and update the release catalogue generator/path assertions. Keep internal implementation details internal. No change to capture behaviour, identity values or provisioning.
+
+- `Project.swift`: Both watch targets still compile individual SpeakCore source paths; the app has seven inclusions and the widget five. The adjacent comment documents a watchOS package compatibility workaround.
+- `Package.swift`: Package declares macOS/iOS only and has no SpeakWatchCore target/product. SpeakCore itself currently declares no dependencies, so planners must verify the claimed product-level escape from package graph compatibility rather than assume it.
+- `Sources/SpeakCore/ReleaseTrain.swift`: Release identity uses ALPHA compile state and Bundle.main metadata, with a generated internal catalogue. Moving this code requires preserving train identity and storage selection.
+- `Sources/SpeakCore/ReleaseTrainCatalogue.swift`: Generated implementation detail is internal; it need not become public when moved alongside ReleaseTrain.
+- `scripts/generate-release-train-config.py`: Generator still writes Sources/SpeakCore/ReleaseTrainCatalogue.swift; extraction must update this path and its validation references.
+
+**Dependencies**
+
+- Part of #1103 D4; independent from CloudKit-container migration and local-runtime decisions.
+- Preserve existing TUIST_WATCH_APP/provisioning gate; do not enable distribution or publish releases.
+- Coordinate generated release configuration path with concurrent release-train work.
+
+**Verification**
+
+- On Apple Swift/Xcode, generate Tuist with watch target enabled and build watch app plus complication for watchOS Simulator. Confirm package graph resolves for this product; if not, use an isolated dependency-free local package rather than restore path inclusions.
+- Run focused watch core tests and existing SpeakCore consumers/tests to check unchanged imports and lifecycle/protocol behaviour.
+- Check release catalogue generation is reproducible and no stale moved-source path references remain; retain one canonical JSON catalogue.
+- Verify Stable/Alpha identity and app-group outputs remain equal before/after extraction, including Bundle.main fallback semantics in package builds.
+- Treat issue grep-count assertion as a structural smoke check, not sufficient acceptance.
+
+**Risks and limits**
+
+- Native framework/package compatibility cannot be proven on this Linux host; watch simulator builds remain an integration gate.
+- A same-manifest dependency-free target may still encounter dependency resolution constraints: existing SpeakCore is already dependency-free. Planner must investigate this before committing to the exact issue recipe.
+- Moving code changes module visibility and compile conditions; avoid exposing generated catalogue internals or weakening Alpha/Stable isolation.
+- No physical watch recording/runtime correctness claim follows from this extraction.
+- Beads CLI is absent per supplied context; scratch decision is review evidence only.
+
+## #1124: test: one StubURLProtocol in a shared test-support target; delete the 31 per-file copies
+
+Reviewer: `/root/issue_review_queue/review_1124`.
+
+**Smallest worthwhile scope:** Add XCTest-free shared support for ordinary complete responses, thrown failures, request/body capture and genuinely isolated per-session fixtures; migrate a bounded representative batch across test targets. Keep cancellation/partial/deferred protocols until an explicit compatible API is justified. Do not require exactly one URLProtocol subclass. Preserve assertion meaning and existing test identities.
+
+- `Tests/SpeakAppTests/OpenAITranscriptionProviderTests.swift`: Uses an async throwing handler in a Task; the proposed synchronous tuple handler does not directly preserve its contract.
+- `Tests/SpeakCoreTests/OpenRouterAudioCatalogNetworkTests.swift`: Sends response headers and incomplete JSON before hanging, and reports didStart/didStop. Returning nil without responding is not equivalent.
+- `Tests/SpeakCoreTests/TTSProviderTransportDoubles.swift`: Ordinary response/recording seam is suitable for consolidation; normalises body streams once and locks state. File also contains call counter, async assertion and response helpers that must remain.
+- `Tests/SpeakiOSTests/BatchProviderRoutingTests.swift`: Records request then fails with userAuthenticationRequired, which can use a throwing shared handler without provider-specific shared code.
+- `Tests/SpeakAppTests/PostHogAnalyticsTestSupport.swift`: Recorder controls deferred responses and whether they finish; lock plus stopped flag suppresses callbacks after cancellation. These are substantive transport timing semantics, not simple canned responses.
+
+**Dependencies**
+
+- Child of consolidation epic #1103; no production feature dependency.
+- Planner must inspect Package.swift/Project.swift target linkage and ensure support remains test-only.
+- No live issue comments add constraints.
+
+**Verification**
+
+- Demonstrate simultaneous sessions cannot observe or reset each other's handlers/recordings, including identical request URLs.
+- Verify body stream capture remains available to both handler and assertions without a second drain.
+- Run existing migrated provider and routing tests, compare discovered existing tests before/after, and separately count any new support-contract tests.
+- Apple Swift macOS tests plus Xcode iOS tests are required before integration; Linux static checks cannot establish native URLProtocol behaviour.
+- For any specialised fixture later migrated, preserve partial-body delivery, deferred completion, cancellation hooks and absence of callbacks after stop.
+- Correct issue API inconsistency: its declared non-optional response tuple cannot return nil; choose explicit semantics in the plan.
+
+**Risks and limits**
+
+- Scope identity must reach requests constructed inside provider code without altering asserted headers/URLs or relying on a process-global fallback; request-property propagation needs native verification.
+- Replacing many independent static handlers with one global handler would increase cross-test contamination.
+- No product UI or latency change is claimed. Five targeted protocol excerpts reviewed; full migration inventory belongs to planning.
+- Beads CLI is absent per parent context; this scratch JSON is analysis evidence only.
+
+## #1125: chore: delete dead scripts, retired workflow stubs and the unratified patterns YAML; fix the README pointer
+
+Reviewer: `/root/issue_review_queue/review_1125`.
+
+**Smallest worthwhile scope:** ['Delete three obsolete scripts, three candidate patterns YAML files and three obsolete/advisory workflow files.', 'Correct README version/build guidance with current Alpha/Stable runbook and active mechanism; avoid suggesting manual commands bypassing approval.', 'Update existing identity assertions to require absence of retired workflows and preserve all active release protection.', 'Ignore untracked SpeakiOS.xcodeproj unless it is present and proven empty/generated; local deletion is not a PR deliverable.']
+
+- `README.md:115–122; scripts/version.sh:6`: README recommends obsolete version.sh commands and BUILD, while script points at BUILD rather than the current build mechanism.
+- `.github/workflows/prepare-stable.yml:40; .github/workflows/publish-stable.yml:34; Docs/alpha-stable-release-trains.md`: Active Stable flow uses release-train.mjs prepare/publish and explicit approved manifest hash. Preserve all these gates.
+- `Tests/SpeakAppTests/DistributionBuildIdentityTests.swift:416–450,626–633`: Tests actually read both retired workflow files; replace these reads/assertions with file absence checks or deletion would fail tests. Preserve active keyboard-signing and frozen-candidate assertions.
+- `.github/workflows/auto-release.yml; .github/workflows/publish-speak-cli.yml`: Manual retired stubs do no publishing; CLI stub exits 1.
+- `.github/workflows/conformance-pr-review.yml; patterns.config.yaml`: Conformance workflow is an active PR-triggered external advisory action, not literally dead; its job is continue-on-error and profile explicitly candidate/unratified. Removing the workflow plus unused profiles is reasonable within the issue’s explicit default-delete scope.
+- `Repository-wide hidden-file rg search excluding .git`: No callers of bump-version.sh or verify-binary.sh outside their own content; version.sh only in README. Retired workflow paths only occur in identity tests; no tracked SpeakiOS.xcodeproj files found.
+
+**Dependencies**
+
+- Part of #1103 E2; independent of the other consolidation issues.
+- Review comments cache is empty; no later owner decision contradicts requested cleanup.
+- Planner should confirm branch protection does not require the advisory conformance job before removing it.
+
+**Verification**
+
+- Repeat tracked and hidden-file reference search; only deliberate negative test assertions may retain deleted names.
+- Run release-train Node tests and targeted identity test on Apple Swift CI; make lint where supported.
+- Verify active prepare/publish workflows and explicit manifest-hash approval remain unchanged.
+- Confirm README describes actual mechanism and no longer advertises BUILD/version.sh.
+
+**Risks and limits**
+
+- The external advisory action may implicitly consume patterns files; remove it together with those files, not independently. Live branch protection was not inspected by this bounded read-only reviewer.
+- Linux cannot validate Apple frameworks; native CI verification is still required, but does not block implementing this cleanup.
+- Beads CLI is absent per supplied session context. No repository changes, external comments or release actions performed.
+
+## #1126: ci: one composite action for the Xcode + Tuist + keychain setup block; one runner-selection scheme
+
+Reviewer: `/root/issue_review_queue/review_1126`.
+
+**Smallest worthwhile scope:** ['Extract repeated Xcode selection/Tuist installation with explicit inputs and preserve existing versions. Keep platform-specific generation, metadata, signing, preflight and final cleanup in their current positions unless a proven equivalent small helper fits.', 'Remove obsolete PR 1038 routing while preserving current hosted defaults and exact-SHA native-pool eligibility. Centralise only if every event/fork/fallback path retains equivalent behaviour.', 'Do not add Apple setup to Ubuntu orchestration or collapse the hardware-specific device runner. Avoid arbitrary environment-map APIs or unsupported action lifecycle assumptions.']
+
+- `.github/workflows/ci.yml`: Exact reviewed SHA plus source-repository/event checks select the native pool for two jobs. Six other visible routing expressions retain the special PR 1038 case. Tuist install/generation repeats in CI.
+- `Docs/native-runner-pool.md`: Documents PR 1038 as merged, exact revision opt-in, hosted fallback, per-Mac admission hooks, architecture/host/workspace-separated cache state. This is a live design constraint, not duplication to remove blindly.
+- `.github/workflows/release-ios.yml`: Toolchain and API-key setup precede upload-reuse preflight; provisioning/profile validation precedes conditional project generation. Generation also copies Package.resolved and reports keyboard rollout policy. One combined step cannot simply preserve this ordering.
+- `.github/workflows/release-mac.yml`: Explicit final always() cleanup deletes signing keychain and ASC key; preserve its end-of-job and failure semantics.
+- `.github/workflows/alpha-release.yml; .github/workflows/prepare-stable.yml; .github/workflows/ios-device-matrix.yml`: Alpha/Stable orchestration uses Ubuntu and reusable Apple workers; physical device workflow intentionally selects ios-device hardware. Forcing all through Apple setup or one runner label is unnecessary.
+
+**Dependencies**
+
+- Part of consolidation #1103 E3. Coordinate workflow edits with #1127.
+- Owner decision: release worker verification waits for the NEXT real Alpha; do not dispatch release or Stable.
+- PR 1038 merged status is supported by native-runner-pool.md; parent can confirm live status from existing repository context before removal.
+
+**Verification**
+
+- Run actionlint and validate local action input/lifecycle syntax against supported schema.
+- CI must run relevant changed-action/workflow lanes and pass; account for path filters when extracting action files.
+- Check runner selection for approved/unapproved main and same-repository PR SHAs, fork PRs and default/unset variables, retaining local admission controls and cache isolation.
+- Review diff for unchanged frozen-manifest checkout, signing/profile checks, generation flags, reuse preflight, release permissions and always() cleanup.
+- PR must name release workers as changed but unverified until next real Alpha; no release dispatch for verification.
+
+**Risks and limits**
+
+- No native or release run was performed in this read-only review; static evidence cannot prove signing or device behaviour.
+- Literal zero occurrence counts are secondary to preserved gates and correct job execution; do not skip required CI merely to centralise routing.
+- Beads CLI is absent per supplied context; this JSON is interim decision evidence, not a replacement tracker.
+
+## #1127: chore(tooling): consolidate release tooling from six languages to shell plus JavaScript
+
+Reviewer: `/root/issue_review_queue/review_1127`.
+
+**Smallest worthwhile scope:** ["Consolidate Node tooling test discovery behind one documented make test-tooling entry point and one canonical test location, updating moved tests' relative paths and all workflow references.", 'Include the existing Ruby profile-creation suite in CI immediately; retain Python and Ruby test commands until any separately justified migration achieves parity.', 'Centralise JS ReleasePipeline loading only where it removes repeated parsing; preserve the distinct ReleaseTrains catalogue and current Swift projection freshness check.', "Correct the issue's acceptance criteria to measure complete coverage and unchanged release behaviour. Defer blanket Python/Ruby ports pending concrete maintenance cost or defect evidence."]
+
+- `.github/workflows/ci.yml: Test CI and release gates / Test release-notes generator`: Node tests run from scripts/tests, scripts/release-train.test.mjs and Tests/ReleaseNotesTests. Ruby release_apple_test.rb and Python unittest discovery run; create_ios_app_store_profile_test.rb is omitted. generate-release-train-config.py --check already protects projection freshness.
+- `scripts/tests/create_ios_app_store_profile_test.rb: IOSProfileBootstrap::FakeTransport / ProvisionerTest`: A self-contained scripted transport suite already tests provisioning conflict handling without live credentials. Adding it to CI provides immediate value without rewriting the ASC client.
+- `scripts/release-train.mjs / scripts/release-train-lib.mjs: validateManifest`: The orchestrator reads ReleasePipeline.json at three call sites; the shared library already protects immutable source, tag/train identity, dependency hash and notes hashes. A shared JS config loader can clarify that boundary while preserving these invariants.
+- `scripts/generate-release-train-config.py: SOURCE / rendered; Project.swift; Sources/SpeakCore/ReleaseTrainCatalogue.swift`: Swift projection is generated from Sources/SpeakCore/Resources/ReleaseTrains.json. Project.swift reads that same catalogue. The two JSON files have different responsibilities; an exactly-two-readers rule must not conflate them.
+- `.github/workflows/release-ios.yml / release-appstore.yml / reconcile-apple-releases.yml`: Production release workers still depend on Python stamping/archive/profile checks and Ruby upload/distribution/reconciliation. Porting them is a separate, higher-risk effort requiring real Alpha evidence.
+
+**Dependencies**
+
+- Coordinate touched test paths and references with dead-file removal #1125 and release consolidation #1126 under epic #1103.
+- Owner requires verification in the next real Alpha; no release dispatch is authorised.
+- Keep existing frozen manifest and explicit Stable approval gates unchanged.
+
+**Verification**
+
+- Inventory pre/post Node test cases and run all moved suites through the new command to show no coverage loss or relative-path regression.
+- Run existing Ruby profile and release tests, Python unittest discovery and projection --check; confirm CI invokes each suite.
+- If adding a loader, test missing/invalid config and preservation of existing config values without weakening manifest/hash checks.
+- Record next owner-initiated real Alpha verification for any release-path changes. Do not dispatch a release or infer Stable approval from CI.
+
+**Risks and limits**
+
+- Moving tests can break repository-root assumptions and coverage discovery; treat test-count parity and path updates as the primary near-term risk.
+- A mechanical rewrite is not proof of equivalence for JWT signing, retries, credentials, keychain cleanup or Apple provisioning.
+- Static review and Linux tooling cannot prove an Apple upload or native keychain behaviour.
+- Beads CLI is absent per supplied session context; this JSON is interim decision evidence, not a substitute tracker.

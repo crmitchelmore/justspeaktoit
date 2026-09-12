@@ -2,8 +2,9 @@ import Foundation
 
 /// Narrow transport seam for shared clients whose stop ordering must be tested
 /// without opening a paid provider connection.
-protocol LiveWebSocketTransport: AnyObject {
+protocol LiveWebSocketTransport: AnyObject, Sendable {
     var state: URLSessionTask.State { get }
+    var closeCode: URLSessionWebSocketTask.CloseCode { get }
     func resume()
     func send(_ message: URLSessionWebSocketTask.Message, completion: @escaping @Sendable (Error?) -> Void)
     func receive(
@@ -20,6 +21,7 @@ final class URLSessionLiveWebSocketTransport: LiveWebSocketTransport, @unchecked
     }
 
     var state: URLSessionTask.State { task.state }
+    var closeCode: URLSessionWebSocketTask.CloseCode { task.closeCode }
     func resume() { task.resume() }
     func send(_ message: URLSessionWebSocketTask.Message, completion: @escaping @Sendable (Error?) -> Void) {
         task.send(message, completionHandler: completion)

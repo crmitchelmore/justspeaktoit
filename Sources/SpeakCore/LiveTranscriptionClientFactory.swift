@@ -72,10 +72,14 @@ public enum LiveTranscriptionClientFactory {
                 sampleRate: route.sampleRate
             )
         case .cartesia:
+            let fallbackBudget = ModelCatalog.liveCapabilities(for: route.modelID)
+                .postStopFinalizeBudget
             return CartesiaLiveClient(
                 apiKey: apiKey,
                 model: route.apiModelName,
-                sampleRate: route.sampleRate
+                sampleRate: route.sampleRate,
+                postStopFinalizeBudget: options.postStopFinalizeBudget ?? fallbackBudget,
+                stopGracePeriod: options.stopGracePeriod
             )
         case .soniox:
             return SonioxLiveClient(

@@ -4,18 +4,27 @@ import Foundation
 final class TestLiveWebSocket: LiveWebSocketTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var storedState: URLSessionTask.State = .suspended
+    private var storedCloseCode: URLSessionWebSocketTask.CloseCode = .invalid
     private var receivers: [@Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void] = []
     private var inbound: [Result<URLSessionWebSocketTask.Message, Error>] = []
     private var sendCompletions: [@Sendable (Error?) -> Void] = []
     private var storedMessages: [URLSessionWebSocketTask.Message] = []
     private var storedCancelCount = 0
     var automaticallyCompletesSends = true
+    var automaticallyRunsOnResume = true
 
     var state: URLSessionTask.State { lock.withLock { storedState } }
+    var closeCode: URLSessionWebSocketTask.CloseCode { lock.withLock { storedCloseCode } }
     var messages: [URLSessionWebSocketTask.Message] { lock.withLock { storedMessages } }
     var cancelCount: Int { lock.withLock { storedCancelCount } }
 
-    func resume() { lock.withLock { storedState = .running } }
+    func resume() {
+        lock.withLock {
+            if automaticallyRunsOnResume { storedState = .running }
+        }
+    }
+
+    func markRunning() { lock.withLock { storedState = .running } }
 
     func send(_ message: URLSessionWebSocketTask.Message, completion: @escaping @Sendable (Error?) -> Void) {
         let completeNow = lock.withLock { () -> Bool in
@@ -44,6 +53,10 @@ final class TestLiveWebSocket: LiveWebSocketTransport, @unchecked Sendable {
 
     func emit(_ text: String) { deliver(.success(.string(text))) }
     func failReceive(_ error: Error = URLError(.networkConnectionLost)) { deliver(.failure(error)) }
+    func closeFromServer(_ code: URLSessionWebSocketTask.CloseCode = .normalClosure) {
+        lock.withLock { storedCloseCode = code }
+        deliver(.failure(URLError(.networkConnectionLost)))
+    }
 
     private func deliver(_ result: Result<URLSessionWebSocketTask.Message, Error>) {
         let receiver = lock.withLock { () -> (@Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void)? in

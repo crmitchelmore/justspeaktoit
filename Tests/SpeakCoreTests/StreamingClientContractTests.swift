@@ -453,6 +453,7 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
     /// their tail on stop, so none of them can truncate a recording.
     func testTheNewlySharedProvidersAllFinaliseGracefully() {
         let clients: [StreamingTranscriptionClient] = [
+            CartesiaLiveClient(apiKey: "k"),
             SpeechmaticsLiveClient(apiKey: "k"),
             RevAILiveClient(accessToken: "k"),
             MistralVoxtralLiveClient(apiKey: "k")

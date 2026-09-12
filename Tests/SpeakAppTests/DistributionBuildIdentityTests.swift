@@ -52,6 +52,42 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertLessThan(testStep.lowerBound, signingStep.lowerBound)
     }
 
+    func testDirectMacRelease_testsThePristineSourceBeforeStampingTheTrain() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-mac.yml"),
+            encoding: .utf8
+        )
+
+        let receiptStep = try XCTUnwrap(workflow.range(of: "- name: Check candidate delivery receipt"))
+        let testStep = try XCTUnwrap(workflow.range(of: "- name: Run Tests (Release Config)"))
+        let manifestStep = try XCTUnwrap(workflow.range(of: "- name: Load frozen release manifest"))
+        let stampStep = try XCTUnwrap(workflow.range(of: "- name: Stamp immutable app metadata"))
+
+        // `configure` rewrites VERSION and the bundled release notes and `stamp`
+        // rewrites Config/AppInfo.plist for the train. The plist-identity and
+        // release-notes tests pin exactly those files, so the re-run must see
+        // the pristine tagged source, as main CI did.
+        XCTAssertLessThan(receiptStep.lowerBound, testStep.lowerBound)
+        XCTAssertLessThan(testStep.lowerBound, manifestStep.lowerBound)
+        XCTAssertLessThan(manifestStep.lowerBound, stampStep.lowerBound)
+        XCTAssertTrue(workflow.contains("python3 scripts/with-test-keychain.py swift test -c release"))
+        XCTAssertTrue(workflow.contains("status --tag \"$MANIFEST\" --surface mac-direct"))
+        XCTAssertTrue(workflow.contains("git checkout -- Package.resolved"))
+    }
+
+    func testAlphaReconciliation_dispatchesWithTheWorkflowToken() throws {
+        let workflow = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/alpha-release.yml"),
+            encoding: .utf8
+        )
+
+        // A personal token without Actions write cannot create workflow
+        // dispatches (HTTP 403 on every hourly pass); the workflow token can.
+        XCTAssertTrue(workflow.contains("actions: write"))
+        XCTAssertTrue(workflow.contains("GH_TOKEN: ${{ github.token }}"))
+        XCTAssertFalse(workflow.contains("AUTO_RELEASE_TOKEN"))
+    }
+
     func testDirectMacRelease_retriesStaplingAcceptedNotarizationTickets() throws {
         // Per-variant packaging lives in the composite action the workflow calls
         // once per download (issue #774).

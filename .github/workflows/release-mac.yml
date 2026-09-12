@@ -39,24 +39,42 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.manifest }}
 
-      - name: Load frozen release manifest
-        env:
-          MANIFEST: ${{ inputs.manifest }}
-        run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface mac-direct
-
       - name: Check candidate delivery receipt
         id: receipt
-        run: node scripts/release-train.mjs status --tag "$RELEASE_TAG" --surface mac-direct
-
-      - name: Stamp immutable app metadata
-        if: steps.receipt.outputs.status != 'verified'
-        run: python3 scripts/stamp-release-train.py mac-direct
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+        run: node scripts/release-train.mjs status --tag "$MANIFEST" --surface mac-direct
 
       - name: Setup Xcode
         if: steps.receipt.outputs.status != 'verified'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.2"
+
+      # Runs on the pristine tagged source, before the manifest stamps train
+      # identity, version and release notes into the tree. Those stamps are
+      # exactly what the plist-identity and release-notes tests pin, so testing
+      # afterwards failed every Alpha build (alpha-build-1..3) and no build ever
+      # reached the alpha-latest pointer that the Sparkle Alpha feed resolves.
+      - name: Run Tests (Release Config)
+        if: steps.receipt.outputs.status != 'verified'
+        run: |
+          # Defence in depth: the pre-merge gate is the release-validation job
+          # in ci.yml; this re-run protects tags cut from any unvalidated state.
+          echo "Re-running release-configuration tests as post-tag defence in depth..."
+          python3 scripts/with-test-keychain.py swift test -c release
+          # The build must use the frozen lock the manifest hashed, not one the
+          # test toolchain may have rewritten while resolving.
+          git checkout -- Package.resolved
+
+      - name: Load frozen release manifest
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+        run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface mac-direct
+
+      - name: Stamp immutable app metadata
+        if: steps.receipt.outputs.status != 'verified'
+        run: python3 scripts/stamp-release-train.py mac-direct
 
       - name: Install Tuist
         if: steps.receipt.outputs.status != 'verified'
@@ -77,16 +95,8 @@ jobs:
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME"
 
-      - name: Run Tests (Release Config)
-        if: steps.receipt.outputs.status != 'verified'
-        run: |
-          # Defence in depth: the pre-merge gate is the release-validation job
-          # in ci.yml; this re-run protects tags cut from any unvalidated state.
-          echo "Re-running release-configuration tests as post-tag defence in depth..."
-          swift test -c release
-
-      # Release tests exercise real Keychain migration. Run them before replacing
-      # the runner's Keychain search list with the temporary signing Keychain.
+      # Release tests exercise real Keychain migration. They ran above, before
+      # the runner's Keychain search list is replaced with the signing Keychain.
       - name: Import Code Signing Certificate
         if: steps.receipt.outputs.status != 'verified'
         env:

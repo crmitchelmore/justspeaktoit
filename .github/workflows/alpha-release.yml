@@ -38,10 +38,14 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      # Dispatches with the workflow token: this workflow grants actions: write,
+      # and workflow_dispatch events created with GITHUB_TOKEN do start runs.
+      # The personal token used before lacked Actions write, so every hourly
+      # pass failed with HTTP 403 and no missed merge was ever retried.
       - name: Reconcile missing successful merges
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.source == '')
         env:
-          GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/release-train.mjs reconcile
       - name: Allocate immutable Alpha manifest
         id: allocate

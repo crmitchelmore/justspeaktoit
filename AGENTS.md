@@ -40,6 +40,8 @@ frozen manifest hash through `publish-stable.yml`. Stable publication must never
 be inferred from a main merge, tag push, upload or successful TestFlight build.
 The three release workers are reusable workflows accepting a manifest tag only.
 
+Before an App Store submission, read [`Docs/ios-app-store-submission.md`](Docs/ios-app-store-submission.md): it records which review requirements the repo already satisfies, and which ones (export compliance answers, nutrition label, review notes) still have to be answered by hand in App Store Connect.
+
 ### VERSION File
 
 The `VERSION` file is a **hint** used as fallback when no macOS tag is present. It does NOT control an iOS TestFlight release. Keep it updated, but verify macOS against actual tags and iOS against App Store Connect.

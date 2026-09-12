@@ -23,6 +23,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
     private let speechModel: String
     private let sampleRate: Int
     private let session: URLSession
+    private let keyterms: [String]
     private let logger = SpeakLogger.logger(category: "AssemblyAILiveClient")
     private let stateLock = NSLock()
 
@@ -43,9 +44,26 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
         sampleRate: Int = 16_000,
         session: URLSession? = nil
     ) {
+        self.init(
+            apiKey: apiKey,
+            speechModel: speechModel,
+            sampleRate: sampleRate,
+            session: session,
+            keyterms: []
+        )
+    }
+
+    public init(
+        apiKey: String,
+        speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        sampleRate: Int = 16_000,
+        session: URLSession? = nil,
+        keyterms: [String]
+    ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.speechModel = speechModel
         self.sampleRate = sampleRate
+        self.keyterms = keyterms
         if let session {
             self.session = session
         } else {
@@ -130,18 +148,10 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
     // MARK: - Connection
 
     private func connect(using host: AssemblyAIStreamingEndpoint) {
-        guard let url = AssemblyAIStreamingRequest.url(
-            endpoint: host,
-            apiKey: apiKey,
-            sampleRate: sampleRate,
-            speechModel: speechModel
-        ) else {
+        guard let request = makeRequest(endpoint: host) else {
             currentOnError()?(StreamingClientError.invalidURL)
             return
         }
-
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "Authorization")
 
         let task = session.webSocketTask(with: request)
         let proceed = withStateLock { () -> Bool in
@@ -157,6 +167,22 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
         task.resume()
         receiveMessages()
         scheduleBeginTimeout(for: task)
+    }
+
+    func makeRequest(endpoint: AssemblyAIStreamingEndpoint) -> URLRequest? {
+        guard let url = AssemblyAIStreamingRequest.url(
+            endpoint: endpoint,
+            apiKey: apiKey,
+            sampleRate: sampleRate,
+            speechModel: speechModel,
+            keyterms: keyterms
+        ) else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue(apiKey, forHTTPHeaderField: "Authorization")
+        return request
     }
 
     private func scheduleBeginTimeout(for task: URLSessionWebSocketTask) {

@@ -5,8 +5,9 @@ class ReleaseAppleTest < Minitest::Test
   class FakeClient
     attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id
     attr_reader :posts
+    attr_accessor :beta_locales
     def initialize
-      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]
+      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]; @beta_locales=[]
     end
     def build
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
@@ -16,6 +17,7 @@ class ReleaseAppleTest < Minitest::Test
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
     def list(path)
+      return beta_locales if path.end_with?('/betaAppLocalizations')
       if path.start_with?('/v1/builds?')
         return review_busy ? [build] : [] if path.include?('betaAppReviewSubmission')
         return [build]
@@ -26,10 +28,14 @@ class ReleaseAppleTest < Minitest::Test
     end
     def post(path, body)
       @posts << path
+      @beta_locales << {'id'=>'beta-locale', 'attributes'=>body[:data][:attributes].transform_keys(&:to_s)} if path == '/v1/betaAppLocalizations'
       @assigned=true if path.end_with?('/relationships/builds')
       {'data'=>{}}
     end
-    def patch(path, body); {'data'=>{}}; end
+    def patch(path, body)
+      beta_locales.find { |l| path.end_with?(l['id']) }['attributes'].merge!(body[:data][:attributes].transform_keys(&:to_s)) if path.start_with?('/v1/betaAppLocalizations/')
+      {'data'=>{}}
+    end
   end
   class Delivery < AppleRelease::Delivery
     attr_reader :receipts
@@ -41,6 +47,39 @@ class ReleaseAppleTest < Minitest::Test
     notes='Frozen notes'
     manifest={'train'=>train,'source'=>'a'*40,'tag'=>'alpha-build-1','surfaces'=>{'ios'=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
     Delivery.new(client:client,manifest:manifest,surface:'ios')
+  end
+  def test_beta_description_is_created_once_and_existing_copy_is_preserved
+    client=FakeClient.new; d=delivery(client)
+    d.ensure_beta_description
+    assert_equal 1,client.beta_locales.size
+    client.beta_locales.first['attributes']['description']='Owner copy'
+    d.ensure_beta_description
+    assert_equal 'Owner copy',client.beta_locales.first['attributes']['description']
+    assert_equal 1,client.posts.count('/v1/betaAppLocalizations')
+  end
+  def test_missing_english_description_is_repaired_before_beta_review
+    client=FakeClient.new
+    client.beta_locales=[{'id'=>'existing','attributes'=>{'locale'=>'en-US','description'=>''}}]
+    delivery(client).distribute(wait_seconds:0)
+    refute_empty client.beta_locales.first['attributes']['description']
+    assert_includes client.posts,'/v1/betaAppReviewSubmissions'
+  end
+  def test_concurrent_localization_creation_is_verified_without_claiming_review_wait
+    client=FakeClient.new
+    def client.post(path,body)
+      super
+      raise IOSProfileBootstrap::ConflictError.new('created concurrently',status:409) if path == '/v1/betaAppLocalizations'
+    end
+    d=delivery(client); d.distribute(wait_seconds:0)
+    assert_equal 'beta_review_pending',d.receipts.last.first
+    assert_includes client.posts,'/v1/betaAppReviewSubmissions'
+  end
+  def test_existing_translated_description_is_preserved
+    client=FakeClient.new
+    client.beta_locales=[{'id'=>'french','attributes'=>{'locale'=>'fr-FR','description'=>'Version de test'}}]
+    delivery(client).ensure_beta_description
+    assert_empty client.posts
+    assert_equal 'Version de test',client.beta_locales.first['attributes']['description']
   end
   def test_stable_candidate_never_assigns_testers
     client=FakeClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha')

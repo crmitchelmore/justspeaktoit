@@ -104,6 +104,35 @@ module AppleRelease
       end
     end
 
+    # New Alpha app records need app-level beta copy as well as build notes.
+    # Preserve owner-authored text and repair only missing English descriptions.
+    def ensure_beta_description
+      raise 'Only Alpha may configure beta metadata' unless @train == 'alpha'
+      description = 'Just Speak to It Alpha is a preview of our dictation and voice tools. '
+      description += 'Test recording, transcription, text delivery and history. '
+      description += 'Alpha installs separately from the stable app and keeps separate settings and data.'
+      path = "/v1/apps/#{@app}/betaAppLocalizations"
+      locales = @client.list(path)
+      if locales.empty?
+        begin
+          @client.post('/v1/betaAppLocalizations', data: {type: 'betaAppLocalizations',
+            attributes: {locale: 'en-GB', description: description},
+            relationships: {app: AppleRelease.relationship('apps', @app)}})
+        rescue IOSProfileBootstrap::ConflictError
+          # Another worker may have created it; the read-back below must prove it.
+        end
+      else
+        locales.each do |locale|
+          next unless locale.dig('attributes', 'description').to_s.strip.empty?
+          raise 'Missing non-English beta description requires translated copy' unless locale.dig('attributes', 'locale').to_s.start_with?('en')
+          @client.patch("/v1/betaAppLocalizations/#{locale.fetch('id')}", data: {
+            type: 'betaAppLocalizations', id: locale.fetch('id'), attributes: {description: description}})
+        end
+      end
+      verified = @client.list(path)
+      raise 'Beta description write was not observed' if verified.empty? || verified.any? { |l| l.dig('attributes', 'description').to_s.strip.empty? }
+    end
+
     def assign(found)
       raise 'Only Alpha may be distributed through TestFlight' unless @train == 'alpha'
       id = found.fetch('id')
@@ -133,6 +162,7 @@ module AppleRelease
           end
           # Apple enforces six submissions/day. A 409/429 remains pending and
           # the reconciler retries; it must not be reported as public delivery.
+          ensure_beta_description
           begin
             @client.post('/v1/betaAppReviewSubmissions', data: {type: 'betaAppReviewSubmissions', relationships: {build: AppleRelease.relationship('builds', id)}})
           rescue IOSProfileBootstrap::ApiError => error

@@ -53,7 +53,7 @@ struct PrivacyView: View {
 
             Toggle(
                 "Allow Universal Clipboard",
-                isOn: $settings.transcriptClipboardAllowsUniversalClipboard
+                isOn: $settings.transcriptAllowsUniversalClipboard
             )
             .accessibilityIdentifier("transcriptClipboardUniversalToggle")
 
@@ -131,7 +131,7 @@ struct PrivacyView: View {
                 }
                 InfoRow(
                     label: "Universal Clipboard",
-                    value: self.settings.transcriptClipboardAllowsUniversalClipboard ? "Allowed" : "Off"
+                    value: self.settings.transcriptAllowsUniversalClipboard ? "Allowed" : "Off"
                 )
                 InfoRow(label: "iCloud Sync", value: "Settings & keys (optional)")
             }
@@ -169,7 +169,7 @@ struct PrivacyView: View {
 
 extension AppSettings {
     var transcriptClipboardPrivacySummary: String {
-        let universalClipboard = self.transcriptClipboardAllowsUniversalClipboard
+        let universalClipboard = self.transcriptAllowsUniversalClipboard
             ? "Universal Clipboard is on, allowing copying between your Apple devices."
             : "Universal Clipboard is off. Enable it to allow copying between your Apple devices."
         return "Transcript copies expire on this iPhone after \(self.transcriptClipboardLifetime.displayName). "

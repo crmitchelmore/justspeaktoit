@@ -106,7 +106,7 @@ public final class AppSettings: ObservableObject {
         case autoPostProcess
         case hasLaunchedBefore
         case transcriptClipboardLifetimeSeconds
-        case transcriptClipboardAllowsUniversalClipboard
+        case transcriptUniversalClipboard = "transcriptClipboardAllowsUniversalClipboard"
         case transcriptClipboardNoticeVersion
     }
 
@@ -367,11 +367,11 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var transcriptClipboardAllowsUniversalClipboard: Bool {
+    @Published var transcriptAllowsUniversalClipboard: Bool {
         didSet {
             self.defaults.set(
-                self.transcriptClipboardAllowsUniversalClipboard,
-                forKey: DefaultsKey.transcriptClipboardAllowsUniversalClipboard.rawValue
+                self.transcriptAllowsUniversalClipboard,
+                forKey: DefaultsKey.transcriptUniversalClipboard.rawValue
             )
         }
     }
@@ -381,7 +381,7 @@ public final class AppSettings: ObservableObject {
     var transcriptClipboardPolicy: TranscriptClipboardPolicy {
         TranscriptClipboardPolicy(
             lifetime: self.transcriptClipboardLifetime,
-            allowsUniversalClipboard: self.transcriptClipboardAllowsUniversalClipboard
+            allowsUniversalClipboard: self.transcriptAllowsUniversalClipboard
         )
     }
 
@@ -541,7 +541,7 @@ public final class AppSettings: ObservableObject {
         let clipboardPolicy = TranscriptClipboardPolicy(
             storedLifetime: defaults.object(forKey: DefaultsKey.transcriptClipboardLifetimeSeconds.rawValue),
             storedAllowsUniversalClipboard: defaults.object(
-                forKey: DefaultsKey.transcriptClipboardAllowsUniversalClipboard.rawValue
+                forKey: DefaultsKey.transcriptUniversalClipboard.rawValue
             )
         )
         let storedClipboardNotice = defaults.object(forKey: DefaultsKey.transcriptClipboardNoticeVersion.rawValue)
@@ -628,7 +628,7 @@ public final class AppSettings: ObservableObject {
         self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
         self.liveActivitiesEnabled = liveActivities
         self.transcriptClipboardLifetime = clipboardPolicy.lifetime
-        self.transcriptClipboardAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
+        self.transcriptAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
         self.transcriptClipboardNoticeVersion = clipboardNoticeVersion
         self.visualDensity = density
         self.autoStartRecording = autoStart

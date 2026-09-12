@@ -110,24 +110,24 @@ final class TranscriptClipboardTests: XCTestCase {
         let first = AppSettings(defaults: defaults, loadsSecureStorage: false)
 
         XCTAssertEqual(first.transcriptClipboardLifetime, .fiveMinutes)
-        XCTAssertFalse(first.transcriptClipboardAllowsUniversalClipboard)
+        XCTAssertFalse(first.transcriptAllowsUniversalClipboard)
         XCTAssertTrue(first.isTranscriptClipboardNoticePending)
 
         first.transcriptClipboardLifetime = .oneMinute
-        first.transcriptClipboardAllowsUniversalClipboard = false
+        first.transcriptAllowsUniversalClipboard = false
 
         let restarted = AppSettings(defaults: defaults, loadsSecureStorage: false)
         XCTAssertEqual(restarted.transcriptClipboardLifetime, .oneMinute)
-        XCTAssertFalse(restarted.transcriptClipboardAllowsUniversalClipboard)
+        XCTAssertFalse(restarted.transcriptAllowsUniversalClipboard)
         XCTAssertTrue(restarted.isTranscriptClipboardNoticePending)
 
         restarted.transcriptClipboardLifetime = .fifteenMinutes
-        restarted.transcriptClipboardAllowsUniversalClipboard = true
+        restarted.transcriptAllowsUniversalClipboard = true
         _ = self.makeClipboard(policy: { restarted.transcriptClipboardPolicy }).copy("headless copy")
 
         let afterHeadlessCopy = AppSettings(defaults: defaults, loadsSecureStorage: false)
         XCTAssertEqual(afterHeadlessCopy.transcriptClipboardLifetime, .fifteenMinutes)
-        XCTAssertTrue(afterHeadlessCopy.transcriptClipboardAllowsUniversalClipboard)
+        XCTAssertTrue(afterHeadlessCopy.transcriptAllowsUniversalClipboard)
         XCTAssertTrue(afterHeadlessCopy.isTranscriptClipboardNoticePending)
 
         afterHeadlessCopy.acknowledgeTranscriptClipboardNotice()
@@ -139,13 +139,13 @@ final class TranscriptClipboardTests: XCTestCase {
     func testSettingsRejectMalformedStoredPolicyAndNoticeValues() {
         let defaults = self.makeDefaults()
         defaults.set("900", forKey: AppSettings.DefaultsKey.transcriptClipboardLifetimeSeconds.rawValue)
-        defaults.set(1, forKey: AppSettings.DefaultsKey.transcriptClipboardAllowsUniversalClipboard.rawValue)
+        defaults.set(1, forKey: AppSettings.DefaultsKey.transcriptUniversalClipboard.rawValue)
         defaults.set(true, forKey: AppSettings.DefaultsKey.transcriptClipboardNoticeVersion.rawValue)
 
         let settings = AppSettings(defaults: defaults, loadsSecureStorage: false)
 
         XCTAssertEqual(settings.transcriptClipboardLifetime, .fiveMinutes)
-        XCTAssertFalse(settings.transcriptClipboardAllowsUniversalClipboard)
+        XCTAssertFalse(settings.transcriptAllowsUniversalClipboard)
         XCTAssertTrue(settings.isTranscriptClipboardNoticePending)
     }
 
@@ -158,7 +158,7 @@ final class TranscriptClipboardTests: XCTestCase {
         XCTAssertTrue(settings.transcriptClipboardPrivacySummary.contains("not guaranteed"))
 
         settings.transcriptClipboardLifetime = .fifteenMinutes
-        settings.transcriptClipboardAllowsUniversalClipboard = true
+        settings.transcriptAllowsUniversalClipboard = true
         XCTAssertTrue(settings.transcriptClipboardPrivacySummary.contains("after 15 minutes"))
         XCTAssertTrue(settings.transcriptClipboardPrivacySummary.contains("Universal Clipboard is on"))
     }

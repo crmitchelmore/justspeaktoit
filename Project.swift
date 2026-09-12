@@ -199,7 +199,7 @@ var iosShareSettings: [String: SettingValue] = [
 var iosKeyboardSettings: [String: SettingValue] = [
     "APPLICATION_EXTENSION_API_ONLY": "YES",
     "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
-    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["RELEASE_SOURCE"] ?? "development"),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES"
@@ -361,7 +361,7 @@ var iosAppInfoPlist: [String: Plist.Value] = [
     "UIRequiresFullScreen": false,
     "CFBundleDisplayName": .string(trainValue("displayName")),
     "SpeakReleaseTrain": .string(releaseTrain),
-    "GitCommitSHA": .string(ProcessInfo.processInfo.environment["RELEASE_SOURCE"] ?? "development"),
+    "GitCommitSHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CFBundleShortVersionString": "$(MARKETING_VERSION)",
     "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
     // Purpose strings are read verbatim by App Review (guideline 5.1.1), so
@@ -457,7 +457,7 @@ let watchAppTarget: Target = .target(
         "WKCompanionAppBundleIdentifier": .string(trainValue("iosBundleIdentifier")),
         "CFBundleDisplayName": .string(trainValue("displayName")),
         "SpeakReleaseTrain": .string(releaseTrain),
-        "GitCommitSHA": .string(ProcessInfo.processInfo.environment["RELEASE_SOURCE"] ?? "development"),
+        "GitCommitSHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
         "NSMicrophoneUsageDescription":

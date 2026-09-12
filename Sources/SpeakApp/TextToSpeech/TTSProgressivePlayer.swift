@@ -174,6 +174,8 @@ extension TTSProgressivePlayer {
     settings: TTSSettings,
     using client: any ProgressiveTextToSpeechClient
   ) async throws -> TTSResult {
+    // A cancelled utterance must not open the audio device or provider stream.
+    try Task.checkCancellation()
     try prepare(sampleRate: client.progressiveSampleRate)
     do {
       let result = try await client.synthesizeProgressively(

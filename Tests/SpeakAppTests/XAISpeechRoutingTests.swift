@@ -163,11 +163,9 @@ final class XAISpeechRoutingTests: XCTestCase {
 
   // MARK: - Progressive playback failure handling
 
-  /// A failure raised while scheduling must reach the synthesis error path and
-  /// end the provider'"'"'s stream. Swallowing it would record usage and history
-  /// for an utterance nobody heard, and keep paying for audio nobody can play.
+  /// Cancellation before playback must not open an audio device or a paid stream.
   @MainActor
-  func testProgressivePlayback_aSchedulingFailureFailsTheSynthesisAndEndsTheStream() async {
+  func testProgressivePlayback_cancelledBeforeStartDoesNotStartTheProvider() async {
     let player = TTSProgressivePlayer()
     let client = FailingChunkProgressiveClient()
     let task = Task { @MainActor in
@@ -181,12 +179,12 @@ final class XAISpeechRoutingTests: XCTestCase {
     task.cancel()
     do {
       _ = try await task.value
-      XCTFail("a scheduling failure must not be reported as a successful synthesis")
+      XCTFail("cancelled playback must not succeed")
+    } catch is CancellationError {
+      XCTAssertFalse(client.didStart)
+      XCTAssertFalse(player.isActive)
     } catch {
-      XCTAssertTrue(
-        client.sawChunkFailure,
-        "the failure must reach the provider so it stops the paid stream"
-      )
+      XCTFail("expected cancellation, got \(error)")
     }
   }
 
@@ -212,6 +210,7 @@ private final class FailingChunkProgressiveClient: TextToSpeechClient, Progressi
   let provider: TTSProvider = .xai
   let progressiveSampleRate = XAITTSAPI.defaultSampleRate
   private(set) var sawChunkFailure = false
+  private(set) var didStart = false
 
   func synthesize(text: String, voice: String, settings: TTSSettings) async throws -> TTSResult {
     throw TTSError.synthesisFailure("not used")
@@ -229,6 +228,7 @@ private final class FailingChunkProgressiveClient: TextToSpeechClient, Progressi
     settings: TTSSettings,
     onAudioChunk: @escaping @Sendable (Data) async throws -> Void
   ) async throws -> TTSResult {
+    didStart = true
     do {
       try await onAudioChunk(Data(repeating: 0, count: 64))
     } catch {

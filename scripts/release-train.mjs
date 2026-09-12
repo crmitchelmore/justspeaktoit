@@ -114,7 +114,7 @@ if(command === 'allocate' || command === 'prepare') {
     const config=json('Sources/SpeakCore/Resources/ReleaseTrains.json')[manifest.train];
     const item=manifest.surfaces[surface];
     const values={TUIST_RELEASE_TRAIN:manifest.train,RELEASE_TRAIN:manifest.train,RELEASE_TAG:manifest.tag,
-        RELEASE_SOURCE:manifest.source,RELEASE_VERSION:item.version,BUILD_NUMBER:item.build,
+        RELEASE_SOURCE:manifest.source,TUIST_RELEASE_SOURCE:manifest.source,RELEASE_VERSION:item.version,BUILD_NUMBER:item.build,
         DOWNLOAD_TAG:manifest.train === "alpha" ? manifest.tag : `mac-v${item.version}`,
         CLI_VERSION:manifest.train === "alpha" ? `${item.version}-alpha.${manifest.ordinal}` : item.version,
         BUNDLE_ID:config[surface==='ios'?'iosBundleIdentifier':surface==='mac-store'?'storeMacBundleIdentifier':'directMacBundleIdentifier'],

@@ -50,11 +50,7 @@ extension CompareModelsController {
             return
         }
         let selection = selectedUsableCandidates
-        let placeholders = selection.map {
-            ModelComparisonEntry(
-                modelID: $0.modelID, modelDisplayName: $0.displayName, providerDisplayName: $0.providerDisplayName
-            )
-        }
+        let placeholders = selection.map(Self.placeholderEntry)
         let roundMode: ModelComparisonInputMode = mode == .batch || !queuedFiles.isEmpty ? .batch : .file
         var round = makeRound(entries: placeholders, mode: roundMode, sample: sample)
         currentRound = round
@@ -79,6 +75,11 @@ extension CompareModelsController {
         // Keep the placeholder ids so the blind order drawn up front holds.
         round.entries = entries.map { Self.rekeyed($0, idsByModel: idsByModel) }
         beginJudging(round)
+    }
+
+    private static func placeholderEntry(_ candidate: ComparisonCandidate) -> ModelComparisonEntry {
+        ModelComparisonEntry(modelID: candidate.modelID, modelDisplayName: candidate.displayName,
+                             providerDisplayName: candidate.providerDisplayName)
     }
 
     private static func rekeyed(_ entry: ModelComparisonEntry, idsByModel: [String: UUID]) -> ModelComparisonEntry {

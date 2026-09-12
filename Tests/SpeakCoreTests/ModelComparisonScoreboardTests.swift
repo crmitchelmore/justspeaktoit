@@ -112,5 +112,6 @@ final class ModelComparisonScoreboardTests: XCTestCase {
 
         let scores = ModelComparisonScoreboard.scores(for: [first, second])
         XCTAssertEqual(scores.first?.modelDisplayName, "New")
+        XCTAssertEqual(ModelComparisonScoreboard.scores(for: [second, first]).first?.modelDisplayName, "New")
     }
 }

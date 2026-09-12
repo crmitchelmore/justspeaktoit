@@ -68,24 +68,8 @@ final class ComparisonLiveFanOut {
         guard !isRunning else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
         let runID = UUID()
         generation = runID
-        let permission = await permissionsManager.ensureGranted(.microphone)
-        guard generation == runID, !Task.isCancelled else { throw CancellationError() }
-        guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
-
-        let inputSession = await audioDeviceManager.beginUsingPreferredInput()
-        guard generation == runID, !Task.isCancelled else {
-            await audioDeviceManager.endUsingPreferredInput(session: inputSession)
-            throw CancellationError()
-        }
-        activeInputSession = inputSession
-        audioEngine = AVAudioEngine()
+        let inputFormat = try await prepareCaptureInput(runID: runID)
         let inputNode = audioEngine.inputNode
-        inputNode.removeTap(onBus: 0)
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard audioInputFormatIsUsable(inputFormat) else {
-            await cleanup()
-            throw TranscriptionManagerError.noUsableAudioInput
-        }
 
         lanes = []
         for candidate in candidates {
@@ -126,6 +110,29 @@ final class ComparisonLiveFanOut {
         }
         isRunning = true
         return lanes.map(\.entry)
+    }
+
+    private func prepareCaptureInput(runID: UUID) async throws -> AVAudioFormat {
+        let permission = await permissionsManager.ensureGranted(.microphone)
+        guard generation == runID, !Task.isCancelled else { throw CancellationError() }
+        guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
+
+        let inputSession = await audioDeviceManager.beginUsingPreferredInput()
+        guard generation == runID, !Task.isCancelled else {
+            await audioDeviceManager.endUsingPreferredInput(session: inputSession)
+            throw CancellationError()
+        }
+        activeInputSession = inputSession
+        audioEngine = AVAudioEngine()
+        let inputNode = audioEngine.inputNode
+        inputNode.removeTap(onBus: 0)
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        guard audioInputFormatIsUsable(inputFormat) else {
+            await cleanup()
+            throw TranscriptionManagerError.noUsableAudioInput
+        }
+
+        return inputFormat
     }
 
     /// Stops the microphone, lets every session finish, and returns the

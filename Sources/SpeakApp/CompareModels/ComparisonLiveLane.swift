@@ -175,7 +175,6 @@ final class ComparisonLiveLane {
         appleSession = nil
     }
 
-
 }
 
 /// Erases the OS-26 availability of the Apple live session so the lane can

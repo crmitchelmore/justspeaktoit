@@ -93,7 +93,9 @@ final class ComparisonRoundStore: ObservableObject {
     func remove(id: UUID) {
         guard let round = round(id: id) else { return }
         var next = document
-        next.revisions[id] = ModelComparisonRevision(deleting: id, at: max(Date(), round.updatedAt.addingTimeInterval(0.001)))
+        next.revisions[id] = ModelComparisonRevision(
+            deleting: id, at: max(Date(), round.updatedAt.addingTimeInterval(0.001))
+        )
         next.acknowledgements[id] = nil
         guard save(next) else { return }
         discardSample(for: round)

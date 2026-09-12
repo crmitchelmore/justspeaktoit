@@ -107,8 +107,8 @@ public enum ModelComparisonScoreboard {
 
         mutating func absorb(entry: ModelComparisonEntry, in round: ModelComparisonRound) {
             // Later rounds carry the freshest display names.
-            if round.updatedAt >= latestNameAt {
-                latestNameAt = round.updatedAt
+            if round.createdAt >= latestNameAt {
+                latestNameAt = round.createdAt
                 modelDisplayName = entry.modelDisplayName
                 providerDisplayName = entry.providerDisplayName
             }

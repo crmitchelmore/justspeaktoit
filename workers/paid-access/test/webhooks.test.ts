@@ -1,5 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { Repository } from '../src/data/repository.js';
 import { hmacSha256Hex } from '../src/crypto.js';
 
 const WEBHOOK_SECRET = 'test-not-a-real-webhook-secret';
@@ -87,10 +88,7 @@ async function seedRevokedEntitlement(userId: string): Promise<void> {
 }
 
 async function entitlementStatus(userId: string): Promise<string | null> {
-  const row = await env.DB.prepare('SELECT status FROM entitlements WHERE user_id = ?1')
-    .bind(userId)
-    .first<{ status: string }>();
-  return row?.status ?? null;
+  return (await new Repository(env.DB).findEntitlement(userId))?.status ?? null;
 }
 
 describe('Stripe webhook signature verification', () => {
@@ -351,13 +349,9 @@ describe('Stripe webhook idempotency', () => {
     expect((await postStripeWebhook(repurchase)).status).toBe(200);
 
     expect(await entitlementStatus(userId)).toBe('active');
-    const row = await env.DB.prepare(
-      'SELECT revoked_at, revocation_reason FROM entitlements WHERE user_id = ?1',
-    )
-      .bind(userId)
-      .first<{ revoked_at: number | null; revocation_reason: string | null }>();
-    expect(row?.revoked_at).toBeNull();
-    expect(row?.revocation_reason).toBeNull();
+    const row = await new Repository(env.DB).findEntitlement(userId);
+    expect(row?.revokedAt).toBeNull();
+    expect(row?.revocationReason).toBeNull();
   });
 
   it('accepts a subscription billing on the plan\'s yearly price', async () => {
@@ -369,11 +363,8 @@ describe('Stripe webhook idempotency', () => {
     expect((await postStripeWebhook(yearly)).status).toBe(200);
 
     expect(await entitlementStatus(userId)).toBe('active');
-    const row = await env.DB.prepare('SELECT plan_id FROM entitlements WHERE user_id = ?1')
-      .bind(userId)
-      .first<{ plan_id: string }>();
-    // The price actually billed, so the record does not claim to be monthly.
-    expect(row?.plan_id).toBe(PLAN_YEARLY_PRICE_ID);
+    const row = await new Repository(env.DB).findEntitlement(userId);
+    expect(row?.planId).toBe(PLAN_YEARLY_PRICE_ID);
   });
 });
 

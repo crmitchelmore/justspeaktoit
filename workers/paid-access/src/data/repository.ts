@@ -17,6 +17,7 @@ import type {
   EntitlementSource,
   EntitlementStatus,
 } from '../entitlement.js';
+import { grantsAccess } from '../entitlement.js';
 import type { UserRole } from '../auth/session.js';
 
 export type PaidOperationName = 'live_transcription' | 'batch_transcription' | 'post_processing';
@@ -278,7 +279,7 @@ export class Repository {
   // Entitlements
   // -------------------------------------------------------------------------
 
-  async findEntitlement(userId: string): Promise<Entitlement | null> {
+  private async findLegacyEntitlement(userId: string): Promise<Entitlement | null> {
     const row = await this.db
       .prepare(
         `SELECT id, user_id, plan_id, status, source, source_reference,
@@ -291,12 +292,53 @@ export class Repository {
     return row === null ? null : toEntitlement(row);
   }
 
+  async findEntitlement(userId: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Entitlement | null> {
+    const result = await this.db.prepare('SELECT * FROM subscription_states WHERE user_id = ?1')
+      .bind(userId).all<EntitlementRow>();
+    const states = result.results.map(toEntitlement);
+    const legacy = await this.findLegacyEntitlement(userId);
+    // Preserve a legacy purchase until it has a source-specific record.
+    // The new table is authoritative once that purchase has been migrated.
+    if (legacy !== null && !states.some((state) =>
+      state.source === legacy.source && state.sourceReference === legacy.sourceReference)) states.push(legacy);
+    const active = states.filter((state) => grantsAccess(state, nowSeconds));
+    const candidates = active.length > 0 ? active : states;
+    candidates.sort((left, right) => {
+      if (active.length > 0) {
+        const end = (right.currentPeriodEnd ?? Number.MAX_SAFE_INTEGER) -
+          (left.currentPeriodEnd ?? Number.MAX_SAFE_INTEGER);
+        if (end !== 0) return end;
+      }
+      return (right.sourceEventAt ?? 0) - (left.sourceEventAt ?? 0) || left.id.localeCompare(right.id);
+    });
+    return candidates[0] ?? null;
+  }
+
+  async ensureSubscription(userId: string, source: EntitlementSource,
+    sourceReference: string | null, nowSeconds: number): Promise<Entitlement> {
+    await this.ensureEntitlement(userId, nowSeconds);
+    // Seed the matching legacy purchase, retaining its status and event clock.
+    await this.db.prepare(`INSERT OR IGNORE INTO subscription_states SELECT * FROM entitlements
+      WHERE user_id = ?1 AND source = ?2 AND source_reference IS ?3`)
+      .bind(userId, source, sourceReference).run();
+    await this.db.prepare(`INSERT INTO subscription_states
+      (id, user_id, plan_id, status, source, source_reference, created_at, updated_at)
+      VALUES (?1, ?2, 'free', 'none', ?3, ?4, ?5, ?5) ON CONFLICT DO NOTHING`)
+      .bind(crypto.randomUUID(), userId, source, sourceReference, nowSeconds).run();
+    const row = await this.db.prepare(`SELECT * FROM subscription_states
+      WHERE user_id = ?1 AND source = ?2 AND source_reference IS ?3`)
+      .bind(userId, source, sourceReference).first<EntitlementRow>();
+    if (row === null) throw new Error('Subscription belongs to another account');
+    return toEntitlement(row);
+  }
+
   async findUserIdBySourceReference(
     source: EntitlementSource,
     sourceReference: string,
   ): Promise<string | null> {
     const row = await this.db
-      .prepare(`SELECT user_id FROM entitlements WHERE source = ?1 AND source_reference = ?2`)
+      .prepare(`SELECT user_id FROM subscription_states WHERE source = ?1 AND source_reference = ?2
+         UNION SELECT user_id FROM entitlements WHERE source = ?1 AND source_reference = ?2 LIMIT 1`)
       .bind(source, sourceReference)
       .first<{ user_id: string }>();
     return row?.user_id ?? null;
@@ -334,6 +376,7 @@ export class Repository {
   async writeEntitlementTransition(input: {
     next: Entitlement;
     expectedVersion: number;
+    scopeToSubscription?: boolean;
     fromStatus: EntitlementStatus;
     reason: string;
     eventSource: 'stripe' | 'storekit' | 'manual' | 'system';
@@ -342,14 +385,16 @@ export class Repository {
     nowSeconds: number;
   }): Promise<boolean> {
     const { next } = input;
+    const table = input.scopeToSubscription ? 'subscription_states' : 'entitlements';
     const update = this.db
       .prepare(
-        `UPDATE entitlements
+        `UPDATE ${table}
             SET plan_id = ?2, status = ?3, source = ?4, source_reference = ?5,
                 current_period_start = ?6, current_period_end = ?7,
                 cancel_at_period_end = ?8, revoked_at = ?9, revocation_reason = ?10,
                 version = ?11, source_event_at = ?12, updated_at = ?13
-          WHERE user_id = ?1 AND version = ?14`,
+          WHERE user_id = ?1 AND version = ?14
+            AND (?15 = 0 OR (source = ?16 AND source_reference IS ?17))`,
       )
       .bind(
         next.userId,
@@ -366,6 +411,9 @@ export class Repository {
         next.sourceEventAt,
         input.nowSeconds,
         input.expectedVersion,
+        input.scopeToSubscription ? 1 : 0,
+        next.source,
+        next.sourceReference,
       );
 
     // changes() reports the row count of the immediately preceding statement

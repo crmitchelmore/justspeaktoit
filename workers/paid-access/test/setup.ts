@@ -18,6 +18,7 @@ beforeEach(async () => {
     'usage_ledger',
     'webhook_events',
     'billing_customers',
+    'subscription_states',
     'entitlements',
     'auth_sessions',
     'users',

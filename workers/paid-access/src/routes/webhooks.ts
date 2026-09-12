@@ -151,8 +151,8 @@ export async function handleStripeWebhook(
     // product on the same Stripe customer, or a previous subscription of ours.
     // It may only apply to the subscription the entitlement actually names.
     if (!grantsAccess && userId !== null) {
-      const current = await context.repository.findEntitlement(userId);
-      if (current !== null && current.sourceReference !== view.subscriptionId) {
+      const owner = await context.repository.findUserIdBySourceReference('stripe', view.subscriptionId);
+      if (owner !== userId) {
         await context.repository.completeWebhookEvent({
           provider: 'stripe',
           eventId: event.id,

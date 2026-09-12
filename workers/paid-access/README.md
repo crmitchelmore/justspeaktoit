@@ -187,6 +187,6 @@ Rules:
 
 Post-processing reserves UTF-8 prompt bytes plus framing overhead and a 4,096-token completion budget. The same completion limit is sent upstream. Provider-reported usage is recorded without clipping; missing usage uses the reserved ceiling. Live sessions persist their measured outcome before quota delivery and retry every 30 seconds until delivery succeeds. A delayed measured settlement corrects an expired reservation's provisional charge.
 
-Subscription event ordering is scoped to the purchase source and reference. An unrelated purchase cannot replace an active entitlement. Management uses the existing entitlement's purchase source; App Store builds explain where website subscriptions are managed.
+Subscription event ordering is scoped to the purchase source and reference. Each verified purchase is stored by account, source, and subscription reference. Account access is derived from all active purchases without multiplying the per-account quota. Expiry, refund, and renewal on one purchase cannot remove another purchase. Management uses the existing entitlement's purchase source; App Store builds explain where website subscriptions are managed.
 
-A scheduled job removes up to 1,000 expired request claims every 15 minutes using an expiry index. Apply both migrations before enabling the worker. Claims contain no response bodies or dictated text. Paid routing remains disabled by default pending staging and billing configuration.
+A scheduled job removes up to 1,000 expired request claims every 15 minutes using an expiry index. Apply all migrations before enabling the worker. Claims contain no response bodies or dictated text. Paid routing remains disabled by default pending staging and billing configuration.

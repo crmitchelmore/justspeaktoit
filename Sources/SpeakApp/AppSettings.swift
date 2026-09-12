@@ -1508,6 +1508,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private func reloadMigrationBehaviour(_ restored: AppSettings) {
+    self.paidAccessRoutingEnabled = restored.paidAccessRoutingEnabled
+    self.simpleModelChoices = restored.simpleModelChoices
     self.silenceThreshold = restored.silenceThreshold
     self.silenceDuration = restored.silenceDuration
     self.connectionPreWarmingEnabled = restored.connectionPreWarmingEnabled

@@ -58,7 +58,9 @@ export async function transitionEntitlement(
   },
 ): Promise<{ applied: boolean; entitlement: Entitlement }> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const current = await context.repository.ensureEntitlement(input.userId, context.nowSeconds);
+    const current = await context.repository.ensureSubscription(
+      input.userId, input.source, input.sourceReference, context.nowSeconds,
+    );
     const outcome = applyUpdate(
       current,
       {
@@ -76,12 +78,13 @@ export async function transitionEntitlement(
     );
 
     if (outcome.kind === 'stale') {
-      return { applied: false, entitlement: outcome.current };
+      return { applied: false, entitlement: (await context.repository.findEntitlement(input.userId, context.nowSeconds))! };
     }
 
     const written = await context.repository.writeEntitlementTransition({
       next: outcome.next,
       expectedVersion: current.version,
+      scopeToSubscription: true,
       fromStatus: current.status,
       reason: input.reason,
       eventSource: input.eventSource,
@@ -90,7 +93,7 @@ export async function transitionEntitlement(
       nowSeconds: context.nowSeconds,
     });
     if (written) {
-      return { applied: true, entitlement: outcome.next };
+      return { applied: true, entitlement: (await context.repository.findEntitlement(input.userId, context.nowSeconds))! };
     }
   }
   throw new ApiError('conflict', 'Entitlement is being updated concurrently; retry');

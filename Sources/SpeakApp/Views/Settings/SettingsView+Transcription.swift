@@ -11,11 +11,15 @@ extension SettingsView {
       // 1. Where transcription runs.
       transcriptionModeCard
 
+      if hidesModelSelection {
+        simpleModelChoicesNotice
+      }
+
       // 2. Which model runs it. Exactly one of these matches the selected mode.
-      if isRemoteStreamingTranscriptionSelected {
+      if isRemoteStreamingTranscriptionSelected && !hidesModelSelection {
         remoteStreamingModelCard
       }
-      if settings.transcriptionMode == .batchRemote {
+      if settings.transcriptionMode == .batchRemote && !hidesModelSelection {
         remoteBatchModelCard
       }
       if isAppleOnDeviceTranscriptionSelected {

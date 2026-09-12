@@ -21,6 +21,10 @@ issues.jsonl
 
 # Quality Software conformance derived evidence
 .conformance/
+
+# Cloudflare Worker (workers/paid-access)
+node_modules/
+.wrangler/
 .build-xc*/
 research/
 

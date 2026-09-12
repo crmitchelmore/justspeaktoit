@@ -21,7 +21,9 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         let request = try XCTUnwrap(factory.requests.first)
         XCTAssertEqual(request.url?.path, "/v1/speech-to-text/realtime")
         XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "test-key")
-        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+        let query = try XCTUnwrap(
+            URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+        )
         XCTAssertEqual(query.first { $0.name == "audio_format" }?.value, "pcm_16000")
         XCTAssertEqual(query.first { $0.name == "commit_strategy" }?.value, "vad")
         XCTAssertFalse(socket.messages.contains { if case .data = $0 { return true }; return false })
@@ -40,7 +42,10 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         let condition2 = await eventually { socket.messages.count == 2 }
         XCTAssertTrue(condition2)
         let payloads = try textMessages(socket).map(json)
-        XCTAssertEqual(payloads.map { $0["audio_base_64"] as? String }, [Data([1, 2]), Data([3, 4])].map { $0.base64EncodedString() })
+        XCTAssertEqual(
+            payloads.map { $0["audio_base_64"] as? String },
+            [Data([1, 2]), Data([3, 4])].map { $0.base64EncodedString() }
+        )
     }
 
     func testFinishBeforeHandshakeReplaysThenCommitsAndRetainsLateFinals() async {

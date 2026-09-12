@@ -59,6 +59,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private let queue = DispatchQueue(label: "ElevenLabsLiveClient.session")
     private let queueKey = DispatchSpecificKey<UInt8>()
     private let callbackQueue = DispatchQueue(label: "ElevenLabsLiveClient.callbacks")
+    private static let errorMessageTypes: Set<String> = [
+        "error", "auth_error", "quota_exceeded", "throttled", "unaccepted_terms",
+        "rate_limited", "queue_overflow", "resource_exhausted", "session_time_limit_exceeded",
+        "input_error", "invalid_request", "chunk_size_exceeded", "insufficient_audio_activity",
+        "transcriber_error"
+    ]
     private var run: Run?
     private var lastTranscript: String?
     private var callbackRunID: UUID?
@@ -215,7 +221,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             queue.sync { run?.socket.cancel(with: .goingAway, reason: nil) }
         }
     }
+}
 
+extension ElevenLabsLiveClient {
     private func receive(on current: Run) {
         current.socket.receive { [weak self, weak current] result in
             guard let self, let current else { return }
@@ -244,6 +252,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
               let data = text.data(using: .utf8),
               let response = try? JSONDecoder().decode(ElevenLabsStreamResponse.self, from: data) else { return }
 
+        if let messageType = response.messageType, Self.errorMessageTypes.contains(messageType) {
+            emitError(providerError(response), on: current)
+            complete(current, closeCode: .goingAway)
+            return
+        }
+
         switch response.messageType {
         case "session_started":
             guard !current.ready else { return }
@@ -255,17 +269,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             guard let text = response.text, !text.isEmpty, !current.finishing else { return }
             emitTranscript(text, isFinal: false, on: current)
         case "committed_transcript":
-            guard let text = response.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            guard let text = response.text,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             current.accumulated.append(final: text)
             if !current.finishing { emitTranscript(text, isFinal: true, on: current) }
         case "committed_transcript_with_timestamps":
             break
-        case "error", "auth_error", "quota_exceeded", "throttled", "unaccepted_terms",
-             "rate_limited", "queue_overflow", "resource_exhausted", "session_time_limit_exceeded",
-             "input_error", "invalid_request", "chunk_size_exceeded", "insufficient_audio_activity",
-             "transcriber_error":
-            emitError(providerError(response), on: current)
-            complete(current, closeCode: .goingAway)
         default:
             break
         }

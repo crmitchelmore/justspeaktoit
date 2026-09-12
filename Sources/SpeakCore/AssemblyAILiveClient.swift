@@ -38,7 +38,7 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
 
     private var transcriptAssembler = AssemblyAIStreamingTranscriptAssembler()
 
-    public init(
+    public convenience init(
         apiKey: String,
         speechModel: String = AssemblyAIModels.universal35ProAPIName,
         sampleRate: Int = 16_000,
@@ -126,7 +126,9 @@ public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecke
             self.scheduleTerminationTimeout(for: task)
         }
     }
+}
 
+extension AssemblyAILiveClient {
     private func scheduleTerminationTimeout(for task: URLSessionWebSocketTask) {
         DispatchQueue.global().asyncAfter(deadline: .now() + Self.terminationTimeoutSeconds) { [weak self, weak task] in
             guard let self, let task else { return }

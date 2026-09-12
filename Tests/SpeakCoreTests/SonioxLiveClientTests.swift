@@ -62,7 +62,9 @@ final class SonioxLiveClientTests: XCTestCase {
         client.start(onTranscript: { _, isFinal in if isFinal { final.fulfill() } }, onError: { _ in })
         let condition8 = await eventually { socket.messages.count == 1 }
         XCTAssertTrue(condition8)
-        socket.emit(#"{"tokens":[{"text":"Yes ","is_final":true},{"text":"Yes","is_final":true},{"text":"<fin>","is_final":true}]}"#)
+        let repeatedTokens = #"{"tokens":[{"text":"Yes ","is_final":true},"#
+            + #"{"text":"Yes","is_final":true},{"text":"<fin>","is_final":true}]}"#
+        socket.emit(repeatedTokens)
         socket.emit(#"{"tokens":[{"text":"<fin>","is_final":true}]}"#)
         await fulfillment(of: [final], timeout: 1)
         client.stop()

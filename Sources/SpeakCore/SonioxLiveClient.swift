@@ -208,7 +208,9 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             queue.sync { run?.socket.cancel(with: .goingAway, reason: nil) }
         }
     }
+}
 
+extension SonioxLiveClient {
     private func initialConfigurationMessage() -> URLSessionWebSocketTask.Message? {
         var payload: [String: Any] = [
             "api_key": apiKey,
@@ -261,30 +263,19 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             return
         }
 
-        var newFinals = ""
-        var nonFinals = ""
-        var sawMarker = false
-        for token in response.tokens ?? [] {
-            if token.text == "<fin>" || token.text == "<end>" {
-                sawMarker = true
-            } else if token.isFinal == true {
-                newFinals.append(token.text)
-            } else {
-                nonFinals.append(token.text)
-            }
-        }
-        if !newFinals.isEmpty {
-            current.accumulatedFinalText.append(newFinals)
+        let summary = response.tokenSummary
+        if !summary.finals.isEmpty {
+            current.accumulatedFinalText.append(summary.finals)
             current.finalVersion += 1
         }
 
-        let display = (current.accumulatedFinalText + nonFinals)
+        let display = (current.accumulatedFinalText + summary.nonFinals)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !display.isEmpty && response.tokens?.isEmpty == false {
             emitTranscript(display, isFinal: false, on: current)
         }
 
-        if (sawMarker || response.finished == true), !current.finishing,
+        if summary.sawMarker || response.finished == true, !current.finishing,
            current.finalVersion > current.deliveredFinalVersion,
            let final = transcript(current) {
             current.deliveredFinalVersion = current.finalVersion
@@ -396,28 +387,5 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             return StreamingClientError.invalidAPIKey(provider: "Soniox")
         }
         return error
-    }
-}
-
-private struct SonioxStreamResponse: Decodable {
-    let tokens: [SonioxToken]?
-    let finished: Bool?
-    let errorCode: Int?
-    let errorMessage: String?
-
-    enum CodingKeys: String, CodingKey {
-        case tokens, finished
-        case errorCode = "error_code"
-        case errorMessage = "error_message"
-    }
-}
-
-private struct SonioxToken: Decodable {
-    let text: String
-    let isFinal: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case text
-        case isFinal = "is_final"
     }
 }

@@ -30,7 +30,7 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
     private var hasSentWAVHeader = false
     private var utteranceTexts: [String] = []
 
-    public init(apiKey: String, sampleRate: Int = 16_000, session: URLSession = .shared) {
+    public convenience init(apiKey: String, sampleRate: Int = 16_000, session: URLSession = .shared) {
         self.init(apiKey: apiKey, sampleRate: sampleRate, session: session, options: .none)
     }
 

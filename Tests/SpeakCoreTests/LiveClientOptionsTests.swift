@@ -20,7 +20,9 @@ final class LiveClientOptionsTests: XCTestCase {
 
         for endpoint in [AssemblyAIStreamingEndpoint.europe, .global] {
             let request = try XCTUnwrap(client.makeRequest(endpoint: endpoint))
-            let components = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false))
+            let components = try XCTUnwrap(
+                URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+            )
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "test-key")
             XCTAssertEqual(components.host, endpoint.rawValue)
             let encoded = try XCTUnwrap(components.queryItems?.first { $0.name == "keyterms_prompt" }?.value)
@@ -44,7 +46,9 @@ final class LiveClientOptionsTests: XCTestCase {
             piiPhiTagging: true
         )
         let request = try XCTUnwrap(ModulateLiveClient(apiKey: "test-key", options: options).makeRequest())
-        let items = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+        let items = try XCTUnwrap(
+            URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+        )
         XCTAssertEqual(items.filter { $0.name == "speaker_diarization" }.map(\.value), ["true"])
         XCTAssertEqual(items.filter { $0.name == "emotion_signal" }.map(\.value), ["false"])
         XCTAssertEqual(items.filter { $0.name == "accent_signal" }.map(\.value), ["true"])

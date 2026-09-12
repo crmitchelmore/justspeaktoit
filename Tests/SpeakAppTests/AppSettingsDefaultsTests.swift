@@ -54,6 +54,32 @@ final class AppSettingsDefaultsTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "transcriptionKeywords"), "Deepgram, Gladia")
     }
 
+    @MainActor
+    func testLiveClientOptionsProjectRecognitionSignalsAndSelectedTiming() {
+        let settings = AppSettings(defaults: defaults)
+        settings.transcriptionMode = .liveNative
+        settings.liveTranscriptionModel = AssemblyAIModels.universal35ProStreamingID
+        settings.transcriptionKeywords = " AssemblyAI, Universal 3.5 "
+        settings.modulateSpeakerDiarizationEnabled = true
+        settings.modulateEmotionSignalEnabled = true
+        settings.modulateAccentSignalEnabled = false
+        settings.modulatePIIPhiTaggingEnabled = true
+        settings.liveStopGracePeriod = 1.25
+
+        let options = settings.liveClientOptions
+
+        XCTAssertEqual(options.keywords, ["AssemblyAI", "Universal 3.5"])
+        XCTAssertEqual(options.assemblyAIKeyterms, ["AssemblyAI", "Universal 3.5"])
+        XCTAssertEqual(options.postStopFinalizeBudget, 2)
+        XCTAssertEqual(options.stopGracePeriod, 1.25)
+        XCTAssertEqual(options.modulate, ModulateLiveOptions(
+            speakerDiarization: true,
+            emotionSignal: true,
+            accentSignal: false,
+            piiPhiTagging: true
+        ))
+    }
+
     /// An existing macOS install has only the old key; its words survive.
     @MainActor
     func testTranscriptionKeywords_migrateFromTheLegacyKeytermsKey() {

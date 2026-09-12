@@ -19,6 +19,7 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
     private let apiKey: String
     private let sampleRate: Int
     private let session: URLSession
+    private let options: ModulateLiveOptions
     private let logger = SpeakLogger.logger(category: "ModulateLiveClient")
     private let stateLock = NSLock()
 
@@ -29,31 +30,31 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
     private var hasSentWAVHeader = false
     private var utteranceTexts: [String] = []
 
-    public init(apiKey: String, sampleRate: Int = 16_000, session: URLSession = .shared) {
+    public convenience init(apiKey: String, sampleRate: Int = 16_000, session: URLSession = .shared) {
+        self.init(apiKey: apiKey, sampleRate: sampleRate, session: session, options: .none)
+    }
+
+    public init(
+        apiKey: String,
+        sampleRate: Int = 16_000,
+        session: URLSession = .shared,
+        options: ModulateLiveOptions
+    ) {
         self.apiKey = apiKey
         self.sampleRate = sampleRate
         self.session = session
+        self.options = options
     }
 
     public func start(
         onTranscript: @escaping (String, Bool) -> Void,
         onError: @escaping (Error) -> Void
     ) {
-        var components = URLComponents(string: Self.endpoint)!
-        components.queryItems = [
-            URLQueryItem(name: "api_key", value: apiKey),
-            URLQueryItem(name: "speaker_diarization", value: "false"),
-            URLQueryItem(name: "emotion_signal", value: "false"),
-            URLQueryItem(name: "accent_signal", value: "false"),
-            URLQueryItem(name: "pii_phi_tagging", value: "false")
-        ]
-        guard let url = components.url else {
+        guard let request = makeRequest() else {
             onError(StreamingClientError.invalidURL)
             return
         }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 30
         let task = session.webSocketTask(with: request)
         withStateLock {
             isStopping = false
@@ -65,6 +66,22 @@ public final class ModulateLiveClient: StreamingTranscriptionClient, @unchecked 
         }
         task.resume()
         receiveMessages()
+    }
+
+    func makeRequest() -> URLRequest? {
+        var components = URLComponents(string: Self.endpoint)!
+        components.queryItems = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "speaker_diarization", value: String(options.speakerDiarization)),
+            URLQueryItem(name: "emotion_signal", value: String(options.emotionSignal)),
+            URLQueryItem(name: "accent_signal", value: String(options.accentSignal)),
+            URLQueryItem(name: "pii_phi_tagging", value: String(options.piiPhiTagging))
+        ]
+        guard let url = components.url else { return nil }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        return request
     }
 
     public func sendAudio(_ audioData: Data) {

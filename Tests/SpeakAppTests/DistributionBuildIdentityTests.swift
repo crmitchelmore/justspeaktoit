@@ -412,8 +412,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
             )
         )
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
-        XCTAssertTrue(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
-        XCTAssertTrue(workflow.contains("Direct-capture keyboard is missing $usage_key"))
+        XCTAssertTrue(workflow.contains("python3 scripts/verify-keyboard-purpose-strings.py"))
+        XCTAssertFalse(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
         XCTAssertFalse(autoRelease.contains("-f include_keyboard=true"))
         XCTAssertTrue(workflow.contains("ref: ${{ inputs.manifest }}"))
 

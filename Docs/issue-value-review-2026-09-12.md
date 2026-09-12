@@ -1,6 +1,6 @@
 # Issue value review — 12 September 2026
 
-This is review evidence, not a replacement for the canonical issue tracker. The initial inventory contained 98 open issues and four open PRs. This checkpoint contains 31 completed independent issue reviews; the remaining issues are not yet assessed. Implementation and validation are separate from these recommendations.
+This is review evidence, not a replacement for the canonical issue tracker. The initial inventory contained 98 open issues and four open PRs. This checkpoint contains 53 completed independent issue reviews; the remaining issues are not yet assessed. Implementation and validation are separate from these recommendations.
 
 ## Method and product goals
 
@@ -18,12 +18,20 @@ Native Apple builds and physical device checks cannot run on this Linux host. No
 
 [Draft PR #1132](https://github.com/crmitchelmore/justspeaktoit/pull/1132) implements #1120 benchmark isolation. All eleven moved source/test files preserve their bytes, the checksum and legacy decoding remain, and an independent native benchmark CI gate is added. Published commit: `066a619`; Apple resolution/lockfile/build/test/checksum validation is pending.
 
+[Draft PR #1133](https://github.com/crmitchelmore/justspeaktoit/pull/1133) implements #1125 retired tooling cleanup. 100 Node tests pass. Conformance removal remains gated by legacy branch-protection verification: the connector returned 403 for that separate protection family; active rulesets do not require it.
+
+[Draft PR #1134](https://github.com/crmitchelmore/justspeaktoit/pull/1134) implements #1129 current architecture documentation. Manifest, source, link and fence checks passed. This describes current ownership and outstanding risks.
+
+[Draft PR #1135](https://github.com/crmitchelmore/justspeaktoit/pull/1135) implements #1127 tooling test discovery. 125 Node and 40 Python tests plus projection checks passed. Ruby is unavailable locally and its CI gate remains required.
+
 Detailed accepted-scope plans are in `issue-plans-2026-09-12/`. [Runtime analytics qualification](issue-plans-2026-09-12/1121-evidence.md) found insufficient runtime-identifying production telemetry; unavailable usage is not zero usage.
 
 ## Decisions
 
 | Issue | Decision | Value |
 |---|---|---|
+| [#1027](https://github.com/crmitchelmore/justspeaktoit/issues/1027) — Epic: iOS capture — make one press always work, never lose the first words, land the text where the user was typing | NARROW | The outcome is the core product promise: reliable instant dictation with preserved text and truthful destination feedback. Retain the epic as an evidence-led coordination and qualification checklist. Its large implementation inventory describes old snapshots, duplicates implemented children, and includes optional experiments that must not become prerequisites for core reliability. No separate giant implementation is justified. |
+| [#1101](https://github.com/crmitchelmore/justspeaktoit/issues/1101) — Compare models: run one audio sample through N transcription models, judge blind, keep a scoreboard | ALREADY COVERED | High product value: personal blind comparisons let users choose transcription quality, latency and cost for their own voice. PR #1102 has now merged and implements this feature; a second implementation would duplicate working architecture. Retain the issue acceptance as a validation gate rather than start another feature build. |
 | [#1104](https://github.com/crmitchelmore/justspeaktoit/issues/1104) — refactor(core): close the feature gaps between the mac-only live transcribers and the SpeakCore live clients | IMPLEMENT | Necessary prerequisite for incremental shared-provider consolidation: retains user vocabulary and Modulate preferences while preventing lost final words. This is proven behavioural parity work, not a speculative architectural rewrite. |
 | [#1105](https://github.com/crmitchelmore/justspeaktoit/issues/1105) — refactor(mac): fold the AssemblyAI live controller onto SharedClientLiveController | IMPLEMENT | Worth doing as the template consolidation: one tested AssemblyAI transport reduces platform drift and duplicate audio lifecycle fixes. Reliability and preservation of first/final words take precedence over deleting lines. No visual change required. |
 | [#1106](https://github.com/crmitchelmore/justspeaktoit/issues/1106) — refactor(mac): fold the Cartesia live controller onto SharedClientLiveController | IMPLEMENT | A bounded consolidation removes duplicated audio capture and transport maintenance while letting macOS receive shared Cartesia fixes already used by iOS. Worth doing only with startup, PCM framing and final-word retention parity; lower line count alone is insufficient. |
@@ -50,11 +58,93 @@ Detailed accepted-scope plans are in `issue-plans-2026-09-12/`. [Runtime analyti
 | [#1127](https://github.com/crmitchelmore/justspeaktoit/issues/1127) — chore(tooling): consolidate release tooling from six languages to shell plus JavaScript | NARROW | Proceed with complete, discoverable tooling test coverage and a clear configuration boundary. These reduce release regressions and help users receive reliable dictation fixes. Do not make zero Python/Ruby files a success criterion: wholesale language ports add signing, provisioning and release risk without an evidenced user benefit. The issue's four-reader premise is stale: current Swift/Python catalogue generation reads ReleaseTrains.json, not ReleasePipeline.json, and projection freshness already runs in CI. |
 | [#1128](https://github.com/crmitchelmore/justspeaktoit/issues/1128) — test: drop swift-snapshot-testing (three PNGs) and fold the Tooling/ SwiftLint graph back into the root package | REJECT | The proposed deletion trades real UI regression protection and deliberate linter isolation for an unmeasured dependency reduction. The single assertSnapshot call is a shared helper used by three distinct rendering tests. Native visual quality, clear completion feedback, latency information and audio feedback are project goals; checking fixed output size or a few pixel colours would materially weaken that protection. A small test count is not evidence that a dependency is harmful. |
 | [#1129](https://github.com/crmitchelmore/justspeaktoit/issues/1129) — docs: rewrite Docs/Architecture.md to cover every module, both platforms, the extensions and the release train | NARROW | Proceed with a concise current-state architecture reference. The existing macOS-only map omits real app surfaces and module boundaries, increasing the risk that contributors duplicate shared catalogues or break capture, privacy and release isolation. This is useful documentation work now, but it must not present conditional consolidation proposals as completed architecture. |
+| [#611](https://github.com/crmitchelmore/justspeaktoit/issues/611) — Streaming insertion + latency as a first-class metric | NARROW | Fast, trustworthy dictation is the primary product goal, but most proposed software already exists. Proceed with a bounded measurement and target-qualification plan; do not rebuild insertion or latency UI, widen the AX allowlist to meet a numeric target, or optimise cold start without measured bottlenecks. |
+| [#614](https://github.com/crmitchelmore/justspeaktoit/issues/614) — Adopt SpeechAnalyzer/DictationTranscriber (iOS 26/macOS Tahoe) + voice-activated hands-free mode | NARROW | The on-device default and optional hands-free mode match fast, private, accessible dictation. Both now exist in main, so another implementation would duplicate working architecture. Narrow this parent issue to device qualification and accurate acceptance wording; its older comments incorrectly describe hands-free as unimplemented. |
+| [#648](https://github.com/crmitchelmore/justspeaktoit/issues/648) — [Feature] Paid Access | ALREADY COVERED | Optional managed billing removes API-key setup friction for nontechnical users and has clear value, provided local/BYOK remain first-class and costs are explicit. PR #665 already owns this implementation, including simplified model selection and post-processing. A second implementation would duplicate sensitive billing/routing state and reduce reliability. Coverage means existing ownership, not shipped or launch-ready. |
+| [#657](https://github.com/crmitchelmore/justspeaktoit/issues/657) — watch: complication + Smart Stack entry to start recording from the watch face | ALREADY COVERED | Starting a short voice capture from the watch face directly supports instant native dictation. The requested implementation is already present; duplicating it adds no value. Keep the issue open as the explicit paired-device acceptance gate rather than commission another feature implementation. |
+| [#659](https://github.com/crmitchelmore/justspeaktoit/issues/659) — watch: extended runtime session for wrist-down recordings | DEFER | Keeping every spoken word during wrist-down capture is core reliability value. The implementation already uses the ordinary audio background mechanism with interruption handling, durable active-capture recovery and idempotent finalisation. Latest issue comments explicitly narrow remaining acceptance to paired hardware. Further runtime code without a demonstrated failure has low value and risks replacing a deliberate policy choice with an unrelated extended-runtime category. Defer additional implementation, preserve the hardware gate and do not close as verified. |
+| [#661](https://github.com/crmitchelmore/justspeaktoit/issues/661) — iOS keyboard v2: run the physical-device matrix and flip the TestFlight flag | NARROW | Reliable dictation into other apps is central to the product, but this issue's original flag-flip and direct-capture assumptions are stale. The shipping keyboard already uses handoff, while the design document now records direct microphone capture as unavailable and retained only for possible future platform changes. A small documentation correction is valuable now because the existing runbook would send testers to nonexistent manual workflow inputs and imply that direct capture is a current rollout goal. Physical handoff verification remains valuable and open. |
+| [#664](https://github.com/crmitchelmore/justspeaktoit/issues/664) — test(mac): verify streaming insertion across the allowlisted target apps | NARROW | Proceed with the remaining two-app qualification gate because safe, exact insertion is core to reliable dictation. Preserve completed TextEdit evidence, finish Notes and both one-shot baselines, and keep five-app expansion in #611. No replacement streaming implementation or broad test tooling project is justified by this issue. |
+| [#776](https://github.com/crmitchelmore/justspeaktoit/issues/776) — Ship opt-in PostHog analytics transport, consent UI and audited rollout | NARROW | Proceed with the missing direct-macOS privacy controls and qualification evidence. An exact-payload inspector and operational local kill switch make the approved consent promise inspectable and give users control without affecting fast dictation. The transport, consent toggle and initial events already exist; rebuilding them or enabling wider collection has low value and would violate explicit rollout gates. |
+| [#802](https://github.com/crmitchelmore/justspeaktoit/issues/802) — Epic: protect the core dictation journey with fast macOS E2E regression tests | NARROW | High value: reliable dictation is the product promise, and shipped orchestration can regress despite passing provider/inserter unit tests. Continue from the substantial merged harness; do not rebuild it or claim the eight P0 journeys already pass. Prioritise a small missing production orchestration slice over expanding combinatorial test counts. |
+| [#814](https://github.com/crmitchelmore/justspeaktoit/issues/814) — feat(analytics): wire detailed transcription, post-processing and settings telemetry | DEFER | Latency distributions and terminal outcome counts could expose slow providers, lost final text and failed insertion, directly supporting fast, reliable dictation. Broad settings surveillance is less clearly tied to a product decision. Do not implement expanded collection now: the issue explicitly requires #776 production go/no-go evidence plus a clean week of phase-one payload inspection, and no supplied evidence clears that gate. This is a sequencing decision, not a rejection of useful reliability measurement. |
+| [#821](https://github.com/crmitchelmore/justspeaktoit/issues/821) — Product proposal: dynamic OpenRouter transcription and TTS model catalogue | NARROW | The one-key catalogue, selection and model-test journey is already delivered. The valuable remaining engineering slice is reducing time to first audible speech with progressive playback while retaining reliable cancellation and privacy. Rebuilding discovery or adding MAI-Transcribe-2 again provides no value. Broad provider-specific knobs are not justified without documented capability metadata and a concrete user need. |
 | [#934](https://github.com/crmitchelmore/justspeaktoit/issues/934) — iOS: the clipboard holds a placeholder after stop, and a late polish overwrites what the user copied since | NARROW | The raw-once contract directly protects instant usable dictation and prevents destruction of later user copies. Current main already implements the approved fix; repeating implementation adds no user value. Narrow the remaining issue to its explicit physical-iPhone delivery qualification gate. |
 | [#935](https://github.com/crmitchelmore/justspeaktoit/issues/935) — iOS: a Bluetooth route or engine configuration change silently kills capture | NARROW | Reliable capture and preservation of the last words are core product requirements. The controlled-stop implementation already landed in main via #1032 and integration commit f8af0b1. Reimplementing it has no demonstrated value; the remaining valuable scope is physical-device qualification of the implemented behaviour, with fixes only for reproduced failures. |
 | [#946](https://github.com/crmitchelmore/justspeaktoit/issues/946) — iOS: the Siri stop phrase arrives as an interruption, ignoring the destination and raising a stale error | DEFER | Reliable delivery and truthful Stop feedback matter to core hands-free dictation. Destination preservation and stale-alert suppression are now implemented under #936. The remaining Siri acknowledgement race warrants physical-device qualification before adding code; no observed ordering evidence or residual reproduction accompanies this issue. |
 | [#947](https://github.com/crmitchelmore/justspeaktoit/issues/947) — iOS: verify suspected Modulate opening-audio loss before adding preroll | NARROW | Protecting opening words directly supports instant, reliable dictation, but current evidence does not prove startup loss. Proceed only with bounded synthetic transport qualification; keep all production buffering changes deferred until actual startup loss is reproduced. This avoids adding latency, memory and lifecycle complexity on the basis of a misleading no-start test. |
 | [#954](https://github.com/crmitchelmore/justspeaktoit/issues/954) — iOS: explain native Control setup and add accurate Action Button hints | NARROW | Native trigger discovery directly reduces setup effort for fast dictation and matches native system controls. The requested implementation is now present on main; repeating it has no value. Retain only the explicit device and accessibility acceptance gate before declaring the issue complete. |
+| [#974](https://github.com/crmitchelmore/justspeaktoit/issues/974) — One audio-session configuration shared by readiness, detector and transcribers; caller-owned deactivation | DEFER | Reliable first-word capture and repeat keyboard dictation matter, but uniform audio options are not themselves a user benefit. Main now has owned session lifecycle and startup observations; the supplied issue and empty comments contain no new physical-device trace showing that configuration churn causes failure or material latency. Changing mixing, Bluetooth output or deactivation ownership without that evidence risks reliable capture and other audio. |
+| [#986](https://github.com/crmitchelmore/justspeaktoit/issues/986) — A warm window after every dictation: prepared engine, preheated analyzer and cached keys | DEFER | Faster repeated dictation supports the primary speed goal, but the proposed universal warm window combines materially different resource and privacy states without measured incremental benefit. Current Instant Dictation already retains a readiness engine and bounds/heals its lifetime. Existing explicit issue guidance requires repeated-start latency and idle resource measurements after lifecycle fixes before expanding retention. Preserve that evidence gate; this is not a Linux-only deferral. |
+| [#987](https://github.com/crmitchelmore/justspeaktoit/issues/987) — Headless triggers reuse the keyboard readiness warm state | DEFER | Preserving the first words of Action Button dictation is high product value, but this is an integration dependent on a capture-ownership mechanism that does not exist on current main. The keyboard itself tears down its readiness engine before provider capture; there is no proven warm capture handle for headless starts to reuse. Implementing a heartbeat shortcut now risks lost input and conflicts with the explicit issue comment's ownership/device gate. |
+| [#988](https://github.com/crmitchelmore/justspeaktoit/issues/988) — Dual-path first partial: on-device volatile text while the cloud socket connects | DEFER | Earlier visible text could reassure cloud dictation users, but the promised sub-0.5-second result is an estimate with no measured route-specific benefit. Running two recognisers introduces lifecycle, battery and transcript-authority complexity into the core reliability path. The latest issue comment explicitly retains evidence gates; current code also makes directly reusing partialText unsafe for display-only preview. |
+| [#989](https://github.com/crmitchelmore/justspeaktoit/issues/989) — Leading-silence guard: detect dead Bluetooth input and auto-fall-back to the built-in mic | DEFER | Preventing lost first words is central to reliable, instant dictation. However silence cannot establish microphone failure, and automatically moving capture from a selected headset to the phone can reduce quality and violate user expectations. The latest issue comment explicitly preserves the selected microphone pending device evidence and a fallback policy. Current evidence does not justify automatic rerouting. |
+| [#994](https://github.com/crmitchelmore/justspeaktoit/issues/994) — Clipboard hygiene: expiring, local-only transcripts with an explicit Universal Clipboard opt-in | IMPLEMENT | A concrete privacy improvement aligned with the privacy-first product: existing transcript writes set only the pasteboard string, so users have no explicit control over transcript clipboard retention or cross-device eligibility. A single policy can cover automatic delivery and deliberate copies without affecting transcription latency or the established raw-only delivery contract. |
+| [#996](https://github.com/crmitchelmore/justspeaktoit/issues/996) — Unified error taxonomy and one CaptureCommandRouter for every entry point | NARROW | Proceed with safe typed start-failure mapping and actionable recovery guidance. The current intent catch-all still wrongly directs users to permission settings for unrelated failures, harming reliable instant dictation. A universal recorder/router rewrite adds regression risk without equivalent user value now that ownership and quick-action routing fixes have landed. |
+| [#998](https://github.com/crmitchelmore/justspeaktoit/issues/998) — Regression harness: simulator XCUITests on the transcript hook, seam tests for lifecycle, a device matrix job | ALREADY COVERED | Reliable first-word capture and retained final text are core product outcomes, so the harness was worthwhile. Main now contains the simulator capture journeys, shared preroll contract table, simulator-labelled CI, manual Action Button matrix and disabled-by-default device job. A second umbrella implementation would duplicate delivered work. This does not mean every original speculative assertion is proven or every hardware scenario passes. |
+| [#999](https://github.com/crmitchelmore/justspeaktoit/issues/999) — Offline-first routing: record with no signal on-device, re-transcribe with the cloud model when online | NARROW | Proceed with capability-checked offline start routing: avoiding a known-offline cloud connection directly supports instant and reliable dictation. Separate and defer automatic later cloud upload: it changes privacy, billing and ownership of an already usable transcript, while manual saved-audio recovery already exists. |
+
+## #1027: Epic: iOS capture — make one press always work, never lose the first words, land the text where the user was typing
+
+Reviewer: `/root/issue_review_queue/review_1027`.
+
+**Smallest worthwhile scope:** Reconcile the epic checklist against current main and all per-issue review decisions, identifying implemented, accepted residual, device qualification, deferred and rejected children.; Make core release acceptance about successful start, preserved first/final words, truthful status and correct delivery; keep speculative trigger/agent/Watch features outside the must-pass set.; Link existing deterministic tests and device matrix evidence for each core journey. Only create new implementation work for a demonstrated residual gap not already owned by a child.
+
+- `Sources/SpeakiOS/Services/CaptureCommandRunner.swift`: Current main already centralises capture deep links and quick actions, guards active starts and surface ownership, pins destination overrides to capture identity, and preserves per-run parameters and specific start outcomes.
+- `Tests/SpeakiOSUITests/CaptureFlowUITests.swift`: The epic claim of zero iOS capture automation is stale: deterministic simulator tests exercise real view/coordinator state, transcript retention and repeated captures. The class explicitly excludes hardware audio and system Live Activity guarantees.
+- `.github/ISSUE_TEMPLATE/action_button_device_matrix.md`: An existing device matrix already covers locked cloud capture, first press after 8h, dismissed activities, crash recovery, rapid toggles, destination truthfulness, interruptions, Bluetooth and first-word loss with build/OS identifiers.
+- `/workspace/scratch/a8be40db3c71/comments/1027.json`: The cached review explicitly identifies specifications conflicting with landed #1025 and #913 and requires rechecking present code before implementing child issues.
+
+**Dependencies**
+
+- Consume individual child issue decisions; do not duplicate their planning or implementation.
+- Keep #934/#935/#954 physical-device qualification distinct from code completion. #998 harness is already covered.
+- Retain evidence gates on #946/#974/#986–#989. Prioritise accepted narrow work such as #994 clipboard policy, #996 error consistency and #999 strict offline behaviour through their own child plans.
+- Preserve explicit removal of Send to Mac (#1024), Watch shipping/device gates (#657/#659), and owner release decisions.
+
+**Verification**
+
+- Every mandatory core journey has an owning child, current code/test evidence, explicit residual status, and a physical-device row where needed.
+- Do not close the epic solely because child PRs merged; required device evidence records actual source/build, OS, route, provider, destination and observed outcomes.
+- No duplicate capture framework, no restored Send to Mac, no Watch enablement, and no Stable publication inferred from reconciliation.
+
+**Risks and limits**
+
+- This bounded read-only review inspected three targeted implementation/test/qualification excerpts; it is not an audit or a completed hardware test.
+- Native builds require Apple Swift/Xcode; no native builds or physical-device runs performed.
+- Beads CLI is absent per supplied context; this analysis JSON is not a replacement tracker. External tracker edits remain with the parent.
+
+## #1101: Compare models: run one audio sample through N transcription models, judge blind, keep a scoreboard
+
+Reviewer: `/root/issue_review_queue/review_1101`.
+
+**Smallest worthwhile scope:** No new implementation identified within this bounded review. Validate the merged feature against the five issue acceptance bullets, and file only specific reproduced residual defects. Do not add replay, automatic word error rate or default-model switching.
+
+- `Sources/SpeakApp/CompareModels/CompareModelsController.swift`: Inspected origin/main, not stale working checkout. Controller filters usable models, requires two candidates, fans out one live capture, tracks generation/cancellation and capture ownership, preserves sample hash/duration, and exposes persisted aggregate scores.
+- `Sources/SpeakApp/CompareModels/CompareModelsRoundView.swift`: Unlabelled columns remain blind until reveal; word diffs compute off main actor; complete ranking gates submission; revealed columns show latency and estimated cost; batch queue advances and round export is exposed.
+- `Sources/SpeakApp/CompareModels/MacComparisonSyncAdapter.swift`: Round updates/deletions trigger sync; activation/account changes and periodic retries resume it; revision application and acknowledgements integrate with the round store.
+- `Sources/SpeakCore/ModelComparison/ModelComparisonExport.swift`: JSON and Markdown encode rounds, sample identity, ranks, timestamps, transcripts, latency, cost and aggregate scores without embedding audio.
+
+**Dependencies**
+
+- Merged PR #1102, origin/main 2ff982d. Do not duplicate this implementation.
+- Existing History CloudKit container/schema deployment and signed two-Mac validation; preserve #1119 owner/container decision gate.
+- Apple Swift/Xcode native test/build environment.
+
+**Verification**
+
+- On a real Mac with two usable models, stream once and import once; confirm raw output, blind diffs, complete ranking, and post-judgement reveal.
+- Complete three rounds and inspect persisted mean rank/wins/rounds plus latency/cost; verify batch files advance through consecutive rounds.
+- Verify rounds/rankings on a second signed Mac using the same iCloud account and intended History container, including reconnection.
+- Inspect JSON and Markdown exports for sample identity, models, ranks, latency, cost and timestamps with no embedded audio.
+- Verify normal dictation before and after comparison and while the comparison feature is idle. Run native test suites and build gates on Apple Swift.
+
+**Risks and limits**
+
+- Static source inspection cannot establish microphone, provider network, normal-dictation latency, or two-Mac CloudKit correctness. ALREADY COVERED means the requested implementation is present, not that physical acceptance has been demonstrated.
+- Inspection was deliberately bounded to four code excerpts; it is a value triage, not an exhaustive correctness audit.
+- No native tests or external provider calls were executed. Unknown prices must remain unknown rather than imply zero cost.
+- Beads CLI is absent per supplied context; this JSON is interim review evidence only.
 
 ## #1104: refactor(core): close the feature gaps between the mac-only live transcribers and the SpeakCore live clients
 
@@ -888,6 +978,367 @@ Reviewer: `/root/issue_review_queue/review_1129`.
 - Linux suffices for document/path checks; it cannot validate microphone, Watch, AX or release provisioning behaviour.
 - Beads CLI is absent per supplied context; this JSON is review evidence only, not a replacement tracker.
 
+## #611: Streaming insertion + latency as a first-class metric
+
+Reviewer: `/root/issue_review_queue/review_611`.
+
+**Smallest worthwhile scope:** Plan a reproducible benchmark protocol using existing session latency data: define first-visible-write versus confirmed-visible-text semantics, app/device/OS/provider/model/network conditions, warm versus cold runs and sample counts.; Use #664 for a target matrix covering selection, corrected partials, Unicode, caret/focus changes, readback failures and fallback delivery. Retain the existing two-app allowlist until new target evidence supports inclusion.; Collect a baseline before selecting a concrete capture-start optimisation; publish only measured, clearly scoped results. A narrow measurement/export helper is worthwhile only if the planner confirms existing history data cannot support the protocol.
+
+- Sources/SpeakApp/LiveTextInserter.swift: InsertionStrategy.rangedStreaming, begin, update and streaming state already implement stable-region tracking, selection replacement, deferred AX readiness and firstInsertionAt instrumentation.
+- Sources/SpeakApp/StreamingInsertionAllowlist.swift: bundleIdentifiers contains only com.apple.TextEdit and com.apple.Notes. Slack, VS Code and browser contenteditable fields are deliberately excluded because full-field AX readback is unreliable; accepting a write alone is insufficient proof of safe reconciliation.
+- Sources/SpeakApp/LatencyInsights.swift: latencyInsightsByProvider consumes firstInsertMs and computes per-provider sample counts/p50/p95; latencyOverview computes capture-start percentiles; providerTable renders First words, First insert and Finish. These already address the historic missing-insertion-metric comment.
+- Tests/SpeakAppTests/HistoryItemLatencyTests.swift: explicit tests cover streaming first insert, one-shot fallback, missing intervals and provider separation. Inspected only; no Apple-native execution performed.
+- Cached comments/611.json: latest progress identifies PR #780 as metric completion and leaves five-target verification under #664, the capture-start budget and publication open.
+
+**Dependencies**
+
+- Coordinate with #664 as the single owner of per-app streaming qualification and any value-independent region verification; do not create a competing AX implementation.
+- Existing PRs #644 and #780 delivered substantial scope and should be credited rather than repeated.
+- Real macOS hardware, microphone, target app versions and provider access are needed for performance and AX evidence. No paid-credit activation or release dispatch is authorised by this review.
+
+**Verification**
+
+- Record reproducible per-provider capture-start, first-partial, first-insert and stop-to-final distributions with sample counts and warm/cold conditions; never claim the sub-100 ms budget from static inspection.
+- Require real app evidence of no duplication or corruption before accepting each additional target; non-allowlisted apps must retain paste-at-end behaviour.
+- Preserve existing percentile and fallback tests; run Apple Swift/Xcode checks for any eventual Swift changes. Benchmark publication requires actual measured samples.
+
+**Risks and limits**
+
+- Five common apps is an aspiration, not evidence that Slack/VS Code/browsers safely support the present AX strategy.
+- A successful AX write timestamp is not independently measured screen-paint latency; benchmark labels must explain the checkpoint.
+- Provider pre-connect and audio prewarming can alter resource use, privacy expectations and first-word preservation; no speculative implementation justified yet.
+- This read-only bounded review does not establish real-device performance, app compatibility or benchmark results.
+- Beads CLI is absent; this JSON is interim review evidence, not a replacement tracker.
+
+## #614: Adopt SpeechAnalyzer/DictationTranscriber (iOS 26/macOS Tahoe) + voice-activated hands-free mode
+
+Reviewer: `/root/issue_review_queue/review_614`.
+
+**Smallest worthwhile scope:** Retain an evidence checklist for comparative first-partial latency and hands-free start/stop behaviour. Correct acceptance wording: armed mode must monitor microphone input for VAD, while preventing silent transcript creation or unintended remote transmission. Do not build another analyzer or VAD implementation. Raise fixes only for observed qualification failures.
+
+- `Sources/SpeakCore/AppleLocalModels.swift`: Shared default prefers SpeechTranscriber, then DictationTranscriber, then legacy, with OS/device availability gates.
+- `Sources/SpeakiOS/Services/iOSLiveTranscriber.swift`: Starts analyzer for analyzer model IDs and falls back to legacy after eligible setup failure; cancellation does not start a fallback capture.
+- `Sources/SpeakApp/MainManager+HandsFree.swift`: Default-off, OS-gated hotkey arming already wires pre-roll capture, silence duration, capture ownership, stop, cancellation and HUD state.
+- `Sources/SpeakiOS/Services/IOSHandsFreeDictationCoordinator.swift`: iOS creates SpeechDetector with microphone input and pre-roll, then resumes detector after successful capture without clearing committed results on restart failure.
+- `Sources/SpeakCore/AppleSpeechDetector.swift`: Shared SpeechDetector analyzer exists, prepares required assets and reports speech activity while silent input is not transcribed.
+
+**Dependencies**
+
+- #658 owns hands-free follow-up; reconcile its current review rather than create duplicate work.
+- #780 latency instrumentation cited in cached comments provides a candidate measurement surface.
+- Apple OS 26 hardware and Apple Swift/Xcode required for runtime qualification; older supported OS/device needed for fallback checks.
+
+**Verification**
+
+- On supported iOS/macOS hardware, confirm actual active engine and compare repeated identical 30-second passages against legacy Apple Speech; record first-partial and first-insert distributions, with analyzer first-partial p50 no worse than legacy as requested in issue comments.
+- Verify hands-free onset target around 300 ms, preservation of first words, silence stop, final transcript delivery, visible armed state and explicit disarm.
+- Verify no transcript/remote transcription during silent arming, cancellation, interruption and fallback on unsupported devices or missing/unavailable assets.
+- Run native tests covering existing HandsFreeVoiceActivity, capture ownership/finalisation, settings and lifecycle paths as part of qualification; do not claim they prove microphone timing.
+
+**Risks and limits**
+
+- Press WER and speed claims are unverified and must not serve as benchmark evidence.
+- Issue claims of no model download and Apple Intelligence dependency do not match code: assets are prepared and DictationTranscriber is explicitly documented as not requiring Apple Intelligence.
+- Static inspection confirms implementation coverage, not runtime reliability or measured latency.
+- Beads CLI absent per supplied context; this JSON is interim review evidence, not a replacement tracker.
+
+## #648: [Feature] Paid Access
+
+Reviewer: `/root/issue_review_queue/review_648`.
+
+**Smallest worthwhile scope:** No new implementation from this intake. Retain issue as PR #665 launch umbrella; reconcile residual gates against its latest head and runbook, keeping feature disabled.
+
+- `issue-context.json: PR #665`: Explicitly closes #648; latest September 12 update reports 158 Worker tests and fixes for separate purchase identities, shared quotas, settlement and metadata-only claim pruning. Feature remains off pending setup and staging.
+- `origin/fix/review-paid-access:Sources/SpeakCore/PaidAccess/PaidAccessRouting.swift`: PaidBillingChannel centralises distribution choice; SimpleModelChoicesPolicy.hidesModelSelection requires actual paid routing; PaidRoutingDecision preserves local/BYOK outcomes.
+- `origin/fix/review-paid-access:Docs/paid-access.md`: Internal-only PAID_ACCESS build flag; public builds compile feature dark; explicit external billing/Cloudflare setup and iOS routing/purchase gate.
+- `comments/648.json`: Prior audit lists billing identity, channel trust, direct-download Apple identity and privacy decisions. Some are superseded by September PR fixes and must not be reopened from stale commentary.
+
+**Dependencies**
+
+- Continue within existing PR #665 ownership; do not commission competing implementation.
+- Real Stripe prices, D1 identifiers, App Store products, staging and signed-build identity validation remain prerequisites.
+- Outstanding iOS, voice-edit/live-polish and live client routing belong to existing paid-access follow-up scope; revalidate current PR before commissioning any.
+
+**Verification**
+
+- Use latest PR CI for Worker/typecheck/lint and native compilation; 158 tests is reported evidence, not rerun here.
+- Before any activation validate purchase, renewal, expiry, refund, restore, quota and failure recovery in staging, plus signed native identity and billing UI.
+- Verify public default BYOK/local operation, no paid-network contact for those paths, retained model access on lapse, clear cost/privacy disclosure, and no iOS purchase until paid routing is real.
+
+**Risks and limits**
+
+- Targeted read-only review; main contains no paid-access implementation because PR remains separate.
+- No purchase, deployment or feature activation authorised by this review.
+- Older comment claims about response-body retention and entitlement design are superseded; current PR says metadata-only claims and independent purchase records.
+- External staging and native/device behaviour are unverified here; Beads CLI is absent per intake context.
+
+## #657: watch: complication + Smart Stack entry to start recording from the watch face
+
+Reviewer: `/root/issue_review_queue/review_657`.
+
+**Smallest worthwhile scope:** Execute and record the existing signed paired-device checklist against an exact main SHA. Open a narrowly scoped repair only for an observed failure. Keep the feature and release signing gates unchanged until provisioning and acceptance are complete.
+
+- `JustSpeakWatchWidget/WatchRecordingComplication.swift`: Existing circular and corner WidgetKit complication renders recording status through the shared action button.
+- `JustSpeakWatchWidget/WatchCaptureStatusWidget.swift`: Existing rectangular Smart Stack widget displays capture state and in-flight count.
+- `JustSpeakWatchShared/StartWatchRecordingIntent.swift`: watchOS 11 AudioRecordingIntent routes to the app coordinator; watchOS 10 has a foreground hand-off fallback. Extension code does not create a separate recorder.
+- `JustSpeakWatch/WatchRecordingCoordinator.swift`: One shared recorder and toggle serialiser own recording entry points; headless toggle explicitly activates WatchCaptureStore before recording.
+- `Project.swift; Docs/watch-provisioning.md`: Manifest retains TUIST_WATCH_APP gating and widget target; provisioning documentation requires bundle identifiers, shared Watch App Group, profiles and physical acceptance checks.
+- `comments/657.json; issue-commit-evidence.json`: Latest cached comment says implementation shipped in #683 and explicitly keeps this open for hardware evidence. Recent #939 fix documents that headless delivery acceptance remains under #657/#659.
+
+**Dependencies**
+
+- #612 Watch capture parent
+- #683 existing implementation
+- #659 overlapping Watch hardware and battery acceptance
+- #939 headless WatchConnectivity activation fix already on main
+- Paired physical Watch/iPhone and valid signing/provisioning
+
+**Verification**
+
+- Record watchOS version, iPhone build, SHA and per-row PASS/FAIL evidence.
+- Verify circular/corner and rectangular families; headless start/stop on watchOS 11+, recording indicator and accurate capture states.
+- Verify rapid/repeated taps and in-app overlap yield one recorder and one History item.
+- Verify app termination/partial recovery, stale Recording expiry, unavailable phone/reconnection, and denied microphone permission.
+- Verify watchOS 10 foreground hand-off if available; collect one-minute battery/time observations with #659.
+
+**Risks and limits**
+
+- Static inspection does not prove headless audio, recording indicator, background transfer, signing or physical-device success.
+- Existing code is covered; issue closure is not justified before the explicit hardware acceptance run.
+- Do not enable Stable release inclusion or register/publish signing changes as part of this triage.
+- Beads CLI is unavailable according to parent context; this scratch JSON is review evidence, not a substitute tracker.
+
+## #659: watch: extended runtime session for wrist-down recordings
+
+Reviewer: `/root/issue_review_queue/review_659`.
+
+**Smallest worthwhile scope:** Run and record the existing three hardware acceptance cases against a current provisioned build. Use actual audio interruption/invalidation or termination/relaunch recovery; do not add WKExtendedRuntimeSession merely to manufacture an expiry case. Open a narrowly evidenced fix only if a case fails.
+
+- `JustSpeakWatch/WatchRecordingRuntime.swift`: Activates AVAudioSession .record while foreground, observes interruptions/media-services reset, ignores stale notifications through run IDs and documents the deliberate audio-background choice over WKExtendedRuntimeSession.
+- `Project.swift`: Watch target has UIBackgroundModes audio and explicitly avoids unrelated WKBackgroundModes categories.
+- `JustSpeakWatch/WatchAudioRecorder.swift`: Single guarded finalisation stops audio, releases runtime, inspects playable audio and queues it. Relaunch recovery uses persisted identity, queue deduplication and clears the active marker only after successful enqueue.
+- `Tests/SpeakCoreTests/WatchRecordingLifecycleTests.swift`: Deterministic policy and recovery coverage exists; it cannot establish actual watchOS suspension, battery cost or phone delivery.
+- `comments/659.json`: Latest cached comment says runtime/capture recovery shipped in #669 and #721; all three remaining acceptance rows require paired Watch hardware.
+- Recent #939 headless WatchConnectivity activation repair expressly leaves paired-device validation under #657/#659.
+
+**Dependencies**
+
+- Paired physical Apple Watch and iPhone with provisioned matching build
+- Parent #612 and companion hardware gate #657
+- Existing shipped #669/#721 recovery work; recent #939 headless activation fix should be included in tested SHA
+
+**Verification**
+
+- At least 60 seconds wrist down/screen asleep with spoken markers near 0, 30 and 60 seconds; all markers reach one iPhone History entry.
+- With phone unavailable, interrupt or terminate a capture, relaunch where needed, verify one recoverable partial capture and eventual History delivery after reconnection, with no orphaned watch audio.
+- Record Watch model/watchOS, iPhone build, source SHA, Low Power Mode and battery conditions; collect repeat runs or longer normalised energy measurement if one-minute percentage resolution is inadequate.
+
+**Risks and limits**
+
+- No physical hardware results obtained; neither static inspection nor existing pure lifecycle tests establishes OS behaviour.
+- Issue title/body and latest comment terminology say runtime session/expiry, whereas actual implementation deliberately uses AVAudioSession background audio. Preserve outcome-based acceptance rather than requiring an inappropriate API.
+- A forced termination cannot execute clean finalisation until relaunch; verify recovery rather than claiming synchronous expiry handling.
+- Beads CLI is absent per supplied context; this JSON is review evidence only.
+
+## #661: iOS keyboard v2: run the physical-device matrix and flip the TestFlight flag
+
+Reviewer: `/root/issue_review_queue/review_661`.
+
+**Smallest worthwhile scope:** A documentation-only PR should reconcile keyboard design/verification instructions with handoff shipping status, current manifest-based release workflow and the #991 finding. Preserve a concrete physical-device handoff matrix and evidence template. Mark direct-capture sections historical/experimental with an explicit new platform-evidence prerequisite. Do not change any flags, dispatch a release, fabricate device results or close the physical verification obligation.
+
+- `Docs/ios-keyboard-v2-design.md`: Shipping status includes the handoff keyboard by default; the issue #991 update dated 2026-09-10 records unavailable direct microphone capture and says the retained flag is a record, not a roadmap. Older surrounding prose still calls it an unverified candidate.
+- `Docs/ios-keyboard-mvp-verification.md`: Physical-device matrix defines device/OS/host evidence, handoff behaviour, permissions and release gates. Rollout sections still reference manual include_keyboard/enable_direct_capture workflow inputs and propose enabling direct capture after the matrix.
+- `.github/workflows/release-ios.yml`: Current workflow is workflow_call with a required manifest only; environment sets TUIST_IOS_KEYBOARD=1 and TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0. Old manual-input instructions do not match this workflow.
+- `Project.swift`: Independent TUIST_IOS_KEYBOARD and TUIST_IOS_KEYBOARD_DIRECT_CAPTURE policies remain; generating a development keyboard build does not authorise changing release defaults.
+- `Sources/SpeakCore/KeyboardDictationMachine.swift`: KeyboardCapturePlanner.path defaults directCapturePolicy to disabled and returns handoff before checking extension permissions.
+
+**Dependencies**
+
+- #678 and PR #719 blockers were cleared according to latest cached issue comment; do not reopen them.
+- #991 supersedes the direct-capture platform assumption.
+- Coordinate release-runbook corrections with current Alpha/Stable train documentation; #1126/#1127 verification occurs in a real future Alpha, not an authorised dispatch now.
+
+**Verification**
+
+- Static cross-check that documented build/workflow inputs and app-group identity selection match current release-train configuration.
+- Design and verification documents consistently state handoff shipping mode and disabled direct capture; no promise or instruction to flip direct capture as routine completion.
+- Physical iPhone/iPad evidence remains required for Full Access, ready/not-ready handoff, transcript/cursor preservation, interruptions, system restrictions, VoiceOver/touch targets and memory. Record exact source/build/device/OS/host versions and PASS/FAIL evidence.
+- Direct-capture enablement requires new supported platform evidence, dedicated physical verification and separate rollout approval; no rollout authorisation inferred.
+
+**Risks and limits**
+
+- Read-only source inspection does not establish installed extension presence, physical microphone behaviour, host editing safety or memory use.
+- No Apple device/Xcode verification performed.
+- The #991 finding is assessed as current repository evidence, not an independently reproduced platform result.
+- Beads CLI is absent per supplied context; this scratch decision file is analysis evidence, not a task tracker.
+
+## #664: test(mac): verify streaming insertion across the allowlisted target apps
+
+Reviewer: `/root/issue_review_queue/review_664`.
+
+**Smallest worthwhile scope:** Create a concise reproducible qualification runbook/result template if none exists, reflecting the actual two-app allowlist and existing TextEdit results. Finish Notes, setting-off baseline, and a non-allowlisted app baseline on an unlocked Mac. Re-run affected TextEdit scenarios only if current code differs materially from the evidenced build. Fix or disable only failures observed in the supported surfaces. Keep experimental default off and do not expand allowlist as part of this issue.
+
+- `Sources/SpeakApp/StreamingInsertionAllowlist.swift`: Only TextEdit and Notes are permitted. Slack, VS Code, Safari and Chrome are deliberately excluded because kAXValue read-back cannot reliably verify the streamed region.
+- `Tests/SpeakAppTests/StreamingInsertionSettingsTests.swift`: Existing tests cover default-off setting, current allowlist and deliberate excluded apps; repeating these tests does not complete physical app qualification.
+- `Sources/SpeakApp/LiveTextInserter.swift`: Unverifiable region returns failed; lost target or failed final patch after writes returns applied while preserving existing partials. The latter protects against duplicate insertion but is not proof of exact final-text equality.
+- `comments/664.json`: Chris's detailed v2.49.0 run records TextEdit PASS and Notes, setting-off, and Sublime Text baseline BLOCKED by locked Mac. Later bravostation summary incorrectly claims both allowlisted apps passed. Prefer the detailed primary run; Notes cannot be counted as verified.
+
+**Dependencies**
+
+- #611 owns expansion beyond two apps; #647 shipped ranged streaming insertion.
+- Unlocked interactive Mac with Accessibility permission and a signed direct-distribution build; preserve build SHA, OS/app versions, provider/model and post-processing configuration.
+- Beads CLI is absent in supplied environment; no substitute tracker was created.
+
+**Verification**
+
+- Record build | macOS | app/version | field | scenario | fallback/pause | exact final text match | pass/fail | evidence.
+- Notes: partials, correction/retraction, selected-text replacement, Unicode/duplicate surrounding text, edits before/inside/after region, focus changes, History accessibility method and firstInsertMs.
+- Setting off and non-allowlisted app: no partial insertion and exactly one final delivery.
+- Keep Insert at Cursor as documented test configuration; do not claim Replace Field qualification.
+- For loss of target/final-patch failures record safe preservation separately from exact final transcript match. A safety PASS cannot substitute for exact-match PASS.
+- Native CI can verify code changes; manual AX evidence is still required for gate closure. Do not close from the contradicted summary.
+
+**Risks and limits**
+
+- This environment cannot produce physical macOS AX or provider observations. Qualification remains device-gated; useful runbook work can proceed now.
+- Allowlisting is per bundle ID, so test named fields; one working Notes field does not establish all Notes controls.
+- Historical TextEdit evidence is tied to mac-v2.49.0 and does not automatically qualify unrelated newer insertion changes.
+- No release promotion or Stable publication is authorised by this review.
+
+## #776: Ship opt-in PostHog analytics transport, consent UI and audited rollout
+
+Reviewer: `/root/issue_review_queue/review_776`.
+
+**Smallest worthwhile scope:** Plan and implement a direct-macOS release inspector attached to the actual transport serializer: consent, endpoint, queue depth, anonymous install ID/reset, bounded last-100 queued/sent event view/export, native controls and clear progress/error feedback. Never expose the ingestion key in inspector exports or publish user-level records.; Wire the existing core forceDisabled seam to an operational local production kill switch, preserving ordered cancellation/purge and opt-in semantics. Add meaningful wire-parity, withdrawal and kill-switch regressions.; Reconcile the issue/audit checklist against merged and newly implemented evidence. Prepare reproducible release-network/server qualification instructions without declaring gates passed or widening collection.; Keep daily-activity correctness and catalogue-to-docs drift as explicit small follow-ups in this tracker; avoid bundling new production event families.
+
+- `Sources/SpeakApp/PostHogAnalytics.swift`: Minimal capture transport is excluded under APP_STORE; configuration absence is no-op; durable queue is capped at 1,000 events/seven days; cancellation/purge and bounded retries already exist. Queue and wire inspection are private, with no release inspector API.
+- `Sources/SpeakApp/Views/Settings/SettingsView+About.swift`: Privacy settings expose analytics opt-in and policy link but no payload inspector, identity reset, export or operation feedback.
+- `Sources/SpeakApp/WireUp.swift`: Initial consent, settings subscription and phase-one call sites are wired. Daily-active event currently runs on install/startup and marks the day after best-effort capture; it does not establish a multi-day-running-app daily signal.
+- `Sources/SpeakCore/ProductAnalytics.swift; Docs/analytics-implementation-audit.md`: Core has forceDisabled and sample preview support; audit explicitly records missing production factory override, exact wire inspector, docs drift check and release/server qualification.
+- `commit 764b9c3e36fe800946aad3e3e65a04ae173ea66c; cached comments/776.json`: Consent/queue reliability already merged with native candidate test evidence; latest owner comments explicitly retain retention, kill-switch and no-content inspection gates. Parent verified four production taxonomy events; this establishes event existence, not rollout qualification.
+
+**Dependencies**
+
+- #814 broader lifecycle/settings instrumentation must await a clean phase-one inspection week.
+- #809 and #916 cover existing transport/consent and reliability implementation.
+- Production-only project, EU vendor, explicit opt-in, separate identities, contact and sole-owner decisions are approved; do not request again or create Development.
+- Server retention/settings evidence and key-rotation drill, release-network audit and identity separation remain required.
+- iOS/TestFlight/App Store expansion and disclosures remain separately gated; Mac App Store must retain compile-out.
+
+**Verification**
+
+- Offline transport spy asserts unknown/opted-out/local-disabled states produce zero traffic; withdrawal cancels controlled work, purges persisted queue and removes install identity, including in-flight transitions.
+- Inspector payload fields match the actual event wire envelope; credential omission is explicit and tested. Last-100 storage is bounded and reset/withdrawal clear identity-associated history. Reset/export show truthful completion/failure states.
+- Apple Swift Debug/Release CI covers changed code; a release Mac run validates inspector UI, reset/export and zero-traffic consent behavior. Linux inspection alone cannot establish these results.
+- Before enablement/expansion: complete retention/server settings evidence, approved key-revocation drill, full release network capture, policy publication, Sentry identity-separation checks and clean inspection week. Production taxonomy count alone cannot substitute.
+
+**Risks and limits**
+
+- Do not widen capture, enable iOS/store analytics or remove compile-out as part of engineering completion.
+- Actual production events already exist per parent audit; recorded gates still require independent evidence and must not be inferred from ingestion.
+- Cannot recall bytes already received by the server before withdrawal; cancellation guarantees must remain precise.
+- Exact-payload visibility and privacy must reconcile the transport credential envelope by showing event JSON and clearly documenting excluded authentication material.
+- Beads CLI is absent; this JSON is interim review evidence, not a replacement tracker.
+
+## #802: Epic: protect the core dictation journey with fast macOS E2E regression tests
+
+Reviewer: `/root/issue_review_queue/review_802`.
+
+**Smallest worthwhile scope:** First increment: extend the current launched batch journey with deterministic post-processing-on success plus a post-processing failure followed by a successful next run in the same app process. Exercise real MainManager routing and assert the documented fallback, exact clipboard output and durable raw/processed History without stale or duplicate delivery. Use the existing global hotkey/recording/transport seams, isolation and diagnostic artifacts. Keep streaming and direct-target permission qualification explicitly open for subsequent increments.
+
+- `Tests/SpeakAppUITests/CoreJourneyBatchUITests.swift`: Real Carbon chord drives production recording and validates exact clipboard output, strict synthetic audio HTTP request, production state progression and durable History. Native paste is conditional on actual posting access; direct AX insertion is not proved.
+- `Sources/SpeakApp/WireUp.swift`: Existing isolated batch transport and recording seams support incremental scenarios without replacing production orchestration.
+- `.github/workflows/ci.yml`: Two bounded ten-minute gates already exist; native selection covers launch, target fixture, hotkey and batch UI suites, with result verification and artifacts.
+- `Docs/core-journey-e2e.md`: Runbook already distinguishes component contracts and actual native batch coverage; processing routing, streaming, failure/recovery and captured-target scenarios remain native gaps.
+- `comments/802.json`: Owner reports passing native batch evidence and explicitly retains streaming, post-processing, failure/target and cold/device qualification gaps. Historical #913 bootstrap-only state is superseded.
+
+**Dependencies**
+
+- Reuse merged #804/#811/#817/#913/#916 harness and strict suite manifests; no duplicate foundation work.
+- Keep #707 captured-target and #800/#801 clipboard regression contracts; complement existing unit/integration coverage.
+- Native macOS Xcode CI required for execution; genuine permission-capable Mac needed for mandatory AX/physical checks.
+
+**Verification**
+
+- New scenarios must begin at real supported Carbon events; do not call orchestration methods directly.
+- Validate real raw-to-processed output and History semantics, no unexpected network or real credentials, visible actionable error on failure and successful same-process recovery.
+- Add new selected suites to fail-closed CI execution verification; preserve existing tests and ten-minute gate budget.
+- Measure native duration and flake rate separately; retain 20 green runs including five cold runners before asserting qualification or completing epic.
+- Static inspection on Linux is not execution evidence; do not weaken permission failures into claims of direct editor coverage.
+
+**Risks and limits**
+
+- Extending fixture seams can accidentally bypass production routing or expose test configuration in release builds; retain explicit DEBUG-only isolation.
+- Existing fifteen-second gesture wait per run can consume budget when adding recovery scenarios; measure actual native runtime before expanding the matrix.
+- AX permissions, physical microphone/Fn and real target apps remain separate qualification gates.
+- Beads CLI is absent per supplied environment context; no tracker mutation attempted.
+
+## #814: feat(analytics): wire detailed transcription, post-processing and settings telemetry
+
+Reviewer: `/root/issue_review_queue/review_814`.
+
+**Smallest worthwhile scope:** No new collection now. After the gate passes, reassess a first increment limited to exactly-one terminal outcome, measurable capture-to-first-text and stop-to-final latency, compiled model/provider/mode segmentation, and post-processing overhead. Add each setting only when it answers a named product question; do not automatically instrument every setting.
+
+- `Sources/SpeakCore/AnalyticsPropertyValue.swift`: Native Boolean, integer and double payload values already exist; that portion is covered and should not be rebuilt.
+- `Sources/SpeakCore/ProductAnalytics.swift`: Lifecycle types use coarse duration/word-count/latency buckets. Settings changes have no typed value. Catalogue presence is not production capture or terminal-event accounting.
+- `Docs/analytics-implementation-audit.md`: Explicitly records absent exact timing/model/settings call sites and requires the clean phase-one week before expansion; source tests do not establish production network qualification.
+- `Docs/analytics-plan.md`: Phase one remains activity/onboarding/first-transcription success, with one clean week of inspected payloads before expansion.
+- #916 delivered scalar/consent/queue reliability foundations and explicitly retained rollout/device gates; it did not authorise #814 expansion.
+- `/workspace/scratch/a8be40db3c71/comments/814.json`: No later issue comments override the dependency. Parent-provided production inspection found four custom event types only; this is not a clean-week approval.
+
+**Dependencies**
+
+- #776 production go/no-go, release network/withdrawal/inspector checks, retention and identity-separation evidence, then one clean phase-one inspection week.
+- #776 currently accepted scope is inspector/reset/export/kill switch plus rollout audit, without event expansion.
+- #916 covers typed scalar and queue/consent foundations, not #814.
+
+**Verification**
+
+- Record dated production go/no-go and seven-day payload-inspection evidence before enabling expanded events.
+- For the later scoped implementation, prove one emitted terminal event per session across success/failure/cancellation/races; distinguish app emission from network delivery guarantees.
+- Test native scalar encoding, compiled-catalogue allowlisting with unknown/custom IDs reduced to other, prohibited-content rejection, opt-out purge and no startup-hydration setting events.
+- Verify disabled development/store transport, update both privacy documents before release, and run Apple Swift CI plus release-build network checks; Linux static inspection cannot establish these.
+
+**Risks and limits**
+
+- No fresh backend inspection performed; existing supplied production evidence is insufficient to clear the week-long rollout gate.
+- Exact timings, language and many settings increase payload detail and cardinality even with no transcript content; collect only dimensions that answer a concrete reliability or product question.
+- Dynamic OpenRouter discoveries must not silently broaden the compiled model allowlist.
+- Beads CLI is absent; this review JSON is interim analysis evidence, not a replacement tracker.
+
+## #821: Product proposal: dynamic OpenRouter transcription and TTS model catalogue
+
+Reviewer: `/root/issue_review_queue/review_821`.
+
+**Smallest worthwhile scope:** Plan and implement an opt-in internal progressive speech path for one verified supported response format, shared bounded transport/stream state in SpeakCore with native playback adapters, preserving completed-file/export behaviour and existing fallback. Measure time to first audible output. Keep capability/cost enrichment to verified metadata that can be labelled accurately; defer speculative controls and additional provider integrations.
+
+- `Sources/SpeakCore/OpenRouterAudioCatalog.swift`: Shared capability-filtered discovery already has a six-hour cache, stale retained state, cancellation and refresh ownership protection.
+- `Sources/SpeakCore/OpenRouterAudioModelDetail.swift`: Existing native form displays raw provider pricing, model-specific voices, STT file tests, speech previews and explicit cloud/cost disclosure; it does not normalise every pricing unit or expose a full provider-parameter editor.
+- `Sources/SpeakCore/OpenRouterAudioClient+Download.swift`: Bounded response bytes are written to a private file; the URL is returned only after the response completes. Speech currently requires audio/mpeg, so network streaming alone does not give progressive playback.
+- `Sources/SpeakApp/TextToSpeech/OpenRouterTTSClient.swift`: Normal macOS speech waits for synthesis completion and AVURLAsset duration; it preserves dynamic voice choices and owns temporary-file cleanup. Provider speed is deliberately avoided until supported metadata exists.
+- `comments/821.json`: Retained 9 September macOS qualification exercised MAI-Transcribe-2 through the installed catalogue and file-test UI with a successful response; it explicitly leaves progressive playback and further device/provider qualification open.
+
+**Dependencies**
+
+- #916 and #918 already delivered core discovery, STT/TTS routing and native settings; do not duplicate them.
+- A separate planner must verify the current OpenRouter speech response/codec contract and identify reusable native playback infrastructure before designing an incremental streaming path.
+- Native Apple Swift CI and Mac/iPhone playback qualification remain required; existing provider credits only.
+
+**Verification**
+
+- Prove audible playback can start before the final response byte for a sufficiently long fixture and supported live provider; compare first-audio latency with the existing completion-based path.
+- Exercise slow chunks, malformed/truncated compressed audio, cancellation before and during playback, timeout, HTTP errors, response limits and immediate subsequent requests without stale playback or file leaks.
+- Verify Mac/iPhone stop, audio-route interruption and recording-session ownership with native tests/device evidence; do not infer those results from Linux or mocked transport.
+- Retain existing discovery/cache/selection tests, show unavailable saved selections without replacement, and preserve accurate unknown-cost reporting and content-free telemetry.
+- Keep the epic open until remaining acceptance items have explicit provider/platform evidence; do not equate one MAI file-test result with all-provider accuracy or normal dictation qualification.
+
+**Risks and limits**
+
+- Progressive MP3 decoding and buffering can introduce underruns, decoder failures or interference with microphone/audio-session ownership; this is a focused playback change, not a catalogue rewrite.
+- Raw pricing units cannot safely be treated as equivalent or turned into an estimated cost without documented provider semantics.
+- No new native/device/provider validation was performed during this bounded read-only value review.
+- Beads CLI is unavailable in this environment per the supplied project context; this JSON is review evidence only, not a replacement tracker.
+
 ## #934: iOS: the clipboard holds a placeholder after stop, and a late polish overwrites what the user copied since
 
 Reviewer: `/root/issue_review_queue/review_934`.
@@ -1047,3 +1498,291 @@ Reviewer: `/root/issue_review_queue/review_954`.
 - Read-only code inspection confirms implementation, not actual picker labels, Action Button behavior or locked microphone capture. No device result was obtained in this review.
 - The merge evidence explicitly says all device-dependent behavior remains unverified, so unconditional closure would discard an explicit acceptance requirement.
 - Beads CLI is absent per supplied context; this JSON is interim review evidence and not a task tracker.
+
+## #974: One audio-session configuration shared by readiness, detector and transcribers; caller-owned deactivation
+
+Reviewer: `/root/issue_review_queue/review_974`.
+
+**Smallest worthwhile scope:** First collect repeated local physical-iPhone readiness → capture → Stop & Insert → readiness evidence with actual route, category/mode/options, activation results and engine state. If a residual failure or material avoidable delay is demonstrated, plan only the affected transition using existing manager and run ownership. Do not dispatch unification or retention implementation now.
+
+- `Sources/SpeakiOS/Services/AudioSessionManager.swift`: Recording intentionally attempts isolated measurement capture, falling back to mixing after classified activation refusal. Its options include Bluetooth, speaker default and A2DP; equalising these is policy change, not a constant extraction.
+- `Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift`: Handoff already claims recording and publishes the recording phase before stopping readiness with deactivateAudioSession false. Explicit endSession stops readiness with deactivation true.
+- `Sources/SpeakiOS/Services/SharedClientLiveTranscriber.swift`: Stop drains queued buffers and converter tail, finalises the client, then releases the audio session. Disruption routes through owner finalisation. Retention must respect those completion boundaries.
+- `Sources/SpeakiOS/Services/IOSTranscriptionSession.swift`: One lifecycle seam covers batch, Apple, OpenAI and shared-client backends, including cancellation settlement and local startup observations from #972. A flag on only live backends would leave batch and asynchronous cleanup unaddressed.
+- `comments/974.json`: No newer comments override the issue's explicit device evidence prerequisite.
+
+**Dependencies**
+
+- #972 baseline instrumentation is present in the session interface; actual device baseline remains required and aggregate startup observations alone do not establish stop-to-ready cost.
+- #973 activation policy must be reconciled before editing the same manager.
+- #935/#936 disruption and interruption handling and #943 ownership settlement may already explain or resolve candidate failures.
+- Do not adopt #980 microphone defaults, #979 shared engine, or #995 readiness-policy changes through this issue.
+
+**Verification**
+
+- Compare repeated built-in and available Bluetooth route cycles with playback on/off; record backend/build/OS, capture samples, successful speech delivery, one insertion, History and return to readiness.
+- For any later patch, cover live and batch normal completion, failed startup, cancellation settlement, disable during cleanup, failed readiness restart and stale cleanup versus a newer owner.
+- Use Apple Swift/Xcode builds and focused lifecycle tests, then physical-device interruption, route removal, playback and microphone checks. Do not infer latency or Bluetooth behaviour from mocks.
+
+**Risks and limits**
+
+- Read-only review of five targeted excerpts; no native build or physical-device measurements.
+- No numeric latency claim is justified.
+- isConfigured and equal options do not prove that system activation is usable or owned.
+- Preserve explicit consent/reconnect, idle-audio discard and provider-traffic boundaries; a shared policy must not broaden listening.
+- Beads CLI absent per supplied context; this JSON is temporary review evidence only.
+
+## #986: A warm window after every dictation: prepared engine, preheated analyzer and cached keys
+
+Reviewer: `/root/issue_review_queue/review_986`.
+
+**Smallest worthwhile scope:** First qualify repeated-start phases for ordinary dictation and already-enabled Instant Dictation separately. If preparation is materially costly, retain only the measured non-recording resource with explicit expiry and invalidation. Do not add a universal running-microphone window or pre-roll ring as part of this issue.
+
+- `Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift`: Readiness is already checked once per second against bounded lifetime and running-engine health; recording handoff is explicitly excluded from idle expiry.
+- `Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift`: A retained AVAudioEngine actually runs with an input tap and discards idle audio while readiness is enabled; stop can deactivate AVAudioSession. This differs from merely prepared objects and would expose the microphone indicator.
+- `Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift`: Current handoff stops readiness without audio-session deactivation and starts the recording owner, with recovery after failure. Blanket warm-window logic risks competing with existing ownership.
+- `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`: Stop preserves startup cancellation, reentrancy protection, transcript draining and background finalisation; resource-retention changes must respect these newer lifecycle guarantees.
+- `Sources/SpeakiOS/Services/IOSTranscriptionSession.swift`: Backend objects and key configuration are constructed per resolution; inspection alone does not show which preparation stage dominates repeated-start latency.
+- `/workspace/scratch/a8be40db3c71/comments/986.json`: Latest cached direction explicitly requires latency/resource measurements and defined cleanup before implementation, and excludes an incidental recording ring.
+
+**Dependencies**
+
+- #977 warm analyzer, #979 shared engine, #978 readiness overlap; coordinate ownership and qualification rather than implement separately.
+- Repeated-start instrumentation and real-device idle battery/memory measurements after approved asset/lifecycle fixes.
+- Existing bounded readiness and recovery behavior associated with #995 must remain authoritative.
+
+**Verification**
+
+- Record cold and repeated-start latency distributions by provider and entry surface, with equivalent first-word preservation checks.
+- Compare baseline versus candidate idle energy, memory and microphone indicator behavior on real iOS devices, including background suspension.
+- Define and verify expiry, user opt-out, interruption, route change, provider/model/key change and memory-pressure cleanup before coding retention.
+- Verify final transcript delivery, startup cancellation and existing readiness handoffs do not regress. Prepared resources must never be represented as guaranteed background execution or guaranteed Live Activity readiness.
+
+**Risks and limits**
+
+- No device latency, battery or background-liveness measurements were supplied; claimed sub-200 ms starts and guaranteed activities remain unproven.
+- Audio buffering while idle changes privacy behavior even without persistence or network transmission.
+- Keeping active audio may affect battery and other playback; retaining only prepared objects does not guarantee process survival.
+- Beads CLI is absent in the parent review context; this JSON is interim review evidence, not a replacement tracker.
+
+## #987: Headless triggers reuse the keyboard readiness warm state
+
+Reviewer: `/root/issue_review_queue/review_987`.
+
+**Smallest worthwhile scope:** After prerequisite capture owner and bounded pre-roll are proven, integrate headless starts through the same valid-input acquisition contract. Preserve ordinary start when readiness is absent or invalid. Do not introduce a separate warm-engine implementation for headless triggers.
+
+- `Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift`: Claims keyboard recording, publishes recording heartbeat, stops readinessAudio without session deactivation, then starts recordingService. Existing keyboard start is an engine swap, not a continuous-input subscription.
+- `Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift`: Private AVAudioEngine owns its input tap. Callback deliberately discards idle buffers; no ring snapshot, subscriber interface or ownership transfer exists.
+- `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`: Headless entry has run ownership, credential loading, foreground arbitration, watchdogs and Live Activity policy. These must survive any future warm path; residency alone cannot replace capture acquisition.
+- `Tests/SpeakiOSTests/StartupDiagnosticsObservationTests.swift`: Current coverage verifies real configuration-stage reporting and failure omission. It supports measurement but does not prove warm handover.
+- `comments/987.json`: Explicitly defers behind #978/#979/#974; requires valid-input ownership, tested transfer/fallback and device evidence before bypassing session setup.
+
+**Dependencies**
+
+- #978 readiness pre-roll mechanism
+- #979 shared capture ownership/handover
+- #974 relevant readiness/session qualification
+- Existing #972 startup observation instrumentation can supply measurements
+
+**Verification**
+
+- First establish device baseline using existing startup stage diagnostics for Action Button with readiness on/off.
+- Demonstrate lossless, nonduplicating handover of buffered and subsequent input with deterministic ownership tests.
+- Exercise readiness invalidation, route change, call interruption, cancellation and concurrent keyboard/headless acquisition; each must release ownership and retain reliable fallback.
+- Verify on physical iPhone while locked/backgrounded that first words are retained, Live Activity policy holds, and idle audio remains bounded in memory and is neither saved nor transmitted.
+- Measure latency distribution before claiming under 100 ms; Apple native CI validates compilation and tests.
+
+**Risks and limits**
+
+- Not deferred because Linux cannot compile Apple frameworks; deferred because required capture contract is absent and explicit device gate remains unmet.
+- Shared readiness heartbeat is not evidence that the caller owns live microphone input.
+- Pre-roll changes idle-audio handling from discard to retention and needs a bounded, opt-in privacy contract.
+- No device or microphone results produced during this read-only review.
+- Beads CLI is absent per supplied context; JSON is interim review evidence only.
+
+## #988: Dual-path first partial: on-device volatile text while the cloud socket connects
+
+Reviewer: `/root/issue_review_queue/review_988`.
+
+**Smallest worthwhile scope:** Keep implementation deferred. Measure representative selected cloud routes on real iOS hardware using existing diagnostics, including cold/warm starts and weak networks. Reconsider only when material latency remains and the warm/shared capture prerequisites have passed; then qualify a bounded, local-only display preview that relinquishes ownership on the first cloud partial.
+
+- `Sources/SpeakiOS/Services/SharedClientLiveTranscriber.swift`: stop builds the committed result from partialText when non-empty; handleTranscript and finalisation use the same value as the full provider transcript. Local volatile preview cannot safely flow through that state or existing callback without separating display and authoritative transcript ownership.
+- `Sources/SpeakCore/AppleSpeechAnalyzerTranscriber.swift`: Dictation progressive presets and asset preparation exist, but these excerpts do not establish a warm, shared cloud-preview session or its latency/thermal behaviour.
+- `Sources/SpeakCore/SessionLatency.swift`: Existing latency model records capture-to-first-non-empty-partial separately from capture startup; use actual route measurements before adding a second recogniser.
+- `comments/988.json`: Latest comment explicitly defers prerequisite #977/#979, requires selected-cloud-route measurement via #972, and forbids committing local preview to fields or History.
+
+**Dependencies**
+
+- #972 route-specific first-partial diagnostics and device measurements
+- #977 warm-analyzer evidence gate
+- #979 shared-engine evidence gate
+
+**Verification**
+
+- Record first-partial distributions and perceived benefit with baseline and proposed preview; do not assert the issue latency target without measurement.
+- Before implementation approval, establish local asset/locale availability, memory/thermal/battery budget, session cancellation and empty-input behaviour on devices.
+- Any later implementation must test divergent preview/cloud text, cloud final arriving without partial, cloud failure, stop before first cloud result, cancel/restart and late callbacks; local text must never enter committed fields, History or provider usage totals.
+- Keep selected cloud provider authoritative and maintain its disclosed cost/privacy semantics; no additional cloud requests, silent model downloads or hidden provider fallback.
+
+**Risks and limits**
+
+- Static inspection cannot prove microphone, shared-engine or iOS 26 Speech framework behaviour; no device tests or runtime latency measurements were available for this review.
+- A display-only partial requires explicit state separation because the existing partialText is also a final-result fallback.
+- Beads CLI is absent per parent context; this JSON is interim review evidence, not a replacement tracker.
+
+## #989: Leading-silence guard: detect dead Bluetooth input and auto-fall-back to the built-in mic
+
+Reviewer: `/root/issue_review_queue/review_989`.
+
+**Smallest worthwhile scope:** Keep this behaviour deferred. First use existing capture diagnostics plus narrowly scoped instrumentation under #972/#950 to qualify whether Bluetooth zero-filled startup is reproducible. Revisit #989 only if there is a distinguishable failure signature and an approved user-controlled fallback policy; no automatic one-second switch now.
+
+- `Sources/SpeakiOS/Services/SharedClientLiveTranscriber.swift:447-488`: Records the first nonempty buffer and forwards capture through a processing queue; frame arrival is distinct from audible speech. Safety writer starts before capture. No demonstrated zero-sample Bluetooth failure is inferred by this code.
+- `Sources/SpeakiOS/Services/AudioSessionManager.swift:100-159`: Bluetooth input is enabled with playAndRecord/measurement; existing fallback addresses activation rejection by using a mixable session, not silence or microphone selection.
+- `Sources/SpeakiOS/Services/AudioSessionManager.swift:190-210,318-345`: Route diagnostics already use stable port types to avoid leaking device names, and route changes update display and notify observers. New route mutations must account for this lifecycle.
+- `comments/989.json`: Explicitly requires physical-device evidence separating absent buffers, zero samples and quiet speech, then an explicit fallback policy; rejects one-second threshold and recovery estimates as unmeasured.
+
+**Dependencies**
+
+- #980 microphone-policy work remains explicitly deferred.
+- #972/#950 capture instrumentation should supply route-labelled evidence; avoid a duplicate probe framework.
+
+**Verification**
+
+- Compare physical-device recordings for delayed speech, genuine silence, quiet speech, absent buffers, all-zero buffers and actual headset startup failures across at least two AirPods generations.
+- Record port-type route labels and capture timings without raw audio, device names or unnecessary firmware identifiers.
+- Before implementation, define a failure signature and demonstrate false-positive behaviour; define microphone-choice and fallback consent semantics.
+- Any later route-switch implementation requires Apple-native builds and hardware tests for route reconfiguration, capture continuity, headset reconnection and visible recovery messaging.
+
+**Risks and limits**
+
+- RMS alone cannot distinguish a silent user from dead input; an arbitrary timeout risks switching healthy sessions.
+- Switching input can itself interrupt capture or move listening to a phone in a pocket or another room.
+- The claimed 1–3 second recovery and approximately 60-line effort are unverified.
+- Static Linux inspection cannot validate Bluetooth hardware behaviour. Beads CLI is unavailable according to supplied parent context; no repository changes or external tracker updates performed.
+
+## #994: Clipboard hygiene: expiring, local-only transcripts with an explicit Universal Clipboard opt-in
+
+Reviewer: `/root/issue_review_queue/review_994`.
+
+**Smallest worthwhile scope:** Implement one iOS transcript pasteboard adapter and a testable policy for configurable local expiry and explicit Universal Clipboard eligibility. Route existing automatic delivery and explicit transcript Copy surfaces through it, including History/Content and any notification copy actions. Use native settings controls and concise explanatory text; choose a bounded default such as five minutes/local-only, document effective settings and migration visibly so existing cross-device users can opt in. Keep polished text explicit-copy-only and retain existing write-result reporting. No delayed clear timer or macOS clipboard implementation expansion.
+
+- `Sources/SpeakiOS/Services/AutomaticPolishOperation.swift`: System writer assigns UIPasteboard.general.string with no expiration/local-only options; copyRaw already guards empty strings and isolates automatic delivery from polishing.
+- `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`: Automatic delivery writes raw text exactly once and uses read-only polling to confirm delivery. Comments explicitly forbid later rewriting because another app may now own the clipboard.
+- `Sources/SpeakiOS/Activity/TranscriptionIntents.swift`: Explicit Copy intents independently assign pasteboard.string; completion Copy retains a write-observation result which must survive helper adoption.
+- `comments/994.json`: Cached latest review explicitly calls for a shared policy, zero writes for History Only/empty captures, no delayed timer clearing newer items, documented effective settings/migration, and two-device verification.
+
+**Dependencies**
+
+- Preserve implemented #934/#1031 raw automatic delivery and history-only polishing.
+- Do not restore removed Send to Mac (#1024); Universal Clipboard is an OS copy eligibility setting, not that deleted delivery destination.
+- Coordinate any simultaneous edits to automatic clipboard writer, Copy intents, History/Content copy actions and iOS settings.
+
+**Verification**
+
+- Test policy option generation, configured expiry, explicit cross-device choice, invalid/missing stored values and migration.
+- Test automatic raw delivery writes once, late polish never writes, and History Only plus silent/empty capture write zero times.
+- Test all explicit transcript Copy adapters use the same policy while preserving selected raw/polished content and success/failure reporting.
+- Native iOS CI build/tests; device checks for local expiry and copying newer unrelated content before expiry without that newer content being cleared.
+- Two-device iPhone/Mac verification for opt-in/opt-out behaviour; UI must not promise that remote copies expire or that expiry removes History.
+
+**Risks and limits**
+
+- Changing the default can surprise existing Universal Clipboard users; a silent migration is unacceptable.
+- Clipboard expiry does not delete transcript History or guarantee deletion from other devices/apps. Treat remote expiry as unverified, not as a security promise.
+- Native clipboard and Universal Clipboard behaviour cannot be proven on this Linux workspace; keep physical verification explicit without blocking useful policy/adapter implementation.
+- Beads CLI is absent per parent context; this JSON is interim review evidence only.
+
+## #996: Unified error taxonomy and one CaptureCommandRouter for every entry point
+
+Reviewer: `/root/issue_review_queue/review_996`.
+
+**Smallest worthwhile scope:** Introduce or extend one pure start-failure presentation mapping over existing error types: safe copy, stable local diagnostic code, optional supported recovery action. Wire existing intent catch-all and existing published start-error alert to that mapping. Distinguish missing credentials, denied permission, unavailable local assets, unavailable Live Activity/audio session and declined foreground continuation only when typed evidence exists. Keep a safe unknown fallback. Preserve current recording owners and router boundaries; do not add analytics or rewrite every entry point.
+
+- `Sources/SpeakiOS/Activity/TranscriptionIntents.swift`: Foreground continuation has a dedicated Live Activity retry, and ownership/parameter failures are handled separately, but the final catch still maps other start failures to microphone/speech permission advice.
+- `Sources/SpeakiOS/Services/iOSTranscriptionError.swift`: Existing typed permission, recognizer, audio-session, Live Activity and timeout cases provide a useful mapping source. Audio-session and recognition descriptions currently interpolate underlying error text; this is unsuitable as universal spoken/public error copy.
+- `Sources/SpeakiOS/Services/CaptureCommandRunner.swift`: URL and quick-action capture already share lifecycle/destination handling and terminal failure policy; cancellation is explicitly distinct from failure. Intent-specific authentication and foreground continuation are deliberately kept outside this runner.
+- `SpeakiOSApp/SpeakiOSApp.swift`: Quick action already invokes CaptureCommandRunner.perform(.toggle).
+
+**Dependencies**
+
+- Honour latest issue comment: #1025/#1070 own shared quick-action/URL runner; #944/#1084 own terminal error visibility.
+- #934/#935/#946 capture ownership fixes are landed and should be preserved.
+- #776/#814 analytics consent and rollout gates remain; local diagnostic codes do not authorise telemetry.
+
+**Verification**
+
+- Unit-test distinct mappings and recovery destinations for known typed errors; unknown errors must not imply permission denial or expose raw provider text.
+- Cancellation, declined continuation and superseded starts must not become a misleading terminal permission alert; verify expected intent outcome explicitly.
+- Verify existing runner cancellation/destination/ownership tests still pass; add adapter coverage proving mapped failures reach existing user surfaces.
+- Use Apple Swift/Xcode CI for native compilation and simulator UI tests; device check foreground continuation and settings navigation before declaring those journeys verified.
+
+**Risks and limits**
+
+- Recoverable failure mapping must follow actual typed evidence rather than guess from arbitrary error strings.
+- Not every system failure has a supported deep link; use clear guidance when no supported repair destination exists.
+- Do not expose credentials, provider response text or provider identities in spoken dialogs.
+- Read-only triage inspected targeted current code; no native/device behaviour was tested. Beads CLI is absent per supplied context; this file is review evidence, not a replacement tracker.
+
+## #998: Regression harness: simulator XCUITests on the transcript hook, seam tests for lifecycle, a device matrix job
+
+Reviewer: `/root/issue_review_queue/review_998`.
+
+**Smallest worthwhile scope:** Reconcile #998 as delivered harness infrastructure and link residual behavioural defects to their owning issues. Do not launch a second implementation agent for this umbrella. Require each accepted production fix to supply a regression for its actual user-visible failure. A true Toggle-intent-to-final-output gap should be handled only if its owning review establishes a missing seam.
+
+- `Tests/SpeakiOSUITests/CaptureFlowUITests.swift`: Exercises real record controls and final text through deterministic simulator transcript injection; explicitly excludes microphone and Live Activity claims.
+- `Tests/SpeakCoreTests/StreamingAudioPrerollTests.swift`: Existing shared-client order, cap and stop coverage; explicitly routes missing Modulate buffering to production defect #947.
+- `.github/workflows/ci.yml`: Runs SpeakiOSTests and SpeakiOSUITests and labels limits in summary.
+- `.github/workflows/ios-device-matrix.yml`: Nightly/manual workflow requires IOS_DEVICE_MATRIX_ENABLED and self-hosted macOS ios-device runner.
+- `.github/ISSUE_TEMPLATE/action_button_device_matrix.md`: Physical locked-device, model selection and Live Activity scenario recording template already exists.
+- `Tests/SpeakiOSTests/TranscriptionActivityLifecycleTests.swift`: Dedicated lifecycle seam coverage also exists; avoid adding copies under this umbrella.
+
+**Dependencies**
+
+- #947 owns Modulate first-word buffering and associated regression coverage.
+- #1029 and #1047 are referenced by the shipped harness as lifecycle seam owners; reconcile their current reviews before assigning more coverage.
+- #793 owns the earlier flaky UI harness concern.
+- Physical device runner, provisioning and manual matrix remain separate operational gates.
+
+**Verification**
+
+- Confirm current native CI exercises the existing capture class and retains xcresult/logs before closure; static review here is not a run result.
+- Retain physical-device matrix for hardware Action Button, locked starts, audio interruptions, routing and Live Activity rendering.
+- Future preroll fixes must demonstrate ordered audio reaches transport; inspecting only a buffer is not full end-to-end assurance.
+- Do not describe recopy availability as proof of clipboard contents: the current test explicitly cannot assert the actual pasteboard write.
+
+**Risks and limits**
+
+- Read-only bounded review on Linux; no Apple-framework, microphone, ActivityKit or device execution performed.
+- The original Toggle-intent simulator test is not present in CaptureFlowUITests; existing app-button flows are a deliberate narrower delivery, not proof of intent invocation.
+- The device job stays opt-in; do not enable infrastructure or claim nightly coverage from workflow existence.
+- Beads CLI is absent according to supplied task context; this JSON is review evidence only.
+
+## #999: Offline-first routing: record with no signal on-device, re-transcribe with the cloud model when online
+
+Reviewer: `/root/issue_review_queue/review_999`.
+
+**Smallest worthwhile scope:** Introduce an injectable network-path snapshot and local capability decision for ordinary live sessions; confirmed unsatisfied path plus available local language assets can select strict local recognition before opening a cloud connection.; Treat unknown path as unknown and satisfied path as no guarantee of provider availability; preserve existing provider error recovery.; Use the existing visible fallback notice and capture/history identity; retain audio and offer the existing manual retry flow where local recognition is unavailable. Preserve explicit per-run model contracts.; Do not introduce pending cloud queues, BGProcessingTask, automatic History replacement, or implicit batch-model substitution in this first change.
+
+- `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`: Current live resolution makes credential fallback visible; explicitly named unavailable models must not be silently replaced. Offline routing must preserve these per-run contracts.
+- `Sources/SpeakiOS/Services/iOSLiveTranscriber.swift`: Apple recognition only requires on-device processing if preferOnDevice and recognizer.supportsOnDeviceRecognition are true; otherwise it uses server recognition. Selecting Apple alone is not proof of an offline route.
+- `Sources/SpeakiOS/Services/CaptureRecoveryCoordinator.swift`: Existing interrupted-capture recovery preserves files, bounds its operation, keys History by capture run, and exposes manual batch retranscription. A streaming-only selection falls back to a supported batch model; that manual policy must not silently become automatic paid upload consent.
+- `Sources/SpeakiOS/Views/iOSHistoryManager.swift`: History already supports durable upsert by identity with updatedAt conflict selection. Automatic upgrades would need to protect user edits and durable completion in addition to reusing the UUID.
+
+**Dependencies**
+
+- Coordinate with #992/#1083 existing capture recovery ownership; do not add a second file-recovery coordinator.
+- Honour issue comment 5622113485: separate fallback and upload; require local capability, consent, supported batch route, bounded retry and idempotent replacement.
+
+**Verification**
+
+- Deterministic route-policy tests: offline/local ready, offline/local unavailable, unknown path, online-but-provider-fails, missing credentials, and explicitly named model.
+- Prove strict offline route cannot fall back to Apple server recognition; verify locale/asset capability handling and audio preservation on failure.
+- Native CI compilation plus device flight-mode and reconnect checks covering first words, complete persisted audio, stable History identity and truthful fallback text.
+- No automatic provider upload or additional provider cost on reconnect.
+
+**Risks and limits**
+
+- Network path does not establish provider reachability; no background-completion or latency guarantee from static inspection.
+- Apple capability and asset availability vary by locale/device; unavailable local support needs explicit recoverable UX.
+- Any future cloud-upgrade stage needs explicit opt-in, supported saved-file route, a single recovery owner, cancellation/deletion handling, bounded retry and protection against overwriting user edits.
+- Apple Swift/Xcode and device checks unavailable on Linux; Beads CLI absent as reported in supplied context.

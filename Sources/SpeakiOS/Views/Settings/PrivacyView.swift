@@ -30,6 +30,7 @@ struct PrivacyView: View {
     var body: some View {
         Form {
             currentWorkflowSection
+            clipboardSection
             supportedProvidersSection
             apiKeysSection
             networkActivitySection
@@ -38,6 +39,28 @@ struct PrivacyView: View {
         }
         .navigationTitle("Privacy")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder
+    private var clipboardSection: some View {
+        Section("Clipboard") {
+            Picker("Transcript expiry", selection: $settings.transcriptClipboardLifetime) {
+                ForEach(TranscriptClipboardLifetime.allCases) { lifetime in
+                    Text(lifetime.displayName).tag(lifetime)
+                }
+            }
+            .accessibilityIdentifier("transcriptClipboardLifetimePicker")
+
+            Toggle(
+                "Allow Universal Clipboard",
+                isOn: $settings.transcriptClipboardAllowsUniversalClipboard
+            )
+            .accessibilityIdentifier("transcriptClipboardUniversalToggle")
+
+            Text(self.settings.transcriptClipboardPrivacySummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder
@@ -106,7 +129,10 @@ struct PrivacyView: View {
                 ForEach(PrivacyWorkflowSummary.voiceOutputRecipients, id: \.self) { provider in
                     InfoRow(label: provider, value: "During voice output")
                 }
-                InfoRow(label: "Send to Mac", value: "Local network only")
+                InfoRow(
+                    label: "Universal Clipboard",
+                    value: self.settings.transcriptClipboardAllowsUniversalClipboard ? "Allowed" : "Off"
+                )
                 InfoRow(label: "iCloud Sync", value: "Settings & keys (optional)")
             }
             .font(.caption)
@@ -138,6 +164,18 @@ struct PrivacyView: View {
                 PermissionRow(icon: "network", name: "Local Network", required: false)
             }
         }
+    }
+}
+
+extension AppSettings {
+    var transcriptClipboardPrivacySummary: String {
+        let universalClipboard = self.transcriptClipboardAllowsUniversalClipboard
+            ? "Universal Clipboard is on, allowing copying between your Apple devices."
+            : "Universal Clipboard is off. Enable it to allow copying between your Apple devices."
+        return "Transcript copies expire on this iPhone after \(self.transcriptClipboardLifetime.displayName). "
+            + universalClipboard
+            + " Expiry does not delete History or copies already pasted elsewhere. "
+            + "Expiry on another device is not guaranteed."
     }
 }
 

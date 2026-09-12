@@ -1,7 +1,6 @@
 #if os(iOS)
 import AppIntents
 import SpeakCore
-import UIKit
 
 // App Intent declarations intentionally stay together so Shortcuts metadata and
 // foreground-continuation behavior remain auditable in one place. That is worth
@@ -570,11 +569,11 @@ public struct CopyLastTranscriptIntent: LiveActivityIntent {
 
     /// Writes to the pasteboard and reports whether the system observed the write.
     @MainActor
-    private static func copyConfirmingChangeCount(_ text: String) -> Bool {
-        let pasteboard = UIPasteboard.general
-        let before = pasteboard.changeCount
-        pasteboard.string = text
-        return pasteboard.changeCount != before
+    static func copyConfirmingChangeCount(
+        _ text: String,
+        clipboard: TranscriptClipboard = .shared
+    ) -> Bool {
+        clipboard.copy(text)
     }
 }
 
@@ -598,11 +597,15 @@ struct CopyLastSentenceIntent: AppIntent {
             return .result(value: "No recent transcription to copy")
         }
 
-        await MainActor.run {
-            UIPasteboard.general.string = lastSentence
-        }
+        let copied = await MainActor.run { Self.copy(lastSentence) }
+        guard copied else { return .result(value: "Couldn’t reach the clipboard. Open the app to copy it.") }
 
         return .result(value: "Copied: \(lastSentence.prefix(50))...")
+    }
+
+    @MainActor
+    static func copy(_ text: String, clipboard: TranscriptClipboard = .shared) -> Bool {
+        clipboard.copy(text)
     }
 }
 
@@ -622,12 +625,16 @@ struct CopyFullTranscriptIntent: AppIntent {
             return .result(value: "No transcription to copy")
         }
 
-        await MainActor.run {
-            UIPasteboard.general.string = fullText
-        }
+        let copied = await MainActor.run { Self.copy(fullText) }
+        guard copied else { return .result(value: "Couldn’t reach the clipboard. Open the app to copy it.") }
 
         let wordCount = fullText.split(separator: " ").count
         return .result(value: "Copied \(wordCount) words")
+    }
+
+    @MainActor
+    static func copy(_ text: String, clipboard: TranscriptClipboard = .shared) -> Bool {
+        clipboard.copy(text)
     }
 }
 

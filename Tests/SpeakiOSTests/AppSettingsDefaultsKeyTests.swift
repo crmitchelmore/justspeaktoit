@@ -23,7 +23,10 @@ final class AppSettingsDefaultsKeyTests: XCTestCase {
             "postProcessingEnabled",
             "postProcessingModel",
             "autoPostProcess",
-            "hasLaunchedBefore"
+            "hasLaunchedBefore",
+            "transcriptClipboardLifetimeSeconds",
+            "transcriptClipboardAllowsUniversalClipboard",
+            "transcriptClipboardNoticeVersion"
         ])
         let actual = AppSettings.DefaultsKey.allCases.map(\.rawValue)
 

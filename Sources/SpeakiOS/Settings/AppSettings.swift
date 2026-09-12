@@ -105,6 +105,9 @@ public final class AppSettings: ObservableObject {
         case postProcessingModel
         case autoPostProcess
         case hasLaunchedBefore
+        case transcriptClipboardLifetimeSeconds
+        case transcriptClipboardAllowsUniversalClipboard
+        case transcriptClipboardNoticeVersion
     }
 
     public static let shared = AppSettings()
@@ -355,6 +358,42 @@ public final class AppSettings: ObservableObject {
         didSet { defaults.set(liveActivitiesEnabled, forKey: DefaultsKey.liveActivitiesEnabled.rawValue) }
     }
 
+    @Published var transcriptClipboardLifetime: TranscriptClipboardLifetime {
+        didSet {
+            self.defaults.set(
+                self.transcriptClipboardLifetime.rawValue,
+                forKey: DefaultsKey.transcriptClipboardLifetimeSeconds.rawValue
+            )
+        }
+    }
+
+    @Published var transcriptClipboardAllowsUniversalClipboard: Bool {
+        didSet {
+            self.defaults.set(
+                self.transcriptClipboardAllowsUniversalClipboard,
+                forKey: DefaultsKey.transcriptClipboardAllowsUniversalClipboard.rawValue
+            )
+        }
+    }
+
+    @Published private(set) var transcriptClipboardNoticeVersion: Int
+
+    var transcriptClipboardPolicy: TranscriptClipboardPolicy {
+        TranscriptClipboardPolicy(
+            lifetime: self.transcriptClipboardLifetime,
+            allowsUniversalClipboard: self.transcriptClipboardAllowsUniversalClipboard
+        )
+    }
+
+    var isTranscriptClipboardNoticePending: Bool {
+        self.transcriptClipboardNoticeVersion < 1
+    }
+
+    func acknowledgeTranscriptClipboardNotice() {
+        self.transcriptClipboardNoticeVersion = 1
+        self.defaults.set(1, forKey: DefaultsKey.transcriptClipboardNoticeVersion.rawValue)
+    }
+
     @Published public var visualDensity: AppVisualDensity {
         didSet { defaults.set(visualDensity.rawValue, forKey: DefaultsKey.visualDensity.rawValue) }
     }
@@ -499,6 +538,22 @@ public final class AppSettings: ObservableObject {
 
         // Default Live Activities to true if not set
         let liveActivities = defaults.object(forKey: DefaultsKey.liveActivitiesEnabled.rawValue) as? Bool ?? true
+        let clipboardPolicy = TranscriptClipboardPolicy(
+            storedLifetime: defaults.object(forKey: DefaultsKey.transcriptClipboardLifetimeSeconds.rawValue),
+            storedAllowsUniversalClipboard: defaults.object(
+                forKey: DefaultsKey.transcriptClipboardAllowsUniversalClipboard.rawValue
+            )
+        )
+        let storedClipboardNotice = defaults.object(forKey: DefaultsKey.transcriptClipboardNoticeVersion.rawValue)
+        let clipboardNoticeVersion: Int
+        if let number = storedClipboardNotice as? NSNumber,
+           CFGetTypeID(number) != CFBooleanGetTypeID(),
+           number.intValue == 1,
+           number.doubleValue == 1 {
+            clipboardNoticeVersion = 1
+        } else {
+            clipboardNoticeVersion = 0
+        }
         let density = AppVisualDensity(
             rawValue: defaults.string(forKey: DefaultsKey.visualDensity.rawValue) ?? ""
         ) ?? .normal
@@ -572,6 +627,9 @@ public final class AppSettings: ObservableObject {
         self.mistralAPIKey = ""
         self.transcriptionKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
         self.liveActivitiesEnabled = liveActivities
+        self.transcriptClipboardLifetime = clipboardPolicy.lifetime
+        self.transcriptClipboardAllowsUniversalClipboard = clipboardPolicy.allowsUniversalClipboard
+        self.transcriptClipboardNoticeVersion = clipboardNoticeVersion
         self.visualDensity = density
         self.autoStartRecording = autoStart
         self.handsFreeDictationEnabled = handsFree

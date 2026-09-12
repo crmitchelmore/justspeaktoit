@@ -42,6 +42,16 @@ struct HardwareTriggerSettingsView: View {
                 }
             }
 
+            Section("Clipboard Privacy") {
+                Text(self.settings.transcriptClipboardPrivacySummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Change this under Settings → Privacy Information → Clipboard.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             autoStopSection
 
             Section("Before You Start") {

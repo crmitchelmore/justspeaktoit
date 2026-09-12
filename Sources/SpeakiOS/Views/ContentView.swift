@@ -933,6 +933,9 @@ public struct ContentView: View {
                                 alignment: .leading,
                                 spacing: density.isCompact ? density.cardContentSpacing : 12
                             ) {
+                                if self.settings.isTranscriptClipboardNoticePending {
+                                    ClipboardPrivacyNotice(settings: self.settings)
+                                }
                                 if let card = onboarding.offeredCard(hardware: captureHardware) {
                                     CaptureOnboardingCard(
                                         trigger: card,
@@ -1542,11 +1545,11 @@ public struct ContentView: View {
     }
 
     private func copyToClipboard() {
-        UIPasteboard.general.string = currentText
-        copied = true
+        guard TranscriptClipboard.shared.copy(self.currentText) else { return }
+        self.copied = true
         Task {
             try? await Task.sleep(for: .seconds(2))
-            copied = false
+            self.copied = false
         }
     }
 }

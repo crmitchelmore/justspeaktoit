@@ -38,6 +38,15 @@ Direct Mac releases are GitHub prereleases. A single `alpha-latest` JSON pointer
 routes Alpha feeds/downloads to immutable assets. It cannot change GitHub Latest,
 Stable Sparkle feeds or Homebrew. Late older builds cannot roll back the pointer.
 
+Each direct Mac worker re-runs the release-configuration tests on the pristine
+tagged source *before* the manifest stamps train identity, version and release
+notes into the tree; those stamps are what the plist-identity and release-notes
+tests pin, so testing afterwards fails every build. Until the pointer exists,
+`https://justspeaktoit.com/alpha/appcast.xml` answers 503 and an installed Alpha
+reports "An error occurred in retrieving update information". Hourly
+reconciliation dispatches with the workflow token (`actions: write`), not a
+personal token.
+
 The local Codex Run action launches Alpha with `script/build_and_run.sh`.
 Alpha starts without a global recording hotkey; configure one in Settings.
 

@@ -25,6 +25,10 @@ extension SettingsView {
         localTranscriptionModelsCard
       }
 
+      if !settings.recoveredTranscriptionKeywords.isEmpty {
+        transcriptionKeywordRecoveryCard
+      }
+
       // 3. Options that depend on the chosen model.
       if isRemoteStreamingTranscriptionSelected {
         processingSpeedCard
@@ -195,6 +199,12 @@ extension SettingsView {
           ),
           credentialPurpose: .batchTranscription,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers)
+        )
+        OpenRouterTranscriptionPickerButton(
+          selection: remoteTranscriptionModelBinding(
+            \AppSettings.batchTranscriptionModel, options: ModelCatalog.batchTranscription
+          ),
+          storage: environment.secureStorage
         )
         if isCustomBatchTranscriptionModel {
           SettingsInlineInfo(
@@ -859,6 +869,12 @@ extension SettingsView {
         Text(localModelSizeLabel(for: model))
           .font(.caption2.monospacedDigit())
           .foregroundStyle(.tertiary)
+        if localModels.usesLegacyStorage(model) {
+          Text("Removing this legacy installation keeps its shared cache. "
+            + "Download again afterward to manage its storage.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
         if case .failed(let message) = state {
           Text(message)
             .font(.caption2)
@@ -878,14 +894,10 @@ extension SettingsView {
               settings.localTranscriptionModel = model.id
             }
           }
-          Button("Delete") {
-            localModels.delete(model)
-            if settings.localTranscriptionModel == model.id {
-              settings.repairDownloadedTranscriptionSelection(
-                fallbackModelID: firstInstalledLocalTranscriptionModelID(excluding: model.id)
-              )
-            }
+          Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
+            deleteDownloadedWhisperKitModel(model)
           }
+          .disabled(!localModels.canDelete(model))
         }
       case .installing:
         VStack(alignment: .trailing, spacing: 6) {
@@ -900,10 +912,23 @@ extension SettingsView {
           Button("Download") {
             Task { await localModels.install(model) }
           }
+          if localModels.canDelete(model) {
+            Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteDownloadedWhisperKitModel(model) }
+          }
         }
       }
       }
     }
+  }
+
+  private func deleteDownloadedWhisperKitModel(_ model: LocalTranscriptionModel) {
+    guard localModels.delete(model) else { return }
+    let sourceID = WhisperKitStreamingModel.id(for: model)
+    settings.repairRemovedWhisperKitSelection(
+      modelID: model.id, streamingSourceID: sourceID,
+      fallbackBatchModelID: firstInstalledLocalTranscriptionModelID(excluding: model.id),
+      fallbackStreamingSourceID: firstInstalledStreamingSourceID(excluding: sourceID)
+    )
   }
 
   private var localModelQuickStart: some View {
@@ -1322,23 +1347,19 @@ extension SettingsView {
                 settings.localStreamingModelSource = streamingID
               }
             }
-            Button("Delete") {
-              localModels.delete(model)
-              if isSelected {
-                if let fallback = firstInstalledStreamingSourceID(excluding: streamingID) {
-                  settings.localStreamingModelSource = fallback
-                } else {
-                  settings.localStreamingModelSource = ""
-                  settings.localTranscriptionMode = .batch
-                }
-              }
+            Button(localModels.usesLegacyStorage(model) ? "Remove" : "Delete") {
+              deleteDownloadedWhisperKitModel(model)
             }
+            .disabled(!localModels.canDelete(model))
           case .installing:
             ProgressView()
               .controlSize(.small)
           case .notInstalled, .failed:
             Button("Download") {
               Task { await localModels.install(model) }
+            }
+            if localModels.canDelete(model) {
+              Button(state == .notInstalled ? "Delete" : "Retry Delete") { deleteDownloadedWhisperKitModel(model) }
             }
           }
         }

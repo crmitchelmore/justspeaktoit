@@ -42,8 +42,8 @@ struct LiveTranscriptSnapshot: Equatable, Sendable {
 /// transcript (issue #643). Display updates are therefore admitted only while a
 /// session is active and only from the controller bound to that session.
 ///
-/// This gates display state only: continuation handling, transcription results
-/// and text insertion are deliberately untouched.
+/// The manager also checks this ownership before admitting terminal callbacks,
+/// so an obsolete provider cannot complete or fail the current recording.
 @MainActor
 final class LiveTranscriptDisplayScope {
   private(set) var activeSessionID: LiveTranscriptSessionID?

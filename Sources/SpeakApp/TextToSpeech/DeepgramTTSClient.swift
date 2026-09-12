@@ -65,7 +65,9 @@ actor DeepgramTTSClient: TextToSpeechClient {
         // Calculate duration
         let duration = try await getAudioDuration(url: outputURL)
 
-        let cost = Decimal(text.count) * DeepgramTTSAPI.costPerThousandCharacters / 1000
+        // Aura pricing must not be attributed to a different model family.
+        let cost: Decimal? = voiceID.hasPrefix("flux-") ? nil
+            : Decimal(text.count) * DeepgramTTSAPI.costPerThousandCharacters / 1000
 
         return TTSResult(
             audioURL: outputURL,

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 
 /// Chooses which Sparkle feed a running build follows (issue #774).
 ///
@@ -18,9 +19,11 @@ enum UpdateFeedSelection {
         machineArchitecture: String,
         isTranslated: Bool
     ) -> String? {
-        guard configuredFeedURL == legacyFeedURL else { return configuredFeedURL }
-        guard machineArchitecture == "arm64", !isTranslated else { return legacyFeedURL }
-        return appleSiliconFeedURL
+        guard let train = ReleaseTrain.allCases.first(where: { $0.feedURL == configuredFeedURL }) else {
+            return configuredFeedURL
+        }
+        guard machineArchitecture == "arm64", !isTranslated else { return train.feedURL }
+        return train.arm64FeedURL
     }
 
     /// The feed for this process, derived from the bundle's `SUFeedURL`.

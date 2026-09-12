@@ -14,8 +14,13 @@ final class UpdaterManager: NSObject, ObservableObject {
 #if !APP_STORE
     /// The Sparkle updater controller
     private lazy var updaterController: SPUStandardUpdaterController = {
-        SPUStandardUpdaterController(
-            startingUpdater: true,
+        #if DEBUG
+        let startsUpdater = supportsSelfUpdate && !CoreJourneyLaunchProfile.isRequested
+        #else
+        let startsUpdater = supportsSelfUpdate
+        #endif
+        return SPUStandardUpdaterController(
+            startingUpdater: startsUpdater,
             updaterDelegate: self,
             userDriverDelegate: nil
         )
@@ -24,6 +29,7 @@ final class UpdaterManager: NSObject, ObservableObject {
     /// Whether automatic update checks are enabled
     @Published var automaticallyChecksForUpdates: Bool {
         didSet {
+            guard supportsSelfUpdate else { return }
             updaterController.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
         }
     }
@@ -41,7 +47,11 @@ final class UpdaterManager: NSObject, ObservableObject {
         automaticallyChecksForUpdates = false
         super.init()
         _ = updaterController
+        #if DEBUG
+        if CoreJourneyLaunchProfile.isRequested { return }
+        #endif
 
+        guard supportsSelfUpdate else { return }
         automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
 
         // Observe canCheckForUpdates changes
@@ -51,6 +61,7 @@ final class UpdaterManager: NSObject, ObservableObject {
 
     /// Manually trigger an update check
     func checkForUpdates() {
+        guard supportsSelfUpdate, canCheckForUpdates else { return }
         updaterController.checkForUpdates(nil)
     }
 
@@ -82,6 +93,7 @@ final class UpdaterManager: NSObject, ObservableObject {
 
     var supportsSelfUpdate: Bool {
         DistributionChannel.current.supportsSelfUpdate
+            && SelfUpdateConfiguration.isConfigured(info: Bundle.main.infoDictionary ?? [:])
     }
 
     var allowsCrossChannelMessaging: Bool {
@@ -89,7 +101,10 @@ final class UpdaterManager: NSObject, ObservableObject {
     }
 
     var updateStatusMessage: String {
-        supportsSelfUpdate ? "Latest unknown" : "Updates are delivered through the App Store."
+        guard DistributionChannel.current.supportsSelfUpdate else {
+            return "Updates are delivered through the App Store."
+        }
+        return supportsSelfUpdate ? "Latest unknown" : SelfUpdateConfiguration.unavailableMessage
     }
 }
 

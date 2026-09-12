@@ -6,20 +6,23 @@
   <title>Privacy Policy — JustSpeakToIt</title>
   <meta name="description" content="How JustSpeakToIt handles recordings, transcripts, diagnostics, API keys, and optional cloud services.">
   <meta name="robots" content="index,follow">
+  <link rel="icon" href="/favicon.svg?v=20260909" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <link rel="canonical" href="https://justspeaktoit.com/privacy">
   <link rel="preconnect" href="https://api.fontshare.com">
-  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
+  <link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@500,700,800&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b0f14;
-      --surface: #111a26;
-      --text: #f8fafc;
-      --muted: #a8b3c7;
-      --accent: #ff6a3d;
+      --bg: #121417;
+      --surface: #191c21;
+      --text: #f5f3f0;
+      --muted: #adb4bd;
+      --accent: #ff9166;
       --border: rgba(255, 255, 255, 0.1);
-      --display: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
-      --body: 'General Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --display: 'Cabinet Grotesk', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --body: 'General Sans', ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     }
 
     * { box-sizing: border-box; }
@@ -27,7 +30,7 @@
     body {
       margin: 0;
       background:
-        radial-gradient(circle at 90% 0%, rgba(255, 106, 61, 0.16), transparent 34rem),
+        radial-gradient(circle at 90% 0%, rgba(255, 107, 61, 0.18), transparent 34rem),
         var(--bg);
       color: var(--text);
       font-family: var(--body);
@@ -39,7 +42,7 @@
 
     .nav {
       border-bottom: 1px solid var(--border);
-      background: rgba(11, 15, 20, 0.88);
+      background: rgba(18, 20, 23, 0.88);
       backdrop-filter: blur(18px);
     }
 
@@ -58,10 +61,13 @@
     }
 
     .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
       color: var(--text);
       font-family: var(--display);
       font-size: 1.1rem;
-      font-weight: 900;
+      font-weight: 800;
       text-decoration: none;
     }
 
@@ -92,7 +98,7 @@
       padding: 1.5rem;
       border: 1px solid var(--border);
       border-radius: 18px;
-      background: linear-gradient(145deg, rgba(255, 106, 61, 0.09), var(--surface));
+      background: linear-gradient(145deg, rgba(255, 107, 61, 0.09), var(--surface));
     }
 
     .summary p { margin: 0; color: var(--text); }
@@ -116,7 +122,7 @@
 <body>
   <nav class="nav" aria-label="Primary navigation">
     <div class="nav__inner">
-      <a class="brand" href="/">🎙️ JustSpeakToIt</a>
+      <a class="brand" href="/"><img src="/favicon.svg?v=20260909" width="32" height="32" alt="">Just Speak to It</a>
       <a class="back" href="/">Back to the app</a>
     </div>
   </nav>

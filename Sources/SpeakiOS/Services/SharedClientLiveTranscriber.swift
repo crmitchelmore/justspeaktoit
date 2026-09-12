@@ -24,8 +24,44 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     public var onPartialResult: ((String, Bool) -> Void)?
     public var onError: ((Error) -> Void)?
+    /// Raised on the main actor at most once per start, when this run's own
+    /// input tap accepts a buffer with a positive frame count (issue #983).
+    public var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations for this start (issue #972).
+    public var onStartupObservation: ((StartupObservation) -> Void)?
 
     private let audioSessionManager: AudioSessionManager
+    private let startup = RecordingStartupOperation()
+    /// Replaced per start so a retired run's tap can never report input for
+    /// the run that replaced it.
+    private var firstInputSignal = FirstInputSignal()
+
+    /// Hopped to from the audio thread once, never per buffer.
+    private func reportFirstInputBuffer(_ captureID: UUID) {
+        guard activeCaptureID == captureID else { return }
+        onFirstInputBuffer?()
+    }
+    private var cleanupTask: Task<Void, Never>?
+    private var isStopping = false
+    private var activeCaptureID: UUID?
+    private var ownsAudioSession = false
+    private var hasInputTap = false
+    // Isolates system boundaries in lifecycle tests.
+    var drainCaptureWork: (() async -> Void)?
+    var clientFactory: (() -> StreamingTranscriptionClient?)?
+    var startCaptureAudio: (() throws -> Void)?
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
+
+    private func removeInputTap() {
+        guard hasInputTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInputTap = false
+    }
     private let route: LiveTranscriptionRoute
     private let apiKey: String
     private let language: String?
@@ -33,6 +69,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private var client: StreamingTranscriptionClient?
     private let audioEngine = AVAudioEngine()
+    private let configurationObserver = CaptureDisruptionObserver()
+    private let captureInterruptionObserver = CaptureDisruptionObserver()
+    var configurationNotificationObject: AnyObject { audioEngine }
     private var startTime: Date?
     /// Finalised text so far, folded by the hosted client's declared final
     /// shape once `start()` knows which client is in use (issue #700).
@@ -41,6 +80,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     /// Persistent audio recorder — saves audio to disk alongside transcription,
     /// so a session survives the network dropping mid-stream.
     public let audioRecorder = AudioRecordingPersistence()
+    let recordingLoss = RecordingLossReporting()
 
     /// Serial queue that takes tap buffers off the real-time audio thread —
     /// persistence and resample + network sends all run here, not in the tap
@@ -70,12 +110,27 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         self.language = language
         self.keywords = keywords
         self.audioSessionManager = audioSessionManager
-        setupInterruptionHandling()
     }
 
     public func start() async throws {
-        guard !isRunning else { return }
+        guard !isRunning, !isStopping, !startup.isStarting else { return }
+        do {
+            try await startup.run(
+                {
+                    await self.cleanupTask?.value
+                    try Task.checkCancellation()
+                    try await self.startCapture()
+                },
+                onFailure: { await self.cleanupCapture()?.value }
+            )
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+            throw error
+        }
+    }
 
+    private func startCapture() async throws {
+        recordingLoss.begin(recorder: audioRecorder)
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             let err = StreamingClientError.missingAPIKey(provider: route.provider.displayName)
             SpeakLogger.logError(
@@ -85,9 +140,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
             throw err
         }
 
-        guard let client = LiveTranscriptionClientFactory.makeClient(
-            for: route, apiKey: apiKey, language: language, keywords: keywords
-        ) else {
+        guard let client = makeClient() else {
             let err = LiveTranscriptionClientError.providerNotAvailable(route.provider)
             self.error = err
             throw err
@@ -96,55 +149,119 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         SpeakLogger.logTranscription(event: "start", model: route.modelID)
 
         try await ensureMicrophonePermission()
+        try Task.checkCancellation()
+        ownsAudioSession = true
         try await configureAudioSession()
+        try Task.checkCancellation()
 
         self.client = client
         // Fold finals by the client's declared shape: standalone segments
         // append (identical text repeats included), cumulative finals replace.
         accumulated = TranscriptAccumulator(shape: client.finalShape)
-        client.start(
-            onTranscript: { [weak self] text, isFinal in
-                Task { @MainActor in self?.handleTranscript(text: text, isFinal: isFinal) }
-            },
-            onError: { [weak self] error in
-                Task { @MainActor in self?.handleError(error) }
-            }
-        )
+        startClient(client)
 
-        do {
+        // The startup owner's failure path drains queued capture work before
+        // closing the client and releasing the audio session.
+        if let startCaptureAudio {
+            try startCaptureAudio()
+        } else {
             try startAudioEngine()
-        } catch {
-            // Capture startup failed after the client connected — tear the
-            // client and audio session back down so nothing is left running.
-            client.stop()
-            self.client = nil
-            audioSessionManager.deactivate()
-            throw error
         }
         resetState()
+        observeCaptureConfiguration()
+    }
+
+    private func makeClient() -> StreamingTranscriptionClient? {
+        if let clientFactory { return clientFactory() }
+        return LiveTranscriptionClientFactory.makeClient(
+            for: route, apiKey: apiKey, language: language, keywords: keywords,
+            azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
+        )
+    }
+
+    private func startClient(_ client: StreamingTranscriptionClient) {
+        let captureID = UUID()
+        activeCaptureID = captureID
+        firstInputSignal = FirstInputSignal()
+        client.start(
+            onTranscript: { [weak self] text, isFinal in
+                Task { @MainActor in
+                    guard self?.activeCaptureID == captureID else { return }
+                    self?.handleTranscript(text: text, isFinal: isFinal)
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor in
+                    guard self?.activeCaptureID == captureID else { return }
+                    self?.handleError(error)
+                }
+            }
+        )
+    }
+
+    private func observeCaptureConfiguration() {
+        configurationObserver.observe(.AVAudioEngineConfigurationChange, object: audioEngine) { [weak self] in
+            self?.audioEngine.isRunning == true
+        } onDisruption: { [weak self] in
+            self?.handleCaptureDisruption(.microphoneChanged)
+        }
+        captureInterruptionObserver.observeAudioInterruption { [weak self] in
+            self?.handleCaptureDisruption(.interrupted)
+        }
+    }
+
+    private func handleCaptureDisruption(_ reason: iOSTranscriptionError) {
+        guard isRunning, !isStopping else { return }
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        audioEngine.stop()
+        removeInputTap()
+        // The owner drains the provider and recording once through its normal stop path.
+        // Interruption itself is a stopped notice; a real drain failure still reaches onError.
+        if !reason.isControlledInterruption { error = reason }
+        onError?(reason)
     }
 
     public func stop() async -> TranscriptionResult {
-        guard isRunning else {
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        let lossRun = recordingLoss.currentReport
+        guard isRunning, !isStopping else {
+            await cleanupTask?.value
             let text = partialText.isEmpty ? accumulated.text : partialText
             return makeResult(text: text, duration: 0)
         }
+        isStopping = true
+        defer { isStopping = false }
 
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
         // Buffers handed to the queue just before the tap came off are still
         // being written and sent; let them land before the client is finalised
         // and the recorder is closed.
         await audioProcessingQueue.drainPendingWork()
+        guard isRunning else {
+            await cleanupTask?.value
+            return makeResult(text: partialText, duration: 0)
+        }
         // The retained resampler is still holding the frames whose filter
         // window has not closed. Flush them down the same send path the live
         // chunks use, before the client is finalised, or the tail of a short
         // utterance is dropped (issue #872).
         await drainConverterTail()
+        guard isRunning else {
+            await cleanupTask?.value
+            return makeResult(text: partialText, duration: 0)
+        }
         await finishClient()
-        _ = audioRecorder.stopRecording()
+        guard isRunning else {
+            await cleanupTask?.value
+            return makeResult(text: partialText, duration: 0)
+        }
+        activeCaptureID = nil
+        recordingLoss.finish(recorder: audioRecorder, run: lossRun)
         isRunning = false
-        audioSessionManager.deactivate()
+        releaseAudioSession()
 
         // `partialText` is the fullest view (finalised text plus any trailing
         // non-final words); fall back to the accumulated finals if empty.
@@ -159,9 +276,40 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     public func cancel() {
-        guard isRunning else { return }
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        startup.cancel()
+        _ = cleanupCapture()
+    }
+
+    func awaitCancellationSettled() async {
+        await cleanupTask?.value
+    }
+
+    private func cleanupCapture() -> Task<Void, Never>? {
+        configurationObserver.stop()
+        captureInterruptionObserver.stop()
+        recordingLoss.cancel()
+        if let cleanupTask { return cleanupTask }
+        guard isRunning || ownsAudioSession || hasInputTap else { return nil }
         audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        removeInputTap()
+        activeCaptureID = nil
+        isRunning = false
+        let task = Task { @MainActor in
+            if let drainCaptureWork {
+                await drainCaptureWork()
+            } else {
+                await audioProcessingQueue.drainPendingWork()
+            }
+            finishCaptureCleanup()
+            cleanupTask = nil
+        }
+        cleanupTask = task
+        return task
+    }
+
+    private func finishCaptureCleanup() {
         client?.stop()
         client = nil
         // Cancelled audio is thrown away, so there is nothing to drain — just
@@ -169,10 +317,12 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         converterCache.reset()
         // Cancel persistent recording (keeps the partial file).
         audioRecorder.cancelRecording()
-        isRunning = false
-        audioSessionManager.deactivate()
+        releaseAudioSession()
     }
 
+}
+
+extension SharedClientLiveTranscriber {
     // MARK: - Private
 
     /// Closes the client, giving providers that can still deliver words a
@@ -184,9 +334,11 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     /// with nothing outstanding would just add latency, so the socket closes
     /// straight away when every interim has already been finalised.
     private func finishClient() async {
-        defer { client = nil }
-        guard let finalizingClient = client as? FinalizingStreamingTranscriptionClient else {
-            client?.stop()
+        let finishingClient = client
+        let captureID = activeCaptureID
+        defer { if client === finishingClient { client = nil } }
+        guard let finalizingClient = finishingClient as? FinalizingStreamingTranscriptionClient else {
+            finishingClient?.stop()
             return
         }
         guard StreamingFinalisationPolicy.shouldAwaitFinalisation(
@@ -201,6 +353,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         // trailing segment, so it replaces what we accumulated. Appending it
         // would double every word the client already streamed.
         if let finalTranscript = await finalizingClient.finishAndWait(),
+           activeCaptureID == captureID,
            !finalTranscript.isEmpty,
            finalText != finalTranscript {
             applyFullTranscript(finalTranscript)
@@ -232,6 +385,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func ensureMicrophonePermission() async throws {
         if !audioSessionManager.hasMicrophonePermission() {
             let granted = await audioSessionManager.requestMicrophonePermission()
+            try Task.checkCancellation()
             if !granted {
                 let err = iOSTranscriptionError.permissionDenied(.microphone)
                 self.error = err
@@ -243,7 +397,9 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private func configureAudioSession() async throws {
         do {
             try await audioSessionManager.configureForRecording()
+            onStartupObservation?(.stage(.audioSessionConfigured))
         } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
             let wrapped = iOSTranscriptionError.audioSessionFailed(error)
             self.error = wrapped
             throw wrapped
@@ -258,17 +414,6 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         error = nil
         startTime = Date()
         isRunning = true
-    }
-
-    private func setupInterruptionHandling() {
-        audioSessionManager.addInterruptionObserver(owner: self) { [weak self] began in
-            Task { @MainActor in
-                guard began, let self, self.isRunning else { return }
-                self.error = iOSTranscriptionError.interrupted
-                self.onError?(iOSTranscriptionError.interrupted)
-                _ = await self.stop()
-            }
-        }
     }
 
     private func handleTranscript(text: String, isFinal: Bool) {
@@ -311,10 +456,20 @@ private extension SharedClientLiveTranscriber {
             targetFormat: targetFormat, converter: converter, targetSampleRate: sampleRate
         )
         let nativeSampleRate = nativeFormat.sampleRate
+        let signal = firstInputSignal
+        let captureID = activeCaptureID
+        // The safety writer opens before the tap and the engine, so the file
+        // covers the very first buffers instead of starting a beat late
+        // (issue #992); a writer failure is reported, never fatal (issue #950).
+        recordingLoss.startWriter(audioRecorder, format: nativeFormat)
+        let lossReport = recordingLoss.currentReport
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             // Copy the buffer and hop off the real-time audio thread —
             // heavy work in the tap makes CoreAudio drop mic buffers.
-            guard let self, let copied = self.tapBufferPool.copy(buffer) else { return }
+            guard let self, let copied = lossReport.copyCapture(buffer, using: self.tapBufferPool) else { return }
+            if copied.frameLength > 0, let captureID, signal.markObserved() {
+                Task { @MainActor [weak self] in self?.reportFirstInputBuffer(captureID) }
+            }
             self.audioProcessingQueue.async {
                 defer { self.tapBufferPool.recycle(copied) }
                 self.audioRecorder.writeBuffer(copied)
@@ -324,10 +479,12 @@ private extension SharedClientLiveTranscriber {
                 )
             }
         }
+        hasInputTap = true
 
         audioEngine.prepare()
         try audioEngine.start()
-        try? audioRecorder.startRecording(format: nativeFormat)
+        // Only after the engine actually returned.
+        onStartupObservation?(.stage(.engineStarted))
     }
 
     /// Bundles the audio-conversion context handed to the capture tap.

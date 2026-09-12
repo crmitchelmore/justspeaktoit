@@ -45,15 +45,15 @@ struct PermissionsSettingsContent: View {
                   .foregroundStyle(Self.statusColor(status))
                   .accessibilityIdentifier("permissions.status.\(String(describing: permission))")
                 Button("Open Settings") {
-                  NSWorkspace.shared.open(permission.settingsURL)
+                  permissions.openSettings(for: permission)
                 }
                 .buttonStyle(.bordered)
                 .speakTooltip("Open the macOS privacy pane for \(permission.displayName).")
                 Button("Request") {
-                  Task { await permissions.request(permission) }
+                  Task { await permissions.requestWithGuidance(permission) }
                 }
                 .buttonStyle(.bordered)
-                .speakTooltip("Ask macOS to prompt again for \(permission.displayName) access.")
+                .speakTooltip("Request or get setup guidance for \(permission.displayName) access.")
               }
 
               if Self.shouldShowManualSetupHelp(for: permission, status: status),
@@ -67,14 +67,16 @@ struct PermissionsSettingsContent: View {
             }
           }
 
+          PermissionRecoveryHelp(permissions: permissions)
+
           Button("Refresh Statuses") {
             permissions.refreshAll()
           }
           .buttonStyle(.borderedProminent)
-          .speakTooltip("Re-check what the system currently allows without leaving Speak.")
+          .speakTooltip("Re-check access for \(RunningAppIdentity.current.name).")
         }
       }
-      .speakTooltip("Review and refresh the macOS permissions Speak depends on.")
+      .speakTooltip("Review and refresh the macOS permissions \(RunningAppIdentity.current.name) depends on.")
     }
     .task {
       while !Task.isCancelled {

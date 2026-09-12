@@ -36,11 +36,17 @@ struct SettingsView: View {
   @State var apiKeyValidationState: ValidationViewState = .idle
   @State var isDeletingRecordings: Bool = false
   @State private var transcriptionProviders: [TranscriptionProviderMetadata] = []
+  /// Voices only a keyed account lists — Mistral publishes no presets.
+  @State private var accountListedVoices: [TTSVoice] = []
   @State var providerAPIKeys: [String: String] = [:]
   @State var providerValidationStates: [String: ValidationViewState] = [:]
   @State var ttsProviderAPIKeys: [String: String] = [:]
   @State var ttsProviderValidationStates: [String: ValidationViewState] = [:]
   @State var apiKeySearchText = ""
+  /// Provider credit balances shown beside the saved keys. Deduplicated by
+  /// account, so one account is fetched and displayed once however many cards
+  /// its key powers.
+  @StateObject var providerBalances = ProviderBalanceStore()
   @State var apiKeyStatusFilter: APIKeyStatusFilter = .all
   @State var apiKeySortOrder: APIKeySortOrder = .name
   @State private var didResolveAPIKeyStorage = false
@@ -124,6 +130,16 @@ struct SettingsView: View {
     let isValidateDisabled: Bool
     let isRemoveDisabled: Bool
     let validationState: ValidationViewState
+    /// Keychain identifier of the credential this card manages, used to look up
+    /// the account's balance.
+    let credentialIdentifier: String
+    /// Whether this is the card that shows the account's balance.
+    ///
+    /// Two cards can manage the same Keychain item — Deepgram has a
+    /// transcription card and a voice-output card, both on `deepgram.apiKey` —
+    /// and the identifier cannot tell them apart, so the one that does not own
+    /// the account sets this to `false` and the figure appears exactly once.
+    var presentsAccountBalance = true
     let saveButtonTitle: String
     let saveTooltip: String
     let validateButtonTitle: String
@@ -184,7 +200,7 @@ struct SettingsView: View {
         entry: APIKeyListEntry(
           id: "general-openrouter",
           title: "OpenRouter",
-          category: "Post-processing",
+          category: "Transcription, Voice Output & Post-processing",
           isStored: isOpenRouterKeyStored
         ),
         source: .openRouter
@@ -208,7 +224,10 @@ struct SettingsView: View {
           source: .transcription(provider)
         )
       }
-    items += [TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia].map { provider in
+    items += [
+      TTSProvider.elevenlabs, .openai, .azure, .deepgram, .soniox, .cartesia,
+      .groq, .gemini, .mistral, .speechmatics, .xai
+    ].map { provider in
       let isShared = provider.sharesTranscriptionCredential
       return MacAPIKeyItem(
         entry: APIKeyListEntry(
@@ -448,6 +467,8 @@ struct SettingsView: View {
       keyboardSettings
     case .permissions:
       permissionsSettings
+    case .dataMigration:
+      DataMigrationView()
     case .about:
       aboutSettings
     }
@@ -742,13 +763,23 @@ struct SettingsView: View {
     }
   }
 
+  /// The Default Voice list: the offline catalogue plus whatever the stored
+  /// keys' accounts list, so a Mistral voice can be made the default here and
+  /// not only chosen ad hoc in Voice Output.
+  private var defaultVoicePickerOptions: [TTSVoice] {
+    VoiceCatalog.includingSelection(
+      settings.defaultTTSVoice,
+      in: VoiceCatalog.allVoices + accountListedVoices
+    )
+  }
+
   private var voiceOutputSettings: some View {
     SpeakDensitySettingsSection(density: settings.visualDensity) {
       SettingsCard(title: "Default Voice", systemImage: "speaker.wave.3", tint: Color.brandLagoonDeep) {
         VStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 8) {
             Picker("Voice", selection: settingsBinding(\AppSettings.defaultTTSVoice)) {
-              ForEach(VoiceCatalog.allVoices) { voice in
+              ForEach(defaultVoicePickerOptions) { voice in
                 HStack {
                   Text(voice.displayName)
                   Spacer()
@@ -766,6 +797,8 @@ struct SettingsView: View {
             }
             .settingsMenuPicker()
             .speakTooltip("Choose your preferred voice for text-to-speech synthesis")
+
+            OpenRouterSpeechPickerButton(selectedVoice: settingsBinding(\AppSettings.defaultTTSVoice))
 
             Text("Your default voice for converting text to speech")
               .font(.caption)
@@ -790,6 +823,9 @@ struct SettingsView: View {
         }
       }
       .speakTooltip("Select which voice to use by default when generating speech from text.")
+      .task {
+        accountListedVoices = await environment.tts.accountListedVoices()
+      }
 
       SettingsCard(title: "Audio Quality & Performance", systemImage: "waveform.circle", tint: Color.green) {
         VStack(alignment: .leading, spacing: 16) {

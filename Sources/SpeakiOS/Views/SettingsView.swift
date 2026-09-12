@@ -16,13 +16,21 @@ import OSLog
 /// Control Center, Back Tap. The main in-app record-and-stop flow is
 /// unaffected — it always shows the result on screen.
 public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Sendable {
+    /// Resolve the destination at stop time (issue #1008): the field the Just
+    /// Speak keyboard is open in when there is one, otherwise the clipboard.
+    /// Every capture also goes to History and iCloud, whichever lane runs.
+    ///
+    /// There is no "Mac" branch: see `AutoDestinationPolicy` for why the phone
+    /// cannot tell a reachable Mac from a configured one.
+    case auto
+
     /// Copy the transcript to the clipboard. Default — matches behaviour
     /// prior to the destination setting being added.
     case clipboard
 
     /// Copy to clipboard and run the configured post-processor (OpenRouter)
-    /// in the background, replacing the clipboard with the polished version
-    /// when it lands. Falls back to plain `.clipboard` if no OpenRouter key.
+    /// asynchronously. Raw text is copied once and polished text is saved in
+    /// History. Without a key, the raw copy remains available.
     case clipboardAndPostProcess
 
     /// Save to history only — don't touch the clipboard, don't post-process.
@@ -34,6 +42,7 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
     public var displayName: String {
         switch self {
+        case .auto: return "Auto"
         case .clipboard: return "Copy to Clipboard"
         case .clipboardAndPostProcess: return "Copy & Polish"
         case .historyOnly: return "Save to History Only"
@@ -42,11 +51,14 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
 
     public var summary: String {
         switch self {
+        case .auto:
+            return "Decided when recording stops: straight into the field if the Just Speak keyboard is open "
+                + "there, otherwise the clipboard. Either way it is saved to History and pushed to iCloud, "
+                + "and the Live Activity says which one happened."
         case .clipboard:
             return "Transcript is copied to the clipboard immediately when recording stops."
         case .clipboardAndPostProcess:
-            return "Transcript is copied to the clipboard, then re-cleaned with your post-processing model "
-                + "and the polished version is re-copied."
+            return "Raw transcript is copied immediately. Polished text is saved in History."
         case .historyOnly:
             return "Transcript is saved to history. Clipboard and post-processing are skipped."
         }
@@ -211,6 +223,22 @@ public final class AppSettings: ObservableObject {
         didSet { persistSecret(xAIAPIKey, identifier: Self.xAIKeyID) }
     }
 
+    @Published public var speechmaticsAPIKey: String {
+        didSet { persistSecret(speechmaticsAPIKey, identifier: Self.speechmaticsKeyID) }
+    }
+
+    @Published public var revAIAPIKey: String {
+        didSet { persistSecret(revAIAPIKey, identifier: Self.revAIKeyID) }
+    }
+
+    @Published public var mistralAPIKey: String {
+        didSet { persistSecret(mistralAPIKey, identifier: Self.mistralKeyID) }
+    }
+
+    @Published public var azureAPIKey: String {
+        didSet { persistSecret(azureAPIKey, identifier: Self.azureKeyID) }
+    }
+
     @Published public var metaAPIKey: String {
         didSet { persistSecret(metaAPIKey, identifier: Self.metaKeyID) }
     }
@@ -236,13 +264,18 @@ public final class AppSettings: ObservableObject {
     static let gladiaKeyID = "gladia.apiKey"
     static let googleKeyID = "google.apiKey"
     static let xAIKeyID = "xai.apiKey"
+    static let azureKeyID = AzureSpeechConfiguration.credentialIdentifier
     static let metaKeyID = "meta.apiKey"
+    static let speechmaticsKeyID = "speechmatics.apiKey"
+    static let revAIKeyID = "revai.apiKey"
+    static let mistralKeyID = "mistral.apiKey"
 
     private static let credentialStorage = SecureStorage(
         configuration: SecureStorageConfiguration(
             service: "com.github.speakapp.credentials",
             masterAccount: "speak-app-secrets",
-            legacyServices: ["com.justspeaktoit.credentials"]
+            legacyServices: ["com.justspeaktoit.credentials"],
+            accessibility: .afterFirstUnlock
         )
     )
 
@@ -255,9 +288,23 @@ public final class AppSettings: ObservableObject {
     private static let logger = SpeakLogger.logger(category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
     private var syncedKeyReloadDepth = 0
-    /// The async keychain load kicked off by `init`. `ensureKeysLoaded()`
-    /// awaits it so cold-start callers never read the placeholder empty keys.
-    private var initialKeyLoadTask: Task<Void, Never>?
+    private let credentials: SecureStorage
+    private let migratesLegacyCredentials: Bool
+    private var protectedDataObserver: NSObjectProtocol?
+    private var keyLoadTask: Task<Bool, Never>?
+    @Published public private(set) var credentialsAvailable = false
+
+    enum CredentialLoadingError: LocalizedError {
+        case unavailable
+
+        var errorDescription: String? {
+            "API keys could not be loaded. Retry when Keychain access is available."
+        }
+    }
+
+    var credentialFallbackReason: String {
+        credentialsAvailable ? "no API key" : "API keys unavailable — retry when access is restored"
+    }
 
     /// Persists (or clears when empty) an API key on the canonical secure store.
     /// Keychain failures are logged rather than silently dropped so a key that
@@ -267,9 +314,9 @@ public final class AppSettings: ObservableObject {
         Task {
             do {
                 if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    try await Self.credentialStorage.removeSecret(identifier: identifier)
+                    try await credentials.removeSecret(identifier: identifier)
                 } else {
-                    try await Self.credentialStorage.storeSecret(value, identifier: identifier)
+                    try await credentials.storeSecret(value, identifier: identifier)
                 }
             } catch {
                 Self.logger.error(
@@ -334,6 +381,30 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    /// Whether a headless capture (Control, Action Button, Siri, Shortcuts)
+    /// finishes itself after a run of silence (issue #1012).
+    ///
+    /// Off by default and staying that way. Auto-stop is a genuine improvement
+    /// for people who dictate in bursts and a genuine regression for people who
+    /// think mid-sentence, and there is no way to tell which someone is without
+    /// asking. Turning this on for everybody would cut some of them off.
+    @Published public var autoStopOnSilenceEnabled: Bool {
+        didSet { defaults.set(autoStopOnSilenceEnabled, forKey: "autoStopOnSilenceEnabled") }
+    }
+
+    /// How long silence must hold before an auto-stopping capture finishes.
+    /// Clamped into `CaptureEndPointingPolicy.silenceWindowRange`.
+    @Published public var autoStopSilenceSeconds: TimeInterval {
+        didSet {
+            let clamped = CaptureEndPointingPolicy.silenceWindow(configured: autoStopSilenceSeconds)
+            if clamped != autoStopSilenceSeconds {
+                autoStopSilenceSeconds = clamped
+            } else {
+                defaults.set(autoStopSilenceSeconds, forKey: "autoStopSilenceSeconds")
+            }
+        }
+    }
+
     // MARK: - Post-Processing Settings
 
     @Published public var postProcessingEnabled: Bool {
@@ -367,9 +438,12 @@ public final class AppSettings: ObservableObject {
     ///     selection are skipped. Tests use this to exercise persistence in isolation.
     init( // swiftlint:disable:this function_body_length
         defaults: UserDefaults = .standard,
-        loadsSecureStorage: Bool = true
+        loadsSecureStorage: Bool = true,
+        credentialStorage: SecureStorage? = nil
     ) {
         self.defaults = defaults
+        self.credentials = credentialStorage ?? Self.credentialStorage
+        self.migratesLegacyCredentials = credentialStorage == nil
         let storedSelectedRaw = defaults.string(forKey: "selectedModel")
             ?? AppleLocalModels.preferredSpeechModelID
         let selectedRaw = ModelCatalog.normalizedLiveTranscriptionModel(storedSelectedRaw)
@@ -410,9 +484,24 @@ public final class AppSettings: ObservableObject {
         )
 
         // Hardware trigger destination (Action Button, Siri, Shortcuts).
-        // Default to .clipboard for backwards compatibility with prior versions.
-        let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination")
-        let hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw ?? "") ?? .clipboard
+        // `.auto` is the default only for users who never made a choice: an
+        // explicitly stored value is always honoured (issue #1008). Auto is a
+        // superset of the old default — it copies to the clipboard except when
+        // the Just Speak keyboard is demonstrably open in a text field, where
+        // the words go into that field instead.
+        //
+        // A stored value this build cannot parse is *not* the same thing as no
+        // stored value: it means a malformed, downgraded or migrated
+        // preference, and defaulting it to Auto would silently opt that user
+        // into suppressing the clipboard whenever a targeted keyboard offer
+        // exists. Missing keeps the new default; unrecognised keeps the
+        // pre-Auto behaviour it was last known to have.
+        let hardwareDest: HardwareTriggerDestination
+        if let hardwareDestRaw = defaults.string(forKey: "hardwareTriggerDestination") {
+            hardwareDest = HardwareTriggerDestination(rawValue: hardwareDestRaw) ?? .clipboard
+        } else {
+            hardwareDest = .auto
+        }
 
         // Post-processing settings
         let postEnabled = defaults.bool(forKey: "postProcessingEnabled")
@@ -451,7 +540,11 @@ public final class AppSettings: ObservableObject {
         self.gladiaAPIKey = ""
         self.googleAPIKey = ""
         self.xAIAPIKey = ""
+        self.azureAPIKey = ""
         self.metaAPIKey = ""
+        self.speechmaticsAPIKey = ""
+        self.revAIAPIKey = ""
+        self.mistralAPIKey = ""
         self.transcriptionKeywords = defaults.string(forKey: "transcriptionKeywords") ?? ""
         self.liveActivitiesEnabled = liveActivities
         self.visualDensity = density
@@ -459,6 +552,15 @@ public final class AppSettings: ObservableObject {
         self.handsFreeDictationEnabled = handsFree
         self.preferredLocaleIdentifier = preferredLocale
         self.hardwareTriggerDestination = hardwareDest
+        // An install that has never seen this setting gets the default window,
+        // not the zero `double(forKey:)` returns for a missing key — which the
+        // clamp would raise to the floor anyway, but reading it explicitly
+        // keeps the stored value and the default from ever disagreeing.
+        self.autoStopOnSilenceEnabled = defaults.bool(forKey: "autoStopOnSilenceEnabled")
+        self.autoStopSilenceSeconds = CaptureEndPointingPolicy.silenceWindow(
+            configured: defaults.object(forKey: "autoStopSilenceSeconds") as? TimeInterval
+                ?? CaptureEndPointingPolicy.defaultSilenceWindowSeconds
+        )
         self.postProcessingEnabled = postEnabled
         self.postProcessingModel = postModel
         self.autoPostProcess = autoPost
@@ -472,23 +574,48 @@ public final class AppSettings: ObservableObject {
         defaults.set(self.rememberedRemoteTranscriptionMode.rawValue, forKey: Self.rememberedRemoteModeKey)
 
         guard loadsSecureStorage else { return }
-        initialKeyLoadTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await Self.migrateLegacyKeysIfNeeded()
-            await self.reloadSyncedAPIKeys()
-            self.observeSecureStorageChanges()
-            self.configureDefaultProviderIfNeeded()
+        observeSecureStorageChanges()
+        protectedDataObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.ensureKeysLoaded()
+            }
+        }
+        Task { @MainActor [weak self] in
+            await self?.ensureKeysLoaded()
         }
     }
 
     private let defaults: UserDefaults
 
-    /// Waits until the initial keychain load kicked off by `init` has finished.
-    /// Idempotent and cheap once loaded. Recording paths await this before
-    /// reading API keys so a cold launch (e.g. from the Action Button) doesn't
-    /// see the placeholder empty keys and silently fall back to Apple Speech.
-    public func ensureKeysLoaded() async {
-        await initialKeyLoadTask?.value
+    /// Coalesces bootstrap and recording callers; a failed read remains retryable.
+    /// Never use placeholder empty keys to make persistent provider decisions.
+    @discardableResult
+    public func ensureKeysLoaded() async -> Bool {
+        if let keyLoadTask { return await keyLoadTask.value }
+        if credentialsAvailable { return true }
+        let task = Task { @MainActor in
+            guard await self.credentials.preloadAndReportSuccess() else { return false }
+            if self.migratesLegacyCredentials { await Self.migrateLegacyKeysIfNeeded() }
+            guard await self.reloadSyncedAPIKeys() else { return false }
+            self.configureDefaultProviderIfNeeded()
+            return true
+        }
+        keyLoadTask = task
+        let success = await task.value
+        keyLoadTask = nil
+        return success
+    }
+
+    /// Remote consumers must not interpret a failed load as a missing key.
+    /// Local models can continue without Keychain access.
+    func requireAvailableCredentials(for model: String, purpose: ModelCredentialPurpose) throws {
+        guard !credentialsAvailable,
+              ModelCredentialResolver.requirement(for: model, purpose: purpose) != .notRequired else { return }
+        throw CredentialLoadingError.unavailable
     }
 
     /// Publishes one coherent, non-secret keyboard capability snapshot whenever
@@ -508,6 +635,9 @@ public final class AppSettings: ObservableObject {
     }
 
     deinit {
+        if let protectedDataObserver {
+            NotificationCenter.default.removeObserver(protectedDataObserver)
+        }
         if let keyChangeObserver {
             NotificationCenter.default.removeObserver(keyChangeObserver)
         }
@@ -565,7 +695,13 @@ public final class AppSettings: ObservableObject {
     public var hasGladiaKey: Bool { !gladiaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasGoogleKey: Bool { !googleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasXAIKey: Bool { !xAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasAzureKey: Bool { !azureAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     public var hasMetaKey: Bool { !metaAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasSpeechmaticsKey: Bool {
+        !speechmaticsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    public var hasRevAIKey: Bool { !revAIAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    public var hasMistralKey: Bool { !mistralAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// Identifiers currently available to model pickers. Because this is
     /// derived from the published key values, readiness badges refresh as soon
@@ -583,60 +719,93 @@ public final class AppSettings: ObservableObject {
         if hasGladiaKey { identifiers.insert(Self.gladiaKeyID) }
         if hasGoogleKey { identifiers.insert(Self.googleKeyID) }
         if hasXAIKey { identifiers.insert(Self.xAIKeyID) }
+        if hasAzureKey { identifiers.insert(Self.azureKeyID) }
         if hasMetaKey { identifiers.insert(Self.metaKeyID) }
+        if hasSpeechmaticsKey { identifiers.insert(Self.speechmaticsKeyID) }
+        if hasRevAIKey { identifiers.insert(Self.revAIKeyID) }
+        if hasMistralKey { identifiers.insert(Self.mistralKeyID) }
         return identifiers
     }
 
-    public func reloadSyncedAPIKeys() async {
+    // Each credential is reloaded without overwriting a locked Keychain entry.
+    @discardableResult
+    public func reloadSyncedAPIKeys() async -> Bool {
+        guard await credentials.preloadAndReportSuccess() else { return false }
         syncedKeyReloadDepth += 1
         defer { syncedKeyReloadDepth -= 1 }
-        deepgramAPIKey = await Self.syncedAPIKeyValue(
+        await reloadCoreAPIKeys()
+        await reloadStreamingProviderAPIKeys()
+        credentialsAvailable = true
+        return true
+    }
+
+    private func reloadCoreAPIKeys() async {
+        deepgramAPIKey = await syncedAPIKeyValue(
             identifier: Self.deepgramKeyID,
             currentValue: deepgramAPIKey
         )
-        openRouterAPIKey = await Self.syncedAPIKeyValue(
+        openRouterAPIKey = await syncedAPIKeyValue(
             identifier: Self.openRouterKeyID,
             currentValue: openRouterAPIKey
         )
-        openAIAPIKey = await Self.syncedAPIKeyValue(
+        openAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.openAIKeyID,
             currentValue: openAIAPIKey
         )
-        elevenLabsAPIKey = await Self.syncedAPIKeyValue(
+        elevenLabsAPIKey = await syncedAPIKeyValue(
             identifier: Self.elevenLabsKeyID,
             currentValue: elevenLabsAPIKey
         )
-        cartesiaAPIKey = await Self.syncedAPIKeyValue(
+        cartesiaAPIKey = await syncedAPIKeyValue(
             identifier: Self.cartesiaKeyID,
             currentValue: cartesiaAPIKey
         )
-        sonioxAPIKey = await Self.syncedAPIKeyValue(
+        sonioxAPIKey = await syncedAPIKeyValue(
             identifier: Self.sonioxKeyID,
             currentValue: sonioxAPIKey
         )
-        modulateAPIKey = await Self.syncedAPIKeyValue(
+        modulateAPIKey = await syncedAPIKeyValue(
             identifier: Self.modulateKeyID,
             currentValue: modulateAPIKey
         )
-        assemblyAIAPIKey = await Self.syncedAPIKeyValue(
+        assemblyAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.assemblyAIKeyID,
             currentValue: assemblyAIAPIKey
         )
-        gladiaAPIKey = await Self.syncedAPIKeyValue(
+        gladiaAPIKey = await syncedAPIKeyValue(
             identifier: Self.gladiaKeyID,
             currentValue: gladiaAPIKey
         )
-        googleAPIKey = await Self.syncedAPIKeyValue(
+        googleAPIKey = await syncedAPIKeyValue(
             identifier: Self.googleKeyID,
             currentValue: googleAPIKey
         )
-        xAIAPIKey = await Self.syncedAPIKeyValue(
+    }
+
+    private func reloadStreamingProviderAPIKeys() async {
+        xAIAPIKey = await syncedAPIKeyValue(
             identifier: Self.xAIKeyID,
             currentValue: xAIAPIKey
         )
-        metaAPIKey = await Self.syncedAPIKeyValue(
+        azureAPIKey = await syncedAPIKeyValue(
+            identifier: Self.azureKeyID,
+            currentValue: azureAPIKey
+        )
+        metaAPIKey = await syncedAPIKeyValue(
             identifier: Self.metaKeyID,
             currentValue: metaAPIKey
+        )
+        speechmaticsAPIKey = await syncedAPIKeyValue(
+            identifier: Self.speechmaticsKeyID,
+            currentValue: speechmaticsAPIKey
+        )
+        revAIAPIKey = await syncedAPIKeyValue(
+            identifier: Self.revAIKeyID,
+            currentValue: revAIAPIKey
+        )
+        mistralAPIKey = await syncedAPIKeyValue(
+            identifier: Self.mistralKeyID,
+            currentValue: mistralAPIKey
         )
     }
 
@@ -656,9 +825,9 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    private static func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
+    private func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
         do {
-            return try await credentialStorage.secret(identifier: identifier)
+            return try await credentials.secret(identifier: identifier)
         } catch SecureStorageError.valueNotFound {
             return ""
         } catch {
@@ -705,7 +874,11 @@ public final class AppSettings: ObservableObject {
             Self.gladiaKeyID: gladiaAPIKey,
             Self.googleKeyID: googleAPIKey,
             Self.xAIKeyID: xAIAPIKey,
-            Self.metaKeyID: metaAPIKey
+            Self.metaKeyID: metaAPIKey,
+            Self.speechmaticsKeyID: speechmaticsAPIKey,
+            Self.revAIKeyID: revAIAPIKey,
+            Self.mistralKeyID: mistralAPIKey,
+            Self.azureKeyID: azureAPIKey
         ]
     }
 
@@ -754,6 +927,7 @@ public final class AppSettings: ObservableObject {
         ModelCatalog.batchTranscription.filter { option in
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
+                || AzureTranscriptionModels.batchIDs.contains(option.id)
                 // OpenRouter-routed Gemini 2.x batch models upload through the
                 // OpenRouter client; Gemini 3.5 Transcribe uploads through the
                 // shared `GeminiInteractionsClient` with the Google key
@@ -762,6 +936,17 @@ public final class AppSettings: ObservableObject {
                 || option.id.hasPrefix("google/")
                 || option.id == "openai/gpt-4o-audio-preview-2024-12-17"
                 || option.id == MetaMuseVoiceTranscribe.batchCatalogID
+                || option.id == CartesiaBatchClient.catalogID
+                // xAI's dedicated speech-to-text endpoint uploads through the
+                // shared `XAIBatchTranscriptionClient` with the xAI key.
+                || option.id == XAISpeechToText.batchCatalogID
+                // Gladia's pre-recorded job API uploads through the shared
+                // `GladiaBatchClient` with the `gladia.apiKey` this app already
+                // stores for live Solaria. Speechmatics batch stays macOS-only
+                // for now: iOS has no Speechmatics credential field, and a
+                // model that can never resolve a key is hidden rather than
+                // shown failing (see Docs/batch-transcription-providers.md).
+                || option.id == GladiaBatchClient.catalogID
         }
 
     // MARK: - Legacy migration
@@ -772,6 +957,7 @@ public final class AppSettings: ObservableObject {
     /// iCloud-syncable store. Additive and idempotent: legacy items are read but
     /// never deleted, and each key is only migrated when the new store lacks it.
     private static func migrateLegacyKeysIfNeeded() async {
+        guard ReleaseTrain.current == .stable else { return }
         let existing = Set(await credentialStorage.knownIdentifiers())
 
         for identifier in [deepgramKeyID, openRouterKeyID, openAIKeyID] where !existing.contains(identifier) {
@@ -886,6 +1072,22 @@ enum IOSTranscriptionLocation: String, CaseIterable, Identifiable {
 
 // swiftlint:disable:next type_body_length
 public struct SettingsView: View {
+    /// Names the provider whose key the selected batch model needs, read from
+    /// the same canonical resolver `batchAPIKey(for:)` uses. Deriving it means
+    /// a provider added to the batch catalogue cannot silently inherit the
+    /// OpenRouter wording while its request goes somewhere else.
+    static func batchAPIKeyPrompt(for modelIdentifier: String) -> String {
+        switch ModelCredentialResolver.requirement(
+            for: modelIdentifier,
+            purpose: .batchTranscription
+        ) {
+        case .notRequired:
+            return "This model runs on device and needs no API key."
+        case .apiKey(_, let providerName):
+            return "Add your \(providerName) API key below to use this model."
+        }
+    }
+
     @StateObject private var settings = AppSettings.shared
     @Environment(\.openURL) private var openURL
     @Environment(\.openClawEnabled) private var openClawEnabled
@@ -945,7 +1147,7 @@ public struct SettingsView: View {
                 .accessibilityIdentifier("transcriptionLocationPicker")
 
                 if transcriptionLocationBinding.wrappedValue == .local {
-                    Picker("Apple On-Device Model", selection: selectedModelBinding) {
+                    Picker("Apple Speech Model", selection: selectedModelBinding) {
                         ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
                             HStack {
                                 Text(option.displayName)
@@ -965,8 +1167,18 @@ public struct SettingsView: View {
                     .pickerStyle(.navigationLink)
                     .accessibilityIdentifier("appleOnDeviceModelPicker")
 
+                    if #available(iOS 26.0, *), AppleLocalModels.isSpeechAnalyzerModel(settings.selectedModel) {
+                        AppleSpeechPreparationView(
+                            modelID: settings.selectedModel,
+                            localeIdentifier: settings.preferredModelLanguage ?? Locale.current.identifier
+                        )
+                    }
+
                     if !usesInlineDensityLayout {
-                        Text("Uses Apple's built-in speech engine. Audio stays on this device.")
+                        Text(
+                            "Uses Apple's on-device speech engines when available. "
+                                + "If recognition is unavailable or fails, audio may be sent to Apple."
+                        )
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1005,6 +1217,12 @@ public struct SettingsView: View {
                         .accessibilityIdentifier("remoteStreamingModelPicker")
                     } else {
                         Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
+                            if let modelID = OpenRouterTranscriptionSelection.modelID(
+                                from: settings.batchTranscriptionModel
+                            ) {
+                                Text("OpenRouter · \(modelID)")
+                                    .tag(settings.batchTranscriptionModel)
+                            }
                             ForEach(BatchModelGroup.grouped(AppSettings.supportedBatchModels)) { group in
                                 Section(group.title) {
                                     ForEach(group.options) { option in
@@ -1027,6 +1245,7 @@ public struct SettingsView: View {
                         }
                         .pickerStyle(.navigationLink)
                         .accessibilityIdentifier("remoteBatchModelPicker")
+                        IOSOpenRouterAudioSettingsLink()
                     }
 
                     if !usesInlineDensityLayout {
@@ -1057,11 +1276,7 @@ public struct SettingsView: View {
                    !AppleLocalModels.isSpeechAnalyzerModel(settings.batchTranscriptionModel),
                    settings.batchAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label(
-                        AppSettings.openAIBatchModelIDs.contains(settings.batchTranscriptionModel)
-                            ? "Add an OpenAI API key below to use this model."
-                            : settings.batchTranscriptionModel == MetaMuseVoiceTranscribe.batchCatalogID
-                                ? "Add a Meta Model API key below to use this model."
-                                : "Add an OpenRouter API key below to use this model.",
+                        Self.batchAPIKeyPrompt(for: settings.batchTranscriptionModel),
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.orange)
@@ -1158,6 +1373,13 @@ public struct SettingsView: View {
                     }
                 }
                 .accessibilityIdentifier("hardwareTriggerSettingsLink")
+
+                NavigationLink {
+                    AutomationGalleryView()
+                } label: {
+                    Label("Shortcuts Gallery", systemImage: "square.stack.3d.up")
+                }
+                .accessibilityIdentifier("automationGalleryLink")
 
                 if !usesInlineDensityLayout {
                     Text(
@@ -1298,6 +1520,25 @@ public struct SettingsView: View {
                 }
             }
 
+            Section("Capture Health") {
+                NavigationLink {
+                    CaptureHealthView()
+                } label: {
+                    Label("Check capture is working", systemImage: "stethoscope")
+                }
+                .accessibilityIdentifier("captureHealthNavLink")
+
+                if !usesInlineDensityLayout {
+                    Text(
+                        "Checks the things a capture needs, runs a microphone self-test, and offers back "
+                            + "any recording that was interrupted before its transcript was saved. "
+                            + "Nothing on that screen leaves this device."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Recordings") {
                 NavigationLink {
                     RecordingsView()
@@ -1307,19 +1548,11 @@ public struct SettingsView: View {
 
                 if !usesInlineDensityLayout {
                     Text(
-                        "Audio is saved locally during transcription so you can "
-                            + "replay or re-transcribe if connectivity was lost."
+                        "Audio is saved locally during transcription so you can replay it, "
+                            + "or transcribe it again if connectivity was lost."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Send to Mac") {
-                NavigationLink {
-                    SendToMacView()
-                } label: {
-                    Label("Configure Mac Connection", systemImage: "desktopcomputer")
                 }
             }
 
@@ -1603,26 +1836,38 @@ struct HardwareTriggerSettingsView: View {
                 }
             }
 
-            Section("Set Up the Action Button") {
+            autoStopSection
+
+            Section("Before You Start") {
                 Text(
-                    "On iPhone 15 Pro and later you can map the Action Button to start recording in one press — "
-                        + "even from the Lock Screen."
+                    "Open JustSpeakToIt before first use and grant the requested permissions, "
+                        + "including microphone access. You may need to unlock your iPhone or open the app "
+                        + "to start recording."
+                )
+                    .font(.callout)
+            }
+
+            if #available(iOS 18.0, *) {
+                nativeControlSetupSection
+            }
+
+            Section("Set Up a Shortcut") {
+                Text(
+                    "Toggle Recording requires iOS 18 or iPadOS 18 or later. Create one shortcut for the "
+                        + "options below or for your existing automations. Back Tap on a supported iPhone and "
+                        + "Apple Pencil Pro squeeze on a compatible iPad do not require an Action Button."
                 )
                     .font(.callout)
 
                 StepRow(number: 1, text: "Open the Shortcuts app and tap the + button.")
                 StepRow(
                     number: 2,
-                    text: "Search for JustSpeakToIt and choose Toggle Recording for a single-button flow. "
-                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt copies the transcript "
-                        + "when you stop. Use Start Recording only if you also create a separate Stop Recording "
-                        + "shortcut."
+                    text: "Search for JustSpeakToIt and add Toggle Recording as the only action. "
+                        + "Do not add a separate Copy to Clipboard action — JustSpeakToIt uses the "
+                        + "destination selected above when you stop. Use Start Recording only if you also "
+                        + "create a separate Stop Recording shortcut."
                 )
                 StepRow(number: 3, text: "Name the shortcut and tap Done.")
-                StepRow(
-                    number: 4,
-                    text: "Open Settings → Action Button, swipe to Shortcut, and pick the shortcut you just made."
-                )
 
                 Button {
                     if let url = URL(string: "shortcuts://") {
@@ -1632,9 +1877,22 @@ struct HardwareTriggerSettingsView: View {
                     Label("Open Shortcuts App", systemImage: "arrow.up.right.square")
                 }
                 .accessibilityIdentifier("openShortcutsAppButton")
+
+                NavigationLink {
+                    AutomationGalleryView()
+                } label: {
+                    Label("Shortcuts Gallery", systemImage: "square.stack.3d.up")
+                }
+                .accessibilityIdentifier("hardwareTriggerGalleryLink")
             }
 
             Section("Other Trigger Options") {
+                BulletRow(
+                    icon: "button.programmable",
+                    title: "Action Button Shortcut",
+                    detail: "On an iPhone with an Action Button, open Settings → Action Button → Shortcut "
+                        + "and choose your saved shortcut. Press and hold the Action Button to run it."
+                )
                 BulletRow(
                     icon: "mic.fill",
                     title: "Siri",
@@ -1642,19 +1900,42 @@ struct HardwareTriggerSettingsView: View {
                 )
                 BulletRow(
                     icon: "square.grid.2x2.fill",
-                    title: "Control Center",
-                    detail: "On iOS 18 and later add the Shortcut control via Customise Controls → Add a Control."
-                )
-                BulletRow(
-                    icon: "lock.iphone",
-                    title: "Lock Screen / Home Screen widget",
-                    detail: "Add a Shortcuts widget and pick your Toggle Recording shortcut."
+                    title: "Home Screen Shortcuts Widget",
+                    detail: "Add a Shortcuts widget to the Home Screen and pick your Toggle Recording shortcut."
                 )
                 BulletRow(
                     icon: "hand.tap.fill",
                     title: "Back Tap",
-                    detail: "Settings → Accessibility → Touch → Back Tap. "
-                        + "Assign your shortcut to a double or triple tap."
+                    detail: "On a supported iPhone, open Settings → Accessibility → Touch → Back Tap → "
+                        + "Double Tap or Triple Tap. Under Shortcuts, choose the shortcut saved above."
+                )
+                BulletRow(
+                    icon: "applepencil",
+                    title: "Apple Pencil Pro Squeeze",
+                    detail: "On a compatible iPad with Apple Pencil Pro, open Settings → Apple Pencil → "
+                        + "Squeeze → Shortcut and choose the shortcut saved above."
+                )
+                if let url = URL(string: "https://support.apple.com/guide/shortcuts/apdbe445a3a2/ios") {
+                    Link("Apple Pencil Pro Shortcut Setup Guide", destination: url)
+                }
+            }
+
+            Section("Try Your Shortcut") {
+                Text(
+                    "Every trigger uses the destination selected above; it is not a separate "
+                        + "setting for each gesture."
+                )
+                    .font(.callout)
+                StepRow(
+                    number: 1,
+                    text: "For your first test, keep the screen awake and the device unlocked. "
+                        + "Run your assigned gesture, check that recording has started, then speak. "
+                        + "Opening or unlocking the app may be required."
+                )
+                StepRow(
+                    number: 2,
+                    text: "Run the same gesture again to stop with Toggle Recording, or use the "
+                        + "Live Activity stop control. Check History for the result."
                 )
             }
 
@@ -1674,9 +1955,74 @@ struct HardwareTriggerSettingsView: View {
         .navigationTitle("Action Button & Shortcuts")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    /// Silence auto-stop (issue #1012). Deliberately explicit about the cost:
+    /// somebody who thinks in long pauses needs to know this will cut them off
+    /// before they turn it on, not after.
+    private var autoStopSection: some View {
+        Section("Stop On Silence") {
+            Toggle("Finish after a pause", isOn: $settings.autoStopOnSilenceEnabled)
+                .accessibilityIdentifier("autoStopOnSilenceToggle")
+
+            Text(
+                "Recordings started from a Control, the Action Button, Siri or a Shortcut finish "
+                    + "on their own once you stop speaking, so one press is the whole capture. "
+                    + "Recordings you start in the app or from the keyboard are unaffected."
+            )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if settings.autoStopOnSilenceEnabled {
+                Stepper(
+                    "Pause length: \(settings.autoStopSilenceSeconds, specifier: "%.0f")s",
+                    value: $settings.autoStopSilenceSeconds,
+                    in: CaptureEndPointingPolicy.silenceWindowRange,
+                    step: 1
+                )
+                    .accessibilityIdentifier("autoStopSilenceStepper")
+
+                Text(
+                    "Shorter finishes sooner but is likelier to cut you off while you are thinking. "
+                        + "A recording that never goes quiet still stops after "
+                        + "\(Int(CaptureEndPointingPolicy.defaultMaximumDurationSeconds / 60)) minutes."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @available(iOS 18.0, *)
+    private var nativeControlSetupSection: some View {
+        Section("Set Up Transcribe Voice") {
+            Text("On iOS 18 and later, add JustSpeakToIt’s Transcribe Voice control directly.")
+                .font(.callout)
+            BulletRow(
+                icon: "button.programmable",
+                title: "Action Button",
+                detail: "On an iPhone with an Action Button, open Settings → Action Button → Controls. "
+                    + "Tap the control picker and choose Transcribe Voice. Press and hold the Action Button "
+                    + "to start or stop dictation."
+            )
+            BulletRow(
+                icon: "square.grid.2x2.fill",
+                title: "Control Center",
+                detail: "Open Control Center, tap the + at the top left, then tap Add a Control. "
+                    + "Find JustSpeakToIt and choose Transcribe Voice."
+            )
+            BulletRow(
+                icon: "lock.iphone",
+                title: "Lock Screen Control",
+                detail: "Touch and hold the Lock Screen, unlock if asked, then tap Customise → Lock Screen. "
+                    + "Remove a bottom control with the minus button, tap the + in that slot, and choose "
+                    + "Transcribe Voice. Tap Done. This is a bottom control, separate from the widgets below the clock."
+            )
+        }
+    }
 }
 
 private struct StepRow: View {
+    @ScaledMetric(relativeTo: .headline) private var badgeSize = 24.0
     let number: Int
     let text: String
 
@@ -1684,12 +2030,13 @@ private struct StepRow: View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(number)")
                 .font(.headline)
-                .frame(width: 24, height: 24)
+                .frame(width: badgeSize, height: badgeSize)
                 .background(Color.accentColor.opacity(0.15), in: Circle())
                 .foregroundStyle(Color.accentColor)
             Text(text)
                 .font(.callout)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1777,13 +2124,20 @@ struct APIKeysView: View {
     @State private var gladiaKey = ""
     @State private var googleKey = ""
     @State private var xAIKey = ""
+    @State private var azureKey = ""
     @State private var metaKey = ""
+    @State private var speechmaticsKey = ""
+    @State private var revAIKey = ""
+    @State private var mistralKey = ""
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
     @State private var searchText = ""
     @State private var statusFilter: APIKeyStatusFilter = .all
     @State private var sortOrder: APIKeySortOrder = .name
+    /// Account balances shown beside the saved keys, deduplicated per account
+    /// by `ProviderBalanceDirectory`.
+    @StateObject private var balances = ProviderBalanceStore()
 
     private struct KeyPresentation {
         let title: String
@@ -1796,6 +2150,10 @@ struct APIKeysView: View {
     }
 
     fileprivate static func entries(for settings: AppSettings) -> [APIKeyListEntry] {
+        coreEntries(for: settings) + streamingProviderEntries(for: settings)
+    }
+
+    private static func coreEntries(for settings: AppSettings) -> [APIKeyListEntry] {
         [
             APIKeyListEntry(
                 id: "deepgram", title: "Deepgram", category: "Transcription", isStored: settings.hasDeepgramKey
@@ -1830,12 +2188,31 @@ struct APIKeysView: View {
             APIKeyListEntry(
                 id: "google", title: GeminiTranscribeModels.providerDisplayName,
                 category: "Transcription", isStored: settings.hasGoogleKey
-            ),
+            )
+        ]
+    }
+
+    private static func streamingProviderEntries(for settings: AppSettings) -> [APIKeyListEntry] {
+        [
             APIKeyListEntry(
                 id: "xai", title: "xAI", category: "Transcription", isStored: settings.hasXAIKey
             ),
             APIKeyListEntry(
                 id: "meta", title: "Meta", category: "Transcription", isStored: settings.hasMetaKey
+            ),
+            APIKeyListEntry(
+                id: "speechmatics", title: "Speechmatics", category: "Transcription & Voice Output",
+                isStored: settings.hasSpeechmaticsKey
+            ),
+            APIKeyListEntry(
+                id: "revai", title: "Rev.ai", category: "Transcription", isStored: settings.hasRevAIKey
+            ),
+            APIKeyListEntry(
+                id: "mistral", title: "Mistral", category: "Transcription & Voice Output",
+                isStored: settings.hasMistralKey
+            ),
+            APIKeyListEntry(
+                id: "azure", title: "Azure Speech", category: "Transcription", isStored: settings.hasAzureKey
             )
         ]
     }
@@ -1851,6 +2228,7 @@ struct APIKeysView: View {
 
     var body: some View {
         Form {
+            Section("Azure Speech resource") { AzureSpeechEndpointField() }
             if visibleEntries.isEmpty {
                 ContentUnavailableView(
                     "No API Keys",
@@ -1912,6 +2290,7 @@ struct APIKeysView: View {
                             && googleKey.isEmpty
                             && xAIKey.isEmpty
                             && metaKey.isEmpty
+                            && azureKey.isEmpty
                     )
                 }
             }
@@ -1921,6 +2300,14 @@ struct APIKeysView: View {
         } message: {
             Text(validationMessage ?? "Keys saved")
         }
+        .task {
+            let storage = AppSettings.canonicalCredentialStorage
+            balances.configure { identifier in
+                try? await storage.secret(identifier: identifier)
+            }
+            balances.refreshAll(storedCredentialIdentifiers: storedCredentialIdentifiers)
+        }
+        .onDisappear { balances.cancelAll() }
     }
 
     private func apiKeySection(for entry: APIKeyListEntry) -> some View {
@@ -1935,6 +2322,14 @@ struct APIKeysView: View {
                     clearStoredKey(for: entry.id)
                 }
             }
+
+            // Purely informational: a billing endpoint that fails changes this
+            // line and nothing else on the screen.
+            ProviderBalanceView(
+                credentialIdentifier: "\(entry.id).apiKey",
+                isKeyStored: entry.isStored,
+                store: balances
+            )
         } header: {
             HStack {
                 Label(presentation.title, systemImage: presentation.systemImage)
@@ -1997,10 +2392,28 @@ struct APIKeysView: View {
             return KeyPresentation(
                 title: "xAI", systemImage: "waveform.badge.mic", help: "Get your key from console.x.ai."
             )
+        case "azure":
+            return KeyPresentation(title: "Azure Speech", systemImage: "cloud",
+                                   help: "Enter your Azure key and region as key:region.")
         case "meta":
             return KeyPresentation(
                 title: "Meta", systemImage: "waveform.badge.mic",
                 help: "Get your Model API key from llama.developer.meta.com."
+            )
+        case "speechmatics":
+            return KeyPresentation(
+                title: "Speechmatics", systemImage: "waveform.and.magnifyingglass",
+                help: "Get your key from portal.speechmatics.com."
+            )
+        case "revai":
+            return KeyPresentation(
+                title: "Rev.ai", systemImage: "waveform.badge.mic",
+                help: "Get your access token from www.rev.ai."
+            )
+        case "mistral":
+            return KeyPresentation(
+                title: "Mistral", systemImage: "waveform.circle",
+                help: "Get your key from console.mistral.ai."
             )
         default:
             return KeyPresentation(
@@ -2022,9 +2435,30 @@ struct APIKeysView: View {
         case "assemblyai": return $assemblyAIKey
         case "google": return $googleKey
         case "xai": return $xAIKey
+        case "azure": return $azureKey
         case "meta": return $metaKey
+        case "speechmatics": return $speechmaticsKey
+        case "revai": return $revAIKey
+        case "mistral": return $mistralKey
         default: return $gladiaKey
         }
+    }
+
+    private var storedCredentialIdentifiers: Set<String> {
+        Set(allEntries.filter(\.isStored).map { "\($0.id).apiKey" })
+    }
+
+    /// Forgets every rendered balance and re-reads the accounts whose key is
+    /// still stored.
+    ///
+    /// Saving or clearing a key replaces the credential a figure was read
+    /// with, so the figure on screen can belong to an account the user is no
+    /// longer using; invalidating first also stops a request already in flight
+    /// from repopulating the entry with the previous account's balance.
+    private func reloadBalancesAfterCredentialChange() {
+        balances.reloadAfterCredentialChange(
+            storedCredentialIdentifiers: storedCredentialIdentifiers
+        )
     }
 
     // swiftlint:disable:next cyclomatic_complexity
@@ -2040,9 +2474,14 @@ struct APIKeysView: View {
         case "assemblyai": settings.assemblyAIAPIKey = ""
         case "google": settings.googleAPIKey = ""
         case "xai": settings.xAIAPIKey = ""
+        case "azure": settings.azureAPIKey = ""
         case "meta": settings.metaAPIKey = ""
+        case "speechmatics": settings.speechmaticsAPIKey = ""
+        case "revai": settings.revAIAPIKey = ""
+        case "mistral": settings.mistralAPIKey = ""
         default: settings.gladiaAPIKey = ""
         }
+        reloadBalancesAfterCredentialChange()
     }
 
     // swiftlint:disable:next function_body_length cyclomatic_complexity
@@ -2050,6 +2489,14 @@ struct APIKeysView: View {
         Task {
             isValidating = true
             var messages: [String] = []
+            if !azureKey.isEmpty {
+                do {
+                    _ = try await AzureSpeechVoiceAPI().listVoices(credentials: azureKey)
+                    settings.azureAPIKey = azureKey
+                    azureKey = ""
+                    messages.append("Azure key and region saved; transcription access depends on your resource.")
+                } catch { messages.append(error.localizedDescription) }
+            }
 
             // Validate and save Deepgram key
             if !deepgramKey.isEmpty {
@@ -2158,9 +2605,31 @@ struct APIKeysView: View {
                 }
             }
 
+            // Saved without a probe: Speechmatics, Rev.ai and Mistral all
+            // validate the credential when the realtime session connects, and
+            // a stored key is never read as entitlement.
+            if !speechmaticsKey.isEmpty {
+                settings.speechmaticsAPIKey = speechmaticsKey
+                speechmaticsKey = ""
+                messages.append("✓ Speechmatics key saved")
+            }
+
+            if !revAIKey.isEmpty {
+                settings.revAIAPIKey = revAIKey
+                revAIKey = ""
+                messages.append("✓ Rev.ai access token saved")
+            }
+
+            if !mistralKey.isEmpty {
+                settings.mistralAPIKey = mistralKey
+                mistralKey = ""
+                messages.append("✓ Mistral key saved")
+            }
+
             isValidating = false
             validationMessage = messages.joined(separator: "\n")
             showingValidation = true
+            reloadBalancesAfterCredentialChange()
         }
     }
 }
@@ -2226,7 +2695,7 @@ struct PrivacyView: View {
             Text(
                 summary.activeRecipients.isEmpty
                     ? "With your current settings nothing is sent to a cloud provider."
-                    : "With your current settings your content reaches "
+                    : "With your current settings your content can be sent to "
                         + PrivacyWorkflowSummary.formattedList(summary.activeRecipients) + "."
             )
             .font(.caption)

@@ -8,8 +8,13 @@ private let logger = SpeakLogger.logger(category: "RecordingsView")
 
 // MARK: - Recordings List View
 
-/// Shows all locally saved audio recordings with playback,
-/// delete, and re-transcribe support.
+/// Shows all locally saved audio recordings with playback, delete, and
+/// transcribe-again.
+///
+/// The transcribe-again action is what makes the saved audio worth keeping
+/// (issue #992): a capture whose transcript never arrived — the network died,
+/// the app was killed — still has its audio here, and this is where it is
+/// turned back into text.
 public struct RecordingsView: View {
     @Environment(\.appVisualDensity) private var density
     @State private var recordings: [RecordingInfo] = []
@@ -17,6 +22,8 @@ public struct RecordingsView: View {
     @State private var audioPlayer: AVAudioPlayer?
     @State private var showingDeleteConfirmation = false
     @State private var recordingToDelete: RecordingInfo?
+    @State private var transcribing: UUID?
+    @State private var transcribeMessage: String?
 
     public init() {}
 
@@ -51,8 +58,15 @@ public struct RecordingsView: View {
                             onDelete: {
                                 recordingToDelete = rec
                                 showingDeleteConfirmation = true
-                            }
+                            },
+                            isTranscribing: transcribing == rec.id,
+                            onTranscribe: { transcribeAgain(rec) }
                         )
+                    }
+                    if let transcribeMessage {
+                        Text(transcribeMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -153,6 +167,49 @@ public struct RecordingsView: View {
         playingURL = nil
     }
 
+    /// Turns a saved recording back into text and files it in History. The
+    /// audio file is never touched, whether this succeeds or fails, so a
+    /// failed attempt costs the user nothing (issue #992).
+    private func transcribeAgain(_ rec: RecordingInfo) {
+        guard transcribing == nil else { return }
+        transcribing = rec.id
+        transcribeMessage = nil
+        Task {
+            defer { transcribing = nil }
+            do {
+                let text = try await CaptureRecoveryCoordinator.transcribe(url: rec.url)
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    transcribeMessage = "That recording produced no text. The audio is still here."
+                    return
+                }
+                // A deliberate re-transcription is a new entry: the user asked
+                // for it, possibly with a different model. Only the automatic
+                // recovery path is keyed on the recording, so that retrying an
+                // interrupted one cannot duplicate its row.
+                iOSHistoryManager.shared.add(iOSHistoryItem(
+                    createdAt: rec.startedAt,
+                    transcription: trimmed,
+                    model: CaptureRecoveryCoordinator.recoveryModel(),
+                    duration: rec.duration,
+                    wordCount: trimmed.split(whereSeparator: \.isWhitespace).count,
+                    originPlatform: CaptureRecoveryCoordinator.recoveredOrigin
+                ))
+                // This recording may be the one an interrupted capture left
+                // behind. Its transcript has just been delivered, so the
+                // matching claim must close: otherwise the next recovery pass
+                // offers the same audio again and accepting it duplicates the
+                // History row (issue #992). Failed and empty attempts above
+                // return before this and stay retryable.
+                CaptureSafetyClaimStore.shared.forget(recording: rec.id)
+                CaptureRecoveryCoordinator.shared.refresh()
+                transcribeMessage = "Saved to History. The audio is still here."
+            } catch {
+                transcribeMessage = "Could not transcribe that recording. The audio is still here."
+            }
+        }
+    }
+
     private func delete(_ rec: RecordingInfo) {
         if playingURL == rec.url {
             stopPlayback()
@@ -171,6 +228,8 @@ struct RecordingRow: View {
     let isPlaying: Bool
     let onPlay: () -> Void
     let onDelete: () -> Void
+    let isTranscribing: Bool
+    let onTranscribe: () -> Void
 
     var body: some View {
         HStack(spacing: density.isCompact ? 6 : 12) {
@@ -252,6 +311,13 @@ struct RecordingRow: View {
             Button(role: .destructive, action: onDelete) {
                 Label("Delete", systemImage: "trash")
             }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button(action: onTranscribe) {
+                Label("Transcribe", systemImage: "text.badge.plus")
+            }
+            .tint(.accentColor)
+            .disabled(isTranscribing)
         }
         .padding(.vertical, density.listRowVerticalPadding)
         .frame(minHeight: density.minimumListRowHeight)

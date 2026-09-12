@@ -31,6 +31,7 @@ configured in the app — nothing is duplicated.
 | --- | --- | --- | --- |
 | Start Dictation | Yes | Yes (as "Start Recording" / "Toggle Recording", iOS 18+) | — |
 | Stop Dictation ("Stop Dictation and Get Text" on iOS, iOS 18+) | Yes | Yes | Final transcript text |
+| Dictate (iOS 18+) | — | Yes | Final transcript text |
 | Transcribe Audio File | Yes | Yes | Transcript text |
 | Get Last Transcription | Yes | Yes | Most recent history entry (polished text preferred) |
 | Polish Text | Yes | Yes | Cleaned-up (or custom-prompt-processed) text |
@@ -46,12 +47,38 @@ Notes:
   recording). The existing "Start Recording" / "Toggle Recording" /
   "Stop Recording" actions remain; "Stop Dictation and Get Text" is the
   variant that hands the transcript to the next action in your shortcut.
+- **Dictate (iOS)** is the one-shot version: it records, finishes on its own
+  once you stop speaking, and returns the transcript — one trigger instead of
+  the Start / "Stop Dictation and Get Text" pair. *Pause Length* is how long
+  silence must hold before it finishes (2–8 seconds, 3 by default; shorter
+  finishes sooner but is likelier to cut you off mid-thought). *Maximum Length*
+  is the hard stop whatever happens (5–60 seconds, 25 by default). Values above
+  25 may not return before the system ends the action, because below iOS 27
+  there is no long-running-intent API to host the recording in. Destination,
+  language, model and source work as they do on the other recording actions.
+  A Dictate that arrives while something is already recording is refused rather
+  than opening a second microphone.
+- **Wait For Polish (iOS 18+)**, on both *Dictate* and *Stop Dictation and Get
+  Text*, decides which version of the transcript your shortcut receives. It is
+  **off by default**, which is what these actions always did: they return the
+  raw transcript the moment recording stops. Turn it on when your destination
+  is *Clipboard and Polish* and you want the chain and the clipboard to agree —
+  otherwise the shortcut gets the raw text while the clipboard is quietly
+  replaced with the polished one a few seconds later. The wait is bounded; if
+  the polish fails, returns nothing, or has not landed in time, the raw
+  transcript is returned rather than nothing at all.
 - **Transcribe Audio File** accepts common audio containers (m4a, mp3, wav,
   aac, flac, ogg, opus, aiff, caf, mp4, webm). On macOS it uses your configured
   file-transcription provider; on iOS it uses your batch model. On both
   platforms the result is saved to history, so **Get Last Transcription** and
   the app's History screen show it. The audio itself is not kept: Shortcuts
-  hands over a temporary copy that is deleted once the action returns.
+  hands over a temporary copy that is deleted once the action returns, and
+  **the file you shared is only ever read — never moved, renamed, changed or
+  deleted.** On iOS the action also takes optional *Language* and *Model*
+  overrides for that recipe only; leave them unset to use Settings. A file it
+  cannot use is refused with the reason — an unsupported format, a file over
+  the size cap, an iCloud file that is not downloaded to this device yet, an
+  empty file, or one it could not open — rather than failing silently.
 - **Polish Text** sends the text through the same post-processing path a
   dictation session uses, so your configured model applies — including the
   on-device Apple Foundation model and downloaded local models, which need no
@@ -79,6 +106,11 @@ system-wide push-to-talk that ends with the transcript on your clipboard.
 3. **Polish Text** (leave the custom prompt empty)
 4. **Create Note** / **Append to Note**
 
+To reach it from anywhere on iOS, open the shortcut's settings and turn on
+**Show in Share Sheet** with the accepted input set to Files (or Media). It
+then appears when you share a Voice Memo, an Apple Watch memo synced to the
+phone, or any audio file in Files.
+
 **Summarise a recording with your own prompt**
 
 1. **Transcribe Audio File**
@@ -88,9 +120,22 @@ system-wide push-to-talk that ends with the transcript on your clipboard.
 
 **Action Button dictation that lands in a draft (iOS)**
 
-1. Assign the Action Button to a shortcut containing **Start Recording**
-2. A second shortcut runs **Stop Dictation and Get Text** → **New Draft**
-   (Drafts, Notes, Mail — anything that accepts text input)
+1. Assign the Action Button to a shortcut containing **Dictate**
+2. Follow it with **New Draft** (Drafts, Notes, Mail — anything that accepts
+   text input)
+
+One press, and the shortcut finishes on its own once you stop talking. The
+older two-shortcut form still works: **Start Recording**, then a second
+shortcut running **Stop Dictation and Get Text**.
+
+**Finish headless recordings without a second press**
+
+Settings → Action Button & Shortcuts → **Stop On Silence**. Recordings started
+from a Control, the Action Button, Siri or a Shortcut then finish on their own
+after the pause length you choose. It is off by default: it saves a press for
+people who dictate in bursts and gets in the way of people who think in long
+pauses. Recordings you start in the app or from the keyboard are unaffected,
+and a recording that never goes quiet still stops after 15 minutes.
 
 **"What did I just say?"**
 
@@ -100,11 +145,50 @@ system-wide push-to-talk that ends with the transcript on your clipboard.
 Works even when the recording happened via the Action Button, Live Activity,
 or the app itself — it reads the same history the app shows.
 
+### The gallery in the app (iOS)
+
+**Settings → Action Button & Shortcuts → Shortcuts Gallery** lists the same
+recipes with the exact action names to search for, marks which steps are Just
+Speak to It's and which are Apple's, and opens the Shortcuts app. Deliberately
+recipes rather than one-tap `.shortcut` downloads: a hosted shortcut has to be
+re-signed for every iOS release and fails to install silently when it is not,
+which is worse than no gallery entry at all. Every Just Speak to It action a
+recipe names is checked against the shipped App Intent by a test, so a renamed
+action breaks the build rather than the recipe.
+
+### Share Sheet (iOS)
+
+There is also an optional Share extension that skips Shortcuts entirely: share
+an audio file to **Just Speak to It** and it copies the recording into the
+app's own storage, then the app transcribes it the next time you open it and
+saves the result to History.
+
+It is built only when the project is generated with
+`TUIST_IOS_SHARE_EXTENSION=1` — like the custom keyboard and the watch app, it
+needs its own App ID, App Group registration and provisioning profile before it
+can ship, so it is off by default and release signing is unaffected until those
+exist.
+
+What it does and does not do:
+
+- **Your recording is only ever read.** The extension opens it for reading,
+  copies it in fixed 64 KiB chunks (so a long recording is never held in
+  memory, which is what gets a Share extension killed), and never moves,
+  renames, changes or deletes the original.
+- Every refusal says which one it was and that nothing was changed: an
+  unsupported format, a file over the size cap, an iCloud file that is not
+  downloaded yet (open it once in Files first), an empty file, one it could not
+  open, or an import you cancelled — in which case the partial copy is deleted.
+- The sheet does not close itself on a failure. A share sheet that dismisses
+  itself is indistinguishable from one that worked.
+- If the transcription itself fails later, the app says so, names the file, and
+  says your recording was not changed.
+
 ### Siri
 
 All actions with App Shortcut phrases can be invoked by voice, e.g. "Start
-dictation with Just Speak to It" or "Get my last transcription from Just Speak
-to It".
+dictation with Just Speak to It", "Dictate with Just Speak to It" or "Get my
+last transcription from Just Speak to It".
 
 ## Turn automation on first (CLI and MCP)
 

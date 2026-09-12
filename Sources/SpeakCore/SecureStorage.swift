@@ -77,6 +77,22 @@ public extension APIKeyIdentifierRegistry {
 // MARK: - Secure Storage Configuration
 
 public struct SecureStorageConfiguration: Sendable {
+    public enum Accessibility: Sendable {
+        /// Preserve the existing platform and synchronizable-store defaults.
+        case platformDefault
+        /// Available after the first unlock, including while locked; remains backup eligible.
+        case afterFirstUnlock
+    }
+
+    public let accessibility: Accessibility
+
+    var keychainAccessibility: CFString? {
+        if accessibility == .afterFirstUnlock || (accessGroup != nil && synchronizable) {
+            return kSecAttrAccessibleAfterFirstUnlock
+        }
+        return nil
+    }
+
     public let service: String
     public let masterAccount: String
     /// Previous service names whose aggregate payload should be copied into the
@@ -90,16 +106,59 @@ public struct SecureStorageConfiguration: Sendable {
 
     public init(
         service: String = "com.github.speakapp.credentials",
-        masterAccount: String = "speak-app-secrets",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
         legacyServices: [String] = [],
         accessGroup: String? = nil,
         synchronizable: Bool = false
     ) {
-        self.service = service
+        self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
+                  accessGroup: accessGroup, synchronizable: synchronizable,
+                  accessibility: .platformDefault, releaseTrain: .current)
+    }
+
+    public init(
+        service: String = "com.github.speakapp.credentials",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
+        legacyServices: [String] = [],
+        accessGroup: String? = nil,
+        synchronizable: Bool = false,
+        releaseTrain: ReleaseTrain
+    ) {
+        self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
+                  accessGroup: accessGroup, synchronizable: synchronizable,
+                  accessibility: .platformDefault, releaseTrain: releaseTrain)
+    }
+
+    public init(
+        service: String = "com.github.speakapp.credentials",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
+        legacyServices: [String] = [],
+        accessGroup: String? = nil,
+        synchronizable: Bool = false,
+        accessibility: Accessibility
+    ) {
+        self.init(service: service, masterAccount: masterAccount, legacyServices: legacyServices,
+                  accessGroup: accessGroup, synchronizable: synchronizable,
+                  accessibility: accessibility, releaseTrain: .current)
+    }
+
+    /// Designated initialiser. `accessibility` and `releaseTrain` are both
+    /// explicit here so neither policy can be dropped by a forwarding overload.
+    public init(
+        service: String = "com.github.speakapp.credentials",
+        masterAccount: String = "speak-app-secrets", // swiftlint:disable:this inclusive_language
+        legacyServices: [String] = [],
+        accessGroup: String? = nil,
+        synchronizable: Bool = false,
+        accessibility: Accessibility,
+        releaseTrain: ReleaseTrain
+    ) {
+        self.service = releaseTrain.namespace(service)
         self.masterAccount = masterAccount
-        self.legacyServices = legacyServices
-        self.accessGroup = accessGroup
+        self.legacyServices = legacyServices.map { releaseTrain.namespace($0) }
+        self.accessGroup = accessGroup.map { releaseTrain.namespace($0) }
         self.synchronizable = synchronizable
+        self.accessibility = accessibility
     }
 
     public static let `default` = SecureStorageConfiguration()
@@ -240,6 +299,31 @@ public actor SecureStorage {
         guard !identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SecureStorageError.emptyIdentifier
         }
+    }
+
+    /// The accessibility class the stored secrets item actually carries, read
+    /// back off the keychain item itself (issue #997).
+    ///
+    /// This is a real read of the real item's `kSecAttrAccessible` attribute
+    /// with `kSecReturnData` off, not a restatement of what the write path
+    /// asked for, because the two can differ — a migrated item keeps the class
+    /// it was created with, which is the whole of issue #930: a `WhenUnlocked`
+    /// item is unreadable during a locked-device capture and the capture
+    /// silently downgrades to Apple Speech instead of saying so.
+    ///
+    /// Returns `nil` when there is no item to inspect. The raw attribute
+    /// string never leaves this method.
+    public func storedAccessibility() -> CaptureHealthAccessibility? {
+        var query = self.baseQuery(account: self.configuration.masterAccount)
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let attributes = item as? [String: Any],
+              let accessible = attributes[kSecAttrAccessible as String] as? String
+        else { return nil }
+        return CaptureHealthAccessibility(secAttrAccessible: accessible)
     }
 
     public func preload() async {
@@ -434,6 +518,17 @@ public actor SecureStorage {
         else {
             throw SecureStorageError.unexpectedStatus(status)
         }
+        if configuration.accessibility == .afterFirstUnlock {
+            do {
+                try KeychainAccessibilityMigration.migrate(query: baseQuery(account: account), expectedData: data)
+            } catch {
+                // A readable credential stays usable even if this OS rejects the
+                // attribute update. Leave the original item intact and retry on reload.
+                Self.logger.error(
+                    "Credential accessibility migration failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
         return payload
     }
 
@@ -566,11 +661,10 @@ public actor SecureStorage {
             kSecAttrLabel as String: account
         ]
 
-        // IMPORTANT: Only set these attributes when we have the entitlement
-        // kSecAttrSynchronizable requires keychain-access-groups entitlement
-        // kSecAttrAccessible with certain values may also require it on some configs
+        if let accessibility = configuration.keychainAccessibility {
+            attributesToUpdate[kSecAttrAccessible as String] = accessibility
+        }
         if configuration.accessGroup != nil && configuration.synchronizable {
-            attributesToUpdate[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
             attributesToUpdate[kSecAttrSynchronizable as String] = kCFBooleanTrue
         }
 
@@ -581,9 +675,10 @@ public actor SecureStorage {
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrLabel as String] = account
 
-            // Only set these for entitled apps
+            if let accessibility = configuration.keychainAccessibility {
+                addQuery[kSecAttrAccessible as String] = accessibility
+            }
             if configuration.accessGroup != nil && configuration.synchronizable {
-                addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
                 addQuery[kSecAttrSynchronizable as String] = kCFBooleanTrue
             }
 

@@ -1,3 +1,4 @@
+import SpeakCore
 //
 //  OpenClawLiveActivity.swift
 //  JustSpeakToItWidgetExtension
@@ -18,7 +19,7 @@ struct OpenClawLiveActivity: Widget {
                 state: context.state,
                 startTime: context.attributes.startTime
             )
-            .widgetURL(URL(string: "justspeaktoit://openclaw"))
+            .widgetURL(ReleaseTrain.current.deepLink("openclaw"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -62,7 +63,7 @@ struct OpenClawLiveActivity: Widget {
             } minimal: {
                 openClawStatusIndicator(for: context.state.status)
             }
-            .widgetURL(URL(string: "justspeaktoit://openclaw"))
+            .widgetURL(ReleaseTrain.current.deepLink("openclaw"))
         }
     }
 }

@@ -114,6 +114,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if let activeRun {
       await stop(activeRun)
     }
+    try Task.checkCancellation()
 
     let model = currentModel ?? appSettings.liveTranscriptionModel
     logger.info("Starting with model: \(model)")
@@ -125,15 +126,15 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let controller = controller(for: model)
     controller.delegate = delegate
     controller.configure(language: currentLanguage, model: model)
-    let run = activate(controller)
+    let run = activate(controller, preRollBuffers: preRollBuffers)
     do {
-      if let analyzer = controller as? AppleSpeechAnalyzerLiveController {
-        try await analyzer.start(preRollBuffers: preRollBuffers)
-      } else {
-        try await controller.start()
-      }
+      try await awaitStartup(run)
       invalidateBeforeNextStart = false
     } catch {
+      if error is CancellationError || Task.isCancelled || run.startTask.isCancelled {
+        await stop(run)
+        throw CancellationError()
+      }
       if AppleLocalModels.isSpeechAnalyzerModel(model), analyzerFallbackAllowed {
         logger.warning(
           "SpeechAnalyzer failed (\(error.localizedDescription, privacy: .public)); using legacy Apple Speech")
@@ -144,10 +145,14 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         )
         let fallbackRun = activate(nativeController)
         do {
-          try await nativeController.start()
+          try await awaitStartup(fallbackRun)
           invalidateBeforeNextStart = false
           return
         } catch {
+          if error is CancellationError || Task.isCancelled || fallbackRun.startTask.isCancelled {
+            await stop(fallbackRun)
+            throw CancellationError()
+          }
           release(fallbackRun)
           invalidateBeforeNextStart = true
           throw error
@@ -169,6 +174,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   /// prevents a delayed cancellation task from targeting a replacement run.
   func scheduleStop() {
     guard let activeRun else { return }
+    // Cancel synchronously, before the teardown task gets its next actor turn.
+    activeRun.startTask.cancel()
     Task { @MainActor [weak self] in
       await self?.stop(activeRun)
     }
@@ -204,16 +211,21 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
       ("modulate/", controllers.modulate),
       ("elevenlabs/", controllers.elevenlabs),
       ("soniox/", controllers.soniox),
-      ("speechmatics/", controllers.speechmatics),
       ("cartesia/", controllers.cartesia),
       ("gladia/", controllers.gladia),
       // Gemini 3.5 Transcribe Live runs on the shared SpeakCore client, so it
       // needs no bespoke controller or audio processor.
       (GeminiTranscribeModels.liveCatalogID, controllers.sharedClient),
       ("xai/", controllers.sharedClient),
+      ("azure/", controllers.sharedClient),
       // Meta Muse Voice Transcribe streams through the shared SpeakCore client,
       // so it uses the same macOS capture controller as xAI.
-      ("meta/", controllers.sharedClient)
+      ("meta/", controllers.sharedClient),
+      // Speechmatics, Rev.ai and Mistral Voxtral all run on the shared
+      // SpeakCore clients, which is what makes them work on iPhone too.
+      ("speechmatics/", controllers.sharedClient),
+      ("revai/", controllers.sharedClient),
+      ("mistral/", controllers.sharedClient)
     ]
   }
 
@@ -247,10 +259,42 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   }
 
   @discardableResult
-  private func activate(_ controller: any LiveTranscriptionController) -> ActiveRun {
-    let run = ActiveRun(controller: controller)
+  private func activate(
+    _ controller: any LiveTranscriptionController,
+    preRollBuffers: [AVAudioPCMBuffer] = []
+  ) -> ActiveRun {
+    let startTask = Task { @MainActor in
+      try Task.checkCancellation()
+      if let analyzer = controller as? AppleSpeechAnalyzerLiveController {
+        try await analyzer.start(preRollBuffers: preRollBuffers)
+      } else {
+        try await controller.start()
+      }
+    }
+    let run = ActiveRun(controller: controller, startTask: startTask)
     activeRun = run
     return run
+  }
+
+  /// Propagate caller cancellation to the provider task. Even a provider that
+  /// ignores cancellation must finish starting before its run can be released.
+  private func awaitStartup(_ run: ActiveRun) async throws {
+    let startTask = run.startTask
+    let runID = run.id
+    try await withTaskCancellationHandler {
+      try await startTask.value
+      try Task.checkCancellation()
+      guard !startTask.isCancelled else { throw CancellationError() }
+    } onCancel: {
+      startTask.cancel()
+      // Some providers only resolve startup when stop() is called. Cancelling
+      // their task alone would leave this await suspended forever. Capture the
+      // run ID so delayed cancellation cannot stop a replacement recording.
+      Task { @MainActor [weak self] in
+        guard let self, let activeRun = self.activeRun, activeRun.id == runID else { return }
+        await self.stop(activeRun)
+      }
+    }
   }
 
   private func release(_ run: ActiveRun) {
@@ -266,8 +310,16 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     if let pendingStop, pendingStop.run.id == run.id {
       task = pendingStop.task
     } else {
+      run.startTask.cancel()
       task = Task { @MainActor in
+        // Some local controllers need stop() to resolve their startup wait.
+        // Others ignore stop while isRunning is false, then acquire capture
+        // late. Retain this run through both phases and sweep up late capture.
         await run.controller.stop()
+        _ = await run.startTask.result
+        if run.controller.isRunning {
+          await run.controller.stop()
+        }
       }
       pendingStop = PendingStop(run: run, task: task)
     }
@@ -284,6 +336,7 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
   private struct ActiveRun {
     let id = UUID()
     let controller: any LiveTranscriptionController
+    let startTask: Task<Void, Error>
   }
 
   private struct PendingStop {
@@ -332,7 +385,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     let assemblyAI: AssemblyAILiveController
     let elevenlabs: ElevenLabsLiveController
     let soniox: SonioxLiveController
-    let speechmatics: SpeechmaticsLiveController
     let cartesia: CartesiaLiveController
     let gladia: GladiaLiveController
     let openAIRealtime: OpenAIRealtimeLiveController
@@ -386,12 +438,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         secureStorage: secureStorage
       )
       soniox = SonioxLiveController(
-        appSettings: appSettings,
-        permissionsManager: permissionsManager,
-        audioDeviceManager: audioDeviceManager,
-        secureStorage: secureStorage
-      )
-      speechmatics = SpeechmaticsLiveController(
         appSettings: appSettings,
         permissionsManager: permissionsManager,
         audioDeviceManager: audioDeviceManager,
@@ -452,7 +498,6 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
         assemblyAI,
         elevenlabs,
         soniox,
-        speechmatics,
         cartesia,
         gladia,
         openAIRealtime,

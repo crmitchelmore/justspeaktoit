@@ -9,7 +9,7 @@ import SwiftUI
 struct QRCodeGeneratorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var qrImage: UIImage?
-    @State private var transferCode: String?
+    @State private var presentation: ConfigTransferPresentation?
     @State private var isGenerating = false
     @State private var error: String?
 
@@ -20,21 +20,27 @@ struct QRCodeGeneratorView: View {
                     ProgressView("Generating...")
                         .padding()
                 } else if let image = qrImage {
-                    Image(uiImage: image)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: 250, maxHeight: 250)
-                        .padding()
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                    
-                    Text("Scan this code on your other device")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if presentation?.isShowingQRCode == true {
+                        Image(uiImage: image)
+                            .interpolation(.none)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 250, maxHeight: 250)
+                            .padding()
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
 
-                    if let transferCode {
+                        Text("Scan this code on your other device")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button(ConfigTransferPresentation.revealButtonTitle) {
+                            presentation?.revealCode()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+
+                    if let transferCode = presentation?.visibleCode {
                         VStack(spacing: 6) {
-                            Text("Then enter this code")
+                            Text("Enter this code on the receiving device")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text(ConfigTransferCode.formatted(transferCode))
@@ -50,7 +56,10 @@ struct QRCodeGeneratorView: View {
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     }
 
-                    Text("Code expires in 10 minutes")
+                    Text(ConfigTransferPresentation.captureNotice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(ConfigTransferPresentation.expiryNotice)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 } else if let error {
@@ -71,10 +80,24 @@ struct QRCodeGeneratorView: View {
                     }
                 }
             }
+            .transaction { transaction in
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
             .padding()
             .navigationTitle("Share Configuration")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    // Same escape hatch as macOS: a failed scan after the code
+                    // was revealed starts a fresh transfer instead of forcing
+                    // the user to leave the screen.
+                    if qrImage != nil, !isGenerating {
+                        Button("Regenerate") {
+                            Task { await generateQRCode() }
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -82,10 +105,13 @@ struct QRCodeGeneratorView: View {
             .task { await generateQRCode() }
         }
     }
-    
+
     private func generateQRCode() async {
+        guard !isGenerating else { return }
         isGenerating = true
         error = nil
+        qrImage = nil
+        presentation = nil
 
         do {
             // Gather secrets and settings via the shared transfer manager so
@@ -93,17 +119,18 @@ struct QRCodeGeneratorView: View {
             // the canonical credential store the rest of the app uses.
             let manager = ConfigTransferManager.shared
             let secrets = try await manager.gatherSecrets(storage: AppSettings.canonicalCredentialStorage)
+            try Task.checkCancellation()
             let settings = manager.gatherSettings()
 
             guard !secrets.isEmpty || !settings.isEmpty else {
                 qrImage = nil
-                transferCode = nil
+                presentation = nil
                 isGenerating = false
                 return
             }
 
-            // The QR carries only ciphertext; the one-time code shown beneath it
-            // is what decrypts it, and it travels by the user reading it out.
+            // A fresh transfer resets the one-way presentation flow. The QR
+            // must leave the view before the unlock code can be shown.
             let transfer = try manager.makeTransfer(
                 secrets: secrets,
                 settings: settings
@@ -118,10 +145,10 @@ struct QRCodeGeneratorView: View {
                 throw ConfigTransferError.qrGenerationFailed
             }
             qrImage = UIImage(cgImage: cgImage)
-            transferCode = transfer.code
+            presentation = ConfigTransferPresentation(code: transfer.code)
         } catch {
             qrImage = nil
-            transferCode = nil
+            presentation = nil
             self.error = error.localizedDescription
         }
 
@@ -153,11 +180,11 @@ struct QRCodeScannerView: View {
                 // Camera preview
                 CameraPreviewView(session: scanner.session)
                     .ignoresSafeArea()
-                
+
                 // Overlay
                 VStack {
                     Spacer()
-                    
+
                     // Scanning indicator
                     if scanner.isScanning {
                         Text("Point camera at QR code")
@@ -165,14 +192,14 @@ struct QRCodeScannerView: View {
                             .padding()
                             .background(.ultraThinMaterial, in: Capsule())
                     }
-                    
+
                     Spacer()
-                    
+
                     // Frame guide
                     RoundedRectangle(cornerRadius: 16)
                         .strokeBorder(.white.opacity(0.5), lineWidth: 2)
                         .frame(width: 250, height: 250)
-                    
+
                     Spacer()
                     Spacer()
                 }
@@ -198,7 +225,7 @@ struct QRCodeScannerView: View {
                 Button("Unlock") { unlockScannedPayload() }
                 Button("Cancel", role: .cancel) { cancelPendingImport() }
             } message: {
-                Text("Type the code shown next to the QR code on the other device.")
+                Text(ConfigTransferPresentation.receiverInstruction)
             }
             .alert("Import Configuration?", isPresented: $showingImportConfirmation) {
                 Button("Import") {
@@ -229,7 +256,7 @@ struct QRCodeScannerView: View {
             }
         }
     }
-    
+
     /// Nothing is decrypted at scan time: an encrypted payload is parked until
     /// the user supplies the one-time code from the exporting device.
     private func handleScannedCode(_ code: String) {

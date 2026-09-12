@@ -32,6 +32,7 @@ public enum LiveAudioConverterDrain {
     outputFormat: AVAudioFormat,
     frameCapacity: AVAudioFrameCount = drainFrameCapacity
   ) -> AVAudioPCMBuffer? {
+    guard outputFormat == converter.outputFormat, frameCapacity > 0 else { return nil }
     var collected: [AVAudioPCMBuffer] = []
     var totalFrames = 0
 
@@ -65,29 +66,37 @@ public enum LiveAudioConverterDrain {
 
   /// Convenience wrapper for the PCM16 send paths: flushes `converter` and
   /// returns the trailing frames as little-endian 16-bit mono samples.
+  /// Both mono layouts are supported. Unsupported formats return `nil`
+  /// without consuming the converter's tail.
   public static func drainPCM16Data(
     converter: AVAudioConverter,
     outputFormat: AVAudioFormat
   ) -> Data? {
+    guard outputFormat.commonFormat == .pcmFormatInt16,
+          outputFormat.channelCount == 1 else { return nil }
     guard let tail = drain(converter: converter, outputFormat: outputFormat),
           tail.frameLength > 0,
-          let samples = tail.int16ChannelData else {
+          let samples = tail.audioBufferList.pointee.mBuffers.mData else {
       return nil
     }
-    return Data(bytes: samples[0], count: Int(tail.frameLength) * MemoryLayout<Int16>.size)
+    return Data(bytes: samples, count: Int(tail.frameLength) * MemoryLayout<Int16>.size)
   }
 
-  /// Convenience wrapper for the float32 sidecar path.
+  /// Convenience wrapper for the mono float32 sidecar path.
+  /// Both mono layouts are supported. Unsupported formats return `nil`
+  /// without consuming the converter's tail.
   public static func drainFloat32Data(
     converter: AVAudioConverter,
     outputFormat: AVAudioFormat
   ) -> Data? {
+    guard outputFormat.commonFormat == .pcmFormatFloat32,
+          outputFormat.channelCount == 1 else { return nil }
     guard let tail = drain(converter: converter, outputFormat: outputFormat),
           tail.frameLength > 0,
-          let samples = tail.floatChannelData else {
+          let samples = tail.audioBufferList.pointee.mBuffers.mData else {
       return nil
     }
-    return Data(bytes: samples[0], count: Int(tail.frameLength) * MemoryLayout<Float>.size)
+    return Data(bytes: samples, count: Int(tail.frameLength) * MemoryLayout<Float>.size)
   }
 
   private static func concatenate(
@@ -174,12 +183,14 @@ public final class LiveConverterCache: @unchecked Sendable {
   /// Flushes the converter at end of stream and returns its trailing frames as
   /// PCM16 bytes, releasing the (now finished) converter.
   public func drainPCM16() -> Data? {
+    guard outputFormat?.commonFormat == .pcmFormatInt16, outputFormat?.channelCount == 1 else { return nil }
     guard let (converter, format) = takeConverter() else { return nil }
     return LiveAudioConverterDrain.drainPCM16Data(converter: converter, outputFormat: format)
   }
 
   /// Float32 counterpart of ``drainPCM16()`` for the sidecar path.
   public func drainFloat32() -> Data? {
+    guard outputFormat?.commonFormat == .pcmFormatFloat32, outputFormat?.channelCount == 1 else { return nil }
     guard let (converter, format) = takeConverter() else { return nil }
     return LiveAudioConverterDrain.drainFloat32Data(converter: converter, outputFormat: format)
   }

@@ -27,7 +27,13 @@ final class WatchCaptureReceiver: NSObject {
         super.init()
         pipeline.sendAck = { ack in
             guard let userInfo = ack.userInfo() else { return }
-            WCSession.default.transferUserInfo(userInfo)
+            let session = WCSession.default
+            guard session.activationState == .activated else { return }
+            // Reconciliation may run repeatedly while the watch is offline.
+            guard !session.outstandingUserInfoTransfers.contains(where: {
+                WatchCaptureAck.from(userInfo: $0.userInfo) == ack
+            }) else { return }
+            session.transferUserInfo(userInfo)
         }
     }
 

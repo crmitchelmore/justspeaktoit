@@ -20,8 +20,6 @@ final class PCMBufferPool: @unchecked Sendable {
     /// capture path; the counter makes that loss visible instead of silent.
     private var exhaustedCheckouts = 0
 
-    private let logger = SpeakLogger.logger(category: "PCMBufferPool")
-
     init(maximumBuffers: Int) {
         self.maximumBuffers = maximumBuffers
     }
@@ -48,9 +46,6 @@ final class PCMBufferPool: @unchecked Sendable {
             // less than the one we need, so retire it and allocate in its place.
             guard !buffers.isEmpty else {
                 exhaustedCheckouts += 1
-                logger.debug(
-                    "PCM buffer pool exhausted (\(self.maximumBuffers) in flight); dropping frame"
-                )
                 return nil
             }
             buffers.removeFirst()

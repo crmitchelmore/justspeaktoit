@@ -10,6 +10,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   case apiKeys
   case shortcuts
   case permissions
+  case dataMigration
   case about
 
   var id: String { rawValue }
@@ -18,6 +19,8 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     title(isAssemblyAI: false)
   }
 
+  // One label per settings destination.
+  // swiftlint:disable:next cyclomatic_complexity
   func title(isAssemblyAI: Bool) -> String {
     switch self {
     case .general: return "General"
@@ -29,6 +32,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .apiKeys: return "API Keys"
     case .shortcuts: return "Keyboard"
     case .permissions: return "Permissions"
+    case .dataMigration: return "Data & Migration"
     case .about: return "About"
     }
   }
@@ -44,6 +48,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .apiKeys: return "key.fill"
     case .shortcuts: return "keyboard"
     case .permissions: return "hand.raised.fill"
+    case .dataMigration: return "arrow.up.arrow.down.square"
     case .about: return "info.circle"
     }
   }

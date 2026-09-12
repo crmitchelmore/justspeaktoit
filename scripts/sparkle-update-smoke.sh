@@ -4,6 +4,11 @@
 #
 #   scripts/sparkle-update-smoke.sh <dmg-path> <appcast-xml-path>
 #
+# Set SPARKLE_SMOKE_LOCAL_ENCLOSURE=1 before publication to serve the exact
+# signed DMG on loopback instead of fetching its not-yet-published GitHub URL.
+# Set SPARKLE_SMOKE_REQUIRE_SUPPORTED=1 for release gates (missing smoke support
+# then fails instead of skipping compatibility tests for old releases).
+#
 # Nothing in CI used to install a Sparkle update. Releases were verified by
 # inspecting the artefacts, so a broken feed, a bad signature or an installer
 # that cannot replace the bundle would first be discovered by a user. On
@@ -37,13 +42,15 @@
 #   * Sparkle reported `installing` (it accepted the item, verified the EdDSA
 #     signature, downloaded, extracted and reached the install-and-relaunch
 #     step);
-#   * the bundle at the temp path still has a valid code signature after being
-#     replaced in place;
+#   * both the bundle and executable filesystem identities changed, proving an
+#     actual replacement rather than an install request followed by failure;
+#   * the replaced bundle at the temp path has a valid code signature;
 #   * its CFBundleVersion equals the version inside the enclosure DMG (read from
 #     the mount up front) — i.e. the bundle really was swapped for the
 #     downloaded one and is not a half-written directory;
-#   * a process for that same bundle path is running again, so the relaunch
-#     worked.
+# Relaunch observation remains advisory on headless CI (issue #878). The
+# required replacement witness, signature, and version checks prove installation;
+# they do not prove GUI relaunch survival in an interactive user session.
 #
 # Exit status: 0 on PASS or SKIPPED, non-zero on FAIL.
 #
@@ -167,6 +174,10 @@ APP_EXECUTABLE="$APP_COPY/Contents/MacOS/$EXECUTABLE_NAME"
 
 SMOKE_SUPPORTED="$(defaults read "$APP_COPY/Contents/Info.plist" SpeakSparkleSmokeSupported 2>/dev/null || echo "")"
 if [ "$SMOKE_SUPPORTED" != "1" ]; then
+    if [ "${SPARKLE_SMOKE_REQUIRE_SUPPORTED:-0}" = "1" ]; then
+        echo "FAIL: release gate requires SpeakSparkleSmokeSupported in Info.plist" >&2
+        exit 1
+    fi
     echo "SKIPPED: $APP_NAME (build $ENCLOSURE_APP_VERSION) predates the headless Sparkle smoke mode"
     echo "         (no SpeakSparkleSmokeSupported marker in Info.plist); nothing to exercise."
     exit 0
@@ -184,60 +195,31 @@ esac
 BUMPED_VERSION="$((10#$RUNNING_VERSION + 1))"
 log "Synthetic appcast will advertise sparkle:version $BUMPED_VERSION (running $RUNNING_VERSION)"
 
-if ! APPCAST_SRC="$APPCAST_PATH" APPCAST_DST="$FEED_DIR/appcast.xml" \
-     BUMPED_VERSION="$BUMPED_VERSION" python3 - <<'PY'
-import os
-import re
-import sys
-
-src = os.environ["APPCAST_SRC"]
-dst = os.environ["APPCAST_DST"]
-bumped = os.environ["BUMPED_VERSION"]
-
-with open(src, "r", encoding="utf-8") as handle:
-    xml = handle.read()
-
-# Only sparkle:version moves. sparkle:shortVersionString, the enclosure url,
-# length and sparkle:edSignature are left byte-for-byte as published, so the
-# artefact Sparkle downloads and verifies is the real signed release DMG.
-xml, count = re.subn(
-    r"(<sparkle:version>)[^<]*(</sparkle:version>)",
-    lambda match: match.group(1) + bumped + match.group(2),
-    xml,
-)
-if count == 0:
-    # Older feeds carry the version as an attribute on the enclosure.
-    xml, count = re.subn(
-        r'(sparkle:version=")[^"]*(")',
-        lambda match: match.group(1) + bumped + match.group(2),
-        xml,
-    )
-if count == 0:
-    sys.stderr.write("no sparkle:version found in %s\n" % src)
-    sys.exit(1)
-
-# A phased rollout can legitimately withhold an update from a background check.
-# The smoke run is a user-initiated check, which ignores it, but dropping the
-# attribute removes the ambiguity from the result. It is not covered by the
-# EdDSA signature, which signs the DMG rather than the feed.
-xml = re.sub(r'\s*sparkle:phasedRolloutInterval="[^"]*"', "", xml)
-
-with open(dst, "w", encoding="utf-8") as handle:
-    handle.write(xml)
-PY
-then
-    echo "FAIL: could not build the synthetic appcast from $APPCAST_PATH" >&2
-    exit 1
-fi
-
-# --- 4. Serve it on loopback --------------------------------------------------
-
 PORT="$(python3 -c 'import socket
 sock = socket.socket()
 sock.bind(("127.0.0.1", 0))
 print(sock.getsockname()[1])
 sock.close()')"
 FEED_URL="http://127.0.0.1:$PORT/appcast.xml"
+LOCAL_ENCLOSURE_URL=""
+if [ "${SPARKLE_SMOKE_LOCAL_ENCLOSURE:-0}" = "1" ]; then
+    # A symlink keeps the exact signed DMG bytes intact without another large
+    # copy. This server is loopback-only and disappears with the smoke run.
+    ABSOLUTE_DMG="$(cd "$(dirname "$DMG_PATH")" && pwd)/$(basename "$DMG_PATH")"
+    if ! ln -s "$ABSOLUTE_DMG" "$FEED_DIR/enclosure.dmg"; then
+        echo "FAIL: could not expose the local signed enclosure" >&2
+        exit 1
+    fi
+    LOCAL_ENCLOSURE_URL="http://127.0.0.1:$PORT/enclosure.dmg"
+fi
+
+if ! python3 "$(dirname "$0")/prepare-sparkle-smoke-feed.py" \
+    "$APPCAST_PATH" "$FEED_DIR/appcast.xml" "$BUMPED_VERSION" "$LOCAL_ENCLOSURE_URL"; then
+    echo "FAIL: could not build the synthetic appcast from $APPCAST_PATH" >&2
+    exit 1
+fi
+
+# --- 4. Serve it on loopback --------------------------------------------------
 
 log "Serving $FEED_DIR at $FEED_URL"
 python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$FEED_DIR" \
@@ -260,6 +242,12 @@ fi
 # NSAllowsLocalNetworking: without it App Transport Security blocks plain HTTP
 # to 127.0.0.1 even from a notarised build. The exemption covers loopback,
 # .local and link-local addresses only.
+
+REPLACEMENT_HELPER="$(dirname "$0")/verify-sparkle-replacement.py"
+if ! ORIGINAL_IDENTITY="$(python3 "$REPLACEMENT_HELPER" snapshot "$APP_COPY" "$APP_EXECUTABLE")"; then
+    echo "FAIL: could not record the original bundle identity" >&2
+    exit 1
+fi
 
 log "Launching $APP_EXECUTABLE in smoke mode"
 "$APP_EXECUTABLE" \
@@ -301,14 +289,21 @@ else
     fail "expected the result file to report \"installing\", got \"${RESULT_STATE:-<nothing>}\""
 fi
 
-# 6b. The replaced bundle is intact and still validly signed.
+# 6b. An install request is not proof of replacement. Wait for Sparkle's helper
+# to replace both filesystem objects after the parent exits, then verify bytes.
+if ! python3 "$REPLACEMENT_HELPER" wait "$APP_COPY" "$APP_EXECUTABLE" \
+    "$ORIGINAL_IDENTITY" "$RELAUNCH_TIMEOUT_SECONDS"; then
+    fail "no completed bundle/executable replacement was observed"
+fi
+
+# 6c. The replaced bundle is intact and still validly signed.
 if codesign --verify --strict "$APP_COPY" 2>"$WORK_DIR/codesign.log"; then
     log "OK: the installed bundle passes codesign --verify --strict"
 else
     fail "the installed bundle failed code signature validation: $(cat "$WORK_DIR/codesign.log")"
 fi
 
-# 6c. The bundle now reports the version that was inside the enclosure DMG.
+# 6d. The bundle now reports the version that was inside the enclosure DMG.
 #     (Not the bumped one — see the header: the synthetic appcast re-uses the
 #     real enclosure, whose app carries the original CFBundleVersion.)
 INSTALLED_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' \
@@ -319,7 +314,7 @@ else
     fail "expected CFBundleVersion $ENCLOSURE_APP_VERSION after install, got \"${INSTALLED_VERSION:-<nothing>}\""
 fi
 
-# 6d. Sparkle relaunched the app from the same bundle path.
+# 6e. Sparkle relaunched the app from the same bundle path.
 RELAUNCHED_PID=""
 WAITED=0
 while [ "$WAITED" -lt "$RELAUNCH_TIMEOUT_SECONDS" ]; do
@@ -332,9 +327,8 @@ if [ -n "$RELAUNCHED_PID" ]; then
     log "OK: the updated app is running again (PID $RELAUNCHED_PID)"
     kill "$RELAUNCHED_PID" 2>/dev/null || true
 else
-    # Advisory only. The three assertions above prove the update itself
-    # (Sparkle's verdict, a valid signature on the replaced bundle, and the
-    # enclosure's version in place). Whether the *relaunched* GUI process
+    # Advisory only. The required assertions above prove replacement of both
+    # filesystem objects followed by a valid signature and enclosure version. Whether the *relaunched* GUI process
     # survives depends on the session it is launched into: on a headless
     # GitHub runner the relaunch is not reliably observable (issue #878),
     # while on a real Mac it appears within a couple of seconds.

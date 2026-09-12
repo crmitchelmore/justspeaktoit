@@ -33,7 +33,7 @@ public enum AppleSpeechAnalyzerEngine: Sendable, Equatable {
 /// A SpeechAnalyzer module wrapped so the transcription pipeline can treat
 /// `SpeechTranscriber` and `DictationTranscriber` interchangeably.
 @available(macOS 26.0, iOS 26.0, *)
-enum AppleSpeechAnalyzerModule {
+enum AppleSpeechAnalyzerModule: Sendable {
     case speech(SpeechTranscriber)
     case dictation(DictationTranscriber)
 
@@ -88,68 +88,6 @@ enum AppleSpeechAnalyzerModule {
     }
 }
 
-/// The asset-inventory states the install wait reacts to, mirrored off
-/// `AssetInventory.Status` so the wait policy stays testable on any OS.
-enum AppleSpeechAssetStatus: Sendable, Equatable {
-    case unsupported
-    case supported
-    case downloading
-    case installed
-}
-
-@available(macOS 26.0, iOS 26.0, *)
-extension AppleSpeechAssetStatus {
-    init(_ status: AssetInventory.Status) {
-        switch status {
-        case .unsupported: self = .unsupported
-        case .supported: self = .supported
-        case .downloading: self = .downloading
-        case .installed: self = .installed
-        @unknown default: self = .unsupported
-        }
-    }
-}
-
-/// What the asset-install wait loop should do after one inventory poll.
-enum AppleSpeechAssetWaitStep: Sendable, Equatable {
-    case installed
-    case keepWaiting
-    case giveUp
-}
-
-/// How long the SpeechAnalyzer asset wait tolerates each inventory state.
-///
-/// `.downloading` gets the full budget because a cold model download is slow.
-/// `.supported` means "installable but not installing", which only resolves
-/// itself while an install request is in flight — so it gets a short grace
-/// window when one was issued, and no wait at all when none was, instead of
-/// silently consuming the whole download budget before failing.
-enum AppleSpeechAssetWaitPolicy {
-    static let pollInterval = Duration.milliseconds(250)
-    /// 120 × 250ms = 30s.
-    static let maxPolls = 120
-    /// 8 × 250ms = 2s.
-    static let supportedGracePolls = 8
-
-    static func step(
-        status: AppleSpeechAssetStatus,
-        didRequestInstall: Bool,
-        consecutiveSupportedPolls: Int
-    ) -> AppleSpeechAssetWaitStep {
-        switch status {
-        case .installed:
-            return .installed
-        case .downloading:
-            return .keepWaiting
-        case .supported:
-            guard didRequestInstall else { return .giveUp }
-            return consecutiveSupportedPolls <= supportedGracePolls ? .keepWaiting : .giveUp
-        case .unsupported:
-            return .giveUp
-        }
-    }
-}
-
 /// Result fields shared by every SpeechAnalyzer module the app uses.
 @available(macOS 26.0, iOS 26.0, *)
 struct AppleSpeechAnalyzerModuleResult: Sendable {
@@ -160,9 +98,10 @@ struct AppleSpeechAnalyzerModuleResult: Sendable {
 }
 
 @available(macOS 26.0, iOS 26.0, *)
-struct AppleSpeechAnalyzerModuleConfiguration {
+struct AppleSpeechAnalyzerModuleConfiguration: Sendable {
     let engine: AppleSpeechAnalyzerEngine
     let module: AppleSpeechAnalyzerModule
+    let localeIdentifier: String
 }
 
 enum AppleSpeechAnalyzerRouting {
@@ -227,9 +166,32 @@ public enum AppleSpeechAnalyzerTranscriber {
     }
 
     /// Builds the SpeechAnalyzer module for `engine`, verifying locale support
-    /// and downloading model assets when needed. `progressive` selects presets
+    /// and applying the requested asset policy. `progressive` selects presets
     /// that report volatile partial results for live streaming.
     static func makeModule(
+        engine: AppleSpeechAnalyzerEngine,
+        localeIdentifier: String?,
+        progressive: Bool,
+        assetPolicy: AppleSpeechAssetPolicy = .installIfNeeded
+    ) async throws -> AppleSpeechAnalyzerModuleConfiguration {
+        let configuration: AppleSpeechAnalyzerModuleConfiguration
+        if assetPolicy == .installedOnly {
+            configuration = try await AppleSpeechDependencyWait.run(
+                timeout: AppleSpeechDependencyWait.inventoryTimeout
+            ) {
+                try await resolveModule(engine: engine, localeIdentifier: localeIdentifier, progressive: progressive)
+            }
+        } else {
+            configuration = try await resolveModule(
+                engine: engine, localeIdentifier: localeIdentifier, progressive: progressive
+            )
+        }
+        try await ensureAssets(for: [configuration.module.speechModule], policy: assetPolicy)
+        return configuration
+    }
+
+    /// Resolves the same engine, locale and preset for preparation and capture, without installing.
+    static func resolveModule(
         engine: AppleSpeechAnalyzerEngine,
         localeIdentifier: String?,
         progressive: Bool
@@ -248,6 +210,7 @@ public enum AppleSpeechAnalyzerTranscriber {
             throw AppleLocalModelError.localeUnsupported(requestedLocale.identifier)
         }
 
+        try Task.checkCancellation()
         let resolvedEngine = AppleSpeechAnalyzerEngine(modelID: route.modelID)
         switch resolvedEngine {
         case .speechTranscriber:
@@ -257,10 +220,10 @@ public enum AppleSpeechAnalyzerTranscriber {
                     ? .timeIndexedProgressiveTranscription
                     : .timeIndexedTranscriptionWithAlternatives
             )
-            try await ensureAssets(for: [transcriber])
             return AppleSpeechAnalyzerModuleConfiguration(
                 engine: resolvedEngine,
-                module: .speech(transcriber)
+                module: .speech(transcriber),
+                localeIdentifier: route.value.identifier
             )
 
         case .dictationTranscriber:
@@ -271,63 +234,34 @@ public enum AppleSpeechAnalyzerTranscriber {
                 : .timeIndexedLongDictation
             preset.attributeOptions.insert(.audioTimeRange)
             let transcriber = DictationTranscriber(locale: route.value, preset: preset)
-            try await ensureAssets(for: [transcriber])
             return AppleSpeechAnalyzerModuleConfiguration(
                 engine: resolvedEngine,
-                module: .dictation(transcriber)
+                module: .dictation(transcriber),
+                localeIdentifier: route.value.identifier
             )
         }
     }
 
-    static func ensureAssets(for modules: [any SpeechModule]) async throws {
-        switch await AssetInventory.status(forModules: modules) {
-        case .installed:
-            return
-        case .supported, .downloading:
-            var didRequestInstall = false
-            if let request = try await AssetInventory.assetInstallationRequest(supporting: modules) {
-                didRequestInstall = true
-                try await request.downloadAndInstall()
-            }
-            guard try await waitForInstalledAssets(
-                for: modules,
-                didRequestInstall: didRequestInstall
-            ) else {
-                throw AppleLocalModelError.modelAssetsUnavailable
-            }
-        case .unsupported:
-            throw AppleLocalModelError.modelAssetsUnavailable
-        @unknown default:
-            throw AppleLocalModelError.modelAssetsUnavailable
-        }
-    }
-
-    /// Polls the asset inventory until the modules report `.installed`, applying
-    /// `AppleSpeechAssetWaitPolicy` so a device with nothing left to download
-    /// fails fast instead of burning the whole download budget.
-    private static func waitForInstalledAssets(
+    static func ensureAssets(
         for modules: [any SpeechModule],
-        didRequestInstall: Bool
-    ) async throws -> Bool {
-        var consecutiveSupportedPolls = 0
-        for _ in 0 ..< AppleSpeechAssetWaitPolicy.maxPolls {
-            try Task.checkCancellation()
-            let status = AppleSpeechAssetStatus(await AssetInventory.status(forModules: modules))
-            consecutiveSupportedPolls = status == .supported ? consecutiveSupportedPolls + 1 : 0
-            switch AppleSpeechAssetWaitPolicy.step(
-                status: status,
-                didRequestInstall: didRequestInstall,
-                consecutiveSupportedPolls: consecutiveSupportedPolls
-            ) {
-            case .installed:
+        policy: AppleSpeechAssetPolicy = .installIfNeeded,
+        onPreparing: @Sendable () async -> Void = {},
+        inventoryTimeout: Duration? = nil
+    ) async throws {
+        try await AppleSpeechAssets.ensure(
+            policy: policy,
+            status: { AppleSpeechAssetStatus(await AssetInventory.status(forModules: modules)) },
+            install: {
+                guard let request = try await AssetInventory.assetInstallationRequest(supporting: modules) else {
+                    return false
+                }
+                try Task.checkCancellation()
+                try await request.downloadAndInstall()
                 return true
-            case .keepWaiting:
-                try await Task.sleep(for: AppleSpeechAssetWaitPolicy.pollInterval)
-            case .giveUp:
-                return false
-            }
-        }
-        return false
+            },
+            onPreparing: onPreparing,
+            inventoryTimeout: inventoryTimeout
+        )
     }
 
     private static func collectFinalSegments(

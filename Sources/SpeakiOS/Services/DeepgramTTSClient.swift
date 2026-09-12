@@ -54,7 +54,7 @@ public final class DeepgramTTSClient: ObservableObject {
             throw DeepgramTTSError.missingAPIKey
         }
 
-        let modelParam = DeepgramTTSCatalog.resolvedSelection(
+        let modelParam = DeepgramSpeechCatalog.resolvedSelection(
             modelID: model,
             voiceID: voice
         ).voice.id

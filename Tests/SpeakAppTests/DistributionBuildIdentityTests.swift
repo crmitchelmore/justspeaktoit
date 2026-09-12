@@ -16,8 +16,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(manifest.contains("\"com.justspeaktoit.mac.appstore\""))
-        XCTAssertTrue(manifest.contains("\"com.justspeaktoit.mac\""))
+        XCTAssertTrue(manifest.contains("\"storeMacBundleIdentifier\""))
+        XCTAssertTrue(manifest.contains("\"directMacBundleIdentifier\""))
         XCTAssertTrue(manifest.contains("bundleId: macBundleIdentifier"))
         XCTAssertTrue(manifest.contains("PRODUCT_BUNDLE_IDENTIFIER\": .string(macBundleIdentifier)"))
     }
@@ -29,13 +29,13 @@ final class DistributionBuildIdentityTests: XCTestCase {
         )
 
         XCTAssertTrue(workflow.contains("BUNDLE_ID: com.justspeaktoit.mac.appstore"))
-        XCTAssertTrue(workflow.contains("<key>com.justspeaktoit.mac.appstore</key>"))
+        XCTAssertTrue(workflow.contains("<key>BUNDLE_ID_PLACEHOLDER</key>"))
         XCTAssertFalse(workflow.contains("<key>com.justspeaktoit.mac</key>"))
         XCTAssertTrue(workflow.contains("APPLE_TEAM_ID.$BUNDLE_ID"))
         XCTAssertTrue(workflow.contains("com.apple.application-identifier"))
         XCTAssertTrue(workflow.contains("com.apple.developer.icloud-container-identifiers"))
-        XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit"))
-        XCTAssertTrue(workflow.contains("$0 == \"iCloud.com.justspeaktoit\""))
+        XCTAssertTrue(workflow.contains("$MAC_CLOUD_CONTAINER"))
+        XCTAssertTrue(workflow.contains("$0 == container"))
         XCTAssertFalse(workflow.contains("grep -Fq \"iCloud.com.justspeaktoit\""))
         XCTAssertFalse(workflow.contains("Entitlements.application-identifier"))
     }
@@ -115,7 +115,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(keyboardTarget.contains("bundleId: \"com.justspeaktoit.ios.keyboard\""))
+        XCTAssertTrue(keyboardTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.keyboard\")"))
         XCTAssertTrue(keyboardTarget.contains("product: .appExtension"))
         XCTAssertTrue(keyboardTarget.contains("settings: .settings(base: iosKeyboardSettings)"))
         XCTAssertTrue(manifest.contains("\"APPLICATION_EXTENSION_API_ONLY\": \"YES\""))
@@ -153,7 +153,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         // whether or not direct capture is on, so the purpose strings cannot be
         // gated on the flag. See IOSAppStoreComplianceTests.
         XCTAssertTrue(
-            manifest.contains("let iosKeyboardInfoPlist: InfoPlist = .file(path: \"JustSpeakKeyboard/Info.plist\")")
+            manifest.contains("trainPlistPath(\"JustSpeakKeyboard/Info.plist\")")
         )
         XCTAssertTrue(manifest.contains("infoPlist: iosKeyboardInfoPlist"))
         XCTAssertTrue(manifest.contains("settings: .settings(base: iosTestSettings)"))
@@ -202,8 +202,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         // The watch app is a separate bundle id that still needs provisioning,
         // so release signing must not pick it up yet.
         XCTAssertFalse(releaseWorkflow.contains("TUIST_WATCH_APP"))
-        XCTAssertTrue(watchTarget.contains("bundleId: \"com.justspeaktoit.ios.watchkitapp\""))
-        XCTAssertTrue(watchTarget.contains("\"WKCompanionAppBundleIdentifier\": \"com.justspeaktoit.ios\""))
+        XCTAssertTrue(watchTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp\")"))
+        XCTAssertTrue(
+            watchTarget.contains("\"WKCompanionAppBundleIdentifier\": .string(trainValue(\"iosBundleIdentifier\"))")
+        )
         XCTAssertTrue(watchTarget.contains("\"Sources/SpeakCore/WatchCaptureProtocol.swift\""))
     }
 
@@ -229,7 +231,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertFalse(manifest.contains("environment[\"WATCH_PROFILE_NAME\"]"))
         XCTAssertFalse(manifest.contains("environment[\"WATCH_WIDGET_PROFILE_NAME\"]"))
         XCTAssertFalse(releaseWorkflow.contains("JustSpeakWatchWidget"))
-        XCTAssertTrue(widgetTarget.contains("bundleId: \"com.justspeaktoit.ios.watchkitapp.complication\""))
+        XCTAssertTrue(
+            widgetTarget.contains("bundleId: trainIdentifier(\"com.justspeaktoit.ios.watchkitapp.complication\")")
+        )
         XCTAssertTrue(widgetTarget.contains("product: .appExtension"))
         XCTAssertTrue(watchTarget.contains(".target(name: \"JustSpeakWatchWidgetExtension\")"))
         // Both watch targets compile the shared intent and read the same
@@ -353,13 +357,20 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("input.installTap"))
         XCTAssertTrue(engine.contains("input.installTap"))
         XCTAssertTrue(engine.contains("try session.setCategory(.record"))
+        // Issue #991: the in-extension capture engine, and the AVFoundation
+        // and Speech imports it needs, exist only behind the flag. A hand-off
+        // build — every build the App Store has received — compiles a stub
+        // that refuses to start, so no shipping keyboard carries capture code
+        // it can never reach. The flagged shape is still built in CI.
+        XCTAssertTrue(engine.contains("#if IOS_KEYBOARD_DIRECT_CAPTURE\nimport AVFoundation\nimport Speech\n#endif"))
+        XCTAssertTrue(engine.contains("#if !IOS_KEYBOARD_DIRECT_CAPTURE"))
+        XCTAssertTrue(engine.contains("onEvent?(runID, .captureFailed(.microphoneUnavailable))"))
         XCTAssertTrue(instantCoordinator.contains("requiresLiveActivity: false"))
         XCTAssertTrue(instantCoordinator.contains("updateInterim"))
         XCTAssertFalse(instantCoordinator.contains(".write("))
         XCTAssertFalse(instantCoordinator.contains(".upload("))
         XCTAssertTrue(instantCoordinator.contains("saveToHistory: false"))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory(transcript, result: result)"))
-        XCTAssertTrue(instantCoordinator.contains("saveToHistory(result.text, result: result)"))
+        // History outcomes across drain/polish races are exercised by KeyboardInstantFinalisationTests.
         XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 
@@ -375,44 +386,36 @@ final class DistributionBuildIdentityTests: XCTestCase {
         )
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
-        XCTAssertTrue(workflow.contains("com.justspeaktoit.ios.keyboard"))
+        XCTAssertTrue(workflow.contains("$BUNDLE_ID.keyboard"))
         XCTAssertTrue(workflow.contains("--capability APP_GROUPS"))
         XCTAssertFalse(workflow.contains("--recreate"))
-        XCTAssertTrue(workflow.contains("Keyboard provisioning profile does not authorize group.com.justspeaktoit.ios"))
+        XCTAssertTrue(workflow.contains("Keyboard provisioning profile does not authorize $IOS_APP_GROUP"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.plist"))
         XCTAssertTrue(workflow.contains("plutil -extract Entitlements xml1"))
-        XCTAssertTrue(workflow.contains("<string>group.com.justspeaktoit.ios</string>"))
+        XCTAssertTrue(workflow.contains("<string>$IOS_APP_GROUP</string>"))
         XCTAssertFalse(workflow.contains("Entitlements.com.apple.security.application-groups.0"))
         XCTAssertFalse(workflow.contains("KEYBOARD_PROFILE_UUID_PLACEHOLDER"))
         XCTAssertTrue(
             workflow.contains(
-                "Add :provisioningProfiles:com.justspeaktoit.ios.keyboard string $KEYBOARD_PROFILE_UUID"
+                "Add :provisioningProfiles:$BUNDLE_ID.keyboard string $KEYBOARD_PROFILE_UUID"
             )
         )
         XCTAssertTrue(workflow.contains("JustSpeakKeyboard.appex"))
         XCTAssertTrue(workflow.contains("keyboard-entitlements.plist"))
         XCTAssertTrue(workflow.contains("APP_ICLOUD_CONTAINER"))
         XCTAssertTrue(workflow.contains("iCloud container mismatch"))
-        XCTAssertTrue(workflow.contains("iCloud.com.justspeaktoit.ios"))
-        XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: ${{ inputs.include_keyboard && '1' || '0' }}"))
+        XCTAssertTrue(workflow.contains("$IOS_CLOUD_CONTAINER"))
+        XCTAssertTrue(workflow.contains("TUIST_IOS_KEYBOARD: \"1\""))
         XCTAssertTrue(
             workflow.contains(
-                "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: ${{ inputs.include_keyboard && inputs.enable_direct_capture"
+                "TUIST_IOS_KEYBOARD_DIRECT_CAPTURE: \"0\""
             )
         )
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
         XCTAssertTrue(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
         XCTAssertTrue(workflow.contains("Direct-capture keyboard is missing $usage_key"))
-        let keyboardInputStart = try XCTUnwrap(workflow.range(of: "      include_keyboard:\n")?.lowerBound)
-        let directInputStart = try XCTUnwrap(workflow.range(of: "      enable_direct_capture:\n")?.lowerBound)
-        let environmentStart = try XCTUnwrap(workflow.range(of: "\nenv:\n")?.lowerBound)
-        let keyboardInput = workflow[keyboardInputStart..<directInputStart]
-        XCTAssertTrue(keyboardInput.contains("default: true"))
-        XCTAssertTrue(keyboardInput.contains("type: boolean"))
-        let directInput = workflow[directInputStart..<environmentStart]
-        XCTAssertTrue(directInput.contains("default: false"))
-        XCTAssertTrue(autoRelease.contains("-f include_keyboard=true"))
-        XCTAssertTrue(autoRelease.contains("-f enable_direct_capture=false"))
+        XCTAssertFalse(autoRelease.contains("-f include_keyboard=true"))
+        XCTAssertTrue(workflow.contains("ref: ${{ inputs.manifest }}"))
 
         let profileBootstrap = try String(
             contentsOf: repositoryRoot.appendingPathComponent("scripts/create-ios-app-store-profile.rb"),
@@ -437,8 +440,14 @@ final class DistributionBuildIdentityTests: XCTestCase {
         // plugin dependency (issue #759); the slices must be built separately
         // and joined with lipo, and the result must be verified universal.
         XCTAssertFalse(script.contains("--arch arm64 --arch x86_64"))
-        XCTAssertTrue(script.contains("swift build --product speak --configuration release --arch arm64"))
-        XCTAssertTrue(script.contains("swift build --product speak --configuration release --arch x86_64"))
+        XCTAssertTrue(
+            script.contains("swift build \"${TRAIN_SWIFT_FLAGS[@]}\" --product speak"
+                + " --configuration release --arch arm64")
+        )
+        XCTAssertTrue(
+            script.contains("swift build \"${TRAIN_SWIFT_FLAGS[@]}\" --product speak"
+                + " --configuration release --arch x86_64")
+        )
         XCTAssertTrue(script.contains("lipo -create"))
         XCTAssertTrue(script.contains("lipo -archs"))
         XCTAssertTrue(script.contains("speak binary is missing"))
@@ -524,23 +533,20 @@ final class DistributionBuildIdentityTests: XCTestCase {
         let continuation = " \\\n            "
         let legacyFeed = [
             "\"$LEGACY_DMG_PATH\"", "\"$SPARKLE_PRIVATE_KEY\"", "\"$RUNNER_TEMP/release-notes.html\"",
-            "\"https://justspeaktoit.com/appcast.xml\" > \"$RUNNER_TEMP/appcast.xml\""
+            "\"$FEED_URL\" > \"$RUNNER_TEMP/appcast.xml\""
         ].joined(separator: continuation)
         let arm64Feed = [
             "\"$DMG_PATH\"", "\"$SPARKLE_PRIVATE_KEY\"", "\"$RUNNER_TEMP/release-notes.html\"",
-            "\"https://justspeaktoit.com/appcast-arm64.xml\" > \"$RUNNER_TEMP/appcast-arm64.xml\""
+            "\"$ARM64_FEED_URL\" > \"$RUNNER_TEMP/appcast-arm64.xml\""
         ].joined(separator: continuation)
         XCTAssertTrue(workflow.contains(legacyFeed))
         XCTAssertTrue(workflow.contains(arm64Feed))
-        XCTAssertTrue(workflow.contains("! grep -q \"$(basename \"$DMG_PATH\")\" \"$RUNNER_TEMP/appcast.xml\""))
+        XCTAssertTrue(workflow.contains("if grep -q \"$(basename \"$DMG_PATH\")\" \"$RUNNER_TEMP/appcast.xml\""))
         XCTAssertTrue(appcastScript.contains("FEED_URL=\"${6:-https://justspeaktoit.com/appcast.xml}\""))
         XCTAssertTrue(appcastScript.contains("<link>${FEED_URL}</link>"))
 
         // Both downloads and both feeds are release assets.
-        let releaseAssets = [
-            "${{ env.DMG_PATH }}", "${{ env.LEGACY_DMG_PATH }}",
-            "${{ env.APPCAST_PATH }}", "${{ env.ARM64_APPCAST_PATH }}"
-        ].joined(separator: "\n            ")
+        let releaseAssets = "\"$DMG_PATH\" \"$LEGACY_DMG_PATH\" \"$APPCAST_PATH\" \"$ARM64_APPCAST_PATH\""
         XCTAssertTrue(workflow.contains(releaseAssets))
 
     }
@@ -556,10 +562,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         )
 
         // The standalone CLI assets ride along when their optional step succeeded (issue #775).
-        let cliAssets = [
-            "${{ env.CLI_ARM64_ZIP }}", "${{ env.CLI_X86_64_ZIP }}",
-            "${{ env.CLI_MANIFEST }}", "${{ env.CLI_MANIFEST_SIG }}"
-        ].joined(separator: "\n            ")
+        let cliAssets = "\"$CLI_ARM64_ZIP\" \"$CLI_X86_64_ZIP\" \"$CLI_MANIFEST\" \"$CLI_MANIFEST_SIG\""
         XCTAssertTrue(workflow.contains(cliAssets))
 
         // The tap is written by one script the workflow delegates to: the cask
@@ -569,9 +572,11 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("scripts/update-homebrew-tap.sh"),
             encoding: .utf8
         )
-        XCTAssertTrue(workflow.contains(
-            "./scripts/update-homebrew-tap.sh \"$VERSION\" \"$ARM64_SHA256\" \"$UNIVERSAL_SHA256\""
-        ))
+        let promotion = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("scripts/release-train.mjs"), encoding: .utf8
+        )
+        XCTAssertTrue(promotion.contains("scripts/update-homebrew-tap.sh"))
+        XCTAssertFalse(workflow.contains("scripts/update-homebrew-tap.sh"))
         XCTAssertTrue(tapScript.contains("arch arm: \"arm64\", intel: \"universal\""))
         XCTAssertTrue(tapScript.contains("sha256 arm:   \"$ARM64_SHA256\",\n         intel: \"$UNIVERSAL_SHA256\""))
         XCTAssertTrue(tapScript.contains(
@@ -583,23 +588,14 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(tapScript.contains("speak-#{version}-arm64.zip"))
         XCTAssertTrue(tapScript.contains("speak-#{version}-x86_64.zip"))
 
-        // The retry workflow reads the DMG digests back out of that two-line
-        // cask by label, not by layout, and refuses to proceed without them.
+        // Published candidate assets cannot be replaced by the legacy repair lane.
         let retryWorkflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/publish-speak-cli.yml"),
             encoding: .utf8
         )
-        XCTAssertTrue(retryWorkflow.contains("grep -oE 'arm: *\"[0-9a-f]{64}\"'"))
-        XCTAssertTrue(retryWorkflow.contains("grep -oE 'intel: *\"[0-9a-f]{64}\"'"))
-        XCTAssertTrue(retryWorkflow.contains("Could not read the DMG digests"))
-        // It builds the CLI from the tag but runs the pipeline files from
-        // main, fetched into the remote-tracking ref it then checks out from.
-        XCTAssertTrue(retryWorkflow.contains("ref: refs/tags/mac-v${{ github.event.inputs.version }}"))
-        XCTAssertTrue(retryWorkflow.contains(
-            "git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main"
-        ))
-        XCTAssertTrue(retryWorkflow.contains("git checkout origin/main -- \\\n            scripts/"))
-        XCTAssertTrue(retryWorkflow.contains("            .github/actions/publish-speak-cli\n"))
+        XCTAssertTrue(retryWorkflow.contains("CLI assets are frozen with release-train candidates"))
+        XCTAssertTrue(retryWorkflow.contains("exit 1"))
+        XCTAssertFalse(retryWorkflow.contains("gh release upload"))
 
         // Signing tools never arrive through an unverified download while the
         // private key is on disk.
@@ -640,38 +636,15 @@ final class DistributionBuildIdentityTests: XCTestCase {
             encoding: .utf8
         )
 
-        let versionInputStart = try XCTUnwrap(workflow.range(of: "      version:\n")?.lowerBound)
-        let buildInputStart = try XCTUnwrap(workflow.range(of: "      build_number:\n")?.lowerBound)
-        let versionInput = workflow[versionInputStart..<buildInputStart]
-        XCTAssertTrue(versionInput.contains("required: true"))
-        XCTAssertTrue(versionInput.contains("type: string"))
-
-        let validationStart = try XCTUnwrap(workflow.range(of: "      - name: Determine Version\n")?.lowerBound)
-        let buildNumberStart = try XCTUnwrap(workflow.range(of: "      - name: Determine Build Number\n")?.lowerBound)
-        let validation = workflow[validationStart..<buildNumberStart]
-        XCTAssertTrue(validation.contains("INPUT_VERSION: ${{ inputs.version }}"))
-        XCTAssertTrue(validation.contains("iOS release version is required"))
-        XCTAssertTrue(validation.contains("VERSION is not authoritative for TestFlight"))
-        XCTAssertTrue(validation.contains("must be semantic version text"))
-
-        let patternPrefix = "VERSION_PATTERN='"
-        let patternStart = try XCTUnwrap(validation.range(of: patternPrefix)?.upperBound)
-        let patternEnd = try XCTUnwrap(validation[patternStart...].firstIndex(of: "'"))
-        let pattern = String(validation[patternStart..<patternEnd])
-        let regex = try NSRegularExpression(pattern: pattern)
-        func isAccepted(_ value: String) -> Bool {
-            let range = NSRange(value.startIndex..<value.endIndex, in: value)
-            return regex.firstMatch(in: value, range: range)?.range == range
-        }
-        XCTAssertTrue(isAccepted("2.29.2"))
-        XCTAssertTrue(isAccepted("0.0.0"))
-        XCTAssertFalse(isAccepted(""))
-        XCTAssertFalse(isAccepted("01.2.3"))
-        XCTAssertFalse(isAccepted("2.00.3"))
-        XCTAssertFalse(isAccepted("v2.29.2"))
-        XCTAssertFalse(isAccepted("2.29"))
-        XCTAssertFalse(workflow.contains("leave empty to use VERSION file"))
+        XCTAssertTrue(workflow.contains("ref: ${{ inputs.manifest }}"))
+        XCTAssertTrue(workflow.contains("configure --tag \"$MANIFEST\" --surface ios"))
+        XCTAssertTrue(workflow.contains("MARKETING_VERSION=\"$VERSION\""))
         XCTAssertFalse(workflow.contains("VERSION=$(cat VERSION)"))
+        let promotion = try String(
+            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/prepare-stable.yml"), encoding: .utf8
+        )
+        XCTAssertTrue(promotion.contains("ios_version:"))
+        XCTAssertTrue(promotion.contains("--ios-version \"$IOS_VERSION\""))
     }
 
     func testIOSApp_declaresRequiredBackgroundModes() throws {

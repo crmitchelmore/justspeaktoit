@@ -69,6 +69,9 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
       selectedVoice = settings.defaultTTSVoice
       await loadAvailableVoices()
     }
+    .onChange(of: selectedVoice) { _, _ in
+        updateEstimatedCost()
+    }
     .fileImporter(
       isPresented: $isImportingFile,
       allowedContentTypes: [.plainText, .text, .utf8PlainText],
@@ -142,9 +145,9 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
   @ViewBuilder
   private var compactHeroAction: some View {
     if tts.isSynthesizing {
-      ProgressView()
-        .controlSize(.mini)
-        .accessibilityLabel("Synthesizing voice")
+      Button("Cancel") { tts.stop() }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Cancel voice synthesis")
     } else if tts.isPlaying {
       Button {
         tts.stop()
@@ -202,6 +205,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
           .controlSize(.small)
         Text("Synthesizing…")
           .font(.headline)
+        Button("Cancel") { tts.stop() }
       }
       .padding(.horizontal, 32)
       .padding(.vertical, 18)
@@ -323,9 +327,40 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
     }
   }
 
+  /// Names the providers whose voice listing failed, so a provider that has
+  /// no offline catalogue does not simply disappear from the picker.
+  @ViewBuilder
+  private var voiceListingFailureNotice: some View {
+    if !tts.voiceListingErrors.isEmpty {
+      let names = tts.voiceListingErrors.keys
+        .map(\.displayName)
+        .sorted()
+        .joined(separator: ", ")
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Image(systemName: "exclamationmark.triangle")
+          .foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Could not load voices from \(names).")
+            .font(.caption)
+          Text("Any voices shown for them are from the last successful load.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        Spacer()
+        Button("Retry") {
+          Task { await loadAvailableVoices() }
+        }
+        .buttonStyle(.link)
+        .font(.caption)
+      }
+      .accessibilityElement(children: .combine)
+    }
+  }
+
   private var voiceSelectionCard: some View {
     SpeakDensityCard(title: "Voice", systemImage: "person.wave.2", tint: .brandAccent) {
       VStack(alignment: .leading, spacing: 12) {
+        voiceListingFailureNotice
         if availableVoices.isEmpty {
           HStack {
             ProgressView()
@@ -336,7 +371,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
           }
         } else {
           Picker("Voice", selection: $selectedVoice) {
-            ForEach(availableVoices) { voice in
+            ForEach(VoiceCatalog.includingSelection(selectedVoice, in: availableVoices)) { voice in
               HStack {
                 Text(voice.displayName)
                 Spacer()
@@ -353,6 +388,8 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
             }
           }
           .labelsHidden()
+
+          OpenRouterSpeechPickerButton(selectedVoice: $selectedVoice)
 
           if let voice = VoiceCatalog.voice(forID: selectedVoice) {
             HStack(spacing: 6) {
@@ -604,7 +641,7 @@ struct VoiceOutputView: View { // swiftlint:disable:this type_body_length
 
   private func loadAvailableVoices() async {
     availableVoices = await tts.availableVoices()
-    if selectedVoice.isEmpty || !availableVoices.contains(where: { $0.id == selectedVoice }) {
+    if selectedVoice.isEmpty {
       selectedVoice = settings.defaultTTSVoice
     }
   }

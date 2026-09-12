@@ -22,12 +22,14 @@ let package = Package(
         )
     ],
     dependencies: [
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
         // SwiftLint intentionally lives in Tooling/Package.swift, not here: it
         // pins an exact swift-syntax version that conflicts with
         // swift-snapshot-testing's constraint, and sharing one graph let a test
         // dependency silently downgrade the linter (issue #677). Run it via
         // `make lint` / scripts/swiftlint.sh.
         .package(url: "https://github.com/nicklockwood/SwiftFormat.git", from: "0.53.6"),
+        .package(url: "https://github.com/jaywcjlove/PermissionFlow.git", exact: "2.11.2"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.3.0"),
         // Mirrored in Project.swift (`projectPackages`): Xcode resolves both
@@ -95,11 +97,14 @@ let package = Package(
                 "SpeakCore",
                 "SpeakSync",
                 "SpeakHotKeys",
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "PermissionFlow", package: "PermissionFlow"),
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")
-            ]
+            ],
+            resources: [.copy("Resources/AppIcon.icns")]
         ),
         .executableTarget(
             name: "SpeakHotKeysDemo",
@@ -138,7 +143,9 @@ let package = Package(
                 "SpeakHotKeys",
                 // The Sentry event tests inspect the serialised payload, so the
                 // test target needs the SDK types, not just SpeakApp.
-                .product(name: "Sentry", package: "sentry-cocoa")
+                .product(name: "Sentry", package: "sentry-cocoa"),
+                // Storage lifecycle tests construct unloaded SDK models.
+                .product(name: "WhisperKit", package: "argmax-oss-swift")
             ]
         ),
         .testTarget(

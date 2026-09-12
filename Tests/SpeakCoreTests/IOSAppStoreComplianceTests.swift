@@ -75,7 +75,8 @@ final class IOSAppStoreComplianceTests: XCTestCase {
     func testKeyboardExtension_alwaysShipsTheInfoPlistThatDeclaresItsPurposeStrings() throws {
         let manifest = try contents(of: "Project.swift")
         XCTAssertTrue(
-            manifest.contains("let iosKeyboardInfoPlist: InfoPlist = .file(path: \"JustSpeakKeyboard/Info.plist\")"),
+            manifest.contains("let iosKeyboardInfoPlist: InfoPlist = .file(")
+                && manifest.contains("trainPlistPath(\"JustSpeakKeyboard/Info.plist\")"),
             "The keyboard binary references record-permission and Speech APIs in every configuration, "
                 + "so the purpose strings cannot be gated on the direct-capture flag"
         )

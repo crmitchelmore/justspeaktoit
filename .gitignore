@@ -21,3 +21,8 @@ issues.jsonl
 
 # Quality Software conformance derived evidence
 .conformance/
+.build-xc*/
+research/
+
+# Project-local Alpha run bundle
+/dist/

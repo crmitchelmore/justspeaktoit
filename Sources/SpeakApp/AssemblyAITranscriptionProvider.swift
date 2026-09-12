@@ -320,7 +320,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
           return
         }
         if self.retryWithFallbackEndpointIfNeeded(after: error) { return }
-        self.logger.error("WebSocket receive error: \(error.localizedDescription, privacy: .public)")
+        SpeakLogger.logError(error, context: "AssemblyAI WebSocket receive", logger: self.logger)
         self.currentOnError()?(error)
       }
     }
@@ -347,10 +347,11 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
     guard shouldRetry else { return false }
 
     let detail = error.localizedDescription
+    let code = (error as NSError).code
     let host = fallback.rawValue
     logger.warning(
       // swiftlint:disable:next line_length
-      "AssemblyAI endpoint failed before session begin (\(detail, privacy: .public)); retrying \(host, privacy: .public)"
+      "AssemblyAI endpoint failed before session begin (code=\(code), \(detail, privacy: .private)); retrying \(host, privacy: .public)"
     )
     taskToCancel?.cancel(with: .goingAway, reason: nil)
     connectWebSocket(using: fallback)
@@ -371,7 +372,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
   }
 
   private func parseResponse(_ json: String) {
-    logger.info("AssemblyAI WS frame received (\(json.count) bytes)")
+    logger.info("AssemblyAI WS frame received (\(json.utf8.count) bytes)")
     guard let data = json.data(using: .utf8) else { return }
 
     do {
@@ -387,7 +388,7 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         withStateLock {
           sessionDidBegin = true
         }
-        logger.info("AssemblyAI session started — \(json.prefix(200), privacy: .public)")
+        logger.info("AssemblyAI session started — \(json.prefix(200), privacy: .private)")
         flushPreBeginAudio()
       case "Termination":
         logger.info("AssemblyAI session terminated by server")
@@ -398,14 +399,15 @@ final class AssemblyAILiveTranscriber: @unchecked Sendable {
         break
       case "Error":
         // AssemblyAI sends an Error text frame just before closing with code 3006/4xxx.
-        // Surface it at .info so users can capture it from `log show` filters.
-        logger.error("AssemblyAI server Error frame: \(json.prefix(500), privacy: .public)")
+        // Keep the event visible while treating provider text as private: errors
+        // and unfamiliar frames can echo transcripts or credential-bearing URLs.
+        logger.error("AssemblyAI server Error frame: \(json.prefix(500), privacy: .private)")
       case "":
         // Unknown / typeless. Could be diagnostic text from server.
-        logger.info("AssemblyAI typeless WS message: \(json.prefix(500), privacy: .public)")
+        logger.info("AssemblyAI typeless WS message: \(json.prefix(500), privacy: .private)")
       default:
         let body = json.prefix(500)
-        logger.info("Unhandled AssemblyAI type=\(resolvedType, privacy: .public): \(body, privacy: .public)")
+        logger.info("Unhandled AssemblyAI type=\(resolvedType, privacy: .private): \(body, privacy: .private)")
       }
     } catch {
       logger.debug("Failed to parse AssemblyAI response: \(error.localizedDescription)")
@@ -788,7 +790,7 @@ private final class AssemblyAIWebSocketDelegate: NSObject, URLSessionWebSocketDe
   ) {
     let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "<nil>"
     logger?.info(
-      "AssemblyAI WS didClose code=\(closeCode.rawValue, privacy: .public) reason=\(reasonStr, privacy: .public)"
+      "AssemblyAI WS didClose code=\(closeCode.rawValue, privacy: .public) reason=\(reasonStr, privacy: .private)"
     )
   }
 
@@ -803,7 +805,7 @@ private final class AssemblyAIWebSocketDelegate: NSObject, URLSessionWebSocketDe
       let desc = error.localizedDescription
       logger?.error(
         // swiftlint:disable:next line_length
-        "AssemblyAI WS didComplete error domain=\(domain, privacy: .public) code=\(code, privacy: .public) desc=\(desc, privacy: .public)"
+        "AssemblyAI WS didComplete error domain=\(domain, privacy: .public) code=\(code, privacy: .public) desc=\(desc, privacy: .private)"
       )
     } else {
       logger?.info("AssemblyAI WS didComplete (no error)")

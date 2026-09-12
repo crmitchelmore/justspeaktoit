@@ -13,6 +13,19 @@ import Foundation
 /// return `nil` — callers fall back to a platform-native path or surface a
 /// "not available yet" message.
 public enum LiveTranscriptionClientFactory {
+    public static func makeClient(
+        for route: LiveTranscriptionRoute,
+        apiKey: String,
+        language: String?,
+        keywords: [String] = []
+    ) -> StreamingTranscriptionClient? {
+        makeClient(for: route, apiKey: apiKey, language: language, keywords: keywords, azureEndpoint: "")
+    }
+
+    // The Azure Voice Live route also needs the resource endpoint the settings
+    // store; every other provider ignores it. The original signature above is
+    // kept as a forwarding overload so the exported API stays compatible.
+    //
     // One case per provider is the point of this switch: the catalogue-to-transport
     // mapping stays auditable in one place, so its length grows with the provider list.
     // swiftlint:disable:next cyclomatic_complexity function_body_length
@@ -20,9 +33,14 @@ public enum LiveTranscriptionClientFactory {
         for route: LiveTranscriptionRoute,
         apiKey: String,
         language: String?,
-        keywords: [String] = []
+        keywords: [String],
+        azureEndpoint: String
     ) -> StreamingTranscriptionClient? {
         switch route.provider {
+        case .azure:
+            return AzureVoiceLiveClient(credentials: apiKey, endpoint: azureEndpoint,
+                                        model: route.apiModelName, language: language,
+                                        sampleRate: route.sampleRate)
         case .deepgram:
             return DeepgramLiveClient(
                 apiKey: apiKey,
@@ -74,7 +92,9 @@ public enum LiveTranscriptionClientFactory {
                 sampleRate: route.sampleRate
             )
         case .xai:
-            return makeXAIClient(for: route, apiKey: apiKey, language: language)
+            return makeXAIClient(
+                for: route, apiKey: apiKey, language: language, keywords: keywords
+            )
         case .meta:
             return MetaMuseLiveClient(
                 apiKey: apiKey,
@@ -83,17 +103,49 @@ public enum LiveTranscriptionClientFactory {
                 keywords: keywords,
                 sampleRate: route.sampleRate
             )
-        case .apple, .openai, .speechmatics:
+        case .speechmatics:
+            return SpeechmaticsLiveClient(
+                apiKey: apiKey,
+                model: route.apiModelName,
+                language: language,
+                sampleRate: route.sampleRate
+            )
+        case .revai:
+            return RevAILiveClient(
+                accessToken: apiKey,
+                language: language,
+                sampleRate: route.sampleRate
+            )
+        case .mistral:
+            return MistralVoxtralLiveClient(
+                apiKey: apiKey,
+                model: route.apiModelName,
+                sampleRate: route.sampleRate
+            )
+        case .apple, .openai:
             return nil
         }
     }
 
+    /// xAI serves two different realtime transports under one provider: the
+    /// Grok Voice session used in transcription-only mode, and the dedicated
+    /// speech-to-text socket. The catalogue identifier decides which, because
+    /// they share neither protocol nor endpoint.
     private static func makeXAIClient(
         for route: LiveTranscriptionRoute,
         apiKey: String,
-        language: String?
-    ) -> XAILiveClient {
-        XAILiveClient(
+        language: String?,
+        keywords: [String]
+    ) -> StreamingTranscriptionClient {
+        guard route.modelID != XAISpeechToText.liveCatalogID else {
+            return XAISpeechToTextLiveClient(
+                apiKey: apiKey,
+                language: language,
+                keywords: keywords,
+                sampleRate: route.sampleRate
+            )
+        }
+        return XAILiveClient(
             apiKey: apiKey,
             model: route.apiModelName,
             language: language,

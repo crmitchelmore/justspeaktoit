@@ -10,15 +10,31 @@ public final class VoiceOutputRouter: ObservableObject {
 
     private let deepgram: DeepgramTTSClient
     private let soniox: SonioxIOSVoiceOutputClient
+    private let openRouter: OpenRouterIOSVoiceOutputClient
 
     public init(session: URLSession = .shared) {
         self.deepgram = DeepgramTTSClient(session: session)
         self.soniox = SonioxIOSVoiceOutputClient(session: session)
+        self.openRouter = OpenRouterIOSVoiceOutputClient(session: session)
         deepgram.$isSpeaking
-            .combineLatest(soniox.$isSpeaking)
-            .map { $0 || $1 }
+            .combineLatest(soniox.$isSpeaking, openRouter.$isSpeaking)
+            .map { $0 || $1 || $2 }
             .removeDuplicates()
             .assign(to: &$isSpeaking)
+    }
+
+    /// Retains the original public entry point for existing clients.
+    public func speak( // swiftlint:disable:this function_parameter_count
+        text: String, provider: VoiceOutputProvider, model: String, voice: String,
+        lastKnownVoiceName: String?, speed: Double, languageIdentifier: String,
+        sonioxRegion: SonioxTTSRegion, deepgramAPIKey: String, sonioxAPIKey: String
+    ) async throws {
+        try await speak(
+            text: text, provider: provider, model: model, voice: voice,
+            lastKnownVoiceName: lastKnownVoiceName, speed: speed, languageIdentifier: languageIdentifier,
+            sonioxRegion: sonioxRegion, deepgramAPIKey: deepgramAPIKey, sonioxAPIKey: sonioxAPIKey,
+            openRouterAPIKey: ""
+        )
     }
 
     public func speak( // swiftlint:disable:this function_parameter_count
@@ -31,7 +47,8 @@ public final class VoiceOutputRouter: ObservableObject {
         languageIdentifier: String,
         sonioxRegion: SonioxTTSRegion,
         deepgramAPIKey: String,
-        sonioxAPIKey: String
+        sonioxAPIKey: String,
+        openRouterAPIKey: String
     ) async throws {
         stop()
         switch provider {
@@ -40,6 +57,8 @@ public final class VoiceOutputRouter: ObservableObject {
             deepgram.voice = voice
             deepgram.speed = min(max(speed, provider.speedRange.lowerBound), provider.speedRange.upperBound)
             try await deepgram.speak(text: text, apiKey: deepgramAPIKey)
+        case .openrouter:
+            try await openRouter.speak(text: text, apiKey: openRouterAPIKey, selectionID: model, speed: speed)
         case .soniox:
             try await soniox.speak(
                 text: text,
@@ -63,6 +82,7 @@ public final class VoiceOutputRouter: ObservableObject {
     public func stop() {
         deepgram.stop()
         soniox.stop()
+        openRouter.stop()
     }
 }
 #endif

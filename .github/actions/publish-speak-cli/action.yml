@@ -3,7 +3,7 @@ description: >-
   Build the standalone `speak` CLI for arm64 and x86_64, sign, notarise and
   verify each archive, then write and sign the release manifest the app's
   installer and the Homebrew formula consume. Issue #775. Shared by the
-  release workflow and the stand-alone publish-speak-cli workflow so a failed
+  release workflow and the manifest-based candidate pipeline so a failed
   CLI publication can be retried without rebuilding the app.
 
 inputs:

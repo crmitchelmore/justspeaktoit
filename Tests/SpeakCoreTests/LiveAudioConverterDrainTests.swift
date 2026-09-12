@@ -181,6 +181,70 @@ final class LiveAudioConverterDrainTests: XCTestCase {
     XCTAssertEqual(data.count % MemoryLayout<Int16>.size, 0)
   }
 
+  func testByteDrainsRejectUnsupportedFormatsWithoutConsumingTheTail() throws {
+    for commonFormat in [AVAudioCommonFormat.pcmFormatInt16, .pcmFormatFloat32] {
+      for (channels, interleaved) in [(AVAudioChannelCount(2), false), (2, true)] {
+        let output = try XCTUnwrap(AVAudioFormat(
+          commonFormat: commonFormat, sampleRate: outputSampleRate,
+          channels: channels, interleaved: interleaved
+        ))
+        let input = makeInputFormat()
+        let converter = try XCTUnwrap(AVAudioConverter(from: input, to: output))
+        for index in 0..<10 {
+          let chunk = makeToneChunk(format: input, frames: 1024, startingFrame: index * 1024)
+          _ = convertChunk(chunk, converter: converter, outputFormat: output)
+        }
+
+        XCTAssertNil(LiveAudioConverterDrain.drainPCM16Data(converter: converter, outputFormat: output))
+        XCTAssertNil(LiveAudioConverterDrain.drainFloat32Data(converter: converter, outputFormat: output))
+        let tail = try XCTUnwrap(LiveAudioConverterDrain.drain(converter: converter, outputFormat: output))
+        XCTAssertGreaterThan(tail.frameLength, 0, "Rejecting a byte format must preserve its multichannel tail")
+        XCTAssertEqual(tail.format, output)
+      }
+    }
+  }
+
+  func testMonoInterleavedByteDrainsKeepTheLiveControllerTail() throws {
+    for commonFormat in [AVAudioCommonFormat.pcmFormatInt16, .pcmFormatFloat32] {
+      let output = try XCTUnwrap(AVAudioFormat(
+        commonFormat: commonFormat, sampleRate: outputSampleRate, channels: 1, interleaved: true
+      ))
+      let input = makeInputFormat()
+      let cache = LiveConverterCache()
+      let converter = try XCTUnwrap(cache.converter(from: input, to: output))
+      for index in 0..<10 {
+        let chunk = makeToneChunk(format: input, frames: 1024, startingFrame: index * 1024)
+        _ = convertChunk(chunk, converter: converter, outputFormat: output)
+      }
+      // An incorrect byte accessor must not retire the cached converter.
+      let data: Data?
+      if commonFormat == .pcmFormatInt16 {
+        XCTAssertNil(cache.drainFloat32())
+        data = cache.drainPCM16()
+      } else {
+        XCTAssertNil(cache.drainPCM16())
+        data = cache.drainFloat32()
+      }
+      XCTAssertGreaterThan(try XCTUnwrap(data).count, 0)
+      XCTAssertNil(cache.drain(), "A successful byte drain must retire the converter")
+    }
+  }
+
+  func testWrongSampleTypeAndMismatchedFormatDoNotConsumePCM16Tail() throws {
+    let input = makeInputFormat()
+    let output = makeOutputFormat()
+    let converter = try XCTUnwrap(AVAudioConverter(from: input, to: output))
+    for index in 0..<10 {
+      let chunk = makeToneChunk(format: input, frames: 1024, startingFrame: index * 1024)
+      _ = convertChunk(chunk, converter: converter, outputFormat: output)
+    }
+
+    XCTAssertNil(LiveAudioConverterDrain.drainFloat32Data(converter: converter, outputFormat: output))
+    XCTAssertNil(LiveAudioConverterDrain.drain(converter: converter, outputFormat: input))
+    XCTAssertNil(LiveAudioConverterDrain.drain(converter: converter, outputFormat: output, frameCapacity: 0))
+    XCTAssertNotNil(LiveAudioConverterDrain.drainPCM16Data(converter: converter, outputFormat: output))
+  }
+
   func testDrainingAnAlreadyDrainedConverterYieldsNothing() {
     let inputFormat = makeInputFormat()
     let outputFormat = makeOutputFormat()

@@ -123,7 +123,7 @@ enum HistoryIssueReporter {
       "- macOS: \(publicSafe(context.operatingSystem))",
       "- Process ID: \(context.processIdentifier)",
       "- Microphone permission: \(context.microphonePermission)",
-      "- Input device: \(publicSafe(context.inputDeviceName))",
+      "- Preferred microphone: \(publicSafe(context.inputDeviceName))",
       "- Provider: \(publicSafe(context.providerLabel))",
       "- Latency: \(context.latencyTier)",
       "- Transcription mode: \(context.transcriptionMode)",

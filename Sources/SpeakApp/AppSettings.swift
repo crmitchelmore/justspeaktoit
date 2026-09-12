@@ -262,7 +262,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
-  enum DefaultsKey: String {
+  enum DefaultsKey: String, CaseIterable {
     case appearance
     case visualDensity
     case transcriptionMode
@@ -330,6 +330,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case clipboardInsertionTriggers
     case enableSendToMac
     case enableAutomationServer
+    case pasteRemoteTranscriptsAtCursor
     case autoCorrectionsEnabled
     case autoCorrectionsPromotionThreshold
     case recordingSoundsEnabled
@@ -337,6 +338,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case recordingSoundVolume
     case assemblyAIKeyterms
     case transcriptionKeywords
+    case transcriptionKeywordsLastReconciled
+    case recoveredTranscriptionKeywords
     case assemblyAIIgnoredPronunciationTerms
     case modulateSpeakerDiarization
     case modulateEmotionSignal
@@ -562,6 +565,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if transcriptionKeywords != assemblyAIKeyterms {
         transcriptionKeywords = assemblyAIKeyterms
       }
+      store(assemblyAIKeyterms, key: .transcriptionKeywordsLastReconciled)
     }
   }
 
@@ -571,7 +575,26 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       if assemblyAIKeyterms != transcriptionKeywords {
         assemblyAIKeyterms = transcriptionKeywords
       }
+      store(transcriptionKeywords, key: .transcriptionKeywordsLastReconciled)
     }
+  }
+
+  /// Competing edits preserved when a deliberate clear wins reconciliation.
+  /// They stay recoverable until the user restores or discards them in Settings.
+  @Published private(set) var recoveredTranscriptionKeywords: [String] {
+    didSet { store(recoveredTranscriptionKeywords, key: .recoveredTranscriptionKeywords) }
+  }
+
+  func restoreTranscriptionKeywords(_ recovered: String) {
+    guard recoveredTranscriptionKeywords.contains(recovered) else { return }
+    transcriptionKeywords = Self.mergedTranscriptionKeywords(
+      canonical: transcriptionKeywords, legacy: recovered, lastReconciled: nil
+    ).active
+    discardRecoveredTranscriptionKeywords(recovered)
+  }
+
+  func discardRecoveredTranscriptionKeywords(_ recovered: String) {
+    recoveredTranscriptionKeywords.removeAll { $0 == recovered }
   }
 
   @Published var assemblyAIIgnoredPronunciationTerms: [String] {
@@ -731,6 +754,19 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(doubleTapWindow, key: .doubleTapWindow) }
   }
 
+  var hasConfiguredGlobalHotKey: Bool {
+    isGlobalHotKeyConfigured(for: ReleaseTrain.current)
+  }
+
+  func isGlobalHotKeyConfigured(for train: ReleaseTrain) -> Bool {
+    train == .stable || defaults.bool(forKey: "alphaGlobalHotKeyExplicitlyChosen")
+  }
+
+  func chooseGlobalHotKey(_ hotKey: HotKey) {
+    defaults.set(true, forKey: "alphaGlobalHotKeyExplicitlyChosen")
+    selectedHotKey = hotKey
+  }
+
   @Published var selectedHotKey: HotKey {
     didSet {
       do {
@@ -755,6 +791,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(liveStopGracePeriod, key: .liveStopGracePeriod) }
   }
 
+    // Registry metadata only (for example "openai.apiKey"), never credential values.
+    // SecureStorage persists values to Keychain before registering their identifiers.
   @Published private(set) var trackedAPIKeyIdentifiers: [String] {
     didSet { store(trackedAPIKeyIdentifiers, key: .trackedKeyIdentifiers) }
   }
@@ -952,6 +990,20 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(enableAutomationServer, key: .enableAutomationServer) }
   }
 
+  // MARK: - Transcripts arriving from iPhone or Apple Watch (#1007)
+
+  /// Paste a freshly arrived phone or watch transcript straight at the cursor
+  /// instead of only posting a notification with a Paste action.
+  ///
+  /// Off by default and deliberately opt-in: text appearing in whatever window
+  /// happens to be focused, seconds after a capture the user made on another
+  /// device, can overwrite a selection and corrupt a document. The notification
+  /// is the safe default, and the paste only ever runs for captures younger
+  /// than `RemoteTranscriptArrival.freshnessWindow`.
+  @Published var pasteRemoteTranscriptsAtCursor: Bool {
+    didSet { store(pasteRemoteTranscriptsAtCursor, key: .pasteRemoteTranscriptsAtCursor) }
+  }
+
   // MARK: - Analytics
 
   /// Whether the user has opted into anonymous product analytics (PostHog).
@@ -1030,6 +1082,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     }
   }
 
+  var migrationDefaults: UserDefaults { defaults }
   private let defaults: UserDefaults
   private let log = SpeakLogger.logger(category: "AppSettings")
 
@@ -1115,13 +1168,35 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     )
     postProcessingTemperature =
       defaults.object(forKey: DefaultsKey.postProcessingTemperature.rawValue) as? Double ?? 0.2
-    // One list, two keys: whichever side an existing install wrote is the
-    // seed, so upgrading from either platform's spelling keeps the words.
+    // Without timestamps, preserve competing nonempty edits. A deliberate clear
+    // after migration wins over a conflicting edit, which remains recoverable.
     let storedKeywords = defaults.string(forKey: DefaultsKey.transcriptionKeywords.rawValue) ?? ""
     let storedKeyterms = defaults.string(forKey: DefaultsKey.assemblyAIKeyterms.rawValue) ?? ""
-    let keywords = storedKeywords.isEmpty ? storedKeyterms : storedKeywords
+    let lastReconciled = defaults.string(forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
+    let reconciliation = Self.mergedTranscriptionKeywords(
+      canonical: storedKeywords, legacy: storedKeyterms, lastReconciled: lastReconciled
+    )
+    var recovered = defaults.stringArray(forKey: DefaultsKey.recoveredTranscriptionKeywords.rawValue) ?? []
+    if let conflict = reconciliation.recovered, !recovered.contains(conflict) {
+      recovered.append(conflict)
+      // Preserve the other edit before replacing either defaults mirror.
+      defaults.set(recovered, forKey: DefaultsKey.recoveredTranscriptionKeywords.rawValue)
+    }
+    recoveredTranscriptionKeywords = recovered
+    let keywords = reconciliation.active
     assemblyAIKeyterms = keywords
     transcriptionKeywords = keywords
+    // Initial assignments do not invoke didSet. Persist the reconciliation
+    // explicitly so the next launch cannot resurrect an old conflicting list.
+    if storedKeywords != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.transcriptionKeywords.rawValue)
+    }
+    if storedKeyterms != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.assemblyAIKeyterms.rawValue)
+    }
+    if lastReconciled != keywords {
+      defaults.set(keywords, forKey: DefaultsKey.transcriptionKeywordsLastReconciled.rawValue)
+    }
     assemblyAIIgnoredPronunciationTerms =
       defaults.array(forKey: DefaultsKey.assemblyAIIgnoredPronunciationTerms.rawValue) as? [String] ?? []
     modulateSpeakerDiarizationEnabled =
@@ -1282,6 +1357,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.enableSendToMac.rawValue) as? Bool ?? false
     enableAutomationServer =
       defaults.object(forKey: DefaultsKey.enableAutomationServer.rawValue) as? Bool ?? false
+    pasteRemoteTranscriptsAtCursor =
+      defaults.object(forKey: DefaultsKey.pasteRemoteTranscriptsAtCursor.rawValue) as? Bool ?? false
     analyticsEnabled =
       defaults.object(forKey: DefaultsKey.analyticsEnabled.rawValue) as? Bool ?? false
 
@@ -1326,6 +1403,112 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     persistLiveTranscriptionSelection()
   }
 
+  func reloadAfterMigration() {
+    let restored = AppSettings(defaults: defaults)
+    suppressesPersistence = true
+    defer { suppressesPersistence = false }
+    reloadMigrationPreferences(restored)
+    reloadMigrationAudioPreferences(restored)
+    reloadMigrationBehaviour(restored)
+    liveTranscriptionSelection = restored.liveTranscriptionSelection
+    // Restore dependent values after model and speed-mode observers have settled.
+    postProcessingEnabled = restored.postProcessingEnabled
+  }
+
+  private func reloadMigrationPreferences(_ restored: AppSettings) {
+    self.appearance = restored.appearance
+    self.visualDensity = restored.visualDensity
+    self.transcriptionMode = restored.transcriptionMode
+    self.liveTranscriptionModel = restored.liveTranscriptionModel
+    self.rememberedLocalTranscriptionSource = restored.rememberedLocalTranscriptionSource
+    self.rememberedRemoteTranscriptionMode = restored.rememberedRemoteTranscriptionMode
+    self.batchTranscriptionModel = restored.batchTranscriptionModel
+    self.localTranscriptionModel = restored.localTranscriptionModel
+    self.localTranscriptionMode = restored.localTranscriptionMode
+    self.preferredLocaleIdentifier = restored.preferredLocaleIdentifier
+    self.preferredAudioInputUID = restored.preferredAudioInputUID
+    self.postProcessingEnabled = restored.postProcessingEnabled
+    self.postProcessingModel = restored.postProcessingModel
+    self.postProcessingTemperature = restored.postProcessingTemperature
+    self.assemblyAIKeyterms = restored.assemblyAIKeyterms
+    self.transcriptionKeywords = restored.transcriptionKeywords
+    self.recoveredTranscriptionKeywords = restored.recoveredTranscriptionKeywords
+    self.assemblyAIIgnoredPronunciationTerms = restored.assemblyAIIgnoredPronunciationTerms
+    self.modulateSpeakerDiarizationEnabled = restored.modulateSpeakerDiarizationEnabled
+    self.modulateEmotionSignalEnabled = restored.modulateEmotionSignalEnabled
+    self.modulateAccentSignalEnabled = restored.modulateAccentSignalEnabled
+    self.modulatePIIPhiTaggingEnabled = restored.modulatePIIPhiTaggingEnabled
+    self.postProcessingOutputLanguage = restored.postProcessingOutputLanguage
+    self.postProcessingIncludeLexiconDirectives = restored.postProcessingIncludeLexiconDirectives
+    self.postProcessingIncludeContextTags = restored.postProcessingIncludeContextTags
+    self.textOutputMethod = restored.textOutputMethod
+    self.accessibilityInsertionMode = restored.accessibilityInsertionMode
+    self.restoreClipboardAfterPaste = restored.restoreClipboardAfterPaste
+    self.showHUDDuringSessions = restored.showHUDDuringSessions
+    self.showLiveTranscriptInHUD = restored.showLiveTranscriptInHUD
+  }
+
+  private func reloadMigrationAudioPreferences(_ restored: AppSettings) {
+    self.showCompactHUD = restored.showCompactHUD
+    self.shortenErrorDisplay = restored.shortenErrorDisplay
+    self.showSidebarShortcutHints = restored.showSidebarShortcutHints
+    self.appVisibility = restored.appVisibility
+    self.showStatusBarIconInDockOnly = restored.showStatusBarIconInDockOnly
+    self.compactStatusBarIcon = restored.compactStatusBarIcon
+    self.runAtLogin = restored.runAtLogin
+    self.recordingsDirectory = restored.recordingsDirectory
+    self.hotKeyActivationStyle = restored.hotKeyActivationStyle
+    self.holdThreshold = restored.holdThreshold
+    self.doubleTapWindow = restored.doubleTapWindow
+    self.selectedHotKey = restored.selectedHotKey
+    self.postRecordingTailDuration = restored.postRecordingTailDuration
+    self.liveStopGracePeriod = restored.liveStopGracePeriod
+    self.trackedAPIKeyIdentifiers = restored.trackedAPIKeyIdentifiers
+    self.defaultTTSVoice = restored.defaultTTSVoice
+    self.ttsLanguageIdentifier = restored.ttsLanguageIdentifier
+    self.sonioxTTSRegion = restored.sonioxTTSRegion
+    self.ttsSpeed = restored.ttsSpeed
+    self.ttsPitch = restored.ttsPitch
+    self.ttsQuality = restored.ttsQuality
+    self.ttsOutputFormat = restored.ttsOutputFormat
+    self.ttsAutoPlay = restored.ttsAutoPlay
+    self.ttsSaveToDirectory = restored.ttsSaveToDirectory
+    self.ttsUseSSML = restored.ttsUseSSML
+    self.ttsFavoriteVoices = restored.ttsFavoriteVoices
+    self.ttsPronunciationDictionary = restored.ttsPronunciationDictionary
+    self.historyFlushInterval = restored.historyFlushInterval
+    self.silenceDetectionEnabled = restored.silenceDetectionEnabled
+    self.handsFreeDictationEnabled = restored.handsFreeDictationEnabled
+  }
+
+  private func reloadMigrationBehaviour(_ restored: AppSettings) {
+    self.silenceThreshold = restored.silenceThreshold
+    self.silenceDuration = restored.silenceDuration
+    self.connectionPreWarmingEnabled = restored.connectionPreWarmingEnabled
+    self.audioPreWarmingEnabled = restored.audioPreWarmingEnabled
+    self.postProcessingStreamingEnabled = restored.postProcessingStreamingEnabled
+    self.hudSizePreference = restored.hudSizePreference
+    self.speedMode = restored.speedMode
+    self.livePolishModel = restored.livePolishModel
+    self.livePolishDebounceMs = restored.livePolishDebounceMs
+    self.livePolishMinDeltaChars = restored.livePolishMinDeltaChars
+    self.livePolishTailWindowChars = restored.livePolishTailWindowChars
+    self.skipPostProcessingWithLivePolish = restored.skipPostProcessingWithLivePolish
+    self.voiceCommandsEnabled = restored.voiceCommandsEnabled
+    self.streamingInsertionEnabled = restored.streamingInsertionEnabled
+    self.clipboardInsertionTriggers = restored.clipboardInsertionTriggers
+    self.enableSendToMac = restored.enableSendToMac
+    self.enableAutomationServer = restored.enableAutomationServer
+    self.pasteRemoteTranscriptsAtCursor = restored.pasteRemoteTranscriptsAtCursor
+    self.analyticsEnabled = restored.analyticsEnabled
+    self.autoCorrectionsEnabled = restored.autoCorrectionsEnabled
+    self.autoCorrectionsPromotionThreshold = restored.autoCorrectionsPromotionThreshold
+    self.recordingSoundsEnabled = restored.recordingSoundsEnabled
+    self.recordingSoundProfile = restored.recordingSoundProfile
+    self.recordingSoundVolume = restored.recordingSoundVolume
+    self.localStreamingModelSource = restored.localStreamingModelSource
+  }
+
   func registerAPIKeyIdentifier(_ identifier: String) {
     reconcileAPIKeyIdentifiers(trackedAPIKeyIdentifiers + [identifier])
   }
@@ -1362,6 +1545,34 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     NSApplication.shared.setActivationPolicy(policy)
   }
 
+  private static func mergedTranscriptionKeywords(
+    canonical: String, legacy: String, lastReconciled: String?
+  ) -> (active: String, recovered: String?) {
+    if canonical == legacy { return (canonical, nil) }
+    let canonicalIsEmpty = canonical.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let legacyIsEmpty = legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    // After a downgrade or a write from another platform, an unchanged mirror
+    // must not override a deliberate edit (including clearing) on the other side.
+    if let lastReconciled {
+      if canonical == lastReconciled { return (legacy, nil) }
+      if legacy == lastReconciled { return (canonical, nil) }
+      // Both mirrors changed independently. Do not silently undo a clear, and
+      // do not destroy the competing edit: Settings exposes it for recovery.
+      if canonicalIsEmpty || legacyIsEmpty {
+        let recovered = canonicalIsEmpty ? legacy : canonical
+        return ("", recovered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : recovered)
+      }
+    }
+    if canonicalIsEmpty { return (legacy, nil) }
+    if legacyIsEmpty { return (canonical, nil) }
+    var seen: Set<String> = []
+    let merged = (canonical + "," + legacy).components(separatedBy: ",")
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty && seen.insert($0).inserted }
+      .joined(separator: ", ")
+    return (merged, nil)
+  }
+
   private static func normalizedBatchModel(_ identifier: String?) -> String {
     ModelCatalog.normalizedBatchTranscriptionModel(identifier)
   }
@@ -1387,7 +1598,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     let base =
       FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
       ?? FileManager.default.homeDirectoryForCurrentUser
-    let appFolder = base.appendingPathComponent("SpeakApp", isDirectory: true)
+    let appFolder = base.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
     let recordings = appFolder.appendingPathComponent("Recordings", isDirectory: true)
     if !FileManager.default.fileExists(atPath: recordings.path) {
       try? FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)

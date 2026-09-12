@@ -47,6 +47,7 @@ final class ManifestParityTests: XCTestCase {
         let project = try contents(of: "Project.swift")
         let shared = [
             "https://github.com/getsentry/sentry-cocoa.git",
+            "https://github.com/jaywcjlove/PermissionFlow.git",
             "https://github.com/argmaxinc/argmax-oss-swift.git",
             "https://github.com/FluidInference/FluidAudio.git"
         ]

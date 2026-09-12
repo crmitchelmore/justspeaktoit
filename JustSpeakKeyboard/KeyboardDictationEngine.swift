@@ -1,7 +1,9 @@
-import AVFoundation
 import Foundation
-import Speech
 import SpeakCore
+#if IOS_KEYBOARD_DIRECT_CAPTURE
+import AVFoundation
+import Speech
+#endif
 
 @MainActor
 protocol KeyboardDictationEngineProtocol: AnyObject {
@@ -11,6 +13,45 @@ protocol KeyboardDictationEngineProtocol: AnyObject {
     func stop(runID: UUID)
     func cancel(runID: UUID)
 }
+
+#if !IOS_KEYBOARD_DIRECT_CAPTURE
+
+/// Hand-off builds — every build the App Store has ever received — ship no
+/// in-extension capture engine at all (issue #991).
+///
+/// A custom keyboard cannot open the microphone. Apple's Custom Keyboard guide
+/// says extensions have no microphone access, the runtime refuses with error
+/// 561145187, and the bug filed against it in 2025 is still open. The engine
+/// below the `#if` was therefore already unreachable in every shipping build:
+/// `KeyboardViewModel.buildDirectCapturePolicy` is `.disabled` without the
+/// flag, and `plannedCapturePath` short-circuits before it can be constructed.
+/// What it was not is *absent* — its `import AVFoundation` and `import Speech`
+/// linked AVFAudio and Speech into the appex, and the class, its audio engine
+/// and its recognition plumbing were compiled into it, so every keyboard
+/// launch paid for machinery no user could ever reach.
+///
+/// This stand-in exists only to satisfy the protocol on the disabled path. It
+/// reports every permission as denied, which is what the planner already
+/// assumes, and refuses to start. Nothing calls it: the direct path is
+/// unreachable when the flag is off. It is deliberately *not* a revival — the
+/// flagged engine is kept solely so the shape can still be compiled in CI.
+@MainActor
+final class KeyboardDictationEngine: KeyboardDictationEngineProtocol {
+    var onEvent: ((UUID, KeyboardDictationMachine.Event) -> Void)?
+
+    static func microphonePermission() -> KeyboardCapturePlanner.Permission { .denied }
+    static func speechRecognitionPermission() -> KeyboardCapturePlanner.Permission { .denied }
+    static func recognizerAvailable(localeIdentifier _: String) -> Bool { false }
+
+    func start(runID: UUID, localeIdentifier _: String) {
+        onEvent?(runID, .captureFailed(.microphoneUnavailable))
+    }
+
+    func stop(runID _: UUID) {}
+    func cancel(runID _: UUID) {}
+}
+
+#else
 
 /// Captures microphone audio and produces live Apple Speech hypotheses inside
 /// the keyboard extension process.
@@ -297,3 +338,5 @@ final class KeyboardDictationEngine: KeyboardDictationEngineProtocol {
         }
     }
 }
+
+#endif

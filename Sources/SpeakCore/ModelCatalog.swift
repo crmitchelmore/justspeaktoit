@@ -8,7 +8,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
     public static let customOptionID = "__model_custom__"
 
-    public static let liveTranscription: [Option] = appleLiveTranscriptionOptions + [
+    public static let liveTranscription: [Option] =
+        appleLiveTranscriptionOptions + [
         Option(
             id: "apple/local/Dictation", displayName: "Apple Dictation",
             description: "Alternative on-device engine that mirrors system dictation.",
@@ -86,6 +87,28 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             latencyTier: .fast,
             tags: [.fast, .leading]),
         Option(
+            id: XAISpeechToText.liveCatalogID,
+            displayName: "xAI Speech-to-Text (Streaming)",
+            description: "xAI's dedicated realtime speech-to-text endpoint: interim captions, "
+                + "chunk finals as speech locks, and one authoritative transcript at the end of "
+                + "the stream. Reuses your xAI API key.",
+            estimatedLatencyMs: 200,
+            latencyTier: .fast,
+            tags: [.fast]),
+        Option(
+            id: RevAIStreaming.liveCatalogID,
+            displayName: "Rev.ai Reverb (Streaming)",
+            description: "Rev.ai's streaming speech-to-text on the Reverb model, with rolling "
+                + "partial hypotheses and per-segment finals. Reuses your Rev.ai access token.",
+            estimatedLatencyMs: 300, latencyTier: .fast),
+        Option(
+            id: MistralVoxtralRealtime.liveCatalogID,
+            displayName: "Mistral Voxtral Realtime (Streaming)",
+            description: "Mistral's natively streaming Voxtral model across 13 languages, with "
+                + "automatic language detection and one authoritative transcript at the end of "
+                + "the stream. Reuses your Mistral API key.",
+            estimatedLatencyMs: 480, latencyTier: .fast),
+        Option(
             id: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
             displayName: "OpenAI GPT Live Transcribe (Streaming)",
             description: "OpenAI's recommended low-latency speech-to-text model with live transcript "
@@ -111,9 +134,28 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
                 + "accuracy on noisy or accented audio with keyterm prompt support. Reuses your "
                 + "OpenAI API key.",
             estimatedLatencyMs: 280, latencyTier: .fast)
-    ]
+    ] + AzureTranscriptionModels.liveOptions
 
-    public static let batchTranscription: [Option] = appleBatchTranscriptionOptions + [
+    public static let batchTranscription: [Option] =
+        appleBatchTranscriptionOptions + [
+        Option(
+            id: CartesiaBatchClient.catalogID, displayName: "Cartesia Ink Whisper (Batch)",
+            description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",
+            estimatedLatencyMs: nil, latencyTier: .medium),
+        Option(
+            id: GladiaBatchClient.catalogID, displayName: "Gladia Solaria-1 (Batch)",
+            description: "Multilingual file transcription with per-utterance timings. "
+                + "Automatic detects the language and allows code switching.",
+            estimatedLatencyMs: nil, latencyTier: .medium),
+        Option(
+            id: SpeechmaticsBatchClient.enhancedCatalogID, displayName: "Speechmatics Enhanced (Batch)",
+            description: "Speechmatics' higher-accuracy file transcription tier, with word timings "
+                + "and automatic language identification.",
+            estimatedLatencyMs: nil, latencyTier: .medium),
+        Option(
+            id: SpeechmaticsBatchClient.standardCatalogID, displayName: "Speechmatics Standard (Batch)",
+            description: "Speechmatics' faster, lower-cost file transcription tier.",
+            estimatedLatencyMs: nil, latencyTier: .fast),
         // Dedicated transcription providers (OpenAI, Rev.ai, etc.)
         Option(
             id: OpenAITranscriptionModels.gptTranscribeCatalogID,
@@ -168,6 +210,12 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "Google's Gemini Interactions API for recorded audio, with word-level "
                 + "timestamps and speaker attribution. Public preview — opt-in, never a default.",
             estimatedLatencyMs: 900, latencyTier: .fast),
+        Option(
+            id: XAISpeechToText.batchCatalogID,
+            displayName: "xAI Speech-to-Text",
+            description: "xAI's dedicated file transcription endpoint, with word timings, "
+                + "keyterm biasing and inverse text normalisation when a language is chosen.",
+            estimatedLatencyMs: 700, latencyTier: .fast),
         Option(
             id: "revai/default", displayName: "Rev.ai",
             description: "Rev.ai's speech recognition. High accuracy with speaker identification.",
@@ -227,7 +275,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             description: "ElevenLabs Scribe v2: high-accuracy speech-to-text across 90+ languages "
                 + "with word-level timestamps.",
             estimatedLatencyMs: 800, latencyTier: .fast)
-    ]
+    ] + AzureTranscriptionModels.batchOptions
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.

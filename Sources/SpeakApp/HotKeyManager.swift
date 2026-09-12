@@ -86,10 +86,10 @@ final class HotKeyManager: ObservableObject {
 		}
 	}
 
-	func startMonitoring() {
-		monitoringRequested = true
-		installMonitoring(requestPermission: true)
-	}
+    func startMonitoring(requestPermission: Bool = true) {
+        monitoringRequested = true
+        installMonitoring(requestPermission: requestPermission)
+    }
 
 	private func installMonitoring(requestPermission: Bool) {
 		guard !engine.isMonitoring, localMonitor == nil else {
@@ -97,7 +97,7 @@ final class HotKeyManager: ObservableObject {
 			return
 		}
 
-		if requestPermission {
+		if requestPermission && appSettings.hasConfiguredGlobalHotKey {
 			permissionRequestTask?.cancel()
 			permissionRequestTask = Task { [weak self] in
 				guard let self else { return }
@@ -136,7 +136,7 @@ final class HotKeyManager: ObservableObject {
 				doubleTapWindow: appSettings.doubleTapWindow
 			)
 		)
-		engine.start(for: hotKey)
+		if appSettings.hasConfiguredGlobalHotKey { engine.start(for: hotKey) }
 		refreshMonitoringState()
 	}
 
@@ -199,13 +199,13 @@ final class HotKeyManager: ObservableObject {
 					doubleTapWindow: appSettings.doubleTapWindow
 				)
 			)
-			engine.start(for: hotKey)
+			if appSettings.hasConfiguredGlobalHotKey { engine.start(for: hotKey) }
 			refreshMonitoringState()
 		}
 	}
 
 	private func refreshMonitoringState() {
-		guard monitoringRequested else {
+		guard monitoringRequested, appSettings.hasConfiguredGlobalHotKey else {
 			monitoringState = .stopped
 			return
 		}
@@ -278,9 +278,15 @@ final class HotKeyManager: ObservableObject {
 	}
 
 	private func handleKeyboardShortcuts(event: NSEvent, scope: ShortcutScope) {
+		// Exact match, not `contains`: `contains` made ⌘R fire on ⌃⌘R and ⇧⌘R too. Escape
+		// opts out and matches whatever is held — see `ignoresModifiers`.
+		let pressedModifiers = event.modifierFlags.intersection(KeyboardShortcut.trackedModifiers)
 		for (shortcut, handlers) in shortcutListeners {
 			guard scope == .local || shortcut.deliveredGlobally else { continue }
-			let modifiersMatch = event.modifierFlags.contains(shortcut.requiredModifiers)
+			let modifiersMatch =
+				shortcut.ignoresModifiers
+				|| pressedModifiers
+					== shortcut.requiredModifiers.intersection(KeyboardShortcut.trackedModifiers)
 			let keyCodeMatch = event.keyCode == shortcut.keyCode
 			if modifiersMatch && keyCodeMatch {
 				log.debug("Firing keyboard shortcut: \(String(describing: shortcut))")

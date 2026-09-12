@@ -26,6 +26,24 @@ enum KeyboardShortcut: Hashable, CaseIterable {
 		}
 	}
 
+	/// Escape cancels whatever else is held down.
+	///
+	/// The recording hotkey can itself be a modifier chord (⌥Space, say), and a hold keeps
+	/// that chord physically down for the whole recording, so the Escape that cancels it
+	/// arrives carrying ⌥. Matching Escape against an empty modifier set would never fire.
+	var ignoresModifiers: Bool {
+		switch self {
+		case .escape:
+			return true
+		case .commandR:
+			return false
+		}
+	}
+
+	/// The modifiers a shortcut may specify. Both sides of a match are clamped to these, so
+	/// a case that returned an untracked flag could not silently never fire.
+	static let trackedModifiers: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
+
 	/// Whether a key press in another app may fire this shortcut.
 	///
 	/// Escape has to: the point of dictation is that you are typing into somebody else's

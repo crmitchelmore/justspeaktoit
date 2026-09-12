@@ -3,10 +3,44 @@ import AVFoundation
 import Foundation
 import SpeakCore
 
+/// Owned lifecycle boundary, injectable without a microphone or provider connection.
+/// Every member the recording owners rely on is here, so a test double stands
+/// in for the whole session and the owners never route on the concrete type.
+@MainActor
+protocol IOSRecordingSession: AnyObject {
+    var isBatch: Bool { get }
+    var resolution: IOSTranscriptionSession.Resolution { get }
+    var partialText: String { get }
+    var confidence: Double? { get }
+    var onPartialResult: ((String, Bool) -> Void)? { get set }
+    var onError: ((Error) -> Void)? { get set }
+    var onFirstInputBuffer: (() -> Void)? { get set }
+    var onStartupObservation: ((StartupObservation) -> Void)? { get set }
+    var inputLevelSample: CaptureInputLevelSample { get }
+    func resetInputLevel()
+    /// The safety recording this capture is writing, or `nil` when it has none.
+    var safetyRecordingID: UUID? { get }
+    /// Drops a non-retained capture's temporary recording after delivery.
+    @discardableResult
+    func discardTemporaryRecording() -> Bool
+    func start() async throws
+    func start(preRollBuffers: [AVAudioPCMBuffer], analyzerFallbackAllowed: Bool) async throws
+    func stop() async throws -> TranscriptionResult
+    func cancel()
+    /// Cancellation stops capture immediately; this waits for whatever the
+    /// provider drains afterwards, so an owner can hold its claim until the
+    /// microphone is really free (#943).
+    func awaitCancellationSettled() async
+    /// Publishes a nonfatal capture or writer loss for this run (#950).
+    var onRecordingWarning: ((String) -> Void)? { get set }
+    /// A summary of this run's losses, once it has finished.
+    var recordingLossSummary: String? { get }
+}
+
 /// One factory-owned transcription session shared by foreground and hardware-trigger recording.
 /// Keeping construction and lifecycle routing here prevents the two entry points from drifting.
 @MainActor
-final class IOSTranscriptionSession {
+final class IOSTranscriptionSession: IOSRecordingSession {
     enum Mode: Equatable, Sendable {
         case streaming
         case batch(retainRecording: Bool)
@@ -26,10 +60,36 @@ final class IOSTranscriptionSession {
 
         var isBatch: Bool { backend == .batch }
         var sampleRate: Int? { route?.sampleRate }
+
+        /// The backend this routing decision already settled, for local
+        /// startup diagnostics (issue #972). `nil` for Apple, which chooses
+        /// between the analyzer and the legacy recogniser at start time and
+        /// labels itself once it has.
+        var resolvedStartupBackend: StartupBackend? {
+            switch backend {
+            case .batch: return .batch
+            case .openAI: return .openAIRealtime
+            case .shared: return .sharedClient
+            case .apple: return nil
+            }
+        }
     }
 
     var onPartialResult: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
+    /// Raised at most once per session, on the main actor, when this session's
+    /// own live input tap accepts a buffer with a positive frame count. Every
+    /// backend supplies it — batch included, which has no partial result — so
+    /// recording presentation never waits on a signal that cannot arrive
+    /// (issue #983).
+    var onFirstInputBuffer: (() -> Void)?
+    /// Local startup-boundary observations from whichever backend is running
+    /// (issue #972). Reuses this boundary rather than adding a second one, so
+    /// all five paths — Apple analyzer, the legacy Apple fallback, OpenAI
+    /// Realtime, the shared client and batch — report through one seam.
+    /// Measurement only: nothing here changes capture, ordering or delivery.
+    var onStartupObservation: ((StartupObservation) -> Void)?
+    var onRecordingWarning: ((String) -> Void)?
 
     let resolution: Resolution
 
@@ -53,37 +113,49 @@ final class IOSTranscriptionSession {
         return transcriber.confidence
     }
 
-    private enum Backend {
+    /// The most recent microphone level, with the buffer sequence it came
+    /// from, whichever backend is running.
+    ///
+    /// Batch is included deliberately. It publishes no partial results — see
+    /// `bindCallbacks`, where `.batch` binds nothing — so an end-pointing rule
+    /// written against the transcript could never fire for anyone whose
+    /// transcription mode is batch, and they would turn the setting on and
+    /// silently never get an auto-stop. The level is the one signal all four
+    /// backends produce. The sequence is what lets a reader tell a fresh
+    /// observation from the same one read twice.
+    var inputLevelSample: CaptureInputLevelSample { audioRecorder.inputLevelSample }
+
+    /// Forgets the metered level, so a new capture never inherits the previous
+    /// one's last reading.
+    func resetInputLevel() { audioRecorder.resetInputLevel() }
+
+    private var audioRecorder: AudioRecordingPersistence {
+        switch backend {
+        case .batch(let transcriber): return transcriber.audioRecorder
+        case .apple(let transcriber): return transcriber.audioRecorder
+        case .openAI(let transcriber): return transcriber.audioRecorder
+        case .shared(let transcriber): return transcriber.audioRecorder
+        }
+    }
+
+    /// Internal rather than private so the safety-recording extension in its
+    /// own file can route on it.
+    enum Backend {
         case batch(IOSBatchTranscriber)
         case apple(iOSLiveTranscriber)
         case openAI(OpenAIRealtimeLiveTranscriber)
         case shared(SharedClientLiveTranscriber)
     }
 
-    private let backend: Backend
+    /// Internal rather than private so the same type's safety-recording
+    /// extension can route on it from its own file.
+    let backend: Backend
     private let language: String?
 
-    init(
-        modelID: String,
-        mode: Mode,
-        language: String? = nil,
-        audioSessionManager: AudioSessionManager,
-        batchAPIKey: String,
-        liveAPIKey: (LiveTranscriptionRoute) -> String,
-        transcriptionKeywords: [String] = []
-    ) throws {
-        let resolution = try Self.resolve(modelID: modelID, mode: mode)
+    private init(resolution: Resolution, language: String?, backend: Backend) {
         self.resolution = resolution
         self.language = language
-        backend = try Self.makeBackend(
-            resolution: resolution,
-            mode: mode,
-            language: language,
-            audioSessionManager: audioSessionManager,
-            batchAPIKey: batchAPIKey,
-            liveAPIKey: liveAPIKey,
-            transcriptionKeywords: transcriptionKeywords
-        )
+        self.backend = backend
         bindCallbacks()
     }
 
@@ -223,6 +295,7 @@ final class IOSTranscriptionSession {
     }
 
     private func bindCallbacks() {
+        recordingLoss.onWarning = { [weak self] message in self?.onRecordingWarning?(message) }
         let partialHandler: (String, Bool) -> Void = { [weak self] text, isFinal in
             guard let self else { return }
             self.onPartialResult?(self.partialText.isEmpty ? text : self.partialText, isFinal)
@@ -231,19 +304,96 @@ final class IOSTranscriptionSession {
             self?.onError?(error)
         }
 
+        let firstInputHandler: () -> Void = { [weak self] in
+            self?.onFirstInputBuffer?()
+        }
+
+        let startupHandler: (StartupObservation) -> Void = { [weak self] observation in
+            self?.onStartupObservation?(observation)
+        }
+
         switch backend {
-        case .batch:
-            break
+        case .batch(let transcriber):
+            transcriber.onFirstInputBuffer = firstInputHandler
+            transcriber.onStartupObservation = startupHandler
         case .apple(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
+            // The Apple backend labels itself when it takes the analyzer or
+            // the legacy branch, so a start that fails before that decision
+            // reports no backend rather than the one it meant to use.
+            transcriber.onStartupObservation = startupHandler
         case .openAI(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
+            transcriber.onStartupObservation = startupHandler
         case .shared(let transcriber):
             transcriber.onPartialResult = partialHandler
             transcriber.onError = errorHandler
+            transcriber.onFirstInputBuffer = firstInputHandler
+            transcriber.onStartupObservation = startupHandler
+        }
+
+    }
+}
+
+// Construction lives beside the class so both recording surfaces keep using
+// the same routing contract; the designated initialiser stays private.
+extension IOSTranscriptionSession {
+    convenience init(
+        modelID: String,
+        mode: Mode,
+        language: String? = nil,
+        audioSessionManager: AudioSessionManager,
+        batchAPIKey: String,
+        liveAPIKey: (LiveTranscriptionRoute) -> String,
+        transcriptionKeywords: [String] = []
+    ) throws {
+        let resolution = try Self.resolve(modelID: modelID, mode: mode)
+        let backend = try Self.makeBackend(
+            resolution: resolution,
+            mode: mode,
+            language: language,
+            audioSessionManager: audioSessionManager,
+            batchAPIKey: batchAPIKey,
+            liveAPIKey: liveAPIKey,
+            transcriptionKeywords: transcriptionKeywords
+        )
+        self.init(resolution: resolution, language: language, backend: backend)
+    }
+
+    /// Lifecycle tests wrap a transcriber whose client and capture are synthetic (issue #949).
+    convenience init(openAI transcriber: OpenAIRealtimeLiveTranscriber) throws {
+        let resolution = try Self.resolve(modelID: "openai/gpt-live-transcribe-streaming", mode: .streaming)
+        self.init(resolution: resolution, language: nil, backend: .openAI(transcriber))
+    }
+}
+
+// MARK: - Recording loss reporting (issue #950)
+
+extension IOSTranscriptionSession {
+    var recordingLossSummary: String? { recordingLoss.finalSummary }
+
+    var recordingLoss: RecordingLossReporting {
+        switch backend {
+        case .batch(let transcriber): return transcriber.recordingLoss
+        case .apple(let transcriber): return transcriber.recordingLoss
+        case .openAI(let transcriber): return transcriber.recordingLoss
+        case .shared(let transcriber): return transcriber.recordingLoss
         }
     }
+
+    #if DEBUG
+    var recordingPersistenceForTesting: AudioRecordingPersistence {
+        switch backend {
+        case .batch(let transcriber): return transcriber.audioRecorder
+        case .apple(let transcriber): return transcriber.audioRecorder
+        case .openAI(let transcriber): return transcriber.audioRecorder
+        case .shared(let transcriber): return transcriber.audioRecorder
+        }
+    }
+    #endif
 }
 #endif

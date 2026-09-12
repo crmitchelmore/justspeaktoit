@@ -64,6 +64,12 @@ extension ModelCatalog {
     /// silently rewrites the user's speed mode to `.instant` whenever that
     /// model is selected. `LiveModelCapabilitiesTests` asserts that parity.
     static let liveCapabilityRegistry: [String: LiveModelCapabilities] = [
+        AzureTranscriptionModels.speechLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
+        AzureTranscriptionModels.maiLive: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish], postStopFinalizeBudget: 5
+        ),
         // Apple on-device — raw passthrough only.
         "apple/local/SFSpeechRecognizer": .default,
         "apple/local/SpeechTranscriber": .default,
@@ -107,6 +113,21 @@ extension ModelCatalog {
         "soniox/stt-rt-v5-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        // Rev.ai finalises a segment as soon as its hypothesis stops changing,
+        // so the incremental tail rewrite can polish each one. `EOS` returns a
+        // trailing hypothesis, which the budget keeps room for.
+        RevAIStreaming.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 2.0
+        ),
+        // Voxtral Realtime streams append-only deltas and emits no
+        // per-utterance final: the authoritative transcript is the
+        // `transcription.done` frame that follows the flush, so the budget
+        // stays large enough to capture it before teardown.
+        MistralVoxtralRealtime.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: MistralVoxtralRealtime.finishBudget
+        ),
         "speechmatics/enhanced-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 2.0
@@ -117,6 +138,14 @@ extension ModelCatalog {
         XAIVoiceModels.thinkFast2CatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 3.0
+        ),
+        // xAI's dedicated speech-to-text stream locks chunks of speech during
+        // the session, which the incremental tail rewrite can polish. The
+        // authoritative transcript only arrives after `audio.done`, so the
+        // budget stays non-zero to capture that frame before teardown.
+        XAISpeechToText.liveCatalogID: LiveModelCapabilities(
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 2.0
         ),
 
         // AssemblyAI Universal-3.5 Pro Streaming emits incremental turns and

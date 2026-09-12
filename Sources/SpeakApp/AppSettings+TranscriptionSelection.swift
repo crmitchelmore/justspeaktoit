@@ -136,4 +136,46 @@ extension AppSettings {
         guard transcriptionMode == .localModel else { return }
         selectLocalTranscriptionSource(.apple)
     }
+
+    /// Removing the selected streaming source must leave batch mode with usable
+    /// downloaded files, or return local transcription to Apple Speech.
+    func repairDownloadedStreamingSelection(fallbackSourceID: String?, fallbackBatchModelID: String?) {
+        if let fallbackSourceID {
+            localStreamingModelSource = fallbackSourceID
+            return
+        }
+        localStreamingModelSource = ""
+        repairDownloadedTranscriptionSelection(fallbackModelID: fallbackBatchModelID)
+        localTranscriptionMode = .batch
+    }
+
+    /// Batch and streaming rows share the same WhisperKit files. Repair both
+    /// remembered IDs before deciding whether the selected mode needs to change.
+    func repairRemovedWhisperKitSelection(
+        modelID: String, streamingSourceID: String,
+        fallbackBatchModelID: String?, fallbackStreamingSourceID: String?
+    ) {
+        let repairsBatch = localTranscriptionModel == modelID
+        let repairsStreaming = localStreamingModelSource == streamingSourceID
+        if repairsBatch, let fallbackBatchModelID {
+            localTranscriptionModel = fallbackBatchModelID
+        }
+        if repairsStreaming {
+            localStreamingModelSource = fallbackStreamingSourceID ?? ""
+        }
+
+        switch localTranscriptionMode {
+        case .batch:
+            guard repairsBatch, fallbackBatchModelID == nil else { return }
+            if let fallbackStreamingSourceID {
+                localStreamingModelSource = fallbackStreamingSourceID
+                localTranscriptionMode = .streaming
+            } else {
+                repairDownloadedTranscriptionSelection(fallbackModelID: nil)
+            }
+        case .streaming:
+            guard repairsStreaming, fallbackStreamingSourceID == nil else { return }
+            repairDownloadedStreamingSelection(fallbackSourceID: nil, fallbackBatchModelID: fallbackBatchModelID)
+        }
+    }
 }

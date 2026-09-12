@@ -1,19 +1,22 @@
 name: Release macOS App
 
 on:
-  push:
-    tags:
-      - 'mac-v*'
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      version:
-        description: 'Version to release (e.g., 0.1.0)'
-        required: false
+      manifest:
+        required: true
+        type: string
+
+concurrency:
+  group: release-mac-direct
+  queue: max
+  cancel-in-progress: false
 
 env:
   SCHEME: SpeakApp
   PRODUCT_NAME: JustSpeakToIt
   WORKSPACE: "Just Speak to It.xcworkspace"
+  GH_TOKEN: ${{ github.token }}
   APP_STORE_CONNECT_KEY_ID: S747NJ9DZY
   # Public PostHog ingestion key. The app remains a silent no-op when the
   # repository secret has not been configured.
@@ -28,35 +31,54 @@ jobs:
     timeout-minutes: 240
     permissions:
       contents: write
-      # A failed optional CLI publication is surfaced as an issue, not a failed release.
-      issues: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ inputs.manifest }}
+
+      - name: Load frozen release manifest
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+        run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface mac-direct
+
+      - name: Check candidate delivery receipt
+        id: receipt
+        run: node scripts/release-train.mjs status --tag "$RELEASE_TAG" --surface mac-direct
+
+      - name: Stamp immutable app metadata
+        if: steps.receipt.outputs.status != 'verified'
+        run: python3 scripts/stamp-release-train.py mac-direct
 
       - name: Setup Xcode
+        if: steps.receipt.outputs.status != 'verified'
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "26.2"
 
       - name: Install Tuist
+        if: steps.receipt.outputs.status != 'verified'
         run: |
           brew install tuist
 
       - name: Generate Xcode Project
+        if: steps.receipt.outputs.status != 'verified'
         run: |
           tuist generate --no-open
+          mkdir -p "Just Speak to It.xcworkspace/xcshareddata/swiftpm"
+          cp Package.resolved "Just Speak to It.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 
       - name: Resolve Swift Package Dependencies
+        if: steps.receipt.outputs.status != 'verified'
         run: |
-          xcodebuild -resolvePackageDependencies \
+          xcodebuild -resolvePackageDependencies -onlyUsePackageVersionsFromResolvedFile \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME"
 
       - name: Run Tests (Release Config)
+        if: steps.receipt.outputs.status != 'verified'
         run: |
           # Defence in depth: the pre-merge gate is the release-validation job
           # in ci.yml; this re-run protects tags cut from any unvalidated state.
@@ -66,6 +88,7 @@ jobs:
       # Release tests exercise real Keychain migration. Run them before replacing
       # the runner's Keychain search list with the temporary signing Keychain.
       - name: Import Code Signing Certificate
+        if: steps.receipt.outputs.status != 'verified'
         env:
           APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
           APPLE_DEVELOPER_ID_APPLICATION_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
@@ -74,22 +97,23 @@ jobs:
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           # Import certificate
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          echo -n "$APPLE_DEVELOPER_ID_APPLICATION" | base64 --decode -o $CERTIFICATE_PATH
+          echo -n "$APPLE_DEVELOPER_ID_APPLICATION" | base64 --decode -o "$CERTIFICATE_PATH"
 
-          security import $CERTIFICATE_PATH -P "$APPLE_DEVELOPER_ID_APPLICATION_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
+          security import "$CERTIFICATE_PATH" -P "$APPLE_DEVELOPER_ID_APPLICATION_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
 
           # Clean up
-          rm -f $CERTIFICATE_PATH
+          rm -f "$CERTIFICATE_PATH"
 
       - name: Install App Store Connect API Key
+        if: steps.receipt.outputs.status != 'verified'
         env:
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
@@ -100,79 +124,18 @@ jobs:
           chmod 600 "$KEY_PATH"
 
       - name: Verify Entitlements for Developer ID
+        if: steps.receipt.outputs.status != 'verified'
         run: |
           # Entitlements file is pre-configured for Developer ID (non-sandboxed).
           # Sandbox and managed entitlements are commented out for future App Store builds.
           echo "Using Developer ID entitlements (non-sandboxed):"
           cat Config/SpeakMacOS.entitlements
 
-      - name: Determine Version
-        id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          elif [[ "$GITHUB_REF" == refs/tags/mac-v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/mac-v}"
-          else
-            VERSION=$(cat VERSION)
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $VERSION"
-
-      - name: Stamp Version in Info.plist
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          # Update CFBundleShortVersionString (marketing version like 0.2.3)
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/AppInfo.plist
-          # Update CFBundleVersion (build number - use timestamp format YYYYMMDDHHmm)
-          # IMPORTANT: This must match sparkle:version in appcast.xml for Sparkle update detection
-          BUILD_NUMBER=$(date -u +"%Y%m%d%H%M")
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" Config/AppInfo.plist
-          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
-          # Stamp the git commit SHA
-          COMMIT_SHA="${{ github.sha }}"
-          /usr/libexec/PlistBuddy -c "Set :GitCommitSHA $COMMIT_SHA" Config/AppInfo.plist
-          echo "Stamped version: $VERSION (build $BUILD_NUMBER, commit ${COMMIT_SHA:0:7})"
-          grep -A1 "CFBundleShortVersionString\|CFBundleVersion\|GitCommitSHA" Config/AppInfo.plist
-
-      # Notes are generated before the archive so the shipped app bundles the
-      # release notes for its own version and can show them offline.
-      - name: Generate detailed release notes
-        if: startsWith(github.ref, 'refs/tags/mac-v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          RELEASE_NOTES_MODEL: gpt-5.6-luna
-          RELEASE_NOTES_REASONING_EFFORT: medium
-        run: |
-          node scripts/generate-release-notes.mjs \
-            --tag "${GITHUB_REF_NAME}" \
-            --build-number "$BUILD_NUMBER" \
-            --output "$RUNNER_TEMP/release-notes.md" \
-            --html-output "$RUNNER_TEMP/release-notes.html"
-
-      # The catalogue is rebuilt in the runner's checkout and never committed
-      # back, so the checked-in file is only ever a starting point and goes
-      # stale between releases. Backfilling from the published releases first
-      # restores the versions released since it was last refreshed; the new
-      # tag's own notes are then merged on top.
-      - name: Bundle release notes into the app
-        if: startsWith(github.ref, 'refs/tags/mac-v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node scripts/update-release-notes-catalogue.mjs --backfill --platform mac \
-            || echo "::warning::Release-note backfill failed; bundling the checked-in history instead"
-          node scripts/update-release-notes-catalogue.mjs \
-            --platform mac \
-            --version "${{ steps.version.outputs.version }}" \
-            --tag "${GITHUB_REF_NAME}" \
-            --notes-file "$RUNNER_TEMP/release-notes.md"
-
       - name: Start artefact size summary
+        if: steps.receipt.outputs.status != 'verified'
         run: |
           {
-            echo "## Release artefacts (v${{ steps.version.outputs.version }}, build ${BUILD_NUMBER})"
+            echo "## Release artefacts (v${{ env.RELEASE_VERSION }}, build ${BUILD_NUMBER})"
             echo ""
             echo "| Variant | DMG | Installed app | Main executable | speak CLI | Archs |"
             echo "|---|---:|---:|---:|---:|---|"
@@ -185,12 +148,13 @@ jobs:
       # The primary ships without the speak CLI, which is published as
       # standalone assets below (issue #775); the legacy build keeps embedding it.
       - name: Package arm64 primary
+        if: steps.receipt.outputs.status != 'verified'
         id: arm64
         uses: ./.github/actions/package-mac-release
         with:
           variant: arm64
           embed-cli: "false"
-          version: ${{ steps.version.outputs.version }}
+          version: ${{ env.RELEASE_VERSION }}
           apple-id: ${{ secrets.APPLE_ID }}
           apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
@@ -198,12 +162,13 @@ jobs:
           app-store-connect-key-id: ${{ env.APP_STORE_CONNECT_KEY_ID }}
 
       - name: Package universal legacy
+        if: steps.receipt.outputs.status != 'verified'
         id: universal
         uses: ./.github/actions/package-mac-release
         with:
           variant: universal
           embed-cli: "true"
-          version: ${{ steps.version.outputs.version }}
+          version: ${{ env.RELEASE_VERSION }}
           apple-id: ${{ secrets.APPLE_ID }}
           apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
@@ -211,6 +176,7 @@ jobs:
           app-store-connect-key-id: ${{ env.APP_STORE_CONNECT_KEY_ID }}
 
       - name: Publish artefact paths
+        if: steps.receipt.outputs.status != 'verified'
         run: |
           {
             echo "DMG_PATH=${{ steps.arm64.outputs.dmg-path }}"
@@ -221,23 +187,21 @@ jobs:
             echo "LEGACY_ARCHIVE_PATH=${{ steps.universal.outputs.archive-path }}"
           } >> "$GITHUB_ENV"
 
-      # Standalone speak CLI assets (issue #775): arm64 and x86_64 archives plus
-      # the signed manifest the in-app installer reads. Optional by design — a
-      # failure here must not block the app release, so it is surfaced below and
-      # retried with the publish-speak-cli workflow.
+      # The candidate includes both standalone CLI architectures and its signed
+      # installer manifest. All eight direct assets must verify before promotion.
       - name: Build, notarise and verify speak CLI assets
+        if: steps.receipt.outputs.status != 'verified'
         id: cli
-        continue-on-error: true
         uses: ./.github/actions/publish-speak-cli
         with:
-          version: ${{ steps.version.outputs.version }}
+          version: ${{ env.CLI_VERSION }}
           apple-id: ${{ secrets.APPLE_ID }}
           apple-id-password: ${{ secrets.APPLE_ID_PASSWORD }}
           apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
           sparkle-private-key: ${{ secrets.SPARKLE_PRIVATE_KEY }}
 
       - name: Publish speak CLI asset paths
-        if: steps.cli.outcome == 'success'
+        if: steps.receipt.outputs.status != 'verified' && (steps.cli.outcome == 'success')
         run: |
           {
             echo "CLI_ARM64_ZIP=${{ steps.cli.outputs.arm64-zip }}"
@@ -246,46 +210,12 @@ jobs:
             echo "CLI_MANIFEST_SIG=${{ steps.cli.outputs.signature }}"
           } >> "$GITHUB_ENV"
 
-      - name: Surface speak CLI publication failure
-        if: steps.cli.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          echo "::error::speak CLI assets were not published for v${VERSION}; the app release continues without them"
-          {
-            echo ""
-            echo "> ⚠️ **speak CLI assets were not published for v${VERSION}.** The app release is unaffected."
-            echo "> Re-run the *Publish speak CLI* workflow with version \`${VERSION}\` once the cause is fixed."
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$GITHUB_REF" == refs/tags/mac-v* ]]; then
-            TITLE="speak CLI assets missing for mac-v${VERSION}"
-            EXISTING="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')"
-            if [ -z "$EXISTING" ]; then
-              gh issue create --title "$TITLE" --body "$(cat <<EOF
-          The optional speak CLI publication step failed in the release run for mac-v${VERSION}: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-
-          The app DMGs, appcasts and cask were published normally. Until the CLI assets exist, the in-app installer shows *Not available* for this release and the Homebrew formula stays at the previous version.
-
-          **Retry:** fix the cause, then run the *Publish speak CLI* workflow (\`publish-speak-cli.yml\`) with version \`${VERSION}\`. It rebuilds, notarises and verifies the archives from the tag, uploads them with the signed manifest to the existing release, and updates the tap. Refs #775.
-          EOF
-          )" || echo "::warning::Could not open the follow-up issue"
-            else
-              echo "Follow-up issue #$EXISTING is already open"
-            fi
-          fi
-
-      # One feed per download. The legacy feed keeps its historical name and
-      # asset because every shipped build carries it in Info.plist, and the
-      # release-notes tooling reads it for every past release; the app picks
-      # the arm64 feed at runtime only when it runs natively on Apple Silicon
-      # (UpdateFeedSelection).
       - name: Generate Appcasts for Sparkle Updates
-        if: startsWith(github.ref, 'refs/tags/mac-v')
+        if: steps.receipt.outputs.status != 'verified'
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ env.RELEASE_VERSION }}"
           # Use timestamp-based build number (set in Stamp Version step)
           # This ensures sparkle:version matches CFBundleVersion for proper update detection
           BUILD_NUMBER="${{ env.BUILD_NUMBER }}"
@@ -297,22 +227,26 @@ jobs:
             "$LEGACY_DMG_PATH" \
             "$SPARKLE_PRIVATE_KEY" \
             "$RUNNER_TEMP/release-notes.html" \
-            "https://justspeaktoit.com/appcast.xml" > "$RUNNER_TEMP/appcast.xml"
+            "$FEED_URL" > "$RUNNER_TEMP/appcast.xml"
           ./scripts/generate-appcast.sh \
             "$VERSION" \
             "$BUILD_NUMBER" \
             "$DMG_PATH" \
             "$SPARKLE_PRIVATE_KEY" \
             "$RUNNER_TEMP/release-notes.html" \
-            "https://justspeaktoit.com/appcast-arm64.xml" > "$RUNNER_TEMP/appcast-arm64.xml"
+            "$ARM64_FEED_URL" > "$RUNNER_TEMP/appcast-arm64.xml"
 
           # Each feed must offer its own download: the legacy feed the universal
           # DMG, the Apple Silicon feed the arm64 DMG. A mix-up here would offer
           # an arm64-only build to an Intel Mac.
-          grep -q "releases/download/mac-v${VERSION}/$(basename "$LEGACY_DMG_PATH")" "$RUNNER_TEMP/appcast.xml"
-          grep -q "releases/download/mac-v${VERSION}/$(basename "$DMG_PATH")" "$RUNNER_TEMP/appcast-arm64.xml"
-          ! grep -q "$(basename "$DMG_PATH")" "$RUNNER_TEMP/appcast.xml"
-          ! grep -q "$(basename "$LEGACY_DMG_PATH")" "$RUNNER_TEMP/appcast-arm64.xml"
+          grep -q "releases/download/${DOWNLOAD_TAG}/$(basename "$LEGACY_DMG_PATH")" "$RUNNER_TEMP/appcast.xml"
+          grep -q "releases/download/${DOWNLOAD_TAG}/$(basename "$DMG_PATH")" "$RUNNER_TEMP/appcast-arm64.xml"
+          if grep -q "$(basename "$DMG_PATH")" "$RUNNER_TEMP/appcast.xml"; then
+            echo "::error::Architecture feed contains the wrong DMG"; exit 1
+          fi
+          if grep -q "$(basename "$LEGACY_DMG_PATH")" "$RUNNER_TEMP/appcast-arm64.xml"; then
+            echo "::error::Architecture feed contains the wrong DMG"; exit 1
+          fi
 
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
           echo "ARM64_APPCAST_PATH=$RUNNER_TEMP/appcast-arm64.xml" >> "$GITHUB_ENV"
@@ -321,36 +255,40 @@ jobs:
           echo "Generated appcast-arm64.xml (Apple Silicon):"
           cat "$RUNNER_TEMP/appcast-arm64.xml"
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/mac-v')
-        uses: softprops/action-gh-release@v3
-        with:
-          # The CLI entries are empty when publication failed; unmatched
-          # entries are skipped (fail_on_unmatched_files is off) so the app
-          # release still goes out.
-          files: |
-            ${{ env.DMG_PATH }}
-            ${{ env.LEGACY_DMG_PATH }}
-            ${{ env.APPCAST_PATH }}
-            ${{ env.ARM64_APPCAST_PATH }}
-            ${{ env.CLI_ARM64_ZIP }}
-            ${{ env.CLI_X86_64_ZIP }}
-            ${{ env.CLI_MANIFEST }}
-            ${{ env.CLI_MANIFEST_SIG }}
-          body_path: ${{ runner.temp }}/release-notes.md
-          generate_release_notes: false
-          draft: false
+      # The signed bytes and installer must pass before GitHub Latest makes
+      # either appcast visible. Post-publication smoke below also checks delivery.
+      - name: Verify Sparkle installation before publication
+        if: steps.receipt.outputs.status != 'verified'
+        timeout-minutes: 20
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPARKLE_SMOKE_LOCAL_ENCLOSURE: '1'
+          SPARKLE_SMOKE_REQUIRE_SUPPORTED: '1'
+        run: |
+          scripts/sparkle-update-smoke.sh "$DMG_PATH" "$ARM64_APPCAST_PATH"
+          scripts/sparkle-update-smoke.sh "$LEGACY_DMG_PATH" "$APPCAST_PATH"
+
+      - name: Upload verified candidate artefacts
+        if: steps.receipt.outputs.status != 'verified'
+        run: |
+          gh release upload "$RELEASE_TAG" --clobber \
+            "$DMG_PATH" "$LEGACY_DMG_PATH" "$APPCAST_PATH" "$ARM64_APPCAST_PATH" \
+            "$CLI_ARM64_ZIP" "$CLI_X86_64_ZIP" "$CLI_MANIFEST" "$CLI_MANIFEST_SIG"
+          node scripts/release-train.mjs receipt --tag "$RELEASE_TAG" --surface mac-direct --status verified \
+            --asset "$DMG_PATH" --asset "$LEGACY_DMG_PATH" --asset "$APPCAST_PATH" --asset "$ARM64_APPCAST_PATH" \
+            --asset "$CLI_ARM64_ZIP" --asset "$CLI_X86_64_ZIP" --asset "$CLI_MANIFEST" --asset "$CLI_MANIFEST_SIG"
+
+      - name: Advance verified Alpha pointer
+        if: env.RELEASE_TRAIN == 'alpha'
+        run: node scripts/release-train.mjs publish-alpha --tag "$RELEASE_TAG"
 
       - name: Create Sentry Release
-        if: env.SENTRY_AUTH_TOKEN != ''
+        if: steps.receipt.outputs.status != 'verified' && env.SENTRY_AUTH_TOKEN != ''
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ env.RELEASE_VERSION }}"
           if command -v sentry-cli &>/dev/null; then
             sentry-cli releases new "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}"
             sentry-cli releases set-commits "justspeaktoit-mac@${VERSION}+${BUILD_NUMBER}" --auto
@@ -362,126 +300,8 @@ jobs:
             echo "sentry-cli not found, skipping release creation"
           fi
 
-      - name: Update Homebrew Tap
-        if: startsWith(github.ref, 'refs/tags/mac-v')
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          ARM64_SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
-          UNIVERSAL_SHA256=$(shasum -a 256 "$LEGACY_DMG_PATH" | awk '{print $1}')
-
-          echo "==> Updating Homebrew tap for version $VERSION"
-          echo "    arm64 SHA256:     $ARM64_SHA256"
-          echo "    universal SHA256: $UNIVERSAL_SHA256"
-
-          # The cask gets the per-architecture DMGs (issue #774) and depends on
-          # the speak formula, which is written from this release's standalone
-          # CLI archives when they were published (issue #775). Without them
-          # the formula is left untouched.
-          CLI_SHAS=()
-          if [ -n "${CLI_ARM64_ZIP:-}" ] && [ -n "${CLI_X86_64_ZIP:-}" ]; then
-            CLI_SHAS=(
-              "$(shasum -a 256 "$CLI_ARM64_ZIP" | awk '{print $1}')"
-              "$(shasum -a 256 "$CLI_X86_64_ZIP" | awk '{print $1}')"
-            )
-            echo "    speak arm64 SHA256:  ${CLI_SHAS[0]}"
-            echo "    speak x86_64 SHA256: ${CLI_SHAS[1]}"
-          else
-            echo "    speak CLI archives not published; formula unchanged"
-          fi
-
-          chmod +x scripts/update-homebrew-tap.sh
-          ./scripts/update-homebrew-tap.sh "$VERSION" "$ARM64_SHA256" "$UNIVERSAL_SHA256" "${CLI_SHAS[@]}"
-
-      - name: Upload Artifacts (for manual builds)
-        if: "!startsWith(github.ref, 'refs/tags/mac-v')"
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: ${{ env.PRODUCT_NAME }}-${{ steps.version.outputs.version }}
-          path: |
-            ${{ env.DMG_PATH }}
-            ${{ env.LEGACY_DMG_PATH }}
-            ${{ env.CLI_ARM64_ZIP }}
-            ${{ env.CLI_X86_64_ZIP }}
-            ${{ env.CLI_MANIFEST }}
-            ${{ env.CLI_MANIFEST_SIG }}
-
       - name: Cleanup Keychain
         if: always()
         run: |
-          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+          security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
           rm -f ~/.appstoreconnect/private_keys/AuthKey_${{ env.APP_STORE_CONNECT_KEY_ID }}.p8 || true
-
-  # Install the release we just published, for real, on a clean machine.
-  #
-  # Until now nothing ever exercised a Sparkle update: the artefacts were
-  # inspected, never installed. A broken feed, a mis-signed enclosure or an
-  # installer that cannot replace the bundle would have been found by a user
-  # first (2026-09-02). This job downloads the published arm64 DMG and its
-  # appcast, and makes a throw-away copy of the app update *itself* headlessly
-  # from a synthetic feed that re-uses the real signed enclosure — see the
-  # header of scripts/sparkle-update-smoke.sh for what that does and does not
-  # prove.
-  #
-  # Meaningful only from the first release that contains the headless smoke mode:
-  # the script prints SKIPPED and exits 0 for an app whose Info.plist has no
-  # SpeakSparkleSmokeSupported marker.
-  sparkle-update-smoke:
-    name: Sparkle Update Smoke
-    needs: build-and-release
-    if: startsWith(github.ref, 'refs/tags/mac-v')
-    runs-on: macos-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      # A failed update round trip is surfaced as an issue as well as a failed job.
-      issues: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: Download the published arm64 DMG and appcast
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/sparkle-smoke"
-          gh release download "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            -p 'JustSpeakToIt-arm64.dmg' \
-            -p 'appcast-arm64.xml' \
-            -D "$RUNNER_TEMP/sparkle-smoke"
-          ls -la "$RUNNER_TEMP/sparkle-smoke"
-
-      - name: Update the app from its own appcast
-        run: |
-          scripts/sparkle-update-smoke.sh \
-            "$RUNNER_TEMP/sparkle-smoke/JustSpeakToIt-arm64.dmg" \
-            "$RUNNER_TEMP/sparkle-smoke/appcast-arm64.xml"
-
-      - name: Report a failed update round trip
-        if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TITLE="Sparkle update smoke failed for ${GITHUB_REF_NAME}"
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          BODY="The published \`${GITHUB_REF_NAME}\` build could not update itself from its own appcast: ${RUN_URL}
-
-          The smoke test copies the released app out of the DMG, serves the real
-          \`appcast-arm64.xml\` with \`sparkle:version\` bumped by one, and lets the copy
-          install the real signed enclosure over itself. A failure here means users on
-          the previous release may not be able to update — check the run log for which
-          assertion failed (Sparkle's verdict, the code signature, the installed
-          \`CFBundleVersion\`, or the relaunch) before announcing the release.
-
-          Refs \`scripts/sparkle-update-smoke.sh\`."
-          EXISTING="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number')"
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body "$BODY" || echo "::warning::Could not comment on issue #$EXISTING"
-          else
-            gh issue create --title "$TITLE" --body "$BODY" || echo "::warning::Could not open the follow-up issue"
-          fi

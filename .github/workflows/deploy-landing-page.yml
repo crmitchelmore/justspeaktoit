@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'landing-page/**'
+      - '.github/workflows/deploy-landing-page.yml'
   workflow_dispatch:
 
 jobs:
@@ -20,9 +21,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Verify and build website
+        working-directory: landing-page
+        run: |
+          npm test
+          npm run build
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy landing-page --project-name=justspeaktoit
+          command: pages deploy landing-page/dist --project-name=justspeaktoit

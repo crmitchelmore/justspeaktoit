@@ -10,43 +10,49 @@ import SwiftUI
 struct ConfigTransferView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var qrImage: NSImage?
-    @State private var transferCode: String?
+    @State private var presentation: ConfigTransferPresentation?
     @State private var isGenerating = false
     @State private var error: String?
     @State private var secretCount = 0
     @State private var settingCount = 0
-    
+
     private let secureStorage: SecureAppStorage
-    
+
     init(secureStorage: SecureAppStorage) {
         self.secureStorage = secureStorage
     }
-    
+
     public var body: some View {
         VStack(spacing: 20) {
             Text("Transfer to iOS")
                 .font(.headline)
-            
+
             if isGenerating {
                 ProgressView("Generating QR Code…")
                     .padding()
             } else if let image = qrImage {
                 VStack(spacing: 16) {
-                    Image(nsImage: image)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 200, height: 200)
-                        .background(Color.white)
-                        .cornerRadius(8)
-                    
-                    Text("Scan with Just Speak to It on iOS")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if presentation?.isShowingQRCode == true {
+                        Image(nsImage: image)
+                            .interpolation(.none)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 200, height: 200)
+                            .background(Color.white)
+                            .cornerRadius(8)
 
-                    if let transferCode {
+                        Text("Scan with Just Speak to It on iOS")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button(ConfigTransferPresentation.revealButtonTitle) {
+                            presentation?.revealCode()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+
+                    if let transferCode = presentation?.visibleCode {
                         VStack(spacing: 4) {
-                            Text("Then enter this code")
+                            Text("Enter this code on the receiving device")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text(ConfigTransferCode.formatted(transferCode))
@@ -68,8 +74,11 @@ struct ConfigTransferView: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    
-                    Text("Code expires in 10 minutes")
+
+                    Text(ConfigTransferPresentation.captureNotice)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(ConfigTransferPresentation.expiryNotice)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -99,13 +108,13 @@ struct ConfigTransferView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            
+
             Divider()
-            
+
             HStack {
                 Button("Close") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                
+
                 if qrImage != nil {
                     Button("Regenerate") {
                         Task { await generateQRCode() }
@@ -113,20 +122,28 @@ struct ConfigTransferView: View {
                 }
             }
         }
+        .transaction { transaction in
+            transaction.animation = nil
+            transaction.disablesAnimations = true
+        }
         .padding(24)
         .frame(width: 300)
         .task { await generateQRCode() }
     }
-    
+
     private func generateQRCode() async {
+        guard !isGenerating else { return }
         isGenerating = true
         error = nil
+        qrImage = nil
+        presentation = nil
 
         do {
             // Gather secrets and settings via the shared transfer manager so
             // both platforms use the same key list and payload format.
             let manager = ConfigTransferManager.shared
             let secrets = try await manager.gatherSecrets(storage: secureStorage.coreStorage())
+            try Task.checkCancellation()
             let settings = manager.gatherSettings(liveModelDefaultsKey: "liveTranscriptionModel")
 
             secretCount = secrets.count
@@ -134,13 +151,13 @@ struct ConfigTransferView: View {
 
             guard !secrets.isEmpty || !settings.isEmpty else {
                 qrImage = nil
-                transferCode = nil
+                presentation = nil
                 isGenerating = false
                 return
             }
 
-            // The QR carries only ciphertext; the one-time code below it is what
-            // decrypts it, and it travels by the user reading it out.
+            // A fresh transfer resets the one-way presentation flow. The QR
+            // must leave the view before the unlock code can be shown.
             let transfer = try manager.makeTransfer(
                 secrets: secrets,
                 settings: settings
@@ -154,10 +171,10 @@ struct ConfigTransferView: View {
             let nsImage = NSImage(size: rep.size)
             nsImage.addRepresentation(rep)
             qrImage = nsImage
-            transferCode = transfer.code
+            presentation = ConfigTransferPresentation(code: transfer.code)
         } catch {
             qrImage = nil
-            transferCode = nil
+            presentation = nil
             self.error = error.localizedDescription
         }
 

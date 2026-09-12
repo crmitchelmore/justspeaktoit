@@ -264,15 +264,21 @@ struct HUDOverlay: View {
         Image(systemName: micIcon)
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(micColor)
-          .accessibilityLabel("Microphone: \(microphonePermissionLabel)")
+          .accessibilityLabel("Microphone permission: \(microphonePermissionLabel)")
 
-        Text(deviceLabel)
+        Text(health.noInputDevicesAvailable ? deviceLabel : "Preferred: \(deviceLabel)")
           .font(.caption2)
           .foregroundStyle(health.noInputDevicesAvailable ? micColor : .secondary)
           .lineLimit(usesAccessibilityLayout ? 3 : 1)
           .truncationMode(.tail)
-          .help(deviceLabel)
-          .accessibilityLabel("Input device: \(deviceLabel)")
+          .help(
+            health.noInputDevicesAvailable
+              ? "No microphone connected. Connect a microphone to record."
+              : "Preferred microphone: \(deviceLabel). Changes apply to new recording sessions."
+          )
+          .accessibilityLabel(
+            health.noInputDevicesAvailable ? deviceLabel : "Preferred microphone: \(deviceLabel)"
+          )
       }
 
       if !usesAccessibilityLayout {

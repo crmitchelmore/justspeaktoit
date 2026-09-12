@@ -151,7 +151,12 @@ struct CompactHUDContent: View {
         Image(systemName: health.noInputDevicesAvailable ? "mic.slash.fill" : "mic.fill")
           .font(.caption2.weight(.semibold))
           .foregroundStyle(health.noInputDevicesAvailable ? Color.red : .secondary)
-        Text(deviceLabel(health))
+        Text(health.noInputDevicesAvailable ? deviceLabel(health) : "Preferred: \(deviceLabel(health))")
+          .help(
+            health.noInputDevicesAvailable
+              ? "No microphone connected. Connect a microphone to record."
+              : "Preferred microphone: \(deviceLabel(health)). Changes apply to new recording sessions."
+          )
           .font(.caption2)
           .foregroundStyle(.secondary)
           .lineLimit(1)
@@ -170,7 +175,12 @@ struct CompactHUDContent: View {
       }
       .frame(maxWidth: .infinity, alignment: .center)
       .accessibilityElement(children: .combine)
-      .accessibilityLabel("Input \(deviceLabel(health)), provider \(health.providerLabel)")
+      .accessibilityLabel(
+        (health.noInputDevicesAvailable
+          ? "No microphone connected"
+          : "Preferred microphone: \(deviceLabel(health))")
+          + ", provider: \(health.providerLabel)"
+      )
     }
   }
 

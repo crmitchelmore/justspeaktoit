@@ -13,7 +13,9 @@ import SpeakiOSLib
 
 @available(iOS 18.0, *)
 struct JustSpeakToItWidgetExtensionControl: ControlWidget {
-    static let kind: String = "com.justspeaktoit.ios.JustSpeakToItWidgetExtension"
+    // Shared with the app so a rename cannot orphan a placed control or leave
+    // the app reloading a kind that no longer exists.
+    static let kind: String = CaptureSurfaceKind.transcriptionControl
 
     var body: some ControlWidgetConfiguration {
         AppIntentControlConfiguration(
@@ -29,10 +31,12 @@ struct JustSpeakToItWidgetExtensionControl: ControlWidget {
                     isRecording ? "Recording..." : "Transcribe",
                     systemImage: isRecording ? "stop.circle.fill" : "mic.fill"
                 )
+                // The hint describes the action that enters the represented state.
+                .controlWidgetActionHint(isRecording ? "Start dictation" : "Stop dictation")
             }
         }
         .displayName("Transcribe Voice")
-        .description("Start or stop voice transcription. Copies result to clipboard.")
+        .description("Start or stop voice transcription.")
     }
 }
 

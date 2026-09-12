@@ -26,6 +26,7 @@ public final class RecordingLifecycleCoordinator {
     public private(set) var state: RecordingServiceState = .idle
 
     private var activeStartRunID: UUID?
+    private var cancelStartingSession: (() -> Void)?
     private var settleWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init() {}
@@ -51,11 +52,27 @@ public final class RecordingLifecycleCoordinator {
     }
 
     /// Retires the in-flight startup run (a stop/cancel during `starting`).
-    /// The suspended run observes this at its next identity check and unwinds
-    /// everything it allocated itself.
+    /// Cancels its allocated session immediately when a hook is installed.
+    /// The suspended run still owns cleanup and settlement, so replacements
+    /// cannot acquire resources before the old startup finishes unwinding.
     public func retireStartRun() {
         guard state == .starting else { return }
         activeStartRunID = nil
+        let cancel = cancelStartingSession
+        cancelStartingSession = nil
+        cancel?()
+    }
+
+    /// Gives the current run ownership of its allocated session's cancellation.
+    /// A late installation is cancelled immediately and cannot attach to a new run.
+    @discardableResult
+    public func installStartCancellation(for runID: UUID, cancel: @escaping () -> Void) -> Bool {
+        guard isCurrentStartRun(runID) else {
+            cancel()
+            return false
+        }
+        cancelStartingSession = cancel
+        return true
     }
 
     /// Publishes successful activation for the given run. Returns `false`
@@ -64,6 +81,7 @@ public final class RecordingLifecycleCoordinator {
     public func activate(_ runID: UUID) -> Bool {
         guard isCurrentStartRun(runID) else { return false }
         activeStartRunID = nil
+        cancelStartingSession = nil
         state = .recording
         settle()
         return true
@@ -74,6 +92,7 @@ public final class RecordingLifecycleCoordinator {
     public func finishStartUnwind() {
         if state == .starting {
             activeStartRunID = nil
+            cancelStartingSession = nil
             state = .idle
         }
         settle()
@@ -90,6 +109,7 @@ public final class RecordingLifecycleCoordinator {
     /// Completes a stop (or a full cancel teardown) back to `idle`.
     public func finishStopping() {
         activeStartRunID = nil
+        cancelStartingSession = nil
         state = .idle
         settle()
     }

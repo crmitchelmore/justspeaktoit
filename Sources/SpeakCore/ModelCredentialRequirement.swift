@@ -95,6 +95,9 @@ public enum ModelCredentialResolver {
             )
         }
 
+        if AzureTranscriptionModels.batchIDs.contains(modelIdentifier) {
+            return .apiKey(identifier: AzureSpeechConfiguration.credentialIdentifier, providerName: "Azure Speech")
+        }
         let provider = providerPrefix(in: modelIdentifier)
         if directBatchProviderIdentifiers.contains(provider) {
             return .apiKey(
@@ -196,6 +199,7 @@ public enum ModelCredentialResolver {
     )
 
     private static let directBatchProviderIdentifiers: Set<String> = [
+        "cartesia",
         "assemblyai",
         "deepgram",
         "elevenlabs",
@@ -206,7 +210,8 @@ public enum ModelCredentialResolver {
         "modulate",
         "revai",
         "soniox",
-        "speechmatics"
+        "speechmatics",
+        "xai"
     ]
 
     /// Every API-key identifier the canonical catalogues can require, derived

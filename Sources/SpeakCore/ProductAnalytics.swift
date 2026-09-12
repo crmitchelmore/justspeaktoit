@@ -49,6 +49,7 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
 
     private static let liveProviderMapping: [LiveTranscriptionProviderID: AnalyticsProviderType] = [
         .apple: .apple,
+        .azure: .azure,
         .deepgram: .deepgram,
         .cartesia: .cartesia,
         .gladia: .gladia,
@@ -60,7 +61,9 @@ public enum AnalyticsProviderType: String, Codable, Sendable {
         .openai: .openAI,
         .speechmatics: .speechmatics,
         .xai: .xAI,
-        .meta: .meta
+        .meta: .meta,
+        .revai: .revAI,
+        .mistral: .mistral
     ]
 
     public init(liveProvider: LiveTranscriptionProviderID) {
@@ -379,7 +382,9 @@ public actor ProductAnalyticsController {
     private let stateStore: any ProductAnalyticsStateStore
     private let forceDisabled: @Sendable () -> Bool
     private var consent: AnalyticsConsentState
-    private var sinkIsClosed = false
+    private var sinkIsClosed = true
+    private var consentRevision = UUID()
+    private var suspensionTask: Task<Void, Error>?
 
     public init(
         context: ProductAnalyticsContext,
@@ -399,7 +404,12 @@ public actor ProductAnalyticsController {
     /// Applies a consent transition fail-closed: collection is only ever enabled after the new state is persisted,
     /// and every opt-out cleanup step is attempted even when an earlier step fails.
     public func setConsent(_ newConsent: AnalyticsConsentState) async throws {
+        let revision = UUID()
+        consentRevision = revision
         guard newConsent != .optedIn else {
+            // A newer opt-in must not reopen a client whose withdrawal is still purging/closing it.
+            if let suspensionTask { try await suspensionTask.value }
+            guard consentRevision == revision else { return }
             try stateStore.saveConsent(newConsent)
             guard !forceDisabled() else {
                 consent = newConsent
@@ -407,6 +417,12 @@ public actor ProductAnalyticsController {
                 return
             }
             try await sink.reopen()
+            guard consentRevision == revision else { return }
+            guard !forceDisabled() else {
+                consent = newConsent
+                try await suspendCollection()
+                return
+            }
             sinkIsClosed = false
             consent = newConsent
             return
@@ -431,13 +447,25 @@ public actor ProductAnalyticsController {
 
     public func capture(_ event: ProductAnalyticsEvent) async throws {
         guard consent.permitsCollection else { return }
+        let revision = consentRevision
+        guard !forceDisabled() else {
+            try await suspendCollection()
+            return
+        }
+        if let suspensionTask { try await suspensionTask.value }
+        guard consentRevision == revision, consent.permitsCollection else { return }
         guard !forceDisabled() else {
             try await suspendCollection()
             return
         }
         if sinkIsClosed {
             try await sink.reopen()
+            guard consentRevision == revision, consent.permitsCollection else { return }
             sinkIsClosed = false
+        }
+        guard !forceDisabled() else {
+            try await suspendCollection()
+            return
         }
         let distinctID = event.privacyClass == .pseudonymous ? try installationID() : nil
         try await sink.capture(ProductAnalyticsPayload(event: event, context: context, distinctID: distinctID))
@@ -463,13 +491,21 @@ public actor ProductAnalyticsController {
     }
 
     private func suspendCollection(deleteIdentity: Bool = true) async throws {
+        if let suspensionTask { return try await suspensionTask.value }
+        sinkIsClosed = true
+        let cleanup = Task { try await self.performSuspension(deleteIdentity: deleteIdentity) }
+        suspensionTask = cleanup
+        defer { suspensionTask = nil }
+        try await cleanup.value
+    }
+
+    private func performSuspension(deleteIdentity: Bool) async throws {
         var firstFailure: Error?
         do { try await sink.purge() } catch { firstFailure = error }
         if deleteIdentity {
             do { try stateStore.deleteInstallationID() } catch { firstFailure = firstFailure ?? error }
         }
         await sink.close()
-        sinkIsClosed = true
         if let firstFailure { throw firstFailure }
     }
 }

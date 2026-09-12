@@ -10,6 +10,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
   case apiKeys
   case shortcuts
   case permissions
+  case compareModels
   case dataMigration
   case about
 
@@ -32,6 +33,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .apiKeys: return "API Keys"
     case .shortcuts: return "Keyboard"
     case .permissions: return "Permissions"
+    case .compareModels: return "Compare Models"
     case .dataMigration: return "Data & Migration"
     case .about: return "About"
     }
@@ -48,6 +50,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case .apiKeys: return "key.fill"
     case .shortcuts: return "keyboard"
     case .permissions: return "hand.raised.fill"
+    case .compareModels: return "rectangle.split.3x1"
     case .dataMigration: return "arrow.up.arrow.down.square"
     case .about: return "info.circle"
     }

@@ -4,6 +4,19 @@ import XCTest
 @testable import SpeakCore
 
 final class LiveClientOptionsTests: XCTestCase {
+    func testLegacyOptionsInitializerKeepsNeutralTimingAndRequiredInitializerSanitizes() {
+        let legacy = LiveClientOptions(keywords: ["legacy"])
+        XCTAssertNil(legacy.postStopFinalizeBudget)
+        XCTAssertEqual(legacy.stopGracePeriod, 0)
+
+        let configured = LiveClientOptions(
+            keywords: [], assemblyAIKeyterms: [], modulate: .none,
+            postStopFinalizeBudget: -.infinity, stopGracePeriod: -2
+        )
+        XCTAssertNil(configured.postStopFinalizeBudget)
+        XCTAssertEqual(configured.stopGracePeriod, 0)
+    }
+
     func testAssemblyAIInitializersPreserveLegacyURLAndEncodeBoundedKeyterms() throws {
         let legacy = AssemblyAILiveClient(apiKey: "test-key")
         let empty = AssemblyAILiveClient(apiKey: "test-key", keyterms: [])

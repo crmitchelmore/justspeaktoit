@@ -89,11 +89,15 @@ public enum LiveTranscriptionClientFactory {
                 apiKey: apiKey, sampleRate: route.sampleRate, options: options.modulate
             )
         case .assemblyai:
+            let fallbackBudget = ModelCatalog.liveCapabilities(for: route.modelID)
+                .postStopFinalizeBudget
             return AssemblyAILiveClient(
                 apiKey: apiKey,
                 speechModel: route.apiModelName,
                 sampleRate: route.sampleRate,
-                keyterms: options.assemblyAIKeyterms
+                keyterms: options.assemblyAIKeyterms,
+                postStopFinalizeBudget: options.postStopFinalizeBudget ?? fallbackBudget,
+                stopGracePeriod: options.stopGracePeriod
             )
         case .gladia:
             return GladiaLiveClient(

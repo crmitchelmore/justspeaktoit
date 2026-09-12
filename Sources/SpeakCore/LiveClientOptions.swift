@@ -25,6 +25,8 @@ public struct LiveClientOptions: Sendable, Equatable {
     public let keywords: [String]
     public let assemblyAIKeyterms: [String]
     public let modulate: ModulateLiveOptions
+    public let postStopFinalizeBudget: TimeInterval?
+    public let stopGracePeriod: TimeInterval
 
     public init(
         keywords: [String] = [],
@@ -34,5 +36,26 @@ public struct LiveClientOptions: Sendable, Equatable {
         self.keywords = keywords
         self.assemblyAIKeyterms = assemblyAIKeyterms
         self.modulate = modulate
+        self.postStopFinalizeBudget = nil
+        self.stopGracePeriod = 0
+    }
+
+    public init(
+        keywords: [String],
+        assemblyAIKeyterms: [String],
+        modulate: ModulateLiveOptions,
+        postStopFinalizeBudget: TimeInterval?,
+        stopGracePeriod: TimeInterval
+    ) {
+        self.keywords = keywords
+        self.assemblyAIKeyterms = assemblyAIKeyterms
+        self.modulate = modulate
+        self.postStopFinalizeBudget = Self.sanitized(postStopFinalizeBudget)
+        self.stopGracePeriod = Self.sanitized(stopGracePeriod) ?? 0
+    }
+
+    private static func sanitized(_ value: TimeInterval?) -> TimeInterval? {
+        guard let value, value.isFinite else { return nil }
+        return max(0, value)
     }
 }

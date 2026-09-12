@@ -1,5 +1,4 @@
 import Foundation
-import SpeakCore
 
 /// Owns the on-disk lifecycle of multipart upload body files (issue #706).
 ///
@@ -9,12 +8,12 @@ import SpeakCore
 /// Bodies claimed by in-flight uploads are tracked in an in-process registry and
 /// are never purged. Removal failures are logged without file contents and are
 /// retried by the next purge pass.
-final class MultipartUploadStaging: @unchecked Sendable {
-  static let shared = MultipartUploadStaging()
+public final class MultipartUploadStaging: @unchecked Sendable {
+  public static let shared = MultipartUploadStaging()
 
   /// Conservative age after which an unclaimed upload body counts as abandoned.
   /// In-flight bodies are protected by the claim registry regardless of age.
-  static let defaultStalenessThreshold: TimeInterval = 60 * 60
+  public static let defaultStalenessThreshold: TimeInterval = 60 * 60
 
   private let directory: URL
   private let stalenessThreshold: TimeInterval
@@ -23,7 +22,7 @@ final class MultipartUploadStaging: @unchecked Sendable {
   private var claimedPaths: Set<String> = []
   private let logger = SpeakLogger.logger(category: "MultipartUploadStaging")
 
-  init(
+  public init(
     directory: URL = FileManager.default.temporaryDirectory
         .appendingPathComponent(ReleaseTrain.current.namespace("speak-multipart-uploads"), isDirectory: true),
     stalenessThreshold: TimeInterval = MultipartUploadStaging.defaultStalenessThreshold,
@@ -37,7 +36,7 @@ final class MultipartUploadStaging: @unchecked Sendable {
   /// Creates an empty upload body file and claims it for the current upload so a
   /// concurrent purge can never remove it. Callers must hand the URL back to
   /// `removeUploadBodyFile(at:)` once the upload finishes or fails.
-  func createUploadBodyFile(providerID: String) throws -> URL {
+  public func createUploadBodyFile(providerID: String) throws -> URL {
     // Retry removals that previously failed; the directory only ever holds
     // in-flight bodies, so the scan is cheap.
     self.purgeStaleUploads()
@@ -70,7 +69,7 @@ final class MultipartUploadStaging: @unchecked Sendable {
 
   /// Removes an upload body and releases its claim. A failed removal is logged
   /// (never the contents) and retried by a later purge pass once stale.
-  func removeUploadBodyFile(at url: URL) {
+  public func removeUploadBodyFile(at url: URL) {
     self.releaseClaim(url)
     do {
       try self.fileManager.removeItem(at: url)
@@ -88,7 +87,7 @@ final class MultipartUploadStaging: @unchecked Sendable {
 
   /// Deletes abandoned `*-upload-*.multipart` files older than the staleness
   /// threshold. Bodies claimed by in-flight uploads are never touched.
-  func purgeStaleUploads(now: Date = Date()) {
+  public func purgeStaleUploads(now: Date = Date()) {
     guard let candidates = try? self.fileManager.contentsOfDirectory(
       at: self.directory,
       includingPropertiesForKeys: [.contentModificationDateKey],

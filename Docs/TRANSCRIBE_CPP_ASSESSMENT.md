@@ -107,13 +107,22 @@ Parakeet or streaming models only in separately labelled reports.
 Build the benchmark tool without building or launching the app:
 
 ```sh
-swift build --product local-transcription-benchmark
+swift build --package-path Benchmarks/LocalTranscription --product local-transcription-benchmark
 ```
+
+Run the benchmark package's qualification tests without model inference:
+
+```sh
+swift test --package-path Benchmarks/LocalTranscription
+```
+
+The Make target accepts the same `run` and `compare` arguments through `BENCH_ARGS`, for example
+`make bench BENCH_ARGS='compare --baseline … --candidate … --evidence … --output …'`.
 
 Create the WhisperKit baseline:
 
 ```sh
-swift run local-transcription-benchmark run \
+swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark run \
   --engine whisperkit \
   --model openai_whisper-large-v3-v20240930_turbo_632MB \
   --repo argmaxinc/whisperkit-coreml \
@@ -127,7 +136,7 @@ swift run local-transcription-benchmark run \
 Create the transcribe.cpp candidate report with a checksum-verified GGUF pinned to a Hugging Face revision:
 
 ```sh
-swift run local-transcription-benchmark run \
+swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark run \
   --engine transcribe.cpp \
   --model /path/to/whisper-large-v3-turbo-Q8_0.gguf \
   --model-source https://huggingface.co/handy-computer/whisper-large-v3-turbo-gguf/resolve/PINNED_REVISION/whisper-large-v3-turbo-Q8_0.gguf \
@@ -149,7 +158,7 @@ Copy `Benchmarks/LocalTranscription/evidence.example.json` and fill it from obse
 is complete only when it has a pinned URL, 64-character SHA-256, byte size, and license. Then run:
 
 ```sh
-swift run local-transcription-benchmark compare \
+swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark compare \
   --baseline /path/to/whisperkit.json \
   --candidate /path/to/transcribe-cpp.json \
   --evidence /path/to/evidence.json \
@@ -169,7 +178,7 @@ Do not add a transcribe.cpp model to `ModelCatalog`, migrate saved selections, o
 test. If the full gate passes, follow with a separate opt-in production-adapter PR and retain the WhisperKit adapter
 through at least one observed release.
 
-## Build and linkage evidence for this assessment PR
+## Historical build and linkage evidence for the assessment PR
 
 - `swift test --filter LocalTranscriptionBenchmarkTests`: 9 tests passed.
 - The selected test build also compiled the typed `SpeakCore` routing and catalogue test target.

@@ -1,6 +1,6 @@
 # Issue value review — 12 September 2026
 
-This is review evidence, not a replacement for the canonical issue tracker. The initial inventory contained 98 open issues and four open PRs. This checkpoint contains 62 completed independent issue reviews; the remaining issues are not yet assessed. Implementation and validation are separate from these recommendations.
+This is review evidence, not a replacement for the canonical issue tracker. The initial inventory contained 98 open issues and four open PRs. This checkpoint contains 78 completed independent issue reviews; the remaining issues are not yet assessed. Implementation and validation are separate from these recommendations.
 
 ## Method and product goals
 
@@ -12,7 +12,7 @@ Native Apple builds and physical device checks cannot run on this Linux host. No
 
 ## Implementation evidence
 
-[Draft PR #1130](https://github.com/crmitchelmore/justspeaktoit/pull/1130) implements #1104. Its published tree matches the locally reviewed tree. Initial Apple CI found two initializer compiler errors and 15 lint findings; corrections are published at `2bb644d` for CI. Provider/device acceptance remains pending.
+[Draft PR #1130](https://github.com/crmitchelmore/justspeaktoit/pull/1130) implements #1104. Its published tree matches the locally reviewed tree. Initial Apple CI found two initializer compiler errors and 15 lint findings; corrections are published at `2bb644d`. Its iOS job passed 480 unit cases and six simulator UI cases; the Mac suite ran 3,431 cases with five skips and one stale ElevenLabs contract expectation. That expectation plus fixture race fixes are published at `dea8de8b` for rerun; native final acceptance remains pending.
 
 [Draft PR #1131](https://github.com/crmitchelmore/justspeaktoit/pull/1131) implements #1115 settings extraction. The exact 17 persisted keys have a compatibility test, moved bodies were mechanically checked, Apple CI found a cross-file access error in APIKeysView.entries; the one-line internal-visibility correction is published at `b7f05f2` for rerun. Simulator navigation remains pending.
 
@@ -27,6 +27,14 @@ Native Apple builds and physical device checks cannot run on this Linux host. No
 [Draft PR #1136](https://github.com/crmitchelmore/justspeaktoit/pull/1136) implements #994 clipboard privacy on #1131. It defaults transcript copies to local-only with five-minute system expiry, exposes finite lifetime and Universal Clipboard choices, and preserves later-copy ownership. Policy/persistence tests are added; Apple execution and device expiry/Handoff remain gates. Published `091fb7a` includes the #1131 build correction.
 
 [Draft PR #1137](https://github.com/crmitchelmore/justspeaktoit/pull/1137) implements #996 safe startup error recovery on #1136. It distinguishes actual missing keys, locked storage and permission denial, keeps cancellation/ownership suppression, and does not expose arbitrary provider descriptions at startup alerts/intents. Focused tests are added; Apple execution, Settings navigation and device continuation remain gates. Published commit: `7c27d66`.
+
+[Draft PR #1138](https://github.com/crmitchelmore/justspeaktoit/pull/1138) implements #661 keyboard documentation corrections. The three runbooks now match shipping handoff and manifest/train identities; source/link checks passed. Physical acceptance stays open.
+
+[Draft PR #1139](https://github.com/crmitchelmore/justspeaktoit/pull/1139) implements #999 strict offline capture on #1137. Known-offline ordinary live requests may select a capable local recognizer, while explicit/profile remote requests refuse. The final Apple backend remains strict after missing-key fallback and on rolling restarts. Native/device network qualification is pending.
+
+[Draft PR #1140](https://github.com/crmitchelmore/justspeaktoit/pull/1140) implements #664 verification runbook and result template. It preserves Chris’s detailed TextEdit results, Notes and baseline blocked rows, and the distinction between exact delivery and preserving user edits. Source/link checks passed; it asserts no new Mac run.
+
+[Draft PR #1141](https://github.com/crmitchelmore/justspeaktoit/pull/1141) implements #963 Stop-only small Live Activity presentation. iOS 18 guards, all ten states, 44-point Stop target and privacy-minimal content are source-checked; native rendering and paired tap/Double Tap delivery remain required. Existing owner and completion semantics are preserved.
 
 Detailed accepted-scope plans are in `issue-plans-2026-09-12/`. [Runtime analytics qualification](issue-plans-2026-09-12/1121-evidence.md) found insufficient runtime-identifying production telemetry; unavailable usage is not zero usage.
 
@@ -87,7 +95,23 @@ Detailed accepted-scope plans are in `issue-plans-2026-09-12/`. [Runtime analyti
 | [#956](https://github.com/crmitchelmore/justspeaktoit/issues/956) — iOS: defer Vocal Shortcuts setup guidance pending device verification | DEFER | A verified voice-trigger setup could improve hands-free accessibility and discovery with little UI cost. Publishing unverified instructions would undermine reliable capture and clear recovery, which outrank speculative trigger breadth. The explicit physical-device re-entry gate remains unsatisfied; no comments supply new device evidence. |
 | [#958](https://github.com/crmitchelmore/justspeaktoit/issues/958) — iOS: defer automation recipes pending a verified device walkthrough | DEFER | A demonstrated deliberate trigger-to-History recipe could reduce repeated setup friction and support fast native capture. The explicit physical-device walkthrough gate remains unsatisfied in the supplied evidence. Adding another gallery or parameters would duplicate current main and would not prove reliable capture, stop or delivery. |
 | [#959](https://github.com/crmitchelmore/justspeaktoit/issues/959) — iOS: defer AirPods-triggered priming and background hands-free arming | DEFER | Hands-free convenience fits instant dictation, but accessory connection does not establish recording intent. The supplied issue correctly distinguishes microphone-free preparation from background VAD. Current Start already has the LiveActivityIntent correction, so the residual Bluetooth-specific benefit needs measurement before adding actions, lifecycle ownership or listening behaviour. Preserve foreground explicit arming and truthful readiness. |
+| [#960](https://github.com/crmitchelmore/justspeaktoit/issues/960) — iOS: defer calendar-scheduled Live Activity pending need and device evidence | DEFER | A meeting-timed recording card could reduce effort for a specific recurring meeting workflow, but no such unmet need or observed timing benefit is supplied. Existing explicit start paths now contain the earlier Live Activity fixes. Calendar reading, scheduling, cancellation and Lock Screen disclosure add scope and privacy cost without evidence they improve the core instant, reliable dictation outcome. Reassess against the fixed existing start journey before funding a feature. |
+| [#961](https://github.com/crmitchelmore/justspeaktoit/issues/961) — iOS: defer repeated foreground auto-start pending ownership and activation policy | DEFER | Warm-return auto-start can save a tap, but repeated implicit microphone activation lacks a defined user-intent boundary. Reliable capture and clear privacy controls have greater value than extending automation while explicit command ordering and hands-free re-arm policy remain material. Existing startup guards now address part of the original safety concern; they do not establish consent or ordering for each foreground return. |
+| [#962](https://github.com/crmitchelmore/justspeaktoit/issues/962) — iOS/watchOS: defer a separate wrist Control pending paired-device relay evidence | DEFER | Starting reliable phone dictation from the wrist fits instant native capture, but a second control adds discovery and maintenance cost without evidence the existing control cannot serve that purpose. The current issue explicitly requires a paired-device experiment before implementation. Preserve this product gate; existing native Watch recording is a different capability. |
+| [#963](https://github.com/crmitchelmore/justspeaktoit/issues/963) — Pinch to stop: a Double Tap primary action on the Live Activity in the watch Smart Stack | IMPLEMENT | A visible wrist Stop control reduces the need to retrieve a phone during an existing dictation. It directly serves fast, reliable native capture and can reuse the established Stop intent. The refined Stop-only scope is worthwhile without shipping or enabling the separate native Watch recorder. |
+| [#964](https://github.com/crmitchelmore/justspeaktoit/issues/964) — Watch-native triggers: App Shortcut (Siri), watchOS 26 Control, Ultra Action button, Double Tap stop | DEFER | A native Watch trigger can reduce capture friction, but adding several entry points before proving reliable Watch recording and delivery would expand unverified failure paths. Existing in-app Double Tap and complication intents already supply much of the requested value. The current explicit baseline hardware gates remain unmet in supplied evidence; this is a sequencing/value decision, not a Linux-only deferral. |
+| [#965](https://github.com/crmitchelmore/justspeaktoit/issues/965) — watchOS: defer startup reorder and recording cues pending hardware evidence | DEFER | Preserving opening words and making recording readiness clear fit the core product goals. However, no measured Watch startup or cue failure demonstrates value for a lifecycle change. Current serialisation and recovery protect retained audio; speculative reordering risks that stronger user outcome. The explicit hardware re-entry gate remains appropriate. |
+| [#966](https://github.com/crmitchelmore/justspeaktoit/issues/966) — iOS: defer background Watch uploads pending post-retry device evidence | DEFER | Completing Watch captures without reopening the phone would support reliable, low-friction dictation. However the premature terminal-failure defect is now repaired in current code; no post-repair device evidence establishes a remaining completion failure worth adding relaunch-safe provider/session orchestration. Preserve this explicit evidence gate, rather than implementing speculative background scheduling. |
+| [#967](https://github.com/crmitchelmore/justspeaktoit/issues/967) — watchOS: defer chunked capture transfer pending paired-device evidence | DEFER | Earlier usable text from long Watch notes could improve speed, but the issue supplies no paired-device baseline showing a file-size bottleneck or user need. Current durable handoff already addresses loss and duplicate delivery. Segmenting now would add substantial recovery and transcript-boundary complexity to the core reliable-dictation path without demonstrated benefit. |
+| [#968](https://github.com/crmitchelmore/justspeaktoit/issues/968) — iOS/watchOS: defer Watch completion notifications pending paired-device evidence | DEFER | Reliable Watch capture and explicit access to saved text fit the core speed, privacy and native simplicity goals. A new notification has unproven incremental value until the existing paired-device History and keyboard retrieval journey is measured. Current code already saves durably and exposes Copy; avoid adding permission prompts, alert noise and another delivery surface without a demonstrated retrieval problem. |
+| [#969](https://github.com/crmitchelmore/justspeaktoit/issues/969) — watchOS: defer native widget Double Tap and learned relevance pending evidence | DEFER | A visible Smart Stack recording gesture could reduce interaction for reliable native dictation. However, the explicit recorder hardware baseline remains unproven; adding a trigger now would expand the surface before capture and delivery are demonstrated. Learned relevance has no demonstrated navigation problem or validated habit evidence and conflicts with the preserved neutral-idle decision. The current review supplies no new evidence to lift either gate. |
+| [#970](https://github.com/crmitchelmore/justspeaktoit/issues/970) — watchOS: defer direct Watch uploads pending phone-absent device evidence | DEFER | Direct upload can reduce time to a usable transcript when the phone is absent, but no recurring need or measured destination benefit is established. The current durable relay already protects recordings while the phone is unavailable. A second paid upload path adds credential, reconciliation and battery complexity against the product priorities of reliable capture, privacy and transparent costs. Latest cached comments contain no new evidence to change the explicit deferred decision. |
+| [#971](https://github.com/crmitchelmore/justspeaktoit/issues/971) — watchOS: defer TestFlight rollout pending device baseline and tester need | DEFER | Wider Watch testing can establish reliable hands-free capture, but distribution work has no demonstrated tester need or recorded paired-device baseline in the supplied evidence. Existing development signing supports baseline collection. Respect the explicit re-entry gates; a beta toggle or new workflow adds state and maintenance before a user benefit is established. |
+| [#973](https://github.com/crmitchelmore/justspeaktoit/issues/973) — iOS: defer mixable-first background activation pending device evidence | DEFER | Instant dictation matters, but this policy change has no measured startup benefit or reproduced failure. Current isolated activation already fails fast; choosing mixing early can change other-audio playback. Preserve reliable capture until physical-device evidence demonstrates worthwhile scope. |
 | [#974](https://github.com/crmitchelmore/justspeaktoit/issues/974) — One audio-session configuration shared by readiness, detector and transcribers; caller-owned deactivation | DEFER | Reliable first-word capture and repeat keyboard dictation matter, but uniform audio options are not themselves a user benefit. Main now has owned session lifecycle and startup observations; the supplied issue and empty comments contain no new physical-device trace showing that configuration churn causes failure or material latency. Changing mixing, Bluetooth output or deactivation ownership without that evidence risks reliable capture and other audio. |
+| [#975](https://github.com/crmitchelmore/justspeaktoit/issues/975) — iOS: defer credential startup optimisation pending residual-wait evidence | DEFER | Fast dictation is a core product goal, but the current loader already coalesces bootstrap and recording work. No measured residual wait demonstrates that changing scheduling would improve speech capture. Preserve provider correctness, secure loading and cancellation until physical-device evidence identifies a material cost. |
+| [#976](https://github.com/crmitchelmore/justspeaktoit/issues/976) — iOS: defer capture before SpeechAnalyzer setup pending residual-gap evidence | DEFER | Preserving opening words directly serves instant, reliable native dictation. Current main now removes model installation from analyzer startup, but supplied evidence does not measure the remaining installed-model setup interval or attribute lost opening speech to it. Introducing capture while analyzer setup is pending adds lifecycle and buffering risk without a demonstrated benefit. Retain the explicit residual-gap gate. |
+| [#977](https://github.com/crmitchelmore/justspeaktoit/issues/977) — iOS: defer warm SpeechAnalyzer sessions pending latency and resource evidence | DEFER | Fast, reliable on-device starts are a core product goal, but retaining analyzers adds idle resource and lifecycle costs without a measured residual latency benefit. Current installed-only startup and foreground preparation must be measured first; no new evidence in the issue comments overturns the explicit gate. |
 | [#986](https://github.com/crmitchelmore/justspeaktoit/issues/986) — A warm window after every dictation: prepared engine, preheated analyzer and cached keys | DEFER | Faster repeated dictation supports the primary speed goal, but the proposed universal warm window combines materially different resource and privacy states without measured incremental benefit. Current Instant Dictation already retains a readiness engine and bounds/heals its lifetime. Existing explicit issue guidance requires repeated-start latency and idle resource measurements after lifecycle fixes before expanding retention. Preserve that evidence gate; this is not a Linux-only deferral. |
 | [#987](https://github.com/crmitchelmore/justspeaktoit/issues/987) — Headless triggers reuse the keyboard readiness warm state | DEFER | Preserving the first words of Action Button dictation is high product value, but this is an integration dependent on a capture-ownership mechanism that does not exist on current main. The keyboard itself tears down its readiness engine before provider capture; there is no proven warm capture handle for headless starts to reuse. Implementing a heartbeat shortcut now risks lost input and conflicts with the explicit issue comment's ownership/device gate. |
 | [#988](https://github.com/crmitchelmore/justspeaktoit/issues/988) — Dual-path first partial: on-device volatile text while the cloud socket connects | DEFER | Earlier visible text could reassure cloud dictation users, but the promised sub-0.5-second result is an estimate with no measured route-specific benefit. Running two recognisers introduces lifecycle, battery and transcript-authority complexity into the core reliability path. The latest issue comment explicitly retains evidence gates; current code also makes directly reusing partialText unsafe for display-only preview. |
@@ -1809,6 +1833,415 @@ Reviewer: `/root/issue_review_queue/review_959`.
 - Do not add Prime/Arm intents, background modes, model downloads or shared-engine changes under this disposition.
 - Beads CLI absent per supplied review context; this JSON is temporary decision evidence.
 
+## #960: iOS: defer calendar-scheduled Live Activity pending need and device evidence
+
+Reviewer: `/root/issue_review_queue/review_960`.
+
+**Smallest worthwhile scope:** No implementation now. Document one concrete opt-in scheduled-meeting use case and compare the current Start/Lock Screen Control journey on a physical device. Only if a distinct benefit remains, request a bounded scheduling policy/prototype decision. Do not fold an idle Start button, EventKit infrastructure or automatic microphone capture into this review.
+
+- `Sources/SpeakCore/TranscriptionActivityManager.swift`: Current code requests immediate activities, adopts only active candidates, and isolates async updates by recording run. The historical #932 lifecycle deficit is already repaired in source; scheduling is not its repair.
+- `Sources/SpeakiOS/Activity/TranscriptionIntents.swift`: Existing idempotent Start conforms to AudioRecordingIntent, LiveActivityIntent and ForegroundContinuableIntent. Narrow foreground retry already exists for liveActivityUnavailable, so new calendar-specific start identities would duplicate it.
+- `JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtensionLiveActivity.swift`: Recording/listening states expose Stop; result states expose result actions. An idle Start button is a distinct smaller proposal, not grounds to authorise calendar integration.
+- `Sources/SpeakiOS; Sources/SpeakCore; Project.swift; SpeakiOSApp`: Targeted search found no EventKit, EKEvent or NSCalendars integration. Calendar scheduling entails a new feature boundary.
+- `/workspace/scratch/a8be40db3c71/comments/960.json`: No newer comments supersede the explicit need and physical-device evidence gates in the issue.
+
+**Dependencies**
+
+- #932 and #953 implementation changes are visible in current code; validate actual existing journey before reconsideration.
+- #954 native Lock Screen Control is the calendar-free comparison path.
+- #943 foreground ownership, #934 clipboard policy and #945 truthful outcomes remain constraints.
+- #958 automation recipes and any idle Start/result-card expansion retain separate scope.
+
+**Verification**
+
+- Capture device, OS, build, provider, permissions and actual wake/unlock/foreground prompts for current Start and Lock Screen Control journeys.
+- A future approved prototype must demonstrate foreground scheduling, background/locked pending-to-active transition, real alert behaviour, explicit Start, speech, Stop, persisted History and intended destination on a physical iPhone.
+- Before shipping any future feature, verify denial/revocation, changed/cancelled meetings, duplicate refresh, disabled/dismissed cards, activity-cap/request failure, active capture isolation and cold-launch versus force-quit limitations.
+- Retain explicit consent and event-title disclosure choices; never auto-start recording.
+
+**Risks and limits**
+
+- No physical-device timing, alert tolerance, demand or microphone evidence was collected; source inspection cannot establish those outcomes.
+- Deferral is a product-value/evidence decision, not a blanket Linux limitation.
+- Historical API references were supplied in issue context; this triage makes no newly verified Apple API guarantee.
+- Beads CLI is reported absent in parent context; this JSON is interim review evidence, not task tracking.
+
+## #961: iOS: defer repeated foreground auto-start pending ownership and activation policy
+
+Reviewer: `/root/issue_review_queue/review_961`.
+
+**Smallest worthwhile scope:** No implementation dispatch now. Re-enter only with an agreed ordinary in-app activation policy covering initial appearance, genuine background return, tab/deep-link intent and keyboard readiness; retain default-off opt-in, explicit command precedence and hands-free explicit re-arm. Close residual proposal if repaired launch capture removes its distinct value.
+
+- `Sources/SpeakiOS/Views/ContentView.swift`: Current autoStartIfEnabled requires BOTH coordinator.state and backgroundService.state to be idle (1385–1393), improving the older isRunning-only evidence. Called from view task and onboarding dismissal; active-phase handler refreshes state and drains imports, without warm-return auto-start.
+- `SpeakiOSApp/SpeakiOSApp.swift`: Current source now DOES contain the previously external capture command integration: URL, task and active transition invoke a drain that consumes the command before scheduling CaptureCommandRunner.perform asynchronously (172–179). A nil pending command check still cannot prove no dispatched command is in flight.
+- `Sources/SpeakiOS/Views/ContentView.swift`: Scene changes synchronously notify hands-free ownership before foreground refresh (1134–1141), with comment preserving the #942 controlled-stop contract.
+- `README.md; .copilot/skills/justspeaktoit-design.md`: Native, fast, privacy-conscious transcription and clear state favour predictable opt-in capture; no demonstrated warm-return benefit justifies weakening explicit recording intent.
+
+**Dependencies**
+
+- #943 ownership/settlement contract: existing dual-idle guard shows progress; do not duplicate repair
+- #942 explicit hands-free re-arm remains binding
+- #1025 command entry source is now present: stale issue text claiming absent code must be updated
+- #935/#936 termination and interruption work remain separate
+
+**Verification**
+
+- Before code: establish concrete warm-return user journey and activation boundaries.
+- If approved: orchestration tests for cold/warm entries, inactive flicker, already-dispatched commands, manual cancellation, teardown, onboarding and keyboard readiness; a pure policy test alone is insufficient.
+- Apple-native build/lint/tests plus physical iPhone evidence for launch, lock/unlock, prompts, explicit Start/Stop/Toggle and hands-free/keyboard combinations with Apple and one remote provider.
+
+**Risks and limits**
+
+- Read-only source review cannot establish microphone or scene event ordering on devices.
+- Do not treat historical speculative timing or dual-engine claims in comments as measured evidence.
+- Deferral is due to product intent/ordering gates, not merely Linux execution limits.
+- Beads CLI unavailable per supplied context; interim JSON is review evidence only.
+
+## #962: iOS/watchOS: defer a separate wrist Control pending paired-device relay evidence
+
+Reviewer: `/root/issue_review_queue/review_962`.
+
+**Smallest worthwhile scope:** Run the issue's zero-source-change paired iOS 26/watchOS 26 experiment on an integrated build. If the existing control works, close as covered or add verified setup guidance under #954. If not, record whether discovery or phone capture fails, then plan only the demonstrated gap.
+
+- `JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtensionControl.swift`: Existing toggle has a shared stable kind and reads SharedTranscriptionState for requested recording state.
+- `Sources/SpeakiOS/Activity/TranscriptionIntents.swift`: Current intent already adopts LiveActivityIntent alongside AudioRecordingIntent and ForegroundContinuableIntent, checks foreground ownership, and classifies desired state idempotently. Historical prerequisite work is substantially present; protocol conformance alone does not establish actual Watch relay discovery.
+- `Sources/SpeakiOS/Services/CaptureSurfaceRefresher.swift`: Phone widget and control refresh already exists. Duplicating it in this issue has no value and would not prove wrist refresh.
+- `JustSpeakWatchShared/StartWatchRecordingIntent.swift`: Native Watch capture already uses a WatchRecordingCoordinator with a watchOS 10 foreground fallback, separate from relayed phone capture.
+- `JustSpeakWatchWidget/WatchRecordingComplication.swift`: Existing Watch complication offers circular/corner recording actions; no need to recreate native Watch trigger capability here.
+
+**Dependencies**
+
+- #953/#932/#941 phone capture and control repairs must be in the physical test build; static inspection finds key intent and refresh changes present
+- #1025 refresh overlap is already represented on current code
+- #930 locked cloud-provider claims require credential verification
+- #657 existing native Watch implementation must remain a separate scope
+- #954 owns phone Control setup guidance
+- Latest cached comment proposes a separate intent from presumed foreground filtering, but supplies no paired-device observations; current issue body explicitly rejects that assumption as sufficient evidence
+
+**Verification**
+
+- Record commit/build, OS versions, Watch model, permissions, provider and connectivity
+- Verify existing Control discovery in Watch Control Center and Smart Stack; Ultra Action button only with real Ultra hardware
+- Observe actual phone microphone capture, stop, activity lifetime, History and configured supported destination with warm/unlocked and cold/locked phone
+- Verify phone-originated state changes reach wrist and requested state remains correct
+- Check unreachable phone, denied microphone permission and disabled Live Activities produce truthful failure and no unintended capture
+
+**Risks and limits**
+
+- No physical paired-device evidence or native build performed; static code does not prove Watch discovery, microphone behaviour or relay reliability
+- Do not remove phone foreground fallback or add a background-only control based solely on protocol conformance
+- Do not restore Send to Mac, redesign routes, or duplicate native Watch capture
+- Beads CLI unavailable as supplied; analysis JSON is not task tracking
+
+## #963: Pinch to stop: a Double Tap primary action on the Live Activity in the watch Smart Stack
+
+Reviewer: `/root/issue_review_queue/review_963`.
+
+**Smallest worthwhile scope:** Opt existing iOS Live Activity into small family on iOS 18+, retain iOS 17 and medium/unknown fallbacks, and render concise explicit status. Add one visible accessible Stop button with primary-action gesture only in recording/listening, using existing intent. All other states have no enabled Stop/Start gesture. Reuse existing resolved completion wording; avoid copying private transcript text or timing primed-card age as capture duration.
+
+- `JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtensionLiveActivity.swift`: Current ActivityConfiguration has no supplementalActivityFamilies, activityFamily branching or handGestureShortcut. Expanded Island and Lock Screen offer Stop only for recording/listening. Compact presentations lack a Stop control. Result rendering already uses TranscriptionResultRow.outcomeMessage; preserve that truthful completion contract.
+- `Sources/SpeakiOS/Activity/TranscriptionIntents.swift`: Existing iOS 18+ AudioRecordingIntent/LiveActivityIntent is alwaysAllowed, finishes keyboard sessions via their existing path, preserves destination resolution, and explicitly refuses separately owned foreground recordings. Reuse without widening ownership.
+- `JustSpeakWatch/WatchContentView.swift`: Native Watch UI already contains availability-guarded primaryAction modifier. This only supplies a local pattern; it does not implement the remote iOS Live Activity.
+- `AGENTS.md; README.md; .copilot/skills/justspeaktoit-design.md`: Project prioritises rapid native dictation, privacy and truthful feedback; system controls, sparse semantic colour and accessible targets fit this scope.
+
+**Dependencies**
+
+- Coordinate changes in the shared Live Activity file with #945/#1001; current result rows already expose truthful outcome copy.
+- Preserve #932 activity validity/run isolation and existing capture ownership contracts.
+- Not dependent on native Watch activation #939, Watch triggers #964/#969, or deferred relayed Control #962.
+- No new intent, transport, Watch provisioning, payload timer field or transcript preview.
+
+**Verification**
+
+- Build app plus embedded widget with Apple Xcode, verify iOS 17 compatibility and iOS 18+ guarded APIs; run affected existing tests and strict lint.
+- Preview small/medium/fallback views across active and every non-active state, large text and accessible Stop targeting.
+- Physical supported Double Tap Watch plus paired iPhone: independently verify tap and gesture while card visible and phone locked; actual microphone capture ends and final transcript reaches configured History/paste path. Record model, OS, build and relevant settings.
+- Exercise repeated Stop, rapid restart, inactive card, connectivity loss, unavailable/dismissed activity, and existing foreground-owner refusal; retain phone Stop fallback.
+
+**Risks and limits**
+
+- Physical hardware qualification is mandatory before asserting remote Stop works; no device/build results were produced in this read-only Linux review.
+- No guaranteed Smart Stack prominence, sleeping-display/locked-Watch gesture, zero-latency stopping or native Watch recording support.
+- Current primary Apple documentation URLs were opened, but browser returned JS shells and Markdown-fetch errors; planner must verify exact API signatures and availability using the supported SDK/primary documentation. Supplied issue evidence is useful context, not new device proof.
+- Beads CLI is absent per parent context; this JSON is interim review evidence only.
+
+## #964: Watch-native triggers: App Shortcut (Siri), watchOS 26 Control, Ultra Action button, Double Tap stop
+
+Reviewer: `/root/issue_review_queue/review_964`.
+
+**Smallest worthwhile scope:** No implementation now. After existing native recorder baseline is proven, select one trigger for an explicit native-Watch capture need. A watchOS 26 Control can be the sole later adapter, reusing coordinator, queue and foreground fallback; Siri discovery and Ultra binding each need separate evidence. Exclude already implemented in-app Double Tap and bulk intent redesign.
+
+- `JustSpeakWatchWidget/JustSpeakWatchWidgetBundle.swift`: Registers WatchRecordingComplication and WatchCaptureStatusWidget only; no native Control registration in this bundle.
+- `JustSpeakWatchShared/StartWatchRecordingIntent.swift`: Existing watchOS 11 AudioRecordingIntent routes app implementation to WatchRecordingCoordinator.toggleRecording; watchOS 10 fallback opens the app. Extension implementation is intentionally split. These are toggle actions, not start-only actions; source assumptions about system recording indication still require device evidence.
+- `JustSpeakWatch/WatchContentView.swift`: Record/stop button already applies watchOS 11+ handGestureShortcut(.primaryAction), so in-app Double Tap should be removed from residual scope.
+- `review-input/964.md and comments/964.json`: Current issue explicitly defers new triggers until provisioned paired-device baseline acceptance; no later cached comments supersede that decision. README and AGENTS favour native SwiftUI and reliable capture.
+
+**Dependencies**
+
+- #657/#659: existing app/complication recording, wrist-down survival and durable delivery acceptance; do not reimplement their delivered intents/complication.
+- #939: recording-entry connectivity activation; #940: transient import retry and retention.
+- #963: separate approved Stop-only mirrored iPhone Live Activity/Double Tap, using phone microphone; do not block it on this proposal.
+- #962 phone relay and #969 widget behaviour are separate proposals; #971 distribution enablement is not prerequisite to a valid development-device build.
+
+**Verification**
+
+- Record actual build/commit, Watch model, paired OS versions, permissions and observed process/foreground routing.
+- Demonstrate app and complication start/stop, at least 60 seconds wrist-down with spoken markers, one durable capture and exactly one resulting iPhone History item, including reconnection retention/delivery.
+- For a later selected trigger, verify Watch microphone capture, visible recording indication, repeat invocation, denied permission, stop and retained audio without silent success or duplicate recordings.
+- Preserve watchOS 10 and default disabled Watch build paths; validate native build in Apple CI, and Control discovery or Ultra binding on relevant hardware.
+
+**Risks and limits**
+
+- No runtime, physical-device or Apple-framework build validation was performed; source inspection cannot prove microphone privileges, system recording indication or Siri routing.
+- Supplied current issue documents watchOS 26 Controls as supported; this review neither rejects platform feasibility nor freshly revalidates platform documentation.
+- Beads CLI is reported absent by parent context; this JSON is interim review evidence, not a tracker replacement.
+
+## #965: watchOS: defer startup reorder and recording cues pending hardware evidence
+
+Reviewer: `/root/issue_review_queue/review_965`.
+
+**Smallest worthwhile scope:** No implementation now. Measure the existing provisioned development build, identify one reproducible latency or feedback problem, then plan only the change supported by those measurements. Close without code if no material problem appears.
+
+- `JustSpeakWatch/WatchAudioRecorder.swift`: Serialises starts with isStarting, awaits finalisation, reconciles the active marker, requests permission, starts runtime and persists capture before record(). The proposed reorder is not already implemented and these waits protect ownership.
+- `JustSpeakWatch/WatchAudioRecorder.swift`: Reads currentTime but also awaits inspectAudio before finalising; skipping asset inspection would remove validation.
+- `JustSpeakWatch/JustSpeakWatchApp.swift`: Scene task already awaits recoverInterruptedCapture before pending watch-face requests.
+- `Docs/watch-provisioning.md`: Native Watch is feature flagged; paired-device capture and complication acceptance remain unchecked.
+
+**Dependencies**
+
+- #657/#659 paired Watch baseline; #939 activation repair and #940 import retries where those entry cases are exercised.
+- #964 shares the hardware baseline; #963 mirrored iPhone Stop is separate.
+- #993/#1012 own duration/silence policy; do not add an arbitrary cap here.
+
+**Verification**
+
+- Record commit/build, device and OS versions, permissions and foreground/headless entry.
+- Repeat cold/warm starts and distinguish permission, session, setup and record-return timing from actual opening speech retained.
+- Check wrist-down spoken markers for at least 60 seconds, retained capture, rapid stop/start and eventual single iPhone History result.
+- Any accepted change must retain single marker ownership, queue-before-clear, playable validation and interruption/termination recovery; require native builds/tests plus physical verification.
+
+**Risks and limits**
+
+- No native or device run was performed; source inspection cannot establish headless microphone activation or safe haptic readiness.
+- Existing issue has no new comments or hardware evidence. Do not infer a 100–400 ms improvement or treat record success as proof of captured speech.
+- Beads CLI is unavailable per supplied context; this JSON is read-only review evidence for parent integration.
+
+## #966: iOS: defer background Watch uploads pending post-retry device evidence
+
+Reviewer: `/root/issue_review_queue/review_966`.
+
+**Smallest worthwhile scope:** No code implementation now. Gather post-repair paired Watch/iPhone evidence for repeatable captures that require foreground reopening; if demonstrated, separately qualify one affected supported batch endpoint and review its bounded background-transfer proposal while preserving the current fast path and selected provider.
+
+- `Sources/SpeakiOS/Services/WatchCaptureImportPipeline.swift`: At inspected HEAD 51286c58c5117821fdd303f3aa06515166f97548, owned background expiration and transient network errors call recordTransientFailure; credential unavailability preserves the retry budget. The issue's older assertion that main charges expiration against attempts is stale.
+- `Sources/SpeakCore/WatchCaptureImportJournal.swift`: Persists retry eligibility and exponential 30-second to 15-minute backoff without incrementing terminal attempts or resetting retention origin.
+- `Sources/SpeakiOS/Services/WatchCaptureImportPipeline.swift`: Stable capture ID upserts History; durable History and journal completion precede audio deletion; failed acknowledgement delivery preserves pending acknowledgement for replay.
+- `Sources/SpeakiOS/Services/IOSBatchTranscriptionClient.swift`: Multiple provider routes and provider-specific request building remain; background work cannot be justified as a simple generic session change.
+
+**Dependencies**
+
+- Validate #940 retry repair now present in code on paired physical devices; do not repeat obsolete PR-unmerged claim.
+- #939 activation and #930 credential availability must work in provisioned feature-enabled development build.
+- Native Watch baseline #964/#965; public release is not required for evidence gathering.
+- Separate #967 chunking, #970 direct networking, #999 fallback and retention/duration proposals remain excluded.
+
+**Verification**
+
+- Record device, OS/build, provider/model, non-sensitive recording size/duration, app state, Wi-Fi/cellular, lock/power state, import start/expiration/completion, retry eligibility, eventual History and acknowledgement.
+- Distinguish upload/provider processing, credentials, activation and owned expiration; compare short/long recordings and controlled slow network.
+- Later implementation must recover task-to-capture association, reconcile tasks before retries, prevent simultaneous fast/background submissions, preserve audio on failure and yield one durable History row plus acknowledgement.
+- Native builds and injectable regression checks cover code/state transitions; physical devices must prove suspension, system termination, locked access and relaunch outcomes.
+
+**Risks and limits**
+
+- No physical-device tests or OS-scheduling observations performed; inspected code is not a shipped/device-verified claim.
+- Persisted eligibility does not itself arrange future background execution, so residual product value remains possible.
+- Avoid fixed background-runtime, immediate completion, never-loss or exactly-once billing promises.
+- Beads CLI absent per supplied context; decision file is review evidence only, parent owns tracker reconciliation.
+
+## #967: watchOS: defer chunked capture transfer pending paired-device evidence
+
+Reviewer: `/root/issue_review_queue/review_967`.
+
+**Smallest worthwhile scope:** No implementation now. Measure the existing Watch-to-phone final-file handoff on provisioned paired hardware with short and multi-minute non-sensitive captures. Reopen a bounded design only if repeatable measurements identify a size-sensitive bottleneck and earlier usable text has clear user value.
+
+- `JustSpeakWatch/WatchCaptureStore.swift`: Transport completion retains audio; transient transfer failures retry; only a durably persisted successful transcription acknowledgement permits audio deletion.
+- `Sources/SpeakCore/WatchCaptureProtocol.swift`: Schema 1 describes a single capture and rejects future schemas; introducing chunk envelopes without compatible handling risks retained but stalled captures.
+- `Sources/SpeakiOS/Services/WatchCaptureImportPipeline.swift`: Existing importer upserts History with capture ID and records success durably before deleting parked audio and replaying acknowledgement.
+
+**Dependencies**
+
+- Paired-device acceptance for #657/#659 and #964/#965 remains necessary.
+- Baseline must account for #939 activation, #940 retries and #930 credentials.
+- #966 background upload is separately deferred and is not a prerequisite.
+
+**Verification**
+
+- Record build/device/OS, duration/file size, lock and connectivity state, finalisation, transfer receipt, transcription, durable History and acknowledgement timings.
+- A later chunk implementation must preserve ordered boundary words, one logical History item, recovery from missing/late/duplicate/out-of-order segments, safe mixed-version handling, and durable completion before audio release.
+- Native CI and paired Watch/iPhone verification are required for a later implementation; static inspection is not device evidence.
+
+**Risks and limits**
+
+- No new measurements or physical-device tests were available; old latency/battery/effort estimates are not evidence.
+- Do not change recorder engine, protocol schema, release flags, or retention based on this review.
+- Beads CLI is absent per supplied session context; this JSON is review evidence only.
+
+## #968: iOS/watchOS: defer Watch completion notifications pending paired-device evidence
+
+Reviewer: `/root/issue_review_queue/review_968`.
+
+**Smallest worthwhile scope:** No feature implementation now. Record the paired-device baseline and observe retrieval using History and the existing keyboard chip. Only if a distinct retrieval problem persists, reassess one opt-in generic notification that opens the matching saved History item for explicit Copy.
+
+- `Sources/SpeakiOS/Services/WatchCaptureImportPipeline.swift`: Uses capture UUID as History identity; requires non-empty transcription and successful durable History persistence before commitSuccessfulImport. Current main now calls offerToKeyboard after committing and publishes via KeyboardDeliveryPublisher with source .watch; this supersedes the issue body implication that keyboard pickup is wholly absent. Optional polish follows.
+- `Sources/SpeakiOS/Views/HistoryView.swift`: Saved rows already expose raw, polished and best-text Copy actions.
+- `SpeakiOSApp/FeatureFlags.swift`: Watch capture remains disabled unless WATCH_APP_FEATURE is defined.
+- `Docs/watch-provisioning.md`: Paired-device acceptance checklist remains unchecked, including eventual offline arrival, process termination, History visibility and Watch state progression.
+- `comments/968.json`: Cached comment removes Send to Mac but proposes automatic copy using old retry semantics. Later issue refinement excludes that automatic copy; preserve the refined narrow boundary.
+
+**Dependencies**
+
+- #657/#659 paired-device baseline and wrist-down gate
+- #939/#940 activation and retry, #930 credentials, #937 History recovery
+- #1003 owns keyboard pickup; current import pipeline already publishes to it
+- #934 clipboard semantics and #945 truthful outcome labels
+- #952 removal direction excludes Send to Mac; #1017 broader automation is separate
+
+**Verification**
+
+- Record device/OS/build SHA, permission/lock state, capture entry point, durable History, eventual acknowledgement and offline reconnect behaviour.
+- Observe current History Copy and keyboard pickup to establish an unmet need.
+- If later approved, require capture-ID routing, non-empty durable result, opt-in and authorisation, no transcript preview, idempotence across replay/relaunch, and no import/acknowledgement dependency on notification success.
+- Future notification work needs focused persistence/routing/idempotence tests, native builds and actual paired-device foreground/background/locked/unlocked validation.
+
+**Risks and limits**
+
+- Read-only static review; no physical-device or native runtime claims.
+- Do not reintroduce automatic clipboard writes, Send to Mac, insertion, global result stores or a shared notification framework.
+- Current keyboard publication is a code finding, not proof of reliable end-to-end delivery.
+- Beads CLI is absent per task context; parent owns tracker updates and durable decision publication.
+
+## #969: watchOS: defer native widget Double Tap and learned relevance pending evidence
+
+Reviewer: `/root/issue_review_queue/review_969`.
+
+**Smallest worthwhile scope:** No code now. After baseline evidence, independently reconsider only an availability-guarded primary-action gesture on the existing widget button, preserving intents, toggle serialisation, ordinary taps and watchOS 10 fallback. Reconsider learned relevance only after a demonstrated navigation problem and useful observed context; keep idle neutral in the meantime.
+
+- `JustSpeakWatchWidget/WatchRecordingActionButton.swift`: Existing widget button selects StartWatchRecordingIntent on watchOS 11+ and OpenWatchRecordingIntent fallback on watchOS 10, with state-aware accessibility; no handGestureShortcut modifier.
+- `JustSpeakWatch/WatchContentView.swift`: Recording control already invokes primaryActionGestureShortcut(), whose availability-guarded implementation applies handGestureShortcut(.primaryAction). The in-app gesture is already present.
+- `Docs/watch-provisioning.md: Device checklist`: Watch targets remain feature-flagged; paired-device recording, transcript delivery, app/complication gesture and Smart Stack acceptance remain unchecked. An unchecked checklist provides no physical acceptance evidence.
+- `/workspace/scratch/a8be40db3c71/review-input/969.md`: Explicit owner-compatible review separates widget gesture re-entry after #657/#659 baseline from speculative learned relevance; preserves neutral idle relevance. Cached comments contain no subsequent decision.
+
+**Dependencies**
+
+- #657 and #659 native Watch capture hardware baseline
+- #939 activation correction; #940 repair for affected offline/import cases
+- #963 accepted mirrored iPhone Live Activity Stop/Double Tap is a different surface and proceeds independently
+- #964/#965 are not prerequisites for a later gesture-only change
+
+**Verification**
+
+- Record provisioned paired Watch/iPhone build, models, OS, permissions, foreground behaviour, app/complication start-stop, 60-second wrist-down spoken markers, durable capture and one eventual History result.
+- If gesture re-enters, build both default and flagged targets with Apple Swift/Xcode; verify ordinary tap and Double Tap independently on supported physical hardware, repeated/cross-surface actions, permissions, stale state, Stop fallback and unavailable-gesture states.
+- For learned relevance, demonstrate benefit beyond a pinned card/complication and observe actual placement; do not infer guaranteed rank or automatic presentation from source scores.
+
+**Risks and limits**
+
+- Read-only source review; no Apple-native build, microphone, physical Watch, delivery or usage study performed.
+- Do not promise one gesture from the watch face or operation in unavailable gesture states.
+- No analytics, new relevance store, location sensing, silence-stop, transport redesign, feature-flag or release change.
+- Beads CLI is absent in the supplied environment; this JSON is review evidence, not a replacement task tracker.
+
+## #970: watchOS: defer direct Watch uploads pending phone-absent device evidence
+
+Reviewer: `/root/issue_review_queue/review_970`.
+
+**Smallest worthwhile scope:** No code implementation now. First document one recurring phone-absent task, the destination where its transcript must be usable, and measured existing relay delay. Reconsider a single-provider explicit opt-in route only if this establishes material benefit and a secure credential/delivery design.
+
+- `JustSpeakWatch/WatchCaptureStore.swift`: Transfers queue after activation without isReachable gating, avoid outstanding duplicates, retry failed transport, and retain audio after delivery until successful acknowledgement.
+- `Sources/SpeakCore/WatchCaptureProtocol.swift`: Schema 1 transports capture metadata and outcome acknowledgement; transcribed is the only audio-release state. No transcript delivery contract for a direct Watch result exists in this protocol.
+- `Sources/SpeakiOS/Services/WatchCaptureImportPipeline.swift`: Phone waits for credentials, selects the configured batch model, transcribes, and persists History under the capture ID before completion. Stable History identity does not establish exclusive provider submission ownership between Watch and phone.
+
+**Dependencies**
+
+- Physical paired Watch baseline #657/#659 with applicable #939 activation, #940 retry and #930 credential fixes.
+- #966 phone background uploads, #967 chunking and #968 completion retrieval are separate deferred features, not mandatory implementation dependencies.
+- No new release, CloudKit migration or credential-sync architecture is authorised.
+
+**Verification**
+
+- Record physical-device baseline with unavailable phone, relaunch, reconnection, one durable phone History result and eventual acknowledgement.
+- Before implementation approval, demonstrate foreground and background Watch upload plus usable result at the chosen independent destination, including suspension, termination, poor connectivity, latency and power observations.
+- Any later route must retain recovery audio/results on failure, persist task association across relaunch, prevent deliberately concurrent Watch/phone submissions, reconcile reconnection races, and provide truthful states with old-peer compatibility.
+- Native Apple Swift builds/tests and physical Wi-Fi/cellular evidence are required for future acceptance; static review is not runtime verification.
+
+**Risks and limits**
+
+- No physical-device measurements or native builds were performed. Deferral follows missing user-outcome evidence and unresolved design decisions, not Linux availability alone.
+- Ambiguous provider completion cannot promise exactly-once billing. A false isReachable value is not evidence of physical phone absence.
+- Beads CLI is absent per supplied session context; this JSON is review evidence only. No repository edits or external posts were made.
+
+## #971: watchOS: defer TestFlight rollout pending device baseline and tester need
+
+Reviewer: `/root/issue_review_queue/review_971`.
+
+**Smallest worthwhile scope:** No implementation now. Collect the existing baseline and tester/provisioning evidence. If a concrete TestFlight requirement emerges, separately plan a default-off Watch option through the current frozen release-manifest system and existing iOS worker, preserving coupled bundle/receiver gating.
+
+- `Project.swift`: TUIST_WATCH_APP remains default-off and gates WATCH_APP_FEATURE alongside Watch inclusion. Existing manual profile hooks remain available.
+- `.github/workflows/release-ios.yml`: Current worker accepts a frozen manifest only and shares release-ios concurrency. This is newer than the issue recipe describing manual keyboard/version/build inputs. Future Watch opt-in must fit immutable release-train manifest controls, not introduce an independent mutable worker input.
+- `Docs/watch-provisioning.md`: Documents existing development-device generation, both Watch bundle ids/App Group, distribution signing hooks, and archive icon validation. Contains physical capture/complication/transfer verification checklist, not completed device evidence.
+- `README.md`: Alpha commissioning and separate installation/data/credentials are explicit; main changes do not themselves justify distribution or Stable publication.
+
+**Dependencies**
+
+- #657/#659 paired-device baseline
+- #939 activation, #930 credentials and #940 retry fixes need final state checked before hardware run
+- Actual tester cohort and reason development-device path is insufficient
+- Verified appropriate release-train Watch identifiers, App Group and both distribution profiles
+
+**Verification**
+
+- Record SHA/build, paired models/OS, permissions, lock/app/network state and observed outcomes for 60-second wrist-down capture, complication start/stop, durable iPhone History completion/ack, and reconnect delivery.
+- If rollout is approved, validate default-off and explicit-on generated builds plus signed archive/export bundle identities, train-specific entitlements, profiles, versions/build numbers and icon.
+- Verify processing, intended tester assignment and physical installation/capture separately; no release dispatch authorised by this review.
+
+**Risks and limits**
+
+- No supplied new baseline/cohort/provisioning evidence satisfies re-entry. Portal absence is not established.
+- Cached comment icon/toggle corrections are respected: icon is present; disabling an unactivated phone receiver strands transfers but does not itself consume the import journal retry budget.
+- Issue implementation recipe predates current manifest-only worker and must be revised if reopened.
+- Static inspection cannot establish microphone/background/Watch behaviour; no native builds or device tests performed.
+- Beads CLI absent per parent context; JSON is analysis evidence only.
+
+## #973: iOS: defer mixable-first background activation pending device evidence
+
+Reviewer: `/root/issue_review_queue/review_973`.
+
+**Smallest worthwhile scope:** No implementation or planning dispatch now. Re-review after focused physical-device traces distinguish fresh background activation from retained keyboard handoff and identify a material refused-attempt cost or concrete user-visible failure. Limit any future selection rule to evidenced conditions.
+
+- `Sources/SpeakiOS/Services/AudioSessionManager.swift`: Current code attempts non-mixable activation exactly once, then switches to mixable only for classified setActive cannotInterruptOthers. Cancellation checks remain before and after configuration. The source comment asserting guaranteed background refusal is not device evidence.
+- `Sources/SpeakiOS/Services/AudioSessionDiagnostics.swift`: Default fallback has four attempts and 150 ms multiplied by attempt delays. Omitting initial isolated attempt does not remove fallback backoff.
+- `Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift`: Readiness uses measurement with mixWithOthers and allowBluetoothHFP. Handoff retains session activation while replacing readiness capture with recording. This differs from fresh background activation.
+- `comments/973.json`: No newer issue comments provide timing or changed approval.
+
+**Dependencies**
+
+- #972 local startup diagnostics and physical-device baseline; not automatic approval for extra instrumentation
+- #974 separate readiness/deactivation qualification; current isolated-first policy must remain intact
+- #935/#936/#942/#943 disruption, finalisation, foreground and ownership guards
+
+**Verification**
+
+- Record phone, OS/build, backend, actual app state, readiness ownership, route, playback state and repeated sample counts; include foreground active/inactive controls.
+- Verify real speech, final transcript destination/History, playback and capture quality, cancellation/failure cleanup and a successful restart on affected routes.
+- If subsequent code is approved, inject tests for eligibility, isolated success, classified fallback, nonretryable failure and cancellation; Apple Swift/Xcode CI remains necessary.
+
+**Risks and limits**
+
+- No device timings, OS activation outcome or Bluetooth behaviour were validated here.
+- Neither inactive app state nor a keyboard profile establishes that isolated activation must fail.
+- Do not unify category policy, add activation caching or change ownership/deactivation as part of this issue.
+- Beads CLI unavailable per intake context; decision JSON is review evidence only.
+
 ## #974: One audio-session configuration shared by readiness, detector and transcribers; caller-owned deactivation
 
 Reviewer: `/root/issue_review_queue/review_974`.
@@ -1841,6 +2274,95 @@ Reviewer: `/root/issue_review_queue/review_974`.
 - isConfigured and equal options do not prove that system activation is usable or owned.
 - Preserve explicit consent/reconnect, idle-audio discard and provider-traffic boundaries; a shared policy must not broaden listening.
 - Beads CLI absent per supplied context; this JSON is temporary review evidence only.
+
+## #975: iOS: defer credential startup optimisation pending residual-wait evidence
+
+Reviewer: `/root/issue_review_queue/review_975`.
+
+**Smallest worthwhile scope:** No implementation now. Collect repeated cold/warm foreground, headless and keyboard starts with explicit Apple and configured remote routes; isolate residual credential wait if aggregate diagnostics cannot attribute it. Re-review only an evidenced credential-only remedy.
+
+- `Sources/SpeakiOS/Views/SettingsView.swift`: Bootstrap already starts asynchronously; recording callers share keyLoadTask; successful credentials are reused, failed loads remain retryable, and default-provider selection occurs after loading. Local models can run when secure loading is unavailable.
+- `Sources/SpeakiOS/Views/SettingsView.swift`: Reload reuses canonical SecureStorage, preserves existing values through syncedAPIKeyValue, and publishes availability only after provider fields load.
+- `Sources/SpeakiOS/Services/TranscriptionRecordingService.swift`: Current main waits for credentials before model resolution, logs credentialsReady, then revalidates foreground ownership and run identity before resource allocation. Startup watchdog already covers the credential wait.
+- `Sources/SpeakCore/SecureStorage.swift`: Public lookups use ensureCacheLoaded and cached values; keychain accessibility has a real readback diagnostic. Number of provider calls alone is not keychain cost evidence.
+- `Docs/ios-startup-diagnostics.md`: Existing diagnostic definition measures entry to credential-wait completion; it does not by itself isolate residual wait.
+
+**Dependencies**
+
+- #972: physical-iPhone timing and attribution prerequisite; instrumentation alone is insufficient.
+- #930: current retryable loader and local/unavailable semantics are now present in main; measure this implementation rather than the obsolete pre-PR snapshot.
+- #932/#943 and existing run lifecycle: preserve activity-before-audio, foreground ownership, cancellation and provider labels.
+
+**Verification**
+
+- Record build/device/OS, entry surface, selected and actual model, mode/profile, permission and lock state plus individual samples.
+- If a remedy is approved, exercise first-launch default selection, explicit local/remote routes, profile and batch overrides, delayed success/failure, retry, key rotation/reload, cancellation and stale bootstrap completion.
+- Use native iOS CI/tests plus physical capture, History/destination and restart checks; show before/after latency without invented thresholds.
+
+**Risks and limits**
+
+- No physical-device measurements supplied; this is an evidence-based deferral, not a Linux build deferral.
+- Exclude audio-session hoisting/caching, concurrent activity startup, new decoders, permanent migration flags or speculative parallel lookups.
+- Beads CLI is absent per supplied context; no tracker changes or external posts performed.
+
+## #976: iOS: defer capture before SpeechAnalyzer setup pending residual-gap evidence
+
+Reviewer: `/root/issue_review_queue/review_976`.
+
+**Smallest worthwhile scope:** Collect repeated cold/warm prepared-asset iPhone baselines by actual backend, route, surface and known opening speech. Re-review an iOS analyzer-only bounded capture/drain change only if a material setup gap or attributable opening-word loss remains. Do not dispatch an implementation planner for capture reordering now.
+
+- `Sources/SpeakiOS/Services/iOSLiveTranscriber.swift`: Current startup uses assetPolicy .installedOnly and awaits session creation before tap, recorder, pre-roll conversion and engine start. Cancellation never falls back; analyzer failure tears down the tap and session before permitted legacy startup.
+- `Sources/SpeakCore/AppleSpeechAnalyzerLiveSession.swift`: Module creation, compatible-format discovery and analyzer.start are awaited; AsyncStream input buffering has no explicit bound. Initializer cancellation finishes the stream, analyzer cancellation and result task.
+- `Sources/SpeakiOS/Services/iOSLiveTranscriber.swift`: Actual analyzer backend and engine-return stage are reported; first-input callback is capture-ID guarded. Stop still returns until isRunning; Cancel cancels startup, stops input, drains processing and discards recording. A reorder must explicitly cover pending-start Stop and preserve these ownership guarantees.
+
+**Dependencies**
+
+- #938 installed-only startup is present in main; residual measurements must use this implementation.
+- #972 startup diagnostics; engine return and first-input callback do not alone attribute module/format/setup latency.
+- #932 required activity before capture; #935/#936 controlled termination; #948/#950 finalisation and loss reporting remain constraints.
+
+**Verification**
+
+- Baseline evidence must include captured/saved opening audio, transcript opening and final words, device/build/OS, route, sample counts and setup timings, with legacy fallback separate.
+- If later approved, delayed-analyzer ownership tests must cover ordered bounded drain, supplied pre-roll once, pool ownership, overflow, format mismatch, Stop/Cancel during setup, fallback, interruption and immediate restart.
+- Native iOS build and affected tests plus physical installed-assets iPhone comparison required; Bluetooth cases remain unverified when hardware unavailable.
+
+**Risks and limits**
+
+- Static review establishes ordering, not latency or physical microphone behaviour. No device measurements were supplied or performed.
+- A finite parking queue alone would not bound downstream AsyncStream retention; unsafe reordering could lose opening speech, exhaust the tap pool or leak the microphone.
+- Beads CLI absent per parent context; review JSON is analysis evidence only. No repository edits or external posts.
+
+## #977: iOS: defer warm SpeechAnalyzer sessions pending latency and resource evidence
+
+Reviewer: `/root/issue_review_queue/review_977`.
+
+**Smallest worthwhile scope:** Keep the optimisation candidate deferred. First collect repeated installed-model physical-iPhone startup measurements with build/device/OS, locale, backend, input route, process residency and sample counts. Use existing observations, adding focused local instrumentation only if it is needed to isolate residual analyzer construction/preparation cost. Re-review preparation or retention options only after a material delay and resident repeat-start use case are demonstrated.
+
+- `Sources/SpeakCore/AppleSpeechAnalyzerLiveSession.swift`: Each initializer builds a module and a SpeechAnalyzer, binds a per-run result callback and starts analysis. finish finalizes through end of input; cancellation joins native teardown. This is an active run-bound session, so pooling would require a deliberate lifecycle change.
+- `Sources/SpeakCore/AppleSpeechAnalyzerTranscriber.swift`: Asset policy is enforced through AppleSpeechAssets.ensure and a use-time AssetInventory status query; download is isolated behind the installation closure.
+- `Sources/SpeakiOS/Services/iOSLiveTranscriber.swift`: Current iOS creation explicitly uses installedOnly, awaits session construction before tap/engine startup, guards callbacks with activeCaptureID, reports engine start and first observed input, and tears down on failure. This establishes a possible critical-path cost, not its measured size.
+- `comments/977.json`: No later comments provide performance or memory evidence or change the previous disposition.
+
+**Dependencies**
+
+- #938 explicit asset preparation and installed-only startup baseline
+- #972 local startup diagnostics; attribute residual cost before choosing a remedy
+- #976 capture-before-analyzer is a separate deferred alternative, not a prerequisite
+- #978/#979/#984/#986/#987 are related resource/readiness proposals; avoid independently adding retained ownership
+
+**Verification**
+
+- Evidence baseline must separate process-cold starts, resident repeat starts, engine-start return, first input and controlled-speech first partial; verify opening and final words and saved History/audio.
+- Any subsequently approved retention design must retain authoritative installed-only checking, capture identity, cancellation and Stop/restart guarantees; never reuse finalized sessions.
+- Measure candidate idle memory/resource behaviour, lifecycle transitions, locale/route changes, interruption, cancellation and restart on a physical iPhone. Define improvement/resource criteria from baseline before implementing retention.
+- Native iOS destination tests and compile, strict lint, and shared/macOS checks for shared API changes; Linux static review cannot establish microphone or resource behaviour.
+
+**Risks and limits**
+
+- No physical-device benchmark or measured latency/resource budget is available in the supplied evidence.
+- No warm pool, automatic re-priming, process-lifetime retention, microphone activation or model download is approved by this review.
+- Beads CLI is absent per supplied project context; this JSON is interim review evidence only.
 
 ## #986: A warm window after every dictation: prepared engine, preheated analyzer and cached keys
 

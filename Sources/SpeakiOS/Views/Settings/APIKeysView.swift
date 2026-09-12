@@ -46,7 +46,7 @@ struct APIKeysView: View {
         Self.entries(for: settings)
     }
 
-    fileprivate static func entries(for settings: AppSettings) -> [APIKeyListEntry] {
+    static func entries(for settings: AppSettings) -> [APIKeyListEntry] {
         coreEntries(for: settings) + streamingProviderEntries(for: settings)
     }
 

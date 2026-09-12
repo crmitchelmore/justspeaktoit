@@ -33,21 +33,19 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
     let endpoint = baseURL.appendingPathComponent("audio/transcriptions")
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"
-
-    let boundary = "Boundary-\(UUID().uuidString)"
-    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-    let audioData = try Data(contentsOf: url)
-    var body = Data()
 
     // Extract model name without provider prefix
     let modelName = model.split(separator: "/").last.map(String.init) ?? model
-
-    body.appendFormField(named: "model", value: modelName, boundary: boundary)
-    body.appendFormField(named: "response_format", value: responseFormat(for: modelName), boundary: boundary)
+    var fields = [
+      OpenAICompatibleBatchTranscriptionClient.FormField(name: "model", value: modelName),
+      OpenAICompatibleBatchTranscriptionClient.FormField(
+        name: "response_format",
+        value: responseFormat(for: modelName)
+      )
+    ]
     if requiresChunkingStrategy(modelName) {
-      body.appendFormField(named: "chunking_strategy", value: "auto", boundary: boundary)
+      fields.append(.init(name: "chunking_strategy", value: "auto"))
     }
 
     if let language {
@@ -55,32 +53,23 @@ struct OpenAITranscriptionProvider: TranscriptionProvider {
         // The new GPT Transcribe family accepts plural language hints while
         // existing GPT-4o and Whisper models retain the singular field.
         let languageCode = language.localeLanguageCode
-        body.appendFormField(
-            named: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
-            value: languageCode,
-            boundary: boundary
-        )
+        fields.append(.init(
+          name: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
+          value: languageCode
+        ))
     }
 
-    body.appendFileField(
-      named: "file",
-      filename: url.lastPathComponent,
-      mimeType: "audio/m4a",
-      fileData: audioData,
-      boundary: boundary
+    let (data, _) = try await OpenAICompatibleBatchTranscriptionClient(session: session).upload(
+      request: request,
+      fields: fields,
+      file: .init(
+        fieldName: "file",
+        filename: url.lastPathComponent,
+        mimeType: "audio/m4a",
+        sourceURL: url
+      ),
+      providerID: metadata.id
     )
-    body.appendString("--\(boundary)--\r\n")
-    request.httpBody = body
-
-    let (data, response) = try await session.data(for: request)
-    guard let http = response as? HTTPURLResponse else {
-      throw TranscriptionProviderError.invalidResponse
-    }
-
-    guard (200..<300).contains(http.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-      throw TranscriptionProviderError.httpError(http.statusCode, body)
-    }
 
     let decoded = try JSONDecoder().decode(OpenAITranscriptionResponse.self, from: data)
     return try await buildTranscriptionResult(

@@ -1,104 +1,158 @@
 # iOS TestFlight release and signing runbook
 
-Use this runbook for normal TestFlight releases and for failures involving the iOS app, widget, or transcription keyboard provisioning profiles.
+Use this runbook to verify an iOS archive produced by the manifest-based release
+pipeline and to diagnose app, widget, or keyboard provisioning failures. The
+reusable **Release iOS (TestFlight)** worker is a `workflow_call` target with one
+required `manifest` input. Release controllers allocate that immutable manifest;
+the worker does not accept manual version, keyboard-inclusion, or direct-capture
+inputs.
 
-Normal automated and manual releases include the keyboard extension. Direct
-capture inside the extension is independently disabled until the physical
-matrix in [iOS keyboard verification](ios-keyboard-mvp-verification.md) passes;
-the shipping keyboard uses Instant Dictation handoff and makes no extension
-microphone or Speech permission attempt.
+The worker always sets `TUIST_IOS_KEYBOARD=1` and
+`TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0`. The shipped keyboard uses Instant
+Dictation handoff and makes no microphone or Speech permission attempt inside
+the extension. Physical acceptance is defined in
+[iOS keyboard verification](ios-keyboard-mvp-verification.md).
 
-## Release identifiers
+## Release controllers and identifiers
 
-| Component | Bundle identifier | Required shared capability |
-| --- | --- | --- |
-| iOS app | `com.justspeaktoit.ios` | App Group and iCloud |
-| Widget | `com.justspeaktoit.ios.JustSpeakToItWidgetExtension` | App Group |
-| Keyboard | `com.justspeaktoit.ios.keyboard` | App Group |
+[Alpha and Stable release trains](alpha-stable-release-trains.md) is the current
+controller and approval runbook. TestFlight distribution is Alpha-only. Stable
+candidates are processed for App Store submission under their separate owner
+approval gates and are not assigned to a TestFlight group.
 
-The shared App Group is `group.com.justspeaktoit.ios`. The keyboard App Store profile name starts with `JustSpeakToIt Keyboard App Store`.
+`Sources/SpeakCore/Resources/ReleaseTrains.json` is the identity source used by
+`scripts/release-train.mjs`:
 
-Do not commit certificates, private keys, decoded profiles, or their base64 contents.
+| Train | App | Widget | Keyboard | App Group |
+| --- | --- | --- | --- | --- |
+| Alpha | `com.justspeaktoit.ios.alpha` | `com.justspeaktoit.ios.alpha.JustSpeakToItWidgetExtension` | `com.justspeaktoit.ios.alpha.keyboard` | `group.com.justspeaktoit.ios.alpha` |
+| Stable | `com.justspeaktoit.ios` | `com.justspeaktoit.ios.JustSpeakToItWidgetExtension` | `com.justspeaktoit.ios.keyboard` | `group.com.justspeaktoit.ios` |
 
-## Normal release
+The release configuration exports the selected app as `BUNDLE_ID`, its group as
+`IOS_APP_GROUP`, and its cloud container as `IOS_CLOUD_CONTAINER`. Use those
+values when inspecting profiles or archives. Do not validate Alpha artifacts
+against Stable identifiers.
 
-1. Confirm the intended commit is on `main` and its required checks passed.
-2. Open App Store Connect and check the latest iOS TestFlight marketing version and build number.
-3. Run the GitHub Actions workflow **Release iOS (TestFlight)**. Enter the intended semantic version explicitly, without a leading `v`.
-   Set `release_notes_source_tag` to the existing `mac-v*` or `ios-v*` tag at the release commit. The workflow rejects a source tag whose code differs from the checkout (apart from `VERSION`).
-   Keep `include_keyboard=true`. Keep `enable_direct_capture=false` unless this exact build is the recorded direct-capture matrix build. The repository `VERSION` file is not authoritative for iOS.
-4. Monitor all distribution gates in the workflow:
-   - signing certificate and three profiles install successfully;
-   - the keyboard profile authorizes `group.com.justspeaktoit.ios`;
-   - the app, widget, and keyboard archive with the requested version and build;
-   - all three archived products retain the shared App Group entitlement, and the app retains `iCloud.com.justspeaktoit.ios`;
-   - export and upload to App Store Connect succeed.
-5. Wait for Apple processing to finish. Confirm the exact version and build are visible in App Store Connect and assign the build to the intended internal TestFlight group.
-6. Update the app from TestFlight on a physical iPhone. Confirm the installed version/build, enable the keyboard, and run the device checks below.
+Do not commit certificates, private keys, decoded profiles, or base64 profile
+contents.
 
-An upload is not the completion signal. Processing, tester assignment, installation, and hardware validation are separate gates.
+## Verify an authorised iOS release
+
+1. Identify the existing authorised manifest tag and retain its source SHA,
+   train, iOS version/build, and controller workflow URL. Do not call the
+   reusable worker ad hoc.
+2. Confirm the worker checked out the manifest and
+   `scripts/release-train.mjs configure --tag <manifest> --surface ios` selected
+   the expected source and train identity.
+3. Monitor the signing and archive gates:
+   - distribution certificate and train-specific app, widget, and keyboard
+     profiles install successfully;
+   - the keyboard profile authorises `IOS_APP_GROUP` for
+     `BUNDLE_ID.keyboard`;
+   - app, widget, and keyboard archive with the manifest version/build;
+   - all three products retain `IOS_APP_GROUP`, and the app retains
+     `IOS_CLOUD_CONTAINER`;
+   - the archive contains `JustSpeakKeyboard.appex` and reports direct capture
+     disabled; and
+   - export and App Store Connect upload succeed.
+4. Keep upload, Apple processing, beta review, and public TestFlight availability
+   as distinct states. Confirm the exact Alpha version/build reaches the intended
+   tester group before installation.
+5. Install or update that processed Alpha build on a physical iPhone. Record the
+   installed train/version/build, then run the physical keyboard checks below.
+
+An upload or green workflow is not proof that Apple processed, distributed, or
+physically verified the build.
 
 ## Repair a keyboard App Group profile
 
-Use this sequence when the workflow reports that the keyboard provisioning profile does not authorize the shared App Group or when archive/export reports an entitlement mismatch.
+Use this sequence when the workflow reports that the keyboard profile does not
+authorise the selected App Group or when archive/export reports an entitlement
+mismatch.
 
-1. In the Apple Developer portal, open **Certificates, Identifiers & Profiles** → **Identifiers** → `com.justspeaktoit.ios.keyboard`.
-2. Enable **App Groups**, choose **Configure**, associate `group.com.justspeaktoit.ios`, then save and confirm the identifier change.
-3. Open **Profiles**, select the App Store profile whose name starts with `JustSpeakToIt Keyboard App Store`, choose **Edit**, and save or regenerate it. Enabling the capability through the App Store Connect API alone does not reliably attach the App Group to the identifier, and an existing profile does not gain the entitlement until it is regenerated.
-4. If CI uses the `IOS_KEYBOARD_APPSTORE_PROFILE` GitHub secret, replace it with the base64 of the regenerated profile. If the secret is absent, the workflow may reuse or create a portal profile, but it will still fail closed unless that profile contains the shared App Group.
-5. Rerun **Release iOS (TestFlight)** with the explicit intended iOS version.
+1. From the failed workflow's release evidence, identify `RELEASE_TRAIN`,
+   `BUNDLE_ID.keyboard`, and `IOS_APP_GROUP`.
+2. In Apple Developer **Certificates, Identifiers & Profiles**, open that exact
+   keyboard identifier. Enable App Groups, associate the exact selected
+   `IOS_APP_GROUP`, save, and confirm the association.
+3. Edit or regenerate the matching train's App Store profile. Enabling the
+   capability alone does not update an existing profile's entitlement.
+4. Replace the matching GitHub secret only if CI uses an explicit profile:
+   `ALPHA_IOS_KEYBOARD_APPSTORE_PROFILE` for Alpha or
+   `IOS_KEYBOARD_APPSTORE_PROFILE` for Stable. If the secret is absent, the
+   workflow may reuse or create its validated portal profile; it still fails
+   closed unless the profile contains the expected group.
+5. Retry through the release controller for the same authorised manifest or its
+   documented rebuild path. Record the new workflow and build allocation.
 
-Prefer reusing and validating the portal profile over deleting profiles. Profile deletion can disrupt other release paths and is not required for this repair.
+Prefer updating and validating the correct profile over deleting profiles, which
+can disrupt other release paths.
 
 ## Verify a downloaded profile
 
-Decode only the entitlements dictionary. Converting the complete profile to JSON can fail because embedded certificate values are binary data.
+Decode only the entitlements dictionary. Converting a complete profile to JSON
+can fail because embedded certificate values are binary.
 
 ```bash
 PROFILE_PATH=/path/to/keyboard.mobileprovision
+EXPECTED_APP_GROUP='<IOS_APP_GROUP from release evidence>'
 PROFILE_PLIST=$(mktemp)
 security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
 plutil -extract Entitlements xml1 -o - "$PROFILE_PLIST" \
-  | grep -Fq '<string>group.com.justspeaktoit.ios</string>'
+  | grep -Fq "<string>$EXPECTED_APP_GROUP</string>"
 ```
 
-The command must exit successfully. The release workflow performs the same exact entitlement check before archiving.
+The command must exit successfully. Also compare the profile's application
+identifier with `<APPLE_TEAM_ID>.<BUNDLE_ID>.keyboard`. The release worker makes
+equivalent identity and entitlement checks before archiving.
 
 ## Physical-device keyboard checks
 
-1. Install or update the processed build from TestFlight and confirm its version/build in the app.
-2. In iOS Settings, enable **Just Speak to It** under **General** → **Keyboard** → **Keyboards**. Enable Full Access only when the app's current onboarding requires it.
-3. Open a text field in another app, switch to the Just Speak to It keyboard, and start transcription. In a normal handoff-only build, the keyboard must not present a microphone or Speech permission prompt. Treat any such prompt as a failure.
-4. Confirm the containing app records through the iPhone microphone, returns the nonce-matched result through the App Group, and the keyboard inserts the text at the cursor. If Instant Dictation is not ready, confirm the keyboard shows the reconnect state and leaves the field unchanged.
-5. Confirm stale results are not reused and normal Apple keyboard switching remains available.
+1. Install the exact processed and tester-assigned Alpha build. Confirm its
+   manifest, source, version, build, and Alpha identity.
+2. In iOS Settings, enable **Just Speak Alpha** under **General** ›
+   **Keyboard** › **Keyboards**, grant Full Access, and complete the app's
+   current Instant Dictation setup.
+3. In Notes, WhatsApp, and the other required matrix hosts, select the keyboard
+   and start dictation. The extension must not present microphone or Speech
+   permission. Treat such a prompt as a failure.
+4. Confirm the containing app records through the iPhone microphone, the keyboard
+   shows the ready/request state truthfully, and the nonce-matched result returns
+   through `group.com.justspeaktoit.ios.alpha` and inserts once at the intended
+   cursor/selection.
+5. With Instant Dictation not ready, confirm actionable reconnect guidance and no
+   host mutation. Confirm cancel, stale result, target switching, interruption,
+   secure-field, globe, accessibility, and memory behavior through the complete
+   [physical shipping matrix](ios-keyboard-mvp-verification.md#physical-shipping-matrix).
 
-Direct extension capture remains an unverified, policy-gated candidate rather
-than an assumed platform capability. Run it only with
-`enable_direct_capture=true` and complete the separate physical matrix. The
-normal supported path is keyboard → containing app → microphone/transcription
-→ App Group handoff → `textDocumentProxy.insertText`.
+The supported path is keyboard → containing app microphone/transcription →
+nonce-scoped App Group result → document-proxy insertion. The retained direct
+code is a historical experiment and is not part of normal release verification.
 
 ## Build-based rollback
 
-- Direct-capture rollback: run a new build with `include_keyboard=true` and
-  `enable_direct_capture=false`; verify handoff on hardware.
-- Extension rollback: run a new build with `include_keyboard=false`; verify the
-  archive omits `JustSpeakKeyboard.appex`.
-- There is no runtime switch for an installed build. Record the replacement
-  workflow URL, commit, version/build, processing, tester assignment, physical
-  installation, and observed extension state in issue #661.
+There is no runtime removal or policy switch for an already installed keyboard.
+A rollback requires an authorised source or release-policy change, review, and a
+new correctly signed build through the existing manifest/controller process.
+
+For a handoff regression, select or build an authorised replacement through the
+Alpha controller and verify its archive, processing, tester assignment,
+installation, and physical behavior independently. Removing the extension or
+changing direct-capture policy is a repository policy decision; do not emulate it
+with an ad hoc call to the reusable worker.
 
 ## Completion evidence
 
 Report each state separately:
 
-- PR merged and release commit identified.
-- Release workflow succeeded.
-- Workflow summary recorded keyboard inclusion and direct-capture policy.
-- Archive presence/absence and keyboard App Group entitlement matched policy.
-- App Store Connect processing completed for the exact version/build.
-- Internal tester group assignment confirmed.
-- TestFlight build installed on a physical iPhone.
-- Microphone handoff and keyboard insertion verified end to end.
+- authorised manifest, source SHA, train, version/build, and controller run;
+- reusable worker success and release-policy summary;
+- archive identities, extension presence, and entitlements;
+- App Store Connect upload, processing, beta review, and tester availability;
+- exact build installed on each physical device; and
+- handoff, insertion, recovery, system restriction, accessibility, and memory
+  rows from the physical matrix.
 
-If a later state is not verified, say so explicitly instead of treating an earlier green gate as shipment.
+If a later state is not verified, mark it PENDING rather than treating an earlier
+green gate as shipment. Documentation review does not satisfy physical-device
+acceptance or authorise a new Alpha or Stable release.

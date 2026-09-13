@@ -25,6 +25,16 @@ final class AssemblyAILiveClientTests: XCTestCase {
         XCTAssertEqual(frame.last, 2)
     }
 
+    private static let firstTurnEvent = #"""
+    {"type":"Turn","turn_order":0,"turn_is_formatted":true,
+     "end_of_turn":true,"transcript":"First.","utterance":"First."}
+    """#
+
+    private static let finalTurnEvent = #"""
+    {"type":"Turn","turn_order":1,"turn_is_formatted":true,
+     "end_of_turn":true,"transcript":"Done.","utterance":"Done."}
+    """#
+
     func testFinishOrdersResidualForceFinalGraceAndTerminate() async throws {
         let socket = TestLiveWebSocket()
         let factory = TestSocketFactory([socket])
@@ -39,12 +49,7 @@ final class AssemblyAILiveClientTests: XCTestCase {
         let didStart = await eventually { socket.state == .running }
         XCTAssertTrue(didStart)
         socket.emit(#"{"type":"Begin"}"#)
-        socket.emit(
-            #"""
-            {"type":"Turn","turn_order":0,"turn_is_formatted":true,
-             "end_of_turn":true,"transcript":"First.","utterance":"First."}
-            """#
-        )
+        socket.emit(Self.firstTurnEvent)
         _ = await eventually { lock.withLock { events.count == 2 } }
         client.sendAudio(Data(repeating: 7, count: 800))
 
@@ -53,11 +58,7 @@ final class AssemblyAILiveClientTests: XCTestCase {
             textMessages(socket).contains(#"{"type":"ForceEndpoint"}"#)
         }
         XCTAssertTrue(didForce)
-        let final = #"""
-        {"type":"Turn","turn_order":1,"turn_is_formatted":true,
-         "end_of_turn":true,"transcript":"Done.","utterance":"Done."}
-        """#
-        socket.emit(final)
+        socket.emit(Self.finalTurnEvent)
         let didTerminate = await eventually {
             textMessages(socket).contains(#"{"type":"Terminate"}"#)
         }

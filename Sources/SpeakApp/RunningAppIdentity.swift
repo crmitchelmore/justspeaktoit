@@ -55,6 +55,6 @@ struct RunningAppIdentity: Sendable {
             + "Other builds and copies can have separate permissions. "
             + "If this exact app is already enabled but access is still not detected, "
             + "turn its switch off and on, then quit and reopen \(name). "
-            + "If Accessibility still shows Denied, " + accessibilityRecoveryInstructions
+            + accessibilityRecoveryInstructions
     }
 }

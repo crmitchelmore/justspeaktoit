@@ -6,7 +6,7 @@ struct SonioxStreamResponse: Decodable {
     let errorCode: Int?
     let errorMessage: String?
 
-    var tokenSummary: (finals: String, nonFinals: String, sawMarker: Bool) {
+    var tokenSummary: SonioxTokenSummary {
         var finals = ""
         var nonFinals = ""
         var sawMarker = false
@@ -19,7 +19,7 @@ struct SonioxStreamResponse: Decodable {
                 nonFinals.append(token.text)
             }
         }
-        return (finals, nonFinals, sawMarker)
+        return SonioxTokenSummary(finals: finals, nonFinals: nonFinals, sawMarker: sawMarker)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -27,6 +27,14 @@ struct SonioxStreamResponse: Decodable {
         case errorCode = "error_code"
         case errorMessage = "error_message"
     }
+}
+
+/// The finals/non-finals split of one Soniox frame, plus whether that frame
+/// carried an end-of-utterance marker.
+struct SonioxTokenSummary {
+    let finals: String
+    let nonFinals: String
+    let sawMarker: Bool
 }
 
 struct SonioxToken: Decodable {

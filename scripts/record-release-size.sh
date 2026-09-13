@@ -25,7 +25,8 @@ for path in "$APP_PATH" "$DMG_PATH"; do
     fi
 done
 
-MAIN_BINARY="$APP_PATH/Contents/MacOS/JustSpeakToIt"
+EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")"
+MAIN_BINARY="$APP_PATH/Contents/MacOS/$EXECUTABLE"
 CLI_BINARY="$APP_PATH/Contents/MacOS/speak"
 
 bytes() { stat -f%z "$1"; }

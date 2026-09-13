@@ -20,6 +20,13 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <!-- Release provenance. Both configurations now share this one plist, so the
+         values arrive through build settings rather than an inline dictionary;
+         the Alpha plist transform overwrites SpeakReleaseTrain in its own copy. -->
+    <key>SpeakReleaseTrain</key>
+    <string>$(SPEAK_RELEASE_TRAIN)</string>
+    <key>GitCommitSHA</key>
+    <string>$(SPEAK_GIT_COMMIT_SHA)</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>The Just Speak keyboard records audio only while you dictate, to type what you say.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

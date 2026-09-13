@@ -38,3 +38,16 @@ func dependencyBlock(named name: String, in manifest: String) throws -> Substrin
         .min() ?? manifest.endIndex
     return manifest[start..<end]
 }
+
+/// The iOS app's Info.plist dictionary, which is declared next to the target
+/// rather than inside it so the optional export-compliance code can be added
+/// after the literal.
+func iosAppInfoPlistBlock(in manifest: String) throws -> Substring {
+    let start = try XCTUnwrap(
+        manifest.range(of: "var iosAppInfoPlist: [String: Plist.Value] = [")?.lowerBound,
+        "No iOS Info.plist dictionary found"
+    )
+    let remainder = manifest[start...]
+    let end = remainder.range(of: "\n]\n")?.upperBound ?? manifest.endIndex
+    return manifest[start..<end]
+}

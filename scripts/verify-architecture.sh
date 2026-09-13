@@ -64,7 +64,12 @@ check_binary() {
     echo "==> $(basename "$binary"): $archs"
 }
 
-check_binary "$APP_PATH/Contents/MacOS/JustSpeakToIt"
+EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Contents/Info.plist")"
+if [[ -z "$EXECUTABLE" || "$EXECUTABLE" == */* || "$EXECUTABLE" == "." || "$EXECUTABLE" == ".." ]]; then
+    echo "error: invalid CFBundleExecutable" >&2
+    exit 1
+fi
+check_binary "$APP_PATH/Contents/MacOS/$EXECUTABLE"
 if [[ "$CLI_MODE" == "embedded-cli" ]]; then
     check_binary "$APP_PATH/Contents/MacOS/speak"
 elif [[ -e "$APP_PATH/Contents/MacOS/speak" ]]; then

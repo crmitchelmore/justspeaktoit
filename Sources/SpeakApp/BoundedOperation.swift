@@ -1,53 +1,73 @@
 import Foundation
 
-/// Runs an operation with a deadline the caller can rely on.
-///
-/// A late completion is discarded rather than awaited, so an operation that
-/// wedges (a Core ML decode, a socket send) cannot hold a stop path open
-/// indefinitely. The operation itself keeps running to completion in its own
-/// task; only the wait is bounded.
+/// A cancellation-aware deadline that never waits for a non-cooperative task.
 enum BoundedOperation {
-    /// Returns the operation's outcome, or nil if `timeout` elapsed first.
     static func run<Value: Sendable>(
         timeout: Duration,
         operation: @escaping @MainActor () async throws -> Value
     ) async -> Result<Value, any Error>? {
-        let resumption = OnceResumption<Result<Value, any Error>?>()
-        var timeoutTask: Task<Void, Never>?
-        let outcome = await withCheckedContinuation { continuation in
-            resumption.arm(continuation)
-            Task { @MainActor in
-                do {
-                    resumption.resume(.success(try await operation()))
-                } catch {
-                    resumption.resume(.failure(error))
+        let gate = OnceResumption<Result<Value, any Error>?>()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                gate.arm(continuation)
+                let work = Task { @MainActor in
+                    do {
+                        try Task.checkCancellation()
+                        gate.resume(.success(try await operation()))
+                    } catch {
+                        gate.resume(.failure(error))
+                    }
                 }
+                gate.track(work)
+                let timer = Task {
+                    guard (try? await Task.sleep(for: timeout)) != nil else { return }
+                    gate.resume(nil)
+                }
+                gate.track(timer)
             }
-            timeoutTask = Task {
-                guard (try? await Task.sleep(for: timeout)) != nil else { return }
-                resumption.resume(nil)
-            }
+        } onCancel: {
+            gate.resume(.failure(CancellationError()))
         }
-        timeoutTask?.cancel()
-        return outcome
     }
 
-    /// Resumes a continuation exactly once from whichever racing task
-    /// finishes first.
     private final class OnceResumption<Value: Sendable>: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<Value, Never>?
+        private var settled = false
+        private var pending: Value?
+        private var tasks: [Task<Void, Never>] = []
 
         func arm(_ continuation: CheckedContinuation<Value, Never>) {
-            lock.withLock { self.continuation = continuation }
+            let value = lock.withLock { () -> Value? in
+                if settled { return pending }
+                self.continuation = continuation
+                return nil
+            }
+            if let value { continuation.resume(returning: value) }
+        }
+
+        func track(_ task: Task<Void, Never>) {
+            let cancel = lock.withLock {
+                if settled { return true }
+                tasks.append(task)
+                return false
+            }
+            if cancel { task.cancel() }
         }
 
         func resume(_ value: Value) {
-            let continuation = lock.withLock { () -> CheckedContinuation<Value, Never>? in
-                defer { self.continuation = nil }
-                return self.continuation
+            let state = lock.withLock { () -> (CheckedContinuation<Value, Never>?, [Task<Void, Never>])? in
+                guard !settled else { return nil }
+                settled = true
+                pending = .some(value)
+                let result = (continuation, tasks)
+                continuation = nil
+                tasks = []
+                return result
             }
+            guard let (continuation, tasks) = state else { return }
             continuation?.resume(returning: value)
+            for task in tasks { task.cancel() }
         }
     }
 }

@@ -114,7 +114,7 @@ if(command === 'allocate' || command === 'prepare') {
     const config=json('Sources/SpeakCore/Resources/ReleaseTrains.json')[manifest.train];
     const item=manifest.surfaces[surface];
     const values={TUIST_RELEASE_TRAIN:manifest.train,RELEASE_TRAIN:manifest.train,RELEASE_TAG:manifest.tag,
-        RELEASE_SOURCE:manifest.source,RELEASE_VERSION:item.version,BUILD_NUMBER:item.build,
+        RELEASE_SOURCE:manifest.source,TUIST_RELEASE_SOURCE:manifest.source,RELEASE_VERSION:item.version,BUILD_NUMBER:item.build,
         DOWNLOAD_TAG:manifest.train === "alpha" ? manifest.tag : `mac-v${item.version}`,
         CLI_VERSION:manifest.train === "alpha" ? `${item.version}-alpha.${manifest.ordinal}` : item.version,
         BUNDLE_ID:config[surface==='ios'?'iosBundleIdentifier':surface==='mac-store'?'storeMacBundleIdentifier':'directMacBundleIdentifier'],
@@ -249,7 +249,9 @@ if(command === 'allocate' || command === 'prepare') {
     let dispatched=0;
     const dispatchLimit=3;
     const seen=new Set();
-    for(const r of runs.reverse()) {
+    // Newest successful main sources carry release repairs; do not starve them
+    // behind permanently failing historical manifests. Older sources remain queued.
+    for(const r of runs.sort((a,b)=>b.run_number-a.run_number)) {
         try {git('merge-base','--is-ancestor',adoption,r.head_sha);} catch {continue;}
         if(seen.has(r.head_sha)) continue;
         seen.add(r.head_sha);

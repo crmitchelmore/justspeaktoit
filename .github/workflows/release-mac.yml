@@ -223,6 +223,7 @@ jobs:
       # Preserve expensive signed packages even when a later verifier fails.
       # These are recovery artefacts, not a published or verified release.
       - name: Preserve packaged release candidates
+        continue-on-error: true
         if: always() && steps.arm64.outcome == 'success'
         uses: actions/upload-artifact@v7.0.1
         with:

@@ -13,13 +13,15 @@ class ReleaseAppleTest < Minitest::Test
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
     end
     def get(path)
-      return {'data'=>{'id'=>'store-review','attributes'=>store_contact}} if path.end_with?('/appStoreReviewDetail')
+      return {'data'=>{'id'=>'store-review','attributes'=>store_contact}} if path == '/v1/appStoreVersions/stable-version/appStoreReviewDetail'
+      raise 'Unexpected Store review source' if path.end_with?('/appStoreReviewDetail')
       return {'data'=>{'id'=>'review','attributes'=>path.include?('6810300888') ? review_contact : stable_contact}} if path.end_with?('/betaAppReviewDetail')
       return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
     def list(path)
-      return [{'id'=>'stable-version'}] if path.end_with?('/appStoreVersions?limit=200')
+      return [{'id'=>'stable-version'}] if path == '/v1/apps/6758528955/appStoreVersions?limit=200'
+      raise 'Unexpected Store app source' if path.include?('/appStoreVersions')
       return beta_locales if path.end_with?('/betaAppLocalizations')
       if path.start_with?('/v1/builds?')
         return review_busy ? [build] : [] if path.include?('betaAppReviewSubmission')

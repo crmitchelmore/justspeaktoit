@@ -5,19 +5,21 @@ class ReleaseAppleTest < Minitest::Test
   class FakeClient
     attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id
     attr_reader :posts
-    attr_accessor :beta_locales, :review_contact, :stable_contact
+    attr_accessor :beta_locales, :review_contact, :stable_contact, :store_contact
     def initialize
-      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]; @beta_locales=[]; @review_contact={'contactFirstName'=>'Owner','contactLastName'=>'Tester','contactPhone'=>'+441234567890','contactEmail'=>'owner@example.com'}; @stable_contact=@review_contact.dup
+      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]; @beta_locales=[]; @review_contact={'contactFirstName'=>'Owner','contactLastName'=>'Tester','contactPhone'=>'+441234567890','contactEmail'=>'owner@example.com'}; @stable_contact=@review_contact.dup; @store_contact=@review_contact.dup
     end
     def build
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
     end
     def get(path)
+      return {'data'=>{'id'=>'store-review','attributes'=>store_contact}} if path.end_with?('/appStoreReviewDetail')
       return {'data'=>{'id'=>'review','attributes'=>path.include?('6810300888') ? review_contact : stable_contact}} if path.end_with?('/betaAppReviewDetail')
       return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
     def list(path)
+      return [{'id'=>'stable-version'}] if path.end_with?('/appStoreVersions?limit=200')
       return beta_locales if path.end_with?('/betaAppLocalizations')
       if path.start_with?('/v1/builds?')
         return review_busy ? [build] : [] if path.include?('betaAppReviewSubmission')
@@ -90,6 +92,15 @@ class ReleaseAppleTest < Minitest::Test
     assert_equal client.stable_contact['contactPhone'],client.review_contact['contactPhone']
     assert_equal 'Owner copy',client.beta_locales.first['attributes']['description']
     assert_equal 'owner@example.com',client.beta_locales.first['attributes']['feedbackEmail']
+  end
+  def test_repairs_contacts_from_store_review_when_stable_beta_contact_is_missing
+    client=FakeClient.new
+    client.review_contact['contactPhone']=''
+    client.stable_contact['contactPhone']=''
+    client.store_contact['contactPhone']='+441111111111'
+    delivery(client).ensure_beta_review_information
+    assert_equal '+441111111111',client.review_contact['contactPhone']
+    assert_equal 'Owner',client.review_contact['contactFirstName']
   end
   def test_preserves_alpha_owner_contact
     client=FakeClient.new; client.review_contact['contactEmail']='alpha@example.com'

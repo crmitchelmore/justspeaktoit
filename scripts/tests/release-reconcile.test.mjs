@@ -18,7 +18,7 @@ fs.appendFileSync(process.env.CALL_LOG,JSON.stringify(a)+'\\n');
 if(a[0]==='workflow') process.exit(0);
 const path=a.at(-1);
 if(path.includes('/releases?')) console.log('[[]]');
-else if(path.includes('/ci.yml/')) console.log(JSON.stringify([{workflow_runs:[5,4,3,2,1,0].map(n=>({head_sha:'source'+n}))}]));
+else if(path.includes('/ci.yml/')) console.log(JSON.stringify([{workflow_runs:[3,5,4,2,1,0].map(n=>({run_number:n,head_sha:'source'+n}))}]));
 else if(path.includes('/alpha-release.yml/')) {
  const pages=[{workflow_runs:Array.from({length:100},(_,n)=>({status:'in_progress',display_title:'unrelated'+n}))},{workflow_runs:[{status:'queued',display_title:'Alpha source0'}]}];
  console.log(JSON.stringify(a.includes('--paginate')?pages:pages[0]));

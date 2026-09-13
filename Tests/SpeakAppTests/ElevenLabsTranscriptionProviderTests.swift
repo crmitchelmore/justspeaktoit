@@ -105,6 +105,11 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             "Request should have been sent to ElevenLabs even when duration loading fails"
         )
         XCTAssertEqual(captured.value(forHTTPHeaderField: "xi-api-key"), "test-key")
+        XCTAssertNil(captured.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(captured.url?.absoluteString, "https://api.elevenlabs.io/v1/speech-to-text")
+        XCTAssertTrue(
+            captured.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=") == true
+        )
     }
 
     func testTranscribeFile_includesLanguageCode_whenProvided() async throws {
@@ -144,6 +149,10 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         let capturedBody = await requestObserver.capturedBody()
         let body = try XCTUnwrap(capturedBody)
         let bodyString = String(data: body, encoding: .utf8) ?? ""
+        XCTAssertTrue(bodyString.contains("model_id"))
+        XCTAssertTrue(bodyString.contains("scribe_v2"))
+        XCTAssertTrue(bodyString.contains("timestamps_granularity"))
+        XCTAssertTrue(bodyString.contains("word"))
         XCTAssertTrue(bodyString.contains("language_code"), "Body should contain language_code field")
         XCTAssertTrue(bodyString.contains("fr"), "Body should contain the extracted language code")
     }
@@ -296,21 +305,22 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         }
     }
 
-    // MARK: - Helpers
+}
 
-    private func makeMockSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [MockURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
+// MARK: - Helpers (file scope, to keep the test class body within its budget)
 
-    private func makeSilentAudioFile() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("test_audio_\(UUID().uuidString).m4a")
-        // Write minimal valid-looking data so Data(contentsOf:) succeeds
-        try Data("fakeaudiodata".utf8).write(to: url)
-        return url
-    }
+private func makeMockSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    return URLSession(configuration: configuration)
+}
+
+private func makeSilentAudioFile() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("test_audio_\(UUID().uuidString).m4a")
+    // Write minimal valid-looking data so Data(contentsOf:) succeeds
+    try Data("fakeaudiodata".utf8).write(to: url)
+    return url
 }
 
 // MARK: - Test Infrastructure

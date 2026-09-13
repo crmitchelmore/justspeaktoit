@@ -106,27 +106,27 @@ struct IOSBatchTranscriptionClient {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         let modelName = model.split(separator: "/").last.map(String.init) ?? model
         var body = Data()
-        body.appendFormField(name: "model", value: modelName, boundary: boundary)
+        body.appendFormField(named: "model", value: modelName, boundary: boundary)
         body.appendFormField(
-            name: "response_format",
+            named: "response_format",
             value: modelName == "gpt-4o-transcribe-diarize" ? "diarized_json" : "json",
             boundary: boundary
         )
         if modelName == "gpt-4o-transcribe-diarize" {
-            body.appendFormField(name: "chunking_strategy", value: "auto", boundary: boundary)
+            body.appendFormField(named: "chunking_strategy", value: "auto", boundary: boundary)
         }
         if let languageCode = language?.split(whereSeparator: { $0 == "_" || $0 == "-" }).first {
             body.appendFormField(
-                name: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
+                named: OpenAITranscriptionModels.batchLanguageFieldName(for: modelName),
                 value: String(languageCode),
                 boundary: boundary
             )
         }
-        body.appendFile(
-            name: "file",
+        body.appendFileField(
+            named: "file",
             filename: url.lastPathComponent,
             mimeType: "audio/m4a",
-            data: try Data(contentsOf: url),
+            fileData: try Data(contentsOf: url),
             boundary: boundary
         )
         body.appendString("--\(boundary)--\r\n")
@@ -319,23 +319,4 @@ private struct OpenAIResponseSegment: Decodable {
     let speaker: String?
 }
 
-private extension Data {
-    mutating func appendString(_ value: String) {
-        if let data = value.data(using: .utf8) { append(data) }
-    }
-
-    mutating func appendFormField(name: String, value: String, boundary: String) {
-        appendString("--\(boundary)\r\n")
-        appendString("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n")
-        appendString("\(value)\r\n")
-    }
-
-    mutating func appendFile(name: String, filename: String, mimeType: String, data: Data, boundary: String) {
-        appendString("--\(boundary)\r\n")
-        appendString("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n")
-        appendString("Content-Type: \(mimeType)\r\n\r\n")
-        append(data)
-        appendString("\r\n")
-    }
-}
 #endif

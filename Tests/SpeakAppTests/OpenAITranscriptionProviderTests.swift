@@ -52,6 +52,13 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
 
         let capturedBody = await requestObserver.capturedBodyString()
         let body = try XCTUnwrap(capturedBody)
+        let capturedRequest = await requestObserver.capturedRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/audio/transcriptions")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-key")
+        XCTAssertTrue(
+          request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=") == true
+        )
         XCTAssertTrue(body.contains("gpt-transcribe"))
         XCTAssertTrue(body.contains(#"name="response_format""#))
         XCTAssertTrue(body.contains("\r\njson\r\n"))
@@ -210,6 +217,10 @@ private actor OpenAIRequestObserver {
 
   func capturedBodyString() -> String? {
     body.flatMap { String(data: $0, encoding: .utf8) }
+  }
+
+  func capturedRequest() -> URLRequest? {
+    request
   }
 
   private func readBody(from stream: InputStream?) -> Data? {

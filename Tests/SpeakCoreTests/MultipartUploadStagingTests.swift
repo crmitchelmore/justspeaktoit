@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 
-@testable import SpeakApp
+@testable import SpeakCore
 
 final class MultipartUploadStagingTests: XCTestCase {
   private var directory: URL!

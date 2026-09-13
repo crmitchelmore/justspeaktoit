@@ -220,6 +220,24 @@ jobs:
             echo "CLI_MANIFEST_SIG=${{ steps.cli.outputs.signature }}"
           } >> "$GITHUB_ENV"
 
+      # Preserve expensive signed packages even when a later verifier fails.
+      # These are recovery artefacts, not a published or verified release.
+      - name: Preserve packaged release candidates
+        if: always() && steps.arm64.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: mac-candidates-${{ env.RELEASE_TAG }}
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            ${{ steps.arm64.outputs.dmg-path }}
+            ${{ steps.universal.outputs.dmg-path }}
+            ${{ steps.cli.outputs.arm64-zip }}
+            ${{ steps.cli.outputs.x86_64-zip }}
+            ${{ steps.cli.outputs.manifest }}
+            ${{ steps.cli.outputs.signature }}
+
       - name: Generate Appcasts for Sparkle Updates
         if: steps.receipt.outputs.status != 'verified'
         env:

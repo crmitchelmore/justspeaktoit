@@ -548,7 +548,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("GITHUB_STEP_SUMMARY"))
 
         XCTAssertTrue(architectureScript.contains("lipo -archs"))
-        XCTAssertTrue(architectureScript.contains("Contents/MacOS/JustSpeakToIt"))
+        XCTAssertTrue(architectureScript.contains("CFBundleExecutable"))
+        XCTAssertFalse(architectureScript.contains("Contents/MacOS/JustSpeakToIt"))
         XCTAssertTrue(architectureScript.contains("Contents/MacOS/speak"))
         XCTAssertTrue(architectureScript.contains("must contain exactly"))
         XCTAssertTrue(sizeScript.contains("GITHUB_STEP_SUMMARY"))

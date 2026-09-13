@@ -50,22 +50,18 @@ Store Connect nutrition label must agree with this file.
 
 ## Export compliance
 
-The app implements AES-GCM and PBKDF2 through CryptoKit to encrypt the user's
-own API keys for end-to-end encrypted iCloud and CloudKit key sync.
-Confidentiality of user data is not one of the Category 5 Part 2 exemptions
-Apple lists, which are authentication, digital signature, DRM, medical and
-banking. `ITSAppUsesNonExemptEncryption` is therefore `true`.
+The iOS app uses Apple CryptoKit for AES-GCM and HMAC-SHA256, Security for
+Keychain/randomness, and URLSession for TLS. The PBKDF2 loop composes CryptoKit
+HMAC calls; it does not embed a cipher implementation. Its package targets
+(SpeakCore, SpeakSync, SpeakiOSLib) have no third-party crypto dependency.
 
-Consequence: every build sits in Missing Compliance in App Store Connect until
-the export questions are answered. If documentation is required, submit it in App Store Connect. After Apple
-approves it, use the key value shown beside the approved documentation:
+Apple explicitly exempts encryption limited to the Apple operating system from
+App Store Connect documentation. `ITSAppUsesNonExemptEncryption` is `false`
+and no `ITSEncryptionExportComplianceCode` is emitted. The previous declaration
+considered only purpose-based exemptions and missed this separate OS exemption.
+Reassess before adding a non-system crypto implementation.
 
-```sh
-TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE=<code from App Store Connect> tuist generate
-```
-
-An unset or empty value leaves the key out of the bundle, which is deliberate: a
-placeholder would ship an invalid code.
+Source: [Apple encryption documentation requirements](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption).
 
 ## Device capabilities
 
@@ -135,30 +131,9 @@ in-app purchases and no unrestricted web access. Two answers to watch:
 
 ### Export compliance
 
-The two questions and their answers:
-
-1. **Does your app use encryption?** **Yes.** CryptoKit AES-GCM and PBKDF2
-   encrypt the user's own API keys for the end-to-end encrypted CloudKit key
-   sync, alongside OS-provided HTTPS and Keychain.
-2. **Does it qualify for an exemption under Category 5 Part 2?** **No.** Apple
-   lists five: medical end-use, intellectual property protection,
-   authentication or digital signature or decryption only, banking and money
-   transactions, and short key lengths. Encrypting user secrets for
-   confidentiality with AES-256-GCM is none of them.
-
-Use the questions in App Store Connect to determine which documentation is
-required for this app. Submit any required documents there and, after Apple
-approves them, inject the key value shown beside the approved documentation:
-
-```sh
-TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE=<code from App Store Connect> tuist generate
-```
-
-See [Apple's encryption documentation procedure](https://developer.apple.com/help/app-store-connect/manage-app-information/determine-and-upload-app-encryption-documentation).
-Any applicable export classification, reporting or country-specific obligations
-are separate from this Apple key. A BIS report does not issue the key used by
-`ITSEncryptionExportComplianceCode`. Confirm those obligations for the actual
-product and distribution territories before submission.
+The app uses encryption, limited to Apple operating-system cryptography.
+Select the OS-encryption exemption; the bundled `ITSAppUsesNonExemptEncryption`
+value is `false`. See the implementation audit and Apple reference above.
 
 ### App Review Information
 

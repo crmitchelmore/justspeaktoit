@@ -346,16 +346,6 @@ let macAppTarget: Target = .target(
     settings: .settings(base: macAppSettings)
 )
 
-// Apple supplies the key value after approving encryption documentation
-// in App Store Connect. Until then the key is absent and App
-// Store Connect asks the compliance questions per build; exporting
-// TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE before `tuist generate` stamps the
-// code into the bundle and stops the prompt. An empty or unset value is
-// ignored: a placeholder string here would ship an invalid code.
-let encryptionComplianceCode = (
-    ProcessInfo.processInfo.environment["TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE"] ?? ""
-).trimmingCharacters(in: .whitespacesAndNewlines)
-
 var iosAppInfoPlist: [String: Plist.Value] = [
     "UILaunchStoryboardName": "LaunchScreen",
     "UIRequiresFullScreen": false,
@@ -387,16 +377,10 @@ var iosAppInfoPlist: [String: Plist.Value] = [
         "Just Speak to It uses the camera to scan the QR code shown by the Mac app, so your settings and "
             + "API keys transfer to this iPhone."
     ),
-    // Export compliance. The app implements AES-GCM and PBKDF2 via CryptoKit
-    // to encrypt the user's own API keys for end-to-end encrypted
-    // iCloud/CloudKit key sync. Confidentiality of user data is not one of
-    // the U.S. EAR Category 5 Part 2 exemptions Apple lists (authentication,
-    // digital signature, DRM, medical, banking), so this declares `true` and
-    // the compliance answers are supplied in App Store Connect. Once Apple
-    // approves the documentation and supplies its key value, export it as
-    // TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE before `tuist generate` and every
-    // build stops prompting for compliance. See Docs/ios-app-store-submission.md.
-    "ITSAppUsesNonExemptEncryption": true,
+    // Encryption uses Apple CryptoKit, Security and URLSession only; the iOS
+    // dependency graph contains no third-party cryptographic implementation.
+    // Apple's OS-encryption documentation exemption applies (see submission docs).
+    "ITSAppUsesNonExemptEncryption": false,
     "NSSupportsLiveActivities": true,
     // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
     // the History entry id, never the transcript itself.
@@ -420,10 +404,6 @@ var iosAppInfoPlist: [String: Plist.Value] = [
         ]
     ]
 ]
-if !encryptionComplianceCode.isEmpty {
-    iosAppInfoPlist["ITSEncryptionExportComplianceCode"] = .string(encryptionComplianceCode)
-}
-
 let iosAppTarget: Target = .target(
     name: "SpeakiOS",
     destinations: .iOS,

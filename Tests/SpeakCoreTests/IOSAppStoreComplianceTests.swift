@@ -58,15 +58,15 @@ final class IOSAppStoreComplianceTests: XCTestCase {
         )
     }
 
-    func testExportCompliance_declaresNonExemptEncryption() throws {
+    func testExportCompliance_declaresOperatingSystemEncryptionExemption() throws {
         let manifest = try contents(of: "Project.swift")
         XCTAssertTrue(
-            manifest.contains("\"ITSAppUsesNonExemptEncryption\": true"),
-            "CryptoKit AES-GCM key sync is not a Category 5 Part 2 exemption Apple lists"
+            manifest.contains("\"ITSAppUsesNonExemptEncryption\": false"),
+            "Apple exempts encryption limited to its operating system"
         )
-        XCTAssertTrue(
-            manifest.contains("TUIST_ITS_ENCRYPTION_COMPLIANCE_CODE"),
-            "The App Store Connect key value must be injectable rather than hard-coded as a placeholder"
+        XCTAssertFalse(
+            manifest.contains("ITSEncryptionExportComplianceCode"),
+            "OS-only encryption must not stamp an unapproved export code"
         )
     }
 

@@ -249,7 +249,9 @@ if(command === 'allocate' || command === 'prepare') {
     let dispatched=0;
     const dispatchLimit=3;
     const seen=new Set();
-    for(const r of runs.reverse()) {
+    // Newest successful main sources carry release repairs; do not starve them
+    // behind permanently failing historical manifests. Older sources remain queued.
+    for(const r of runs.sort((a,b)=>b.run_number-a.run_number)) {
         try {git('merge-base','--is-ancestor',adoption,r.head_sha);} catch {continue;}
         if(seen.has(r.head_sha)) continue;
         seen.add(r.head_sha);

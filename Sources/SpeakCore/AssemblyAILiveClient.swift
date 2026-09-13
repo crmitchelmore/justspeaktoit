@@ -3,7 +3,7 @@ import Foundation
 
 /// Cross-platform AssemblyAI Universal-3.5 Pro Streaming v3 client.
 public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
-    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient,
     @unchecked Sendable {
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
     public let finishFlushesBufferedAudio = true
@@ -399,28 +399,33 @@ extension AssemblyAILiveClient {
               let envelope = try? JSONDecoder().decode(AssemblyAIEnvelope.self, from: data) else { return }
         switch envelope.type ?? (envelope.turn_order == nil ? "" : "Turn") {
         case "Begin": handleBegin(run)
-        case "Turn":
-            guard let turn = try? JSONDecoder().decode(AssemblyAIStreamingTurn.self, from: data),
-                  let update = run.assembler.consume(turn) else { return }
-            if update.finalizedTurn {
-                if run.finishing { run.finalObservedAfterFinish = true }
-            }
-            let utterance = turn.utterance?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let boundary = utterance?.isEmpty == false ? boundaryCallback : nil
-            let consumesTrailingFinal = update.finalizedTurn && run.finishing
-            callbackQueue.async { [weak self, run] in
-                guard let self,
-                      self.queue.sync(execute: { self.callbackGeneration == run.id }) else { return }
-                if let utterance { boundary?(utterance) }
-                if !consumesTrailingFinal {
-                    run.onTranscript(update.displayText, false)
-                }
-            }
-            if run.finishing, run.forceSent, run.finalObservedAfterFinish { scheduleGrace(run) }
+        case "Turn": handleTurn(data: data, run: run)
         case "Termination": complete(run, closeCode: .normalClosure)
         default: break
         }
+    }
+
+    /// Decodes and applies one `Turn` event. Split from `handle` so each stays
+    /// inside the project's cyclomatic-complexity budget.
+    private func handleTurn(data: Data, run: Run) {
+        guard let turn = try? JSONDecoder().decode(AssemblyAIStreamingTurn.self, from: data),
+              let update = run.assembler.consume(turn) else { return }
+        if update.finalizedTurn {
+            if run.finishing { run.finalObservedAfterFinish = true }
+        }
+        let utterance = turn.utterance?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let boundary = utterance?.isEmpty == false ? boundaryCallback : nil
+        let consumesTrailingFinal = update.finalizedTurn && run.finishing
+        callbackQueue.async { [weak self, run] in
+            guard let self,
+                  self.queue.sync(execute: { self.callbackGeneration == run.id }) else { return }
+            if let utterance { boundary?(utterance) }
+            if !consumesTrailingFinal {
+                run.onTranscript(update.displayText, false)
+            }
+        }
+        if run.finishing, run.forceSent, run.finalObservedAfterFinish { scheduleGrace(run) }
     }
 
     func handleBegin(_ run: Run) {

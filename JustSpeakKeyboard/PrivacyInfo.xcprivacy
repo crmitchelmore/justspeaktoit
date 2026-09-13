@@ -2,15 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- The app does not track users across apps/websites owned by other companies. -->
+    <!-- Apple evaluates the privacy manifest of every binary in the upload, not
+         just the host app, so the keyboard extension carries its own. It links
+         SpeakCore, which reads the shared App Group defaults and file
+         attributes. -->
     <key>NSPrivacyTracking</key>
     <false/>
     <key>NSPrivacyTrackingDomains</key>
     <array/>
 
-    <!-- Data types the iOS app collects. Transcription audio is sent to the
-         user-selected provider for App Functionality. The iOS app does not
-         currently initialise Sentry or another developer analytics SDK. -->
+    <!-- With direct capture switched on the extension records dictation audio
+         and hands it to Apple's on-device speech recogniser. It keeps nothing
+         and sends nothing to a server of ours. -->
     <key>NSPrivacyCollectedDataTypes</key>
     <array>
         <dict>
@@ -25,26 +28,8 @@
                 <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
             </array>
         </dict>
-        <!-- Transcript text leaves the device separately from the audio: post-
-             processing sends it to the chosen language model and voice output
-             sends it to the chosen speech provider. Apple counts that as
-             collection of other user content, and the nutrition label in App
-             Store Connect must agree with this entry. -->
-        <dict>
-            <key>NSPrivacyCollectedDataType</key>
-            <string>NSPrivacyCollectedDataTypeOtherUserContent</string>
-            <key>NSPrivacyCollectedDataTypeLinked</key>
-            <false/>
-            <key>NSPrivacyCollectedDataTypeTracking</key>
-            <false/>
-            <key>NSPrivacyCollectedDataTypePurposes</key>
-            <array>
-                <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
-            </array>
-        </dict>
     </array>
 
-    <!-- Required-reason API declarations. -->
     <key>NSPrivacyAccessedAPITypes</key>
     <array>
         <dict>
@@ -62,14 +47,6 @@
             <key>NSPrivacyAccessedAPITypeReasons</key>
             <array>
                 <string>C617.1</string>
-            </array>
-        </dict>
-        <dict>
-            <key>NSPrivacyAccessedAPIType</key>
-            <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
-            <key>NSPrivacyAccessedAPITypeReasons</key>
-            <array>
-                <string>E174.1</string>
             </array>
         </dict>
     </array>

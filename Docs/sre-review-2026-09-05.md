@@ -81,8 +81,9 @@ behavior from an arm64 runner, or TestFlight/device background behavior.
   observes cancellation. Later microphone/resource acquisition is fenced; known
   partial resources and analyzer teardown are owned by the cancelled startup.
 - #802 and #664: finish native capture-to-editor scenarios and the signed target
-  app matrix. Physical watch/keyboard interruption and background behavior also
-  need device checks.
+  app matrix using the [streaming insertion runbook](streaming-insertion-verification.md).
+  Physical watch/keyboard interruption and background behavior also need device
+  checks.
 - #648 / #665: paid-access billing/identity decisions remain unresolved. This
   sweep does not ship the blocked billing implementation.
 - Synchronous filesystem reads can still stall the recorder actor; cleanup

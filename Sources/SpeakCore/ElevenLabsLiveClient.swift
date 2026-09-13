@@ -258,26 +258,46 @@ extension ElevenLabsLiveClient {
             return
         }
 
+        apply(response, on: current)
+    }
+
+    /// Applies one decoded non-error provider event. Split from `handle` so each
+    /// stays within the project's cyclomatic-complexity budget.
+    private func apply(_ response: ElevenLabsStreamResponse, on current: Run) {
         switch response.messageType {
         case "session_started":
-            guard !current.ready else { return }
-            current.ready = true
-            let held = preroll.drain()
-            for chunk in held { enqueueAudio(chunk, on: current) }
-            if current.finishing { enqueueCommit(on: current) }
+            beginSession(on: current)
         case "partial_transcript":
-            guard let text = response.text, !text.isEmpty, !current.finishing else { return }
-            emitTranscript(text, isFinal: false, on: current)
+            emitPartial(response, on: current)
         case "committed_transcript":
-            guard let text = response.text,
-                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            current.accumulated.append(final: text)
-            if !current.finishing { emitTranscript(text, isFinal: true, on: current) }
+            commitFinal(response, on: current)
         case "committed_transcript_with_timestamps":
             break
         default:
             break
         }
+    }
+
+    /// Marks the run ready and releases any audio buffered before the provider
+    /// acknowledged the session.
+    private func beginSession(on current: Run) {
+        guard !current.ready else { return }
+        current.ready = true
+        let held = preroll.drain()
+        for chunk in held { enqueueAudio(chunk, on: current) }
+        if current.finishing { enqueueCommit(on: current) }
+    }
+
+    private func emitPartial(_ response: ElevenLabsStreamResponse, on current: Run) {
+        guard let text = response.text, !text.isEmpty, !current.finishing else { return }
+        emitTranscript(text, isFinal: false, on: current)
+    }
+
+    private func commitFinal(_ response: ElevenLabsStreamResponse, on current: Run) {
+        guard let text = response.text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        current.accumulated.append(final: text)
+        if !current.finishing { emitTranscript(text, isFinal: true, on: current) }
     }
 
     /// Fixture entry point for the real provider event decoder.

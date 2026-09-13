@@ -15,6 +15,8 @@ final class CaptureSessionOwnership {
     case dictation
     case voiceEdit
     case migration
+    /// A Compare Models live fan-out holding the microphone (issue #1101).
+    case compareModels
   }
 
   private(set) var owner: Owner?

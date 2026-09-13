@@ -11,6 +11,9 @@ struct TroubleshootingView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: density.isCompact ? density.sectionSpacing : 24) {
         header
+        if DistributionChannel.current.supportsAccessibilityTextInsertion {
+          PermissionRecoveryHelp(permissions: environment.permissions)
+        }
         if analyser.items.isEmpty {
           allClearBanner
         } else {

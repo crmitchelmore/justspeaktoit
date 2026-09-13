@@ -2,7 +2,7 @@ import Foundation
 
 /// Cross-platform Cartesia Ink streaming speech-to-text client.
 public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
-    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient,
     @unchecked Sendable {
     public static let apiVersion = "2026-03-01"
     public let finalShape: TranscriptFinalShape = .standaloneSegments

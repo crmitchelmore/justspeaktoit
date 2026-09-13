@@ -83,7 +83,12 @@ guard manifest.automationSchemaVersion == expectedSchema else {
     fail("automationSchemaVersion is \(manifest.automationSchemaVersion), expected \(expectedSchema)")
 }
 
-let releasePrefix = "https://github.com/crmitchelmore/justspeaktoit/releases/download/mac-v\(expectedVersion)/"
+let configuredTag = ProcessInfo.processInfo.environment["DOWNLOAD_TAG"] ?? ""
+let releaseTag = configuredTag.isEmpty ? "mac-v\(expectedVersion)" : configuredTag
+guard releaseTag.range(of: "^[A-Za-z0-9.+-]+$", options: .regularExpression) != nil else {
+    fail("release tag must be a plain tag name")
+}
+let releasePrefix = "https://github.com/crmitchelmore/justspeaktoit/releases/download/\(releaseTag)/"
 var remaining = Dictionary(uniqueKeysWithValues: archives.map { ($0.lastPathComponent, $0) })
 var seenArchitectures: Set<String> = []
 for asset in manifest.assets {

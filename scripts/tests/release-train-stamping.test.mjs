@@ -14,3 +14,12 @@ test('both actual Mac source plists can be stamped before Alpha generation',t=>{
   const plist=readFileSync(join(root,'Config',file),'utf8');assert.match(plist,/<string>alpha<\/string>/);assert.match(plist,/<string>3.2.0<\/string>/);
  }
 });
+
+test('Tuist receives the frozen commit through its exported environment namespace',()=>{
+ const project=readFileSync('Project.swift','utf8');
+ const configure=readFileSync('scripts/release-train.mjs','utf8');
+ assert.match(configure,/TUIST_RELEASE_SOURCE:manifest\.source/);
+ assert.doesNotMatch(project,/environment\["RELEASE_SOURCE"\]/);
+ assert.equal((project.match(/environment\["TUIST_RELEASE_SOURCE"\]/g)||[]).length,3,
+  'app, watch and keyboard metadata must all use the Tuist-visible commit');
+});

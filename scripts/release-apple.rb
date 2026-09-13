@@ -104,6 +104,74 @@ module AppleRelease
       end
     end
 
+    # New Alpha app records need app-level beta copy as well as build notes.
+    # Preserve owner-authored text and repair only missing English descriptions.
+    def ensure_beta_description
+      raise 'Only Alpha may configure beta metadata' unless @train == 'alpha'
+      description = 'Just Speak to It Alpha is a preview of our dictation and voice tools. '
+      description += 'Test recording, transcription, text delivery and history. '
+      description += 'Alpha installs separately from the stable app and keeps separate settings and data.'
+      path = "/v1/apps/#{@app}/betaAppLocalizations"
+      locales = @client.list(path)
+      if locales.empty?
+        begin
+          @client.post('/v1/betaAppLocalizations', data: {type: 'betaAppLocalizations',
+            attributes: {locale: 'en-GB', description: description},
+            relationships: {app: AppleRelease.relationship('apps', @app)}})
+        rescue IOSProfileBootstrap::ConflictError
+          # Another worker may have created it; the read-back below must prove it.
+        end
+      else
+        locales.each do |locale|
+          next unless locale.dig('attributes', 'description').to_s.strip.empty?
+          raise 'Missing non-English beta description requires translated copy' unless locale.dig('attributes', 'locale').to_s.start_with?('en')
+          @client.patch("/v1/betaAppLocalizations/#{locale.fetch('id')}", data: {
+            type: 'betaAppLocalizations', id: locale.fetch('id'), attributes: {description: description}})
+        end
+      end
+      verified = @client.list(path)
+      raise 'Beta description write was not observed' if verified.empty? || verified.any? { |l| l.dig('attributes', 'description').to_s.strip.empty? }
+    end
+
+    # Reuse the owner's existing contact information without embedding it in Git.
+    # Only fill empty Alpha fields; Stable is read-only.
+    def ensure_beta_review_information
+      raise 'Only Alpha may configure beta metadata' unless @train == 'alpha'
+      path = "/v1/apps/#{@app}/betaAppReviewDetail"
+      detail = @client.get(path).fetch('data')
+      attrs = detail.fetch('attributes')
+      required = %w[contactFirstName contactLastName contactPhone contactEmail]
+      missing = required.select { |key| attrs[key].to_s.strip.empty? }
+      unless missing.empty?
+        stable = @pipeline.fetch('apple').fetch('stable').fetch(@surface)
+        source = @client.get("/v1/apps/#{stable}/betaAppReviewDetail").fetch('data').fetch('attributes')
+        if missing.any? { |key| source[key].to_s.strip.empty? }
+          versions = @client.list("/v1/apps/#{stable}/appStoreVersions?limit=200")
+          versions.each do |version|
+            review = @client.get("/v1/appStoreVersions/#{version.fetch('id')}/appStoreReviewDetail")['data']
+            next unless review
+            required.each { |key| source[key] = review.fetch('attributes')[key] if source[key].to_s.strip.empty? }
+            break if missing.all? { |key| !source[key].to_s.strip.empty? }
+          end
+        end
+        unavailable = missing.select { |key| source[key].to_s.strip.empty? }
+        raise "Owner review information missing: #{unavailable.join(', ')}" unless unavailable.empty?
+        patch = missing.to_h { |key| [key, source[key]] }
+        @client.patch("/v1/betaAppReviewDetails/#{detail.fetch('id')}", data: {
+          type: 'betaAppReviewDetails', id: detail.fetch('id'), attributes: patch})
+      end
+      verified = @client.get(path).fetch('data').fetch('attributes')
+      raise 'Beta review contact write was not observed' if required.any? { |key| verified[key].to_s.strip.empty? }
+      locales = @client.list("/v1/apps/#{@app}/betaAppLocalizations")
+      locales.each do |locale|
+        next unless locale.dig('attributes', 'feedbackEmail').to_s.strip.empty?
+        @client.patch("/v1/betaAppLocalizations/#{locale.fetch('id')}", data: {
+          type: 'betaAppLocalizations', id: locale.fetch('id'), attributes: {feedbackEmail: verified.fetch('contactEmail')}})
+      end
+      observed = @client.list("/v1/apps/#{@app}/betaAppLocalizations")
+      raise 'Beta feedback email write was not observed' if observed.any? { |l| l.dig('attributes', 'feedbackEmail').to_s.strip.empty? }
+    end
+
     def assign(found)
       raise 'Only Alpha may be distributed through TestFlight' unless @train == 'alpha'
       id = found.fetch('id')
@@ -133,6 +201,8 @@ module AppleRelease
           end
           # Apple enforces six submissions/day. A 409/429 remains pending and
           # the reconciler retries; it must not be reported as public delivery.
+          ensure_beta_description
+          ensure_beta_review_information
           begin
             @client.post('/v1/betaAppReviewSubmissions', data: {type: 'betaAppReviewSubmissions', relationships: {build: AppleRelease.relationship('builds', id)}})
           rescue IOSProfileBootstrap::ApiError => error

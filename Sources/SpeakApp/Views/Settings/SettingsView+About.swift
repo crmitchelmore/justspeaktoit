@@ -120,7 +120,7 @@ extension SettingsView {
             )
               .font(.callout)
               .foregroundStyle(.secondary)
-            Link("Privacy policy", destination: URL(string: "https://justspeaktoit.com/privacy")!)
+            Link("Privacy policy", destination: PrivacyPolicy.url)
               .font(.callout)
           }
         }

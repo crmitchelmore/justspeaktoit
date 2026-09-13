@@ -1,0 +1,66 @@
+name: Local Transcription Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/local-transcription-benchmark.yml"
+      - "Benchmarks/LocalTranscription/**"
+      - "Docs/TRANSCRIBE_CPP_ASSESSMENT.md"
+      - "Makefile"
+      - "Package.swift"
+      - "Package.resolved"
+      - "Sources/SpeakCore/**"
+      - "scripts/verify-checksums.sh"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/local-transcription-benchmark.yml"
+      - "Benchmarks/LocalTranscription/**"
+      - "Docs/TRANSCRIBE_CPP_ASSESSMENT.md"
+      - "Makefile"
+      - "Package.swift"
+      - "Package.resolved"
+      - "Sources/SpeakCore/**"
+      - "scripts/verify-checksums.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  benchmark-package:
+    name: Build & Test Benchmark Package
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify package resolution and CTranscribe checksum
+        run: make verify-checksums
+
+      - name: Check benchmark Package.resolved drift
+        run: git diff --exit-code Benchmarks/LocalTranscription/Package.resolved
+
+      - name: Build clean shipping core graph without CTranscribe
+        run: |
+          swift build --scratch-path "$RUNNER_TEMP/root-build" --target SpeakCore
+          if find "$RUNNER_TEMP/root-build" -iname '*ctranscribe*' -o -iname '*transcribecpp*' | grep -q .; then
+            echo "CTranscribe unexpectedly appeared in the root build graph" >&2
+            exit 1
+          fi
+
+      - name: Build benchmark executable
+        run: >-
+          swift build --package-path Benchmarks/LocalTranscription
+          --scratch-path "$RUNNER_TEMP/benchmark-build"
+          --product local-transcription-benchmark
+
+      - name: Test benchmark qualification gates
+        run: >-
+          swift test --package-path Benchmarks/LocalTranscription
+          --scratch-path "$RUNNER_TEMP/benchmark-build"

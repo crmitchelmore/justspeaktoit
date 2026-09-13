@@ -61,20 +61,4 @@ final class ManifestParityTests: XCTestCase {
             XCTAssertEqual(packageVersion, projectVersion, "\(url): Package.swift and Project.swift disagree")
         }
     }
-
-    func testArgmaxPin_matchesTheBenchmarkRuntimeVersion() throws {
-        let resolved = try contents(of: "Package.resolved")
-        let runners = try contents(of: "Sources/LocalTranscriptionBenchmark/EngineRunners.swift")
-        let pinnedVersion = try XCTUnwrap(
-            firstMatch(
-                #""identity" : "argmax-oss-swift".*?"(version)" : "([^"]+)""#,
-                in: resolved
-            ),
-            "argmax-oss-swift pin missing from Package.resolved"
-        )
-        XCTAssertTrue(
-            runners.contains("\"argmax-oss-swift \(pinnedVersion)\""),
-            "EngineRunners.runtimeVersion must name the pinned argmax-oss-swift version \(pinnedVersion)"
-        )
-    }
 }

@@ -1,4 +1,5 @@
 SWIFT_FLAGS ?=
+BENCH_ARGS ?=
 ARCHIVE_PATH ?= ~/Desktop/JustSpeakToIt.xcarchive
 EXPORT_PATH ?= ~/Desktop/JustSpeakToIt-AppStore
 # Provisioning profile used for Mac App Store manual signing. Project.swift only applies
@@ -81,6 +82,10 @@ update-tooling: ## Intentionally upgrade the lint toolchain pinned in Tooling/Pa
 .PHONY: verify-checksums
 verify-checksums: ## Verify binary XCFramework and package checksums
 	./scripts/verify-checksums.sh
+
+.PHONY: bench
+bench: ## Run the isolated local-transcription benchmark (pass arguments with BENCH_ARGS)
+	swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark $(BENCH_ARGS)
 
 .PHONY: install-hooks
 install-hooks: ## Install git hooks for pre-push verification

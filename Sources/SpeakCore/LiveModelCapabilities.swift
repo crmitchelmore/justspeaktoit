@@ -89,7 +89,8 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish]
         ),
         "cartesia/ink-2-streaming": LiveModelCapabilities(
-            supportedSpeedModes: [.instant, .livePolish]
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 1.5
         ),
         "gladia/solaria-1-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],

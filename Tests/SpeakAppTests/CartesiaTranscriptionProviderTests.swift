@@ -15,6 +15,7 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     let capabilities = ModelCatalog.liveCapabilities(for: "cartesia/ink-2-streaming")
 
     XCTAssertTrue(capabilities.supportedSpeedModes.contains(.livePolish))
+    XCTAssertEqual(capabilities.postStopFinalizeBudget, 1.5)
   }
 
   func testProviderRegistry_routesCartesiaModelToCartesiaProvider() async {
@@ -67,6 +68,12 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
 
   func testValidateAPIKey_redactsAuthorizationHeaderInDebugSnapshot() async throws {
     CartesiaMockURLProtocol.requestHandler = { request in
+      XCTAssertEqual(request.httpMethod, "GET")
+      XCTAssertEqual(request.url?.path, "/voices")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret-cartesia-key")
+      XCTAssertEqual(
+        request.value(forHTTPHeaderField: "Cartesia-Version"), CartesiaLiveClient.apiVersion
+      )
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url),
         statusCode: 401,
@@ -83,6 +90,63 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     let authorization = try XCTUnwrap(result.debug?.requestHeaders["Authorization"])
     XCTAssertTrue(authorization.contains("RE"))
     XCTAssertFalse(authorization.contains("secret-cartesia-key"))
+  }
+
+  func testValidateAPIKey_trimsKeyAndAcceptsSuccess() async throws {
+    CartesiaMockURLProtocol.requestHandler = { request in
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer trimmed-key")
+      let response = HTTPURLResponse(
+        url: try XCTUnwrap(request.url), statusCode: 200,
+        httpVersion: nil, headerFields: nil
+      )!
+      return (response, Data())
+    }
+    defer { CartesiaMockURLProtocol.requestHandler = nil }
+
+    let result = await CartesiaTranscriptionProvider(session: makeMockSession())
+      .validateAPIKey("  trimmed-key\n")
+
+    if case .failure(let message) = result.outcome {
+      XCTFail("Expected successful validation, got \(message)")
+    }
+  }
+
+  func testValidateAPIKey_emptyKeyDoesNotCreateRequest() async {
+    CartesiaMockURLProtocol.requestHandler = { request in
+      XCTFail("Empty key unexpectedly created request: \(request)")
+      throw URLError(.badURL)
+    }
+    defer { CartesiaMockURLProtocol.requestHandler = nil }
+
+    let result = await CartesiaTranscriptionProvider(session: makeMockSession())
+      .validateAPIKey(" \n ")
+
+    if case .failure(let message) = result.outcome {
+      XCTAssertEqual(message, "Empty API key")
+    } else {
+      XCTFail("Expected empty key failure")
+    }
+  }
+
+  func testValidateAPIKey_reportsBothCredentialRejectionStatuses() async throws {
+    defer { CartesiaMockURLProtocol.requestHandler = nil }
+    for status in [401, 403] {
+      let expectedStatus = status
+      CartesiaMockURLProtocol.requestHandler = { request in
+        let response = HTTPURLResponse(
+          url: try XCTUnwrap(request.url), statusCode: expectedStatus,
+          httpVersion: nil, headerFields: nil
+        )!
+        return (response, Data())
+      }
+      let result = await CartesiaTranscriptionProvider(session: makeMockSession())
+        .validateAPIKey("key")
+      if case .failure(let message) = result.outcome {
+        XCTAssertTrue(message.contains(String(expectedStatus)))
+      } else {
+        XCTFail("Expected HTTP \(expectedStatus) to reject the credential")
+      }
+    }
   }
 
   private func makeMockSession() -> URLSession {

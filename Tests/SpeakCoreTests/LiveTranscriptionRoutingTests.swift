@@ -197,11 +197,10 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         ) as? FinalizingStreamingTranscriptionClient
 
         // Assert: Deepgram's CloseStream flushes audio it hasn't transcribed
-        // yet, so a stop must always drain it. ElevenLabs has no end-of-stream
-        // frame, so a stop with nothing outstanding closes immediately rather
-        // than burning the drain budget.
+        // yet. ElevenLabs sends an explicit final manual-commit chunk for the
+        // same reason. Both stops must therefore drain their buffered PCM.
         XCTAssertEqual(deepgram?.finishFlushesBufferedAudio, true)
-        XCTAssertEqual(elevenLabs?.finishFlushesBufferedAudio, false)
+        XCTAssertEqual(elevenLabs?.finishFlushesBufferedAudio, true)
     }
 
     func testStreamingClientError_missingAPIKeyNamesTheProvider() {

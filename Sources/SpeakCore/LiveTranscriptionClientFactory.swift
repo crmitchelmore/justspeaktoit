@@ -19,7 +19,10 @@ public enum LiveTranscriptionClientFactory {
         language: String?,
         keywords: [String] = []
     ) -> StreamingTranscriptionClient? {
-        makeClient(for: route, apiKey: apiKey, language: language, keywords: keywords, azureEndpoint: "")
+        makeClient(
+            for: route, apiKey: apiKey, language: language,
+            options: LiveClientOptions(keywords: keywords)
+        )
     }
 
     // The Azure Voice Live route also needs the resource endpoint the settings
@@ -28,13 +31,26 @@ public enum LiveTranscriptionClientFactory {
     //
     // One case per provider is the point of this switch: the catalogue-to-transport
     // mapping stays auditable in one place, so its length grows with the provider list.
-    // swiftlint:disable:next cyclomatic_complexity function_body_length
     public static func makeClient(
         for route: LiveTranscriptionRoute,
         apiKey: String,
         language: String?,
         keywords: [String],
         azureEndpoint: String
+    ) -> StreamingTranscriptionClient? {
+        makeClient(
+            for: route, apiKey: apiKey, language: language,
+            options: LiveClientOptions(keywords: keywords), azureEndpoint: azureEndpoint
+        )
+    }
+
+    // swiftlint:disable:next cyclomatic_complexity function_body_length
+    public static func makeClient(
+        for route: LiveTranscriptionRoute,
+        apiKey: String,
+        language: String?,
+        options: LiveClientOptions,
+        azureEndpoint: String = ""
     ) -> StreamingTranscriptionClient? {
         switch route.provider {
         case .azure:
@@ -56,10 +72,14 @@ public enum LiveTranscriptionClientFactory {
                 sampleRate: route.sampleRate
             )
         case .cartesia:
+            let fallbackBudget = ModelCatalog.liveCapabilities(for: route.modelID)
+                .postStopFinalizeBudget
             return CartesiaLiveClient(
                 apiKey: apiKey,
                 model: route.apiModelName,
-                sampleRate: route.sampleRate
+                sampleRate: route.sampleRate,
+                postStopFinalizeBudget: options.postStopFinalizeBudget ?? fallbackBudget,
+                stopGracePeriod: options.stopGracePeriod
             )
         case .soniox:
             return SonioxLiveClient(
@@ -69,12 +89,19 @@ public enum LiveTranscriptionClientFactory {
                 sampleRate: route.sampleRate
             )
         case .modulate:
-            return ModulateLiveClient(apiKey: apiKey, sampleRate: route.sampleRate)
+            return ModulateLiveClient(
+                apiKey: apiKey, sampleRate: route.sampleRate, options: options.modulate
+            )
         case .assemblyai:
+            let fallbackBudget = ModelCatalog.liveCapabilities(for: route.modelID)
+                .postStopFinalizeBudget
             return AssemblyAILiveClient(
                 apiKey: apiKey,
                 speechModel: route.apiModelName,
-                sampleRate: route.sampleRate
+                sampleRate: route.sampleRate,
+                keyterms: options.assemblyAIKeyterms,
+                postStopFinalizeBudget: options.postStopFinalizeBudget ?? fallbackBudget,
+                stopGracePeriod: options.stopGracePeriod
             )
         case .gladia:
             return GladiaLiveClient(
@@ -88,19 +115,19 @@ public enum LiveTranscriptionClientFactory {
                 apiKey: apiKey,
                 model: route.apiModelName,
                 language: language,
-                customVocabulary: GeminiTranscribeModels.boundedCustomVocabulary(keywords),
+                customVocabulary: GeminiTranscribeModels.boundedCustomVocabulary(options.keywords),
                 sampleRate: route.sampleRate
             )
         case .xai:
             return makeXAIClient(
-                for: route, apiKey: apiKey, language: language, keywords: keywords
+                for: route, apiKey: apiKey, language: language, keywords: options.keywords
             )
         case .meta:
             return MetaMuseLiveClient(
                 apiKey: apiKey,
                 model: route.apiModelName,
                 language: language,
-                keywords: keywords,
+                keywords: options.keywords,
                 sampleRate: route.sampleRate
             )
         case .speechmatics:

@@ -28,6 +28,6 @@ else if(path.includes('/alpha-release.yml/')) {
   cwd:root,env:{...process.env,PATH:bin+':'+process.env.PATH,CALL_LOG:log},stdio:'pipe'});
  const calls=readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);
  const dispatches=calls.filter(a=>a[0]==='workflow').map(a=>a.at(-1));
- assert.deepEqual(dispatches,['source=source1','source=source2','source=source3']);
+ assert.deepEqual(dispatches,['source=source5','source=source4','source=source3']);
  assert.equal(calls.filter(a=>a[0]==='release').length,0,'undispatched sources are not marked delivered');
 });

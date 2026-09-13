@@ -5,14 +5,15 @@ class ReleaseAppleTest < Minitest::Test
   class FakeClient
     attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id
     attr_reader :posts
-    attr_accessor :beta_locales
+    attr_accessor :beta_locales, :review_contact, :stable_contact
     def initialize
-      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]; @beta_locales=[]
+      @bundle_id='com.justspeaktoit.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false; @posts=[]; @beta_locales=[]; @review_contact={'contactFirstName'=>'Owner','contactLastName'=>'Tester','contactPhone'=>'+441234567890','contactEmail'=>'owner@example.com'}; @stable_contact=@review_contact.dup
     end
     def build
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
     end
     def get(path)
+      return {'data'=>{'id'=>'review','attributes'=>path.include?('6810300888') ? review_contact : stable_contact}} if path.end_with?('/betaAppReviewDetail')
       return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
@@ -33,6 +34,7 @@ class ReleaseAppleTest < Minitest::Test
       {'data'=>{}}
     end
     def patch(path, body)
+      review_contact.merge!(body[:data][:attributes].transform_keys(&:to_s)) if path.start_with?('/v1/betaAppReviewDetails/')
       beta_locales.find { |l| path.end_with?(l['id']) }['attributes'].merge!(body[:data][:attributes].transform_keys(&:to_s)) if path.start_with?('/v1/betaAppLocalizations/')
       {'data'=>{}}
     end
@@ -80,6 +82,19 @@ class ReleaseAppleTest < Minitest::Test
     delivery(client).ensure_beta_description
     assert_empty client.posts
     assert_equal 'Version de test',client.beta_locales.first['attributes']['description']
+  end
+  def test_repairs_missing_alpha_contacts_and_feedback_from_existing_owner_data
+    client=FakeClient.new; client.review_contact['contactPhone']=''
+    client.beta_locales=[{'id'=>'beta','attributes'=>{'locale'=>'en-GB','description'=>'Owner copy'}}]
+    delivery(client).ensure_beta_review_information
+    assert_equal client.stable_contact['contactPhone'],client.review_contact['contactPhone']
+    assert_equal 'Owner copy',client.beta_locales.first['attributes']['description']
+    assert_equal 'owner@example.com',client.beta_locales.first['attributes']['feedbackEmail']
+  end
+  def test_preserves_alpha_owner_contact
+    client=FakeClient.new; client.review_contact['contactEmail']='alpha@example.com'
+    delivery(client).ensure_beta_review_information
+    assert_equal 'alpha@example.com',client.review_contact['contactEmail']
   end
   def test_stable_candidate_never_assigns_testers
     client=FakeClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha')

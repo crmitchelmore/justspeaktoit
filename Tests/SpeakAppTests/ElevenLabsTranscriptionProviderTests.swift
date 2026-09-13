@@ -305,21 +305,22 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         }
     }
 
-    // MARK: - Helpers
+}
 
-    private func makeMockSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [MockURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
+// MARK: - Helpers (file scope, to keep the test class body within its budget)
 
-    private func makeSilentAudioFile() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("test_audio_\(UUID().uuidString).m4a")
-        // Write minimal valid-looking data so Data(contentsOf:) succeeds
-        try Data("fakeaudiodata".utf8).write(to: url)
-        return url
-    }
+private func makeMockSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    return URLSession(configuration: configuration)
+}
+
+private func makeSilentAudioFile() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("test_audio_\(UUID().uuidString).m4a")
+    // Write minimal valid-looking data so Data(contentsOf:) succeeds
+    try Data("fakeaudiodata".utf8).write(to: url)
+    return url
 }
 
 // MARK: - Test Infrastructure

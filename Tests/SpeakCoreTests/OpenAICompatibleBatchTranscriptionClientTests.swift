@@ -3,7 +3,7 @@ import XCTest
 
 @testable import SpeakCore
 
-final class OpenAICompatibleBatchTranscriptionClientTests: XCTestCase {
+final class OpenAICompatibleBatchClientTests: XCTestCase {
   func testUpload_writesOrderedFieldsAndExactFileBytesAndCleansUp() async throws {
     let directory = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -54,7 +54,7 @@ final class OpenAICompatibleBatchTranscriptionClientTests: XCTestCase {
     XCTAssertNotNil(body.range(of: audio))
     XCTAssertNotNil(body.range(of: Data("filename=\"clip\\\\\\\".m4a\"".utf8)))
     XCTAssertTrue(body.starts(with: Data("--\(boundary)\r\n".utf8)))
-    XCTAssertTrue(body.ends(with: Data("\r\n--\(boundary)--\r\n".utf8)))
+    XCTAssertEqual(body.range(of: Data("\r\n--\(boundary)--\r\n".utf8))?.upperBound, body.endIndex)
     XCTAssertEqual(captured.activeBodyWasProtected, true)
     XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(captured.bodyURL).path))
     XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
@@ -204,6 +204,14 @@ final class OpenAICompatibleBatchTranscriptionClientTests: XCTestCase {
 }
 
 private actor UploadCapture {
+  /// What the stub transport recorded for one upload.
+  struct Recorded {
+    let request: URLRequest?
+    let body: Data?
+    let bodyURL: URL?
+    let activeBodyWasProtected: Bool?
+  }
+
   private var request: URLRequest?
   private var body: Data?
   private var bodyURL: URL?
@@ -223,8 +231,13 @@ private actor UploadCapture {
     self.activeBodyWasProtected = value
   }
 
-  func value() -> (request: URLRequest?, body: Data?, bodyURL: URL?, activeBodyWasProtected: Bool?) {
-    (request, body, bodyURL, activeBodyWasProtected)
+  func value() -> Recorded {
+    Recorded(
+      request: request,
+      body: body,
+      bodyURL: bodyURL,
+      activeBodyWasProtected: activeBodyWasProtected
+    )
   }
 }
 

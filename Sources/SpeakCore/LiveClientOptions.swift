@@ -1,3 +1,5 @@
+import Foundation
+
 /// Provider-specific preferences passed through the shared live-client factory.
 public struct ModulateLiveOptions: Sendable, Equatable {
     public let speakerDiarization: Bool

@@ -42,10 +42,19 @@ struct RunningAppIdentity: Sendable {
         return await Task.detached(priority: .userInitiated) { reveal(url) }.value
     }
 
+    var accessibilityRecoveryInstructions: String {
+        "If Accessibility is already enabled, quit \(name). In System Settings → Privacy & Security → "
+            + "Accessibility, select only this app and click − to remove its old entry. Click + and add "
+            + "the app at \(bundleURL.path), then enable its switch and reopen it. "
+            + "Check Again must show Granted before testing recording insertion or Paste Last History Item. "
+            + "This replaces the permission entry, not your recordings or settings."
+    }
+
     var recoveryInstructions: String {
         "Check that you enabled \(name), using the app shown by Show App. "
             + "Other builds and copies can have separate permissions. "
             + "If this exact app is already enabled but access is still not detected, "
-            + "turn its switch off and on, then quit and reopen \(name)."
+            + "turn its switch off and on, then quit and reopen \(name). "
+            + "If Accessibility still shows Denied, " + accessibilityRecoveryInstructions
     }
 }

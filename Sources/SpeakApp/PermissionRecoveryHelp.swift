@@ -7,6 +7,12 @@ struct PermissionRecoveryHelp: View {
     private let identity = RunningAppIdentity.current
 
     var body: some View {
+        if let message = permissions.accessibilityRecoveryMessage {
+            Label(message, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("permissions.accessibilityAccessLost")
+        }
         DisclosureGroup("Already enabled in System Settings?") {
             VStack(alignment: .leading, spacing: 8) {
                 Text(identity.recoveryInstructions)

@@ -1,16 +1,17 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 @testable import SpeakCore
 
 final class SonioxTTSAPIContractTests: XCTestCase {
     override func tearDown() {
-        SonioxTTSMockURLProtocol.handler = nil
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
     func testSynthesis_UsesSelectedRegionalRESTHostAndBearerHeader() async throws {
         let recorder = SonioxTTSRequestRecorder()
-        SonioxTTSMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             await recorder.record(request)
             return (
                 HTTPURLResponse(
@@ -41,7 +42,7 @@ final class SonioxTTSAPIContractTests: XCTestCase {
     /// A gateway can refuse the key with a body the app cannot classify. The
     /// status code must still reach the caller so it can name the real cause.
     func testRefusedKey_ReportsTheStatusCodeWithAnUnrecognisedBody() async {
-        SonioxTTSMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             (
                 HTTPURLResponse(
                     url: try XCTUnwrap(request.url),
@@ -73,7 +74,7 @@ final class SonioxTTSAPIContractTests: XCTestCase {
 
     func testValidation_UsesSelectedRegionalAPIHost() async {
         let recorder = SonioxTTSRequestRecorder()
-        SonioxTTSMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             await recorder.record(request)
             return (
                 HTTPURLResponse(
@@ -96,7 +97,7 @@ final class SonioxTTSAPIContractTests: XCTestCase {
 
     func testAccountVoiceDiscovery_FollowsCursorAndUsesRegionalAPIHost() async throws {
         let recorder = SonioxTTSRequestRecorder()
-        SonioxTTSMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             await recorder.record(request)
             let cursor = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?
                 .queryItems?.first { $0.name == "cursor" }?.value
@@ -130,7 +131,7 @@ final class SonioxTTSAPIContractTests: XCTestCase {
 
     func testAccountVoiceDiscovery_StopsWhenCursorRepeats() async throws {
         let recorder = SonioxTTSRequestRecorder()
-        SonioxTTSMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             await recorder.record(request)
             return (
                 HTTPURLResponse(
@@ -152,7 +153,7 @@ final class SonioxTTSAPIContractTests: XCTestCase {
 
     private func mockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [SonioxTTSMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 }
@@ -165,28 +166,3 @@ private actor SonioxTTSRequestRecorder {
     func requests() -> [URLRequest] { recorded }
 }
 
-private final class SonioxTTSMockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.handler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        Task {
-            do {
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
-}

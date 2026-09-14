@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import SpeakCore
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakiOSLib
@@ -12,10 +13,10 @@ final class BatchProviderRoutingTests: XCTestCase {
         try Data([0, 1, 2, 3]).write(to: audioURL)
         defer { try? FileManager.default.removeItem(at: audioURL) }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [BatchRoutingURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        defer { BatchRoutingURLProtocol.handler = nil }
+        defer { StubURLProtocol.reset() }
 
         let cases = [
             (GeminiTranscribeModels.batchCatalogID, "generativelanguage.googleapis.com", "google-test-key"),
@@ -24,7 +25,7 @@ final class BatchProviderRoutingTests: XCTestCase {
         ]
         for (model, host, key) in cases {
             let received = expectation(description: "Request reached " + host)
-            BatchRoutingURLProtocol.handler = { request in
+            StubURLProtocol.handler = { request in
                 XCTAssertEqual(request.url?.host, host)
                 if host == "generativelanguage.googleapis.com" {
                     XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), key)
@@ -34,6 +35,7 @@ final class BatchProviderRoutingTests: XCTestCase {
                     XCTAssertNil(request.value(forHTTPHeaderField: "x-goog-api-key"))
                 }
                 received.fulfill()
+                return .fail(URLError(.userAuthenticationRequired))
             }
             do {
                 _ = try await IOSBatchTranscriber.transcribeFile(
@@ -56,14 +58,14 @@ final class BatchProviderRoutingTests: XCTestCase {
         try Data([0, 1, 2, 3]).write(to: audioURL)
         defer { try? FileManager.default.removeItem(at: audioURL) }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [BatchRoutingResponseURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        defer { BatchRoutingResponseURLProtocol.handler = nil }
+        defer { StubURLProtocol.reset() }
 
-        BatchRoutingResponseURLProtocol.handler = { request in
+        StubURLProtocol.handler = { request in
             XCTAssertEqual(request.url?.host, "api.cartesia.ai")
-            return (401, Data(#"{"error":"bad key"}"#.utf8))
+            return .status(401, Data(#"{"error":"bad key"}"#.utf8), url: request.url!)
         }
         do {
             _ = try await IOSBatchTranscriber.transcribeFile(
@@ -75,8 +77,12 @@ final class BatchProviderRoutingTests: XCTestCase {
             XCTAssertEqual(status, 401)
         }
 
-        BatchRoutingResponseURLProtocol.handler = { _ in
-            (200, Data(#"{"type":"transcript","text":"  ","language":"en","duration":0.5,"words":[]}"#.utf8))
+        StubURLProtocol.handler = { request in
+            .status(
+                200,
+                Data(#"{"type":"transcript","text":"  ","language":"en","duration":0.5,"words":[]}"#.utf8),
+                url: request.url!
+            )
         }
         do {
             _ = try await IOSBatchTranscriber.transcribeFile(
@@ -89,38 +95,4 @@ final class BatchProviderRoutingTests: XCTestCase {
     }
 }
 
-private final class BatchRoutingResponseURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (Int, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.handler, let url = self.request.url else {
-            self.client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        let (status, body) = handler(self.request)
-        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
-        self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        self.client?.urlProtocol(self, didLoad: body)
-        self.client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
-}
-
-private final class BatchRoutingURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> Void)?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        Self.handler?(self.request)
-        self.client?.urlProtocol(self, didFailWithError: URLError(.userAuthenticationRequired))
-    }
-
-    override func stopLoading() {}
-}
 #endif

@@ -1,5 +1,6 @@
 // swiftlint:disable file_length
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -53,7 +54,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
-        GeminiMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let url = try XCTUnwrap(request.url)
             XCTAssertEqual(url.path, "/v1beta/interactions")
             let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
@@ -66,7 +67,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
             """
             return (response, Data(body.utf8))
         }
-        defer { GeminiMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let result = try await GeminiInteractionsClient(session: self.makeMockSession()).transcribeFile(
             at: audioURL, apiKey: "k", model: GeminiTranscribeModels.batchCatalogID, language: nil
@@ -84,13 +85,13 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
-        GeminiMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url), statusCode: 401, httpVersion: nil, headerFields: nil
             )!
             return (response, Data(#"{"error":{"code":401,"message":"API key not valid"}}"#.utf8))
         }
-        defer { GeminiMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         do {
             _ = try await GeminiInteractionsClient(session: self.makeMockSession()).transcribeFile(
@@ -116,7 +117,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
-        GeminiMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let url = try XCTUnwrap(request.url)
             let attempt = await recorder.record(method: request.httpMethod ?? "", path: url.path)
 
@@ -152,7 +153,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
                 return try respond("{}")
             }
         }
-        defer { GeminiMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = self.makeMockSession()
         var client = GeminiInteractionsClient(
@@ -198,7 +199,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         try handle.truncate(atOffset: byteCount)
         try handle.close()
 
-        GeminiMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let url = try XCTUnwrap(request.url)
             _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
             var headers: [String: String] = [:]
@@ -228,7 +229,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
             ))
             return (response, Data(body.utf8))
         }
-        defer { GeminiMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = self.makeMockSession()
         var client = GeminiInteractionsClient(session: session)
@@ -262,7 +263,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         defer { try? FileManager.default.removeItem(at: audioURL) }
         for interval in [0.0, -1.0, 100.0, .greatestFiniteMagnitude] {
             let recorder = GeminiRequestLog()
-            GeminiMockURLProtocol.requestHandler = { request in
+            StubURLProtocol.respond {  request in
                 let url = try XCTUnwrap(request.url)
                 _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
                 let headers = url.path == "/upload/v1beta/files"
@@ -273,7 +274,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
                     : #"{"state":"PROCESSING"}"#
                 return (response, Data(body.utf8))
             }
-            defer { GeminiMockURLProtocol.requestHandler = nil }
+            defer { StubURLProtocol.reset() }
             let client = GeminiInteractionsClient(session: self.makeMockSession(), inlineAudioByteLimit: 0,
                                                   filePollInterval: interval, filePollTimeout: 0.2)
             let start = ContinuousClock.now
@@ -302,7 +303,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         let recorder = GeminiRequestLog()
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        GeminiMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let url = try XCTUnwrap(request.url)
             _ = await recorder.record(method: request.httpMethod ?? "", path: url.path)
             if request.httpMethod == "GET" {
@@ -319,7 +320,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
                 ? #"{"file":{"name":"files/abc123","uri":"u","state":"PROCESSING"}}"# : "{}"
             return (response, Data(body.utf8))
         }
-        defer { GeminiMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
         let client = GeminiInteractionsClient(session: self.makeMockSession(), inlineAudioByteLimit: 0,
                                               filePollInterval: 0.01, filePollTimeout: 0.2)
         let start = ContinuousClock.now
@@ -340,7 +341,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
         let audioURL = try Self.makeTemporaryAudioFile()
         defer { try? FileManager.default.removeItem(at: audioURL) }
 
-        GeminiMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let url = try XCTUnwrap(request.url)
             let response = HTTPURLResponse(
                 url: url,
@@ -357,7 +358,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
                 return (response, Data("{}".utf8))
             }
         }
-        defer { GeminiMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let client = GeminiInteractionsClient(
             session: self.makeMockSession(),
@@ -389,7 +390,7 @@ final class GeminiInteractionsClientTests: XCTestCase { // swiftlint:disable:thi
 
     private func makeMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [GeminiMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 }
@@ -414,50 +415,3 @@ private actor GeminiRequestLog {
     }
 }
 
-private final class GeminiMockURLProtocol: URLProtocol {
-    private let stateLock = NSLock()
-    private var loadTask: Task<Void, Never>?
-    #if compiler(>=5.10)
-        nonisolated(unsafe) static var requestHandler:
-            (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-    #else
-        static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-    #endif
-
-    override static func canInit(with request: URLRequest) -> Bool {
-        true
-    }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
-    }
-
-    override func startLoading() {
-        guard let handler = Self.requestHandler else {
-            XCTFail("GeminiMockURLProtocol.requestHandler was not set")
-            return
-        }
-
-        stateLock.lock()
-        loadTask = Task {
-            do {
-                let (response, data) = try await handler(self.request)
-                try Task.checkCancellation()
-                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                self.client?.urlProtocol(self, didLoad: data)
-                self.client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                if !Task.isCancelled { self.client?.urlProtocol(self, didFailWithError: error) }
-            }
-        }
-        stateLock.unlock()
-    }
-
-    override func stopLoading() {
-        stateLock.lock()
-        let task = loadTask
-        loadTask = nil
-        stateLock.unlock()
-        task?.cancel()
-    }
-}

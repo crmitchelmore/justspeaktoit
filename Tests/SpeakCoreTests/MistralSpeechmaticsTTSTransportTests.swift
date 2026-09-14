@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -10,11 +11,11 @@ import XCTest
 final class MistralSpeechmaticsTTSTransportTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        TTSTransportMockURLProtocol.reset()
+        StubURLProtocol.reset()
     }
 
     override func tearDown() {
-        TTSTransportMockURLProtocol.reset()
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
@@ -35,7 +36,7 @@ final class MistralSpeechmaticsTTSTransportTests: XCTestCase {
         )
 
         XCTAssertEqual(decoded, audio)
-        let recorded = try XCTUnwrap(TTSTransportMockURLProtocol.lastRequest)
+        let recorded = try XCTUnwrap(StubURLProtocol.lastRequest)
         XCTAssertEqual(recorded.url?.absoluteString, "https://api.mistral.ai/v1/audio/speech")
         XCTAssertEqual(recorded.value(forHTTPHeaderField: "Authorization"), "Bearer mist_test")
 
@@ -59,7 +60,7 @@ final class MistralSpeechmaticsTTSTransportTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? MistralTTSAPIError, .voiceRequired)
         }
-        XCTAssertNil(TTSTransportMockURLProtocol.lastRequest)
+        XCTAssertNil(StubURLProtocol.lastRequest)
     }
 
     func testMistralVoiceListing_acceptsTheDocumentedAndUndocumentedEnvelopeShapes() throws {
@@ -84,14 +85,14 @@ final class MistralSpeechmaticsTTSTransportTests: XCTestCase {
         }.joined(separator: ",")
         let secondPage = #"{"id":"page2-0","name":"Late voice"}"#
 
-        TTSTransportMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let query = request.url?.query ?? ""
             let body = query.contains("offset=100")
                 ? Data("{\"items\":[\(secondPage)]}".utf8)
                 : Data("{\"items\":[\(firstPage)]}".utf8)
             return (TTSTransportStub.response(for: request, statusCode: 200), body)
         }
-        defer { TTSTransportMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let api = MistralTTSAPI(session: TTSTransportStub.session())
         let voices = try await api.listVoices(apiKey: "mist_test")
@@ -132,7 +133,7 @@ final class MistralSpeechmaticsTTSTransportTests: XCTestCase {
             request: SpeechmaticsTTSRequest(voiceID: "speechmatics/theo")
         )
 
-        let recorded = try XCTUnwrap(TTSTransportMockURLProtocol.lastRequest)
+        let recorded = try XCTUnwrap(StubURLProtocol.lastRequest)
         let components = try XCTUnwrap(
             URLComponents(url: try XCTUnwrap(recorded.url), resolvingAgainstBaseURL: false)
         )

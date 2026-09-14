@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 @testable import SpeakCore
 
@@ -9,7 +10,7 @@ final class OpenRouterAudioCatalogTests: XCTestCase {
     func testRefresh_UsesDedicatedFilterAndPersistsOnlyMetadata() async throws {
         let cache = temporaryCache()
         defer { try? FileManager.default.removeItem(at: cache.deletingLastPathComponent()) }
-        OpenRouterCatalogMockProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-secret")
             let components = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
             XCTAssertEqual(
@@ -39,7 +40,7 @@ final class OpenRouterAudioCatalogTests: XCTestCase {
         let cache = try seededCache(updatedAt: now)
         defer { try? FileManager.default.removeItem(at: cache.deletingLastPathComponent()) }
         let calls = OpenRouterCatalogRequestCount()
-        OpenRouterCatalogMockProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             await calls.increment()
             return Self.response(request, body: #"{"data":[]}"#)
         }
@@ -59,7 +60,7 @@ final class OpenRouterAudioCatalogTests: XCTestCase {
         let updatedAt = now.addingTimeInterval(-OpenRouterAudioCatalog.cacheLifetime)
         let cache = try seededCache(updatedAt: updatedAt)
         defer { try? FileManager.default.removeItem(at: cache.deletingLastPathComponent()) }
-        OpenRouterCatalogMockProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             Self.response(request, status: 503, body: "Authorization: Bearer test-secret")
         }
         let catalog = OpenRouterAudioCatalog(session: mockSession(), cacheURL: cache, clock: { self.now })
@@ -79,7 +80,7 @@ final class OpenRouterAudioCatalogTests: XCTestCase {
         let updatedAt = now.addingTimeInterval(-30_000)
         let cache = try seededCache(updatedAt: updatedAt)
         defer { try? FileManager.default.removeItem(at: cache.deletingLastPathComponent()) }
-        OpenRouterCatalogMockProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             Self.response(request, body: #"{"data":[{"id":false}]}"#)
         }
         let catalog = OpenRouterAudioCatalog(session: mockSession(), cacheURL: cache, clock: { self.now })
@@ -129,7 +130,7 @@ final class OpenRouterAudioCatalogTests: XCTestCase {
     func testOverlappingForcedRefresh_OlderWorkCannotReplaceNewerResult() async {
         let started = expectation(description: "First key lookup started")
         let gate = OpenRouterCatalogKeyGate(started: started)
-        OpenRouterCatalogMockProtocol.handler = { request in Self.response(request, body: Self.body) }
+        StubURLProtocol.respond {  request in Self.response(request, body: Self.body) }
         let catalog = OpenRouterAudioCatalog(
             apiKeyProvider: { await gate.key() }, session: mockSession(), cacheURL: nil, clock: { self.now }
         )
@@ -147,7 +148,7 @@ final class OpenRouterAudioCatalogTests: XCTestCase {
     }
 
     func testOversizedResponse_IsRejectedBeforeDecoding() async {
-        OpenRouterCatalogMockProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200, httpVersion: nil,
                 headerFields: ["Content-Length": "\(OpenRouterAudioCatalogSnapshot.maximumBytes + 1)"]
@@ -164,7 +165,7 @@ final class OpenRouterAudioCatalogTests: XCTestCase {
 
     private func mockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [OpenRouterCatalogMockProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 
@@ -219,28 +220,3 @@ private actor OpenRouterCatalogKeyGate {
     }
 }
 
-private final class OpenRouterCatalogMockProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.handler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        Task {
-            do {
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
-}

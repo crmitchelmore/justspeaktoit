@@ -1,17 +1,18 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
 
 final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
     override func tearDown() {
-        ElevenLabsSTTValidationMockURLProtocol.handler = nil
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
     func testValidate_probesUserThenScribeAndSucceedsOnMissingAudioResponse() async throws {
         let recorder = ElevenLabsSTTValidationRequestRecorder()
-        ElevenLabsSTTValidationMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             await recorder.record(request)
             let path = request.url?.path
             let statusCode = path == "/v1/speech-to-text" ? 422 : 200
@@ -42,7 +43,7 @@ final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
     }
 
     func testValidate_rejectsTTSOnlyKeyWhenScribeAccessIsForbidden() async {
-        ElevenLabsSTTValidationMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let statusCode = request.url?.path == "/v1/speech-to-text" ? 403 : 200
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -64,7 +65,7 @@ final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
     }
 
     func testValidate_acceptsUnsupportedMediaTypeAfterUserCheck() async {
-        ElevenLabsSTTValidationMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let statusCode = request.url?.path == "/v1/speech-to-text" ? 415 : 200
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -86,7 +87,7 @@ final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
 
     func testValidate_doesNotProbeScribeWhenUserCheckRejectsKey() async throws {
         let recorder = ElevenLabsSTTValidationRequestRecorder()
-        ElevenLabsSTTValidationMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             await recorder.record(request)
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -110,7 +111,7 @@ final class ElevenLabsSTTAPIKeyValidatorTests: XCTestCase {
 
     private func makeMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ElevenLabsSTTValidationMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 }
@@ -173,35 +174,3 @@ private struct RecordedRequest: Equatable {
     let body: String?
 }
 
-private final class ElevenLabsSTTValidationMockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool {
-        true
-    }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
-    }
-
-    override func startLoading() {
-        guard let handler = Self.handler else {
-            XCTFail("ElevenLabsSTTValidationMockURLProtocol.handler was not set")
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-
-        Task {
-            do {
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
-}

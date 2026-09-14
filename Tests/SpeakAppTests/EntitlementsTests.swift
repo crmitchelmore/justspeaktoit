@@ -102,7 +102,9 @@ final class EntitlementsTests: XCTestCase {
         let allowedKeys: Set<String> = [
             "com.apple.security.device.audio-input",
             "com.apple.security.automation.apple-events",
-            "com.apple.security.cs.disable-library-validation"
+            "com.apple.security.cs.disable-library-validation",
+            // Sign in with Apple, required by the paid access subscription flow.
+            "com.apple.developer.applesignin"
         ]
 
         let actualKeys = Set(entitlements.keys)
@@ -195,7 +197,9 @@ final class AppStoreEntitlementsTests: XCTestCase {
             "com.apple.developer.ubiquity-kvstore-identifier",
             "com.apple.developer.icloud-container-identifiers",
             "com.apple.developer.icloud-services",
-            "aps-environment"
+            "aps-environment",
+            // Sign in with Apple, required by the paid access subscription flow.
+            "com.apple.developer.applesignin"
         ]
         let unexpected = Set(entitlements.keys).subtracting(allowedKeys)
         XCTAssertTrue(unexpected.isEmpty,

@@ -92,4 +92,3 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     return URLSession(configuration: configuration)
   }
 }
-

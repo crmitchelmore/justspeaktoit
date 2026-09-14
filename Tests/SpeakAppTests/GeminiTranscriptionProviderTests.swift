@@ -253,4 +253,3 @@ private actor GeminiRequestObserver {
     request
   }
 }
-

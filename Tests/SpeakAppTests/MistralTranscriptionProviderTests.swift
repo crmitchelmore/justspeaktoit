@@ -315,4 +315,3 @@ private actor MistralRequestObserver {
   }
 
 }
-

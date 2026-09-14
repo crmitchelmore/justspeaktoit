@@ -89,4 +89,3 @@ private actor SpeechmaticsRequestObserver {
     request
   }
 }
-

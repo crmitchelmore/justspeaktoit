@@ -25,6 +25,9 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         case respondWithoutFinishing(URLResponse, Data)
         /// Fail the request with this error.
         case fail(Swift.Error)
+        /// Send nothing at all and leave the request pending, so the only way
+        /// it ends is cancellation. Used by the stop/cancel tests.
+        case hang
     }
 
     public enum Error: Swift.Error {
@@ -183,6 +186,8 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
                 client?.urlProtocol(self, didLoad: data)
             case let .fail(error):
                 client?.urlProtocol(self, didFailWithError: error)
+            case .hang:
+                break
             }
         }
         Self.onStartLoading?()

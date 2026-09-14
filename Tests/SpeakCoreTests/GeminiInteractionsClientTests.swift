@@ -414,4 +414,3 @@ private actor GeminiRequestLog {
         return self.calls.filter { $0 == call }.count
     }
 }
-

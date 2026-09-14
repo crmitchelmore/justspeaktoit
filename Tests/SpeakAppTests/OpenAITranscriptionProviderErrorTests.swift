@@ -106,4 +106,3 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
 }
 
 // MARK: - Test Infrastructure
-

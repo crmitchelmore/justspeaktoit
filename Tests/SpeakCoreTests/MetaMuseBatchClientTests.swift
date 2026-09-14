@@ -237,4 +237,3 @@ final class MetaMuseBatchClientTests: XCTestCase {
         return url
     }
 }
-

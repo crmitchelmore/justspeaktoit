@@ -43,4 +43,3 @@ final class DeepgramSpeechCatalogTests: XCTestCase {
         StubURLProtocol.reset()
     }
 }
-

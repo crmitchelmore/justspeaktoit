@@ -129,4 +129,3 @@ private actor GroqRequestObserver {
     return data.isEmpty ? nil : data
   }
 }
-

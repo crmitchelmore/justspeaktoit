@@ -357,4 +357,3 @@ private actor RequestObserver {
         return data.isEmpty ? nil : data
     }
 }
-

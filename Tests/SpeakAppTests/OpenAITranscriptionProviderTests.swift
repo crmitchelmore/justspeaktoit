@@ -231,4 +231,3 @@ private actor OpenAIRequestObserver {
     return data.isEmpty ? nil : data
   }
 }
-

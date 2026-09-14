@@ -367,4 +367,3 @@ private actor OpenRouterRequestObserver {
         return data.isEmpty ? nil : data
     }
 }
-

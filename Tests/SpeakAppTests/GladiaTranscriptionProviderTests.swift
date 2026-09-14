@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -119,7 +120,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
 
   func testValidateAPIKey_sendsXGladiaKeyAndRedactsDebugHeaders() async throws {
     let observer = GladiaRequestObserver()
-    GladiaMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await observer.store(request: request)
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url),
@@ -130,7 +131,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
       let body = #"{"items":[{"status":"done","result":{"transcription":"private prior transcript"}}]}"#
       return (response, Data(body.utf8))
     }
-    defer { GladiaMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = GladiaTranscriptionProvider(session: makeMockSession())
     let result = await provider.validateAPIKey("gladia-test-key")
@@ -150,7 +151,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
   }
 
   func testValidateAPIKey_returnsFailureOnUnauthorized() async {
-    GladiaMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url),
         statusCode: 401,
@@ -159,7 +160,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
       )!
       return (response, Data(#"{"message":"invalid key"}"#.utf8))
     }
-    defer { GladiaMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = GladiaTranscriptionProvider(session: makeMockSession())
     let result = await provider.validateAPIKey("bad-key")
@@ -174,7 +175,7 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
 
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GladiaMockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 }
@@ -191,38 +192,3 @@ private actor GladiaRequestObserver {
   }
 }
 
-private final class GladiaMockURLProtocol: URLProtocol {
-#if compiler(>=5.10)
-  nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-#else
-  static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-#endif
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("GladiaMockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
-}

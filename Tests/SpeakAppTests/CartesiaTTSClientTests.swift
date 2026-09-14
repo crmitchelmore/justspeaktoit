@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -34,15 +35,15 @@ final class CartesiaTTSClientTests: XCTestCase {
   }
 
   func testValidateAPIKey_probesTheVoicesEndpointWithBothHeaders() async throws {
-    CartesiaTTSMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       (Self.response(for: request, statusCode: 200), Data(#"{"data":[],"has_more":false}"#.utf8))
     }
-    defer { CartesiaTTSMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let api = CartesiaTTSAPI(session: Self.makeMockSession())
     let result = await api.validateAPIKey("sk_car_test")
 
-    let recorded = try XCTUnwrap(CartesiaTTSMockURLProtocol.lastRequest)
+    let recorded = try XCTUnwrap(StubURLProtocol.lastRequest)
     let components = try XCTUnwrap(
       URLComponents(url: try XCTUnwrap(recorded.url), resolvingAgainstBaseURL: false)
     )
@@ -57,10 +58,10 @@ final class CartesiaTTSClientTests: XCTestCase {
   }
 
   func testValidateAPIKey_reportsARejectedKey() async {
-    CartesiaTTSMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       (Self.response(for: request, statusCode: 401), Data(#"{"error":"unauthorized"}"#.utf8))
     }
-    defer { CartesiaTTSMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let api = CartesiaTTSAPI(session: Self.makeMockSession())
     let result = await api.validateAPIKey("sk_car_bad")
@@ -74,11 +75,11 @@ final class CartesiaTTSClientTests: XCTestCase {
       #"{"data":[{"id":"b","name":"Bo","language":"fr"}],"has_more":false}"#
     ]
     let pageIndex = CartesiaTTSPageCounter()
-    CartesiaTTSMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       let index = pageIndex.next()
       return (Self.response(for: request, statusCode: 200), Data(pages[min(index, 1)].utf8))
     }
-    defer { CartesiaTTSMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let api = CartesiaTTSAPI(session: Self.makeMockSession())
     let voices = try await api.listVoices(apiKey: "sk_car_test")
@@ -90,10 +91,10 @@ final class CartesiaTTSClientTests: XCTestCase {
   // MARK: - Helpers
 
   private func recordSynthesisRequest() async throws -> URLRequest {
-    CartesiaTTSMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       (Self.response(for: request, statusCode: 200), Data("RIFFfake".utf8))
     }
-    defer { CartesiaTTSMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let api = CartesiaTTSAPI(session: Self.makeMockSession())
     _ = try await api.synthesize(
@@ -106,19 +107,22 @@ final class CartesiaTTSClientTests: XCTestCase {
         content: "Hello there"
       )
     )
-    return try XCTUnwrap(CartesiaTTSMockURLProtocol.lastRequest)
+    return try XCTUnwrap(StubURLProtocol.lastRequest)
   }
 
   private func recordSynthesisBody() async throws -> [String: Any] {
     let request = try await recordSynthesisRequest()
-    let body = try XCTUnwrap(request.httpBody)
+    // URLSession hands the protocol a stream rather than `httpBody`.
+    let body = StubURLProtocol.body(of: request)
+    XCTAssertFalse(body.isEmpty, "Expected a request body")
     return try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
   }
 
   private static func makeMockSession() -> URLSession {
-    CartesiaTTSMockURLProtocol.reset()
+    // Only the recording is cleared: callers install the handler first.
+    StubURLProtocol.resetRecordedRequests()
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [CartesiaTTSMockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 

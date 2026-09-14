@@ -16,11 +16,13 @@ import Foundation
 public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     /// What the stub should do with one request.
     public enum Outcome: Sendable {
-        /// Send the response and body, then finish loading.
-        case respond(HTTPURLResponse, Data)
+        /// Send the response and body, then finish loading. Takes `URLResponse`
+        /// rather than `HTTPURLResponse` because some tests deliberately return
+        /// a non-HTTP response to exercise that error path.
+        case respond(URLResponse, Data)
         /// Send the response and body but never finish, so the caller sees an
         /// in-flight request. Used by the cancellation tests.
-        case respondWithoutFinishing(HTTPURLResponse, Data)
+        case respondWithoutFinishing(URLResponse, Data)
         /// Fail the request with this error.
         case fail(Swift.Error)
     }
@@ -45,8 +47,8 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         set { lock.withLock { _handler = newValue } }
     }
 
-    /// Every request the stub has seen, oldest first, each with `httpBody`
-    /// populated from the body stream when the sender used one.
+    /// Every request the stub has seen, oldest first, exactly as sent. A body
+    /// supplied as a stream stays a stream here — use `body(of:)` to read it.
     public static var recordedRequests: [URLRequest] {
         lock.withLock { _recordedRequests }
     }
@@ -72,12 +74,18 @@ public final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     /// response and a body, then finish loading. Equivalent to setting
     /// `handler` and wrapping the result in `.respond`.
     public static func respond(
-        with handler: @escaping @Sendable (URLRequest) async throws -> (HTTPURLResponse, Data)
+        with handler: @escaping @Sendable (URLRequest) async throws -> (URLResponse, Data)
     ) {
         self.handler = { request in
             let (response, data) = try await handler(request)
             return .respond(response, data)
         }
+    }
+
+    /// Clears the recorded requests but leaves the handler and callbacks in
+    /// place, for tests that install a handler and then build their session.
+    public static func resetRecordedRequests() {
+        lock.withLock { _recordedRequests = [] }
     }
 
     /// Clears the handler, the recorded requests and both callbacks.

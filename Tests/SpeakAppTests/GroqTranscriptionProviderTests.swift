@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -19,11 +20,11 @@ final class GroqTranscriptionProviderTests: XCTestCase {
 
   func testTranscribeFile_usesGroqOpenAICompatibleEndpoint() async throws {
     let requestObserver = GroqRequestObserver()
-    GroqMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       return try Self.makeResponse(for: request, body: #"{"text":"hello","duration":1.0}"#)
     }
-    defer { GroqMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -47,11 +48,11 @@ final class GroqTranscriptionProviderTests: XCTestCase {
 
   func testValidateAPIKey_usesGroqModelsEndpoint() async throws {
     let requestObserver = GroqRequestObserver()
-    GroqMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       return try Self.makeResponse(for: request, body: #"{"data":[]}"#)
     }
-    defer { GroqMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = await makeProvider().validateAPIKey("test-groq-key")
     let capturedRequest = await requestObserver.capturedRequest()
@@ -68,7 +69,7 @@ final class GroqTranscriptionProviderTests: XCTestCase {
 
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GroqMockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 
@@ -129,38 +130,3 @@ private actor GroqRequestObserver {
   }
 }
 
-private final class GroqMockURLProtocol: URLProtocol {
-#if compiler(>=5.10)
-  nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-#else
-  static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-#endif
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("GroqMockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
-}

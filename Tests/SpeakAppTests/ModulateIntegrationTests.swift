@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -129,7 +130,7 @@ final class ModulateIntegrationTests: XCTestCase {
 
   func testValidationRequestIncludesAudioFileAndValidationResultRedactsHeaders() async throws {
     let requestObserver = RequestObserver()
-    MockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url),
@@ -141,7 +142,7 @@ final class ModulateIntegrationTests: XCTestCase {
       return (response, data)
     }
     defer {
-      MockURLProtocol.requestHandler = nil
+      StubURLProtocol.reset()
     }
 
     let session = makeMockSession()
@@ -177,7 +178,7 @@ final class ModulateIntegrationTests: XCTestCase {
 
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [MockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 
@@ -222,34 +223,3 @@ private actor RequestObserver {
   }
 }
 
-private final class MockURLProtocol: URLProtocol {
-  nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("MockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
-}

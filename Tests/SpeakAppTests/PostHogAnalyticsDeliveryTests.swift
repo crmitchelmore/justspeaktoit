@@ -1,6 +1,7 @@
 #if !APP_STORE
 @testable import SpeakApp
 import SpeakCore
+import SpeakTestSupport
 import XCTest
 
 final class PostHogAnalyticsDeliveryTests: XCTestCase {
@@ -112,8 +113,8 @@ final class PostHogAnalyticsDeliveryTests: XCTestCase {
         retryDelays: [Duration] = []
     ) -> (sink: PostHogProductAnalyticsSink, queueURL: URL) {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [AnalyticsRecordingURLProtocol.self]
-        AnalyticsRecordingURLProtocol.recorder = recorder
+        configuration.protocolClasses = [StubURLProtocol.self]
+        recorder.installAsStubHandler()
         let queueURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString).appendingPathComponent("analytics_queue.json")
         let sink = PostHogProductAnalyticsSink(

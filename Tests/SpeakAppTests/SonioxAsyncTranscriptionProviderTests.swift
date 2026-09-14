@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -25,11 +26,11 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
 
   func testTranscribeFile_uploadsCreatesPollsAndFetchesTranscript() async throws {
     let requestObserver = SonioxRequestObserver()
-    SonioxMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       return try Self.makeResponse(for: request)
     }
-    defer { SonioxMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = SonioxTranscriptionProvider(
       session: makeMockSession(),
@@ -65,7 +66,7 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
   }
 
   func testTranscribeFile_throwsWhenPollingReportsError() async throws {
-    SonioxMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       switch request.url?.path {
       case "/v1/files":
         return try Self.makeResponse(for: request, body: #"{"id":"file-1"}"#, statusCode: 201)
@@ -85,7 +86,7 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
         return try Self.makeResponse(for: request)
       }
     }
-    defer { SonioxMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = SonioxTranscriptionProvider(
       session: makeMockSession(),
@@ -108,7 +109,7 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
 
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [SonioxMockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 
@@ -198,40 +199,4 @@ private actor SonioxRequestObserver {
     }
     return data.isEmpty ? nil : data
   }
-}
-
-private final class SonioxMockURLProtocol: URLProtocol {
-#if compiler(>=5.10)
-  nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-#else
-  static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-#endif
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("SonioxMockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
 }

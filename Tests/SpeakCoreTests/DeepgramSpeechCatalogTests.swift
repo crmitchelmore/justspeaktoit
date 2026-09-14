@@ -1,3 +1,4 @@
+import SpeakTestSupport
 import XCTest
 @testable import SpeakCore
 
@@ -22,37 +23,23 @@ final class DeepgramSpeechCatalogTests: XCTestCase {
 
     func testTransportRoutesFluxAndAura_usesOwnEndpoints() async throws {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [SpeechCatalogURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         let api = DeepgramTTSAPI(session: session)
         for (model, path) in [("flux-kit-en", "/v2/speak"), ("aura-2-asteria-en", "/v1/speak")] {
-            SpeechCatalogURLProtocol.handler = { request in
+            StubURLProtocol.handler = { request in
                 XCTAssertEqual(request.url?.path, path)
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Token fixture")
                 XCTAssertEqual(request.httpMethod, "POST")
                 let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
                 XCTAssertEqual(query?.first { $0.name == "model" }?.value, model)
-                return Data([1, 2, 3])
+                return .status(200, Data([1, 2, 3]), url: request.url!)
             }
             let data = try await api.synthesize(text: "Hello", apiKey: "fixture",
                                                queryItems: [URLQueryItem(name: "model", value: model)])
             XCTAssertEqual(data, Data([1, 2, 3]))
         }
-        SpeechCatalogURLProtocol.handler = nil
+        StubURLProtocol.reset()
     }
-}
-
-private class SpeechCatalogURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) static var handler: ((URLRequest) -> Data)?
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        guard let data = Self.handler?(request), let url = request.url else { return }
-        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
 }

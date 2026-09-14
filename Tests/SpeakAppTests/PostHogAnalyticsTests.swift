@@ -1,6 +1,7 @@
 #if !APP_STORE
 @testable import SpeakApp
 import SpeakCore
+import SpeakTestSupport
 import XCTest
 
 final class PostHogAnalyticsTests: XCTestCase {
@@ -180,8 +181,8 @@ final class PostHogAnalyticsTests: XCTestCase {
         now: @escaping @Sendable () -> Date = { Date() }
     ) -> PostHogProductAnalyticsSink {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [AnalyticsRecordingURLProtocol.self]
-        AnalyticsRecordingURLProtocol.recorder = recorder
+        configuration.protocolClasses = [StubURLProtocol.self]
+        recorder.installAsStubHandler()
         return PostHogProductAnalyticsSink(
             queueURL: queueURL ?? temporaryQueueURL(),
             session: URLSession(configuration: configuration),

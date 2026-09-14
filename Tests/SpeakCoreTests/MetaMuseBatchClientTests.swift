@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -7,12 +8,12 @@ import XCTest
 /// key validation, result parsing, error mapping, and cancellation.
 final class MetaMuseBatchClientTests: XCTestCase {
     override func tearDown() {
-        MetaMuseMockURLProtocol.handler = nil
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
     func testAPIKeyValidation_probesSpeechEndpointAndMapsAuthFailure() async throws {
-        MetaMuseMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 401,
@@ -32,7 +33,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
     func testBatchClient_convertsSupportedFileUploadsAndDecodesTurns() async throws {
         let audioURL = try makeTemporaryWAV()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        MetaMuseMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             XCTAssertEqual(request.url?.path, "/v1/asr/transcribe")
             XCTAssertTrue(
                 request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=") == true
@@ -94,7 +95,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
     func testBatchClient_requiresAPIKeyBeforeTouchingTheNetwork() async throws {
         let audioURL = try makeTemporaryWAV()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        MetaMuseMockURLProtocol.handler = { _ in
+        StubURLProtocol.respond {  _ in
             XCTFail("A blank key must never reach the network")
             throw URLError(.badServerResponse)
         }
@@ -114,7 +115,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
     func testBatchClient_mapsRateLimitResponse() async throws {
         let audioURL = try makeTemporaryWAV()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        MetaMuseMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 429,
@@ -139,7 +140,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
     func testBatchClient_mapsMalformedSuccessBodyToInvalidResponse() async throws {
         let audioURL = try makeTemporaryWAV()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        MetaMuseMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -164,7 +165,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
     func testBatchClient_fallsBackToASingleSegmentWhenNoTurnsAreReturned() async throws {
         let audioURL = try makeTemporaryWAV()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        MetaMuseMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -192,7 +193,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
     func testBatchClient_labelsDiarizedTurnsWithTheirSpeaker() async throws {
         let audioURL = try makeTemporaryWAV()
         defer { try? FileManager.default.removeItem(at: audioURL) }
-        MetaMuseMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -223,7 +224,7 @@ final class MetaMuseBatchClientTests: XCTestCase {
     }
     private func makeMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [MetaMuseMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 
@@ -235,29 +236,4 @@ final class MetaMuseBatchClientTests: XCTestCase {
         try data.write(to: url, options: .atomic)
         return url
     }
-}
-
-private class MetaMuseMockURLProtocol: URLProtocol, @unchecked Sendable {
-    static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        Task {
-            do {
-                guard let handler = Self.handler else {
-                    throw URLError(.badServerResponse)
-                }
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
 }

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -97,7 +98,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
 
   func testValidateAPIKey_probesListModelsAndRedactsTheKeyInDebugHeaders() async throws {
     let observer = GeminiRequestObserver()
-    GeminiMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await observer.store(request: request)
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url),
@@ -107,7 +108,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
       )!
       return (response, Data(#"{"models":[{"name":"models/gemini-3.5-transcribe"}]}"#.utf8))
     }
-    defer { GeminiMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = GeminiTranscriptionProvider(session: makeMockSession())
     let result = await provider.validateAPIKey("gemini-test-key")
@@ -126,7 +127,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
   }
 
   func testValidateAPIKey_returnsFailureOnUnauthorized() async {
-    GeminiMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url),
         statusCode: 401,
@@ -135,7 +136,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
       )!
       return (response, Data(#"{"error":{"code":401,"message":"API key not valid"}}"#.utf8))
     }
-    defer { GeminiMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = GeminiTranscriptionProvider(session: makeMockSession())
     let result = await provider.validateAPIKey("bad-key")
@@ -148,12 +149,12 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
   }
 
   func testValidateAPIKey_reportsRateLimitsSeparately() async {
-    GeminiMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url), statusCode: 429, httpVersion: nil, headerFields: nil)!
       return (response, Data(#"{"error":{"code":429,"message":"quota"}}"#.utf8))
     }
-    defer { GeminiMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = GeminiTranscriptionProvider(session: makeMockSession())
     let result = await provider.validateAPIKey("k")
@@ -202,7 +203,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
     let audioURL = try Self.makeTemporaryAudioFile()
     defer { try? FileManager.default.removeItem(at: audioURL) }
 
-    GeminiMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       let url = try XCTUnwrap(request.url)
       XCTAssertEqual(url.path, "/v1beta/interactions")
       let response = HTTPURLResponse(
@@ -216,7 +217,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
       """
       return (response, Data(body.utf8))
     }
-    defer { GeminiMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = GeminiTranscriptionProvider(session: makeMockSession())
     let result = try await provider.transcribeFile(
@@ -236,7 +237,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
 
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [GeminiMockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 }
@@ -251,41 +252,4 @@ private actor GeminiRequestObserver {
   func capturedRequest() -> URLRequest? {
     request
   }
-}
-
-private final class GeminiMockURLProtocol: URLProtocol {
-  #if compiler(>=5.10)
-    nonisolated(unsafe) static var requestHandler:
-      (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-  #else
-    static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-  #endif
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("GeminiMockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
 }

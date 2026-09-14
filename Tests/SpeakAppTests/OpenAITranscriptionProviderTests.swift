@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -34,14 +35,14 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
 
     func testTranscribeFileWithGPTTranscribe_usesJSONAndPluralLanguageHints() async throws {
         let requestObserver = OpenAIRequestObserver()
-        OpenAIMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             await requestObserver.store(request: request)
             return try Self.makeResponse(
                 for: request,
                 body: #"{"text":"hello world","languages":[{"code":"en"}]}"#
             )
         }
-        defer { OpenAIMockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let result = try await makeProvider().transcribeFile(
             at: try makeAudioFile(),
@@ -63,11 +64,11 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
 
   func testTranscribeFileWithGPT4oTranscribe_usesJSONResponseFormat() async throws {
     let requestObserver = OpenAIRequestObserver()
-    OpenAIMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       return try Self.makeResponse(for: request, body: #"{"text":"hello world","duration":1.25}"#)
     }
-    defer { OpenAIMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -101,11 +102,11 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
       ]
     }
     """
-    OpenAIMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       return try Self.makeResponse(for: request, body: responseBody)
     }
-    defer { OpenAIMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -134,10 +135,10 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
       ]
     }
     """
-    OpenAIMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       try Self.makeResponse(for: request, body: responseBody)
     }
-    defer { OpenAIMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -151,10 +152,10 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
   }
 
   func testTranscribeFileWithEmptySegments_fallsBackToTranscriptText() async throws {
-    OpenAIMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       try Self.makeResponse(for: request, body: #"{"text":"fallback transcript","segments":[]}"#)
     }
-    defer { OpenAIMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -174,7 +175,7 @@ final class OpenAITranscriptionProviderTests: XCTestCase {
 
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [OpenAIMockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 
@@ -229,36 +230,4 @@ private actor OpenAIRequestObserver {
     }
     return data.isEmpty ? nil : data
   }
-}
-
-private final class OpenAIMockURLProtocol: URLProtocol {
-  nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("OpenAIMockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
 }

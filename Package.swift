@@ -14,6 +14,11 @@ let package = Package(
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
+        // Test-only; a product purely so the Tuist-built iOS test bundle can
+        // link the same module the SwiftPM test targets import (issue #1124).
+        // Not part of the shipped API surface and not checked by the
+        // public-API compatibility gate.
+        .library(name: "SpeakTestSupport", targets: ["SpeakTestSupport"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"]),
         .executable(name: "speak", targets: ["SpeakCLI"]),
         .executable(
@@ -123,9 +128,16 @@ let package = Package(
                 "CTranscribe"
             ]
         ),
+        // Shared test doubles (issue #1124). A plain target, not a test
+        // target, so the Tuist-built iOS test bundle can compile the same
+        // sources through its own glob.
+        .target(
+            name: "SpeakTestSupport",
+            path: "Tests/SpeakTestSupport"
+        ),
         .testTarget(
             name: "SpeakCoreTests",
-            dependencies: ["SpeakCore"]
+            dependencies: ["SpeakCore", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakHotKeysTests",
@@ -141,6 +153,7 @@ let package = Package(
                 "SpeakApp",
                 "SpeakAutomationKit",
                 "SpeakHotKeys",
+                "SpeakTestSupport",
                 // The Sentry event tests inspect the serialised payload, so the
                 // test target needs the SDK types, not just SpeakApp.
                 .product(name: "Sentry", package: "sentry-cocoa"),
@@ -158,7 +171,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SpeakiOSTests",
-            dependencies: ["SpeakiOSLib"]
+            dependencies: ["SpeakiOSLib", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakAutomationKitTests",

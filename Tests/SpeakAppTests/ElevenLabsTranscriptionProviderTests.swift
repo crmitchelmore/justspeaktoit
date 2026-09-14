@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -70,7 +71,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
 
     func testTranscribeFile_sendsCorrectAuthHeader() async throws {
         let requestObserver = RequestObserver()
-        MockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             await requestObserver.store(request: request)
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -83,7 +84,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
                 + #"{"text":"world","type":"word","start":0.6,"end":1.0}]}"#
             return (response, Data(json.utf8))
         }
-        defer { MockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = makeMockSession()
         let provider = ElevenLabsTranscriptionProvider(session: session)
@@ -109,7 +110,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
 
     func testTranscribeFile_includesLanguageCode_whenProvided() async throws {
         let requestObserver = RequestObserver()
-        MockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             await requestObserver.store(request: request)
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -120,7 +121,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             let json = #"{"text":"bonjour","language_code":"fr","words":null}"#
             return (response, Data(json.utf8))
         }
-        defer { MockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = makeMockSession()
         let provider = ElevenLabsTranscriptionProvider(session: session)
@@ -151,7 +152,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
     // MARK: - Error Paths
 
     func testTranscribeFile_throwsHttpError_onNon2xxResponse() async throws {
-        MockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 401,
@@ -160,7 +161,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             )!
             return (response, Data(#"{"detail":"invalid_api_key"}"#.utf8))
         }
-        defer { MockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = makeMockSession()
         let provider = ElevenLabsTranscriptionProvider(session: session)
@@ -182,7 +183,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
     }
 
     func testTranscribeFile_throwsHttpError_on500Response() async throws {
-        MockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 500,
@@ -191,7 +192,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             )!
             return (response, Data(#"{"detail":"internal server error"}"#.utf8))
         }
-        defer { MockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = makeMockSession()
         let provider = ElevenLabsTranscriptionProvider(session: session)
@@ -215,7 +216,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
     // MARK: - API Key Validation
 
     func testValidateAPIKey_returnsSuccess_whenUserKeyHasScribeAccess() async {
-        MockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let statusCode = request.url?.path == "/v1/speech-to-text" ? 422 : 200
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -225,7 +226,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             )!
             return (response, Data("{}".utf8))
         }
-        defer { MockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = makeMockSession()
         let provider = ElevenLabsTranscriptionProvider(session: session)
@@ -239,7 +240,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
     }
 
     func testValidateAPIKey_returnsFailure_whenScribeAccessForbidden() async {
-        MockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let statusCode = request.url?.path == "/v1/speech-to-text" ? 403 : 200
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -250,7 +251,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             return (response, Data("{}".utf8))
         }
 
-        defer { MockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = makeMockSession()
         let provider = ElevenLabsTranscriptionProvider(session: session)
@@ -274,7 +275,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
     }
 
     func testValidateAPIKey_returnsFailure_on401() async {
-        MockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 401,
@@ -283,7 +284,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
             )!
             return (response, Data("{}".utf8))
         }
-        defer { MockURLProtocol.requestHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let session = makeMockSession()
         let provider = ElevenLabsTranscriptionProvider(session: session)
@@ -300,7 +301,7 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
 
     private func makeMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [MockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 
@@ -355,36 +356,4 @@ private actor RequestObserver {
 
         return data.isEmpty ? nil : data
     }
-}
-
-private final class MockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool {
-        true
-    }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
-    }
-
-    override func startLoading() {
-        guard let handler = Self.requestHandler else {
-            XCTFail("MockURLProtocol.requestHandler was not set")
-            return
-        }
-
-        Task {
-            do {
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
 }

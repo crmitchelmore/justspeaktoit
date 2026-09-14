@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 @testable import SpeakCore
 
@@ -57,17 +58,27 @@ final class OpenRouterAudioCatalogNetworkTests: XCTestCase {
     }
 
     private func hangingSession(started: XCTestExpectation, stopped: XCTestExpectation) -> URLSession {
-        OpenRouterCatalogHangingProtocol.didStart = { started.fulfill() }
-        OpenRouterCatalogHangingProtocol.didStop = { stopped.fulfill() }
+        StubURLProtocol.onStartLoading = { started.fulfill() }
+        StubURLProtocol.onStopLoading = { stopped.fulfill() }
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [OpenRouterCatalogHangingProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
+        // Responds but never finishes, so the request stays in flight.
+        StubURLProtocol.handler = { request in
+            .respondWithoutFinishing(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(#"{"data":["#.utf8)
+            )
+        }
         return URLSession(configuration: configuration)
     }
 
     private func finish(_ session: URLSession) {
         session.invalidateAndCancel()
-        OpenRouterCatalogHangingProtocol.didStart = nil
-        OpenRouterCatalogHangingProtocol.didStop = nil
+        StubURLProtocol.onStartLoading = nil
+        StubURLProtocol.onStopLoading = nil
     }
 
     private func seededCache() throws -> URL {
@@ -88,21 +99,3 @@ final class OpenRouterAudioCatalogNetworkTests: XCTestCase {
 
 /// Produces headers and an incomplete JSON chunk, then waits for URLSession to cancel it.
 /// No continuation, timer, or background task survives stopLoading.
-private final class OpenRouterCatalogHangingProtocol: URLProtocol {
-    nonisolated(unsafe) static var didStart: (@Sendable () -> Void)?
-    nonisolated(unsafe) static var didStop: (@Sendable () -> Void)?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        let response = HTTPURLResponse(
-            url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"]
-        )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"data":["#.utf8))
-        Self.didStart?()
-    }
-
-    override func stopLoading() { Self.didStop?() }
-}

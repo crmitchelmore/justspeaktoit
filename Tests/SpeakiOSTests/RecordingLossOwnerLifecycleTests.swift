@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import SpeakCore
+import SpeakTestSupport
 import XCTest
 @testable import SpeakiOSLib
 
@@ -123,7 +124,10 @@ final class RecordingLossOwnerLifecycleTests: XCTestCase {
                          start: transcriber.start, stop: { await transcriber.stop() }, cancel: transcriber.cancel)
         default:
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.protocolClasses = [LossReportingURLProtocol.self]
+            configuration.protocolClasses = [StubURLProtocol.self]
+            StubURLProtocol.handler = { request in
+                .status(200, Data("{\"text\":\"Available words\"}".utf8), url: request.url!)
+            }
             let transcriber = IOSBatchTranscriber(
                 audioSessionManager: manager, model: "openai/gpt-4o-mini-transcribe", apiKey: "test",
                 session: URLSession(configuration: configuration)
@@ -155,15 +159,4 @@ private final class LossReportingClient: FinalizingStreamingTranscriptionClient 
     func finishAndWait() async -> String? { "Available words" }
 }
 
-private final class LossReportingURLProtocol: URLProtocol {
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data("{\"text\":\"Available words\"}".utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
 #endif

@@ -104,6 +104,18 @@ archive: ## Create Xcode archive of the direct/Developer ID flavour
 		archive
 	@echo "Archive created at $(ARCHIVE_PATH)"
 
+.PHONY: paid-access-test-build
+paid-access-test-build: ## Build a local direct-download app with paid access explicitly enabled
+	@echo "Generating Chris/internal paid-access flavour..."
+	TUIST_PAID_ACCESS=1 TUIST_APP_STORE=0 tuist generate --no-open
+	xcodebuild -workspace "Just Speak to It.xcworkspace" \
+		-scheme "SpeakApp" \
+		-configuration Debug \
+		-destination "platform=macOS" \
+		-derivedDataPath .build/paid-access-test \
+		build
+	@echo "Paid-access test app: .build/paid-access-test/Build/Products/Debug/JustSpeakToIt.app"
+
 .PHONY: archive-appstore
 archive-appstore: ## Regenerate the App Store flavour and create its Xcode archive
 	@echo "Generating App Store flavour (TUIST_APP_STORE=1)..."

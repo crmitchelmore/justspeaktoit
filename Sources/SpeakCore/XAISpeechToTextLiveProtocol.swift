@@ -8,7 +8,7 @@ import Foundation
 /// directly.
 extension XAISpeechToTextLiveClient {
     /// `wss://api.x.ai/v1/stt` with the session configured entirely by query
-    /// items — there is no start message and no `model` parameter.
+    /// items, including the explicit transcription model — there is no start message.
     static func webSocketURL(
         sampleRate: Int,
         language: String?,
@@ -19,6 +19,7 @@ extension XAISpeechToTextLiveClient {
         components.host = XAISpeechToText.webSocketHost
         components.path = XAISpeechToText.webSocketPath
         var items = [
+            URLQueryItem(name: "model", value: XAISpeechToText.apiModelName),
             URLQueryItem(name: "encoding", value: "pcm"),
             URLQueryItem(name: "sample_rate", value: String(sampleRate)),
             URLQueryItem(name: "interim_results", value: "true")

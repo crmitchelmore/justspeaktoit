@@ -17,8 +17,14 @@ final class XAISpeechToTextTests: XCTestCase {
         let batch = try XCTUnwrap(ModelCatalog.batchTranscription.first {
             $0.id == XAISpeechToText.batchCatalogID
         })
-        XCTAssertTrue(live.displayName.contains("Streaming"))
-        XCTAssertFalse(batch.displayName.contains("Streaming"))
+        XCTAssertEqual(live.displayName, "Grok Voice Transcribe 2.0 (Streaming)")
+        XCTAssertEqual(batch.displayName, "Grok Voice Transcribe 2.0")
+        // Persisted capability IDs upgrade in place on both platforms.
+        XCTAssertEqual(batch.id, "xai/speech-to-text")
+        XCTAssertEqual(live.id, "xai/speech-to-text-streaming")
+        XCTAssertFalse((ModelCatalog.liveTranscription + ModelCatalog.batchTranscription).contains {
+            $0.id.contains("grok-voice-transcribe-1.0")
+        })
 
         let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: XAISpeechToText.liveCatalogID))
         XCTAssertEqual(route.provider, .xai)
@@ -122,8 +128,9 @@ final class XAISpeechToTextTests: XCTestCase {
         XCTAssertTrue(body.contains("name=\"format\"\r\n\r\ntrue\r\n"))
         XCTAssertTrue(body.contains("name=\"keyterm\"\r\n\r\nSpeak\r\n"))
         XCTAssertTrue(body.contains("filename=\"recording.m4a\"\r\nContent-Type: audio/mp4"))
-        // There is no model field: the endpoint serves one service.
-        XCTAssertFalse(body.contains("name=\"model\""))
+        let modelPart = try XCTUnwrap(body.range(of: "name=\"model\"\r\n\r\ngrok-voice-transcribe-2.0\r\n"))
+        let filePart = try XCTUnwrap(body.range(of: "name=\"file\""))
+        XCTAssertLessThan(modelPart.lowerBound, filePart.lowerBound)
     }
 
     /// Inverse text normalisation is rejected without a language, so neither
@@ -139,6 +146,7 @@ final class XAISpeechToTextTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: upload.file.deletingLastPathComponent()) }
         let body = try XCTUnwrap(String(bytes: Data(contentsOf: upload.file), encoding: .utf8))
+        XCTAssertTrue(body.contains("name=\"model\"\r\n\r\ngrok-voice-transcribe-2.0\r\n"))
         XCTAssertFalse(body.contains("name=\"language\""))
         XCTAssertFalse(body.contains("name=\"format\""))
     }

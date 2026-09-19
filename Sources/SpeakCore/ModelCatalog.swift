@@ -88,7 +88,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             tags: [.fast, .leading]),
         Option(
             id: XAISpeechToText.liveCatalogID,
-            displayName: "xAI Speech-to-Text (Streaming)",
+            displayName: XAISpeechToText.displayName + " (Streaming)",
             description: "xAI's dedicated realtime speech-to-text endpoint: interim captions, "
                 + "chunk finals as speech locks, and one authoritative transcript at the end of "
                 + "the stream. Reuses your xAI API key.",
@@ -212,7 +212,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             estimatedLatencyMs: 900, latencyTier: .fast),
         Option(
             id: XAISpeechToText.batchCatalogID,
-            displayName: "xAI Speech-to-Text",
+            displayName: XAISpeechToText.displayName,
             description: "xAI's dedicated file transcription endpoint, with word timings, "
                 + "keyterm biasing and inverse text normalisation when a language is chosen.",
             estimatedLatencyMs: 700, latencyTier: .fast),

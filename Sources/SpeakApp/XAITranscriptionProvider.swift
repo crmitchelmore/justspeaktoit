@@ -87,7 +87,7 @@ enum XAITranscriptionProviderError: LocalizedError {
     switch self {
     case .batchNotSupported(let model):
       return "\(ModelCatalog.transcriptionDisplayName(for: model, isBatch: false)) has no file "
-        + "transcription mode. Choose xAI Speech-to-Text for recordings, or keep this model for "
+        + "transcription mode. Choose \(XAISpeechToText.displayName) for recordings, or keep this model for "
         + "live streaming."
     }
   }

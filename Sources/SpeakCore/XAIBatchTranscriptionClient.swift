@@ -3,13 +3,13 @@ import Foundation
 /// xAI's dedicated file-transcription endpoint, shared by macOS and iOS.
 ///
 /// `POST https://api.x.ai/v1/stt` takes one multipart `file` part and returns
-/// the transcript with word timings. There is no `model` field: the endpoint
-/// serves one service. Inverse text normalisation (`format=true`) is only legal
+/// the transcript with word timings. Explicitly selects Grok Voice Transcribe
+/// 2.0. Inverse text normalisation (`format=true`) is only legal
 /// alongside a `language`, so it is requested exactly when the user's language
 /// selection resolves to one xAI documents.
 ///
 /// Contract: https://docs.x.ai/developers/model-capabilities/audio/speech-to-text
-/// (read 2026-09-10).
+/// (read 2026-09-19).
 public struct XAIBatchTranscriptionClient: Sendable {
     var uploadRecording: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
 
@@ -73,6 +73,7 @@ public struct XAIBatchTranscriptionClient: Sendable {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
+        body.appendFormField(named: "model", value: XAISpeechToText.apiModelName, boundary: boundary)
         // `format=true` is rejected without a language, so the two travel
         // together or not at all.
         if let code = XAISpeechToText.languageCode(for: language) {

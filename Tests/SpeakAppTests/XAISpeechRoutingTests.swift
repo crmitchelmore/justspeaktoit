@@ -53,7 +53,7 @@ final class XAISpeechRoutingTests: XCTestCase {
         } catch {
             let message = error.localizedDescription
             XCTAssertTrue(message.contains("no file"), message)
-            XCTAssertTrue(message.contains("xAI Speech-to-Text"), message)
+            XCTAssertTrue(message.contains("Grok Voice Transcribe 2.0"), message)
         }
     }
 

@@ -42,12 +42,14 @@ extension XAISpeechToTextLiveClient {
         }
     }
 
-    /// After `audio.done` has left, and after `transcript.done`, the server
-    /// closes the socket itself, so a closure then is the normal end of the
-    /// stream. Any other failure ends a live recording visibly.
+    /// The server sends `transcript.done` and only then closes the socket, so
+    /// a closure is benign only after that frame. Any earlier failure, even
+    /// once `audio.done` has left, ends the run visibly: the finish still
+    /// returns the locked spans received so far for recovery, but the error
+    /// is published first so a caller cannot mistake them for a completed
+    /// transcription.
     private func transportFailed(_ error: Error, _ active: XAISpeechToTextLiveRun) {
-        let streamEnded = active.phase == .finishing && active.audioDoneSent && !active.sending
-        if active.doneReceived || streamEnded {
+        if active.doneReceived {
             close(active)
         } else {
             fail(mapConnectionError(error), active)

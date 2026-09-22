@@ -29,6 +29,10 @@ public enum DesktopLiveTranscription {
 
     /// Hosts supply native I/O; provider choice and protocol behaviour stay
     /// shared so adding a route does not require another platform-owned list.
+    ///
+    /// `language` is the Speak selection as stored (`en_GB`, `Automatic`, nil);
+    /// a route that takes a language hint maps it to its own code and omits
+    /// it when the service cannot serve it, so a host never sends a raw locale.
     public static func makeClient(
         model: String, apiKey: String, language: String? = nil,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
@@ -57,7 +61,7 @@ public enum DesktopLiveTranscription {
         case .xai:
             // `route(forID:)` admits only the dedicated speech-to-text stream.
             return XAISpeechToTextLiveClient(
-                apiKey: apiKey, sampleRate: route.sampleRate, makeConnection: makeConnection
+                apiKey: apiKey, language: language, sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         default: return nil
         }

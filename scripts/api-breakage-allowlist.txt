@@ -12,3 +12,4 @@
 # being reported.
 API breakage: enumelement StreamingClientError.transportStalled has been added as a new enum case
 API breakage: enumelement XAISpeechToTextError.sessionNotReady has been added as a new enum case
+API breakage: enumelement XAISpeechToTextError.missingCompletion has been added as a new enum case

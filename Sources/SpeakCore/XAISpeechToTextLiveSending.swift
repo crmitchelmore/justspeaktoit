@@ -48,7 +48,10 @@ extension XAISpeechToTextLiveClient {
     /// short recording finished during an ordinary handshake holds its capture
     /// until the session is ready rather than pushing PCM the service would
     /// refuse. A session that cannot become ready inside `readyBudget` fails
-    /// visibly, and one deadline bounds the whole finish.
+    /// visibly, and one deadline bounds the whole finish: only
+    /// `transcript.done` completes it, so a drain that stalls or a completion
+    /// that never arrives is reported, with the locked spans received so far
+    /// returned for recovery rather than presented as a finished transcript.
     func beginFinish(_ active: XAISpeechToTextLiveRun) {
         guard isCurrent(active), active.connection != nil, !active.doneReceived else { close(active); return }
         guard active.phase != .finishing else { return }
@@ -61,7 +64,7 @@ extension XAISpeechToTextLiveClient {
         }
         after(Self.finishBudget, active) { client, active in
             if active.audioDoneSent, !active.sending {
-                client.close(active)
+                client.fail(XAISpeechToTextError.missingCompletion, active)
             } else {
                 client.fail(client.stalledError, active)
             }

@@ -56,10 +56,13 @@ enum XAISpeechToTextEvent: Equatable {
         }
     }
 
+    /// A channel index that is fractional, non-finite or outside `Int` is
+    /// unreadable rather than fatal: `Int(exactly:)` answers `nil` for all of
+    /// those, and the identity then falls back to channel 0 on every platform.
     private static func index(_ value: Any?) -> Int? {
         switch value {
         case let integer as Int: return integer
-        case let double as Double where double == double.rounded(): return Int(double)
+        case let double as Double: return Int(exactly: double)
         default: return nil
         }
     }

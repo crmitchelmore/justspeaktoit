@@ -31,6 +31,16 @@ final class XAISpeechToTextFailureTests: XCTestCase {
     }
 
     func testServerErrorDuringFinishIsDeliveredOnceBeforeTheWaiterResumes() async {
+        await exerciseFailureOrdering { $0.xaiError("rate limit exceeded") }
+    }
+
+    /// The server closes the socket only after `transcript.done`, so a closure
+    /// once `audio.done` has left but before that frame is still a failure.
+    func testClosureAfterAudioDoneWithoutTranscriptDoneIsDeliveredOnceBeforeTheWaiterResumes() async {
+        await exerciseFailureOrdering { $0.fail() }
+    }
+
+    private func exerciseFailureOrdering(trigger: @escaping @Sendable (AssemblyAITestSocket) -> Void) async {
         let fixture = XAISpeechToTextLiveFixture()
         let client = fixture.client
         let errorEntered = expectation(description: "Error callback entered on the provider queue")
@@ -58,13 +68,14 @@ final class XAISpeechToTextFailureTests: XCTestCase {
             return result
         }
         await fulfillment(of: [ending], timeout: 2)
-        DispatchQueue.global().async { old.xaiError("rate limit exceeded") }
+        old.completeSend()
+        DispatchQueue.global().async { trigger(old) }
         await fulfillment(of: [errorEntered], timeout: 2)
         await fulfillment(of: [prematurelyReturned], timeout: 0.1)
         gate.release.signal()
         await fulfillment(of: [errorCompleted, finished], timeout: 2)
         let result = await finish.value
-        XCTAssertEqual(result, "Saved.")
+        XCTAssertEqual(result, "Saved.", "The locked spans are returned for recovery after the error")
         XCTAssertEqual(old.cancels, 1)
         assertReplacementAcceptsAudio(fixture)
     }
@@ -106,7 +117,10 @@ final class XAISpeechToTextFailureTests: XCTestCase {
         XCTAssertEqual(again, "Saved.", "A closed run answers a second finish at once with the same text")
     }
 
-    func testTransportClosureDuringFinishBeforeAudioDoneIsAFailureAndAfterItIsNot() async {
+    /// A closure during a finish is a failure until `transcript.done` has
+    /// arrived, whether audio is still draining or `audio.done` has already
+    /// left; the retained text comes back either way, after the error.
+    func testTransportClosureDuringFinishIsAFailureUntilTranscriptDoneArrives() async {
         let early = XAISpeechToTextLiveFixture()
         early.start()
         early.becomeReady()
@@ -123,7 +137,7 @@ final class XAISpeechToTextFailureTests: XCTestCase {
         let late = XAISpeechToTextLiveFixture()
         late.start()
         late.becomeReady()
-        late.socket.transcriptPartial("Complete.", isFinal: true, start: 0)
+        late.socket.transcriptPartial("Incomplete.", isFinal: true, start: 0)
         let ending = expectation(description: "audio.done")
         late.socket.fulfillOnAudioDone(ending)
         let lateFinish = Task { await late.client.finishAndWait() }
@@ -131,8 +145,10 @@ final class XAISpeechToTextFailureTests: XCTestCase {
         late.socket.completeSend()
         late.socket.fail()
         let lateTranscript = await lateFinish.value
-        XCTAssertEqual(lateTranscript, "Complete.")
-        XCTAssertTrue(late.events.errors.isEmpty, "The server closing after audio.done is the end of the stream")
+        XCTAssertEqual(lateTranscript, "Incomplete.", "Retained for recovery, not as a completed transcript")
+        XCTAssertEqual(late.events.errors.count, 1, "No transcript.done arrived, so the closure is not benign")
+        XCTAssertEqual((late.events.errors.first as? URLError)?.code, .networkConnectionLost)
+        XCTAssertEqual(late.socket.cancels, 1)
     }
 
     func testServerErrorFramesAreClassifiedBeforeTheyReachTheHost() {

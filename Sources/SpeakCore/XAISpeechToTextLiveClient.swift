@@ -157,7 +157,9 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     /// `transcript.done`, all inside `finishBudget`. The return value is the
     /// whole session transcript, so finals that arrive during the finish are
     /// folded into it and returned once rather than also delivered through
-    /// `onTranscript`.
+    /// `onTranscript`. A finish that does not reach `transcript.done`, whether
+    /// the socket closes early or the budget elapses, publishes its error
+    /// before returning the spans received so far.
     public func finishAndWait() async -> String? {
         let active = synchronized { run }
         return await withTaskCancellationHandler {

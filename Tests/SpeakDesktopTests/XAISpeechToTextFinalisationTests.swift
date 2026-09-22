@@ -110,23 +110,29 @@ final class XAISpeechToTextFinalisationTests: XCTestCase {
         XCTAssertTrue(fixture.socket.binary.isEmpty)
     }
 
-    func testFinishDeadlineClosesGracefullyAfterAudioDoneAndFailsVisiblyBeforeIt() async {
-        let graceful = XAISpeechToTextLiveFixture()
-        graceful.start()
-        graceful.becomeReady()
-        graceful.socket.transcriptPartial("Best.", isFinal: true, start: 0)
+    /// Only `transcript.done` completes a finish. A budget that elapses after
+    /// `audio.done` left is a missing completion, and one that elapses while
+    /// audio is still draining is a stall; both are published before the
+    /// finish returns the locked spans, which are recovery material rather
+    /// than a completed transcript.
+    func testFinishDeadlineReportsAMissingCompletionAfterAudioDoneAndAStallBeforeIt() async {
+        let incomplete = XAISpeechToTextLiveFixture()
+        incomplete.start()
+        incomplete.becomeReady()
+        incomplete.socket.transcriptPartial("Best.", isFinal: true, start: 0)
         let ending = expectation(description: "audio.done")
-        graceful.socket.fulfillOnAudioDone(ending)
-        let finish = Task { await graceful.client.finishAndWait() }
+        incomplete.socket.fulfillOnAudioDone(ending)
+        let finish = Task { await incomplete.client.finishAndWait() }
         await fulfillment(of: [ending], timeout: 2)
-        graceful.socket.completeSend()
+        incomplete.socket.completeSend()
         // The audio.done send deadline and the finish deadline share a length.
-        await graceful.waitForScheduled(XAISpeechToTextLiveClient.finishBudget, count: 2)
-        graceful.clock.fire(XAISpeechToTextLiveClient.finishBudget)
+        await incomplete.waitForScheduled(XAISpeechToTextLiveClient.finishBudget, count: 2)
+        incomplete.clock.fire(XAISpeechToTextLiveClient.finishBudget)
         let transcript = await finish.value
-        XCTAssertEqual(transcript, "Best.", "A missing transcript.done still returns the locked spans")
-        XCTAssertTrue(graceful.events.errors.isEmpty)
-        XCTAssertEqual(graceful.socket.cancels, 1)
+        XCTAssertEqual(transcript, "Best.", "The locked spans are returned for recovery")
+        XCTAssertEqual(incomplete.events.errors.first as? XAISpeechToTextError, .missingCompletion)
+        XCTAssertEqual(incomplete.events.errors.count, 1)
+        XCTAssertEqual(incomplete.socket.cancels, 1)
 
         let stalled = XAISpeechToTextLiveFixture()
         stalled.start()

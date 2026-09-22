@@ -16,10 +16,11 @@ final class XAISpeechToTextLiveRun: @unchecked Sendable {
     var outgoing: [Data] = []
     var sending = false
     var sendID: UInt64 = 0
-    /// `audio.done` was handed to the transport. From then on a closure is
-    /// the server ending the stream, not a failure.
+    /// `audio.done` was handed to the transport; the finish then waits for
+    /// `transcript.done` rather than for the drain.
     var audioDoneSent = false
-    /// `transcript.done` arrived; the server closes the socket afterwards.
+    /// `transcript.done` arrived. The server closes the socket afterwards, so
+    /// only from here is a closure the normal end of the stream.
     var doneReceived = false
     let budget: StreamingAudioSendBudget
     var accumulated = TranscriptAccumulator(shape: .standaloneSegments)

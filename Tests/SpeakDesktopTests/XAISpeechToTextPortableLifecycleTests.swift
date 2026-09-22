@@ -221,4 +221,28 @@ final class XAISpeechToTextPortableLifecycleTests: XCTestCase {
         XCTAssertTrue(fixture.events.errors.isEmpty)
         fixture.client.cancel()
     }
+
+    /// A channel index the frame cannot use must never trap the recording.
+    /// Apple's JSONSerialization answers `1e100` as a Double whose rounded
+    /// value equals itself, so only an exact conversion is safe.
+    func testParserReadsUnusableChannelIndexesWithoutTrappingAndFallsBackToChannelZero() throws {
+        func identity(channel: String) throws -> String? {
+            let json = #"{"type":"transcript.partial","text":"x","is_final":true,"start":2,"channel_index":"#
+                + channel + "}"
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+            guard case .partial(_, _, _, let eventID) = try XCTUnwrap(XAISpeechToTextEvent(object: object)) else {
+                XCTFail("Expected a partial frame for channel \(channel)")
+                return nil
+            }
+            return eventID
+        }
+        XCTAssertEqual(try identity(channel: "1"), "1:2.0")
+        XCTAssertEqual(try identity(channel: "1.0"), "1:2.0", "An integral double is an ordinary index")
+        XCTAssertEqual(try identity(channel: "1e18"), "1000000000000000000:2.0")
+        XCTAssertEqual(try identity(channel: "9007199254740993"), "9007199254740993:2.0")
+        XCTAssertEqual(try identity(channel: "1e100"), "0:2.0", "Out of range is unusable, not fatal")
+        XCTAssertEqual(try identity(channel: "-1e308"), "0:2.0")
+        XCTAssertEqual(try identity(channel: "1.5"), "0:2.0", "A fractional index is unusable")
+        XCTAssertEqual(try identity(channel: "\"1\""), "0:2.0", "A string is not an index")
+    }
 }

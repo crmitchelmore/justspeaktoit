@@ -11,10 +11,12 @@ import os
 import pathlib
 import platform
 import shutil
+import stat
 import struct
 import subprocess
 import sys
 import tarfile
+import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("cross_bootstrap", HERE / "build-foundation-proof.py")
@@ -47,6 +49,40 @@ def extract_compiler(archive, destination):
                 raise ValueError("Unexpected LLVM archive entry")
             source.extract(member, destination)
     return destination / root / "bin"
+
+
+def run_package_build(command, environment, log, package):
+    # SwiftPM removes Package.resolved for our dependency-free Windows graph.
+    # Preserve the caller's exact Apple pins, including uncommitted edits, on
+    # success and failure. Never replace them with a repository revision.
+    lockfile = package / "Package.resolved"
+    try:
+        original = lockfile.lstat()
+    except FileNotFoundError:
+        original = None
+    if original is not None and not stat.S_ISREG(original.st_mode):
+        raise ValueError("Package.resolved must be a regular file for an in-place cross-build")
+    contents = lockfile.read_bytes() if original is not None else None
+    try:
+        with log.open("a") as stream:
+            stream.write("\nARGV: " + json.dumps([str(value) for value in command]) + "\n")
+            stream.flush()
+            subprocess.run([str(value) for value in command], env=environment, stdout=stream,
+                           stderr=subprocess.STDOUT, check=True)
+    finally:
+        if original is None:
+            lockfile.unlink(missing_ok=True)
+        else:
+            descriptor, name = tempfile.mkstemp(prefix=".Package.resolved-cross-", dir=package)
+            temporary = pathlib.Path(name)
+            try:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(contents)
+                    stream.flush()
+                    os.fchmod(stream.fileno(), stat.S_IMODE(original.st_mode))
+                os.replace(temporary, lockfile)
+            finally:
+                temporary.unlink(missing_ok=True)
 
 
 def main():
@@ -97,11 +133,7 @@ def main():
     environment = os.environ.copy()
     environment.update(SPEAK_WINDOWS_TARGET="1", CC=str(clang / "clang"), CXX=str(clang / "clang++"))
     print("Cross-building Windows app and all portable/native tests", flush=True)
-    with log.open("a") as stream:
-        stream.write("\nARGV: " + json.dumps([str(value) for value in command]) + "\n")
-        stream.flush()
-        subprocess.run([str(value) for value in command], env=environment, stdout=stream,
-                       stderr=subprocess.STDOUT, check=True)
+    run_package_build(command, environment, log, HERE.parent.parent)
     built = scratch / "x86_64-unknown-windows-msvc/debug"
     artifacts = {}
     for source_name, artifact_name in [("SpeakWindows.exe", "SpeakWindows.exe"),

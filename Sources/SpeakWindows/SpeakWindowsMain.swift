@@ -107,6 +107,7 @@ enum SpeakWindowsMain {
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
                 try WindowsNative.checked { jsti_private_storage_self_test($0, $1) }
+                try WindowsNative.stagingSelfTest()
                 try WindowsNative.checked { jsti_websocket_self_test($0, $1) }
                 guard !DesktopTranscription.batchModels.isEmpty else {
                     throw WindowsNativeError(message: "No canonical desktop models available.")
@@ -143,7 +144,9 @@ enum SpeakWindowsMain {
         try WindowsNative.configurePostProcessing(
             processing, context: Unmanaged.passUnretained(holder).toOpaque()
         )
-        let strings = DesktopTranscription.batchModels.map { Array($0.displayName.utf8CString) }
+        let preferences = await controller.preferredModelIDs()
+        try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
+        let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
         let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in
             let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)
             pointer.initialize(from: chars, count: chars.count)

@@ -35,6 +35,14 @@ enum JSTIWindowEvent {
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
+/* Optional pre-run mode catalogue. is_live contains only 0/1 and must have the
+ * same count/order as window_run's full model array. Preferences are global
+ * indices of their respective mode; -1 chooses that mode's first model.
+ * Null/count0 restores the legacy all-batch catalogue. Inputs are copied.
+ * window_run's selected_index overrides that mode's preference. Every callback
+ * continues to report a global model index, never a filtered combo row. */
+int jsti_window_set_model_modes(const int *is_live, size_t count,
+                                int preferred_batch_index, int preferred_live_index);
 /* Thread safe; updates coalesce. Null status/transcript retains the prior value.
  * recording: -1 retains current value, 0 idle, 1 recording, 2 busy (disable controls). */
 int jsti_window_update(const char *status, const char *transcript, int recording);

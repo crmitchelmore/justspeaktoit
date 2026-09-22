@@ -75,7 +75,8 @@ enum WindowsNative {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         let rows = records.map { record in
-            let model = ModelCatalog.batchTranscription.first { $0.id == record.modelIdentifier }?.displayName
+            let model = (ModelCatalog.batchTranscription + ModelCatalog.liveTranscription)
+                .first { $0.id == record.modelIdentifier }?.displayName
                 ?? record.modelIdentifier.split(separator: "/").last.map(String.init) ?? record.modelIdentifier
             let detail = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
                 ?? record.displayText ?? "Recording saved; awaiting transcription."
@@ -94,12 +95,14 @@ enum WindowsNative {
 /// Owned until WASAPI stop has joined its worker, so no callback sees freed state.
 final class WindowsCaptureContext: @unchecked Sendable {
     let file: PCMRecordingFile
+    let live: DesktopLiveSession?
     let onFailure: @Sendable (String) -> Void
     private let lock = NSLock()
     private var failed = false
 
-    init(file: PCMRecordingFile, onFailure: @escaping @Sendable (String) -> Void) {
+    init(file: PCMRecordingFile, live: DesktopLiveSession? = nil, onFailure: @escaping @Sendable (String) -> Void) {
         self.file = file
+        self.live = live
         self.onFailure = onFailure
     }
 
@@ -116,7 +119,9 @@ func captureAudio(_ samples: UnsafePointer<Int16>?, _ count: Int, _ context: Uns
     guard let samples, let context else { return }
     let capture = Unmanaged<WindowsCaptureContext>.fromOpaque(context).takeUnretainedValue()
     do {
-        try capture.file.append(Data(bytes: samples, count: count * MemoryLayout<Int16>.size))
+        let data = Data(bytes: samples, count: count * MemoryLayout<Int16>.size)
+        try capture.file.append(data)
+        capture.live?.sendAudio(data)
     } catch {
         capture.fail(error.localizedDescription)
     }

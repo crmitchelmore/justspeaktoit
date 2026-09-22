@@ -1,5 +1,6 @@
 import Foundation
 import CWindowsSupport
+import SpeakDesktop
 
 extension WindowsAppController {
     func selectHistory(_ identifier: String) {
@@ -15,6 +16,10 @@ extension WindowsAppController {
     func retryHistory(_ identifier: String) async {
         guard canUseHistory, let id = UUID(uuidString: identifier),
               let record = history[id] else { return }
+        guard DesktopTranscription.provider(for: record.modelIdentifier) != nil else {
+            update("This used a live model. Open its audio, then choose Batch and import it to transcribe again.")
+            return
+        }
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }

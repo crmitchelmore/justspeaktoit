@@ -56,7 +56,7 @@ extension WindowsAppController {
         }
     }
 
-    private func present(_ record: DesktopRecordingStore.Record, target: JSTITextTarget?) {
+    func present(_ record: DesktopRecordingStore.Record, target: JSTITextTarget?) {
         selectedHistoryID = record.id
         refreshHistory()
         transcript = record.displayText ?? ""
@@ -82,6 +82,7 @@ extension WindowsAppController {
         cancellationRequested = true
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()
+        liveFinalisation?.cancel()
         update("Cancelling… Saved audio and completed results will be retained.", state: 2)
     }
 }

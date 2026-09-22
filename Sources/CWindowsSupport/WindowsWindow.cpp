@@ -15,7 +15,7 @@ constexpr UINT updateMessage = WM_APP + 1;
 constexpr int hotkeyID = 1;
 enum Control {
     modelID = 100, keyID, saveID, recordID, importID, copyID, transcriptID, statusID,
-    historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID
+    historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID, modeID
 };
 struct HistoryRow {
     std::string id;
@@ -37,6 +37,8 @@ struct WindowState {
     std::wstring transcript;
     std::vector<MicrophoneRow> microphones;
     std::string microphoneSelection;
+    std::vector<int> configuredModelModes;
+    int configuredPreferredModels[2] = {-1, -1};
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
@@ -46,10 +48,71 @@ struct WindowState {
     std::vector<HWND> controls;
     // Only accessed by the UI thread. Pending snapshots above use mutex.
     std::vector<HistoryRow> displayedHistory;
+    std::vector<std::wstring> modelNames;
+    std::vector<int> modelModes;
+    std::vector<int> filteredModels;
+    int preferredModels[2] = {-1, -1};
+    int activeMode = 0;
 } state;
 
 int selection(HWND window) {
-    return static_cast<int>(SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0));
+    const LRESULT index = SendDlgItemMessageW(window, modelID, CB_GETCURSEL, 0, 0);
+    return index == CB_ERR || static_cast<size_t>(index) >= state.filteredModels.size()
+        ? -1 : state.filteredModels[static_cast<size_t>(index)];
+}
+
+bool hasModeChoice() {
+    return state.preferredModels[0] >= 0 && state.preferredModels[1] >= 0;
+}
+
+bool liveSelection(HWND window) {
+    const int selected = selection(window);
+    return selected >= 0 && static_cast<size_t>(selected) < state.modelModes.size() && state.modelModes[selected] == 1;
+}
+
+void updateModelAvailability(HWND window, int recording) {
+    EnableWindow(GetDlgItem(window, modeID), recording == 0 && hasModeChoice());
+    EnableWindow(GetDlgItem(window, modelID), recording == 0);
+    EnableWindow(GetDlgItem(window, importID), recording == 0 && selection(window) >= 0 && !liveSelection(window));
+}
+
+bool idleControl(HWND window, int identifier) {
+    int recording;
+    { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    return recording == 0 && IsWindowEnabled(GetDlgItem(window, identifier));
+}
+
+bool populateModels(HWND window) {
+    HWND combo = GetDlgItem(window, modelID);
+    SendMessageW(combo, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    state.filteredModels.clear();
+    LRESULT selectedRow = CB_ERR;
+    bool success = true;
+    for (size_t index = 0; index < state.modelNames.size(); ++index) {
+        if (state.modelModes[index] != state.activeMode) continue;
+        const LRESULT row = SendMessageW(combo, CB_ADDSTRING, 0,
+                                         reinterpret_cast<LPARAM>(state.modelNames[index].c_str()));
+        if (row == CB_ERR || row == CB_ERRSPACE) { success = false; break; }
+        state.filteredModels.push_back(static_cast<int>(index));
+        if (static_cast<int>(index) == state.preferredModels[state.activeMode]) selectedRow = row;
+    }
+    if (selectedRow == CB_ERR || !success) {
+        SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+        state.filteredModels.clear();
+        success = false;
+    } else SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(selectedRow), 0);
+    SendMessageW(combo, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(combo, nullptr, TRUE);
+    const bool choice = hasModeChoice();
+    ShowWindow(GetDlgItem(window, modeID), choice ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(window, 95), choice ? SW_SHOW : SW_HIDE);
+    SendDlgItemMessageW(window, modeID, CB_SETCURSEL, state.activeMode, 0);
+    SetDlgItemTextW(window, 90, !choice && state.activeMode == 1 ? L"Live &transcription model" : L"&Transcription model");
+    int recording;
+    { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    updateModelAvailability(window, recording);
+    return success;
 }
 
 void emit(HWND window, int event, const char *text = "") {
@@ -110,12 +173,15 @@ void layout(HWND window) {
     const int width = availableWidth - historyWidth - margin;
     const int saveWidth = scale(window, 112);
     auto move = [&](int id, int x, int y, int w, int h) { MoveWindow(GetDlgItem(window, id), x, y, w, h, TRUE); };
-    move(90, contentLeft, margin, width, scale(window, 22));
+    const int modelTop = margin + (hasModeChoice() ? row : 0);
+    move(95, contentLeft, margin + scale(window, 3), scale(window, 64), scale(window, 22));
+    move(modeID, contentLeft + scale(window, 70), margin, width - scale(window, 70), scale(window, 160));
+    move(90, contentLeft, modelTop, width, scale(window, 22));
     const int settingsWidth = scale(window, 148);
-    move(modelID, contentLeft, margin + scale(window, 26), width - settingsWidth - gap, scale(window, 260));
-    move(processingID, contentLeft + width - settingsWidth, margin + scale(window, 26), settingsWidth, row);
-    move(91, contentLeft, margin + scale(window, 70), width, scale(window, 22));
-    const int keyTop = margin + scale(window, 96);
+    move(modelID, contentLeft, modelTop + scale(window, 26), width - settingsWidth - gap, scale(window, 260));
+    move(processingID, contentLeft + width - settingsWidth, modelTop + scale(window, 26), settingsWidth, row);
+    move(91, contentLeft, modelTop + scale(window, 70), width, scale(window, 22));
+    const int keyTop = modelTop + scale(window, 96);
     move(keyID, contentLeft, keyTop, width - saveWidth - gap, row);
     move(saveID, contentLeft + width - saveWidth, keyTop, saveWidth, row);
     const int microphoneTop = keyTop + row + gap;
@@ -171,6 +237,8 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Retr&y", BS_PUSHBUTTON | WS_TABSTOP, retryID) &&
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
+        add(L"STATIC", L"&Mode", 0, 95) &&
+        add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, modeID) &&
         add(L"STATIC", L"&Transcription model", 0, 90) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
         add(L"BUTTON", L"&Post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
@@ -197,6 +265,9 @@ bool createControls(HWND window) {
     SendDlgItemMessageW(window, keyID, EM_LIMITTEXT, 2048, 0);
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
     refreshFont(window);
+    if (SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Batch")) < 0 ||
+        SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Live")) < 0 ||
+        !populateModels(window)) return false;
     updateHistoryControls(window, 0);
     EnableWindow(GetDlgItem(window, processingID), jsti_postprocessing_available());
     return okay;
@@ -226,7 +297,8 @@ void applyUpdate(HWND window) {
     if (transcriptChanged) SetDlgItemTextW(window, transcriptID, transcript.c_str());
     SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel transcription" : L"&Record"));
     EnableWindow(GetDlgItem(window, recordID), TRUE);
-    for (int id : {modelID, keyID, saveID, importID, microphoneID}) EnableWindow(GetDlgItem(window, id), recording == 0);
+    for (int id : {keyID, saveID, microphoneID}) EnableWindow(GetDlgItem(window, id), recording == 0);
+    updateModelAvailability(window, recording);
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
     if (historyChanged) {
         HWND list = GetDlgItem(window, historyID);
@@ -284,7 +356,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return createControls(window) ? 0 : -1;
     case WM_GETMINMAXINFO: {
         auto info = reinterpret_cast<MINMAXINFO *>(lparam);
-        info->ptMinTrackSize = {scale(window, 820), scale(window, 600)};
+        info->ptMinTrackSize = {scale(window, 820), scale(window, hasModeChoice() ? 634 : 600)};
         return 0;
     }
     case WM_SIZE:
@@ -303,7 +375,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
         case recordID: emitRecording(window); return 0;
-        case importID: importAudio(window); return 0;
+        case importID:
+            if (idleControl(window, importID) && !liveSelection(window)) importAudio(window);
+            return 0;
         case copyID: {
             const std::string id = selectedHistory(window);
             emit(window, JSTI_EVENT_COPY_TRANSCRIPT, id.c_str());
@@ -333,6 +407,30 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case modelID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
+                if (!idleControl(window, modelID)) {
+                    const auto previous = std::find(state.filteredModels.begin(), state.filteredModels.end(),
+                                                     state.preferredModels[state.activeMode]);
+                    if (previous != state.filteredModels.end()) SendDlgItemMessageW(window, modelID, CB_SETCURSEL,
+                        static_cast<WPARAM>(previous - state.filteredModels.begin()), 0);
+                    return 0;
+                }
+                const int selected = selection(window);
+                if (selected < 0) return 0;
+                state.preferredModels[state.activeMode] = selected;
+                SetDlgItemTextW(window, keyID, L"");
+                emit(window, JSTI_EVENT_MODEL_CHANGED);
+            }
+            return 0;
+        case modeID:
+            if (HIWORD(wparam) == CBN_SELCHANGE) {
+                if (!idleControl(window, modeID)) {
+                    SendDlgItemMessageW(window, modeID, CB_SETCURSEL, state.activeMode, 0);
+                    return 0;
+                }
+                const LRESULT mode = SendDlgItemMessageW(window, modeID, CB_GETCURSEL, 0, 0);
+                if ((mode != 0 && mode != 1) || state.preferredModels[mode] < 0) return 0;
+                state.activeMode = static_cast<int>(mode);
+                if (!populateModels(window)) { showFailure(window, "Windows could not display this mode's models."); return 0; }
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
             }
@@ -374,6 +472,24 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.running) return jsti::fail("The desktop window is already running.", error, capacity);
+        if (!state.configuredModelModes.empty() && state.configuredModelModes.size() != count) {
+            return jsti::fail("The model mode catalogue does not match the supplied model labels.", error, capacity);
+        }
+        state.modelNames = std::move(names);
+        state.modelModes = state.configuredModelModes.empty() ? std::vector<int>(count, 0) : state.configuredModelModes;
+        for (int mode = 0; mode < 2; ++mode) {
+            state.preferredModels[mode] = state.configuredPreferredModels[mode];
+            if (state.preferredModels[mode] < 0) {
+                const auto first = std::find(state.modelModes.begin(), state.modelModes.end(), mode);
+                if (first != state.modelModes.end()) state.preferredModels[mode] = static_cast<int>(first - state.modelModes.begin());
+            }
+        }
+        if (selected < 0 || static_cast<size_t>(selected) >= count) {
+            selected = state.preferredModels[0] >= 0 ? state.preferredModels[0] : state.preferredModels[1];
+        }
+        state.activeMode = state.modelModes[selected];
+        state.preferredModels[state.activeMode] = selected;
+        state.filteredModels.clear();
         if (state.microphones.empty()) state.microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
@@ -401,13 +517,11 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Just Speak to It — Windows Preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        1100, 720, nullptr, nullptr, instance, nullptr) : nullptr;
+        1100, hasModeChoice() ? 754 : 720, nullptr, nullptr, instance, nullptr) : nullptr;
     int outcome = 0;
     if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     else {
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
-        for (const auto &name : names) SendDlgItemMessageW(window, modelID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str()));
-        SendDlgItemMessageW(window, modelID, CB_SETCURSEL, selected >= 0 && static_cast<size_t>(selected) < count ? selected : 0, 0);
         ShowWindow(window, SW_SHOWDEFAULT);
         UpdateWindow(window);
         emit(window, JSTI_EVENT_READY);
@@ -430,6 +544,26 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     if (registered) UnregisterClassW(type.lpszClassName, instance);
     { std::lock_guard<std::mutex> lock(state.mutex); state.running = false; state.window = nullptr; }
     return outcome;
+}
+
+int jsti_window_set_model_modes(const int *isLive, size_t count, int preferredBatch, int preferredLive) {
+    if (count > 10000 || (count && !isLive)) return -1;
+    try {
+        std::vector<int> modes;
+        if (count) modes.assign(isLive, isLive + count);
+        if (std::any_of(modes.begin(), modes.end(), [](int mode) { return mode != 0 && mode != 1; })) return -1;
+        const int preferred[] = {preferredBatch, preferredLive};
+        for (int mode = 0; mode < 2; ++mode) {
+            const int index = preferred[mode];
+            if (index < -1 || (index >= 0 && (static_cast<size_t>(index) >= count || modes[index] != mode))) return -1;
+        }
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (state.running) return -1;
+        state.configuredModelModes = std::move(modes);
+        state.configuredPreferredModels[0] = preferredBatch;
+        state.configuredPreferredModels[1] = preferredLive;
+        return 0;
+    } catch (const std::exception &) { return -1; }
 }
 
 int jsti_window_set_microphones(const char *const *ids, const char *const *names, size_t count,
@@ -575,24 +709,29 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     }
     const std::vector<HistoryRow> originalHistory = state.displayedHistory;
     const std::string originalSelection = selectedHistory(window);
+    const std::vector<std::wstring> originalModelNames = state.modelNames;
+    const std::vector<int> originalModelModes = state.modelModes;
+    const int originalPreferredModels[] = {state.preferredModels[0], state.preferredModels[1]};
+    const int originalMode = state.activeMode;
     const auto originalCallback = state.callback;
     void *const originalContext = state.context;
     RECT originalBounds{};
     GetWindowRect(window, &originalBounds);
-    struct Event { int event = 0; std::string id; } observed;
-    state.callback = [](int event, const char *id, int, void *context) {
+    struct Event { int event = 0; std::string id; int model = -1; } observed;
+    state.callback = [](int event, const char *id, int model, void *context) {
         auto &observed = *static_cast<Event *>(context);
-        observed.event = event; observed.id = id ? id : "";
+        observed.event = event; observed.id = id ? id : ""; observed.model = model;
     };
     state.context = &observed;
     std::string failure;
-    auto check = [&]() -> bool {
-        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, 600),
+    auto checkBounds = [&]() -> bool {
+        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, hasModeChoice() ? 634 : 600),
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         layout(window);
         RECT client{};
         GetClientRect(window, &client);
         for (HWND control : state.controls) {
+            if (!IsWindowVisible(control)) continue;
             RECT bounds{};
             GetWindowRect(control, &bounds);
             MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&bounds), 2);
@@ -602,13 +741,63 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                 return false;
             }
         }
+        return true;
+    };
+    auto check = [&]() -> bool {
+        // Deliberately interleaved global rows prove callbacks do not leak the
+        // filtered combo index. These are never sent to the real Swift host.
+        state.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
+        state.modelModes = {0, 1, 0, 1};
+        state.preferredModels[0] = 2;
+        state.preferredModels[1] = 3;
+        state.activeMode = 0;
+        if (!populateModels(window) || !checkBounds() || selection(window) != 2 ||
+            SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 2) {
+            if (failure.empty()) failure = "Batch models did not retain their global identity.";
+            return false;
+        }
+        auto changeMode = [&](int mode, int expected) {
+            SendDlgItemMessageW(window, modeID, CB_SETCURSEL, mode, 0);
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(modeID, CBN_SELCHANGE), 0);
+            return observed.event == JSTI_EVENT_MODEL_CHANGED && observed.model == expected &&
+                selection(window) == expected &&
+                (IsWindowEnabled(GetDlgItem(window, importID)) != FALSE) == (mode == 0);
+        };
+        SendDlgItemMessageW(window, modelID, CB_SETCURSEL, 0, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelID, CBN_SELCHANGE), 0);
+        if (observed.model != 0 || !changeMode(1, 3)) {
+            failure = "Mode change did not restore its preferred global model."; return false;
+        }
+        SendDlgItemMessageW(window, modelID, CB_SETCURSEL, 0, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelID, CBN_SELCHANGE), 0);
+        if (observed.event != JSTI_EVENT_MODEL_CHANGED || observed.model != 1 ||
+            !changeMode(0, 0) || !changeMode(1, 1)) {
+            failure = "Mode-specific model selections were not preserved."; return false;
+        }
+        SetDlgItemTextW(window, keyID, L"synthetic-smoke-test-key");
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(saveID, BN_CLICKED), 0);
+        if (observed.event != JSTI_EVENT_SAVE_CREDENTIAL || observed.model != 1) {
+            failure = "Credential callback did not identify the global live model."; return false;
+        }
+        // Disabled Live import must never open a modal chooser or emit an event.
+        const int previousEvent = observed.event;
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(importID, BN_CLICKED), 0);
+        if (observed.event != previousEvent) { failure = "Live mode admitted a batch import."; return false; }
+        jsti_window_update(nullptr, nullptr, 1);
+        applyUpdate(window);
+        const bool recordingModesDisabled = !IsWindowEnabled(GetDlgItem(window, modeID)) &&
+            !IsWindowEnabled(GetDlgItem(window, modelID));
+        jsti_window_update(nullptr, nullptr, 0);
+        applyUpdate(window);
+        if (!recordingModesDisabled) { failure = "Recording allowed a model mode change."; return false; }
         const LRESULT originalMicrophone = SendDlgItemMessageW(window, microphoneID, CB_GETCURSEL, 0, 0);
         if (state.microphones.size() < 2) { failure = "Smoke test requires two synthetic microphone choices."; return false; }
         SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, 1, 0);
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(microphoneID, CBN_SELCHANGE), 0);
         const bool microphoneChanged = observed.event == JSTI_EVENT_MICROPHONE_CHANGED && observed.id == state.microphones[1].id;
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
-        const bool recordingSnapshot = observed.event == JSTI_EVENT_TOGGLE_RECORDING && observed.id == state.microphones[1].id;
+        const bool recordingSnapshot = observed.event == JSTI_EVENT_TOGGLE_RECORDING &&
+            observed.id == state.microphones[1].id && observed.model == 1;
         SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, static_cast<WPARAM>(originalMicrophone), 0);
         if (!microphoneChanged || !recordingSnapshot) {
             failure = "Microphone selection and recording did not retain the exact selected device."; return false;
@@ -639,7 +828,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                               JSTI_EVENT_HISTORY_OPEN_AUDIO, JSTI_EVENT_COPY_TRANSCRIPT};
         for (size_t i = 0; i < 4; ++i) {
             SendMessageW(window, WM_COMMAND, MAKEWPARAM(controls[i], BN_CLICKED), 0);
-            if (observed.event != events[i] || observed.id != "one") {
+            if (observed.event != events[i] || observed.id != "one" || observed.model != 1) {
                 failure = "A history action did not report its selected record ID."; return false;
             }
         }
@@ -647,15 +836,32 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         applyUpdate(window);
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
         const bool cancellation = observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION &&
-            IsWindowEnabled(GetDlgItem(window, recordID));
+            IsWindowEnabled(GetDlgItem(window, recordID)) && !IsWindowEnabled(GetDlgItem(window, modeID)) &&
+            !IsWindowEnabled(GetDlgItem(window, modelID)) && observed.model == 1;
         jsti_window_update(nullptr, nullptr, 0);
         applyUpdate(window);
         if (!cancellation) { failure = "Busy transcription could not be cancelled from the native control."; return false; }
+        state.modelModes.assign(state.modelNames.size(), 0);
+        state.preferredModels[0] = 2;
+        state.preferredModels[1] = -1;
+        state.activeMode = 0;
+        if (!populateModels(window) || !checkBounds() || IsWindowVisible(GetDlgItem(window, modeID)) ||
+            IsWindowEnabled(GetDlgItem(window, modeID)) || !IsWindowEnabled(GetDlgItem(window, importID)) ||
+            selection(window) != 2 || SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 4) {
+            if (failure.empty()) failure = "The all-batch model catalogue lost legacy behaviour.";
+            return false;
+        }
         return jsti_settings_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }
     catch (const std::exception &) { failure = "Window smoke test could not allocate its temporary state."; }
+    state.modelNames = originalModelNames;
+    state.modelModes = originalModelModes;
+    state.preferredModels[0] = originalPreferredModels[0];
+    state.preferredModels[1] = originalPreferredModels[1];
+    state.activeMode = originalMode;
+    if (!populateModels(window)) { passed = false; failure = "The model catalogue could not be restored after its smoke test."; }
     state.callback = originalCallback;
     state.context = originalContext;
     {

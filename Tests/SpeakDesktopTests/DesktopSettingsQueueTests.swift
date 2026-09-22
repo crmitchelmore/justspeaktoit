@@ -4,7 +4,8 @@ import XCTest
 
 final class DesktopSettingsQueueTests: XCTestCase {
     /// Apply A, Record, Apply B in UI order, with Record's own task scheduled
-    /// only after B has been applied: the read still holds A.
+    /// only after B has been applied: the read still holds A, and the queue
+    /// drains while that consumer is still held.
     func testReadBetweenChanges_keepsItsPlaceWhenItsConsumerRunsAfterALaterChange() async {
         let queue = DesktopSettingsQueue()
         let settings = SettingsProbe()
@@ -49,19 +50,26 @@ final class DesktopSettingsQueueTests: XCTestCase {
     func testReadAfterSlowChange_waitsForIt() async {
         let queue = DesktopSettingsQueue()
         let settings = SettingsProbe()
+        let savingEntered = SettingsGate()
         let saving = SettingsGate()
         queue.submit {
+            await savingEntered.open()
             await saving.wait()
             await settings.apply("A")
         }
-        let snapshot = queue.read { await settings.value }
-        let early = Task { await snapshot.value }
-        try? await Task.sleep(for: .milliseconds(50))
-        let applied = await settings.history
-        XCTAssertEqual(applied, [])
+        let snapshot = queue.read { () -> String in
+            await settings.note("read")
+            return await settings.value
+        }
+        // Apply A is held mid-save; the read is queued behind it.
+        await savingEntered.wait()
+        let whileSaving = await settings.history
+        XCTAssertEqual(whileSaving, [])
         await saving.open()
-        let value = await early.value
+        let value = await snapshot.value
         XCTAssertEqual(value, "A")
+        let history = await settings.history
+        XCTAssertEqual(history, ["A", "read"])
     }
 
     /// A later change waits for an earlier read to finish, and never for work
@@ -69,10 +77,12 @@ final class DesktopSettingsQueueTests: XCTestCase {
     func testLaterChange_waitsOnlyForTheReadItself() async {
         let queue = DesktopSettingsQueue()
         let settings = SettingsProbe()
+        let readEntered = SettingsGate()
         let reading = SettingsGate()
         let consumer = SettingsGate()
         queue.submit { await settings.apply("A") }
         let snapshot = queue.read { () -> String in
+            await readEntered.open()
             await reading.wait()
             return await settings.value
         }
@@ -82,13 +92,15 @@ final class DesktopSettingsQueueTests: XCTestCase {
             return value
         }
         queue.submit { await settings.apply("B") }
-        try? await Task.sleep(for: .milliseconds(50))
-        let heldByRead = await settings.value
-        XCTAssertEqual(heldByRead, "A")
+        // The read has started, so A has finished; B is queued behind the held read.
+        await readEntered.wait()
+        let whileReading = await settings.history
+        XCTAssertEqual(whileReading, ["A"])
         await reading.open()
+        // The consumer still holds its value, yet the queue drains.
         await queue.drain()
-        let afterRead = await settings.value
-        XCTAssertEqual(afterRead, "B", "A consumer still holding its value must not block later settings")
+        let afterRead = await settings.history
+        XCTAssertEqual(afterRead, ["A", "B"], "A consumer still holding its value must not block later settings")
         await consumer.open()
         let recorded = await recording.value
         XCTAssertEqual(recorded, "A")
@@ -97,15 +109,18 @@ final class DesktopSettingsQueueTests: XCTestCase {
     func testSubmissions_runOneAtATimeInOrder() async {
         let queue = DesktopSettingsQueue()
         let settings = SettingsProbe()
+        let firstEntered = SettingsGate()
         let first = SettingsGate()
         queue.submit {
+            await firstEntered.open()
             await first.wait()
             await settings.apply("first")
         }
         queue.submit { await settings.apply("second") }
-        try? await Task.sleep(for: .milliseconds(50))
-        let early = await settings.history
-        XCTAssertEqual(early, [])
+        // The first submission is running and held; the second must not start.
+        await firstEntered.wait()
+        let whileFirstRuns = await settings.history
+        XCTAssertEqual(whileFirstRuns, [])
         await first.open()
         await queue.drain()
         let history = await settings.history
@@ -121,9 +136,12 @@ private actor SettingsProbe {
         self.value = value
         history.append(value)
     }
+
+    func note(_ event: String) { history.append(event) }
 }
 
-/// Holds callers until opened, like a scheduler delaying their tasks.
+/// Holds callers until opened, like a scheduler delaying their tasks. Opening
+/// one also serves as a signal that a held operation has been reached.
 private actor SettingsGate {
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []

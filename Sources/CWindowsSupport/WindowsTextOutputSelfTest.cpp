@@ -417,11 +417,19 @@ int supportsTextPattern(HWND control) {
     int supported = -1;
     {
         jsti::COM<IUIAutomation> automation;
+        jsti::COM<IUIAutomation2> modern;
         jsti::COM<IUIAutomationElement> element;
         jsti::COM<IUnknown> pattern;
-        if (SUCCEEDED(CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation,
-                                       reinterpret_cast<void **>(&automation.value))) && automation.value &&
-            SUCCEEDED(automation->ElementFromHandle(control, &element.value)) && element.value) {
+        // Match the production worker's client/proxy generation. A legacy
+        // CUIAutomation capability probe cannot constrain CUIAutomation8.
+        if (SUCCEEDED(CoCreateInstance(CLSID_CUIAutomation8, nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation2,
+                                       reinterpret_cast<void **>(&modern.value))) && modern.value) {
+            modern.value->QueryInterface(IID_IUIAutomation, reinterpret_cast<void **>(&automation.value));
+        } else {
+            CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation,
+                             reinterpret_cast<void **>(&automation.value));
+        }
+        if (automation.value && SUCCEEDED(automation->ElementFromHandle(control, &element.value)) && element.value) {
             supported = SUCCEEDED(element->GetCurrentPattern(UIA_TextPatternId, &pattern.value)) && pattern.value ? 1 : 0;
         }
     }
@@ -657,12 +665,18 @@ std::string checkAutomationPaths(Fixture &state) {
     if (!capture(target, error)) return describe("uia selection", "capture failed", error.c_str());
     const int textPattern = supportsTextPattern(host.edit);
     attempt = insert(target, "new");
-    if (attempt.status != 0 || textOf(host.edit) != L"new" ||
+    const bool replacementMatches = textOf(host.edit) == L"new";
+    const bool clipboardMatches = state.clipboard.unicodeText() == L"previous text";
+    if (attempt.status != 0 || !replacementMatches ||
         (attempt.result.method != JSTI_INSERTION_METHOD_UIA_VALUE && attempt.result.method != JSTI_INSERTION_METHOD_PASTE) ||
         (attempt.result.method == JSTI_INSERTION_METHOD_UIA_VALUE && textPattern == 0) ||
         (attempt.result.method == JSTI_INSERTION_METHOD_PASTE && attempt.result.clipboard != JSTI_INSERTION_CLIPBOARD_RESTORED) ||
-        state.clipboard.unicodeText() != L"previous text") {
-        return describe("uia selection", "replacing a full selection did not keep insertion semantics", attempt.error);
+        !clipboardMatches) {
+        const std::string detail = std::string(attempt.error) + " status=" + std::to_string(attempt.status) +
+            " method=" + std::to_string(attempt.result.method) + " verified=" + std::to_string(attempt.result.verified) +
+            " textPattern=" + std::to_string(textPattern) + " clipboard=" + std::to_string(attempt.result.clipboard) +
+            " replacementMatches=" + std::to_string(replacementMatches) + " clipboardMatches=" + std::to_string(clipboardMatches);
+        return describe("uia selection", "replacing a full selection did not keep insertion semantics", detail.c_str());
     }
     state.pasteCalls = 0;
 

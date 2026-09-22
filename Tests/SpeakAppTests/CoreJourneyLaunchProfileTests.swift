@@ -52,6 +52,8 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         XCTAssertEqual(options.keychainServiceOverride, profile.suiteName)
         XCTAssertEqual(options.credentialStorage.legacyServices, [])
         XCTAssertFalse(options.startsCredentialKeySync(on: .appStore))
+        XCTAssertTrue(options.fileManager === profile.fileManager)
+        XCTAssertTrue(options.defaults === profile.defaults)
         XCTAssertFalse(options.sweepsStagedLeftovers)
         XCTAssertEqual(options.permissionsOverride?.status(for: .microphone), .denied)
         XCTAssertEqual(options.permissionsOverride?.status(for: .inputMonitoring), .denied)

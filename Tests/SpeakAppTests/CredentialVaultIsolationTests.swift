@@ -12,8 +12,8 @@ import XCTest
 /// `SecureStorage` only queries its configured service and legacy services, so
 /// checking those names proves isolation without touching the Keychain. Tests
 /// that load a vault refuse one naming a production service, use UUID-suffixed
-/// synthetic services and remove their items. None bootstraps WireUp, which
-/// also opens the developer's history files.
+/// synthetic services and remove their items. Settings and permissions come
+/// from an owned WireUp test host.
 final class CredentialVaultIsolationTests: XCTestCase {
     private let productionServices = Set(
         ["com.github.speakapp.credentials", "com.justspeaktoit.credentials"].map(ReleaseTrain.current.namespace)
@@ -50,8 +50,9 @@ final class CredentialVaultIsolationTests: XCTestCase {
 
     @MainActor
     func testNamedTestVault_hasNoPredecessor() throws {
-        let settings = AppSettings(defaults: try makeIsolatedDefaults())
-        let permissions = PermissionsManager(statusProvider: { _ in .denied })
+        let host = try makeWireUpTestHost()
+        let settings = host.makeSettings()
+        let permissions = host.makePermissions()
         let named = SecureAppStorage(
             permissionsManager: permissions, appSettings: settings,
             keychainService: "com.justspeaktoit.tests.named.\(UUID().uuidString)"
@@ -71,9 +72,10 @@ final class CredentialVaultIsolationTests: XCTestCase {
     func testOverriddenBootstrapVault_preloadsOnlyItsSyntheticService() async throws {
         let service = "com.justspeaktoit.tests.bootstrap.\(UUID().uuidString.prefix(8))"
         let options = WireUp.BootstrapOptions(keychainServiceOverride: service)
-        let settings = AppSettings(defaults: try makeIsolatedDefaults())
+        let host = try makeWireUpTestHost()
+        let settings = host.makeSettings()
         let vault = WireUp.buildSecureStorage(
-            options: options, settings: settings, permissions: PermissionsManager(statusProvider: { _ in .denied })
+            options: options, settings: settings, permissions: host.makePermissions()
         )
         XCTAssertEqual(vault.configuration.service, options.credentialStorage.service)
         XCTAssertEqual(vault.configuration.legacyServices, options.credentialStorage.legacyServices)
@@ -109,9 +111,10 @@ final class CredentialVaultIsolationTests: XCTestCase {
         try await SecureStorage(configuration: SecureStorageConfiguration(service: legacyService))
             .storeSecret("synthetic-legacy-key", identifier: "synthetic.apiKey")
 
-        let settings = AppSettings(defaults: try makeIsolatedDefaults())
+        let host = try makeWireUpTestHost()
+        let settings = host.makeSettings()
         let vault = SecureAppStorage(
-            permissionsManager: PermissionsManager(statusProvider: { _ in .denied }), appSettings: settings,
+            permissionsManager: host.makePermissions(), appSettings: settings,
             configuration: SecureAppStorage.vaultConfiguration(service: vaultService, legacyServices: [legacyService])
         )
         let loaded = await vault.preloadTrackedSecrets()
@@ -132,13 +135,6 @@ final class CredentialVaultIsolationTests: XCTestCase {
         deleteSyntheticVaultItems(services: [legacyService, vaultService])
         XCTAssertFalse(syntheticItemExists(service: legacyService), "The test must leave no Keychain item behind")
         XCTAssertFalse(syntheticItemExists(service: vaultService), "The test must leave no Keychain item behind")
-    }
-
-    private func makeIsolatedDefaults() throws -> UserDefaults {
-        let suite = "CredentialVaultIsolationTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite), "Never fall back to the real preferences")
-        addTeardownBlock { UserDefaults.standard.removePersistentDomain(forName: suite) }
-        return defaults
     }
 }
 

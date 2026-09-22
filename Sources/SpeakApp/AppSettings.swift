@@ -722,17 +722,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   /// Registers or unregisters the app as a login item based on the current `runAtLogin` setting.
   private func updateLoginItemRegistration() {
-    let service = SMAppService.mainApp
     do {
-      if runAtLogin {
-        if service.status != .enabled {
-          try service.register()
-        }
-      } else {
-        if service.status == .enabled {
-          try service.unregister()
-        }
-      }
+      try system.registerLoginItem(runAtLogin)
     } catch {
       log.error("Failed to update login item: \(error.localizedDescription, privacy: .public)")
     }
@@ -1084,15 +1075,44 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   var migrationDefaults: UserDefaults { defaults }
   private let defaults: UserDefaults
+  private let system: SystemDependencies
   private let log = SpeakLogger.logger(category: "AppSettings")
+
+  /// What applying these settings reaches outside `defaults`: the folder that
+  /// holds the default Recordings directory, the app's Dock presence and its
+  /// login item. The app uses `.live`; test settings pass their own, so
+  /// constructing them never creates folders in the user's Application
+  /// Support, changes the test runner's activation policy or queries login items.
+  struct SystemDependencies {
+    var fileManager: FileManager
+    var setActivationPolicy: @MainActor (NSApplication.ActivationPolicy) -> Void
+    var registerLoginItem: @MainActor (_ enabled: Bool) throws -> Void
+
+    static let live = SystemDependencies(
+      fileManager: .default,
+      setActivationPolicy: { NSApplication.shared.setActivationPolicy($0) },
+      registerLoginItem: { enabled in
+        let service = SMAppService.mainApp
+        if enabled {
+          if service.status != .enabled {
+            try service.register()
+          }
+        } else if service.status == .enabled {
+          try service.unregister()
+        }
+      }
+    )
+  }
 
   /// When true, `store` skips writing to `UserDefaults` while the published
   /// in-memory values still update. Used by `SessionProfileApplier` so
   /// session-scoped dictation-profile overrides never touch persisted defaults.
   var suppressesPersistence = false
 
-  init(defaults: UserDefaults = .standard) { // swiftlint:disable:this function_body_length
+  // swiftlint:disable:next function_body_length
+  init(defaults: UserDefaults = .standard, system: SystemDependencies = .live) {
     self.defaults = defaults
+    self.system = system
 
     appearance =
       Appearance(
@@ -1244,7 +1264,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.compactStatusBarIcon.rawValue) as? Bool ?? false
     runAtLogin = defaults.object(forKey: DefaultsKey.runAtLogin.rawValue) as? Bool ?? false
 
-    let defaultDirectory = Self.defaultRecordingsDirectory()
+    let defaultDirectory = Self.defaultRecordingsDirectory(fileManager: system.fileManager)
     if let storedPath = defaults.string(forKey: DefaultsKey.recordingsDirectory.rawValue),
       !storedPath.isEmpty {
       recordingsDirectory = URL(fileURLWithPath: storedPath, isDirectory: true)
@@ -1542,7 +1562,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   /// Applies the current app visibility setting to show/hide dock icon
   func applyAppVisibility() {
     let policy: NSApplication.ActivationPolicy = appVisibility.showInDock ? .regular : .accessory
-    NSApplication.shared.setActivationPolicy(policy)
+    system.setActivationPolicy(policy)
   }
 
   private static func mergedTranscriptionKeywords(
@@ -1588,20 +1608,20 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
   }
 
   private func ensureRecordingsDirectoryExists() {
-    let fileManager = FileManager.default
+    let fileManager = system.fileManager
     if !fileManager.fileExists(atPath: recordingsDirectory.path) {
       try? fileManager.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true)
     }
   }
 
-  private static func defaultRecordingsDirectory() -> URL {
+  private static func defaultRecordingsDirectory(fileManager: FileManager) -> URL {
     let base =
-      FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-      ?? FileManager.default.homeDirectoryForCurrentUser
+      fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+      ?? fileManager.homeDirectoryForCurrentUser
     let appFolder = base.appendingPathComponent(ReleaseTrain.current.supportDirectory, isDirectory: true)
     let recordings = appFolder.appendingPathComponent("Recordings", isDirectory: true)
-    if !FileManager.default.fileExists(atPath: recordings.path) {
-      try? FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)
+    if !fileManager.fileExists(atPath: recordings.path) {
+      try? fileManager.createDirectory(at: recordings, withIntermediateDirectories: true)
     }
     return recordings
   }

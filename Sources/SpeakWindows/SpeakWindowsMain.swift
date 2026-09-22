@@ -81,7 +81,10 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         let pendingSettings = holder.currentSettingsTask
         Task {
             await pendingSettings?.value
-            await controller.toggle(target: captured, modelIndex: Int(index), deviceID: value)
+            await controller.toggle(
+                target: captured, modelIndex: Int(index), deviceID: value,
+                targetExecutablePath: captured?.executablePath
+            )
         }
     case 2:
         let pendingSettings = holder.currentSettingsTask

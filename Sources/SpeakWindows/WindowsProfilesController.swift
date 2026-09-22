@@ -28,6 +28,12 @@ extension WindowsAppController {
         return status
     }
 
+    func profileContext(_ record: DesktopRecordingStore.Record) -> String {
+        var details = record.profileName.map { " App profile: \($0)." } ?? ""
+        for note in record.profileNotes ?? [] { details += " " + note }
+        return details
+    }
+
     static func loadProfiles(
         from store: DesktopDictationProfileStore
     ) throws -> (profiles: [DictationProfile], warning: String?) {
@@ -52,7 +58,7 @@ extension WindowsAppController {
 
     var profileCapabilities: DesktopProfileCapabilities {
         DesktopProfileCapabilities(
-            batchModels: WindowsModels.all.filter { !WindowsModels.isLive($0.id) },
+            batchModels: WindowsModels.visible.filter { !WindowsModels.isLive($0.id) },
             liveModels: WindowsModels.live, polishModels: DesktopPostProcessing.remoteModels
         )
     }

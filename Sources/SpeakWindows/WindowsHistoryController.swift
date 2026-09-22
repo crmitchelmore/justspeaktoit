@@ -45,7 +45,7 @@ extension WindowsAppController {
             ?? (record.hasTranscriptVariants
                 ? "Saved transcript. Transcript version switches between the processed and original text."
                 : "Saved transcript. Retry uses this recording’s original model.")
-        update(status, transcript: transcript)
+        update(status + profileContext(record), transcript: transcript)
         showTranscriptVariant(.processed, for: record)
     }
 

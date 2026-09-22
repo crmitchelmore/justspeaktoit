@@ -5,7 +5,9 @@ import SpeakWindowsPlatform
 import CWindowsSupport
 
 extension WindowsAppController {
-    func startRecording(target: WindowsInsertionTarget?, deviceID: String, profile: DesktopProfileSession) async throws {
+    func startRecording(
+        target: WindowsInsertionTarget?, deviceID: String, profile: DesktopProfileSession
+    ) async throws {
         let key = try WindowsNative.apiKey(name: credentialIdentifier(for: profile.modelIdentifier))
         guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
         let id = UUID()

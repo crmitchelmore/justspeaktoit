@@ -81,7 +81,7 @@ extension WindowsAppController {
             // An active search keeps its rows; the result is still shown here.
             status += " This recording is hidden by the current History search."
         }
-        update(status, transcript: transcript, state: 0)
+        update(status + profileContext(record), transcript: transcript, state: 0)
     }
 
     func cancelTranscription() {

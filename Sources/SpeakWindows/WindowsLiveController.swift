@@ -32,7 +32,9 @@ extension WindowsAppController {
                 guard revision != snapshot.revision else { continue }
                 revision = snapshot.revision
                 transcript = snapshot.text
-                update("Live transcription… Ctrl+Alt+Space to finish.", transcript: snapshot.text, state: 1)
+                let status = "Live transcription… Ctrl+Alt+Space to finish."
+                    + (recording.map { profileContext($0.record) } ?? "")
+                update(status, transcript: snapshot.text, state: 1)
             }
         }
     }

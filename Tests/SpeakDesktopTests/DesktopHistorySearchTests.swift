@@ -96,6 +96,21 @@ final class DesktopHistorySearchTests: XCTestCase {
         XCTAssertFalse(DesktopHistorySearch.matches(query: "x", searchText: ""))
     }
 
+    func testFilter_MatchesTheCapturedProfileNameAfterProfileChanges() throws {
+        var record = try makeRecord(original: "Draft text", processed: nil, model: "test")
+        record.profileName = "Café notes"
+        record.profileNotes = ["A profile override was unavailable."]
+        let restored = try JSONDecoder().decode(
+            DesktopRecordingStore.Record.self, from: JSONEncoder().encode(record)
+        )
+        XCTAssertEqual(DesktopHistorySearch.filter([restored], query: "CAFE").map(\.id), [record.id])
+        XCTAssertEqual(restored.profileNotes, record.profileNotes)
+        XCTAssertEqual(restored.originalText, record.originalText)
+        XCTAssertTrue(DesktopHistorySearch.filter([restored], query: "unavailable").isEmpty)
+        record.profileName = nil
+        XCTAssertTrue(DesktopHistorySearch.filter([record], query: "CAFE").isEmpty)
+    }
+
     func testFilter_PreservesIdentifiersAndDeterministicNewestFirstOrder() throws {
         let newest = try makeRecord(
             original: "match one", processed: nil, model: "test", createdAt: base.addingTimeInterval(10)

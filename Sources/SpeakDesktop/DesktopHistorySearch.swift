@@ -3,7 +3,7 @@ import SpeakCore
 
 /// Shared History search policy for desktop hosts. A query matches a record
 /// when its folded text appears in the original transcript, the processed
-/// transcript or the canonical friendly model name. The policy only decides
+/// transcript, app profile name or the canonical friendly model name. The policy only decides
 /// which records are visible and in what order; it never alters a record, its
 /// identifier or its transcript contents.
 public enum DesktopHistorySearch {
@@ -42,7 +42,7 @@ public enum DesktopHistorySearch {
     /// Folded text a host can cache per record and reuse for every keystroke.
     /// Field boundaries are separated so a query cannot span two fields.
     public static func searchText(for record: DesktopRecordingStore.Record) -> String {
-        [record.originalText, record.processedText, modelDisplayName(for: record.modelIdentifier)]
+        [record.originalText, record.processedText, record.profileName, modelDisplayName(for: record.modelIdentifier)]
             .compactMap { $0 }
             .map(fold)
             .joined(separator: "\u{1F}")

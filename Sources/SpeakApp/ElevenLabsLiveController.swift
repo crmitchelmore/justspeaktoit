@@ -32,6 +32,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   private var finalSegments: [TranscriptionSegment] = []
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
+  private var finalizedText: String?
 
   init(
     appSettings: AppSettings,
@@ -176,10 +177,11 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     if let snapshot {
       // This is the full session text, including a retained draft on failure.
       // Replace once; appending it would duplicate earlier streamed segments.
-      fullTranscript = snapshot.text
+      fullTranscript = snapshot.confirmedText
+      finalizedText = snapshot.text
       currentInterim = ""
-      finalSegments = snapshot.text.isEmpty ? [] : [
-        TranscriptionSegment(startTime: 0, endTime: 0, text: snapshot.text)
+      finalSegments = snapshot.confirmedText.isEmpty ? [] : [
+        TranscriptionSegment(startTime: 0, endTime: 0, text: snapshot.confirmedText)
       ]
       delegate?.liveTranscriber(self, didUpdatePartial: snapshot.text)
     }
@@ -390,6 +392,7 @@ private extension ElevenLabsLiveController {
     finalSegments = []
     currentInterim = ""
     fullTranscript = ""
+    finalizedText = nil
     streamingStartTime = nil
     hasFinished = false
     isRunning = false
@@ -407,6 +410,7 @@ private extension ElevenLabsLiveController {
     currentInterim = ""
     finalSegments = []
     fullTranscript = ""
+    finalizedText = nil
     await endActiveInputSession()
   }
 
@@ -426,7 +430,7 @@ private extension ElevenLabsLiveController {
     }
 
     return TranscriptionResult(
-      text: text,
+      text: finalizedText ?? text,
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,

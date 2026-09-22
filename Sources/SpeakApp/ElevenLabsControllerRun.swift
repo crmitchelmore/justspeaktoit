@@ -6,12 +6,14 @@ import SpeakCore
 final class ElevenLabsControllerRun: @unchecked Sendable {
     struct Snapshot {
         let text: String
+        let confirmedText: String
         let error: Error?
     }
 
     private let lock = NSLock()
     private var committed = TranscriptAccumulator(shape: .standaloneSegments)
     private var interim = ""
+    private var retainedDisplay: String?
     private var failure: Error?
     private var failureReported = false
     private var closed = false
@@ -19,7 +21,10 @@ final class ElevenLabsControllerRun: @unchecked Sendable {
     var snapshot: Snapshot { lock.withLock { value } }
 
     private var value: Snapshot {
-        Snapshot(text: committed.display(withInterim: interim), error: failure)
+        Snapshot(
+            text: retainedDisplay ?? committed.display(withInterim: interim),
+            confirmedText: committed.text, error: failure
+        )
     }
 
     func record(text: String, final: Bool) -> Bool {
@@ -45,14 +50,17 @@ final class ElevenLabsControllerRun: @unchecked Sendable {
 
     func finish(whole: String?) -> Snapshot {
         lock.withLock {
+            let visible = value.text
             if let whole = whole?.trimmingCharacters(in: .whitespacesAndNewlines), !whole.isEmpty {
-                // A failed shared finish can return only previously confirmed
-                // words. Keep the newer draft instead of discarding it then.
-                if failure == nil || whole != committed.text {
-                    committed.replace(with: whole)
+                committed.replace(with: whole)
+                if failure == nil {
                     interim = ""
                 }
             }
+            // Failure/cancellation can return a confirmed prefix or a revised
+            // confirmed segment. Retain the visible draft separately, without
+            // mislabelling it as confirmed or dropping it on a nonempty return.
+            if failure != nil { retainedDisplay = visible.isEmpty ? committed.text : visible }
             closed = true
             return value
         }
@@ -66,5 +74,10 @@ final class ElevenLabsControllerRun: @unchecked Sendable {
         }
     }
 
-    func close() { lock.withLock { closed = true } }
+    func cancel() {
+        lock.withLock {
+            if !closed, failure == nil { failure = CancellationError() }
+            closed = true
+        }
+    }
 }

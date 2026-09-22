@@ -67,6 +67,7 @@ final class ElevenLabsLiveAdapterTests: XCTestCase {
         let result = await adapter.finishAndWait()
         XCTAssertTrue(result.error is AdapterFailure)
         XCTAssertEqual(result.text, "Confirmed. draft", "Failure must not drop a newer draft")
+        XCTAssertEqual(result.confirmedText, "Confirmed.")
         XCTAssertEqual(queuedErrors.count, 1)
         XCTAssertTrue(adapter.takeFailureForReporting() is AdapterFailure)
         XCTAssertNil(adapter.takeFailureForReporting(), "Stop and queued UI delivery report one error")
@@ -101,6 +102,64 @@ final class ElevenLabsLiveAdapterTests: XCTestCase {
         XCTAssertEqual(result.text, "Current.")
         XCTAssertEqual(adapter.snapshot.text, "Current.")
         XCTAssertEqual(delivered, ["Old.", "Current."])
+        XCTAssertNil(result.error)
+    }
+
+    func testFailedFinishKeepsVisibleDraftAndLateRevisedConfirmedTextSeparately() async {
+        let client = ElevenLabsAdapterClient()
+        let adapter = ElevenLabsLiveTranscriber(client: client)
+        adapter.start(onTranscript: { _, _ in }, onError: { _ in })
+        client.callbacks[0].transcript("hello", true)
+        client.callbacks[0].transcript("trailing words", false)
+        client.finishResult = "Hello."
+        client.onFinish = { client.callbacks[0].error(AdapterFailure()) }
+        let result = await adapter.finishAndWait()
+        XCTAssertEqual(result.text, "hello trailing words")
+        XCTAssertEqual(result.confirmedText, "Hello.")
+        XCTAssertTrue(result.error is AdapterFailure)
+    }
+
+    func testExplicitCancellationKeepsDraftWhenTheClientReturnsConfirmedText() async {
+        let client = ElevenLabsAdapterClient()
+        let adapter = ElevenLabsLiveTranscriber(client: client)
+        adapter.start(onTranscript: { _, _ in }, onError: { _ in })
+        client.callbacks[0].transcript("Hello", true)
+        client.callbacks[0].transcript("trailing words", false)
+        client.finishResult = "Hello."
+        client.onFinish = { adapter.stop() }
+        let result = await adapter.finishAndWait()
+        XCTAssertEqual(result.text, "Hello trailing words")
+        XCTAssertEqual(result.confirmedText, "Hello.")
+        XCTAssertTrue(result.error is CancellationError)
+    }
+
+    func testTaskCancellationWithoutAnErrorCallbackKeepsTheVisibleDraft() async {
+        let client = ElevenLabsAdapterClient()
+        let adapter = ElevenLabsLiveTranscriber(client: client)
+        adapter.start(onTranscript: { _, _ in }, onError: { _ in })
+        client.callbacks[0].transcript("Hello", true)
+        client.callbacks[0].transcript("trailing words", false)
+        client.finishResult = "Hello"
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await adapter.finishAndWait()
+        }
+        let result = await task.value
+        XCTAssertEqual(result.text, "Hello trailing words")
+        XCTAssertEqual(result.confirmedText, "Hello")
+        XCTAssertTrue(result.error is CancellationError)
+    }
+
+    func testHealthyFinalPunctuationRevisionIsAuthoritative() async {
+        let client = ElevenLabsAdapterClient()
+        let adapter = ElevenLabsLiveTranscriber(client: client)
+        adapter.start(onTranscript: { _, _ in }, onError: { _ in })
+        client.callbacks[0].transcript("hello", true)
+        client.callbacks[0].transcript("stale guess", false)
+        client.finishResult = "Hello!"
+        let result = await adapter.finishAndWait()
+        XCTAssertEqual(result.text, "Hello!")
+        XCTAssertEqual(result.confirmedText, "Hello!")
         XCTAssertNil(result.error)
     }
 

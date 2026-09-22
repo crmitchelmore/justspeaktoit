@@ -64,7 +64,7 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
 
     func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         let active = ElevenLabsControllerRun()
-        lock.withLock { run.close(); run = active }
+        lock.withLock { run.cancel(); run = active }
         client.start(onTranscript: { text, final in
             guard active.record(text: text, final: final) else { return }
             onTranscript(text, final)
@@ -79,13 +79,14 @@ final class ElevenLabsLiveTranscriber: @unchecked Sendable {
     func finishAndWait() async -> ElevenLabsControllerRun.Snapshot {
         let active = lock.withLock { run }
         let whole = await client.finishAndWait()
+        if Task.isCancelled { active.cancel() }
         return active.finish(whole: whole)
     }
 
     func takeFailureForReporting() -> Error? { lock.withLock { run }.takeFailureForReporting() }
 
     func stop() {
-        lock.withLock { run }.close()
+        lock.withLock { run }.cancel()
         client.stop()
     }
 }

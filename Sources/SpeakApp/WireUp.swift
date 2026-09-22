@@ -498,6 +498,9 @@ enum WireUp {
   struct BootstrapOptions {
     var settingsOverride: AppSettings?
     var permissionsOverride: PermissionsManager?
+    /// Opens an isolated credential vault under this service instead of the
+    /// user's. It has no legacy predecessor and never joins API-key sync, so a
+    /// test or launch profile cannot read, copy or sync the user's keys.
     var keychainServiceOverride: String?
     /// Whether to clear the files a pre-warmed recorder staged in an earlier
     /// run. Only the real app does this: a test bootstrap resolves the user's
@@ -505,6 +508,19 @@ enum WireUp {
     var sweepsStagedLeftovers = true
 
     static let `default` = BootstrapOptions()
+
+    /// The credential vault this bootstrap opens.
+    var credentialStorage: SecureStorageConfiguration {
+      keychainServiceOverride.map(SecureAppStorage.isolatedConfiguration(service:))
+        ?? SecureAppStorage.productionConfiguration
+    }
+
+    /// Whether this bootstrap starts encrypted API-key sync on `channel`. Only
+    /// the user's own vault may: the shared sync pairs it with this Mac's sync
+    /// state and the user's private CloudKit database.
+    func startsCredentialKeySync(on channel: DistributionChannel) -> Bool {
+      keychainServiceOverride == nil && channel.supportsEncryptedCloudKitKeySync
+    }
   }
 
   // swiftlint:disable:next function_body_length
@@ -537,12 +553,7 @@ enum WireUp {
     if options.sweepsStagedLeftovers {
       AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
     }
-    let secureStorage = SecureAppStorage(
-      permissionsManager: permissions,
-      appSettings: settings,
-      keychainService: options.keychainServiceOverride
-        ?? "com.github.speakapp.credentials"
-    )
+    let secureStorage = buildSecureStorage(options: options, settings: settings, permissions: permissions)
     #if DEBUG
     let openRouter = profile?.runsBatchJourney == true
       ? CoreJourneyBatchFixture.makeClient() : OpenRouterAPIClient(secureStorage: secureStorage)
@@ -628,7 +639,12 @@ enum WireUp {
       hudPresenter: hudPresenter
     )
 
-    configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
+    configureServices(
+      environment: environment,
+      settings: settings,
+      secureStorage: secureStorage,
+      startsCredentialKeySync: options.startsCredentialKeySync(on: .current)
+    )
     AppEnvironment.shared = environment
     return environment
   }
@@ -645,7 +661,8 @@ enum WireUp {
   private static func configureServices(
     environment: AppEnvironment,
     settings: AppSettings,
-    secureStorage: SecureAppStorage
+    secureStorage: SecureAppStorage,
+    startsCredentialKeySync: Bool
   ) {
     #if DEBUG
     // Construct production managers and UI, but never preload credentials,
@@ -723,7 +740,7 @@ enum WireUp {
     }
 
     Task { await secureStorage.preloadTrackedSecrets() }
-    if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
+    if startsCredentialKeySync {
       Task {
         let coreStorage = await secureStorage.coreStorage()
         let keySync = CloudKitKeySync.shared
@@ -795,6 +812,21 @@ enum WireUp {
       distributionChannel: distributionChannel,
       localeLanguageCode: localeCode,
       architecture: arch
+    )
+  }
+
+  // MARK: - Credential Vault Factory
+
+  /// Opens the credential vault a bootstrap with `options` uses.
+  static func buildSecureStorage(
+    options: BootstrapOptions,
+    settings: AppSettings,
+    permissions: PermissionsManager
+  ) -> SecureAppStorage {
+    SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      configuration: options.credentialStorage
     )
   }
 

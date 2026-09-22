@@ -16,7 +16,7 @@ extension WindowsAppController {
         liveUpdates?.cancel()
         selectedHistoryID = session.snapshot().id
         transcriptVariant = .processed
-        refreshHistory()
+        refreshHistory(selectRecord: true)
         transcript = ""
         if let id = selectedHistoryID, let record = history[id] { showTranscriptVariant(.processed, for: record) }
         liveUpdates = Task {

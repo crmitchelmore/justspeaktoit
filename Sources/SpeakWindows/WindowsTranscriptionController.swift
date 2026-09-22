@@ -64,7 +64,7 @@ extension WindowsAppController {
     func present(_ record: DesktopRecordingStore.Record, target: WindowsInsertionTarget?) {
         selectedHistoryID = record.id
         transcriptVariant = .processed
-        refreshHistory()
+        refreshHistory(selectRecord: true)
         transcript = record.displayText ?? ""
         var status = record.failure ?? "Saved to History. Select Copy to use the transcript."
         if let failure = record.postProcessingFailure {
@@ -76,12 +76,13 @@ extension WindowsAppController {
                 : "Saved. An earlier insertion is still finishing; select Copy."
         }
         if selectedHistoryID == record.id {
-            showTranscriptVariant(.processed, for: record)
+            WindowsNative.recordingState(0)
+            WindowsNative.historyPresentation(record, variant: .processed, status: status + profileContext(record))
         } else {
             // An active search keeps its rows; the result is still shown here.
             status += " This recording is hidden by the current History search."
+            update(status + profileContext(record), transcript: transcript, state: 0)
         }
-        update(status + profileContext(record), transcript: transcript, state: 0)
     }
 
     func cancelTranscription() {

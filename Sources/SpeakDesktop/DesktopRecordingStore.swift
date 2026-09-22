@@ -135,6 +135,12 @@ public actor DesktopRecordingStore {
     public func exportTranscript(id: UUID, variant: DesktopTranscriptVariant, to destination: URL) throws {
         let record = try record(id: id)
         guard let text = record.text(for: variant) else { throw CocoaError(.fileReadUnknown) }
+        try exportTranscriptSnapshot(text, to: destination)
+    }
+
+    /// Exports text captured from the visible transcript before an async action
+    /// or save dialog. Later retries cannot change the content the user chose.
+    public func exportTranscriptSnapshot(_ text: String, to destination: URL) throws {
         // A save dialog can accept a manually typed path. Never replace the
         // retained audio/metadata with its exported transcript.
         let root = directory.resolvingSymlinksInPath().standardizedFileURL

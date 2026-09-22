@@ -16,7 +16,7 @@ extension WindowsAppController {
         }
     }
 
-    func refreshHistory() {
+    func refreshHistory(selectRecord: Bool = false) {
         guard !closed else { return }
         let visible = visibleHistory()
         if let selected = selectedHistoryID, !visible.contains(where: { $0.id == selected }) {
@@ -26,7 +26,7 @@ extension WindowsAppController {
             transcript = ""
             transcriptVariant = .processed
             playback.stop()
-            WindowsNative.history(visible, selected: nil)
+            WindowsNative.history(visible, selected: nil, selectRecord: selectRecord)
             WindowsNative.transcriptVariant(nil, for: nil, switchable: false)
             update(
                 "The selected recording is hidden by this search. Clear the search or choose a matching recording.",
@@ -34,7 +34,18 @@ extension WindowsAppController {
             )
             return
         }
-        WindowsNative.history(visible, selected: selectedHistoryID)
+        WindowsNative.history(visible, selected: selectedHistoryID, selectRecord: selectRecord)
+    }
+
+    /// Startup renders the restored selection through the same record-bound
+    /// path as later selections, while an empty History can display global text.
+    func showSelectedHistory(status: String, state: Int32) {
+        if let id = selectedHistoryID, let record = history[id] {
+            WindowsNative.recordingState(state)
+            WindowsNative.historyPresentation(record, variant: transcriptVariant, status: status)
+        } else {
+            update(status, transcript: transcript, state: state)
+        }
     }
 
     func selectHistory(_ identifier: String) {
@@ -49,8 +60,8 @@ extension WindowsAppController {
             ?? (record.hasTranscriptVariants
                 ? "Saved transcript. Transcript version switches between the processed and original text."
                 : "Saved transcript. Retry uses this recording’s original model.")
-        update(status + profileContext(record), transcript: transcript)
-        showTranscriptVariant(.processed, for: record)
+        transcriptVariant = .processed
+        WindowsNative.historyPresentation(record, variant: .processed, status: status + profileContext(record))
     }
 
     /// A selection event for a record that a newer search has already hidden
@@ -83,9 +94,10 @@ extension WindowsAppController {
               let record = history[id], record.hasTranscriptVariants else { return }
         transcriptVariant = variant
         transcript = record.text(for: variant) ?? ""
-        update(variant == .original
+        let status = variant == .original
             ? "Showing the original transcript. Copy and Export use the version shown here."
-            : "Showing the processed transcript. Copy and Export use the version shown here.", transcript: transcript)
+            : "Showing the processed transcript. Copy and Export use the version shown here."
+        WindowsNative.historyPresentation(record, variant: variant, status: status)
     }
 
     func retryHistory(_ identifier: String) async {
@@ -102,15 +114,15 @@ extension WindowsAppController {
         await transcribe(record, duration: record.result?.duration ?? 0, target: nil)
     }
 
-    /// `variant` was captured with the record ID on the UI thread before the
-    /// save dialog opened, so the export matches what the window displayed.
-    func exportHistory(_ identifier: String, variant: DesktopTranscriptVariant = .processed, path: String) async {
-        guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
+    /// Text and version were captured on the UI thread before the save dialog.
+    /// A retry replacing the same record cannot change this action's content.
+    func exportHistory(text: String, variant: DesktopTranscriptVariant, path: String) async {
+        guard !closed else { return }
         activeOperations += 1
         defer { finishOperation() }
         do {
-            try await store.exportTranscript(id: id, variant: variant, to: URL(fileURLWithPath: path))
-            update(variant == .original && record.hasTranscriptVariants
+            try await store.exportTranscriptSnapshot(text, to: URL(fileURLWithPath: path))
+            update(variant == .original
                 ? "Original transcript exported." : "Transcript exported.")
         } catch { update("Could not export transcript: \(error.localizedDescription)") }
     }

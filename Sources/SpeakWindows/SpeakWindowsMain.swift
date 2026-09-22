@@ -3,12 +3,18 @@ import CWindowsSupport
 import SpeakDesktop
 import SpeakWindowsPlatform
 
+private enum WindowsHistoryEvent: Sendable {
+    case selection(String)
+    case version(String, DesktopTranscriptVariant)
+}
+
 final class WindowsEventContext {
     let controller: WindowsAppController
     let smokeTest: Bool
     var smokeTestFailure: Error?
     var microphoneMonitor: WindowsMicrophoneMonitor?
     let search: WindowsSearchCoalescer
+    private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
     private var settingsTask: Task<Void, Never>?
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
         guard let self else { return }
@@ -19,6 +25,18 @@ final class WindowsEventContext {
         self.controller = controller
         self.smokeTest = smokeTest
         self.search = WindowsSearchCoalescer { query in await controller.searchHistory(query) }
+        self.historyEvents = DesktopEventDispatcher { event in
+            switch event {
+            case .selection(let identifier): await controller.selectHistory(identifier)
+            case .version(let identifier, let variant):
+                await controller.selectTranscriptVariant(variant, identifier: identifier)
+            }
+        }
+    }
+
+    func selectHistory(_ identifier: String) { historyEvents.submit(.selection(identifier)) }
+    func selectHistoryVersion(_ variant: DesktopTranscriptVariant, identifier: String) {
+        historyEvents.submit(.version(identifier, variant))
     }
 
     // Called only by the native UI thread. Persist settings in UI event order,
@@ -123,12 +141,15 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
     switch event {
     case 3:
         let variant = WindowsNative.displayedTranscriptVariant()
-        Task { await controller.copyTranscript(identifier: value, variant: variant) }
+        do {
+            let text = try WindowsNative.displayedTranscript()
+            Task { await controller.copyTranscript(text, variant: variant) }
+        } catch { WindowsNative.update(error.localizedDescription) }
     case 6: holder.microphoneMonitor?.cancel()
     case 15: holder.search.submit(value)
     case 16:
         if let variant = WindowsNative.displayedTranscriptVariant() {
-            Task { await controller.selectTranscriptVariant(variant, identifier: value) }
+            holder.selectHistoryVersion(variant, identifier: value)
         }
     case 18: Task { await controller.playbackToggle(value) }
     case 19: Task { await controller.playbackStop() }
@@ -181,16 +202,17 @@ private func secondaryWindowEvent(_ event: Int32, value: String, holder: Windows
     let controller = holder.controller
     switch event {
     case 17: openProfiles(holder)
-    case 9: Task { await controller.selectHistory(value) }
+    case 9: holder.selectHistory(value)
     case 10: Task { await controller.retryHistory(value) }
     case 11:
         // The dialog runs on the UI thread. Capture the record ID and displayed
-        // version before opening it so a later selection or version change
-        // cannot export a different transcript.
+        // version and text before opening it. Its nested message loop may
+        // receive a replacement for the same record while the dialog is open.
         let variant = WindowsNative.displayedTranscriptVariant() ?? .processed
         do {
+            let text = try WindowsNative.displayedTranscript()
             if let path = try WindowsNative.chooseExportPath(identifier: value) {
-                Task { await controller.exportHistory(value, variant: variant, path: path) }
+                Task { await controller.exportHistory(text: text, variant: variant, path: path) }
             }
         } catch { WindowsNative.update(error.localizedDescription) }
     case 12: Task { await controller.openHistoryAudio(value) }

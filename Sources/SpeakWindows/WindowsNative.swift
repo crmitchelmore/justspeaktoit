@@ -61,7 +61,7 @@ enum WindowsNative {
         return String(cString: path)
     }
 
-    static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?) {
+    static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool = false) {
         var strings: [UnsafeMutablePointer<CChar>] = []
         defer { strings.forEach { $0.deallocate() } }
         func owned(_ value: String) -> UnsafePointer<CChar> {
@@ -85,9 +85,50 @@ enum WindowsNative {
             )
         }
         let result = rows.withUnsafeBufferPointer { rows in
-            (selected?.uuidString ?? "").withCString { jsti_window_set_history(rows.baseAddress, rows.count, $0) }
+            if selectRecord {
+                return (selected?.uuidString ?? "").withCString {
+                    jsti_window_set_history(rows.baseAddress, rows.count, $0)
+                }
+            }
+            return jsti_window_set_history(rows.baseAddress, rows.count, nil)
         }
         if result != 0 { update("The history list could not be refreshed. Saved recordings remain on disk.") }
+    }
+
+    static func historyPresentation(
+        _ record: DesktopRecordingStore.Record, variant: DesktopTranscriptVariant, status: String
+    ) {
+        let effectiveVariant: Int32 = record.hasTranscriptVariants && variant == .processed ? 0 : 1
+        let selected: Int32 = record.result == nil ? -1 : effectiveVariant
+        let result = record.id.uuidString.withCString { identifier in
+            (record.text(for: variant) ?? "").withCString { text in
+                status.withCString {
+                    jsti_window_set_history_presentation(
+                        identifier, selected, record.hasTranscriptVariants ? 1 : 0, text, $0
+                    )
+                }
+            }
+        }
+        if result != 0 { update("The saved transcript could not be displayed.") }
+    }
+
+    static func recordingState(_ state: Int32) {
+        _ = jsti_window_update(nil, nil, state)
+    }
+
+    /// Call synchronously on the window thread, before a dialog or actor hop.
+    static func displayedTranscript() throws -> String {
+        var count = 0
+        guard jsti_window_transcript_snapshot(nil, 0, &count) == 2, count > 0, count <= 8_388_609 else {
+            throw WindowsNativeError(
+                message: "The displayed transcript is unavailable or exceeds the 8 MiB action limit."
+            )
+        }
+        var bytes = [CChar](repeating: 0, count: count)
+        guard jsti_window_transcript_snapshot(&bytes, bytes.count, &count) == 0 else {
+            throw WindowsNativeError(message: "The displayed transcript could not be captured. Try again.")
+        }
+        return String(cString: bytes)
     }
 
     /// Reports which transcript version the window shows for `record`; the

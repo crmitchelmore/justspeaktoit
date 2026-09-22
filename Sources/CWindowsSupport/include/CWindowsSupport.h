@@ -117,7 +117,8 @@ typedef struct JSTIHistoryRow {
 } JSTIHistoryRow;
 /* Atomically replaces history; synchronously deep-copies all UTF-8 strings.
  * selected_id: null preserves the current selection if it still exists, an
- * empty string clears it. Programmatic updates do not emit selection events.
+ * empty string clears it. A user selection made after enqueue takes precedence.
+ * Programmatic updates do not emit selection events.
  * Events 9-12 and 16 carry the selected record ID in their borrowed text
  * argument. Rows are whatever the host chose to show (for example a search
  * result); the window never filters, reorders or edits them itself. Clearing
@@ -132,6 +133,16 @@ int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char
  * displayed. Thread safe; updates coalesce with jsti_window_update. A user
  * choice emits TRANSCRIPT_VARIANT and is retained until the selection changes. */
 int jsti_window_set_transcript_variant(const char *record_id, int selected, int can_switch);
+/* Copies one complete saved-record presentation. UI applies only to the current
+ * record and requested version; selection changes clear text/actions meanwhile.
+ * selected: 0 processed, 1 original, -1 no result. Thread-safe, latest-only. */
+int jsti_window_set_history_presentation(const char *record_id, int selected, int can_switch,
+    const char *transcript_utf8, const char *status_utf8);
+/* Snapshot this window's displayed transcript on its UI thread before an action
+ * or modal dialog. Returns 0 including valid empty text, 2 when the buffer is too
+ * small (required includes NUL), or -1 when unavailable/invalid/over 8 MiB UTF-8.
+ * Passing null/0 queries capacity. Never falls back to saved or external text. */
+int jsti_window_transcript_snapshot(char *text_utf8, size_t capacity, size_t *required);
 /* The displayed transcript variant: -1 none, 0 processed, 1 original. UI thread
  * only; call synchronously from the COPY_TRANSCRIPT, HISTORY_EXPORT or
  * TRANSCRIPT_VARIANT callback so it pairs with that event's record ID. */

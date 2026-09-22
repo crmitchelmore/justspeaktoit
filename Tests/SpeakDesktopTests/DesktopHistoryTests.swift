@@ -31,6 +31,36 @@ final class DesktopHistoryTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: audioURL), audio)
     }
 
+    func testDisplayedSnapshotExport_survivesSameRecordReplacementAndProtectsHistory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("History")
+        let store = try DesktopRecordingStore(directory: directory)
+        var record = DesktopRecordingStore.Record(id: UUID(), audioFilename: "retained.wav", modelIdentifier: "test")
+        record.result = TranscriptionResult(
+            text: "Original café 🎙", segments: [], confidence: nil, duration: 1,
+            modelIdentifier: "test", cost: nil, rawPayload: nil, debugInfo: nil
+        )
+        record.processedText = "Visible before retry."
+        try await store.save(record)
+        let displayed = try XCTUnwrap(record.text(for: .processed))
+        // A retry finishes while the modal save chooser or actor hop is pending.
+        record.processedText = "New result not shown when Export was clicked."
+        try await store.save(record)
+        let export = root.appendingPathComponent("snapshot.txt")
+        try await store.exportTranscriptSnapshot(displayed, to: export)
+        XCTAssertEqual(try String(contentsOf: export, encoding: .utf8), displayed)
+        let current = try await store.record(id: record.id)
+        XCTAssertEqual(current.processedText, record.processedText)
+        let metadata = directory.appendingPathComponent(record.id.uuidString + ".json")
+        let original = try Data(contentsOf: metadata)
+        do {
+            try await store.exportTranscriptSnapshot(displayed, to: metadata)
+            XCTFail("Snapshot export overwrote retained metadata")
+        } catch { XCTAssertEqual((error as? CocoaError)?.code, .fileWriteNoPermission) }
+        XCTAssertEqual(try Data(contentsOf: metadata), original)
+    }
+
     func testAudioPath_RejectsTraversalAndDirectories() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

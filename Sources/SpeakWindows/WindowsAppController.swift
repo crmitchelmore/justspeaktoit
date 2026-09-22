@@ -331,8 +331,7 @@ extension WindowsAppController {
             selectedHistoryID = records.first(where: { $0.result != nil })?.id ?? records.first?.id
             transcript = selectedHistoryID.flatMap { history[$0]?.displayText } ?? ""
             transcriptVariant = .processed
-            refreshHistory()
-            if let id = selectedHistoryID, let record = history[id] { showTranscriptVariant(.processed, for: record) }
+            refreshHistory(selectRecord: true)
             let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
             var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
                 : "Ready. Ctrl+Alt+Space starts or stops recording. \(records.count) saved recordings."
@@ -341,7 +340,7 @@ extension WindowsAppController {
             }
             if let microphoneWarning { status += " \(microphoneWarning)" }
             if let profileWarning { status += " \(profileWarning)" }
-            update(status, transcript: transcript, state: 0)
+            showSelectedHistory(status: status, state: 0)
         } catch { update(error.localizedDescription, state: 0) }
     }
 
@@ -381,19 +380,16 @@ extension WindowsAppController {
         } catch { update(error.localizedDescription) }
     }
 
-    /// `variant` is the version the window displayed when Copy was pressed,
-    /// captured with the record ID; a later selection change cannot redirect it.
-    func copyTranscript(identifier: String = "", variant: DesktopTranscriptVariant? = nil) {
+    /// Text and version are the immutable display snapshot from the Copy click;
+    /// a later selection or retry cannot replace the content this action uses.
+    func copyTranscript(_ text: String, variant: DesktopTranscriptVariant? = nil) {
         guard !closed else { return }
-        let record = UUID(uuidString: identifier).flatMap { history[$0] }
-        let chosen = variant ?? .processed
-        let text = record.map { $0.text(for: chosen) ?? "" } ?? transcript
         guard !text.isEmpty else { update("There is no transcript to copy."); return }
         do {
             try text.withCString { text in
                 try WindowsNative.checked { jsti_clipboard_write(text, $0, $1) }
             }
-            update(record?.hasTranscriptVariants == true && chosen == .original
+            update(variant == .original
                 ? "Original transcript copied." : "Transcript copied.")
         } catch { update(error.localizedDescription) }
     }

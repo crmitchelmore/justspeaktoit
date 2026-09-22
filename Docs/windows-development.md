@@ -168,7 +168,9 @@ unchanged. Follow [the cross-build guide](../scripts/windows-cross/README.md).
 A Foundation proof compiled on the Mac has already executed successfully on
 Windows. The full app workflow copies those exact Mac-built executables to a
 Windows runner and verifies their source revision and hashes before tests and
-native window checks; its first runtime result remains pending at this checkpoint.
+native window checks. The first full test executable ran 376 tests on Windows;
+a synthetic insertion failure matched the native build and was subsequently fixed.
+The optimised release app/test runtime check remains pending at this checkpoint.
 
 ## Architecture and ownership
 
@@ -293,8 +295,8 @@ smoke checks cover CRUD, ordering, preservation, validation, modal hotkey refusa
 keyboard scrolling and narrow window layout. Model-list smoke checks exercise
 refresh, retained selection and transition from batch-only to live-capable lists. Native
 storage tests check protected ACLs, existing-file refusal and junction rejection.
-The microphone/cancellation/storage/search/transcript-version additions still
-require final-head CI.
+The combined additions passed native CI at `ae61b2e8`; later revisions require
+their own checks.
 Neither executable smoke test proves physical microphone capture, live provider
 transcription, successful external insertion or user-visible feature parity.
 Separate adapter unit tests exercise Credential Manager with isolated synthetic
@@ -302,6 +304,15 @@ test entries; they do not validate a user's provider credentials.
 
 Verified checkpoints on 22 September 2026:
 
+- [Native Windows/macOS/Linux run 35734154969](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35734154969)
+  passed at source `ae61b2e8` (tested merge `c4e8872a`): **378 Windows tests,
+  ten optional skips, zero failures**, then all five WinHTTP loopback probes,
+  native self-tests and expanded window checks. This includes profiles, dynamic
+  model refresh, bounded insertion and microphone hot-plug. The client snapshot
+  was inspected: its controls fit without overlap. The
+  [developer artifact 10696349821](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35734154969/artifacts/10696349821)
+  has executable SHA-256 `a1d475a0b7beedef89cb8d273b0677f1c872a9cfc415501b7dfe9a32eeb98704`.
+  Mac and Linux each passed **340 portable tests, five optional skips**.
 - [Windows/macOS/Linux run 35729527217](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35729527217)
   passed at source `e20a085e` (tested merge `b2e46fdd`). Windows passed **360
   baseline tests, ten optional probes skipped, zero failures**, then all five
@@ -320,6 +331,11 @@ Verified checkpoints on 22 September 2026:
   `01a06c18` passed **96 tests**. The full Apple run for the combined native profiles,
   dynamic model and insertion checkpoint `0c50d046` passed **3,688 tests, sixteen
   skipped, zero failures**.
+- The actual iOS Simulator app compiled and linked at `ac7b5416` with Apple
+  Swift 6.2.3, iOS 26.2 and arm64: **zero errors, 74 warnings**, 55.9 seconds.
+  This includes the iOS OpenAI adapters and shared OpenRouter code. The build
+  used the normal Tuist project with keyboard handoff enabled and signing
+  disabled; no simulator launch, device or runtime acceptance is claimed.
 - Local combined portable validation passed **339 tests, five optional probes
   skipped, zero failures**; the subsequent profile review regressions passed
   **39 focused tests**. Strict SwiftLint, full Windows Swift host typecheck and
@@ -331,11 +347,17 @@ Verified checkpoints on 22 September 2026:
   single macOS probe. These figures are not a Windows or comparative performance
   result. A later silence probe stopped at Keychain access before connecting;
   silence requalification remains unverified.
-- [Native Windows run 35732516867](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35732516867)
-  and [full app cross-build run 35732516925](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35732516925)
-  are in progress for `0c50d046`. They contain native profiles, model refresh and
-  broader insertion, including modal focus, path-validation and ABI corrections.
-  Their results must be checked before treating this later checkpoint as verified.
+- [Native run 35732516867](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35732516867)
+  and [full app cross-runtime run 35732516925](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35732516925)
+  ran the same **376 Windows tests** at `0c50d046`, with one failure in a synthetic
+  full-selection insertion case. Its capability probe used a legacy UI Automation
+  client instead of the production client; `bbfdb0a8` corrected the probe without
+  weakening replacement or clipboard assertions. The later native run above is
+  green. The first optimised cross attempt then exposed SwiftPM's release tests
+  needing testable imports. `ac7b5416` retains the production app first and builds
+  the test-enabled executable separately. Local full release cross-compilation
+  passed; [cross-runtime run 35735185760](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35735185760)
+  is running for that source. Its result remains a gate for the release cross path.
 - Earlier [run 35725040396](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35725040396)
   verified generated AAC/M4A and MP3 imports through real Media Foundation,
   preserving original files and non-silent decoded samples. It also verified

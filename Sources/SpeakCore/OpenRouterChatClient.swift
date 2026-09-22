@@ -58,9 +58,15 @@ public struct OpenRouterBranding: Sendable {
     }()
 }
 
-/// Shared service location for chat, streaming and inline-audio requests.
-enum OpenRouterService {
-    static let baseURL = URL(string: "https://openrouter.ai/api/v1")!
+/// Shared service location and provider identity for chat, streaming, inline-audio and
+/// dedicated audio requests.
+public enum OpenRouterService {
+    public static let baseURL = URL(string: "https://openrouter.ai/api/v1")!
+    /// The provider slug credential ownership and desktop descriptors use. It is also the
+    /// first path component of every saved dynamic selection (`openrouter/transcription/…`).
+    public static let providerID = "openrouter"
+    /// Where an OpenRouter key is created; the account URL the Apple onboarding links.
+    public static let apiKeysURL = URL(string: "https://openrouter.ai/keys")!
 }
 
 extension OpenRouterBranding {

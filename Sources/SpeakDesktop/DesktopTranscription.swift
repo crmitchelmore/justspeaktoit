@@ -11,15 +11,25 @@ public enum DesktopTranscription {
         ModelCatalog.batchTranscription.filter { backend(for: $0.id) != nil }
     }
 
-    /// These routes need canonical mono 16 kHz PCM16 WAV before their shared
-    /// clients run. Other providers retain their encoded-container upload path.
-    public static func requiresCanonicalPCM16WAV(model: String) -> Bool {
-        let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard case .prepared(let provider) = backend(for: identifier) else { return false }
-        switch provider {
-        case .meta, .azure: return true
-        default: return false
+    /// Static catalogue routes followed by OpenRouter speech-to-text models discovered at
+    /// runtime, projected as `openrouter/transcription/<provider/model>` options. Only
+    /// `transcription`-capable metadata is offered: speech-only and chat models, malformed
+    /// identifiers and duplicates are left out. Discovery supplies every dynamic entry;
+    /// nothing here is a built-in model list.
+    public static func batchModels(includingDiscovered models: [OpenRouterAudioModel]) -> [ModelCatalog.Option] {
+        var options = batchModels
+        var identifiers = Set(options.map(\.id))
+        for model in models where model.supports(.transcription) {
+            let identifier = model.transcriptionSelectionID
+            guard backend(for: identifier) != nil, identifiers.insert(identifier).inserted else { continue }
+            options.append(ModelCatalog.Option(
+                id: identifier,
+                displayName: model.name,
+                description: model.description.isEmpty ? nil : model.description,
+                latencyTier: .medium
+            ))
         }
+        return options
     }
 
     /// The same credential identifier, provider name and account-creation URL
@@ -29,8 +39,21 @@ public enum DesktopTranscription {
         guard let backend = backend(for: identifier),
               case .apiKey(let credentialID, let providerName) = ModelCredentialResolver.requirement(
                 for: identifier, purpose: .batchTranscription
-              ),
-              let providerID = ModelRouting.family(for: identifier).providerID else { return nil }
+              ) else { return nil }
+        switch backend {
+        case .openRouterInlineAudio, .openRouterTranscription:
+            // OpenRouter serves these google/ and openai/ catalogue identifiers, so the
+            // descriptor follows the credential owner rather than the identifier prefix.
+            return TranscriptionProviderMetadata(
+                id: OpenRouterService.providerID,
+                displayName: providerName,
+                website: OpenRouterService.apiKeysURL.absoluteString,
+                apiKeyIdentifier: credentialID
+            )
+        default:
+            break
+        }
+        guard let providerID = ModelRouting.family(for: identifier).providerID else { return nil }
         let website: String
         if case .groq = backend {
             website = GroqBatchClient().metadata.website
@@ -109,7 +132,7 @@ public enum DesktopTranscription {
         let staging: SharedMultipartUploadStaging?
     }
 
-    private static func transcribe(
+    private static func transcribe( // swiftlint:disable:this cyclomatic_complexity
         _ input: Request, using backend: Backend, session: URLSession
     ) async throws -> TranscriptionResult {
         switch backend {
@@ -142,6 +165,18 @@ public enum DesktopTranscription {
         case .speechmatics:
             return try await SpeechmaticsBatchClient(session: session)
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        case .openRouterInlineAudio:
+            return try await OpenRouterInlineAudioTranscriptionClient(
+                apiKey: input.apiKey, session: session, formatPolicy: .supportedFormatsOnly,
+                durationResolver: { _ in input.duration }
+            ).transcribeFile(at: input.audioURL, model: input.model, language: input.language)
+        case .openRouterTranscription:
+            // The dedicated endpoint takes the raw provider/model; the result keeps the saved selection identifier.
+            guard let rawModel = OpenRouterTranscriptionSelection.modelID(from: input.model) else {
+                throw DesktopTranscriptionError.unsupportedModel
+            }
+            return try await OpenRouterAudioClient(apiKeyProvider: { input.apiKey }, session: session)
+                .transcribe(audioFileURL: input.audioURL, model: rawModel, language: input.language)
         }
     }
 
@@ -206,26 +241,36 @@ public enum DesktopTranscription {
         case cartesia
         case gladia
         case speechmatics
+        /// Static audio-capable chat models sent inline through OpenRouter chat completions.
+        case openRouterInlineAudio
+        /// Saved `openrouter/transcription/<provider/model>` selections on the dedicated endpoint.
+        case openRouterTranscription
     }
 
     /// One mapping controls discovery, credentials and execution. Model entries
     /// and defaults continue to be owned by the shared catalogue and clients.
     private static func backend(for model: String) -> Backend? {
         if let backend = fixedBackends[model] { return backend }
+        // A saved dynamic OpenRouter selection stays routable whenever its identifier is
+        // well formed. Discovery informs the picker; it is not a gate, so an offline or
+        // retired catalogue cannot strand a selection the user already made.
+        if OpenRouterTranscriptionSelection.modelID(from: model) != nil { return .openRouterTranscription }
         // These clients accept every batch model owned by their canonical
         // provider catalogue. Unknown and streaming identifiers stay hidden.
-        if case .cloudBatch(let provider) = ModelRouting.family(for: model) {
-            if provider == "assemblyai" { return .prepared(.assemblyai) }
-            if provider == "groq" { return .groq }
-            if provider == "deepgram" { return .deepgram }
-            if provider == "elevenlabs" { return .elevenlabs }
-            if provider == "mistral" { return .prepared(.mistral) }
-            if provider == "soniox" { return .prepared(.soniox) }
-            if provider == "revai" { return .prepared(.revai) }
-            if provider == "modulate" { return .prepared(.modulate) }
-        }
-        return nil
+        guard case .cloudBatch(let provider) = ModelRouting.family(for: model) else { return nil }
+        return providerBackends[provider]
     }
+
+    private static let providerBackends: [String: Backend] = [
+        "assemblyai": .prepared(.assemblyai),
+        "groq": .groq,
+        "deepgram": .deepgram,
+        "elevenlabs": .elevenlabs,
+        "mistral": .prepared(.mistral),
+        "soniox": .prepared(.soniox),
+        "revai": .prepared(.revai),
+        "modulate": .prepared(.modulate)
+    ]
 
     private static let fixedBackends: [String: Backend] = {
         var mappings: [String: Backend] = [
@@ -238,9 +283,25 @@ public enum DesktopTranscription {
         for model in GeminiTranscribeModels.directBatchModelIDs { mappings[model] = .google }
         for model in OpenAITranscriptionModels.directBatchModelIDs { mappings[model] = .openai }
         for model in SpeechmaticsBatchClient.catalogIDs { mappings[model] = .speechmatics }
+        for model in OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs {
+            mappings[model] = .openRouterInlineAudio
+        }
         return mappings
     }()
 
+}
+
+extension DesktopTranscription {
+    /// These routes need canonical mono 16 kHz PCM16 WAV before their shared
+    /// clients run. Other providers retain their encoded-container upload path.
+    public static func requiresCanonicalPCM16WAV(model: String) -> Bool {
+        let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .prepared(let provider) = backend(for: identifier) else { return false }
+        switch provider {
+        case .meta, .azure: return true
+        default: return false
+        }
+    }
 }
 
 public enum DesktopTranscriptionError: LocalizedError {

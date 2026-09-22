@@ -53,6 +53,7 @@ final class DesktopRecordingTests: XCTestCase {
             .union(ModelCatalog.batchTranscriptionOptions(forProvider: "revai").map(\.id))
             .union(ModelCatalog.batchTranscriptionOptions(forProvider: "modulate").map(\.id))
             .union(ModelCatalog.batchTranscriptionOptions(forProvider: "assemblyai").map(\.id))
+            .union(OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs)
         XCTAssertEqual(Set(DesktopTranscription.batchModels.map(\.id)), expected)
         XCTAssertTrue(DesktopTranscription.batchModels.allSatisfy { option in
             ModelCatalog.batchTranscription.contains(option)

@@ -10,6 +10,10 @@ import os.log
 /// Handles chat completions (streaming and non-streaming), inline-audio batch
 /// transcription, API-key validation, and connection pre-warming.
 ///
+/// Inline-audio transcription itself is the portable
+/// `OpenRouterInlineAudioTranscriptionClient`; this actor adds the stored-key
+/// lookup, the local fallbacks and the AVFoundation duration reader.
+///
 /// API keys are resolved lazily through `apiKeyProvider` (or the explicit
 /// override) and are only ever placed in the `Authorization` header — they are
 /// never logged. Validation debug snapshots pass through
@@ -449,74 +453,22 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         return request
     }
 
+    /// The shared inline-audio contract, enriched with this actor's best-effort
+    /// duration so a transcript is never lost to unreadable container metadata.
     private func performRemoteTranscription(
         apiKey: String,
         url: URL,
         model: String,
         language: String?
     ) async throws -> TranscriptionResult {
-        let endpoint = baseURL.appendingPathComponent("chat/completions")
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        applyBrandHeaders(&request)
-
-        try enforceInlineAudioSizeLimit(for: url)
-        request.httpBody = try JSONEncoder().encode(
-            audioTranscriptionPayload(audioURL: url, model: model, language: language)
+        let client = OpenRouterInlineAudioTranscriptionClient(
+            apiKey: apiKey,
+            session: session,
+            maximumInlineAudioBytes: maximumInlineAudioBytes,
+            branding: branding,
+            durationResolver: { audioURL in await self.bestEffortDuration(of: audioURL) }
         )
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw OpenRouterClientError.invalidResponse
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-            throw OpenRouterClientError.httpStatus(http.statusCode, body)
-        }
-
-        let decoded = try JSONDecoder().decode(OpenRouterChatResponse.self, from: data)
-        guard
-            let text = decoded.choices
-                .compactMap({ $0.message?.content.trimmingCharacters(in: .whitespacesAndNewlines) })
-                .first(where: { !$0.isEmpty })
-        else {
-            throw OpenRouterClientError.invalidResponse
-        }
-
-        return await buildTranscriptionResult(
-            text: text,
-            audioURL: url,
-            model: model,
-            payload: data
-        )
-    }
-
-    private func audioTranscriptionPayload(
-        audioURL: URL,
-        model: String,
-        language: String?
-    ) throws -> OpenRouterAudioTranscriptionRequest {
-        let audioData = try Data(contentsOf: audioURL)
-        let prompt = transcriptionPrompt(language: language)
-        return OpenRouterAudioTranscriptionRequest(
-            model: model,
-            temperature: 0,
-            messages: [
-                OpenRouterAudioTranscriptionRequest.Message(
-                    role: "user",
-                    content: [
-                        .text(prompt),
-                        .inputAudio(
-                            data: audioData.base64EncodedString(),
-                            format: audioInputFormat(for: audioURL)
-                        )
-                    ]
-                )
-            ],
-            stream: false
-        )
+        return try await client.transcribeFile(at: url, model: model, language: language)
     }
 
     // MARK: - Local fallbacks
@@ -610,70 +562,6 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         return normalized
     }
 
-    private func transcriptionPrompt(language: String?) -> String {
-        let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if trimmedLanguage.isEmpty {
-            return "Transcribe this audio file. Return only the transcript text, with no commentary."
-        }
-
-        return "Transcribe this audio file using locale \(trimmedLanguage). "
-            + "Return only the transcript text, with no commentary."
-    }
-
-    private func audioInputFormat(for url: URL) -> String {
-        let ext = url.pathExtension.lowercased()
-        switch ext {
-        case "wav", "mp3", "aiff", "aac", "ogg", "flac", "m4a", "pcm16", "pcm24":
-            return ext
-        case "m4b":
-            return "m4a"
-        case "wave":
-            return "wav"
-        default:
-            return "m4a"
-        }
-    }
-
-    private func enforceInlineAudioSizeLimit(for url: URL) throws {
-        let fileSize = try audioFileSize(for: url)
-        guard fileSize <= maximumInlineAudioBytes else {
-            throw OpenRouterClientError.audioFileTooLarge(
-                fileSize: fileSize,
-                limit: maximumInlineAudioBytes
-            )
-        }
-    }
-
-    private func audioFileSize(for url: URL) throws -> Int64 {
-        if let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
-            return Int64(fileSize)
-        }
-
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
-    }
-
-    private func buildTranscriptionResult(
-        text: String,
-        audioURL: URL,
-        model: String,
-        payload: Data
-    ) async -> TranscriptionResult {
-        let duration = await bestEffortDuration(of: audioURL)
-        let segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: text)]
-
-        return TranscriptionResult(
-            text: text,
-            segments: segments,
-            confidence: nil,
-            duration: duration,
-            modelIdentifier: model,
-            cost: nil,
-            rawPayload: String(data: payload, encoding: .utf8),
-            debugInfo: nil
-        )
-    }
-
     /// Reads the recorded length of `audioURL`, and reports `0` when the local
     /// file gives no usable value.
     ///
@@ -761,47 +649,6 @@ private struct OpenRouterValidationResponse: Decodable {
 
     let valid: Bool?
     let data: ValidationData?
-}
-
-private struct OpenRouterAudioTranscriptionRequest: Encodable {
-    struct Message: Encodable {
-        let role: String
-        let content: [OpenRouterAudioContentPart]
-    }
-
-    let model: String
-    let temperature: Double
-    let messages: [Message]
-    let stream: Bool
-}
-
-private enum OpenRouterAudioContentPart: Encodable {
-    case text(String)
-    case inputAudio(data: String, format: String)
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case text
-        case inputAudio = "input_audio"
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .text(let text):
-            try container.encode("text", forKey: .type)
-            try container.encode(text, forKey: .text)
-        case .inputAudio(let data, let format):
-            try container.encode("input_audio", forKey: .type)
-            let inputAudio = OpenRouterInputAudio(data: data, format: format)
-            try container.encode(inputAudio, forKey: .inputAudio)
-        }
-    }
-}
-
-private struct OpenRouterInputAudio: Encodable {
-    let data: String
-    let format: String
 }
 
 private struct OpenRouterStreamChunkDelta: Decodable {

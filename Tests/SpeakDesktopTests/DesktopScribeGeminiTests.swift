@@ -77,7 +77,9 @@ final class DesktopScribeGeminiTests: XCTestCase {
         XCTAssertEqual(result.segments.map(\.text), ["Hello", "Gemini"])
         XCTAssertEqual(result.segments.last?.endTime, 0.9)
         XCTAssertTrue(result.rawPayload?.contains("spk_2") == true)
-        XCTAssertNil(DesktopTranscription.provider(for: "google/gemini-2.0-flash-001"))
+        // The OpenRouter-routed Gemini 2.0 entry shares the google/ prefix but never the Google credential.
+        let routedThroughOpenRouter = DesktopTranscription.provider(for: "google/gemini-2.0-flash-001")
+        XCTAssertEqual(routedThroughOpenRouter?.id, OpenRouterService.providerID)
     }
 
     func testGeminiStagedUploadKeepsSnapshotAndPollsBeforeTranscription() async throws {

@@ -20,16 +20,25 @@ final class DesktopTranscriptionTests: XCTestCase {
                 ModelCredentialResolver.requirement(for: model.id, purpose: .batchTranscription),
                 .apiKey(identifier: descriptor.apiKeyIdentifier, providerName: descriptor.displayName)
             )
-            XCTAssertEqual(descriptor.id, ModelRouting.family(for: model.id).providerID)
             XCTAssertEqual(descriptor.apiKeyLabel, descriptor.displayName + " API Key")
+            XCTAssertNotNil(descriptor.apiKeyURL)
+            if OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains(model.id) {
+                // OpenRouter serves these google/ and openai/ identifiers; the descriptor
+                // follows the credential owner, never the identifier prefix.
+                XCTAssertEqual(descriptor.id, OpenRouterService.providerID)
+                XCTAssertEqual(descriptor.apiKeyURL, OpenRouterService.apiKeysURL)
+                continue
+            }
+            XCTAssertEqual(descriptor.id, ModelRouting.family(for: model.id).providerID)
             let accountURL = descriptor.id == GroqBatchClient().metadata.id
                 ? GroqBatchClient().metadata.apiKeyURL : LiveTranscriptionProviderID(rawValue: descriptor.id)?.apiKeyURL
             XCTAssertEqual(descriptor.apiKeyURL, accountURL)
-            XCTAssertNotNil(descriptor.apiKeyURL)
         }
         XCTAssertNil(DesktopTranscription.provider(for: "apple/local/SFSpeechRecognizer"))
         XCTAssertNil(DesktopTranscription.provider(for: "cartesia/ink-2-streaming"))
-        XCTAssertNil(DesktopTranscription.provider(for: "openai/gpt-4o-audio-preview-2024-12-17"))
+        let audioPreview = DesktopTranscription.provider(for: "openai/gpt-4o-audio-preview-2024-12-17")
+        XCTAssertEqual(audioPreview?.id, OpenRouterService.providerID)
+        XCTAssertNotEqual(audioPreview?.apiKeyIdentifier, OpenAIBatchClient().metadata.apiKeyIdentifier)
     }
 
     func testEveryOpenAIModelStillUsesTheExistingSharedClient() async throws {
@@ -281,6 +290,12 @@ private extension DesktopTranscriptionTests {
             } else {
                 XCTAssertEqual(error as? GeminiBatchError, .rateLimited("provider rejection"))
             }
+        } else if OpenRouterInlineAudioTranscriptionClient.batchCatalogIDs.contains(model) {
+            guard case OpenRouterClientError.httpStatus(let reportedStatus, let body) = error else {
+                return XCTFail("Unexpected OpenRouter error: \(error)")
+            }
+            XCTAssertEqual(reportedStatus, status)
+            XCTAssertEqual(body, Self.rejection)
         } else {
             XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, Self.rejection))
         }

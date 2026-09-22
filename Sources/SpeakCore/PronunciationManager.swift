@@ -23,9 +23,9 @@ public final class PronunciationManager: ObservableObject {
 
     private let defaults: UserDefaults
 
-    // Owns the replacement semantics and compiled-expression cache shared with
-    // portable voice output.
-    private let renderer = PronunciationRenderer()
+    // Owns the replacement semantics shared with portable voice output. Every
+    // compiled expression is kept for the manager's lifetime, as before.
+    let renderer = PronunciationRenderer(retention: .unbounded)
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

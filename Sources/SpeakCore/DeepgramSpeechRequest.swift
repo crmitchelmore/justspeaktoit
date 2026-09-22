@@ -78,6 +78,9 @@ public enum DeepgramSpeechError: Error, Equatable, Sendable {
     case invalidResponse
     case transportFailure
     case emptyAudio
+    /// The body ended before a declared finite length: truncated audio is
+    /// never reported as speech.
+    case incompleteAudio
     /// Every sample was zero: nothing audible would be spoken.
     case silentAudio
     /// Not mono 16-bit linear PCM WAV at the requested rate.
@@ -112,6 +115,8 @@ extension DeepgramSpeechError: LocalizedError {
             return "Deepgram could not be reached."
         case .emptyAudio:
             return "Deepgram returned no audio."
+        case .incompleteAudio:
+            return "Deepgram's audio ended before its declared length."
         case .silentAudio:
             return "Deepgram returned only silence."
         case .unsupportedAudioFormat:

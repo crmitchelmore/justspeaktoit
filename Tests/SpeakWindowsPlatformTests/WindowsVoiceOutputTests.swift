@@ -9,54 +9,11 @@ import SpeakTestSupport
 import XCTest
 @testable import SpeakWindowsPlatform
 
-/// Records the exact bytes the player was given when it opened the file,
-/// before any release, while the shared device-free engine plays them.
-final class VoiceOutputRecordingBackend: WindowsAudioPlaybackBackend, @unchecked Sendable {
-    struct Opened {
-        let path: String
-        let bytes: Data?
-    }
-
-    let engine = PlaybackTestBackend()
-    private let lock = NSLock()
-    private var values: [Opened] = []
-
-    var opened: [Opened] { lock.withLock { values } }
-
-    func open(
-        path: String, completion: @escaping @Sendable (WindowsAudioPlaybackCompletion) -> Void
-    ) throws -> any WindowsAudioPlaybackHandle {
-        let bytes = try? Data(contentsOf: URL(fileURLWithPath: path))
-        lock.withLock { values.append(Opened(path: path, bytes: bytes)) }
-        return try engine.open(path: path, completion: completion)
-    }
-}
-
-/// Synthesis runs through the real shared transport against a local stub; no
-/// vendor key or network is used. The fake engine proves ordering and file
-/// ownership only; audible output is claimed solely by the endpoint test.
-final class WindowsVoiceOutputTests: XCTestCase {
-    private var session: URLSession!
-    private var parent: URL!
-
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        session = StubURLProtocol.makeSession()
-        parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
-    }
-
-    override func tearDownWithError() throws {
-        session.invalidateAndCancel()
-        StubURLProtocol.reset()
-        try? FileManager.default.removeItem(at: parent)
-        try super.tearDownWithError()
-    }
-
-    private var directory: URL { parent.appendingPathComponent("VoiceOutput") }
-
+/// File ownership: exclusive creation, only-our-own removal, a bounded budget
+/// that counts files still held, and refusal of unsafe locations and names.
+final class WindowsVoiceOutputStagingTests: WindowsVoiceOutputTestCase {
     func testStaging_CreatesExclusiveFilesAndRemovesOnlyItsOwn() throws {
-        let staging = WindowsVoiceOutputStaging(directory: directory)
+        let staging = try WindowsVoiceOutputStaging(directory: directory)
         let wav = Self.canonicalWAV(frames: 240)
         let first = try staging.store(wav)
         XCTAssertEqual(first.deletingLastPathComponent().lastPathComponent, "VoiceOutput")
@@ -69,29 +26,148 @@ final class WindowsVoiceOutputTests: XCTestCase {
         try savedBytes.write(to: saved)
         let second = try staging.store(wav)
         XCTAssertNotEqual(first, second)
-        staging.discard(first)
-        staging.discard(second)
+        try staging.discard(first)
+        try staging.discard(second)
+        try staging.discard(saved)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: second.path))
         XCTAssertEqual(try Data(contentsOf: saved), savedBytes)
-        XCTAssertEqual(staging.retainedCount, 0)
+        XCTAssertEqual(staging.ownedCount, 0)
     }
 
-    func testStaging_RetainsAFileWindowsStillPinsAndRemovesItAfterRelease() async throws {
-        let staging = WindowsVoiceOutputStaging(directory: directory)
-        let file = try staging.store(Self.canonicalWAV(frames: 240))
-        // The real native player pins its input with delete sharing denied,
-        // without touching any device until it is started.
-        let pin = try WindowsAudioPlaybackNativeBackend().open(path: file.path) { _ in }
-        staging.discard(file)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
-        XCTAssertEqual(staging.retainedCount, 1)
-        XCTAssertThrowsError(try staging.removeRetained())
+    func testStaging_RefusesUnsafeLocationsAndNamesBeforeAnyFileSystemCall() throws {
+        let remote = try XCTUnwrap(URL(string: "https://example.invalid/VoiceOutput"))
+        XCTAssertThrowsError(try WindowsVoiceOutput(stagingDirectory: remote, session: session))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
 
-        try await Task.detached { try pin.destroy() }.value
+        // An embedded NUL would shorten a path to its prefix at the C boundary.
+        XCTAssertNil(WindowsVoiceOutputStaging.cString(directory.path + "\u{0}escape"))
+        XCTAssertNil(WindowsVoiceOutputStaging.cString(""))
+        XCTAssertEqual(WindowsVoiceOutputStaging.cString(directory.path), directory.path)
+        // However this Foundation represents such a URL, the prefix is never prepared.
+        let probe = StagingFileSystemProbe()
+        let embedded = URL(fileURLWithPath: directory.path + "\u{0}escape")
+        if let staging = try? WindowsVoiceOutputStaging(directory: embedded, fileSystem: probe.fileSystem) {
+            try staging.discard(try staging.store(Data([1])))
+        }
+        XCTAssertFalse(probe.preparedPaths.contains(directory.path), "A truncated prefix was prepared")
+        XCTAssertFalse(probe.preparedPaths.contains { $0.utf8.contains(0) })
+
+        let refusedNames = StagingFileSystemProbe()
+        for name in ["", ".", "..", "a/b", "a\\b", "audio.wav:stream", "a\u{0}b"] {
+            let staging = try WindowsVoiceOutputStaging(
+                directory: directory, makeName: { name }, fileSystem: refusedNames.fileSystem
+            )
+            XCTAssertThrowsError(try staging.store(Data([1])), "\(name.debugDescription) was accepted")
+            XCTAssertEqual(staging.ownedCount, 0)
+        }
+        XCTAssertEqual(refusedNames.creations, 0)
+        XCTAssertTrue(refusedNames.preparedPaths.isEmpty)
+    }
+
+    /// A removal held in progress keeps its files counted: a concurrent store
+    /// cannot admit a file beyond the budget while Windows still holds the rest.
+    func testHeldRemoval_KeepsPendingFilesCountedAgainstTheBudget() async throws {
+        let probe = StagingFileSystemProbe()
+        let staging = try WindowsVoiceOutputStaging(directory: directory, fileSystem: probe.fileSystem)
+        probe.pin(true)
+        for _ in 0..<WindowsVoiceOutputStaging.maximumOwnedFiles {
+            let file = try staging.store(Data([1]))
+            XCTAssertThrowsError(try staging.discard(file), "A still-held file was reported removed")
+        }
+        XCTAssertEqual(staging.retainedCount, WindowsVoiceOutputStaging.maximumOwnedFiles)
+
+        let held = PlaybackTestGate()
+        probe.holdNextRemoval(held)
+        let shutdown = Task.detached { try staging.removeRetained() }
+        await playbackEventually { held.entered }
+        XCTAssertEqual(staging.retainedCount, WindowsVoiceOutputStaging.maximumOwnedFiles)
+        XCTAssertThrowsError(try staging.store(Data([1])), "A file beyond the budget was admitted")
+        XCTAssertEqual(probe.creations, WindowsVoiceOutputStaging.maximumOwnedFiles)
+        XCTAssertEqual(probe.preparedPaths.count, WindowsVoiceOutputStaging.maximumOwnedFiles, "Refusal touched disk")
+        held.open()
+        do {
+            try await shutdown.value
+            XCTFail("Held files were reported removed")
+        } catch {}
+        XCTAssertEqual(staging.retainedCount, WindowsVoiceOutputStaging.maximumOwnedFiles)
+
+        // Once Windows lets go, every owned file is removed and speech is admitted again.
+        probe.pin(false)
         try staging.removeRetained()
-        XCTAssertEqual(staging.retainedCount, 0)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertEqual(staging.ownedCount, 0)
+        XCTAssertEqual(probe.existing, 0)
+        try staging.discard(try staging.store(Data([1])))
+    }
+
+    func testEngine_OutputCollisionNeverTruncatesOrRemovesTheExistingFile() async throws {
+        respond(with: Self.streamedWAV(frames: 2_400))
+        var error = [CChar](repeating: 0, count: 1_024)
+        let prepared = directory.path.withCString { jsti_private_directory_prepare($0, &error, error.count) }
+        XCTAssertEqual(prepared, 0, String(cString: error))
+        let existing = directory.appendingPathComponent("collision.wav")
+        let sentinel = Data("Existing output must survive".utf8)
+        try sentinel.write(to: existing)
+
+        let backend = VoiceOutputRecordingBackend()
+        let staging = try WindowsVoiceOutputStaging(directory: directory, makeName: { "collision.wav" })
+        let output = WindowsVoiceOutput(staging: staging, session: session, backend: backend)
+        do {
+            _ = try await output.speak(try request("Hello")) { "fixture-key" }
+            XCTFail("A colliding output path was reused")
+        } catch { XCTAssertFalse(error is CancellationError, "\(error)") }
+        XCTAssertEqual(try Data(contentsOf: existing), sentinel)
+        XCTAssertTrue(backend.opened.isEmpty)
+        XCTAssertEqual(output.retainedFileCount, 0)
+        XCTAssertEqual(staging.ownedCount, 0)
+    }
+}
+
+/// The engine end to end: ordering against the player, release before removal,
+/// failed and held releases, whitespace and refused audio.
+final class WindowsVoiceOutputTests: WindowsVoiceOutputTestCase {
+    func testFailedNativeRelease_KeepsThePinnedInputOwnedUntilWindowsReleasesIt() async throws {
+        respond(with: Self.streamedWAV(frames: 2_400))
+        let backend = PinnedInputBackend(failures: 1)
+        let output = try WindowsVoiceOutput(stagingDirectory: directory, session: session, backend: backend)
+        do {
+            _ = try await output.speak(try request("Hello")) { "fixture-key" }
+            XCTFail("A failed native release reported speech")
+        } catch {
+            XCTAssertFalse(error is CancellationError, "\(error)")
+            XCTAssertTrue(error.localizedDescription.contains("Injected release failure"), "\(error)")
+        }
+        let handle = try XCTUnwrap(backend.handles.first)
+        XCTAssertFalse(handle.isPinReleased)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: handle.path), "A pinned input was reported removed")
+        XCTAssertEqual(output.retainedFileCount, 1)
+        XCTAssertThrowsError(try output.removeRetainedFiles())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: handle.path))
+
+        // The playback registry retries a failed release when it admits the next job.
+        let next = PlaybackTestBackend()
+        next.enqueue(PlaybackTestPlan(completeOnStart: .init(status: .finished, played: 0)))
+        _ = try await WindowsAudioPlayback.play(input: URL(fileURLWithPath: "/fixture.wav"), backend: next)
+        await playbackEventually { handle.isPinReleased }
+        try output.removeRetainedFiles()
+        XCTAssertEqual(output.retainedFileCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: handle.path))
+    }
+
+    func testRemovalFailureAfterSpeech_IsReportedAndTheFileStaysOwned() async throws {
+        respond(with: Self.streamedWAV(frames: 2_400))
+        let backend = PinnedInputBackend(failures: 0, keepPinAfterRelease: true)
+        let output = try WindowsVoiceOutput(stagingDirectory: directory, session: session, backend: backend)
+        let outcome = try await output.speak(try request("Hello")) { "fixture-key" }
+        guard case let .spoken(receipt) = outcome else { return XCTFail("Expected speech, got \(outcome)") }
+        XCTAssertFalse(receipt.audioFileRemoved, "A file another holder keeps open was reported removed")
+        let handle = try XCTUnwrap(backend.handles.first)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: handle.path))
+        XCTAssertEqual(output.retainedFileCount, 1)
+
+        try await Task.detached { try handle.releasePin() }.value
+        try output.removeRetainedFiles()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: handle.path))
     }
 
     func testEngine_PlaysTheCanonicalFileAndRemovesItOnlyAfterRelease() async throws {
@@ -103,6 +179,7 @@ final class WindowsVoiceOutputTests: XCTestCase {
         guard case let .spoken(receipt) = outcome else { return XCTFail("Expected speech, got \(outcome)") }
         XCTAssertEqual(receipt.playedDuration, 0.1)
         XCTAssertEqual(receipt.audioDuration, 0.1, accuracy: 1e-12)
+        XCTAssertTrue(receipt.audioFileRemoved)
         let opened = try XCTUnwrap(backend.opened.first)
         XCTAssertEqual(backend.opened.count, 1)
         XCTAssertEqual(opened.bytes, Self.canonicalWAV(frames: 2_400), "The player must receive exact lengths")
@@ -116,7 +193,7 @@ final class WindowsVoiceOutputTests: XCTestCase {
         respond(with: Self.streamedWAV(frames: 2_400))
         let backend = VoiceOutputRecordingBackend(), destroy = PlaybackTestGate()
         backend.engine.enqueue(PlaybackTestPlan(destroyGate: destroy))
-        let output = engine(backend)
+        let output = try engine(backend)
         let speech = try request("Hello")
         let task = Task { try await output.speak(speech) { "fixture-key" } }
         await playbackEventually { backend.engine.handles.first?.counts.started == 1 }
@@ -164,27 +241,6 @@ final class WindowsVoiceOutputTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
     }
 
-    func testEngine_OutputCollisionNeverTruncatesOrRemovesTheExistingFile() async throws {
-        respond(with: Self.streamedWAV(frames: 2_400))
-        var error = [CChar](repeating: 0, count: 1_024)
-        let prepared = directory.path.withCString { jsti_private_directory_prepare($0, &error, error.count) }
-        XCTAssertEqual(prepared, 0, String(cString: error))
-        let existing = directory.appendingPathComponent("collision.wav")
-        let sentinel = Data("Existing output must survive".utf8)
-        try sentinel.write(to: existing)
-
-        let backend = VoiceOutputRecordingBackend()
-        let staging = WindowsVoiceOutputStaging(directory: directory) { "collision.wav" }
-        let output = WindowsVoiceOutput(staging: staging, session: session, backend: backend)
-        do {
-            _ = try await output.speak(try request("Hello")) { "fixture-key" }
-            XCTFail("A colliding output path was reused")
-        } catch { XCTAssertFalse(error is CancellationError, "\(error)") }
-        XCTAssertEqual(try Data(contentsOf: existing), sentinel)
-        XCTAssertTrue(backend.opened.isEmpty)
-        XCTAssertEqual(output.retainedFileCount, 0)
-    }
-
     /// Real synthesis transport, private staging and the native Media Foundation
     /// decoder. Without an endpoint the decoder must accept the file and fail
     /// only at the missing device; the audible part is then skipped, not passed.
@@ -192,12 +248,13 @@ final class WindowsVoiceOutputTests: XCTestCase {
         // A probe failure is a test failure; only a definite "no endpoint" skips.
         let endpoint = try WindowsAudioPlayback.isOutputEndpointAvailable()
         respond(with: Self.streamedWAV(frames: 2_400))
-        let output = WindowsVoiceOutput(stagingDirectory: directory, session: session)
+        let output = try WindowsVoiceOutput(stagingDirectory: directory, session: session)
         do {
             let outcome = try await output.speak(try request("Hello from Windows")) { "fixture-key" }
             XCTAssertTrue(endpoint, "Playback reported speech without an output endpoint")
             guard case let .spoken(receipt) = outcome else { return XCTFail("Expected speech, got \(outcome)") }
             XCTAssertEqual(receipt.playedDuration, 0.1, accuracy: 0.02)
+            XCTAssertTrue(receipt.audioFileRemoved)
         } catch let error as WindowsAudioPlaybackError where !endpoint {
             XCTAssertTrue(error.message.contains("No active audio output device"), error.message)
         }
@@ -209,49 +266,8 @@ final class WindowsVoiceOutputTests: XCTestCase {
         }
     }
 
-    // MARK: - Helpers
-
-    private func engine(_ backend: VoiceOutputRecordingBackend) -> WindowsVoiceOutput {
-        WindowsVoiceOutput(stagingDirectory: directory, session: session, backend: backend)
-    }
-
-    private func request(_ text: String) throws -> DeepgramSpeechRequest {
-        try DeepgramSpeechRequest(text: text, modelID: "aura-2", voiceID: "deepgram/aura-2-thalia-en")
-    }
-
-    private func respond(with body: Data, contentType: String = "audio/wav") {
-        StubURLProtocol.handler = { request in
-            .respond(
-                HTTPURLResponse(
-                    url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": contentType]
-                )!,
-                body
-            )
-        }
-    }
-
-    /// A quiet 200 Hz square wave, like the other playback tests.
-    private static func pcm(frames: Int) -> Data {
-        var pcm = Data(capacity: frames * 2)
-        for frame in 0..<frames {
-            let sample = UInt16(bitPattern: (frame / 60).isMultiple(of: 2) ? 512 : -512)
-            pcm.append(UInt8(truncatingIfNeeded: sample))
-            pcm.append(UInt8(truncatingIfNeeded: sample >> 8))
-        }
-        return pcm
-    }
-
-    private static func canonicalWAV(frames: Int) -> Data {
-        PCMWaveWriter.wavData(pcm: pcm(frames: frames), sampleRate: 24_000)!
-    }
-
-    /// Deepgram streams its header before synthesis ends, so both lengths are
-    /// placeholders here.
-    private static func streamedWAV(frames: Int) -> Data {
-        var wav = canonicalWAV(frames: frames)
-        wav.replaceSubrange(4..<8, with: Data(repeating: 0xFF, count: 4))
-        wav.replaceSubrange(40..<44, with: Data(repeating: 0xFF, count: 4))
-        return wav
+    private func engine(_ backend: VoiceOutputRecordingBackend) throws -> WindowsVoiceOutput {
+        try WindowsVoiceOutput(stagingDirectory: directory, session: session, backend: backend)
     }
 }
 #endif

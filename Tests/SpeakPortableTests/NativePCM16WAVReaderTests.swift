@@ -7,6 +7,20 @@ import XCTest
 @testable import SpeakCore
 
 final class NativePCM16WAVReaderTests: XCTestCase {
+    func testHeaderProbeAcceptsOnlyCompleteCanonicalAudio() throws {
+        let audio = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
+        defer { try? FileManager.default.removeItem(at: audio) }
+        let canonical = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 16_000))
+        try canonical.write(to: audio)
+        XCTAssertEqual(try NativePCM16WAVReader.canonicalDuration(at: audio), 2.0 / 16_000, accuracy: 1e-9)
+        let stereo = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data([1, 0, 2, 0]), sampleRate: 16_000, channels: 2))
+        let empty = try XCTUnwrap(PCMWaveWriter.wavData(pcm: Data(), sampleRate: 16_000))
+        for invalid in [Data(canonical.dropLast()), stereo, empty, Data()] {
+            try invalid.write(to: audio)
+            XCTAssertThrowsError(try NativePCM16WAVReader.canonicalDuration(at: audio))
+        }
+    }
+
     func testNativeRecordingPassesThroughByteForByteWithMeasuredDuration() throws {
         let pcm = Data([0xFF, 0x7F, 0, 0x80, 0, 0])
         let bytes = try XCTUnwrap(PCMWaveWriter.wavData(pcm: pcm, sampleRate: 16_000))

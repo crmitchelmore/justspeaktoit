@@ -182,7 +182,8 @@ portablePackage.targets.append(contentsOf: [
         linkerSettings: [
             .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
             .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
-            .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"), .linkedLibrary("avrt")
+            .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
+            .linkedLibrary("avrt"), .linkedLibrary("mfuuid")
         ]
     ),
     .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport"]),

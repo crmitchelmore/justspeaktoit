@@ -3,7 +3,7 @@ import Foundation
 /// Reads the canonical WAV produced by native desktop capture without decoding
 /// or resampling. Other containers and WAV layouts need a platform converter.
 /// Bytes are bounded before allocation, then checked against the actual file.
-enum NativePCM16WAVReader {
+public enum NativePCM16WAVReader {
     static let sampleRate = 16_000
     private static let headerSize = 44
     private static let bytesPerSecond = sampleRate * 2
@@ -11,6 +11,24 @@ enum NativePCM16WAVReader {
     struct PreparedAudio {
         let data: Data
         let duration: TimeInterval
+    }
+
+    /// Reads only the 44-byte header and file size. Platform adapters can skip
+    /// decoding recordings that already match the shared provider input format.
+    public static func canonicalDuration(at url: URL) throws -> TimeInterval {
+        try Task.checkCancellation()
+        let input = try FileHandle(forReadingFrom: url)
+        defer { try? input.close() }
+        let size = try input.seekToEnd()
+        guard size >= UInt64(headerSize) else { throw PreparationError.invalidContainer }
+        try input.seek(toOffset: 0)
+        guard let header = try input.read(upToCount: headerSize), header.count == headerSize else {
+            throw PreparationError.invalidContainer
+        }
+        let payloadSize = size - UInt64(headerSize)
+        try validate(header: header, size: size, payloadSize: payloadSize)
+        guard payloadSize > 0 else { throw PreparationError.emptyInput }
+        return Double(payloadSize) / Double(bytesPerSecond)
     }
 
     static func prepare(

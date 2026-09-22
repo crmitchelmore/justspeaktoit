@@ -26,6 +26,11 @@
 #include <limits>
 
 namespace jsti {
+// Exclusive private staging file, opened read/write with DELETE access so a
+// failed producer can remove its own file by handle rather than following a
+// mutable pathname. The caller owns the handle; INVALID_HANDLE_VALUE fails.
+HANDLE createPrivateFileHandle(const char *path, std::string &error);
+
 inline int fail(const std::string &message, char *error, size_t capacity) {
     if (error && capacity) {
         const size_t count = std::min(message.size(), capacity - 1);

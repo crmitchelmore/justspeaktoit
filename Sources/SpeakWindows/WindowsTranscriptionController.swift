@@ -25,9 +25,7 @@ extension WindowsAppController {
             let model = record.modelIdentifier
             let task = Task {
                 try Task.checkCancellation()
-                return try await DesktopTranscription.transcribe(
-                    audioURL: audio, model: model, apiKey: key, duration: duration, staging: uploadStaging
-                )
+                return try await transcribePreparedAudio(audio, model: model, key: key, duration: duration)
             }
             transcriptionTask = task
             defer { transcriptionTask = nil }

@@ -184,6 +184,33 @@ int jsti_websocket_destroy(JSTIWebSocket *socket, char *error, size_t error_capa
 /* Deterministic URL/header validation; no network or credentials. */
 int jsti_websocket_self_test(char *error, size_t error_capacity);
 
+typedef struct JSTIAudioConversion JSTIAudioConversion;
+/* One completion on the dedicated conversion worker after start succeeds.
+ * status: 0 success, 1 cancelled, -1 failure. Duration/sample_count describe the
+ * actual canonical16kHz mono PCM16 output only on success. Error is borrowed
+ * until callback returns. Retain context until destroy succeeds; never destroy
+ * from this callback. The input is never changed. */
+typedef void (*JSTIAudioConversionCallback)(int status, double duration_seconds,
+                                           uint64_t sample_count, const char *error, void *context);
+/* Absolute local regular-file input; maximum25,000,000 input/output bytes.
+ * Output must not exist, and its parent must already have been prepared by
+ * jsti_private_directory_prepare. Conversion uses installed Media Foundation
+ * decoders; support for compressed formats depends on the Windows installation.
+ * Partial outputs are removed by their owned handle on failure/cancellation. */
+JSTIAudioConversion *jsti_audio_conversion_create(const char *input_path, const char *output_path,
+                                                  JSTIAudioConversionCallback callback, void *context,
+                                                  char *error, size_t error_capacity);
+int jsti_audio_conversion_start(JSTIAudioConversion *conversion, char *error, size_t error_capacity);
+/* Thread safe request. Pending sample reads are flushed on the worker;
+ * cancellation is checked between setup stages and output writes. */
+void jsti_audio_conversion_cancel(JSTIAudioConversion *conversion);
+/* Serialize against caller operations. Cancels and joins; zero frees the job.
+ * On failure retain the job/context and retry outside its callback thread. */
+int jsti_audio_conversion_destroy(JSTIAudioConversion *conversion, char *error, size_t error_capacity);
+/* Synthetic WAV decode/resample, bounds/collision/refusal/cancellation checks.
+ * No microphone, credentials, provider requests, or user recordings. */
+int jsti_audio_conversion_self_test(char *error, size_t error_capacity);
+
 /* Deterministic native checks: Unicode, frame boundaries, silence, invalid
  * insertion targets. Does not use microphone, clipboard or real credentials. */
 int jsti_native_self_test(char *error, size_t error_capacity);

@@ -253,7 +253,7 @@ bool verifyPrivate(HANDLE handle, const PrivateSecurity &security, std::string &
     return true;
 }
 
-int prepare(const char *path, bool directory, char *error, size_t capacity) {
+int prepareDirectory(const char *path, char *error, size_t capacity) {
     try {
         std::string detail;
         std::vector<std::wstring> components;
@@ -261,23 +261,18 @@ int prepare(const char *path, bool directory, char *error, size_t capacity) {
         std::vector<std::unique_ptr<jsti::Handle>> parents;
         if (!parsePath(path, components, detail) || !security.initialise(detail) ||
             !openParents(components, parents, detail)) return jsti::fail(detail, error, capacity);
-        if (!directory && !verifyPrivate(parents.back()->value, security, detail)) {
-            return jsti::fail("Multipart file parent is not private: " + detail, error, capacity);
-        }
         jsti::Handle leaf;
-        const ACCESS_MASK access = READ_CONTROL | FILE_READ_ATTRIBUTES | (directory ? WRITE_DAC : FILE_WRITE_DATA);
+        const ACCESS_MASK access = READ_CONTROL | FILE_READ_ATTRIBUTES | WRITE_DAC;
         if (!openRelative(parents.back()->value, components.back(), access,
-                          directory ? FILE_OPEN_IF : FILE_CREATE, directory, &security.descriptor, leaf, detail)) {
+                          FILE_OPEN_IF, true, &security.descriptor, leaf, detail)) {
             return jsti::fail(detail, error, capacity);
         }
-        if (directory) {
-            if (!verifyOwner(leaf.value, security, detail)) return jsti::fail(detail, error, capacity);
-            const DWORD code = SetSecurityInfo(leaf.value, SE_FILE_OBJECT,
-                                               DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                                               nullptr, nullptr, static_cast<PACL>(security.acl.value), nullptr);
-            if (code != ERROR_SUCCESS) {
-                return jsti::fail(jsti::systemError("Protect staging directory permissions", code), error, capacity);
-            }
+        if (!verifyOwner(leaf.value, security, detail)) return jsti::fail(detail, error, capacity);
+        const DWORD code = SetSecurityInfo(leaf.value, SE_FILE_OBJECT,
+                                           DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                                           nullptr, nullptr, static_cast<PACL>(security.acl.value), nullptr);
+        if (code != ERROR_SUCCESS) {
+            return jsti::fail(jsti::systemError("Protect staging directory permissions", code), error, capacity);
         }
         if (!verifyPrivate(leaf.value, security, detail)) return jsti::fail(detail, error, capacity);
         if (error && capacity) error[0] = 0;
@@ -358,12 +353,48 @@ struct TestFiles {
 };
 } // namespace
 
+HANDLE jsti::createPrivateFileHandle(const char *path, std::string &error) {
+    try {
+        std::vector<std::wstring> components;
+        PrivateSecurity security;
+        std::vector<std::unique_ptr<jsti::Handle>> parents;
+        if (!parsePath(path, components, error) || !security.initialise(error) ||
+            !openParents(components, parents, error)) return INVALID_HANDLE_VALUE;
+        if (!verifyPrivate(parents.back()->value, security, error)) {
+            error = "Output file parent is not private: " + error;
+            return INVALID_HANDLE_VALUE;
+        }
+        jsti::Handle leaf;
+        const ACCESS_MASK access = READ_CONTROL | FILE_READ_ATTRIBUTES | FILE_READ_DATA | FILE_WRITE_DATA | DELETE;
+        if (!openRelative(parents.back()->value, components.back(), access,
+                          FILE_CREATE, false, &security.descriptor, leaf, error)) return INVALID_HANDLE_VALUE;
+        if (!verifyPrivate(leaf.value, security, error)) {
+            FILE_DISPOSITION_INFO disposition{TRUE};
+            if (!SetFileInformationByHandle(leaf.value, FileDispositionInfo, &disposition, sizeof(disposition))) {
+                error += " " + jsti::systemError("Remove invalid private output");
+            }
+            return INVALID_HANDLE_VALUE;
+        }
+        const HANDLE handle = leaf.value;
+        leaf.value = nullptr;
+        return handle;
+    } catch (const std::exception &) {
+        error = "Private staging could not allocate its security state.";
+        return INVALID_HANDLE_VALUE;
+    }
+}
+
 int jsti_private_directory_prepare(const char *path, char *error, size_t capacity) {
-    return prepare(path, true, error, capacity);
+    return prepareDirectory(path, error, capacity);
 }
 
 int jsti_private_file_create(const char *path, char *error, size_t capacity) {
-    return prepare(path, false, error, capacity);
+    std::string detail;
+    jsti::Handle file;
+    file.value = jsti::createPrivateFileHandle(path, detail);
+    if (file.value == INVALID_HANDLE_VALUE) return jsti::fail(detail, error, capacity);
+    if (error && capacity) error[0] = 0;
+    return 0;
 }
 
 int jsti_private_storage_self_test(char *error, size_t capacity) {
@@ -439,14 +470,31 @@ int jsti_private_storage_self_test(char *error, size_t capacity) {
         // preparation repairs it. Real recordings/credentials are never touched.
         {
             jsti::Handle handle;
-            handle.value = CreateFileW(paths.root.c_str(), WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            handle.value = CreateFileW(paths.root.c_str(), READ_CONTROL | WRITE_DAC, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
             if (handle.value == INVALID_HANDLE_VALUE) {
                 return jsti::fail(jsti::systemError("Open test directory for ACL repair"), error, capacity);
             }
+            BYTE everyone[SECURITY_MAX_SID_SIZE] = {};
+            DWORD sidSize = sizeof(everyone);
+            if (!CreateWellKnownSid(WinWorldSid, nullptr, everyone, &sidSize)) {
+                return jsti::fail(jsti::systemError("Create synthetic test trustee"), error, capacity);
+            }
+            EXPLICIT_ACCESSW entry{};
+            entry.grfAccessPermissions = FILE_ALL_ACCESS;
+            entry.grfAccessMode = GRANT_ACCESS;
+            entry.grfInheritance = NO_INHERITANCE;
+            BuildTrusteeWithSidW(&entry.Trustee, everyone);
+            PACL permissiveACL = nullptr;
+            const DWORD aclCode = SetEntriesInAclW(1, &entry, static_cast<PACL>(testSecurity.acl.value), &permissiveACL);
+            LocalMemory permissiveMemory;
+            permissiveMemory.value = permissiveACL;
+            if (aclCode != ERROR_SUCCESS) {
+                return jsti::fail(jsti::systemError("Create synthetic directory test ACL", aclCode), error, capacity);
+            }
             const DWORD code = SetSecurityInfo(handle.value, SE_FILE_OBJECT,
                                                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                                               nullptr, nullptr, nullptr, nullptr);
+                                               nullptr, nullptr, permissiveACL, nullptr);
             if (code != ERROR_SUCCESS) {
                 return jsti::fail(jsti::systemError("Set synthetic directory test ACL", code), error, capacity);
             }

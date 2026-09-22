@@ -43,7 +43,7 @@ struct DeepgramSpeechSynthesizer: Sendable {
         responseLimit: Int = DeepgramSpeechSynthesizer.defaultResponseLimit,
         deadline: Duration = DeepgramSpeechSynthesizer.defaultDeadline,
         engine: OpenRouterBoundedResponseTransport.Engine = .platformDefault,
-        renderer: PronunciationRenderer = PronunciationRenderer()
+        renderer: PronunciationRenderer = PronunciationRenderer(retention: .activeDictionary)
     ) {
         precondition(responseLimit > 44 && deadline > .zero, "Deepgram speech needs a positive response bound")
         self.session = session

@@ -190,11 +190,38 @@ final class DeepgramSpeechSynthesizerTests: DeepgramSpeechStubTestCase {
         let family = "\u{1F469}\u{200D}\u{1F469}\u{200D}\u{1F467}"
         XCTAssertEqual(try count(String(repeating: family, count: 400)), 2_000)
         assertTooLong(String(repeating: family, count: 401), counting: 2_005)
-        // Oversized input, padding included, is refused before pronunciation
-        // work; whitespace alone is still simply nothing to speak.
+        // Oversized input is refused before pronunciation work.
         assertTooLong(String(repeating: "c", count: 20_001), counting: 20_001)
-        assertTooLong("hello" + String(repeating: " ", count: 20_000), counting: 20_005)
-        XCTAssertNil(try count(String(repeating: " \n", count: 20_000)))
+    }
+
+    func testSourceWorkBound_MeasuresTheExactTextGivenToPronunciation() throws {
+        // A single letter inside huge padding must not run every expression over
+        // the padding: the bound applies to the untrimmed text the renderer sees.
+        let renderer = PronunciationRenderer(retention: .activeDictionary)
+        let synthesizer = DeepgramSpeechSynthesizer(session: session, renderer: renderer)
+        let entries = [PronunciationEntry(word: "a", pronunciation: "ay", replacement: "ay")]
+        let padding = String(repeating: " ", count: 20_000)
+        for text in [padding + "a", "a" + padding, " " + padding + "a\n"] {
+            let request = try DeepgramSpeechRequest(text: text, modelID: nil, voiceID: nil, pronunciation: entries)
+            XCTAssertThrowsError(try synthesizer.utterance(for: request)) {
+                XCTAssertEqual(
+                    $0 as? DeepgramSpeechError,
+                    .textTooLong(characterCount: text.unicodeScalars.count, limit: 2_000)
+                )
+            }
+        }
+        XCTAssertEqual(renderer.compilationCount, 0, "Pronunciation ran on oversized input")
+        // Whitespace alone is still nothing to speak, whatever its size.
+        let blank = try DeepgramSpeechRequest(
+            text: String(repeating: " \n", count: 20_000), modelID: nil, voiceID: nil, pronunciation: entries
+        )
+        XCTAssertNil(try synthesizer.utterance(for: blank))
+        // At the bound, pronunciation runs on exactly that text.
+        let bounded = try DeepgramSpeechRequest(
+            text: String(repeating: " ", count: 19_999) + "a", modelID: nil, voiceID: nil, pronunciation: entries
+        )
+        XCTAssertEqual(try synthesizer.utterance(for: bounded)?.text, "ay")
+        XCTAssertEqual(renderer.compilationCount, 1)
     }
 
     func testRequestSnapshot_IgnoresLaterChangesToTheCallersDictionary() throws {

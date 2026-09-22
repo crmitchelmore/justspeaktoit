@@ -23,13 +23,32 @@ enum DeepgramSpeechFixture {
         PCMWaveWriter.wavData(pcm: pcm, sampleRate: rate, channels: channels, bitsPerSample: bits)!
     }
 
-    /// A streamed response: its header was written before synthesis ended, so
-    /// both lengths carry `placeholder`.
-    static func streamedWAV(pcm: Data, rate: Int = 24_000, placeholder: UInt32 = .max) -> Data {
-        var wav = canonicalWAV(pcm: pcm, rate: rate)
-        wav.replaceSubrange(4..<8, with: littleEndian(placeholder))
-        wav.replaceSubrange(40..<44, with: littleEndian(placeholder))
+    /// The header Deepgram streams before synthesis ends: RIFF `24 00 ff 7f`
+    /// and data `00 00 ff 7f`, as in the hexdumps at
+    /// https://developers.deepgram.com/docs/handling-audio-issues-in-text-to-speech
+    /// and https://github.com/orgs/deepgram/discussions/664.
+    static func streamedWAV(pcm: Data, rate: Int = 24_000) -> Data {
+        withLengths(canonicalWAV(pcm: pcm, rate: rate), riff: [0x24, 0x00, 0xFF, 0x7F], data: [0x00, 0x00, 0xFF, 0x7F])
+    }
+
+    /// The zero placeholders in Deepgram's streamed-header example.
+    static func zeroPlaceholderWAV(pcm: Data, rate: Int = 24_000) -> Data {
+        withLengths(canonicalWAV(pcm: pcm, rate: rate), riff: [0, 0, 0, 0], data: [0, 0, 0, 0])
+    }
+
+    /// Replaces the RIFF and `data` length bytes of a 44-byte-header WAV.
+    static func withLengths(_ wav: Data, riff: [UInt8], data: [UInt8]) -> Data {
+        var wav = wav
+        wav.replaceSubrange(4..<8, with: riff)
+        wav.replaceSubrange(40..<44, with: data)
         return wav
+    }
+
+    /// Recomputes a finite RIFF length for the whole body.
+    static func withFiniteRIFF(_ body: Data) -> Data {
+        var body = body
+        body.replaceSubrange(4..<8, with: littleEndian(UInt32(body.count - 8)))
+        return body
     }
 
     static func littleEndian(_ value: UInt32) -> Data {
@@ -52,40 +71,94 @@ enum DeepgramSpeechFixture {
 
 final class DeepgramSpeechWAVTests: XCTestCase {
     private let pcm = DeepgramSpeechFixture.pcm(frames: 2_400)
+    private var expected: Data { DeepgramSpeechFixture.canonicalWAV(pcm: pcm) }
 
-    func testStreamedPlaceholderLengths_AreRewrittenExactly() throws {
-        let expected = DeepgramSpeechFixture.canonicalWAV(pcm: pcm)
-        for placeholder in [UInt32.max, 0] {
-            let body = DeepgramSpeechFixture.streamedWAV(pcm: pcm, placeholder: placeholder)
+    func testDocumentedDeepgramStreamingHeaders_AreRewrittenExactly() throws {
+        let streamed = DeepgramSpeechFixture.streamedWAV(pcm: pcm)
+        XCTAssertEqual(Array(streamed[4..<8]), [0x24, 0x00, 0xFF, 0x7F])
+        XCTAssertEqual(Array(streamed[40..<44]), [0x00, 0x00, 0xFF, 0x7F])
+        for body in [streamed, DeepgramSpeechFixture.zeroPlaceholderWAV(pcm: pcm)] {
             let audio = try DeepgramSpeechWAV.canonical(body, sampleRate: 24_000)
-            XCTAssertEqual(audio.wav, expected, "placeholder \(placeholder)")
+            XCTAssertEqual(audio.wav, expected)
             XCTAssertEqual(audio.frameCount, 2_400)
             XCTAssertEqual(audio.duration, 0.1, accuracy: 1e-12)
         }
-        // A data length beyond the received bytes is a placeholder too.
-        var oversized = DeepgramSpeechFixture.canonicalWAV(pcm: pcm)
-        oversized.replaceSubrange(40..<44, with: DeepgramSpeechFixture.littleEndian(10_000_000))
-        XCTAssertEqual(try DeepgramSpeechWAV.canonical(oversized, sampleRate: 24_000).wav, expected)
-        // An exact header passes through unchanged.
+        // An exact finite header passes through unchanged.
         XCTAssertEqual(try DeepgramSpeechWAV.canonical(expected, sampleRate: 24_000).wav, expected)
     }
 
+    func testTruncatedFiniteAudio_IsIncompleteNeverPartialSpeech() {
+        let declared = Array(DeepgramSpeechFixture.littleEndian(UInt32(pcm.count + 2)))
+        let consistentRIFF = Array(DeepgramSpeechFixture.littleEndian(UInt32(36 + pcm.count + 2)))
+        // Both lengths finite and consistent with each other, but the body ends early.
+        assertRefused(expected.dropLast(100), .incompleteAudio, "cut mid-payload")
+        assertRefused(
+            DeepgramSpeechFixture.withLengths(expected, riff: consistentRIFF, data: declared),
+            .incompleteAudio, "declared beyond the body"
+        )
+        // The RIFF length matches the body but the data length overruns it.
+        assertRefused(
+            DeepgramSpeechFixture.withLengths(expected, riff: Array(expected[4..<8]), data: declared),
+            .incompleteAudio, "data beyond a consistent RIFF"
+        )
+        // 0xFFFFFFFF is not a documented Deepgram sentinel; it is an overrun.
+        assertRefused(
+            DeepgramSpeechFixture.withLengths(expected, riff: [0xFF, 0xFF, 0xFF, 0xFF], data: [0xFF, 0xFF, 0xFF, 0xFF]),
+            .incompleteAudio, "undocumented all-ones lengths"
+        )
+        // The stream ended inside the header.
+        let header = Data("RIFF".utf8) + DeepgramSpeechFixture.littleEndian(0) + Data("WAVEfmt ".utf8)
+        assertRefused(header + DeepgramSpeechFixture.littleEndian(16) + Data([1, 0, 1, 0]), .incompleteAudio, "fmt")
+    }
+
+    func testInconsistentOrMixedLengths_AreRefused() {
+        let finiteData = Array(expected[40..<44])
+        let cases: [(String, Data)] = [
+            ("bytes after the RIFF container", expected + Data([1, 2, 3, 4])),
+            ("Deepgram RIFF sentinel with a finite data length",
+             DeepgramSpeechFixture.withLengths(expected, riff: [0x24, 0x00, 0xFF, 0x7F], data: finiteData)),
+            ("zero RIFF with Deepgram's data sentinel",
+             DeepgramSpeechFixture.withLengths(expected, riff: [0, 0, 0, 0], data: [0x00, 0x00, 0xFF, 0x7F])),
+            ("Deepgram RIFF sentinel with a zero data length",
+             DeepgramSpeechFixture.withLengths(expected, riff: [0x24, 0x00, 0xFF, 0x7F], data: [0, 0, 0, 0]))
+        ]
+        for (name, body) in cases {
+            assertRefused(body, .unsupportedAudioFormat, name)
+        }
+        // A finite RIFF with Deepgram's data sentinel declares more than arrived.
+        assertRefused(
+            DeepgramSpeechFixture.withLengths(expected, riff: Array(expected[4..<8]), data: [0x00, 0x00, 0xFF, 0x7F]),
+            .incompleteAudio, "finite RIFF with a data sentinel"
+        )
+    }
+
     func testOtherChunksAndExtensiblePCM_AreAcceptedWithoutTheirBytes() throws {
-        let expected = DeepgramSpeechFixture.canonicalWAV(pcm: pcm)
         // An odd-sized LIST chunk and its pad byte precede the audio; a trailing
-        // chunk follows an exact data length. Neither reaches the player.
+        // chunk follows an exact data length inside a consistent RIFF length.
         var body = Data(expected[0..<36])
         body.append(Data("LIST".utf8) + DeepgramSpeechFixture.littleEndian(3) + Data([1, 2, 3, 0]))
         body.append(expected[36...])
         body.append(Data("junk".utf8) + DeepgramSpeechFixture.littleEndian(2) + Data([9, 9]))
-        XCTAssertEqual(try DeepgramSpeechWAV.canonical(body, sampleRate: 24_000).wav, expected)
+        XCTAssertEqual(try canonical(DeepgramSpeechFixture.withFiniteRIFF(body)), expected)
 
-        XCTAssertEqual(try DeepgramSpeechWAV.canonical(extensible(), sampleRate: 24_000).wav, expected)
+        let streamedLengths: [([UInt8], [UInt8])] = [
+            ([0x24, 0x00, 0xFF, 0x7F], [0x00, 0x00, 0xFF, 0x7F]), ([0, 0, 0, 0], [0, 0, 0, 0])
+        ]
+        for (riff, data) in streamedLengths {
+            XCTAssertEqual(try canonical(extensible(riff: riff, data: data)), expected)
+        }
+        let finite = extensible(riff: [0, 0, 0, 0], data: Array(DeepgramSpeechFixture.littleEndian(UInt32(pcm.count))))
+        XCTAssertEqual(try canonical(DeepgramSpeechFixture.withFiniteRIFF(finite)), expected)
+    }
+
+    private func canonical(_ body: Data) throws -> Data {
+        try DeepgramSpeechWAV.canonical(body, sampleRate: 24_000).wav
     }
 
     func testEmptyAndSilentResponses_AreRefused() {
         assertRefused(Data(), .emptyAudio)
-        assertRefused(DeepgramSpeechFixture.streamedWAV(pcm: Data(), placeholder: 0), .emptyAudio)
+        assertRefused(DeepgramSpeechFixture.zeroPlaceholderWAV(pcm: Data()), .emptyAudio)
+        assertRefused(DeepgramSpeechFixture.streamedWAV(pcm: Data()), .emptyAudio)
         assertRefused(DeepgramSpeechFixture.canonicalWAV(pcm: Data()), .emptyAudio)
         assertRefused(DeepgramSpeechFixture.streamedWAV(pcm: Data(count: 4_800)), .silentAudio)
     }
@@ -99,32 +172,25 @@ final class DeepgramSpeechWAVTests: XCTestCase {
             ("stereo", DeepgramSpeechFixture.canonicalWAV(pcm: pcm, channels: 2)),
             ("8-bit", DeepgramSpeechFixture.canonicalWAV(pcm: pcm, bits: 8)),
             ("partial sample", DeepgramSpeechFixture.streamedWAV(pcm: pcm) + Data([7])),
-            ("no data chunk", Data(DeepgramSpeechFixture.canonicalWAV(pcm: pcm)[0..<36])),
-            ("data before fmt", dataBeforeFormat()),
-            ("truncated fmt", Data("RIFF".utf8) + DeepgramSpeechFixture.littleEndian(0) + Data("WAVEfmt ".utf8)
-                + DeepgramSpeechFixture.littleEndian(16) + Data([1, 0, 1, 0]))
+            ("no data chunk", DeepgramSpeechFixture.withFiniteRIFF(Data(expected[0..<36]))),
+            ("data before fmt", Data(expected[0..<12]) + Data(expected[36...]) + Data(expected[12..<36]))
         ]
         for (name, body) in unsupported {
             assertRefused(body, .unsupportedAudioFormat, name)
         }
     }
 
-    private func extensible() -> Data {
+    private func extensible(riff: [UInt8], data: [UInt8]) -> Data {
         var format = DeepgramSpeechFixture.littleEndian16(0xFFFE) + DeepgramSpeechFixture.littleEndian16(1)
         format += DeepgramSpeechFixture.littleEndian(24_000) + DeepgramSpeechFixture.littleEndian(48_000)
         format += DeepgramSpeechFixture.littleEndian16(2) + DeepgramSpeechFixture.littleEndian16(16)
         format += DeepgramSpeechFixture.littleEndian16(22) + DeepgramSpeechFixture.littleEndian16(16)
         format += DeepgramSpeechFixture.littleEndian(4)
         format += Data([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71])
-        var body = Data("RIFF".utf8) + DeepgramSpeechFixture.littleEndian(.max) + Data("WAVEfmt ".utf8)
+        var body = Data("RIFF".utf8) + Data(riff) + Data("WAVEfmt ".utf8)
         body += DeepgramSpeechFixture.littleEndian(UInt32(format.count)) + format
-        body += Data("data".utf8) + DeepgramSpeechFixture.littleEndian(.max) + pcm
+        body += Data("data".utf8) + Data(data) + pcm
         return body
-    }
-
-    private func dataBeforeFormat() -> Data {
-        let canonical = DeepgramSpeechFixture.canonicalWAV(pcm: pcm)
-        return Data(canonical[0..<12]) + Data(canonical[36...]) + Data(canonical[12..<36])
     }
 
     private func assertRefused(

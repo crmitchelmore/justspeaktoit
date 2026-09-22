@@ -6,14 +6,28 @@ import Foundation
 /// `PronunciationManager` delegates here, and portable voice output applies an
 /// immutable entry snapshot through the same code, so a dictionary is spoken
 /// identically on every platform. Thread safe. Compiled expressions are cached
-/// by options and pattern; the cache is bounded because a long-lived renderer
-/// can outlive many edited dictionaries, and a full cache is simply rebuilt.
+/// by options and pattern; `Retention` decides how long they are kept, never
+/// how text is replaced.
 final class PronunciationRenderer: @unchecked Sendable {
-    static let maximumCachedExpressions = 512
+    enum Retention: Sendable {
+        /// Every compiled expression is kept for the renderer's lifetime: the
+        /// dictionary manager's established behaviour, whatever its size.
+        case unbounded
+        /// After each dictionary pass, only the expressions that dictionary can
+        /// use are kept. A long-lived renderer that sees many request snapshots
+        /// then holds one dictionary's expressions, all of them warm.
+        case activeDictionary
+    }
 
+    private let retention: Retention
     private let lock = NSLock()
     // Cache compiled NSRegularExpression instances; key = "<options.rawValue>:<pattern>"
     private var regexCache: [String: NSRegularExpression] = [:]
+    private var compilations = 0
+
+    init(retention: Retention = .unbounded) {
+        self.retention = retention
+    }
 
     /// Applies every entry with a non-empty replacement, in entry order, each
     /// to the result of the previous one.
@@ -40,6 +54,7 @@ final class PronunciationRenderer: @unchecked Sendable {
             }
         }
 
+        if case .activeDictionary = retention { retainExpressions(of: entries) }
         return result
     }
 
@@ -56,8 +71,7 @@ final class PronunciationRenderer: @unchecked Sendable {
             return text.replacingOccurrences(of: word, with: replacement)
         } else {
             // Case-insensitive replacement with word boundaries
-            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
-            guard let regex = cachedRegex(pattern: pattern, options: .caseInsensitive) else {
+            guard let regex = cachedRegex(pattern: Self.wordPattern(word), options: .caseInsensitive) else {
                 return text
             }
 
@@ -78,12 +92,7 @@ final class PronunciationRenderer: @unchecked Sendable {
         replacement: String,
         caseSensitive: Bool
     ) -> String {
-        var options: NSRegularExpression.Options = []
-        if !caseSensitive {
-            options.insert(.caseInsensitive)
-        }
-
-        guard let regex = cachedRegex(pattern: pattern, options: options) else {
+        guard let regex = cachedRegex(pattern: pattern, options: Self.regexOptions(caseSensitive: caseSensitive)) else {
             return text
         }
 
@@ -97,9 +106,11 @@ final class PronunciationRenderer: @unchecked Sendable {
     }
 
     var cachedExpressionCount: Int { lock.withLock { regexCache.count } }
+    /// Expressions compiled so far; unchanged by warm passes.
+    var compilationCount: Int { lock.withLock { compilations } }
 
     private func cachedRegex(pattern: String, options: NSRegularExpression.Options) -> NSRegularExpression? {
-        let key = "\(options.rawValue):\(pattern)"
+        let key = Self.cacheKey(pattern: pattern, options: options)
         if let cached = lock.withLock({ regexCache[key] }) {
             return cached
         }
@@ -108,9 +119,43 @@ final class PronunciationRenderer: @unchecked Sendable {
             return nil
         }
         lock.withLock {
-            if regexCache.count >= Self.maximumCachedExpressions { regexCache.removeAll() }
+            compilations += 1
             regexCache[key] = regex
         }
         return regex
+    }
+
+    /// Keeps the expressions any pass over `entries` can use, including the
+    /// SSML path's, and drops the rest.
+    private func retainExpressions(of entries: [PronunciationEntry]) {
+        let keys = Set(entries.compactMap(Self.cacheKey(for:)))
+        lock.withLock {
+            guard regexCache.keys.contains(where: { !keys.contains($0) }) else { return }
+            regexCache = regexCache.filter { keys.contains($0.key) }
+        }
+    }
+
+    /// The compiled expression an entry can use; `nil` for literal matching.
+    private static func cacheKey(for entry: PronunciationEntry) -> String? {
+        if entry.isRegex {
+            return cacheKey(pattern: entry.word, options: regexOptions(caseSensitive: entry.caseSensitive))
+        }
+        return entry.caseSensitive ? nil : cacheKey(pattern: wordPattern(entry.word), options: .caseInsensitive)
+    }
+
+    private static func wordPattern(_ word: String) -> String {
+        "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
+    }
+
+    private static func regexOptions(caseSensitive: Bool) -> NSRegularExpression.Options {
+        var options: NSRegularExpression.Options = []
+        if !caseSensitive {
+            options.insert(.caseInsensitive)
+        }
+        return options
+    }
+
+    private static func cacheKey(pattern: String, options: NSRegularExpression.Options) -> String {
+        "\(options.rawValue):\(pattern)"
     }
 }

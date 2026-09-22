@@ -69,6 +69,10 @@ public extension StreamingTranscriptionClient {
 ///
 /// `StreamingClientContractTests` asserts this for every conformer.
 public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionClient {
+    /// Maximum provider drain time, excluding platform capture teardown and UI
+    /// delivery. Nil preserves the host's existing default watchdog policy.
+    var finalisationBudget: TimeInterval? { get }
+
     /// Commits pending input, waits for the provider's final transcript (with
     /// an implementation-defined timeout), then closes the connection.
     ///
@@ -88,6 +92,7 @@ public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionCl
 }
 
 public extension FinalizingStreamingTranscriptionClient {
+    var finalisationBudget: TimeInterval? { nil }
     var finishFlushesBufferedAudio: Bool { true }
 }
 

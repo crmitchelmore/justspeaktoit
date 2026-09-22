@@ -387,8 +387,15 @@ int jsti_private_storage_self_test(char *error, size_t capacity) {
         TestFiles paths;
         const std::wstring testRoot = std::wstring(temporary) + L"JustSpeakToIt-security-test-" + identifier;
         // Establish exclusive ownership before preparing or later removing the
-        // leaf, even in the extremely unlikely event of a GUID collision.
-        if (!CreateDirectoryW(testRoot.c_str(), nullptr)) {
+        // leaf, even in the extremely unlikely event of a GUID collision. An
+        // elevated token's default owner can be Administrators rather than
+        // TokenUser, so the synthetic root needs the same explicit owner as
+        // production staging. Do not weaken existing-directory owner checks.
+        PrivateSecurity testSecurity;
+        std::string securityError;
+        if (!testSecurity.initialise(securityError)) return jsti::fail(securityError, error, capacity);
+        SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), &testSecurity.descriptor, FALSE};
+        if (!CreateDirectoryW(testRoot.c_str(), &attributes)) {
             return jsti::fail(jsti::systemError("Create unique security test directory"), error, capacity);
         }
         paths.root = testRoot;

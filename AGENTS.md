@@ -68,6 +68,23 @@ of hand-maintained structure documentation.
 3. **Public APIs for libraries**: Types in `SpeakiOSLib` must be `public` for Xcode project to access
 4. **Tuist links packages**: `Project.swift` references the local Swift package for Xcode generation
 
+### Windows and shared desktop behaviour
+
+- Put provider contracts, parsing, catalogues and transcript policies in `SpeakCore`;
+  put portable desktop recording/history orchestration in `SpeakDesktop`.
+- New shared source files enter the Windows/Linux build by default. Keep native
+  framework dependencies in platform adapters; do not expand `appleCoreSources`
+  to avoid implementing a shared feature on Windows.
+- Keep capture, resampling, inference and insertion native and in process. Reuse
+  shared Swift behaviour without adding IPC or disk polling to the audio path.
+- Use the canonical catalogue and stable identifiers. A platform may expose only
+  routes its host actually implements; catalogue membership alone is not support.
+- Changes to shared behaviour must pass the normal Apple suite and portable
+  Windows/macOS/Linux checks. Native adapters also need target-platform evidence.
+- Follow [Docs/windows-development.md](Docs/windows-development.md) for builds,
+  the current parity matrix and performance/device acceptance gates. Preserve
+  `Package.resolved` when the dependency-free portable graph removes it.
+
 ## Build, Test, and Development Commands
 
 ### macOS (SwiftPM)

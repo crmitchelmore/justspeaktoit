@@ -4,8 +4,8 @@ import SpeakDesktop
 import CWindowsSupport
 
 enum WindowsModels {
-    // Enabled only once the production WinHTTP runtime probe passes on Windows.
-    static let streamingQualified = false
+    // Native WinHTTP passed all five Windows runtime probes in run 35718564307.
+    static let streamingQualified = true
     static var live: [ModelCatalog.Option] { streamingQualified ? DesktopLiveTranscription.liveModels : [] }
     static var all: [ModelCatalog.Option] { DesktopTranscription.batchModels + live }
 

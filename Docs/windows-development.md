@@ -33,11 +33,15 @@ $bin = swift build --configuration release --show-bin-path
 & (Join-Path $bin.Trim() 'SpeakWindows.exe')
 ```
 
-The current source offers microphone recording, audio-file import and **22 batch
-models across twelve providers**: OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini,
-xAI, Cartesia, Gladia, Speechmatics, Meta, Azure and Mistral. These are projections of the canonical
-shared catalogue and execute through shared provider clients; live models remain
-unavailable in the Windows workflow. Final-head CI for this expansion is pending.
+The current source offers microphone recording, audio-file import and **24 batch
+models across fourteen providers**: OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini,
+xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox and Rev.ai. These are projections of the canonical
+shared catalogue and execute through shared provider clients. Three Deepgram live
+models are wired through shared Swift session snapshots and the native WinHTTP
+adapter, whose five Windows runtime probes passed. Final-head CI for the host
+integration and real provider acceptance are pending. Batch and Live keep separate
+model selections. Native capture is joined before finalisation; received text
+and audio survive cancellation or failure, with no automatic insertion on failure.
 `Ctrl+Alt+Space` starts and stops recording when registration succeeds. Save the
 selected provider's key through the application; each provider uses its canonical
 credential identifier in Windows Credential Manager. The app stores settings and
@@ -54,10 +58,13 @@ Imports are checked before copying: regular audio files, supported extensions,
 non-empty and at most 25 MB. Meta and Azure currently accept the app's canonical
 16 kHz mono PCM16 WAV directly; other imported encodings require a future Windows
 conversion adapter. Azure keys accept `key:region` (a raw key defaults to eastus);
-custom resource endpoint UI remains pending. Mistral streams its multipart body
-from a temporary file, using a native protected ACL for the current Windows user
+custom resource endpoint UI remains pending. Mistral, Soniox and Rev.ai stream multipart bodies
+from temporary files, using a native protected ACL for the current Windows user
 and SYSTEM. Creation refuses existing files and reparse-point paths; completed,
-failed and cancelled uploads remove their staging files.
+failed and cancelled uploads remove their staging files. Soniox removes accepted
+remote file/job resources after completion, failure and cancellation; a failed
+job deletion still attempts file deletion. Rev.ai retains its existing remote-job
+retention policy.
 
 The native History pane selects saved recordings, retries transcription with
 the recording's original model, exports transcript text through an overwrite-
@@ -134,7 +141,7 @@ flowchart TB
 | Layer | Current responsibility | Source |
 |---|---|---|
 | Canonical domain | Model identifiers, provider routes, transcript semantics, Unicode reconciliation, lifecycle ownership, PCM/WAV, comparison and history projections | `Sources/SpeakCore/` |
-| Shared batch transport | Twelve provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
+| Shared batch transport | Fourteen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
 | Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
@@ -183,8 +190,8 @@ but must not be presented as the identical Apple-only engine or service.
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
-| Batch transcription | 22 canonical models across OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta, Azure and Mistral, through shared clients | Final-head Windows/Linux CI, real provider receipts, supported formats/languages and remaining macOS providers |
-| Live transcription | Shared routes/protocols/transcript policies compile | Windows transport integration and every provider's streaming/finalisation acceptance |
+| Batch transcription | 24 canonical models across OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox and Rev.ai, through shared clients | Final-head Windows/Linux CI, real provider receipts, supported formats/languages and remaining macOS providers |
+| Live transcription | Three Deepgram routes use shared sessions and a runtime-qualified native WinHTTP transport | Final-head native host checks, real provider receipts and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
 | Text output | Captured native Edit/RichEdit insertion and explicit copy implemented | Browser/Electron/Office coverage, selections, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
@@ -195,7 +202,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
 | Voice output | Shared catalogues and some request contracts compile | Provider execution, native playback, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
-| Credentials | Windows Credential Manager uses canonical identifiers for the twelve transcription providers and OpenRouter | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
+| Credentials | Windows Credential Manager uses canonical identifiers for the fourteen transcription providers and OpenRouter | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
 | Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
 | Automation and integrations | Shared protocol data available in source | Windows CLI/IPC, OpenClaw, deep links and applicable automation surface parity |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
@@ -265,6 +272,15 @@ Verified baseline on 22 September 2026:
   requires a Windows transport adapter before any live model is exposed.
 - The full Apple suite after the nine-provider extraction passed **3,476 tests,
   16 skipped, zero failures**. Later changes require their own regression checks.
+- [Run 35718564307](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35718564307)
+  at source `bd8b4235` (tested merge `ad89d515`) passed the Windows release build,
+  **125 baseline tests, ten optional probes skipped, zero failures**, followed by
+  **all five native WinHTTP runtime probes with zero skips or failures**. These
+  cover handshake, 100 ms PCM, server ping/autopong, close status/reason, cancelled
+  handshake/receive, abrupt disconnect, fragmented Unicode/binary messages, two
+  exact 2 MiB echoes and oversized-message rejection. Portable macOS/Linux passed.
+  The overall run failed in executable self-test on private staging ownership;
+  this run therefore does not qualify the expanded native window or host.
 - **Final-head Windows, macOS and Linux CI for the current source is pending.**
   Provider contract tests use the shared URLProtocol stub and no live provider
   keys; test success must not be reported as a live transcription receipt.

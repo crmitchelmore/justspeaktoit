@@ -9,17 +9,15 @@ extension SharedMultipartUploadStaging {
         boundary: String,
         fields: [(name: String, value: String)],
         mimeType: String,
-        fileField: String = "file"
+        fileField: String = "file",
+        trailingFields: [(name: String, value: String)] = []
     ) throws -> URL {
         try Task.checkCancellation()
         let destination = try createUploadBodyFile(providerID: providerID)
         do {
             let output = try FileHandle(forWritingTo: destination)
             defer { try? output.close() }
-            for field in fields {
-                let header = "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field.name)\"\r\n\r\n"
-                try output.write(contentsOf: Data((header + field.value + "\r\n").utf8))
-            }
+            try Self.write(fields: fields, boundary: boundary, to: output)
             let filename = sourceURL.lastPathComponent
                 .replacingOccurrences(of: "\r", with: "")
                 .replacingOccurrences(of: "\n", with: "")
@@ -37,11 +35,26 @@ extension SharedMultipartUploadStaging {
                 guard !chunk.isEmpty else { break }
                 try output.write(contentsOf: chunk)
             }
-            try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
+            if trailingFields.isEmpty {
+                try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
+            } else {
+                try output.write(contentsOf: Data("\r\n".utf8))
+                try Self.write(fields: trailingFields, boundary: boundary, to: output)
+                try output.write(contentsOf: Data("--\(boundary)--\r\n".utf8))
+            }
             return destination
         } catch {
             removeUploadBodyFile(at: destination)
             throw error
+        }
+    }
+
+    private static func write(
+        fields: [(name: String, value: String)], boundary: String, to output: FileHandle
+    ) throws {
+        for field in fields {
+            let header = "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field.name)\"\r\n\r\n"
+            try output.write(contentsOf: Data((header + field.value + "\r\n").utf8))
         }
     }
 }

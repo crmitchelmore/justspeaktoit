@@ -11,6 +11,17 @@ public enum DesktopTranscription {
         ModelCatalog.batchTranscription.filter { backend(for: $0.id) != nil }
     }
 
+    /// These routes need canonical mono 16 kHz PCM16 WAV before their shared
+    /// clients run. Other providers retain their encoded-container upload path.
+    public static func requiresCanonicalPCM16WAV(model: String) -> Bool {
+        let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .prepared(let provider) = backend(for: identifier) else { return false }
+        switch provider {
+        case .meta, .azure: return true
+        default: return false
+        }
+    }
+
     /// The same credential identifier, provider name and account-creation URL
     /// the Apple surfaces use. Unimplemented models never acquire a descriptor.
     public static func provider(for modelID: String) -> TranscriptionProviderMetadata? {
@@ -41,11 +52,13 @@ public enum DesktopTranscription {
         duration: TimeInterval,
         language: String? = nil,
         azureEndpoint: String = "",
+        modulateFeatures: ModulateTranscriptionFeatures = .init(),
         staging: SharedMultipartUploadStaging? = nil
     ) async throws -> TranscriptionResult {
         try await transcribe(
             audioURL: audioURL, model: model, apiKey: apiKey, duration: duration,
-            language: language, azureEndpoint: azureEndpoint, staging: staging, session: .shared
+            language: language, azureEndpoint: azureEndpoint, modulateFeatures: modulateFeatures,
+            staging: staging, session: .shared
         )
     }
 
@@ -58,6 +71,7 @@ public enum DesktopTranscription {
         duration: TimeInterval,
         language: String? = nil,
         azureEndpoint: String = "",
+        modulateFeatures: ModulateTranscriptionFeatures = .init(),
         staging: SharedMultipartUploadStaging? = nil,
         session: URLSession
     ) async throws -> TranscriptionResult {
@@ -72,7 +86,8 @@ public enum DesktopTranscription {
             return try await transcribe(
                 Request(
                     audioURL: audioURL, model: identifier, apiKey: key, duration: duration,
-                    language: language, azureEndpoint: azureEndpoint, staging: staging
+                    language: language, azureEndpoint: azureEndpoint,
+                    modulateFeatures: modulateFeatures, staging: staging
                 ),
                 using: backend, session: session
             )
@@ -90,6 +105,7 @@ public enum DesktopTranscription {
         let duration: TimeInterval
         let language: String?
         let azureEndpoint: String
+        let modulateFeatures: ModulateTranscriptionFeatures
         let staging: SharedMultipartUploadStaging?
     }
 
@@ -129,12 +145,16 @@ public enum DesktopTranscription {
         }
     }
 
-    private enum PreparedProvider: Sendable { case meta, azure, mistral, soniox, revai }
+    private enum PreparedProvider: Sendable { case meta, azure, mistral, soniox, revai, modulate }
 
     private static func transcribePrepared(
         _ input: Request, using provider: PreparedProvider, session: URLSession
     ) async throws -> TranscriptionResult {
         switch provider {
+        case .modulate:
+            return try await ModulateBatchClient(
+                session: session, features: input.modulateFeatures, multipartStaging: secureStaging(input.staging)
+            ).transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .revai:
             return try await RevAIBatchClient(
                 session: session, multipartStaging: secureStaging(input.staging),
@@ -198,6 +218,7 @@ public enum DesktopTranscription {
             if provider == "mistral" { return .prepared(.mistral) }
             if provider == "soniox" { return .prepared(.soniox) }
             if provider == "revai" { return .prepared(.revai) }
+            if provider == "modulate" { return .prepared(.modulate) }
         }
         return nil
     }

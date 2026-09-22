@@ -40,8 +40,11 @@ Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI and OpenRouter. The canonic
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
-Four OpenAI, three Deepgram and one AssemblyAI live models use shared Swift
-clients with the native WinHTTP transport. Batch and Live retain separate model
+Four OpenAI, three Deepgram, one AssemblyAI and xAI's dedicated speech-to-text
+live models use shared Swift clients with the native WinHTTP transport. The xAI
+stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is source-wired with
+fake-transport tests only and still needs a Windows provider receipt; the Grok
+Voice conversation route stays unavailable. Batch and Live retain separate model
 selections. Native capture is joined before finalisation; received text and audio
 survive cancellation or failure, with no automatic insertion on failure.
 `Ctrl+Alt+Space` starts and stops recording when registration succeeds. Save the
@@ -248,7 +251,7 @@ but must not be presented as the identical Apple-only engine or service.
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
-| Live transcription | Four OpenAI, three Deepgram and one AssemblyAI models use shared clients and native WinHTTP | Final-head native host checks, Windows provider receipts and remaining streaming providers |
+| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including a real xAI stream, and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; replace-field, direct-only and clipboard-only modes as hand-edited settings | Physical browser/Electron/Office/XAML acceptance, a text output settings UI, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |

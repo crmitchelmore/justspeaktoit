@@ -11,3 +11,4 @@
 # Prune an entry once its case is on the baseline branch, where it stops
 # being reported.
 API breakage: enumelement StreamingClientError.transportStalled has been added as a new enum case
+API breakage: enumelement XAISpeechToTextError.sessionNotReady has been added as a new enum case

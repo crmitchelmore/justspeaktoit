@@ -298,6 +298,16 @@ version/baseline authority. `VERSION` is a build hint only.
 - `Sources/SpeakApp/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
 - Portable lifecycle tests live in `Tests/SpeakDesktopTests/OpenAIRealtime*Tests.swift` and drive the real client through a fake `StreamingWebSocketConnection`.
 
+## xAI Dedicated Speech-to-Text Streaming
+
+### Protocol
+- `wss://api.x.ai/v1/stt` is configured entirely by query items (`model=grok-voice-transcribe-2.0`, `encoding=pcm`, `sample_rate`, `interim_results=true`, optional `language`, repeated `keyterm`); there is no start message. Audio goes up as raw binary PCM and must wait for `transcript.created`; `{"type":"audio.done"}` requests `transcript.done`. This is a different protocol from the Grok Voice session in `XAILiveClient`, which shares the `xai/` prefix and credential.
+- Server frames are `transcript.partial` with `is_final`/`speech_final` (there is no `transcript.chunk`). A final's identity is `channel_index` + `start`: a locked chunk restated as an utterance final has the same start and is dropped, while identical text at a new start is a genuine repeat. A non-empty `transcript.done` replaces the folded finals; an empty one keeps them.
+
+### Key files
+- `Sources/SpeakCore/XAISpeechToTextLiveClient.swift` (+ `…LiveRun`, `…LiveConnection`, `…LiveSending`, `…LiveProtocol`, `XAISpeechToTextEvent.swift`) — the shared portable client: injected transport, readiness gating on `transcript.created`, bounded single-in-flight sends, one bounded finish and per-run identity. `LiveTranscriptionClientFactory` (Apple) and `DesktopLiveTranscription` (Windows) construct it; the desktop factory admits only `XAISpeechToText.liveCatalogID`, never the Grok Voice route.
+- Portable lifecycle tests: `Tests/SpeakDesktopTests/XAISpeechToText*Tests.swift`; established protocol expectations: `Tests/SpeakCoreTests/XAISpeechToTextLiveClientTests.swift`.
+
 ## Accessibility Text Insertion
 
 ### API semantics

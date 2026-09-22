@@ -263,10 +263,12 @@ final class DesktopLiveSessionTests: XCTestCase {
 extension DesktopLiveSessionTests {
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
-            let provider = LiveTranscriptionRouting.route(for: $0.id)?.provider
-            return provider == .deepgram || provider == .assemblyai || provider == .openai
+            guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
+            return [.deepgram, .assemblyai, .openai].contains(route.provider)
+                || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
+        XCTAssertTrue(canonical.contains { $0.id == XAISpeechToText.liveCatalogID })
         XCTAssertEqual(DesktopLiveTranscription.liveModels.map(\.id), canonical.map(\.id))
         for model in canonical {
             let route = try XCTUnwrap(DesktopLiveTranscription.route(forID: model.id))
@@ -286,10 +288,36 @@ extension DesktopLiveSessionTests {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)
                 XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)
             }
+            if route.provider == .xai {
+                XCTAssertEqual(model.id, XAISpeechToText.liveCatalogID)
+                XCTAssertTrue(client is XAISpeechToTextLiveClient)
+                XCTAssertEqual(route.sampleRate, 24_000)
+            }
         }
         XCTAssertNil(DesktopLiveTranscription.route(forID: "deepgram/unknown-streaming"))
         XCTAssertNil(DesktopLiveTranscription.provider(forID: "deepgram/nova-3"))
         XCTAssertNil(DesktopLiveTranscription.route(forID: "openai/gpt-live-transcribe"))
+    }
+
+    /// Grok Voice shares the xAI provider prefix and credential with the
+    /// dedicated speech-to-text stream but speaks a different protocol with no
+    /// shared client, so admitting the provider wholesale would expose the
+    /// wrong engine. Only the dedicated stream's identifier is a desktop route.
+    func testGrokVoiceRouteStaysUnavailableInTheDesktopFactory() {
+        let grokVoice = XAIVoiceModels.thinkFast2CatalogID
+        XCTAssertEqual(LiveTranscriptionRouting.route(for: grokVoice)?.provider, .xai)
+        XCTAssertFalse(DesktopLiveTranscription.liveModels.contains { $0.id == grokVoice })
+        XCTAssertNil(DesktopLiveTranscription.route(forID: grokVoice))
+        XCTAssertNil(DesktopLiveTranscription.provider(forID: grokVoice))
+        XCTAssertNil(DesktopLiveTranscription.makeClient(model: grokVoice, apiKey: "", makeConnection: { _ in
+            fatalError("An unavailable route must not open a connection")
+        }))
+        XCTAssertEqual(
+            DesktopLiveTranscription.liveModels.filter { $0.id.hasPrefix("xai/") }.map(\.id),
+            [XAISpeechToText.liveCatalogID]
+        )
+        XCTAssertEqual(DesktopLiveTranscription.provider(forID: XAISpeechToText.liveCatalogID)?.apiKeyIdentifier,
+                       "xai.apiKey")
     }
 }
 

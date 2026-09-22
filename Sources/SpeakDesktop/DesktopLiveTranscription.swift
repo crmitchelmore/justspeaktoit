@@ -8,9 +8,17 @@ import SpeakCore
 /// qualify their native transport before exposing this projection in the UI.
 /// Models, routing and credential metadata remain owned by SpeakCore.
 public enum DesktopLiveTranscription {
+    /// The live routes the shared desktop session implements. xAI serves two
+    /// live products under one provider and only the dedicated speech-to-text
+    /// stream has a shared client, so that route is admitted by identifier;
+    /// the Grok Voice session stays unavailable on desktop hosts.
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
-        guard let provider = LiveTranscriptionRouting.route(for: $0.id)?.provider else { return false }
-        return provider == .deepgram || provider == .assemblyai || provider == .openai
+        guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
+        switch route.provider {
+        case .deepgram, .assemblyai, .openai: return true
+        case .xai: return route.modelID == XAISpeechToText.liveCatalogID
+        default: return false
+        }
     }
 
     /// A host can forward hints only for implemented routes whose canonical
@@ -45,6 +53,11 @@ public enum DesktopLiveTranscription {
             return AssemblyAILiveClient(
                 apiKey: apiKey, speechModel: route.apiModelName, sampleRate: route.sampleRate,
                 makeConnection: makeConnection
+            )
+        case .xai:
+            // `route(forID:)` admits only the dedicated speech-to-text stream.
+            return XAISpeechToTextLiveClient(
+                apiKey: apiKey, sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         default: return nil
         }

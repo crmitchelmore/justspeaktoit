@@ -93,7 +93,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
             await pendingSettings?.value
             await controller.importAudio(path: value, modelIndex: Int(index))
         }
-    case 3, 6, 15, 16: transcriptEvent(event, value: value, holder: holder)
+    case 3, 6, 15, 16, 18, 19: transcriptEvent(event, value: value, holder: holder)
     case 4: holder.enqueueSettings { await controller.saveKey(value, modelIndex: Int(index)) }
     case 5: holder.enqueueSettings { await controller.selectModel(Int(index)) }
     case 7:
@@ -116,7 +116,8 @@ private func openProfiles(_ holder: WindowsEventContext) {
 }
 
 // Copy and version events read the displayed version here, on the UI thread,
-// so it is paired with the record ID the same event carries.
+// so it is paired with the record ID the same event carries. Playback events
+// carry the selected record ID for the same reason.
 private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
     let controller = holder.controller
     switch event {
@@ -129,6 +130,8 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
         if let variant = WindowsNative.displayedTranscriptVariant() {
             Task { await controller.selectTranscriptVariant(variant, identifier: value) }
         }
+    case 18: Task { await controller.playbackToggle(value) }
+    case 19: Task { await controller.playbackStop() }
     default: break
     }
 }

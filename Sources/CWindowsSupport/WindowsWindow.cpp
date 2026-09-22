@@ -26,6 +26,14 @@ enum Control {
 };
 constexpr int searchLabelID = 96;
 constexpr int variantLabelID = 97;
+// Native History playback controls. Explicit reserved identifiers, outside the
+// implicit Control enumeration, so existing control identities never shift.
+constexpr int playbackLabelID = 98;
+constexpr int playPauseID = 160;
+constexpr int stopPlaybackID = 161;
+constexpr int playbackTimeID = 162;
+constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
+const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 struct HistoryRow {
     std::string id;
     std::wstring title;
@@ -54,6 +62,10 @@ struct WindowState {
     std::string pendingVariantRecord;
     int pendingVariant = -1;
     bool pendingVariantSwitchable = false;
+    bool playbackChanged = false;
+    std::string pendingPlaybackRecord;
+    int pendingPlaybackState = playbackIdle;
+    std::wstring pendingPlaybackText;
     int recording = 0;
     std::wstring status;
     std::wstring transcript;
@@ -72,6 +84,7 @@ struct WindowState {
     std::vector<HistoryRow> displayedHistory;
     int displayedVariant = -1;
     bool variantSwitchable = false;
+    int displayedPlayback = playbackIdle;
     bool suppressSearchEvents = false;
     std::vector<std::wstring> modelNames;
     std::vector<int> modelModes;
@@ -236,10 +249,31 @@ void applyVariant(HWND window, int selected, bool switchable, int recording) {
     EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
 }
 
+// Play/Pause is available for a selected idle record, or whenever a playback
+// is active so it can always be paused; Stop only while a playback is active.
+// The label follows the state the host acknowledged, never a click.
+void updatePlaybackControls(HWND window, bool selected, int recording) {
+    const bool active = state.displayedPlayback != playbackIdle;
+    SetDlgItemTextW(window, playPauseID,
+        state.displayedPlayback == playbackPreparing || state.displayedPlayback == playbackPlaying ? L"Pause" : L"Play");
+    EnableWindow(GetDlgItem(window, playPauseID), (selected && recording == 0) || active);
+    EnableWindow(GetDlgItem(window, stopPlaybackID), active);
+}
+
+// The playback display never infers progress: it shows only what the host
+// reported for the selected record, and controls are echoed back by event.
+void applyPlayback(HWND window, int playback, const std::wstring &text, bool selected, int recording) {
+    state.displayedPlayback = playback >= playbackIdle && playback <= playbackPaused ? playback : playbackIdle;
+    SetDlgItemTextW(window, playbackTimeID, text.empty() ? playbackIdleText : text.c_str());
+    updatePlaybackControls(window, selected, recording);
+}
+
 void updateHistoryControls(HWND window, int recording) {
     const LRESULT index = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
     const bool selected = index != LB_ERR && static_cast<size_t>(index) < state.displayedHistory.size();
     const bool filtering = searching(window);
+    if (!selected && state.displayedPlayback != playbackIdle) applyPlayback(window, playbackIdle, L"", false, recording);
+    else updatePlaybackControls(window, selected, recording);
     SetDlgItemTextW(window, historyDetailID, selected ? state.displayedHistory[static_cast<size_t>(index)].detail.c_str()
         : (state.displayedHistory.empty()
             ? (filtering ? L"No saved recordings match this search." : L"Your saved recordings will appear here.")
@@ -340,8 +374,10 @@ void layout(HWND window) {
     move(93, margin, historyLabelTop, historyWidth, scale(window, 22));
     const int historyTop = historyLabelTop + scale(window, 26);
     const int detailHeight = scale(window, 72);
+    // Below the list: detail, version label+combo, two action rows, the
+    // playback label/time row and the Play/Pause + Stop row.
     const int historyHeight = std::max(scale(window, 120), static_cast<int>(bounds.bottom) - historyTop -
-        detailHeight - scale(window, 26) - 3 * row - 4 * gap - margin);
+        detailHeight - scale(window, 52) - 4 * row - 5 * gap - margin);
     move(historyID, margin, historyTop, historyWidth, historyHeight);
     const int detailTop = historyTop + historyHeight + gap;
     move(historyDetailID, margin, detailTop, historyWidth, detailHeight);
@@ -353,6 +389,13 @@ void layout(HWND window) {
     move(retryID, margin, buttonsTop, buttonWidth, row);
     move(exportID, margin + buttonWidth + gap, buttonsTop, buttonWidth, row);
     move(openAudioID, margin, buttonsTop + row + gap, historyWidth, row);
+    const int playbackLabelTop = buttonsTop + 2 * (row + gap);
+    const int playbackLabelWidth = scale(window, 84);
+    move(playbackLabelID, margin, playbackLabelTop, playbackLabelWidth, scale(window, 22));
+    move(playbackTimeID, margin + playbackLabelWidth, playbackLabelTop, historyWidth - playbackLabelWidth, scale(window, 22));
+    const int playbackTop = playbackLabelTop + scale(window, 26);
+    move(playPauseID, margin, playbackTop, buttonWidth, row);
+    move(stopPlaybackID, margin + buttonWidth + gap, playbackTop, buttonWidth, row);
 }
 
 void refreshFont(HWND window) {
@@ -397,6 +440,12 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Retr&y", BS_PUSHBUTTON | WS_TABSTOP, retryID) &&
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
+        // The label carries the mnemonic and precedes Play/Pause, so Alt+B
+        // and assistive technology reach the playback controls.
+        add(L"STATIC", L"Play&back", 0, playbackLabelID) &&
+        add(L"STATIC", playbackIdleText, SS_RIGHT, playbackTimeID) &&
+        add(L"BUTTON", L"Play", BS_PUSHBUTTON | WS_TABSTOP, playPauseID) &&
+        add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
         add(L"BUTTON", L"App &profiles", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, modeID) &&
@@ -504,11 +553,18 @@ void applyUpdate(HWND window) {
     std::vector<ModelRow> models;
     std::wstring modelStatus;
     std::vector<HistoryRow> history;
-    std::string historySelection, variantRecord;
-    int recording, variant;
+    std::string historySelection, variantRecord, playbackRecord;
+    std::wstring playbackText;
+    int recording, variant, playback;
+    bool playbackChanged;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         status.swap(state.status); transcript.swap(state.transcript);
+        playbackChanged = state.playbackChanged;
+        playbackRecord = state.pendingPlaybackRecord;
+        playback = state.pendingPlaybackState;
+        playbackText = state.pendingPlaybackText;
+        state.playbackChanged = false;
         modelsChanged = state.modelsChanged;
         modelsRefreshing = state.modelsRefreshing;
         if (modelsChanged) { models = std::move(state.pendingModels); modelStatus = state.modelStatus; }
@@ -586,14 +642,22 @@ void applyUpdate(HWND window) {
             selectionChanged = nowSelected != state.selectedHistoryID;
             state.selectedHistoryID = nowSelected;
         }
-        // A different (or no) record is displayed: its version is unknown
-        // until the host reports it, so never keep the previous record's.
-        if (selectionChanged) applyVariant(window, -1, false, recording);
+        // A different (or no) record is displayed: its version and playback
+        // are unknown until the host reports them, so never keep the previous record's.
+        if (selectionChanged) {
+            applyVariant(window, -1, false, recording);
+            applyPlayback(window, playbackIdle, L"", !nowSelected.empty(), recording);
+        }
         if (failed) showFailure(window, "Windows could not display the saved recording list.");
     }
     // A report for a record the user has since left is stale; the new row's
     // version stays unknown until its own report arrives.
     if (variantChanged && variantRecord == selectedHistory(window)) applyVariant(window, variant, variantSwitchable, recording);
+    if (playbackChanged) {
+        const std::string nowSelected = selectedHistory(window);
+        if (playbackRecord.empty()) applyPlayback(window, playbackIdle, L"", !nowSelected.empty(), recording);
+        else if (playbackRecord == nowSelected) applyPlayback(window, playback, playbackText, true, recording);
+    }
     updateHistoryControls(window, recording);
 }
 
@@ -660,15 +724,28 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
         case exportID: emitHistory(window, JSTI_EVENT_HISTORY_EXPORT); return 0;
         case openAudioID: emitHistory(window, JSTI_EVENT_HISTORY_OPEN_AUDIO); return 0;
+        case playPauseID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, playPauseID))) {
+                emitHistory(window, JSTI_EVENT_HISTORY_PLAY_PAUSE);
+            }
+            return 0;
+        case stopPlaybackID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, stopPlaybackID))) {
+                emitHistory(window, JSTI_EVENT_HISTORY_STOP);
+            }
+            return 0;
         case historyID:
             if (HIWORD(wparam) == LBN_SELCHANGE) {
                 int recording;
+                std::string nowSelected;
                 {
                     std::lock_guard<std::mutex> lock(state.mutex);
-                    state.selectedHistoryID = selectedHistory(window);
+                    nowSelected = selectedHistory(window);
+                    state.selectedHistoryID = nowSelected;
                     recording = state.recording;
                 }
                 applyVariant(window, -1, false, recording);
+                applyPlayback(window, playbackIdle, L"", !nowSelected.empty(), recording);
                 updateHistoryControls(window, recording);
                 emitHistory(window, JSTI_EVENT_HISTORY_SELECTED);
             }
@@ -819,6 +896,10 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.pendingVariantRecord.clear();
         state.pendingVariant = -1;
         state.pendingVariantSwitchable = false;
+        state.playbackChanged = false;
+        state.pendingPlaybackRecord.clear();
+        state.pendingPlaybackState = playbackIdle;
+        state.pendingPlaybackText.clear();
         state.pendingHistory.clear(); state.pendingHistorySelection.clear(); state.selectedHistoryID.clear();
         state.status.clear(); state.transcript.clear();
     }
@@ -827,6 +908,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     state.displayedHistory.clear();
     state.displayedVariant = -1;
     state.variantSwitchable = false;
+    state.displayedPlayback = playbackIdle;
     state.suppressSearchEvents = false;
     // The process may already have a manifest-defined awareness context.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -1081,6 +1163,27 @@ int jsti_window_transcript_variant(void) {
     { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) return -1;
     return selectedHistory(window).empty() ? -1 : state.displayedVariant;
+}
+
+int jsti_window_set_playback(const char *recordID, int playback, const char *timeText) {
+    if (playback < playbackIdle || playback > playbackPaused) return -1;
+    std::wstring checkedRecord, text;
+    if (recordID && (!jsti::wide(recordID, checkedRecord) || checkedRecord.size() > 128)) return -1;
+    if (timeText && (!jsti::wide(timeText, text) || text.size() > 256)) return -1;
+    try {
+        std::string record = recordID ? recordID : "";
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (!state.window) return -1;
+        state.pendingPlaybackState = record.empty() ? playbackIdle : playback;
+        state.pendingPlaybackRecord = std::move(record);
+        state.pendingPlaybackText = std::move(text);
+        state.playbackChanged = true;
+        if (!state.posted) {
+            state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+            if (!state.posted) return -1;
+        }
+        return 0;
+    } catch (const std::exception &) { return -1; }
 }
 
 int jsti_window_choose_export_path(const char *suggestedFilename, char *path, size_t pathCapacity,
@@ -1452,6 +1555,106 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                 failure = "A history action did not report its selected record ID."; return false;
             }
         }
+        // Playback controls: idle for a selected record until the host reports,
+        // record-bound and latest-only, with Stop available only while active.
+        auto playbackLabel = [&]() {
+            wchar_t label[32] = {};
+            GetDlgItemTextW(window, playPauseID, label, 32);
+            return std::wstring(label);
+        };
+        auto playbackTime = [&]() {
+            wchar_t time[64] = {};
+            GetDlgItemTextW(window, playbackTimeID, time, 64);
+            return std::wstring(time);
+        };
+        if (!IsWindowEnabled(GetDlgItem(window, playPauseID)) || IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) ||
+            playbackLabel() != L"Play" || playbackTime() != playbackIdleText) {
+            failure = "Playback controls were not idle for a selected record."; return false;
+        }
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(playPauseID, BN_CLICKED), 0);
+        if (observed.event != JSTI_EVENT_HISTORY_PLAY_PAUSE || observed.id != "one" || observed.model != 1) {
+            failure = "Play did not report the selected record."; return false;
+        }
+        observed.event = -500;
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(stopPlaybackID, BN_CLICKED), 0);
+        if (observed.event != -500) { failure = "A disabled Stop emitted a playback event."; return false; }
+        if (jsti_window_set_playback("one", 4, "bad") != -1 || jsti_window_set_playback("\xff", 2, "bad") != -1 ||
+            jsti_window_set_playback("two", playbackPlaying, "00:00.10 / 00:01.90") != 0) {
+            failure = "Playback report validation failed."; return false;
+        }
+        applyUpdate(window);
+        if (state.displayedPlayback != playbackIdle || playbackLabel() != L"Play" ||
+            IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || playbackTime() != playbackIdleText) {
+            failure = "A playback report for another record changed the selected row's controls."; return false;
+        }
+        if (jsti_window_set_playback("one", playbackPreparing, "00:00.00 / 00:02.00") != 0 ||
+            jsti_window_set_playback("one", playbackPlaying, "00:00.10 / 00:01.90") != 0) {
+            failure = "Playback reports for the selected record were rejected."; return false;
+        }
+        applyUpdate(window);
+        if (state.displayedPlayback != playbackPlaying || playbackLabel() != L"Pause" ||
+            !IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || !IsWindowEnabled(GetDlgItem(window, playPauseID)) ||
+            playbackTime() != L"00:00.10 / 00:01.90") {
+            failure = "A playing report did not show Pause, Stop and the latest time."; return false;
+        }
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(stopPlaybackID, BN_CLICKED), 0);
+        if (observed.event != JSTI_EVENT_HISTORY_STOP || observed.id != "one") {
+            failure = "Stop did not report the selected record."; return false;
+        }
+        // Recording locks Play for an idle record but keeps an active playback
+        // pausable and stoppable, and never touches status or transcript.
+        jsti_window_update("Playback status sentinel", "Playback transcript sentinel", 1);
+        applyUpdate(window);
+        const bool activeWhileRecording = IsWindowEnabled(GetDlgItem(window, playPauseID)) &&
+            IsWindowEnabled(GetDlgItem(window, stopPlaybackID));
+        jsti_window_set_playback("one", playbackPaused, "00:00.50 / 00:01.50");
+        applyUpdate(window);
+        const bool pausedWhileRecording = state.displayedPlayback == playbackPaused && playbackLabel() == L"Play" &&
+            IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) && playbackTime() == L"00:00.50 / 00:01.50";
+        jsti_window_set_playback("one", playbackIdle, "00:00.00 / 00:02.00");
+        applyUpdate(window);
+        const bool idleWhileRecording = !IsWindowEnabled(GetDlgItem(window, playPauseID)) &&
+            !IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) && playbackTime() == L"00:00.00 / 00:02.00";
+        wchar_t playbackStatus[64] = {}, playbackTranscript[64] = {};
+        GetDlgItemTextW(window, statusID, playbackStatus, 64);
+        GetDlgItemTextW(window, transcriptID, playbackTranscript, 64);
+        jsti_window_update(nullptr, nullptr, 0);
+        applyUpdate(window);
+        if (!activeWhileRecording || !pausedWhileRecording || !idleWhileRecording ||
+            !IsWindowEnabled(GetDlgItem(window, playPauseID)) || IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) ||
+            std::wstring(playbackStatus) != L"Playback status sentinel" ||
+            std::wstring(playbackTranscript) != L"Playback transcript sentinel") {
+            failure = "Recording lockout or status preservation failed for playback controls."; return false;
+        }
+        // Selecting another row resets the display; a late report for the
+        // previous record is ignored, and an empty record resets explicitly.
+        jsti_window_set_playback("one", playbackPlaying, "00:01.00 / 00:01.00");
+        applyUpdate(window);
+        SendDlgItemMessageW(window, historyID, LB_SETCURSEL, 0, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(historyID, LBN_SELCHANGE), 0);
+        if (observed.event != JSTI_EVENT_HISTORY_SELECTED || observed.id != "two" || state.displayedPlayback != playbackIdle ||
+            playbackLabel() != L"Play" || IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || playbackTime() != playbackIdleText) {
+            failure = "Selecting another record did not reset the playback display."; return false;
+        }
+        jsti_window_set_playback("one", playbackPlaying, "00:01.10 / 00:00.90");
+        applyUpdate(window);
+        if (state.displayedPlayback != playbackIdle || IsWindowEnabled(GetDlgItem(window, stopPlaybackID))) {
+            failure = "A stale playback report was applied to a different record."; return false;
+        }
+        jsti_window_set_playback("two", playbackPlaying, "00:00.20 / 00:00.80");
+        applyUpdate(window);
+        jsti_window_set_playback("", playbackPlaying, nullptr);
+        applyUpdate(window);
+        if (state.displayedPlayback != playbackIdle || IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) ||
+            playbackTime() != playbackIdleText || !checkBounds()) {
+            if (failure.empty()) failure = "An empty playback report did not reset the controls.";
+            return false;
+        }
+        SendDlgItemMessageW(window, historyID, LB_SETCURSEL, 1, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(historyID, LBN_SELCHANGE), 0);
+        if (observed.event != JSTI_EVENT_HISTORY_SELECTED || observed.id != "one") {
+            failure = "History selection could not return to the first record after playback checks."; return false;
+        }
         // Search: every edit reports the exact current query (UTF-8), and the
         // clear affordance becomes available only while a query is present.
         if (IsWindowEnabled(GetDlgItem(window, clearSearchID)) || jsti_window_transcript_variant() != -1) {
@@ -1642,6 +1845,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     SetDlgItemTextW(window, searchID, L"");
     state.suppressSearchEvents = false;
     applyVariant(window, -1, false, 0);
+    applyPlayback(window, playbackIdle, L"", false, 0);
     state.callback = originalCallback;
     state.context = originalContext;
     {
@@ -1650,6 +1854,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         state.pendingHistorySelection = originalSelection;
         state.historySelectionProvided = true;
         state.historyChanged = true;
+        state.playbackChanged = false;
+        state.pendingPlaybackRecord.clear();
+        state.pendingPlaybackState = playbackIdle;
+        state.pendingPlaybackText.clear();
     }
     applyUpdate(window);
     SetWindowPos(window, nullptr, originalBounds.left, originalBounds.top,

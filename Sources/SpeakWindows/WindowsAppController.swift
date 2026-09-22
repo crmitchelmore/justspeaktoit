@@ -66,6 +66,12 @@ actor WindowsAppController {
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     var insertion = WindowsInsertionState()
+    /// At most one audible native History playback; its status presenter is
+    /// installed by preparePlayback once this actor exists.
+    let playback = WindowsAudioPlaybackController(
+        backend: WindowsAudioPlaybackNativeBackend(),
+        presenter: WindowsAudioPlaybackPresenter(show: { WindowsNative.playback($0) }, status: { _ in })
+    )
 
     init(directory: URL) throws {
         self.directory = directory
@@ -99,6 +105,9 @@ actor WindowsAppController {
     ) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
         cancelInsertion()
+        // Capture never starts over an audible playback; the stop is immediate
+        // and the codec join drains in the background.
+        playback.stop()
         selectModel(modelIndex)
         selectMicrophone(deviceID)
         busy = true
@@ -195,6 +204,7 @@ extension WindowsAppController {
               WindowsModels.all.indices.contains(modelIndex),
               !WindowsModels.isLive(WindowsModels.all[modelIndex].id) else { return }
         cancelInsertion()
+        playback.stop()
         selectModel(modelIndex)
         busy = true
         activeOperations += 1
@@ -252,6 +262,9 @@ extension WindowsAppController {
                 FileHandle.standardError.write(Data("Could not persist recording on close.\n".utf8))
             }
         }
+        // Playback stops audibly at once; waiting here bounds the background
+        // codec joins so no native thread outlives the actor.
+        await playback.close()
         // The network task alone is insufficient: its owner must also finish
         // success/failure persistence and release native/file resources.
         if activeOperations > 0 {
@@ -302,6 +315,7 @@ extension WindowsAppController {
     func ready() async {
         defer { isReady = true }
         guard !closed else { return }
+        preparePlayback()
         refreshModels(force: false)
         activeOperations += 1
         defer { finishOperation() }

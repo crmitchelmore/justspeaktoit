@@ -96,8 +96,15 @@ clear until the search is cleared or another row is chosen. Where a record
 retains both transcripts, a Transcript version control switches the displayed
 text; it defaults to the processed text, Copy and Export use the version shown
 for the captured record, and Retry and Open audio always use the original
-recording. Embedded playback, history import and retention controls are not
-implemented yet.
+recording. Native Play/Pause, Stop and an elapsed/remaining display play the
+selected recording in the app: the original file stays pinned read-only and
+is decoded by the installed Media Foundation codecs to the output endpoint's
+own format, then rendered through event-driven WASAPI; Open audio remains
+the explicit external-player action. Playback stops before recording,
+importing, switching records or closing, and hardware output remains a
+separate acceptance gate. See
+[Windows History playback](windows-history-playback.md). History import and
+retention controls are not implemented yet.
 
 Post-processing is disabled by default. The native Post-processing dialog can
 opt into OpenRouter, choose a shared catalogue model, edit its instructions and
@@ -225,7 +232,7 @@ flowchart TB
 | Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
-| Windows services | Event-driven WASAPI capture with a bounded writer queue, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |
+| Windows services | Event-driven WASAPI capture with a bounded writer queue, native History playback through Media Foundation decoding and event-driven WASAPI rendering, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |
 | Apple services | Existing SwiftUI, AVFoundation, Speech, Core ML, Keychain, CloudKit and Sparkle integrations | `Sources/SpeakApp/`, `Sources/SpeakiOS/`, `Sources/SpeakSync/` |
 
 `Package.swift` selects the portable graph on Windows/Linux and when explicitly
@@ -278,9 +285,9 @@ but must not be presented as the identical Apple-only engine or service.
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
 | Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
-| History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export and external audio opening; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, embedded playback, history import and record/audio removal controls |
+| History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, Windows runtime execution of the playback checks, physical speaker/Bluetooth/USB playback, history import and retention controls |
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
-| Voice output | Shared catalogues and some request contracts compile | Provider execution, native playback, system voices and pronunciation controls |
+| Voice output | Shared catalogues and some request contracts compile; the native playback engine can render decoded audio | Provider execution, wiring synthesized audio onto the native playback engine, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
 | Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
@@ -326,8 +333,17 @@ smoke checks cover CRUD, ordering, preservation, validation, modal hotkey refusa
 keyboard scrolling and narrow window layout. Model-list smoke checks exercise
 refresh, retained selection and transition from batch-only to live-capable lists. Native
 storage tests check protected ACLs, existing-file refusal and junction rejection.
+The playback self-test drives the production decode, queue and render loop
+against a synthetic audio engine without a speaker: exact output bytes with
+no trailing silence, source position through pause/resume, cancel and the
+final drain, pause before start, event timeout, device failure, immediate
+completion, refused second start, callback self-destroy refusal and release
+of the pinned source; the window smoke test adds record-bound playback
+controls and recording lockout. Hardware playback tests probe the endpoint
+explicitly and skip only the audible checks when Windows reports none.
 The combined additions passed native CI at `ae61b2e8` and `ac7b5416`, and the
 Mac-built release app passed at `ac7b5416`; later revisions require their own checks.
+The playback checks have not yet run on Windows.
 Neither executable smoke test proves physical microphone capture, live provider
 transcription, successful external insertion or user-visible feature parity.
 Separate adapter unit tests exercise Credential Manager with isolated synthetic

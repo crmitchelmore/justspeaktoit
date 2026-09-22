@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "microsoftRuntime": {
+    "name": "VC_redist.x64.exe",
+    "url": "https://download.visualstudio.microsoft.com/download/pr/ebdab8e5-1d7b-4d9f-a11b-cbb1720c3b12/843068991DAAA1F73AD9F6239BCE4D0F6A07A51F18C37EA2A867E9BECA71295C/VC_redist.x64.exe",
+    "sha256": "843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c",
+    "bytes": 18731856,
+    "version": "14.51.36247.0",
+    "permalink": "https://aka.ms/vc14/vc_redist.x64.exe",
+    "documentation": "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist",
+    "packages": {
+      "minimum": "packages\\vcRuntimeMinimum_amd64\\vc_runtimeMinimum_x64.msi",
+      "additional": "packages\\vcRuntimeAdditional_amd64\\vc_runtimeAdditional_x64.msi"
+    }
+  },
+  "licenses": [
+    {
+      "name": "LICENSE-swift.txt",
+      "url": "https://raw.githubusercontent.com/swiftlang/swift/484e622d1c0afcae5b12a31c090a74ad0901e44f/LICENSE.txt",
+      "sha256": "770af8291f708538d8ff885a0bbc4e045cd700531741c4f99528d435c14d7f55",
+      "bytes": 11751,
+      "license": "Apache License 2.0 with Runtime Library Exception",
+      "covers": "Swift runtime, swift-corelibs-libdispatch, BlocksRuntime, swift-foundation and swift-corelibs-foundation DLLs",
+      "pinnedTo": "swiftlang/swift tag swift-6.2.3-RELEASE, commit 484e622d1c0afcae5b12a31c090a74ad0901e44f"
+    },
+    {
+      "name": "LICENSE-icu.txt",
+      "url": "https://raw.githubusercontent.com/unicode-org/icu/9edac7b78327a1cb58db29e2714b15f9fa14e4d7/LICENSE",
+      "sha256": "17510cf7a58b4879b887ec05a45d72cf1b73544dd9ec7e72f20110ed104229ee",
+      "bytes": 25185,
+      "license": "Unicode License v3 with ICU third-party notices",
+      "covers": "International Components for Unicode 74.1 code and data compiled into _FoundationICU.dll",
+      "pinnedTo": "unicode-org/icu tag release-74-1, commit 9edac7b78327a1cb58db29e2714b15f9fa14e4d7; swift-foundation-icu at swift-6.2.3-RELEASE (commit ddd11fa3f970bd34924c418835986167b8e6efeb) declares U_ICU_VERSION 74.1 in icuSources/include/_foundation_unicode/uvernum.h and licenses its own changes under the Swift licence"
+    }
+  ],
+  "provenanceNotes": [
+    "The Visual C++ redistributable URL is the destination of Microsoft's documented permalink https://aka.ms/vc14/vc_redist.x64.exe, resolved on 2026-09-22; the SHA-256 embedded in that URL matches the downloaded bytes.",
+    "Microsoft permits licensed Visual Studio users to distribute the Visual C++ runtime files unmodified with their programs: https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution (Visual C++ Runtime Files) under https://visualstudio.microsoft.com/license-terms/vs2022-ga-community/ for this MIT-licensed open-source application; the runtime's own terms are linked from https://aka.ms/VCRedistLicense.",
+    "The redistributable is read as data only. Its stub, bootstrapper application, MSI packages and custom actions never execute; cabinets are inflated in Python and file names come from the MSI File tables.",
+    "The Swift 6.2.3 runtime DLLs come from the swift.org installer already pinned in scripts/windows-cross/dependencies.json (rtl.msi and rtl.cab, whose SHA-512 digests the installer manifest records). No Microsoft runtime file is taken from that installer.",
+    "Licence texts are pinned to the release tag commits of the official repositories so the bundle notices cannot drift silently."
+  ]
+}

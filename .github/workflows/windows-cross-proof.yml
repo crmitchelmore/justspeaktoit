@@ -16,6 +16,7 @@ on:
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
+      - scripts/windows-bundle/**
       - .github/workflows/windows-cross-proof.yml
   push:
     branches: [main]
@@ -31,6 +32,7 @@ on:
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
+      - scripts/windows-bundle/**
       - .github/workflows/windows-cross-proof.yml
 
 permissions:
@@ -69,6 +71,27 @@ jobs:
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --output "$RUNNER_TEMP/windows-app-cross" 2>&1 |
             tee "$RUNNER_TEMP/windows-app-cross/bootstrap.log"
+      - name: Assemble the self-contained runtime bundle
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 -B -m unittest discover -s scripts/windows-bundle -p 'test_*.py'
+          mkdir -p "$RUNNER_TEMP/windows-runtime-bundle"
+          python3 scripts/windows-bundle/build-windows-bundle.py \
+            --app "$RUNNER_TEMP/windows-app-cross" \
+            --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
+            --downloads "$RUNNER_TEMP/private-windows-cross-sdk/bundle-downloads" \
+            --output "$RUNNER_TEMP/windows-runtime-bundle" \
+            --llvm-readobj "$RUNNER_TEMP/private-windows-cross-sdk/llvm-20/LLVM-20.1.8-macOS-ARM64/bin/llvm-readobj" 2>&1 |
+            tee "$RUNNER_TEMP/windows-runtime-bundle/bootstrap.log"
+      - name: Upload self-contained runtime bundle
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-runtime-bundle
+          path: ${{ runner.temp }}/windows-runtime-bundle/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload Mac-built Windows app and tests
         if: always()
         uses: actions/upload-artifact@v7.0.1
@@ -215,5 +238,35 @@ jobs:
         with:
           name: foundation-windows-runtime-evidence
           path: proof/windows-*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  bundle-execute:
+    name: Run the self-contained bundle on Windows without Swift
+    needs: compile
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-runtime-bundle
+          path: bundle
+      # No Swift setup action runs in this job. The script additionally isolates
+      # PATH to the Windows system directories, proves the executable cannot
+      # start without the bundled DLLs, and records every loaded module's path.
+      - name: Verify hashes, isolate PATH and run the bundled production app
+        shell: pwsh
+        run: |
+          ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA
+      - name: Upload bundle execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-runtime-bundle-execution-evidence
+          path: ${{ runner.temp }}/bundle-run/evidence/
           if-no-files-found: warn
           retention-days: 14

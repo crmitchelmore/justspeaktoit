@@ -143,6 +143,33 @@ let appleCoreSources: [String] = [
     "XAITTSRealtime.swift"
 ]
 
+// SpeakSync's schema, reconciliation and CloudKit Web Services transport are
+// portable by default. These files adapt the native CloudKit framework (and its
+// CryptoKit/Combine surfaces) and stay on Apple platforms.
+let appleSyncSources: [String] = [
+    "CloudKitComparisonSyncTransport.swift",
+    "CloudKitHistorySyncTransport.swift",
+    "CloudKitKeySync.swift",
+    "CloudKitRecordFields.swift",
+    "ComparisonSyncEngine.swift",
+    "ComparisonSyncRecord.swift",
+    "CryptoKitSyncEnvelopeCryptography.swift",
+    "HistorySyncEngine.swift",
+    "HistorySyncPushRouting.swift",
+    "SyncConfiguration.swift",
+    "SyncRecord.swift",
+    "SyncState.swift"
+]
+
+// Tests of those native adapters. Every other SpeakSync test runs on all platforms.
+let appleSyncTestSources: [String] = [
+    "CloudKitKeySyncTests.swift",
+    "ComparisonSyncTests.swift",
+    "HistorySyncEngineGuardTests.swift",
+    "HistorySyncEngineTests.swift",
+    "NativeRecordParityTests.swift"
+]
+
 let portablePackage = Package(
     name: "SpeakApp",
     defaultLocalization: "en",
@@ -160,8 +187,21 @@ let portablePackage = Package(
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        .target(
+            name: "SpeakSync",
+            dependencies: ["SpeakCore"],
+            path: "Sources/SpeakSync",
+            exclude: appleSyncSources,
+            swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
+        ),
         .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .testTarget(
+            name: "SpeakSyncTests",
+            dependencies: ["SpeakSync", "SpeakCore", "SpeakTestSupport"],
+            path: "Tests/SpeakSyncTests",
+            exclude: appleSyncTestSources
+        ),
         .testTarget(
             name: "SpeakPortableTests",
             dependencies: ["SpeakCore", "SpeakTestSupport"],
@@ -344,7 +384,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         ),
         .testTarget(
             name: "SpeakSyncTests",
-            dependencies: ["SpeakSync"]
+            dependencies: ["SpeakSync", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakAppTests",

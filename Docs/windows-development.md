@@ -245,7 +245,8 @@ flowchart TB
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
 | Windows services | Event-driven WASAPI capture with a bounded writer queue, native History playback through Media Foundation decoding and event-driven WASAPI rendering, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |
-| Apple services | Existing SwiftUI, AVFoundation, Speech, Core ML, Keychain, CloudKit and Sparkle integrations | `Sources/SpeakApp/`, `Sources/SpeakiOS/`, `Sources/SpeakSync/` |
+| Shared sync | CloudKit record schema, History and Compare Models reconciliation, and the CloudKit Web Services transport for the existing containers | `Sources/SpeakSync/` except `appleSyncSources`; see [Windows CloudKit sync](windows-cloudkit-sync.md) |
+| Apple services | Existing SwiftUI, AVFoundation, Speech, Core ML, Keychain, CloudKit and Sparkle integrations | `Sources/SpeakApp/`, `Sources/SpeakiOS/`, native adapters in `Sources/SpeakSync/` |
 
 `Package.swift` selects the portable graph on Windows/Linux and when explicitly
 requested on macOS. New `SpeakCore` source files enter the portable build by
@@ -312,7 +313,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Voice output | Shared catalogues and some request contracts compile; the native playback engine can render decoded audio | Provider execution, wiring synthesized audio onto the native playback engine, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
-| Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
+| Sync and Apple companion flows | Portable CloudKit schema, the shared History/Compare Models reconciliation and an injectable CloudKit Web Services transport for the existing containers, with opt-in consent, identity isolation and session-bound retries; source and fixture tests only, no Windows UI, sign-in or host storage | Developer API token and sign-in callback, Windows sign-in, consent and storage, live CloudKit and Mac↔Windows receipts, a CNG envelope provider and portable key sync; Handoff equivalence is unresolved. See [Windows CloudKit sync](windows-cloudkit-sync.md) |
 | Automation and integrations | Shared protocol data available in source | Windows CLI/IPC, OpenClaw, deep links and applicable automation surface parity |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
 | Distribution and updates | Unsigned developer executable artifact | Runtime packaging, signing, installer/uninstaller, upgrade/data migration and update channel |

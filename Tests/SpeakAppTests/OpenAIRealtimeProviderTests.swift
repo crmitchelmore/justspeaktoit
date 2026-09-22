@@ -131,9 +131,10 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
         let json = """
         {"type":"error","error":{"code":"invalid_request_error","message":"bad audio format"}}
         """
-        guard case .error(let code, let message)? = OpenAIRealtimeServerEvent.parse(json) else {
+        guard case .error(let code, let message, let eventID)? = OpenAIRealtimeServerEvent.parse(json) else {
             return XCTFail("Expected an error event")
         }
+        XCTAssertNil(eventID)
         let description = OpenAIRealtimeStreamingError.serverError(code: code, message: message).localizedDescription
         XCTAssertTrue(description.contains("invalid_request_error"))
         XCTAssertTrue(description.contains("bad audio format"))

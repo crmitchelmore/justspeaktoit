@@ -10,7 +10,7 @@ import SpeakCore
 public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let provider = LiveTranscriptionRouting.route(for: $0.id)?.provider else { return false }
-        return provider == .deepgram || provider == .assemblyai
+        return provider == .deepgram || provider == .assemblyai || provider == .openai
     }
 
     /// Hosts supply native I/O; provider choice and protocol behaviour stay
@@ -21,6 +21,11 @@ public enum DesktopLiveTranscription {
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         guard let route = route(forID: model) else { return nil }
         switch route.provider {
+        case .openai:
+            return OpenAIRealtimeLiveClient(
+                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate,
+                makeConnection: makeConnection
+            )
         case .deepgram:
             return DeepgramLiveClient(
                 apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate,

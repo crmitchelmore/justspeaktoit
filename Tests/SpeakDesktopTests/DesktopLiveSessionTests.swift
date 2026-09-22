@@ -264,7 +264,7 @@ extension DesktopLiveSessionTests {
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
             let provider = LiveTranscriptionRouting.route(for: $0.id)?.provider
-            return provider == .deepgram || provider == .assemblyai
+            return provider == .deepgram || provider == .assemblyai || provider == .openai
         }
         XCTAssertFalse(canonical.isEmpty)
         XCTAssertEqual(DesktopLiveTranscription.liveModels.map(\.id), canonical.map(\.id))
@@ -282,6 +282,10 @@ extension DesktopLiveSessionTests {
             XCTAssertNotNil(client)
             if route.provider == .deepgram { XCTAssertTrue(client is DeepgramLiveClient) }
             if route.provider == .assemblyai { XCTAssertTrue(client is AssemblyAILiveClient) }
+            if route.provider == .openai {
+                XCTAssertTrue(client is OpenAIRealtimeLiveClient)
+                XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)
+            }
         }
         XCTAssertNil(DesktopLiveTranscription.route(forID: "deepgram/unknown-streaming"))
         XCTAssertNil(DesktopLiveTranscription.provider(forID: "deepgram/nova-3"))

@@ -129,12 +129,17 @@ public enum DesktopTranscription {
         }
     }
 
-    private enum PreparedProvider: Sendable { case meta, azure, mistral, soniox }
+    private enum PreparedProvider: Sendable { case meta, azure, mistral, soniox, revai }
 
     private static func transcribePrepared(
         _ input: Request, using provider: PreparedProvider, session: URLSession
     ) async throws -> TranscriptionResult {
         switch provider {
+        case .revai:
+            return try await RevAIBatchClient(
+                session: session, multipartStaging: secureStaging(input.staging),
+                durationResolver: { _ in input.duration }
+            ).transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .soniox:
             return try await SonioxBatchClient(session: session, multipartStaging: secureStaging(input.staging))
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
@@ -192,6 +197,7 @@ public enum DesktopTranscription {
             if provider == "elevenlabs" { return .elevenlabs }
             if provider == "mistral" { return .prepared(.mistral) }
             if provider == "soniox" { return .prepared(.soniox) }
+            if provider == "revai" { return .prepared(.revai) }
         }
         return nil
     }

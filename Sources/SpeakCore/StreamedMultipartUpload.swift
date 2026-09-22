@@ -8,7 +8,8 @@ extension SharedMultipartUploadStaging {
         providerID: String,
         boundary: String,
         fields: [(name: String, value: String)],
-        mimeType: String
+        mimeType: String,
+        fileField: String = "file"
     ) throws -> URL {
         try Task.checkCancellation()
         let destination = try createUploadBodyFile(providerID: providerID)
@@ -25,7 +26,7 @@ extension SharedMultipartUploadStaging {
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
             let header = "--\(boundary)\r\n"
-                + "Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n"
+                + "Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(filename)\"\r\n"
                 + "Content-Type: \(mimeType)\r\n\r\n"
             try output.write(contentsOf: Data(header.utf8))
             let input = try FileHandle(forReadingFrom: sourceURL)

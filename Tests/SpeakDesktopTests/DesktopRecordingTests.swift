@@ -50,6 +50,7 @@ final class DesktopRecordingTests: XCTestCase {
             .union(AzureTranscriptionModels.batchIDs)
             .union(ModelCatalog.batchTranscriptionOptions(forProvider: "mistral").map(\.id))
             .union(ModelCatalog.batchTranscriptionOptions(forProvider: "soniox").map(\.id))
+            .union(ModelCatalog.batchTranscriptionOptions(forProvider: "revai").map(\.id))
         XCTAssertEqual(Set(DesktopTranscription.batchModels.map(\.id)), expected)
         XCTAssertTrue(DesktopTranscription.batchModels.allSatisfy { option in
             ModelCatalog.batchTranscription.contains(option)

@@ -31,6 +31,24 @@
       "license": "Unicode License v3 with ICU third-party notices",
       "covers": "International Components for Unicode 74.1 code and data compiled into _FoundationICU.dll",
       "pinnedTo": "unicode-org/icu tag release-74-1, commit 9edac7b78327a1cb58db29e2714b15f9fa14e4d7; swift-foundation-icu at swift-6.2.3-RELEASE (commit ddd11fa3f970bd34924c418835986167b8e6efeb) declares U_ICU_VERSION 74.1 in icuSources/include/_foundation_unicode/uvernum.h and licenses its own changes under the Swift licence"
+    },
+    {
+      "name": "LICENSE-curl.txt",
+      "url": "https://raw.githubusercontent.com/curl/curl/83bedbd730d62b83744cc26fa0433d3f6e2e4cd6/COPYING",
+      "sha256": "adb1fc06547fd136244179809f7b7c2d2ae6c4534f160aa513af9b6a12866a32",
+      "bytes": 1088,
+      "license": "curl permission notice",
+      "covers": "curl 8.9.1 statically linked into FoundationNetworking.dll",
+      "pinnedTo": "curl/curl commit 83bedbd730d62b83744cc26fa0433d3f6e2e4cd6; Swift 6.2.3 utils/build.ps1 and update-checkout-config.json pin this release"
+    },
+    {
+      "name": "LICENSE-zlib.txt",
+      "url": "https://raw.githubusercontent.com/madler/zlib/51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf/LICENSE",
+      "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+      "bytes": 1002,
+      "license": "zlib licence",
+      "covers": "zlib 1.3.1 statically linked into FoundationNetworking.dll",
+      "pinnedTo": "madler/zlib commit 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf; Swift 6.2.3 utils/build.ps1 and update-checkout-config.json pin this release"
     }
   ],
   "provenanceNotes": [
@@ -38,6 +56,7 @@
     "Microsoft permits licensed Visual Studio users to distribute the Visual C++ runtime files unmodified with their programs: https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution (Visual C++ Runtime Files) under https://visualstudio.microsoft.com/license-terms/vs2022-ga-community/ for this MIT-licensed open-source application; the runtime's own terms are linked from https://aka.ms/VCRedistLicense.",
     "The redistributable is read as data only. Its stub, bootstrapper application, MSI packages and custom actions never execute; cabinets are inflated in Python and file names come from the MSI File tables.",
     "The Swift 6.2.3 runtime DLLs come from the swift.org installer already pinned in scripts/windows-cross/dependencies.json (rtl.msi and rtl.cab, whose SHA-512 digests the installer manifest records). No Microsoft runtime file is taken from that installer.",
-    "Licence texts are pinned to the release tag commits of the official repositories so the bundle notices cannot drift silently."
+    "Licence texts are pinned to the release tag commits of the official repositories so the bundle notices cannot drift silently.",
+    "swift-runtime-lock.json authenticates every cached Swift DLL against hashes regenerated from the fully SHA-256-verified installer, SHA-512-verified rtl.msi/rtl.cab and reconstructed MSI file identities; cache-local metadata is not trusted."
   ]
 }

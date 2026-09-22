@@ -36,6 +36,7 @@ class PEImage:
         (self.machine, section_count, self.timestamp, _, _, optional_size,
          self.characteristics) = struct.unpack_from("<HHIIIHH", self._bytes(coff, 20))
         optional = coff + 20
+        self._bytes(optional, optional_size)
         self.optional_magic = self._u16(optional)
         if self.optional_magic == 0x20B:
             self.image_base = self._u64(optional + 24)
@@ -65,7 +66,9 @@ class PEImage:
                 raise PEFormatError(self.name + ": section data exceeds file size")
             self.sections.append((name.rstrip(b"\0").decode("ascii", "replace"), virtual_address,
                                   max(virtual_size, raw_size), raw_size, raw_pointer))
-        self.header_size = table + section_count * 40
+        self.header_size = self._u32(optional + 60)
+        if not table + section_count * 40 <= self.header_size <= len(self.data):
+            raise PEFormatError(self.name + ": invalid SizeOfHeaders")
 
     @classmethod
     def load(cls, path):
@@ -101,14 +104,14 @@ class PEImage:
                 return name
         return None
 
-    def offset(self, rva):
+    def offset(self, rva, length=1):
         """Translate an RVA into a file offset; header RVAs map directly."""
         for _, address, size, raw_size, raw_pointer in self.sections:
             if address <= rva < address + size:
-                if rva - address >= raw_size:
+                if length < 0 or rva - address + length > raw_size:
                     raise PEFormatError(self.name + ": RVA points into uninitialised section data")
                 return raw_pointer + (rva - address)
-        if rva < self.header_size:
+        if 0 <= rva < self.header_size and 0 <= length <= self.header_size - rva:
             return rva
         raise PEFormatError(self.name + ": RVA %#x is outside every section" % rva)
 
@@ -117,6 +120,7 @@ class PEImage:
         end = self.data.find(b"\0", offset, offset + limit + 1)
         if end < 0:
             raise PEFormatError(self.name + ": unterminated string at RVA %#x" % rva)
+        self.offset(rva, end - offset + 1)
         try:
             return self.data[offset:end].decode("ascii")
         except UnicodeDecodeError as error:
@@ -131,43 +135,45 @@ class PEImage:
     def imports(self):
         """Names of statically imported modules, in table order."""
         rva, size = self.directory(DIRECTORY_IMPORT)
-        if not rva:
+        if not rva and not size:
             return []
-        names, index = [], 0
-        while True:
-            entry = self._bytes(self.offset(rva + index * 20), 20)
+        if not rva or size < 20:
+            raise PEFormatError(self.name + ": truncated import directory")
+        self.offset(rva, size)
+        names = []
+        for index in range(min(size // 20, 4097)):
+            entry = self._bytes(self.offset(rva + index * 20, 20), 20)
             original_thunk, _, _, name_rva, first_thunk = struct.unpack("<IIIII", entry)
-            if not (original_thunk or name_rva or first_thunk):
-                break
+            if not any(entry):
+                return names
             if not name_rva:
                 raise PEFormatError(self.name + ": import descriptor without a module name")
             names.append(self.string(name_rva))
-            index += 1
-            if index > 4096:
-                raise PEFormatError(self.name + ": unterminated import directory")
-        return names
+        raise PEFormatError(self.name + ": unterminated import directory")
 
     def delay_imports(self):
         """Names of delay-loaded modules from IMAGE_DELAYLOAD_DESCRIPTOR entries."""
         rva, size = self.directory(DIRECTORY_DELAY_IMPORT)
-        if not rva:
+        if not rva and not size:
             return []
-        names, index = [], 0
-        while True:
-            entry = self._bytes(self.offset(rva + index * 32), 32)
+        if not rva or size < 32:
+            raise PEFormatError(self.name + ": truncated delay-load directory")
+        self.offset(rva, size)
+        names = []
+        for index in range(min(size // 32, 4097)):
+            entry = self._bytes(self.offset(rva + index * 32, 32), 32)
             attributes, name_address, module_handle, iat, int_table, _, _, _ = struct.unpack("<IIIIIIII", entry)
-            if not (name_address or module_handle or iat or int_table):
-                break
+            if not any(entry):
+                return names
+            if not name_address or attributes & ~1:
+                raise PEFormatError(self.name + ": invalid delay-load descriptor")
             if not attributes & 1:
                 # Pre-VC2010 descriptors store virtual addresses instead of RVAs.
                 if name_address < self.image_base:
                     raise PEFormatError(self.name + ": delay-load name address below the image base")
                 name_address -= self.image_base
             names.append(self.string(name_address))
-            index += 1
-            if index > 4096:
-                raise PEFormatError(self.name + ": unterminated delay-load directory")
-        return names
+        raise PEFormatError(self.name + ": unterminated delay-load directory")
 
     # --- version resource ------------------------------------------------------
     def version_info(self):
@@ -175,18 +181,22 @@ class PEImage:
         rva, size = self.directory(DIRECTORY_RESOURCE)
         if not rva:
             return None
-        base = self.offset(rva)
-        data_entry = self._find_version_data(base, base, 0)
+        base = self.offset(rva, size)
+        data_entry = self._find_version_data(base, base, 0, base + size)
         if data_entry is None:
             return None
         data_rva, data_size = struct.unpack("<II", self._bytes(data_entry, 8))
-        block = self._bytes(self.offset(data_rva), data_size)
+        block = self._bytes(self.offset(data_rva, data_size), data_size)
         return parse_version_block(block, self.name)
 
-    def _find_version_data(self, base, table, level):
+    def _find_version_data(self, base, table, level, end):
         if level > 2:
             return None
+        if not base <= table <= end - 16:
+            raise PEFormatError(self.name + ": resource table outside directory")
         named, ids = struct.unpack("<HH", self._bytes(table + 12, 4))
+        if table + 16 + (named + ids) * 8 > end:
+            raise PEFormatError(self.name + ": truncated resource table")
         entry = table + 16 + named * 8
         for _ in range(ids):
             identifier, offset = struct.unpack("<II", self._bytes(entry, 8))
@@ -195,10 +205,12 @@ class PEImage:
             if not wanted:
                 continue
             if offset & 0x80000000:
-                found = self._find_version_data(base, base + (offset & 0x7FFFFFFF), level + 1)
+                found = self._find_version_data(base, base + (offset & 0x7FFFFFFF), level + 1, end)
                 if found is not None:
                     return found
             elif level == 2:
+                if base + offset + 16 > end:
+                    raise PEFormatError(self.name + ": resource data entry outside directory")
                 return base + offset
         return None
 
@@ -208,11 +220,16 @@ def parse_version_block(block, name="<memory>"):
     if len(block) < 6:
         raise PEFormatError(name + ": version resource too small")
     length, value_length, kind = struct.unpack_from("<HHH", block)
+    if not 6 <= length <= len(block):
+        raise PEFormatError(name + ": invalid version resource length")
+    block = block[:length]
     key, cursor = _read_key(block, 6, name)
     if key != "VS_VERSION_INFO":
         raise PEFormatError(name + ": unexpected version resource root " + key)
     cursor = _align(cursor)
     result = {"fileVersion": None, "productVersion": None, "strings": {}}
+    if cursor + value_length > length:
+        raise PEFormatError(name + ": truncated fixed version value")
     if value_length >= 52:
         signature, _, ms, ls, pms, pls = struct.unpack_from("<IIIIII", block, cursor)
         if signature != 0xFEEF04BD:
@@ -223,9 +240,9 @@ def parse_version_block(block, name="<memory>"):
     end = min(length, len(block))
     while cursor + 6 <= end:
         child_length, child_value_length, _ = struct.unpack_from("<HHH", block, cursor)
-        if child_length < 6:
+        if child_length < 6 or cursor + child_length > end:
             raise PEFormatError(name + ": zero-length version child")
-        child_key, key_end = _read_key(block, cursor + 6, name)
+        child_key, key_end = _read_key(block[:cursor + child_length], cursor + 6, name)
         if child_key == "StringFileInfo":
             _parse_string_file_info(block, _align(key_end), cursor + child_length, result["strings"], name)
         cursor = _align(cursor + child_length)
@@ -233,20 +250,24 @@ def parse_version_block(block, name="<memory>"):
 
 
 def _parse_string_file_info(block, cursor, end, strings, name):
-    end = min(end, len(block))
+    if end > len(block):
+        raise PEFormatError(name + ": string info outside resource")
     while cursor + 6 <= end:
         table_length, _, _ = struct.unpack_from("<HHH", block, cursor)
-        if table_length < 6:
+        if table_length < 6 or cursor + table_length > end:
             raise PEFormatError(name + ": zero-length string table")
-        _, key_end = _read_key(block, cursor + 6, name)
-        entry, table_end = _align(key_end), min(cursor + table_length, end)
+        table_end = cursor + table_length
+        _, key_end = _read_key(block[:table_end], cursor + 6, name)
+        entry = _align(key_end)
         while entry + 6 <= table_end:
             entry_length, value_length, kind = struct.unpack_from("<HHH", block, entry)
-            if entry_length < 6:
+            if entry_length < 6 or entry + entry_length > table_end:
                 raise PEFormatError(name + ": zero-length string entry")
-            key, value_start = _read_key(block, entry + 6, name)
+            key, value_start = _read_key(block[:entry + entry_length], entry + 6, name)
             value_start = _align(value_start)
             if kind == 1 and value_length:
+                if value_start + value_length * 2 > entry + entry_length:
+                    raise PEFormatError(name + ": string value outside version entry")
                 raw = block[value_start:value_start + value_length * 2]
                 strings.setdefault(key, raw.decode("utf-16-le", "replace").split("\0")[0])
             entry = _align(entry + entry_length)

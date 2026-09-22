@@ -300,6 +300,29 @@ class PEReaderTests(unittest.TestCase):
         with self.assertRaisesRegex(PE.PEFormatError, "below the image base"):
             PE.PEImage(bytes(data)).delay_imports()
 
+    def test_import_directories_must_contain_complete_descriptors_and_terminator(self):
+        for directory, method, width in [(1, "imports", 20), (13, "delay_imports", 32)]:
+            for invalid_size in [1, width]:
+                data = bytearray(build_pe(["KERNEL32.dll"], ["Foundation.dll"]))
+                struct.pack_into("<I", data, 0x40 + 24 + 112 + directory * 8 + 4, invalid_size)
+                with self.assertRaises(PE.PEFormatError):
+                    getattr(PE.PEImage(data), method)()
+
+    def test_descriptor_may_not_cross_mapped_section_boundary(self):
+        data = bytearray(build_pe(["KERNEL32.dll"]))
+        # Raw section ends 19 bytes into the descriptor, although file bytes remain.
+        struct.pack_into("<I", data, 0x40 + 24 + 240 + 16, 19)
+        with self.assertRaises(PE.PEFormatError):
+            PE.PEImage(data).imports()
+
+    def test_optional_and_version_lengths_are_checked(self):
+        with self.assertRaises(PE.PEFormatError):
+            PE.PEImage(build_pe()[:0x40 + 24 + 120])
+        block = bytearray(version_block((1, 2, 3, 4), {}))
+        struct.pack_into("<H", block, 0, len(block) + 1)
+        with self.assertRaises(PE.PEFormatError):
+            PE.parse_version_block(block)
+
     def test_dll_flag_and_foreign_machine_are_reported(self):
         image = PE.PEImage(build_pe(dll=True, machine=0x14C))
         self.assertTrue(image.is_dll)
@@ -412,11 +435,19 @@ class ClosureTests(unittest.TestCase):
 class PathSafetyTests(unittest.TestCase):
     def test_unsafe_components_are_rejected(self):
         for path in ["../x.dll", "a/../b", "/abs", "a\\b", "C:/x", "", "con", "CON.dll", "nul.txt", "com1.dll",
-                     "a./b", " a", "a ", "tab\there"]:
+                     "a./b", " a", "a ", "tab\there", "a<.txt", "a>.txt", 'a".txt',
+                     "a|.txt", "a?.txt", "a*.txt", "dir/bad?.txt"]:
             with self.assertRaises(BUILD.BundleError, msg=path):
                 BUILD.check_bundle_path(path)
         self.assertEqual(BUILD.check_bundle_path("SpeakApp_SpeakCore.resources/Info.plist"),
                          "SpeakApp_SpeakCore.resources/Info.plist")
+
+    def test_output_separation_rejects_equal_and_nested_paths(self):
+        app, cache = pathlib.Path("/app"), pathlib.Path("/cache")
+        for output in [app, cache, app / "bundle", cache / "bundle", pathlib.Path("/")]:
+            with self.assertRaises(BUILD.BundleError):
+                BUILD.check_output_separation(app, cache, output)
+        BUILD.check_output_separation(app, cache, pathlib.Path("/bundle"))
 
     def test_layout_rejects_case_collisions_forbidden_files_and_file_directory_clashes(self):
         policy = BUILD.Policy.load()
@@ -499,9 +530,17 @@ class SwiftRuntimeSourceTests(unittest.TestCase):
         (self.cache / "swift-windows/swiftCore.dll").write_bytes(data)
         (self.cache / "windows-extraction/rtl-layout.json").write_text(json.dumps(
             [{"path": "swiftCore.dll", "cabinet": "rtl.cab", "id": "filCore", "bytes": len(data)}]))
+        cross = json.loads((HERE.parent / "windows-cross/dependencies.json").read_text())
+        installer = next(item for item in cross["downloads"] if item["name"].endswith("-windows10.exe"))
+        self.lock_path = self.cache / "source-lock.json"
+        self.lock_path.write_text(json.dumps({"swiftVersion": "6.2.3", "installer": installer,
+            "bootstrapManifestSHA256": "fixture", "payloads": {
+                "rtl.msi": {"bytes": 450560, "sha512": "abc"}, "rtl.cab": {"bytes": 18542881, "sha512": "def"}},
+            "files": [{"path": "swiftCore.dll", "cabinet": "rtl.cab", "id": "filCore", "bytes": len(data),
+                       "sha256": hashlib.sha256(data).hexdigest()}]}))
 
     def test_runtime_package_provenance_and_modules_are_read(self):
-        source = BUILD.load_swift_runtime(self.cache)
+        source = BUILD.load_swift_runtime(self.cache, self.lock_path)
         self.assertEqual(source["payloads"], {"rtl.msi": {"bytes": 450560, "sha512": "abc"},
                                               "rtl.cab": {"bytes": 18542881, "sha512": "def"}})
         self.assertEqual(source["swiftVersion"], "6.2.3")
@@ -513,9 +552,27 @@ class SwiftRuntimeSourceTests(unittest.TestCase):
             BUILD.read_swift_module(source, "swiftWinSDK.dll")
 
     def test_missing_provenance_is_refused(self):
-        (self.cache / "windows-extraction/bootstrap/0").unlink()
+        self.lock_path.unlink()
         with self.assertRaisesRegex(BUILD.BundleError, "provenance"):
-            BUILD.load_swift_runtime(self.cache)
+            BUILD.load_swift_runtime(self.cache, self.lock_path)
+
+    def test_same_size_tamper_is_refused_even_with_changed_cache_metadata(self):
+        path = self.cache / "swift-windows/swiftCore.dll"
+        changed = bytearray(path.read_bytes())
+        changed[-1] ^= 1
+        path.write_bytes(changed)
+        (self.cache / "windows-extraction/rtl-layout.json").write_text("[]")
+        (self.cache / "windows-extraction/bootstrap/0").write_text("substituted metadata")
+        source = BUILD.load_swift_runtime(self.cache, self.lock_path)
+        with self.assertRaisesRegex(BUILD.BundleError, "checksum"):
+            BUILD.read_swift_module(source, "swiftCore.dll")
+
+    def test_source_lock_must_match_cross_installer_pin(self):
+        lock = json.loads(self.lock_path.read_text())
+        lock["installer"]["sha256"] = "0" * 64
+        self.lock_path.write_text(json.dumps(lock))
+        with self.assertRaisesRegex(BUILD.BundleError, "installer"):
+            BUILD.load_swift_runtime(self.cache, self.lock_path)
 
 
 class CabinetTests(unittest.TestCase):
@@ -641,11 +698,12 @@ class AssemblyTests(unittest.TestCase):
         for name, (static, delayed) in modules.items():
             data = build_pe(static, delayed, dll=True)
             (self.runtime / name).write_bytes(data)
-            layout[name] = {"path": name, "cabinet": "rtl.cab", "id": "fil" + name, "bytes": len(data)}
+            layout[name] = {"path": name, "cabinet": "rtl.cab", "id": "fil" + name, "bytes": len(data),
+                            "sha256": hashlib.sha256(data).hexdigest()}
         self.swift = {"directory": self.runtime, "layout": layout,
                       "payloads": {"rtl.msi": {"bytes": 1, "sha512": "a"}, "rtl.cab": {"bytes": 2, "sha512": "b"}},
                       "installer": {"name": "swift-6.2.3-RELEASE-windows10.exe", "sha256": "c", "bytes": 3, "url": "https://x"},
-                      "swiftVersion": "6.2.3"}
+                      "swiftVersion": "6.2.3", "lockSHA256": "fixture", "bootstrapManifestSHA256": "fixture"}
         self.microsoft = {"modules": {}, "version": "14.51.36247.0",
                           "displayName": "Microsoft Visual C++ v14 Redistributable (x64) - 14.51.36247",
                           "productName": "Microsoft Visual C++ 2022 X64 Minimum Runtime - 14.51.36247"}
@@ -697,6 +755,18 @@ class AssemblyTests(unittest.TestCase):
         self.assertIn("LICENSE-icu.txt", entries["THIRD-PARTY-NOTICES.txt"].decode())
         self.assertIn("0123456789abcdef", entries["README.txt"].decode())
         self.assertEqual(manifest["application"]["executableSHA256"], hashlib.sha256(self.executable).hexdigest())
+
+    def test_pinned_licences_cover_embedded_networking_dependencies(self):
+        lock = json.loads((HERE / "dependencies.json").read_text())
+        for name in ["curl", "zlib"]:
+            entry = next(item for item in lock["licenses"] if item["name"] == "LICENSE-" + name + ".txt")
+            self.assertEqual(len(entry["sha256"]), 64)
+            self.assertIn("FoundationNetworking.dll", entry["covers"])
+            self.licenses.append(dict(entry, data=b"fixture licence"))
+        entries, manifest = self.assemble()
+        for name in ["curl", "zlib"]:
+            self.assertIn("licenses/LICENSE-" + name + ".txt", entries)
+            self.assertIn("LICENSE-" + name + ".txt", entries["THIRD-PARTY-NOTICES.txt"].decode())
 
     def test_assembly_is_deterministic(self):
         first, first_manifest = self.assemble()

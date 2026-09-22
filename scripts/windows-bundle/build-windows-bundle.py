@@ -162,7 +162,7 @@ def resolve_closure(root, read_imports, policy):
 
 # --- bundle path safety -------------------------------------------------------------
 def check_bundle_path(path):
-    if not path or path.startswith("/") or "\\" in path or ":" in path:
+    if not path or path.startswith("/") or any(character in path for character in '\\:<>"|?*'):
         raise BundleError("unsafe bundle path: " + repr(path))
     for part in path.split("/"):
         if part in ("", ".", "..") or part != part.strip() or part.endswith(".") or any(ord(c) < 32 for c in part):
@@ -276,24 +276,22 @@ def load_application(app_dir, policy):
 
 
 # --- Swift runtime source ---------------------------------------------------------------
-def load_swift_runtime(cache):
+def load_swift_runtime(cache, lock_path=HERE / "swift-runtime-lock.json"):
     runtime = cache / "swift-windows"
-    layout_path = cache / "windows-extraction" / "rtl-layout.json"
-    manifest_path = cache / "windows-extraction" / "bootstrap" / "0"
-    for path in (runtime, layout_path, manifest_path):
-        if not path.exists():
-            raise BundleError("cross-build cache lacks Swift runtime provenance: " + str(path))
-    layout = {row["path"]: row for row in json.loads(layout_path.read_text())}
-    payloads = {}
-    for element in ET.parse(manifest_path).getroot().iter():
-        if element.tag.endswith("}Payload") and element.get("FilePath") in ("rtl.msi", "rtl.cab"):
-            payloads[element.get("FilePath")] = {"bytes": int(element.get("FileSize")),
-                                                 "sha512": element.get("Hash").lower()}
-    if set(payloads) != {"rtl.msi", "rtl.cab"}:
-        raise BundleError("Swift installer manifest does not list the runtime package")
+    if not runtime.is_dir() or runtime.is_symlink() or not lock_path.is_file():
+        raise BundleError("missing pinned Swift runtime provenance or runtime directory")
+    # Authenticate against the reviewed source lock, never mutable metadata next
+    # to the extracted DLLs. pin-swift-runtime.py reproduces the entire chain.
+    source = json.loads(lock_path.read_text())
     installer = json.loads((CROSS / "dependencies.json").read_text())
     pinned = next(entry for entry in installer["downloads"] if entry["name"].endswith("-windows10.exe"))
-    return {"directory": runtime, "layout": layout, "payloads": payloads, "installer": pinned,
+    if source["installer"] != pinned or source["swiftVersion"] != installer["swiftVersion"]:
+        raise BundleError("Swift runtime lock does not match the pinned cross compiler installer")
+    layout = {row["path"]: row for row in source["files"]}
+    if len(layout) != len(source["files"]):
+        raise BundleError("duplicate Swift runtime lock path")
+    return {"directory": runtime, "layout": layout, "payloads": source["payloads"], "installer": pinned,
+            "lockSHA256": digest_file(lock_path), "bootstrapManifestSHA256": source["bootstrapManifestSHA256"],
             "swiftVersion": installer["swiftVersion"]}
 
 
@@ -305,6 +303,8 @@ def read_swift_module(source, name):
     data = path.read_bytes()
     if len(data) != row["bytes"]:
         raise BundleError(name + " does not match the runtime package layout size")
+    if sha256(data) != row["sha256"]:
+        raise BundleError(name + " checksum differs from the authenticated runtime package")
     provenance = {"package": "rtl.msi", "cabinet": row["cabinet"], "fileKey": row["id"],
                   "installer": source["installer"]["name"], "swiftVersion": source["swiftVersion"]}
     return data, provenance
@@ -424,7 +424,7 @@ def readme_text(metadata, closure_names, microsoft):
         "later without installing the Swift toolchain or Visual C++ redistributable:",
         "the runtime DLLs the application imports sit beside SpeakWindows.exe.",
         "",
-        "Run SpeakWindows.exe, or pass --self-test / --ui-smoke-test. The smoke tests",
+        "Run SpeakWindows.exe, or pass --bundle-self-test / --self-test / --ui-smoke-test. The smoke tests",
         "use no microphone and no real provider API key. Settings and recordings are",
         "stored under %LOCALAPPDATA%\\JustSpeakToIt. Because the executable is not",
         "code-signed, Windows SmartScreen may ask for confirmation before it runs.",
@@ -451,6 +451,9 @@ def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock
     if icu is not None:
         lines += ["_FoundationICU.dll additionally contains " + icu["covers"].split(" compiled")[0] + ":",
                   "  Licence: " + icu["license"] + " (licenses/LICENSE-icu.txt)", ""]
+    for entry in licenses:
+        if entry["name"] in ("LICENSE-curl.txt", "LICENSE-zlib.txt"):
+            lines += [entry["covers"], "  Licence: " + entry["license"] + " (licenses/" + entry["name"] + ")", ""]
     lines += [microsoft["displayName"] + ": " + ", ".join(microsoft_files),
               "  Files are unmodified copies from Microsoft's official " + lock["name"] + " (" + microsoft["productName"] + ").",
               "  Redistributed under the Visual Studio 2022 Community licence's Distributable Code terms for this open-source application:",
@@ -558,7 +561,9 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         "dependencies": {"bundled": closure["bundled"], "system": closure["system"],
                          "additionalRuntimeModules": policy.additional},
         "sources": {
-            "swiftRuntime": {"installer": swift["installer"], "payloads": swift["payloads"], "swiftVersion": swift["swiftVersion"]},
+            "swiftRuntime": {"installer": swift["installer"], "payloads": swift["payloads"],
+                             "swiftVersion": swift["swiftVersion"], "fileLockSHA256": swift["lockSHA256"],
+                             "bootstrapManifestSHA256": swift["bootstrapManifestSHA256"]},
             "microsoftRuntime": {"download": {key: lock[key] for key in ("name", "url", "sha256", "bytes", "permalink", "version")},
                                  "displayName": microsoft["displayName"], "productName": microsoft["productName"]},
             "licenses": [{key: entry[key] for key in ("name", "url", "sha256", "bytes", "license", "covers")} for entry in licenses],
@@ -566,10 +571,16 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         "policy": policy.data,
         "verification": {"importReader": "windows_pe.py static and delay-load import directories",
                          "llvmReadobjCrossCheck": cross_check is not None,
-                         "windowsEvidence": "scripts/windows-bundle/verify-windows-bundle.ps1 runs the bundle with an isolated PATH and records loaded modules"},
+                         "windowsEvidence": "scripts/windows-bundle/verify-windows-bundle.ps1 runs the bundle with an isolated PATH and records sampled loaded modules"},
     }
     check_bundle_layout(sorted(entries) + ["bundle-manifest.json"], policy)
     return entries, manifest
+
+
+def check_output_separation(app, cache, output):
+    if (app == output or cache == output or cache in output.parents or output in cache.parents
+            or app in output.parents or output in app.parents):
+        raise BundleError("Keep the app output, private cache and bundle output separate")
 
 
 def main():
@@ -582,8 +593,7 @@ def main():
     parser.add_argument("--llvm-readobj", type=pathlib.Path, help="cross-check import tables with llvm-readobj")
     args = parser.parse_args()
     app, cache, output = args.app.resolve(), args.cache.resolve(), args.output.resolve()
-    if cache == output or cache in output.parents or output in cache.parents or app in output.parents or output in app.parents:
-        raise SystemExit("Keep the app output, private cache and bundle output separate")
+    check_output_separation(app, cache, output)
     output.mkdir(parents=True, exist_ok=True)
     log = Log(output / "bundle-build.log")
     policy = Policy.load()

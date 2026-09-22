@@ -201,6 +201,10 @@ private func secondaryWindowEvent(_ event: Int32, value: String, holder: Windows
 enum SpeakWindowsMain {
     static func main() async {
         do {
+            if CommandLine.arguments.contains("--bundle-self-test") {
+                try await WindowsBundleSelfTest.run()
+                return
+            }
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
                 try WindowsNative.checked { jsti_text_output_self_test($0, $1) }

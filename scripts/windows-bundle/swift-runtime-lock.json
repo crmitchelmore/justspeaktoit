@@ -1,0 +1,247 @@
+{
+  "bootstrapManifestSHA256": "0c3bf2bd08c6a87e321c9ed59b25fe3da1e8b47e22bbaf95202aae6786bf785f",
+  "files": [
+    {
+      "bytes": 11776,
+      "cabinet": "rtl.cab",
+      "id": "filDkUQiqolKUaeer3QO8UuJGlAkxo",
+      "path": "BlocksRuntime.dll",
+      "sha256": "41e1c72fe3138c84e77a5a5cd6de8d0bbf572fac279c4fa1cca55942047f3042"
+    },
+    {
+      "bytes": 4762112,
+      "cabinet": "rtl.cab",
+      "id": "filXOtJKgD0OJP_Uv9J7rqAG5VCog4",
+      "path": "Foundation.dll",
+      "sha256": "174965f736fd1d3da032a93797b4409d9e68e1e4de51601b384564339d0e7b54"
+    },
+    {
+      "bytes": 5400576,
+      "cabinet": "rtl.cab",
+      "id": "filSVLcBi9MrUVB1wKdCYarVg0JVuY",
+      "path": "FoundationEssentials.dll",
+      "sha256": "2113bb03b2e09d8bd6781fadb0032c075c52797fd3740d598b4968f59050596e"
+    },
+    {
+      "bytes": 1600512,
+      "cabinet": "rtl.cab",
+      "id": "filHtRXONW9UvbSUfB_L3djiLqKA58",
+      "path": "FoundationInternationalization.dll",
+      "sha256": "4768949c9fde336810454b3f2d9ed358bff8b0c4d0c2907b11231a46eebb6ebc"
+    },
+    {
+      "bytes": 1323008,
+      "cabinet": "rtl.cab",
+      "id": "filq12A7PQ1f4xMjS_Sf.IRC8K4wwQ",
+      "path": "FoundationNetworking.dll",
+      "sha256": "6dc1ed49a56c136864e7bcf256b4d57b3ccdf686dcb7e6c776b49f71585906f6"
+    },
+    {
+      "bytes": 820224,
+      "cabinet": "rtl.cab",
+      "id": "filVwfe4.KZHFPZSnpP85G1axIVyaM",
+      "path": "FoundationXML.dll",
+      "sha256": "5204d4e159bda1fc7c0e003068366e3cd70e3294848215b70e1bbe06e8cd7c9a"
+    },
+    {
+      "bytes": 35854336,
+      "cabinet": "rtl.cab",
+      "id": "filX4_XSgn4nSqTGYeDZmU1YWp89h8",
+      "path": "_FoundationICU.dll",
+      "sha256": "002c65ac113e8e16ae8269f331f9d8abdf9101d2f84e346c6fe7a100ccb7f0f0"
+    },
+    {
+      "bytes": 322640,
+      "cabinet": "rtl.cab",
+      "id": "filH9FMlElzhkgW34CjNgQAmOmTyZU",
+      "path": "concrt140.dll",
+      "sha256": "e2e4609c569c69f7b1686f6d0e81ce62187ac5df05e0247954500053b3c3de3f"
+    },
+    {
+      "bytes": 234496,
+      "cabinet": "rtl.cab",
+      "id": "fil_XxeajVkQGzv51nglFDttNbplvc",
+      "path": "dispatch.dll",
+      "sha256": "2d5f6313c87927649fbb9ef71a5421bbe183bbfe5e766b18daedbfcf9ae6d030"
+    },
+    {
+      "bytes": 575592,
+      "cabinet": "rtl.cab",
+      "id": "filRFmaafdTBXg7R_4FhCexbksMt7E",
+      "path": "msvcp140.dll",
+      "sha256": "9057d39b36b6c7d054865ee2bf9cde7a490fe3b01ec4e82514687e24f576269f"
+    },
+    {
+      "bytes": 35944,
+      "cabinet": "rtl.cab",
+      "id": "filDaB853n3mj9ud678uI7kexdEvVE",
+      "path": "msvcp140_1.dll",
+      "sha256": "a65249861238e1c18b84ae5d112617c438d83a76b67eddc170ad82dbc2338665"
+    },
+    {
+      "bytes": 267880,
+      "cabinet": "rtl.cab",
+      "id": "filfoD7AzTb8oplR__coay9t3Ic3xw",
+      "path": "msvcp140_2.dll",
+      "sha256": "89e2e9a163165e20c540f9adea081e927ddfe4a556547b0f45f11586d4cce165"
+    },
+    {
+      "bytes": 50256,
+      "cabinet": "rtl.cab",
+      "id": "fil0qTu72w7m7KyLVSWPuIQ2f8Ddy8",
+      "path": "msvcp140_atomic_wait.dll",
+      "sha256": "fbf41e4b53f51bbf73fee37b6120103fea6b7d5ae29916f8ef50c50cfdedeead"
+    },
+    {
+      "bytes": 31824,
+      "cabinet": "rtl.cab",
+      "id": "filTqF9lmD_c8uCRCCkPjNYLVqwgac",
+      "path": "msvcp140_codecvt_ids.dll",
+      "sha256": "0e1d3d76e899a89fb3893fb13abae232ff62ad4f573214dd2f02b8398166bcc6"
+    },
+    {
+      "bytes": 39936,
+      "cabinet": "rtl.cab",
+      "id": "fil.CMCJPDzeTnYWE4sfSjUiguRKYU",
+      "path": "swiftCRT.dll",
+      "sha256": "26fed701f33075d08ededed2af6fc1e0f94e84a231453e305cac9ee759f5de11"
+    },
+    {
+      "bytes": 5963264,
+      "cabinet": "rtl.cab",
+      "id": "filB.hVP2FE9f07Lzk.dvhMxvlbc_o",
+      "path": "swiftCore.dll",
+      "sha256": "c615e7e25b008e651e5e483a4b0918ae2f4f6318ed3927d28e1a012f51eae191"
+    },
+    {
+      "bytes": 150528,
+      "cabinet": "rtl.cab",
+      "id": "filVtGX3fjDYBfbkiYOT4pKkKzROlo",
+      "path": "swiftDispatch.dll",
+      "sha256": "0a5631ab0a569311e447ebc0d1c79d7fa57986a8380b852832b64d93afe8e2f2"
+    },
+    {
+      "bytes": 100864,
+      "cabinet": "rtl.cab",
+      "id": "filMhxk0gezDLDeD1q_DxbnTxZr1Og",
+      "path": "swiftDistributed.dll",
+      "sha256": "21f653ad7bbde4848234635db2774c82c550210956aa639df81e8d3e80839e91"
+    },
+    {
+      "bytes": 77824,
+      "cabinet": "rtl.cab",
+      "id": "filHUdy2Uq0a4415nyvbWfCMQZDLSc",
+      "path": "swiftObservation.dll",
+      "sha256": "33cc530abfcaadd82fe77edb773090dce8c17b0a148fcb53a49c9f1b5473ac51"
+    },
+    {
+      "bytes": 78336,
+      "cabinet": "rtl.cab",
+      "id": "fil3RYBA7dH1IN9W5PDrUOQywEP6CQ",
+      "path": "swiftRegexBuilder.dll",
+      "sha256": "7ab131a84f4da86a2b2a5fd0fd3f61f0a09e7ad9a8d5134870312a629bf92ab8"
+    },
+    {
+      "bytes": 834560,
+      "cabinet": "rtl.cab",
+      "id": "fildzuBzgKrguAIHTVMrl09YGkJFZo",
+      "path": "swiftRemoteMirror.dll",
+      "sha256": "bd0ad46345bcc0ad864a822439779e81582d6d0cc39205c33592c7bf96567fc2"
+    },
+    {
+      "bytes": 233984,
+      "cabinet": "rtl.cab",
+      "id": "fil97Q4gz7MqFXSrIjJGzN9HQMvG0c",
+      "path": "swiftSwiftOnoneSupport.dll",
+      "sha256": "ca20976c34c7cb59a091195f848bc27e7c856b96faf8854a4dfcacd8dba4b34a"
+    },
+    {
+      "bytes": 54784,
+      "cabinet": "rtl.cab",
+      "id": "filGfwJQtI4BElc8E3JsvIhKe6.ztM",
+      "path": "swiftSynchronization.dll",
+      "sha256": "bf8a7a1595e15d39d6cf179bc15b58d9e37f3fffc282c86bf98bae93ab368406"
+    },
+    {
+      "bytes": 30720,
+      "cabinet": "rtl.cab",
+      "id": "filhp4Cqv_izkKbMg86G3Q3ZtrRUOw",
+      "path": "swiftWinSDK.dll",
+      "sha256": "035e2348c4453db26d058a7549b09e21fb8bc15a099bd4d2c0e8d5aba6562538"
+    },
+    {
+      "bytes": 525824,
+      "cabinet": "rtl.cab",
+      "id": "fil1IAkvLswoANrSuAm1NRtW4GeT_Y",
+      "path": "swift_Concurrency.dll",
+      "sha256": "54e43742cee7225344eb217519b37a6765beb5866a7024b2fd7f90ac212f4b7a"
+    },
+    {
+      "bytes": 340992,
+      "cabinet": "rtl.cab",
+      "id": "filB5Ybi1NzG9v0iY9nlYbCMfuBY9M",
+      "path": "swift_Differentiation.dll",
+      "sha256": "b479d20398242d88b313d8285b9eff7be96b921680751508a4e719bc7ca06232"
+    },
+    {
+      "bytes": 974848,
+      "cabinet": "rtl.cab",
+      "id": "filmIqCh5wvcsY97YhqvAi5nGmxqRs",
+      "path": "swift_RegexParser.dll",
+      "sha256": "50cf68d0f165c48f49bd36b1a06312ca19f4f29bef6acab350c22be46de60f2e"
+    },
+    {
+      "bytes": 670720,
+      "cabinet": "rtl.cab",
+      "id": "filsM3ScmSGvhWuHEtxtFDxDvJsWz4",
+      "path": "swift_StringProcessing.dll",
+      "sha256": "2ae94d02df0a0c3f0ad47a47f10b6bb3aaf9519bb9f5b7baa02402f809049645"
+    },
+    {
+      "bytes": 351824,
+      "cabinet": "rtl.cab",
+      "id": "filwr5QVefuPqSrQ4e6zNyoxOM9zig",
+      "path": "vccorlib140.dll",
+      "sha256": "8903b5d88968791d2a93648a54a1ac3d1c708c579a72311ffe194f6d66903043"
+    },
+    {
+      "bytes": 120432,
+      "cabinet": "rtl.cab",
+      "id": "filQKeWnDJN.zhYC5C8FIHex1Xx.2c",
+      "path": "vcruntime140.dll",
+      "sha256": "da72e6677bd1bcd01c453c1998aaa19aeaf6659f4774cf6848409da8232a95b2"
+    },
+    {
+      "bytes": 49744,
+      "cabinet": "rtl.cab",
+      "id": "fil0eH50izP2lmvqP2Lcyr2R3ohlZw",
+      "path": "vcruntime140_1.dll",
+      "sha256": "26e470b29bed3d873e0c328186e53f95e9edbfe0b0fd0cda44743a0b1a04a828"
+    },
+    {
+      "bytes": 38504,
+      "cabinet": "rtl.cab",
+      "id": "fil42Wp4u_nVhDCT0gPSigfhSDE3ZU",
+      "path": "vcruntime140_threads.dll",
+      "sha256": "326110c8c5cac836cfed1643304cb6bdc4a8737a7a535d6b1eff4d63878aef9d"
+    }
+  ],
+  "installer": {
+    "bytes": 891523424,
+    "name": "swift-6.2.3-RELEASE-windows10.exe",
+    "sha256": "10a4d887c383bec128f3f11b8caaae8fbd0d13ff10cc9844c578b6560f1f3e77",
+    "url": "https://download.swift.org/swift-6.2.3-release/windows10/swift-6.2.3-RELEASE/swift-6.2.3-RELEASE-windows10.exe"
+  },
+  "payloads": {
+    "rtl.cab": {
+      "bytes": 18542881,
+      "sha512": "b0293efb8b10005ffad3ab5909d48fd6a3142e4cfe18db4a9c81ac327338f5f122e4c936c4cb3f7bf769c7f97001b5e862ac2ffb3534881543d260119c97d100"
+    },
+    "rtl.msi": {
+      "bytes": 450560,
+      "sha512": "abb8b502193d9a22fad5bbdaa002a0da9d62cb9fefa8639e86edf06df88c524188eeceb84fe078429d27aff9f32d6f6238f2ca58931ce143b86c2fb033f93ffb"
+    }
+  },
+  "schemaVersion": 1,
+  "swiftVersion": "6.2.3"
+}

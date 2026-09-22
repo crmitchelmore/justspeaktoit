@@ -256,7 +256,7 @@ jobs:
           path: bundle
       # No Swift setup action runs in this job. The script additionally isolates
       # PATH to the Windows system directories, proves the executable cannot
-      # start without the bundled DLLs, and records every loaded module's path.
+      # start without the bundled DLLs, and records sampled loaded modules's path.
       - name: Verify hashes, isolate PATH and run the bundled production app
         shell: pwsh
         run: |

@@ -6,7 +6,7 @@ separately installed Visual C++ redistributable. It copies the production
 `SpeakWindows.exe`, its SwiftPM resources, and only the runtime DLLs reached
 from the executable's static and delay-load import closure, plus licence texts
 and a manifest of hashes and provenance. `verify-windows-bundle.ps1` runs that
-bundle on Windows with an isolated PATH and records every loaded module.
+bundle on Windows with an isolated PATH and records sampled loaded modules.
 
 Design, provenance, licences, evidence and remaining gates are documented in
 [Docs/windows-runtime-bundle.md](../../Docs/windows-runtime-bundle.md).

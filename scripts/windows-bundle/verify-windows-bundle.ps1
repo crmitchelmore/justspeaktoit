@@ -7,7 +7,7 @@ Verifies the ZIP and every extracted file against the hashes recorded on the Mac
 isolates PATH to the Windows system directories, proves the runner cannot satisfy
 the executable's runtime on its own (a copy without the bundled DLLs must fail to
 start), then runs the production executable's self-test and native window smoke
-test while recording every module the process loads. Any non-system module must
+test while sampling the process’s loaded module paths. Any non-system module must
 come from the bundle directory. Evidence is written even when a check fails, and
 every failure is reported before the script exits non-zero.
 #>
@@ -49,6 +49,7 @@ $report = [ordered]@{
     zip = $null
     isolation = $null
     negativeControl = $null
+    resourceNegativeControl = $null
     runs = @()
     failures = @()
 }
@@ -65,7 +66,7 @@ try {
     if ((Get-Item -LiteralPath $zipPath).Length -ne $evidence.zip.bytes) { throw 'Bundle ZIP size mismatch.' }
     $report.zip = [ordered]@{ name = $evidence.zip.name; sha256 = $zipHash; bytes = $evidence.zip.bytes }
 
-    $bundle = Join-Path $workspace 'bundle'
+    $bundle = Join-Path $workspace 'Bundle with spaces κόσμε'
     if (Test-Path -LiteralPath $bundle) { Remove-Item -LiteralPath $bundle -Recurse -Force }
     Expand-Archive -LiteralPath $zipPath -DestinationPath $bundle -Force
     $bundle = (Resolve-Path -LiteralPath $bundle).Path
@@ -100,7 +101,7 @@ try {
     $systemRoot = $env:SystemRoot
     $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
     $env:Path = $isolatedPath
-    foreach ($name in 'SDKROOT', 'SWIFTFLAGS', 'DEVELOPER_DIR', 'SWIFT_TOOLCHAIN', 'SWIFT_EXEC') {
+    foreach ($name in @((Get-ChildItem Env: | Where-Object { $_.Name -like 'SWIFT*' }).Name) + @('SDKROOT', 'DEVELOPER_DIR', 'ICU_DATA')) {
         Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
     }
     if (Get-Command swift.exe -ErrorAction SilentlyContinue) { throw 'A Swift toolchain is reachable on the isolated PATH.' }
@@ -120,9 +121,15 @@ try {
     $report.isolation = [ordered]@{
         path = $isolatedPath
         swiftOnPath = $false
+        icuDataOverride = $null
+        bundlePath = $bundle
+        workingDirectory = (Join-Path $workspace 'Empty working directory')
         systemCopiesOfBundledModules = $systemCopies
     }
     Write-Host "Isolated PATH: $isolatedPath"
+
+    $emptyWorkingDirectory = (New-Item -ItemType Directory -Force -Path (Join-Path $workspace 'Empty working directory')).FullName
+    if (Get-ChildItem -LiteralPath $emptyWorkingDirectory -Force) { throw 'Isolation working directory must be empty.' }
 
     # --- 4. Negative control: the executable alone must fail to start --------------
     $errorMode = Add-Type -Namespace Jsti -Name ErrorMode -PassThru -MemberDefinition @'
@@ -136,7 +143,7 @@ try {
     $previousMode = $errorMode::SetErrorMode(0x8003)  # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
     try {
         $controlProcess = Start-Process -FilePath (Join-Path $control 'SpeakWindows.exe') -ArgumentList '--self-test' `
-            -WorkingDirectory $control -PassThru -NoNewWindow `
+            -WorkingDirectory $emptyWorkingDirectory -PassThru -NoNewWindow `
             -RedirectStandardOutput (Join-Path $evidenceDirectory 'negative-control.log') `
             -RedirectStandardError (Join-Path $evidenceDirectory 'negative-control-errors.log')
         if (-not $controlProcess.WaitForExit(30000)) {
@@ -161,12 +168,15 @@ try {
         $parameters = @{
             FilePath = (Join-Path $bundle 'SpeakWindows.exe')
             ArgumentList = $arguments
-            WorkingDirectory = $bundle
+            WorkingDirectory = $emptyWorkingDirectory
             PassThru = $true
             NoNewWindow = $true
             RedirectStandardOutput = (Join-Path $evidenceDirectory "bundle-$label.log")
             RedirectStandardError = (Join-Path $evidenceDirectory "bundle-$label-errors.log")
         }
+        $probeRelease = Join-Path $evidenceDirectory ('module-probe-' + $label + '.ready')
+        Remove-Item -LiteralPath $probeRelease -Force -ErrorAction SilentlyContinue
+        $env:JSTI_BUNDLE_PROBE_RELEASE_PATH = $probeRelease
         $process = Start-Process @parameters
         $loaded = @{}
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -174,6 +184,13 @@ try {
             try {
                 $process.Refresh()
                 foreach ($module in $process.Modules) { $loaded[$module.FileName.ToLowerInvariant()] = $module.FileName }
+                $allStaticObserved = $true
+                foreach ($entry in $bundled.Values) {
+                    if (@($entry.importedBy | Where-Object { $_.kind -eq 'static' }).Count -eq 0) { continue }
+                    $expectedPath = (Join-Path $bundle $entry.name).ToLowerInvariant()
+                    if (-not $loaded.ContainsKey($expectedPath)) { $allStaticObserved = $false }
+                }
+                if ($allStaticObserved) { [System.IO.File]::WriteAllText($probeRelease, 'sampled') }
             } catch { }
             if ($stopwatch.Elapsed.TotalSeconds -gt $seconds) {
                 $process.Kill()
@@ -222,6 +239,37 @@ try {
         return $run
     }
 
+    try {
+        $run = Invoke-Bundled '--bundle-self-test' 'foundation-resources' 30
+        if (-not (Select-String -LiteralPath (Join-Path $evidenceDirectory 'bundle-foundation-resources.log') -Pattern 'JSTI_BUNDLE_SELF_TEST_OK' -Quiet)) {
+            throw 'Bundled Foundation/resource success marker missing.'
+        }
+    } catch { $failures.Add($_.Exception.Message) }
+    try {
+        # This disposable control has the complete runtime/resource directory,
+        # but its release-notes JSON is missing. The usual empty-catalogue
+        # fallback must fail the explicit resource assertion.
+        $resourceControl = Join-Path $workspace 'Missing resource control κόσμε'
+        if (Test-Path -LiteralPath $resourceControl) { Remove-Item -LiteralPath $resourceControl -Recurse -Force }
+        New-Item -ItemType Directory -Path $resourceControl | Out-Null
+        Get-ChildItem -LiteralPath $bundle | Copy-Item -Destination $resourceControl -Recurse
+        $resourceFiles = @(Get-ChildItem -LiteralPath $resourceControl -Recurse -File -Filter 'ReleaseNotes.json')
+        if ($resourceFiles.Count -ne 1) { throw 'Expected exactly one bundled ReleaseNotes.json fixture.' }
+        Remove-Item -LiteralPath $resourceFiles[0].FullName -Force
+        $resourceErrors = Join-Path $evidenceDirectory 'missing-resource-errors.log'
+        $resourceProcess = Start-Process -FilePath (Join-Path $resourceControl 'SpeakWindows.exe') `
+            -ArgumentList '--bundle-self-test' -WorkingDirectory $emptyWorkingDirectory -PassThru -NoNewWindow `
+            -RedirectStandardOutput (Join-Path $evidenceDirectory 'missing-resource.log') -RedirectStandardError $resourceErrors
+        if (-not $resourceProcess.WaitForExit(30000)) {
+            $resourceProcess.Kill()
+            throw 'Missing-resource control did not exit within 30 seconds.'
+        }
+        $report.resourceNegativeControl = [ordered]@{ exitCode = $resourceProcess.ExitCode }
+        if ($resourceProcess.ExitCode -eq 0 -or -not (Select-String -LiteralPath $resourceErrors `
+            -Pattern 'Bundle resource lookup failed' -Quiet)) {
+            throw 'The missing-resource control did not fail the real SwiftPM resource lookup.'
+        }
+    } catch { $failures.Add($_.Exception.Message) }
     try {
         $run = Invoke-Bundled '--self-test' 'self-test' 90
         if (-not (Select-String -LiteralPath (Join-Path $evidenceDirectory 'bundle-self-test.log') -Pattern 'self-test passed' -Quiet)) {

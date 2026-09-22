@@ -77,10 +77,17 @@ final class SonioxControllerClient: @unchecked Sendable {
 
     func finishAndWait() async -> Snapshot {
         let whole = await client.finishAndWait()
+        let taskWasCancelled = Task.isCancelled
         return lock.withLock {
             if !finalized, let whole, !whole.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 accumulator.replace(with: whole)
-                text = accumulator.text
+                // Failure/cancellation can return only confirmed words while
+                // the visible draft contains speech not yet confirmed. Keep
+                // that display and the confirmed result separately; neither
+                // prefixes nor lengths can safely merge provider revisions.
+                if (error == nil && !closed && !taskWasCancelled) || text.isEmpty {
+                    text = accumulator.text
+                }
             }
             // A nil result does not erase a draft or previously confirmed text.
             closed = true

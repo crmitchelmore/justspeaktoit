@@ -75,15 +75,17 @@ final class SonioxControllerWireTests: XCTestCase {
         let fixture = SonioxControllerFixture()
         fixture.start()
         fixture.ready()
-        fixture.socket.emit(#"{"tokens":[{"text":"Confirmed.","is_final":true}]}"#)
+        fixture.socket.emit(
+            #"{"tokens":[{"text":"Confirmed.","is_final":true},{"text":" trailing draft","is_final":false}]}"#
+        )
         let finished = Task { await fixture.adapter.finishAndWait() }
         await self.waitUntil { fixture.clock.delays.contains(3.5) }
         XCTAssertFalse(fixture.clock.delays.contains(8))
         fixture.socket.completeSend()
         fixture.clock.fire(3.5)
         let snapshot = await finished.value
-        XCTAssertEqual(snapshot.text, "Confirmed.")
-        XCTAssertEqual(snapshot.confirmedText, snapshot.text)
+        XCTAssertEqual(snapshot.text, "Confirmed. trailing draft")
+        XCTAssertEqual(snapshot.confirmedText, "Confirmed.")
         XCTAssertNotNil(snapshot.error)
         XCTAssertTrue(fixture.socket.isCancelled)
     }

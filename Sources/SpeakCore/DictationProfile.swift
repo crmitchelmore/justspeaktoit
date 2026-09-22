@@ -4,16 +4,26 @@ import Foundation
 
 /// A rule binding a dictation profile to a target context.
 ///
-/// Today only `bundleID` matchers are evaluated (macOS frontmost-app matching).
-/// `urlPattern` is reserved so browser URL matching (Safari/Chrome via AX) can be
-/// added later without a storage or sync format change; unknown kinds written by
-/// newer clients are dropped on decode instead of failing the whole profile list.
+/// `bundleID` matchers are evaluated on macOS (frontmost-app matching) and
+/// `windowsExecutablePath` matchers on Windows (the captured application's
+/// full executable path). Each platform evaluates only its own kind and keeps
+/// the others untouched when it edits a profile, so one profile list can carry
+/// both. `urlPattern` is reserved so browser URL matching (Safari/Chrome via AX)
+/// can be added later without a storage or sync format change; unknown kinds
+/// written by newer clients are dropped on decode instead of failing the whole
+/// profile list.
 public struct DictationProfileMatcher: Codable, Equatable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable {
         /// Matches the frontmost application's bundle identifier (case-insensitive).
         case bundleID
         /// Reserved: matches the frontmost browser tab's URL. Not evaluated yet.
         case urlPattern
+        /// Matches the full executable path of the Windows process that owned the
+        /// captured text target, compared as an exact path after
+        /// `normalizedWindowsExecutablePath` (case-insensitive, `\` separators,
+        /// no `\\?\` prefix). A bare file name or a bundle identifier never
+        /// matches; nothing is inferred from a process name.
+        case windowsExecutablePath
     }
 
     public var kind: Kind
@@ -26,6 +36,48 @@ public struct DictationProfileMatcher: Codable, Equatable, Hashable, Sendable {
 
     public static func bundleID(_ identifier: String) -> DictationProfileMatcher {
         DictationProfileMatcher(kind: .bundleID, value: identifier)
+    }
+
+    public static func windowsExecutablePath(_ path: String) -> DictationProfileMatcher {
+        DictationProfileMatcher(kind: .windowsExecutablePath, value: path)
+    }
+}
+
+// MARK: - Windows executable paths
+
+public extension DictationProfileMatcher {
+    /// The comparison form of a Windows executable path: surrounding whitespace
+    /// trimmed, `/` folded to `\`, the `\\?\` and `\\?\UNC\` prefixes removed
+    /// and everything lower-cased, because Windows compares paths without regard
+    /// to case. `nil` for a blank value, which never matches anything.
+    static func normalizedWindowsExecutablePath(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        var path = trimmed.replacingOccurrences(of: "/", with: "\\").lowercased()
+        if path.hasPrefix("\\\\?\\unc\\") {
+            path = "\\\\" + path.dropFirst("\\\\?\\unc\\".count)
+        } else if path.hasPrefix("\\\\?\\") {
+            path = String(path.dropFirst("\\\\?\\".count))
+        }
+        return path.isEmpty ? nil : path
+    }
+
+    /// Whether `path` names a specific file by its complete Windows path: a
+    /// drive-letter path such as `C:\Apps\App.exe` or a UNC path with a server,
+    /// share and file name. Relative paths and bare names are rejected so a
+    /// matcher can only ever describe the exact application it was chosen for.
+    static func isFullWindowsExecutablePath(_ path: String) -> Bool {
+        guard let normalized = normalizedWindowsExecutablePath(path), !normalized.hasSuffix("\\") else {
+            return false
+        }
+        let scalars = Array(normalized.unicodeScalars)
+        if scalars.count >= 4, ("a"..."z").contains(scalars[0]), scalars[1] == ":", scalars[2] == "\\" {
+            return true
+        }
+        guard normalized.hasPrefix("\\\\") else { return false }
+        let components = normalized.dropFirst(2).split(separator: "\\", omittingEmptySubsequences: false)
+        return components.count >= 3 && components.allSatisfy { !$0.isEmpty }
     }
 }
 
@@ -215,6 +267,26 @@ public extension DictationProfile {
     }
 }
 
+// MARK: - Platform-owned matchers
+
+public extension DictationProfile {
+    /// The Windows executable paths this profile matches, in stored order.
+    var windowsExecutablePaths: [String] {
+        matchers.filter { $0.kind == .windowsExecutablePath }.map(\.value)
+    }
+
+    /// A copy whose Windows matchers are replaced by `paths`. Every other
+    /// matcher — macOS bundle identifiers and reserved URL patterns — keeps its
+    /// value and relative order, so a Windows edit never loses what the Mac
+    /// editor stored (and vice versa once it adopts the same rule).
+    func replacingWindowsExecutablePaths(_ paths: [String]) -> DictationProfile {
+        var copy = self
+        copy.matchers = matchers.filter { $0.kind != .windowsExecutablePath }
+            + paths.map(DictationProfileMatcher.windowsExecutablePath)
+        return copy
+    }
+}
+
 // MARK: - List serialisation
 
 public extension DictationProfile {
@@ -234,10 +306,12 @@ public extension DictationProfile {
 
 /// Resolves which profile applies to a dictation session.
 ///
-/// Precedence: the first profile in user order with an explicit bundle-ID match
-/// wins. When nothing matches (or no bundle ID is known) the resolver returns
-/// `nil`, which means "use the app's normal settings" — the implicit default
-/// profile that preserves today's behaviour.
+/// Precedence: the first profile in user order with an explicit match for the
+/// platform's own matcher kind wins. When nothing matches (or no application
+/// identity is known) the resolver returns `nil`, which means "use the app's
+/// normal settings" — the implicit default profile that preserves today's
+/// behaviour. The Windows lookup ignores bundle-ID matchers and the macOS
+/// lookup ignores executable paths; neither derives one identity from the other.
 public struct ProfileResolver: Sendable {
     public var profiles: [DictationProfile]
 
@@ -250,6 +324,19 @@ public struct ProfileResolver: Sendable {
         return profiles.first { profile in
             profile.matchers.contains { matcher in
                 matcher.kind == .bundleID && Self.normalized(matcher.value) == target
+            }
+        }
+    }
+
+    /// The first profile whose Windows matcher names exactly the captured
+    /// application's full executable path (see
+    /// `DictationProfileMatcher.normalizedWindowsExecutablePath`).
+    public func profile(forWindowsExecutablePath path: String?) -> DictationProfile? {
+        guard let target = DictationProfileMatcher.normalizedWindowsExecutablePath(path) else { return nil }
+        return profiles.first { profile in
+            profile.matchers.contains { matcher in
+                matcher.kind == .windowsExecutablePath
+                    && DictationProfileMatcher.normalizedWindowsExecutablePath(matcher.value) == target
             }
         }
     }

@@ -17,6 +17,10 @@ public enum DictationProfileIssue: Equatable, Sendable {
     /// A local model stored under remote routing: the session would send a local
     /// identifier to a cloud provider.
     case localModelUnderRemoteRouting(modelID: String)
+    /// A Windows matcher that is not a complete executable path: a relative path
+    /// or bare file name could never equal the captured application's path, so
+    /// the profile would silently never activate.
+    case invalidWindowsExecutablePath(path: String)
 
     public var message: String {
         switch self {
@@ -31,6 +35,9 @@ public enum DictationProfileIssue: Equatable, Sendable {
             return "“\(modelID)” is not a local model the app can run. Pick a downloaded model."
         case .localModelUnderRemoteRouting(let modelID):
             return "“\(modelID)” is a local model. Choose Local Model routing for it."
+        case .invalidWindowsExecutablePath(let path):
+            return "“\(path)” is not a full Windows executable path. "
+                + "Use the complete path, for example C:\\Program Files\\App\\App.exe, or choose it with Browse."
         }
     }
 }
@@ -40,6 +47,12 @@ public enum DictationProfileValidator {
         var issues: [DictationProfileIssue] = []
         if profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(.emptyName)
+        }
+        for matcher in profile.matchers where matcher.kind == .windowsExecutablePath {
+            // Blank values are inert (they match nothing), like blank bundle IDs.
+            if let path = trimmedNonEmpty(matcher.value), !DictationProfileMatcher.isFullWindowsExecutablePath(path) {
+                issues.append(.invalidWindowsExecutablePath(path: path))
+            }
         }
         if let override = profile.resolvedTranscriptionOverride {
             issues.append(contentsOf: transcriptionIssues(modelID: override.modelID, routing: override.routing))

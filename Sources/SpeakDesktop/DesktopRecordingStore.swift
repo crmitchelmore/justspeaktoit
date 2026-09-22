@@ -14,6 +14,12 @@ public actor DesktopRecordingStore {
         public var processedText: String?
         public var postProcessingModelIdentifier: String?
         public var postProcessingFailure: String?
+        /// Provider language the recording was transcribed with (`nil` means
+        /// detection), so a retry repeats the original request exactly.
+        public var languageIdentifier: String?
+        /// The dictation profile applied to this recording, for display only;
+        /// retries and imports never resolve a profile again.
+        public var profileName: String?
 
         public var displayText: String? { processedText ?? result?.text }
 

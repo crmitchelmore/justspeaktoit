@@ -61,7 +61,7 @@ public enum DesktopLiveTranscription {
         case .xai:
             // `route(forID:)` admits only the dedicated speech-to-text stream.
             return XAISpeechToTextLiveClient(
-                apiKey: apiKey, language: language, sampleRate: route.sampleRate, makeConnection: makeConnection
+                apiKey: apiKey, language: hint, sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         default: return nil
         }

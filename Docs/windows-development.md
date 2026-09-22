@@ -183,6 +183,12 @@ copied before the separate test-enabled build; metadata verifies
 The [exact developer artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35735185760/artifacts/10698245839)
 is an optimised cross-built app, with the runtime prerequisites described above.
 
+After the model-specific language profiles and dedicated xAI live client were
+integrated, the macOS portable suite passed **385 tests, five expected optional
+loopback skips and zero failures**. This covers the combined shared source;
+native Windows, full Apple and API compatibility checks must also pass for that
+revision before it is promoted. It is not a live Windows xAI provider receipt.
+
 ## Architecture and ownership
 
 ```mermaid

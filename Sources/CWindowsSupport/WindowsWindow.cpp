@@ -144,6 +144,8 @@ bool populateModels(HWND window) {
     return success;
 }
 
+void updateModelLayout(HWND window);
+
 bool applyModelRows(HWND window, const std::vector<ModelRow> &rows) {
     if (rows.empty()) return true;
     bool changed = rows.size() != state.modelNames.size();
@@ -154,6 +156,8 @@ bool applyModelRows(HWND window, const std::vector<ModelRow> &rows) {
     if (!changed) return true;
     const int selected = selection(window);
     if (selected >= 0) state.preferredModels[state.activeMode] = selected;
+    const bool hadModeChoice = hasModeChoice();
+    const int oldPreferred[] = {state.preferredModels[0], state.preferredModels[1]};
     auto oldNames = state.modelNames;
     auto oldModes = state.modelModes;
     auto oldOrder = state.modelOrder;
@@ -165,7 +169,16 @@ bool applyModelRows(HWND window, const std::vector<ModelRow> &rows) {
         order.push_back(row.order);
     }
     state.modelNames = std::move(names); state.modelModes = std::move(modes); state.modelOrder = std::move(order);
-    if (populateModels(window)) return true;
+    for (size_t index = 0; index < rows.size(); ++index) {
+        if (rows[index].order >= 0 && state.preferredModels[rows[index].mode] < 0) {
+            state.preferredModels[rows[index].mode] = static_cast<int>(index);
+        }
+    }
+    if (populateModels(window)) {
+        if (hadModeChoice != hasModeChoice()) updateModelLayout(window);
+        return true;
+    }
+    state.preferredModels[0] = oldPreferred[0]; state.preferredModels[1] = oldPreferred[1];
     state.modelNames = std::move(oldNames); state.modelModes = std::move(oldModes); state.modelOrder = std::move(oldOrder);
     populateModels(window);
     return false;
@@ -337,6 +350,17 @@ void refreshFont(HWND window) {
     for (HWND control : state.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
     if (state.font) DeleteObject(state.font);
     state.font = replacement;
+}
+
+void updateModelLayout(HWND window) {
+    RECT bounds{};
+    GetWindowRect(window, &bounds);
+    const int minimumHeight = scale(window, hasModeChoice() ? 684 : 650);
+    if (bounds.bottom - bounds.top < minimumHeight) {
+        SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, minimumHeight,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    layout(window);
 }
 
 bool createControls(HWND window) {
@@ -1331,6 +1355,31 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             selection(window) != 2 || SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 4) {
             if (failure.empty()) failure = "The all-batch model catalogue lost legacy behaviour.";
             return false;
+        }
+        // A host initially exposing only batch can add its first live route
+        // without restarting or changing the current batch preference.
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.knownModelIdentities = {{"batch-a", 0}, {"batch-b", 0}, {"batch-c", 0}, {"batch-d", 0}};
+        }
+        const JSTIModelRow firstLive[] = {
+            {"batch-a", "Batch Alpha", 0, 0}, {"batch-b", "Batch Beta", 0, 1},
+            {"batch-c", "Batch Gamma", 0, 2}, {"batch-d", "Batch Delta", 0, 3},
+            {"first-live", "First Live", 1, 4}
+        };
+        const int eventBeforeFirstLive = observed.event;
+        if (jsti_window_set_model_catalog(firstLive, 5, "Live now available", 0) != 0) {
+            failure = "The first live mode could not be appended."; return false;
+        }
+        applyUpdate(window);
+        RECT modeBounds{}, labelBounds{}, windowBounds{};
+        GetWindowRect(GetDlgItem(window, modeID), &modeBounds);
+        GetWindowRect(GetDlgItem(window, 90), &labelBounds);
+        GetWindowRect(window, &windowBounds);
+        if (!hasModeChoice() || !IsWindowVisible(GetDlgItem(window, modeID)) || selection(window) != 2 ||
+            observed.event != eventBeforeFirstLive || modeBounds.bottom > labelBounds.top ||
+            windowBounds.bottom - windowBounds.top < scale(window, 684) || !checkBounds() || !changeMode(1, 4)) {
+            failure = "Adding the first live mode lost its preference or overlapped the model controls."; return false;
         }
         return jsti_settings_self_test(window, failure);
     };

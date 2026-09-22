@@ -21,11 +21,18 @@ public enum DictationProfileIssue: Equatable, Sendable {
     /// or bare file name could never equal the captured application's path, so
     /// the profile would silently never activate.
     case invalidWindowsExecutablePath(path: String)
+    /// A native editor selection no longer belongs to its captured catalogue.
+    case invalidSelection(field: String)
+    case duplicateProfile
 
     public var message: String {
         switch self {
         case .emptyName:
             return "Give the profile a name."
+        case .invalidSelection(let field):
+            return "Choose \(field) again before saving this profile."
+        case .duplicateProfile:
+            return "This profile appears more than once. Keep one copy before saving."
         case .unknownStreamingProvider(let modelID):
             return "“\(modelID)” is not a streaming model the app can route to. "
                 + "Use a provider/model identifier from a supported live provider, or pick a catalogue model."

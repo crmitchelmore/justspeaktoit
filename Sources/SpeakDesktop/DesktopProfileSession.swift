@@ -202,7 +202,24 @@ public enum DesktopProfileSessionResolver {
             }
         }
 
-        var options = defaultPostProcessing
+        let polish = resolvePolish(
+            profile: profile, defaults: defaultPostProcessing, capabilities: capabilities, limitations: &limitations
+        )
+        return DesktopProfileSession(
+            profileName: profile.name,
+            modelIdentifier: model,
+            language: language,
+            postProcessing: polish.options,
+            limitations: limitations,
+            skippedPolishReason: polish.skippedReason
+        )
+    }
+
+    private static func resolvePolish(
+        profile: DictationProfile, defaults: DesktopPostProcessing.Options,
+        capabilities: DesktopProfileCapabilities, limitations: inout [DesktopProfileLimitation]
+    ) -> (options: DesktopPostProcessing.Options, skippedReason: String?) {
+        var options = defaults
         var skippedPolishReason: String?
         if let enabled = profile.polishEnabled {
             options.mode = enabled ? .remote : .disabled
@@ -229,14 +246,7 @@ public enum DesktopProfileSessionResolver {
             if profile.polishIncludeLexiconDirectives == true { limitations.append(.lexiconDirectivesUnavailable) }
             if profile.polishIncludeContextTags == true { limitations.append(.contextTagsUnavailable) }
         }
-        return DesktopProfileSession(
-            profileName: profile.name,
-            modelIdentifier: model,
-            language: language,
-            postProcessing: options,
-            limitations: limitations,
-            skippedPolishReason: skippedPolishReason
-        )
+        return (options, skippedPolishReason)
     }
 
     /// The limitations a profile would meet here regardless of the current

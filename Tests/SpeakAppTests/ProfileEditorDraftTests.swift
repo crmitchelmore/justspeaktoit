@@ -7,6 +7,17 @@ import XCTest
 /// exactly as displayed (issue #690).
 @MainActor
 final class ProfileEditorDraftTests: XCTestCase {
+  func testEditingMacAppsPreservesWindowsAndURLMatchers() {
+    var draft = ProfileEditorDraft()
+    draft.name = "Shared profile"
+    draft.bundleIDs = ["com.apple.Notes"]
+    draft.preservedMatchers = [
+      .windowsExecutablePath(#"C:\Windows\System32\notepad.exe"#),
+      DictationProfileMatcher(kind: .urlPattern, value: "example.com")
+    ]
+    XCTAssertEqual(draft.profile(id: nil).matchers, [.bundleID("com.apple.Notes")] + draft.preservedMatchers)
+  }
+
   func testStreamingChoice_storesExplicitStreamingRouting() {
     var draft = ProfileEditorDraft()
     draft.name = " Slack "

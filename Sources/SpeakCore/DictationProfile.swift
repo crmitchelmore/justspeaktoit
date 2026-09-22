@@ -72,12 +72,21 @@ public extension DictationProfileMatcher {
             return false
         }
         let scalars = Array(normalized.unicodeScalars)
-        if scalars.count >= 4, ("a"..."z").contains(scalars[0]), scalars[1] == ":", scalars[2] == "\\" {
-            return true
+        guard !scalars.contains(where: { $0.value < 32 || "<>\"|?*".unicodeScalars.contains($0) }) else {
+            return false
         }
-        guard normalized.hasPrefix("\\\\") else { return false }
-        let components = normalized.dropFirst(2).split(separator: "\\", omittingEmptySubsequences: false)
-        return components.count >= 3 && components.allSatisfy { !$0.isEmpty }
+        let components: [Substring]
+        if scalars.count >= 4, ("a"..."z").contains(scalars[0]), scalars[1] == ":", scalars[2] == "\\" {
+            components = normalized.dropFirst(3).split(separator: "\\", omittingEmptySubsequences: false)
+        } else {
+            guard normalized.hasPrefix("\\\\") else { return false }
+            components = normalized.dropFirst(2).split(separator: "\\", omittingEmptySubsequences: false)
+            guard components.count >= 3 else { return false }
+        }
+        return components.allSatisfy {
+            !$0.isEmpty && $0 != "." && $0 != ".." && !$0.contains(":")
+                && !$0.hasSuffix(".") && !$0.hasSuffix(" ")
+        }
     }
 }
 
@@ -332,7 +341,8 @@ public struct ProfileResolver: Sendable {
     /// application's full executable path (see
     /// `DictationProfileMatcher.normalizedWindowsExecutablePath`).
     public func profile(forWindowsExecutablePath path: String?) -> DictationProfile? {
-        guard let target = DictationProfileMatcher.normalizedWindowsExecutablePath(path) else { return nil }
+        guard let target = DictationProfileMatcher.normalizedWindowsExecutablePath(path),
+              DictationProfileMatcher.isFullWindowsExecutablePath(target) else { return nil }
         return profiles.first { profile in
             profile.matchers.contains { matcher in
                 matcher.kind == .windowsExecutablePath

@@ -39,7 +39,9 @@ final class DesktopProfileEditingTests: XCTestCase {
         XCTAssertEqual(draft.polishPrompt, "Be terse.")
         XCTAssertEqual(draft.polishOutputLanguage, "French")
         XCTAssertEqual(draft.language, .index(languageIndex))
-        XCTAssertEqual(draft.notes, ["Also matches these macOS apps, which only the Mac editor changes: com.apple.Notes."])
+        XCTAssertEqual(
+            draft.notes, ["Also matches these macOS apps, which only the Mac editor changes: com.apple.Notes."]
+        )
 
         let imported = DictationProfile(
             name: "Imported",
@@ -76,7 +78,8 @@ final class DesktopProfileEditingTests: XCTestCase {
         let stored = DictationProfile(
             id: UUID(),
             name: "Imported",
-            matchers: [.bundleID("com.apple.mail"), .windowsExecutablePath(notepad), .bundleID("com.microsoft.Outlook")],
+            matchers: [.bundleID("com.apple.mail"), .windowsExecutablePath(notepad),
+            .bundleID("com.microsoft.Outlook")],
             transcriptionModelID: "local/whisperkit/tiny",
             polishEnabled: true,
             polishModelID: "local/post-processing/rules",
@@ -126,8 +129,9 @@ final class DesktopProfileEditingTests: XCTestCase {
         XCTAssertTrue(DictationProfileValidator.issues(for: saved).isEmpty)
     }
 
-    func testNewDraftStoresOnlyWhatIsShown_AndDisabledPolishDropsPolishDetails() {
-        var draft = DesktopProfileEditing.Draft(name: " Notes ", executablePaths: [" \(notepad) ", "", notepad.uppercased()])
+    func testPolishOptionsSurviveDisabledAndInheritedMode() {
+        var draft = DesktopProfileEditing.Draft(name: " Notes ", executablePaths: [" \(notepad) ", "",
+            notepad.uppercased()])
         draft.transcription = .batch(index: batchIndex)
         draft.polishMode = .enabled
         draft.polishModel = .index(polishIndex)
@@ -152,9 +156,9 @@ final class DesktopProfileEditingTests: XCTestCase {
             draft.polishMode = mode
             let plain = DesktopProfileEditing.profile(from: draft, original: nil, catalogue: catalogue)
             XCTAssertEqual(plain.polishEnabled, mode == .disabled ? false : nil)
-            XCTAssertNil(plain.polishModelID)
-            XCTAssertNil(plain.polishPrompt)
-            XCTAssertNil(plain.polishOutputLanguage)
+            XCTAssertEqual(plain.polishModelID, created.polishModelID)
+            XCTAssertEqual(plain.polishPrompt, created.polishPrompt)
+            XCTAssertEqual(plain.polishOutputLanguage, created.polishOutputLanguage)
         }
         XCTAssertNotEqual(
             DesktopProfileEditing.profile(from: draft, original: nil, catalogue: catalogue).id,
@@ -175,7 +179,9 @@ final class DesktopProfileEditingTests: XCTestCase {
         draft.name = "Fixed"
         draft.executablePaths = [notepad, #"\\server\share\App.exe"#]
         XCTAssertEqual(DesktopProfileEditing.issues(for: draft, catalogue: catalogue), [])
-        XCTAssertEqual(DesktopProfileEditing.issues(for: DesktopProfileEditing.Draft(name: "No app"), catalogue: catalogue), [])
+        XCTAssertEqual(
+            DesktopProfileEditing.issues(for: DesktopProfileEditing.Draft(name: "No app"), catalogue: catalogue), []
+        )
     }
 
     // MARK: - Merging a whole editing session
@@ -214,15 +220,54 @@ final class DesktopProfileEditingTests: XCTestCase {
 
         var broken = renamed
         broken.executablePaths = ["relative.exe"]
-        let rejected = DesktopProfileEditing.merge([broken, renamed], into: [imported], catalogue: catalogue)
+        let rejected = DesktopProfileEditing.merge([broken], into: [imported], catalogue: catalogue)
         guard case .failure(let failure) = rejected else { return XCTFail("Expected a rejected merge") }
         XCTAssertEqual(failure.rejections.map(\.name), ["Imported, renamed"])
         XCTAssertEqual(failure.rejections[0].issues, [.invalidWindowsExecutablePath(path: "relative.exe")])
         XCTAssertTrue(failure.message.contains("relative.exe"))
 
-        let unnamed = DesktopProfileEditing.merge([DesktopProfileEditing.Draft(name: " ")], into: [], catalogue: catalogue)
+        let unnamed = DesktopProfileEditing.merge([DesktopProfileEditing.Draft(name: " ")], into: [],
+            catalogue: catalogue)
         guard case .failure(let unnamedFailure) = unnamed else { return XCTFail("Expected an empty-name rejection") }
         XCTAssertEqual(unnamedFailure.rejections[0].issues, [.emptyName])
         XCTAssertTrue(unnamedFailure.message.hasPrefix("Unnamed profile"))
+    }
+
+    func testInvalidCatalogueSelectionsCannotSilentlyBecomeAppDefaults() {
+        var draft = DesktopProfileEditing.Draft(name: "Invalid selections")
+        for choice in [DesktopProfileEditing.TranscriptionChoice.batch(index: -1), .live(index: Int.max)] {
+            draft.transcription = choice
+            draft.polishModel = .index(Int.max)
+            draft.language = .index(-1)
+            let expected: [DictationProfileIssue] = [
+                .invalidSelection(field: "a transcription model"), .invalidSelection(field: "a polish model"),
+                .invalidSelection(field: "a spoken language")
+            ]
+            XCTAssertEqual(DesktopProfileEditing.issues(for: draft, catalogue: catalogue), expected)
+            guard case .failure(let failure) = DesktopProfileEditing.merge([draft], into: [], catalogue: catalogue)
+            else { return XCTFail("Invalid selections must block every save path") }
+            XCTAssertEqual(failure.rejections.first?.issues, expected)
+        }
+    }
+
+    func testDuplicateIdentifiersRejectEntireSaveInsteadOfDroppingAProfile() {
+        let original = DictationProfile(name: "Original")
+        let draft = DesktopProfileEditing.draft(for: original, catalogue: catalogue)
+        guard case .failure(let failure) = DesktopProfileEditing.merge(
+            [draft, draft], into: [original], catalogue: catalogue
+        ) else { return XCTFail("Duplicate identifiers must not silently discard edits") }
+        XCTAssertEqual(failure.rejections.first?.issues, [.duplicateProfile])
+    }
+
+    func testDisabledAndInheritedImportedProfilesKeepEveryPolishOption() {
+        for enabled: Bool? in [false, nil] {
+            let stored = DictationProfile(
+                name: "Imported", polishEnabled: enabled, polishModelID: "local/post-processing/rules",
+                polishPrompt: "Keep this prompt.", polishOutputLanguage: "French",
+                polishIncludeLexiconDirectives: true, polishIncludeContextTags: false
+            )
+            let draft = DesktopProfileEditing.draft(for: stored, catalogue: catalogue)
+            XCTAssertEqual(DesktopProfileEditing.profile(from: draft, original: stored, catalogue: catalogue), stored)
+        }
     }
 }

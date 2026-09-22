@@ -141,7 +141,9 @@ final class DesktopProfileSessionTests: XCTestCase {
         XCTAssertEqual(enabled.postProcessing.customPrompt, "Keep it short.", "A nil prompt keeps the user's prompt")
         XCTAssertEqual(enabled.postProcessing.temperature, 0.3)
 
-        let disabled = resolve(DictationProfile(name: "Off", polishEnabled: false, polishModelID: alternativePolishModel))
+        let disabled = resolve(DictationProfile(
+            name: "Off", polishEnabled: false, polishModelID: alternativePolishModel
+        ))
         XCTAssertEqual(disabled.postProcessing.mode, .disabled)
         XCTAssertEqual(disabled.postProcessing.modelIdentifier, alternativePolishModel)
 
@@ -202,7 +204,8 @@ final class DesktopProfileSessionTests: XCTestCase {
         XCTAssertTrue(off.limitations.isEmpty)
 
         let declined = resolve(DictationProfile(
-            name: "Declined", polishEnabled: true, polishIncludeLexiconDirectives: false, polishIncludeContextTags: false
+            name: "Declined", polishEnabled: true, polishIncludeLexiconDirectives: false,
+            polishIncludeContextTags: false
         ))
         XCTAssertTrue(declined.limitations.isEmpty, "Not asking for the lexicon is honoured trivially")
     }

@@ -91,12 +91,12 @@ public enum DesktopProfileEditing {
 
     /// Why a list of drafts could not be stored. Nothing is persisted when
     /// any draft fails, so a cancelled or invalid edit leaves the prior values.
-    public struct MergeFailure: Error, Equatable, Sendable {
-        public struct Rejection: Equatable, Sendable {
-            public let name: String
-            public let issues: [DictationProfileIssue]
-        }
+    public struct Rejection: Equatable, Sendable {
+        public let name: String
+        public let issues: [DictationProfileIssue]
+    }
 
+    public struct MergeFailure: Error, Equatable, Sendable {
         public let rejections: [Rejection]
 
         public var message: String {
@@ -111,24 +111,7 @@ public enum DesktopProfileEditing {
 
     public static func draft(for profile: DictationProfile, catalogue: Catalogue) -> Draft {
         var draft = Draft(id: profile.id, name: profile.name, executablePaths: profile.windowsExecutablePaths)
-        if let override = profile.resolvedTranscriptionOverride {
-            switch override.routing {
-            case .remoteBatch:
-                if let index = catalogue.batchModels.firstIndex(where: { $0.id == override.modelID }) {
-                    draft.transcription = .batch(index: index)
-                } else {
-                    draft.transcription = .preserved
-                }
-            case .remoteStreaming:
-                if let index = catalogue.liveModels.firstIndex(where: { $0.id == override.modelID }) {
-                    draft.transcription = .live(index: index)
-                } else {
-                    draft.transcription = .preserved
-                }
-            case .localBatch:
-                draft.transcription = .preserved
-            }
-        }
+        draft.transcription = transcriptionChoice(for: profile, catalogue: catalogue)
         switch profile.polishEnabled {
         case .some(true): draft.polishMode = .enabled
         case .some(false): draft.polishMode = .disabled
@@ -154,6 +137,23 @@ public enum DesktopProfileEditing {
         return draft
     }
 
+    private static func transcriptionChoice(
+        for profile: DictationProfile, catalogue: Catalogue
+    ) -> TranscriptionChoice {
+        guard let override = profile.resolvedTranscriptionOverride else { return .appSetting }
+        switch override.routing {
+        case .remoteBatch:
+            return catalogue.batchModels.firstIndex(where: { $0.id == override.modelID }).map {
+                .batch(index: $0)
+            } ?? .preserved
+        case .remoteStreaming:
+            return catalogue.liveModels.firstIndex(where: { $0.id == override.modelID }).map {
+                .live(index: $0)
+            } ?? .preserved
+        case .localBatch: return .preserved
+        }
+    }
+
     /// Everything the editor keeps but cannot change, in the words the user
     /// sees. Limitations come from the same policy the recording applies.
     public static func notes(for profile: DictationProfile, catalogue: Catalogue) -> [String] {
@@ -177,14 +177,50 @@ public enum DesktopProfileEditing {
     // MARK: - Draft to profile
 
     /// The profile exactly as the editor displayed it, merged over `original`
-    /// so the identifier, macOS matchers and preserved values survive. As on
-    /// macOS, polish details are stored only when polish is enabled, so a
-    /// hidden control can never apply silently.
-    public static func profile(from draft: Draft, original: DictationProfile?, catalogue: Catalogue) -> DictationProfile {
+    /// so the identifier, macOS matchers and preserved values survive. Polish
+    /// options remain stored when disabled or inherited; the session resolver
+    /// alone decides whether they run.
+    public static func profile(
+        from draft: Draft, original: DictationProfile?, catalogue: Catalogue
+    ) -> DictationProfile {
         var profile = original ?? DictationProfile(id: draft.id ?? UUID(), name: "")
         profile.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         profile = profile.replacingWindowsExecutablePaths(cleanedPaths(draft.executablePaths))
 
+        applyTranscription(draft, to: &profile, original: original, catalogue: catalogue)
+
+        let polishEnabled: Bool?
+        switch draft.polishMode {
+        case .appSetting: polishEnabled = nil
+        case .disabled: polishEnabled = false
+        case .enabled: polishEnabled = true
+        }
+        profile.polishEnabled = polishEnabled
+        switch draft.polishModel {
+        case .appSetting: profile.polishModelID = nil
+        case .index(let index):
+            profile.polishModelID = catalogue.polishModels.indices.contains(index)
+                ? catalogue.polishModels[index].id : nil
+        case .preserved: profile.polishModelID = original?.polishModelID
+        }
+        profile.polishPrompt = trimmedNonEmpty(draft.polishPrompt)
+        profile.polishOutputLanguage = trimmedNonEmpty(draft.polishOutputLanguage)
+        profile.polishIncludeLexiconDirectives = original?.polishIncludeLexiconDirectives
+        profile.polishIncludeContextTags = original?.polishIncludeContextTags
+
+        switch draft.language {
+        case .appSetting: profile.languageIdentifier = nil
+        case .index(let index):
+            profile.languageIdentifier = catalogue.languages.indices.contains(index)
+                ? catalogue.languages[index].id : nil
+        case .preserved: profile.languageIdentifier = original?.languageIdentifier
+        }
+        return profile
+    }
+
+    private static func applyTranscription(
+        _ draft: Draft, to profile: inout DictationProfile, original: DictationProfile?, catalogue: Catalogue
+    ) {
         switch draft.transcription {
         case .appSetting:
             profile.transcriptionModelID = nil
@@ -202,40 +238,6 @@ public enum DesktopProfileEditing {
             profile.transcriptionRouting = original?.transcriptionRouting
         }
 
-        let polishEnabled: Bool?
-        switch draft.polishMode {
-        case .appSetting: polishEnabled = nil
-        case .disabled: polishEnabled = false
-        case .enabled: polishEnabled = true
-        }
-        profile.polishEnabled = polishEnabled
-        if polishEnabled == true {
-            switch draft.polishModel {
-            case .appSetting: profile.polishModelID = nil
-            case .index(let index):
-                profile.polishModelID = catalogue.polishModels.indices.contains(index)
-                    ? catalogue.polishModels[index].id : nil
-            case .preserved: profile.polishModelID = original?.polishModelID
-            }
-            profile.polishPrompt = trimmedNonEmpty(draft.polishPrompt)
-            profile.polishOutputLanguage = trimmedNonEmpty(draft.polishOutputLanguage)
-            profile.polishIncludeLexiconDirectives = original?.polishIncludeLexiconDirectives
-            profile.polishIncludeContextTags = original?.polishIncludeContextTags
-        } else {
-            profile.polishModelID = nil
-            profile.polishPrompt = nil
-            profile.polishOutputLanguage = nil
-            profile.polishIncludeLexiconDirectives = nil
-            profile.polishIncludeContextTags = nil
-        }
-
-        switch draft.language {
-        case .appSetting: profile.languageIdentifier = nil
-        case .index(let index):
-            profile.languageIdentifier = catalogue.languages.indices.contains(index) ? catalogue.languages[index].id : nil
-        case .preserved: profile.languageIdentifier = original?.languageIdentifier
-        }
-        return profile
     }
 
     /// Save-time validation of what the editor controls. Preserved values are
@@ -245,7 +247,25 @@ public enum DesktopProfileEditing {
         if editable.transcription == .preserved { editable.transcription = .appSetting }
         if editable.polishModel == .preserved { editable.polishModel = .appSetting }
         if editable.language == .preserved { editable.language = .appSetting }
-        return DictationProfileValidator.issues(for: profile(from: editable, original: nil, catalogue: catalogue))
+        return selectionIssues(for: draft, catalogue: catalogue)
+            + DictationProfileValidator.issues(for: profile(from: editable, original: nil, catalogue: catalogue))
+    }
+
+    private static func selectionIssues(for draft: Draft, catalogue: Catalogue) -> [DictationProfileIssue] {
+        var issues: [DictationProfileIssue] = []
+        switch draft.transcription {
+        case .batch(let index) where !catalogue.batchModels.indices.contains(index),
+             .live(let index) where !catalogue.liveModels.indices.contains(index):
+            issues.append(.invalidSelection(field: "a transcription model"))
+        default: break
+        }
+        if case .index(let index) = draft.polishModel, !catalogue.polishModels.indices.contains(index) {
+            issues.append(.invalidSelection(field: "a polish model"))
+        }
+        if case .index(let index) = draft.language, !catalogue.languages.indices.contains(index) {
+            issues.append(.invalidSelection(field: "a spoken language"))
+        }
+        return issues
     }
 
     /// The complete stored list after an editing session: drafts in their new
@@ -256,24 +276,31 @@ public enum DesktopProfileEditing {
         _ drafts: [Draft], into stored: [DictationProfile], catalogue: Catalogue
     ) -> Result<[DictationProfile], MergeFailure> {
         var merged: [DictationProfile] = []
-        var rejections: [MergeFailure.Rejection] = []
+        var rejections: [Rejection] = []
         var seen = Set<UUID>()
         for draft in drafts {
             let original = draft.id.flatMap { id in stored.first { $0.id == id } }
             let profile = profile(from: draft, original: original, catalogue: catalogue)
-            guard seen.insert(profile.id).inserted else { continue }
+            guard seen.insert(profile.id).inserted else {
+                rejections.append(Rejection(name: profile.name, issues: [.duplicateProfile]))
+                continue
+            }
             let existing = original.map(DictationProfileValidator.issues(for:)) ?? []
-            let introduced = DictationProfileValidator.issues(for: profile).filter { !existing.contains($0) }
+            let introduced = selectionIssues(for: draft, catalogue: catalogue)
+                + DictationProfileValidator.issues(for: profile).filter { !existing.contains($0) }
             if introduced.isEmpty {
                 merged.append(profile)
             } else {
-                rejections.append(MergeFailure.Rejection(name: profile.name, issues: introduced))
+                rejections.append(Rejection(name: profile.name, issues: introduced))
             }
         }
         guard rejections.isEmpty else { return .failure(MergeFailure(rejections: rejections)) }
         return .success(merged)
     }
 
+}
+
+extension DesktopProfileEditing {
     /// Trimmed, non-blank paths with duplicates (by normalised form) removed.
     public static func cleanedPaths(_ paths: [String]) -> [String] {
         var seen = Set<String>()

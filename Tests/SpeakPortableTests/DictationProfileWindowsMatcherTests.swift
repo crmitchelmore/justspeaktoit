@@ -29,7 +29,9 @@ final class DictationProfileWindowsMatcherTests: XCTestCase {
         XCTAssertEqual(resolver.profile(forWindowsExecutablePath: notepadPath)?.name, "Notes")
         XCTAssertEqual(resolver.profile(forWindowsExecutablePath: #"c:\windows\system32\NOTEPAD.EXE"#)?.name, "Notes")
         XCTAssertEqual(resolver.profile(forWindowsExecutablePath: "C:/Windows/System32/notepad.exe")?.name, "Notes")
-        XCTAssertEqual(resolver.profile(forWindowsExecutablePath: #"\\?\C:\Windows\System32\notepad.exe"#)?.name, "Notes")
+        XCTAssertEqual(
+            resolver.profile(forWindowsExecutablePath: #"\\?\C:\Windows\System32\notepad.exe"#)?.name, "Notes"
+        )
         XCTAssertEqual(resolver.profile(forWindowsExecutablePath: "  \(codePath)\n")?.name, "Code")
     }
 
@@ -41,6 +43,14 @@ final class DictationProfileWindowsMatcherTests: XCTestCase {
         XCTAssertNil(resolver.profile(forWindowsExecutablePath: #"D:\Windows\System32\notepad.exe"#))
         XCTAssertNil(resolver.profile(forWindowsExecutablePath: #"C:\Windows\System32\notepad.exe.bak"#))
         XCTAssertNil(resolver.profile(forWindowsExecutablePath: #"C:\Windows\System32\"#))
+    }
+
+    func testMalformedStoredMatcherCannotMatchTheSameMalformedTarget() {
+        for path in ["notepad.exe", #"C:\Apps\..\App.exe"#, #"C:\Apps\App.exe:stream"#, "C:\\App\u{0}.exe"] {
+            let profile = DictationProfile(name: "Invalid", matchers: [.windowsExecutablePath(path)])
+            XCTAssertFalse(DictationProfileMatcher.isFullWindowsExecutablePath(path))
+            XCTAssertNil(ProfileResolver(profiles: [profile]).profile(forWindowsExecutablePath: path))
+        }
     }
 
     func testNilAndBlankPathsAndBlankMatchersFallBackToDefaults() {
@@ -158,7 +168,8 @@ final class DictationProfileWindowsMatcherTests: XCTestCase {
         XCTAssertEqual(decoded[0].polishOutputLanguage, "British English")
         XCTAssertEqual(decoded[0].windowsExecutablePaths, [#"C:\Program Files\Mail\Mail.exe"#])
         XCTAssertEqual(
-            ProfileResolver(profiles: decoded).profile(forWindowsExecutablePath: #"c:\program files\mail\mail.exe"#)?.name,
+            ProfileResolver(profiles: decoded)
+                .profile(forWindowsExecutablePath: #"c:\program files\mail\mail.exe"#)?.name,
             "Email"
         )
         XCTAssertEqual(ProfileResolver(profiles: decoded).profile(forBundleID: "COM.APPLE.MAIL")?.name, "Email")

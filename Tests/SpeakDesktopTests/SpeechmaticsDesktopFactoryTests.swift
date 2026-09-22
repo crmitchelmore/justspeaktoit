@@ -88,11 +88,11 @@ final class SpeechmaticsDesktopFactoryTests: XCTestCase {
         XCTAssertTrue(client is SpeechmaticsLiveClient)
     }
 
-    func testDesktopFactoryDoesNotExposeAnUnrelatedProvider() {
+    func testDesktopFactoryRejectsBatchAndUnknownSpeechmaticsRoutes() {
         XCTAssertNil(DesktopLiveTranscription.route(forID: "speechmatics/enhanced"),
                      "The batch identifier is not a live desktop route")
-        XCTAssertNil(DesktopLiveTranscription.route(forID: "elevenlabs/scribe-v2-streaming"))
-        XCTAssertFalse(DesktopLiveTranscription.liveModels.contains { $0.id == "elevenlabs/scribe-v2-streaming" })
+        XCTAssertNil(DesktopLiveTranscription.route(forID: "speechmatics/unknown-streaming"))
+        XCTAssertFalse(DesktopLiveTranscription.liveModels.contains { $0.id == "speechmatics/unknown-streaming" })
     }
 
     func testDesktopFactoryForwardsSelectedLanguageToTheStartRecognitionRequest() throws {

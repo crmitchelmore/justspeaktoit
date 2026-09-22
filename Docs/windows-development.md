@@ -40,8 +40,8 @@ Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI and OpenRouter. The canonic
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
-Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox and xAI's dedicated speech-to-text
-live models use shared Swift clients with the native WinHTTP transport. The xAI
+Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs
+and xAI's dedicated speech-to-text live models use shared Swift clients with the native WinHTTP transport. The xAI
 stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is source-wired with
 fake-transport tests only and still needs a Windows provider receipt; the Grok
 Voice conversation route stays unavailable. Batch and Live retain separate model
@@ -278,7 +278,7 @@ but must not be presented as the identical Apple-only engine or service.
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
-| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics and Soniox streams, and remaining streaming providers |
+| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox and ElevenLabs streams, and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; replace-field, direct-only and clipboard-only modes as hand-edited settings | Physical browser/Electron/Office/XAML acceptance, a text output settings UI, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
@@ -343,7 +343,14 @@ controls and recording lockout. Hardware playback tests probe the endpoint
 explicitly and skip only the audible checks when Windows reports none.
 The combined additions passed native CI at `ae61b2e8` and `ac7b5416`, and the
 Mac-built release app passed at `ac7b5416`; later revisions require their own checks.
-The playback checks have not yet run on Windows.
+The first playback run at `71be64f2` executed 535 Windows tests with 13 optional
+skips and one failure: refusing an oversized source left an input handle pinned.
+The reviewed correction retains temporary ownership until validation succeeds;
+a regression checks both handle ownership and whether the file can be reopened.
+The standalone bundle run also found an empty-environment cleanup failure before
+launch. The cleanup now handles absent Swift variables, with an actual PowerShell
+regression covering empty and populated environments. Both corrected runtime
+paths require their own Windows CI receipt before qualification.
 Neither executable smoke test proves physical microphone capture, live provider
 transcription, successful external insertion or user-visible feature parity.
 Separate adapter unit tests exercise Credential Manager with isolated synthetic
@@ -443,3 +450,16 @@ code. Preserve the same input audio and provider conditions when comparing:
 Record and investigate regressions before broadening availability. Shared code
 is accepted only when its consumers retain correct behaviour and measured
 performance on their own platforms.
+
+The combined shared-provider and framing checkpoint passed **509 portable release
+tests, five optional skips, zero failures** on 22 September 2026. It includes
+ElevenLabs manual commit ordering, Soniox finalisation budgets and desktop route
+projection. Soniox's macOS adapter now delegates transport and finalisation to
+the same shared client while preserving native capture. Failed or cancelled
+finalisation keeps visible draft text separate from provider-confirmed text.
+
+Deepgram capture uses 20 ms Windows frames; other routes keep 100 ms. Synthetic
+10/20 ms packet tests at both supported rates show first delivery at 20 ms instead
+of 100 ms, preserving exact sample order and final tails. The queue retains its
+12.8-second bound and 600 KiB PCM storage. This isolates application batching; it
+is not a physical-device or end-to-end latency measurement.

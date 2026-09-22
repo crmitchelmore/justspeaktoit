@@ -140,7 +140,7 @@ let appleCoreSources: [String] = [
     "XAILiveFinalisation.swift",
     "XAILiveProtocol.swift",
     "XAITTSAPI.swift",
-    "XAITTSRealtime.swift",
+    "XAITTSRealtime.swift"
 ]
 
 let portablePackage = Package(

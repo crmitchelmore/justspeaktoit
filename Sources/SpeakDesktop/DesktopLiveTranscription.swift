@@ -107,3 +107,35 @@ public enum DesktopLiveTranscription {
         )
     }
 }
+
+extension DesktopLiveTranscription {
+    /// Azure Voice Live routes, derived from the canonical catalogue. Their
+    /// shared client is implemented, but Voice Live has no regional fallback:
+    /// it connects only to the user's resource endpoint, which a host must
+    /// persist and forward. `liveModels` omits these routes until a host does,
+    /// because catalogue membership alone is not support.
+    public static let azureResourceEndpointLiveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription
+        .filter { LiveTranscriptionRouting.route(for: $0.id)?.provider == .azure }
+
+    /// Additive overload for hosts that store the Azure resource endpoint. The
+    /// Azure routes connect to that endpoint; every other identifier behaves
+    /// exactly as `makeClient(model:apiKey:language:makeConnection:)`. An
+    /// invalid key or endpoint is reported by the client's `start()`, before
+    /// any connection is attempted.
+    public static func makeClient(
+        model: String, apiKey: String, language: String? = nil, azureResourceEndpoint: String,
+        makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard azureResourceEndpointLiveModels.contains(where: { $0.id == identifier }),
+              let route = LiveTranscriptionRouting.route(for: identifier) else {
+            return makeClient(model: model, apiKey: apiKey, language: language, makeConnection: makeConnection)
+        }
+        let hint = ModelCatalog.liveCapabilities(for: identifier).supportsLanguageHint
+            ? TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") : nil
+        return AzureVoiceLiveClient(
+            credentials: apiKey, endpoint: azureResourceEndpoint, model: route.apiModelName, language: hint,
+            sampleRate: route.sampleRate, makeConnection: makeConnection
+        )
+    }
+}

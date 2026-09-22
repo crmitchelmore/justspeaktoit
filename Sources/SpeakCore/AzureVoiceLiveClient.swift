@@ -1,56 +1,75 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
+import os.log
+#endif
 
-/// Azure Voice Live is used only for input transcription. No response.create
-/// is sent, and VAD response generation is explicitly disabled.
+/// Shared Azure Voice Live input-transcription client used by macOS, iOS and
+/// Windows, for both canonical routes (`azure-speech` and `mai-transcribe`).
 ///
-/// Leading audio is held in `StreamingAudioPreroll` until the server's first
-/// `session.updated` confirms the session accepts input; that frame is the
-/// handshake `StreamingSessionReadiness` gates on, so a stop that lands during
-/// the handshake still commits what was captured. Outbound audio is bounded
-/// by `StreamingAudioSendBudget`, so a stalled socket is reported instead of
-/// retaining the recording in memory.
+/// Voice Live is used only for input transcription: the session is text-only,
+/// turn detection never creates a response, and `response.create` is never
+/// sent, so no assistant output is generated or billed. One socket per run
+/// connects to the user's resource origin with the key in the `api-key` header.
+/// The configuration leaves after the real handshake; 24 kHz PCM16 frames are
+/// admitted synchronously into a queue bounded by bytes and by frames, and sent
+/// one at a time once `session.updated` has acknowledged it. A finish drains
+/// that queue, commits, sends the barrier described in `AzureVoiceLiveProtocol`
+/// and waits for every announced item inside one budget.
+///
+/// State is confined to one lock, which is never held across a transport call
+/// or a host callback. Callbacks and finish results are delivered in order by
+/// one thread at a time, so a failure is always published before any finish,
+/// including one that starts while the failure is being delivered, returns.
+/// The transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP
+/// on Windows); framing, admission and lifecycle stay here.
 ///
 /// Contract: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to
-public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable { // swiftlint:disable:this type_body_length line_length
+public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+
+    /// Every final restates the confirmed session transcript in item order, so
+    /// finals replace rather than append.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
-    // The public protocol accepts ordinary closures; this box transfers their
-    // ownership to the serial state queue, where callbacks are always invoked.
-    private struct Callbacks: @unchecked Sendable {
-        let transcript: (String, Bool) -> Void
-        let error: (Error) -> Void
-    }
-    /// One queued frame; `audioBytes` is the PCM this frame reserves from the
-    /// send budget (zero for control events), released when the send completes.
-    private struct Outgoing {
-        let json: String
-        let audioBytes: Int
-    }
-    private let queue = DispatchQueue(label: "AzureVoiceLiveClient")
-    private let credentials: String
-    private let endpoint: String
-    private let model: String
-    private let language: String?
-    private let session: URLSession
+    /// The one budget that bounds a finish: readiness, drain, commit, barrier
+    /// acknowledgement and every pending final. From the canonical catalogue.
+    public var finalisationBudget: TimeInterval? { finishBudget }
+
+    /// The handshake and the configuration acknowledgement must land within this bound.
+    static let readyDeadline: TimeInterval = 10
+    /// A send that has not completed by then means the transport stalled.
+    static let sendDeadline: TimeInterval = 5
+    /// Queued plus in-flight PCM is bounded by frames as well as by bytes.
+    static let maximumQueuedFrames = 256
+    /// Five seconds of 24 kHz PCM16, the shared streaming hold budget.
+    static let maximumQueuedBytes = AzureVoiceLiveProtocol.sampleRate * AzureVoiceLiveProtocol.bytesPerSample
+        * Int(StreamingAudioPreroll.defaultBudgetSeconds)
+
+    let credentials: String
+    let endpoint: String
+    let model: String
+    let language: String?
+    let sampleRate: Int
+    let finishBudget: TimeInterval
+    let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    /// Audio offered before the first `start()`, replayed into that session in
+    /// capture order. Admission keeps it within a run's bounds, so the buffer
+    /// never evicts anything itself.
     let preroll: StreamingAudioPreroll
+    /// Mirrors whether the current session's configuration was acknowledged.
     let readiness = StreamingSessionReadiness()
-    let sendBudget: StreamingAudioSendBudget
-    private var socket: URLSessionWebSocketTask?
-    private var finishing = false
-    private var finishBegun = false
-    private var outgoing: [Outgoing] = []
-    private var sending = false
-    private var audioSinceCommit = false
-    private var commitAcknowledged = false
-    private var commitSent = false
-    private var awaitingFinishConfiguration = false
-    private var items: [String] = []
-    private var transcripts: [String: String] = [:]
-    private var completed: Set<String> = []
-    private var failedItems: Set<String> = []
-    private var errorReported = false
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var finishContinuation: CheckedContinuation<String?, Never>?
+
+    let lock = NSLock()
+    var run: AzureVoiceLiveRun
+    /// Host callbacks and finish results, delivered in order outside the lock.
+    var deliveries: [AzureVoiceLiveDelivery] = []
+    var delivering = false
+    /// Why pre-start audio could not be held; reported when the session starts.
+    var heldFailure: AzureVoiceLiveError?
 
     public init(
         credentials: String,
@@ -64,320 +83,309 @@ public final class AzureVoiceLiveClient: FinalizingStreamingTranscriptionClient,
         self.endpoint = endpoint
         self.model = model
         self.language = language
-        self.session = session
+        self.sampleRate = sampleRate
+        self.finishBudget = Self.finishBudget(forModel: model)
+        self.makeConnection = { URLSessionStreamingConnection(session: session, request: $0) }
+        self.schedule = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        self.sendBudget = StreamingAudioSendBudget(sampleRate: sampleRate)
+        self.run = AzureVoiceLiveRun(phase: .idle)
     }
 
+    /// Transport injection for hosts with their own WebSocket adapter.
+    public init(
+        credentials: String,
+        endpoint: String,
+        model: String,
+        language: String?,
+        sampleRate: Int = 24_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.credentials = credentials
+        self.endpoint = endpoint
+        self.model = model
+        self.language = language
+        self.sampleRate = sampleRate
+        self.finishBudget = Self.finishBudget(forModel: model)
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.run = AzureVoiceLiveRun(phase: .idle)
+    }
+
+    deinit { run.connection?.cancel() }
+
+    /// The catalogue's post-stop budget for the route that sends this model.
+    static func finishBudget(forModel model: String) -> TimeInterval {
+        let routeBudget = AzureVoiceLiveProtocol.catalogID(forModel: model)
+            .map { ModelCatalog.liveCapabilities(for: $0).postStopFinalizeBudget } ?? 0
+        guard routeBudget > 0 else {
+            return ModelCatalog.liveCapabilities(for: AzureTranscriptionModels.speechLive).postStopFinalizeBudget
+        }
+        return routeBudget
+    }
+
+    // MARK: - StreamingTranscriptionClient
+
+    /// Replaces any current session. An invalid key, endpoint, rate or model is
+    /// reported through `onError` before any connection is created.
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
-        let callbacks = Callbacks(transcript: onTranscript, error: onError)
-        queue.async { [self] in
-            guard socket == nil else { return }
-            resetSession(callbacks)
-            do {
-                let request = try Self.connectionRequest(credentials: credentials, endpoint: endpoint)
-                let socket = session.webSocketTask(with: request)
-                self.socket = socket
-                socket.resume()
-                receive(socket)
-                enqueue(try Self.sessionUpdate(model: model, language: language))
-                queue.asyncAfter(deadline: .now() + 10) { [weak self, weak socket] in
-                    guard let self, let socket, self.socket === socket, !self.readiness.isReady else { return }
-                    self.fail(AzureSpeechError.timedOut)
-                }
-            } catch { fail(error) }
+        let plan: AzureVoiceLiveConnectionPlan? = transact { effects in
+            let held = takeHeldAudio()
+            let active = arm(onTranscript: onTranscript, onError: onError, phase: .connecting, &effects)
+            return prepare(active, held: held, &effects)
         }
+        if let plan { connect(plan.run, request: plan.request) }
     }
 
-    /// Arms the callbacks and clears per-recording state without opening a
-    /// socket. `start` is this plus the connection; tests pair it with `ingest`.
-    func beginSession(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
-        let callbacks = Callbacks(transcript: onTranscript, error: onError)
-        queue.sync { resetSession(callbacks) }
-    }
-
-    private func resetSession(_ callbacks: Callbacks) {
-        onTranscript = callbacks.transcript
-        onError = callbacks.error
-        finishing = false
-        finishBegun = false
-        commitAcknowledged = false
-        commitSent = false
-        awaitingFinishConfiguration = false
-        audioSinceCommit = false
-        errorReported = false
-        outgoing = []; sending = false
-        items = []; transcripts = [:]; completed = []; failedItems = []
-        preroll.reset(); readiness.reset(); sendBudget.reset()
-    }
-
+    /// Synchronous, bounded admission; see `admit(_:_:)`.
     public func sendAudio(_ audioData: Data) {
-        queue.async { [self] in
-            guard socket != nil, !finishing, !audioData.isEmpty else { return }
-            // Azure rejects audio before the session is configured, so the
-            // opening words are held and replayed on `session.updated`.
-            if readiness.isReady { appendAudio(audioData) } else { preroll.append(audioData) }
-        }
+        guard !audioData.isEmpty else { return }
+        transact { effects in admit(audioData, &effects) }
     }
 
+    /// Commits admitted audio and returns the confirmed whole-session transcript
+    /// once every announced item has settled, or when the finish budget, a
+    /// failure, cancellation or replacement ends the run. A failure is always
+    /// delivered through `onError` first. Concurrent and repeated calls for one
+    /// run share its single result; transcripts are not also delivered through
+    /// `onTranscript` while finishing.
     public func finishAndWait() async -> String? {
-        await withCheckedContinuation { continuation in
-            queue.async { [self] in
-                guard !finishing else { continuation.resume(returning: transcript); return }
-                finishing = true
-                finishContinuation = continuation
-                guard let activeSocket = socket else { close(); return }
-                if readiness.isReady {
-                    beginFinish()
-                } else {
-                    // The stop landed during the handshake: wait the shared
-                    // budget for `session.updated` so the held capture is
-                    // still committed, then finish on the state queue.
-                    DispatchQueue.global().async { [weak self, weak activeSocket] in
-                        guard let self else { return }
-                        let ready = self.readiness.waitUntilReady()
-                        self.queue.async {
-                            guard let activeSocket, self.socket === activeSocket, self.finishing else { return }
-                            if ready { self.beginFinish() } else { self.fail(AzureSpeechError.timedOut) }
-                        }
-                    }
-                }
-                // One deadline covers startup, queued sends, commit and finals.
-                queue.asyncAfter(deadline: .now() + 5) { [weak self, weak activeSocket] in
-                    guard let self, let activeSocket, self.socket === activeSocket else { return }
-                    if self.finishContinuation != nil { self.reportError(AzureSpeechError.timedOut) }
-                    self.close()
-                }
+        let active = lock.withLock { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                transact { effects in join(active, continuation, &effects) }
+            }
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.transact { effects in
+                if self.isCurrent(active) { self.close(active, &effects) }
             }
         }
     }
 
-    public func stop() {
-        queue.async { [self] in close() }
+    /// Immediate abort; the same as `cancel()`. Confirmed text stays available
+    /// to a finish, and waiting finishes resume with it.
+    public func stop() { cancel() }
+
+    public func cancel() {
+        transact { effects in
+            if run.phase == .idle { discardHeldAudio() }
+            close(run, &effects)
+        }
     }
 
-    /// Drives the same event parser in contract tests without a network session.
+    // MARK: - Contract-test seams
+
+    /// Whether the current session's configuration has been acknowledged.
+    var isSessionReady: Bool { lock.withLock { isCurrent(run) && run.ready } }
+
+    /// Finish callers waiting on the current run.
+    var pendingFinishCount: Int { lock.withLock { run.waiters.count } }
+
+    /// Callbacks and finish results queued behind the one being delivered.
+    var queuedDeliveryCount: Int { lock.withLock { deliveries.count } }
+
+    /// Arms the callbacks without opening a socket: an explicitly detached run
+    /// for contract tests, paired with `ingest`. `start` is this plus a connection.
+    func beginSession(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        transact { effects in
+            discardHeldAudio()
+            _ = arm(onTranscript: onTranscript, onError: onError, phase: .detached, &effects)
+        }
+    }
+
+    /// Feeds one raw server frame through the receive path; the socket is the
+    /// only production caller. A never-started client becomes a detached run.
+    /// A connecting run is treated exactly as its socket would treat the frame.
     func ingest(_ json: String) {
-        queue.sync { handle(Data(json.utf8)) }
-    }
-
-    private var transcript: String? {
-        let text = items.compactMap { transcripts[$0] }.filter { !$0.isEmpty }.joined(separator: " ")
-        return text.isEmpty ? nil : text
-    }
-
-    private func appendAudio(_ data: Data) {
-        // A socket that has stopped completing sends would otherwise retain
-        // every frame captured from here on; the budget reports that instead.
-        guard sendBudget.admit(data.count) else {
-            fail(StreamingClientError.transportStalled(provider: "Azure Speech"))
-            return
-        }
-        audioSinceCommit = true
-        enqueue(
-            "{\"type\":\"input_audio_buffer.append\",\"audio\":\"\(data.base64EncodedString())\"}",
-            audioBytes: data.count
-        )
-    }
-
-    private func beginFinish() {
-        guard !finishBegun else { return }
-        finishBegun = true
-        // Voice Live rejects disabling VAD after a session starts. Commit queued
-        // audio without changing VAD, then use a harmless configuration update
-        // as a server acknowledgement barrier behind the commit.
-        awaitingFinishConfiguration = true
-        commit()
-        enqueue(Self.finalizationBarrier)
-    }
-
-    private func commit() {
-        if audioSinceCommit {
-            commitAcknowledged = false
-            enqueue(#"{"type":"input_audio_buffer.commit"}"#)
-        } else {
-            commitAcknowledged = true
-            finishIfComplete()
-        }
-    }
-
-    private func enqueue(_ json: String, audioBytes: Int = 0) {
-        outgoing.append(Outgoing(json: json, audioBytes: audioBytes))
-        sendNext()
-    }
-
-    private func sendNext() {
-        guard !sending, !outgoing.isEmpty, let socket else { return }
-        sending = true
-        let frame = outgoing.removeFirst()
-        if frame.json == #"{"type":"input_audio_buffer.commit"}"# {
-            commitSent = true
-        }
-        socket.send(.string(frame.json)) { [weak self, weak socket] error in
-            guard let self else { return }
-            self.queue.async {
-                self.sendBudget.release(frame.audioBytes)
-                guard let socket, self.socket === socket else { return }
-                self.sending = false
-                if let error { self.fail(error) } else { self.sendNext() }
+        transact { effects in
+            if run.phase == .idle {
+                discardHeldAudio()
+                run.phase = .detached
             }
+            guard isCurrent(run) else { return }
+            handleFrame(Data(json.utf8), run, &effects)
         }
-    }
-
-    private func receive(_ socket: URLSessionWebSocketTask) {
-        socket.receive { [weak self, weak socket] result in
-            guard let self, let socket else { return }
-            self.queue.async {
-                guard self.socket === socket else { return }
-                switch result {
-                case .failure(let error): self.fail(error)
-                case .success(let message):
-                    let data: Data
-                    switch message {
-                    case .string(let text): data = Data(text.utf8)
-                    case .data(let value): data = value
-                    @unknown default: self.fail(AzureSpeechError.invalidResponse); return
-                    }
-                    self.handle(data)
-                    if self.socket === socket { self.receive(socket) }
-                }
-            }
-        }
-    }
-
-    // The switch mirrors Azure event types; keep the contract in one place.
-    // swiftlint:disable:next cyclomatic_complexity
-    private func handle(_ data: Data) {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = object["type"] as? String else { fail(AzureSpeechError.invalidResponse); return }
-        switch type {
-        case "session.updated":
-            if !readiness.isReady {
-                // The handshake: the session now accepts audio. A finish that
-                // is waiting on `readiness` continues from its own waiter.
-                readiness.markReady()
-                preroll.drain().forEach(appendAudio)
-            } else if awaitingFinishConfiguration {
-                awaitingFinishConfiguration = false
-                finishIfComplete()
-            }
-        case "input_audio_buffer.committed":
-            if let id = object["item_id"] as? String, !items.contains(id) { items.append(id) }
-            // Only acknowledge after all audio/commit writes have left our queue.
-            if finishing && commitSent { commitAcknowledged = true }
-
-            finishIfComplete()
-        case "conversation.item.input_audio_transcription.delta":
-            update(object, final: false)
-        case "conversation.item.input_audio_transcription.completed":
-            update(object, final: true)
-        case "conversation.item.input_audio_transcription.failed":
-            // Azure reports this per item, for example an unintelligible or
-            // empty turn. Ending the session here would discard every later
-            // utterance, so the item completes with no text; a finish that
-            // then yields nothing at all is reported as a failure, not silence.
-            if let id = object["item_id"] as? String {
-                if !items.contains(id) { items.append(id) }
-                transcripts[id] = ""
-                completed.insert(id)
-                failedItems.insert(id)
-            }
-            finishIfComplete()
-        case "error":
-            let error = object["error"] as? [String: Any]
-            if finishing, error?["code"] as? String == "input_audio_buffer_commit_empty" {
-                commitAcknowledged = true
-                finishIfComplete()
-            } else {
-                // Do not surface raw envelopes which may echo request details.
-                fail(AzureSpeechError.configuration(
-                    "Azure Voice Live rejected the session. Check model access and resource region."
-                ))
-            }
-        default: break
-        }
-    }
-
-    private func update(_ object: [String: Any], final: Bool) {
-        guard let id = object["item_id"] as? String, !completed.contains(id) else { return }
-        if !items.contains(id) { items.append(id) }
-        if final {
-            transcripts[id] = object["transcript"] as? String ?? ""
-            completed.insert(id)
-        } else if let delta = object["delta"] as? String { transcripts[id, default: ""] += delta }
-        if !finishing, let transcript { onTranscript?(transcript, final) }
-        finishIfComplete()
-    }
-
-    private func finishIfComplete() {
-        guard finishing, !awaitingFinishConfiguration, commitAcknowledged,
-              items.allSatisfy(completed.contains) else { return }
-        close()
-    }
-
-    private func reportError(_ error: Error) {
-        guard !errorReported else { return }
-        errorReported = true
-        onError?(error)
-    }
-
-    private func fail(_ error: Error) {
-        reportError(error)
-        close()
-    }
-
-    private func close() {
-        socket?.cancel(with: .normalClosure, reason: nil)
-        socket = nil; outgoing = []; sending = false
-        preroll.reset(); readiness.reset(); sendBudget.reset()
-        let continuation = finishContinuation
-        finishContinuation = nil
-        let result = transcript
-        if continuation != nil, result == nil, !failedItems.isEmpty {
-            reportError(AzureSpeechError.transcriptionFailed)
-        }
-        continuation?.resume(returning: result)
-        onTranscript = nil; onError = nil
     }
 }
 
-extension AzureVoiceLiveClient {
-    static let finalizationBarrier = #"{"type":"session.update","session":{"modalities":["text"]}}"#
+/// Work computed under the state lock and performed after it is released:
+/// transport calls and scheduling never run while the lock is held.
+struct AzureVoiceLiveEffects {
+    private var actions: [() -> Void] = []
 
-    static func connectionRequest(credentials: String, endpoint: String) throws -> URLRequest {
-        let config = try AzureSpeechConfiguration(credentials: credentials)
-        let origin = try AzureSpeechConfiguration.resourceURL(endpoint)
-        var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
-        components.scheme = "wss"
-        components.path = "/voice-live/realtime"
-        components.queryItems = [
-            .init(name: "api-version", value: "2026-04-10"),
-            .init(name: "model", value: "gpt-4.1")
-        ]
-        var request = URLRequest(url: components.url!, timeoutInterval: 30)
-        request.setValue(config.apiKey, forHTTPHeaderField: "api-key")
-        return request
-    }
+    mutating func append(_ action: @escaping () -> Void) { actions.append(action) }
 
-    static func sessionUpdate(model: String, language: String?) throws -> String {
-        guard ["azure-speech", "mai-transcribe"].contains(model)
-        else { throw AzureSpeechError.unsupportedModel }
-        var transcription: [String: Any] = ["model": model]
-        if let language, !language.isEmpty, !["auto", "automatic"].contains(language) {
-            transcription["language"] = language.replacingOccurrences(of: "_", with: "-")
+    func perform() { actions.forEach { $0() } }
+}
+
+/// A host callback or finish result, queued under the lock and delivered in
+/// order by one thread at a time with the lock released.
+enum AzureVoiceLiveDelivery {
+    case transcript((String, Bool) -> Void, text: String, isFinal: Bool)
+    case failure((Error) -> Void, Error)
+    case finish(CheckedContinuation<String?, Never>, String?)
+
+    func perform() {
+        switch self {
+        case .transcript(let callback, let text, let isFinal): callback(text, isFinal)
+        case .failure(let callback, let error): callback(error)
+        case .finish(let continuation, let transcript): continuation.resume(returning: transcript)
         }
-        let event: [String: Any] = ["type": "session.update", "session": [
-            "modalities": ["text"], "input_audio_format": "pcm16", "input_audio_sampling_rate": 24_000,
-            "input_audio_transcription": transcription,
-            "turn_detection": [
-                "type": "azure_semantic_vad",
-                "create_response": false,
-                "silence_duration_ms": 500
-            ]
-        ] as [String: Any]]
-        let data = try JSONSerialization.data(withJSONObject: event)
-        guard let json = String(data: data, encoding: .utf8) else { throw AzureSpeechError.invalidResponse }
-        return json
+    }
+}
+
+struct AzureVoiceLiveConnectionPlan {
+    let run: AzureVoiceLiveRun
+    let request: URLRequest
+}
+
+extension AzureVoiceLiveClient {
+    /// Runs `body` under the state lock, then performs the transport work it
+    /// queued and delivers pending callbacks, both with the lock released.
+    /// Only entry points call this; `body` must not re-enter it.
+    @discardableResult
+    func transact<Value>(_ body: (inout AzureVoiceLiveEffects) -> Value) -> Value {
+        var effects = AzureVoiceLiveEffects()
+        let value = lock.withLock { body(&effects) }
+        effects.perform()
+        deliverPending()
+        return value
     }
 
+    /// Delivers queued callbacks in order. A callback that re-enters the client
+    /// only queues more work, which this loop then delivers after it returns.
+    func deliverPending() {
+        let claimed = lock.withLock { () -> Bool in
+            guard !delivering else { return false }
+            delivering = true
+            return true
+        }
+        guard claimed else { return }
+        while let next = lock.withLock({ () -> AzureVoiceLiveDelivery? in
+            guard !deliveries.isEmpty else {
+                delivering = false
+                return nil
+            }
+            return deliveries.removeFirst()
+        }) {
+            next.perform()
+        }
+    }
+
+    func isCurrent(_ active: AzureVoiceLiveRun) -> Bool { active === run && active.phase != .closed }
+
+    /// Replaces the current run with a fresh one whose callbacks are armed.
+    func arm(
+        onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void,
+        phase: AzureVoiceLiveRun.Phase, _ effects: inout AzureVoiceLiveEffects
+    ) -> AzureVoiceLiveRun {
+        close(run, &effects)
+        let active = AzureVoiceLiveRun(phase: phase)
+        run = active
+        active.onTranscript = onTranscript
+        active.onError = onError
+        readiness.reset()
+        return active
+    }
+
+    /// Validates everything a connection needs, then queues the configuration
+    /// and any held audio. Nothing is connected when validation fails.
+    func prepare(
+        _ active: AzureVoiceLiveRun, held: AzureVoiceLiveHeldAudio, _ effects: inout AzureVoiceLiveEffects
+    ) -> AzureVoiceLiveConnectionPlan? {
+        let request: URLRequest
+        let update: String
+        do {
+            guard let configuration = try? AzureSpeechConfiguration(credentials: credentials) else {
+                throw AzureVoiceLiveError.invalidCredentials
+            }
+            guard let origin = try? AzureSpeechConfiguration.resourceURL(endpoint),
+                  let built = AzureVoiceLiveProtocol.webSocketRequest(origin: origin, apiKey: configuration.apiKey)
+            else { throw AzureVoiceLiveError.invalidResourceEndpoint }
+            guard sampleRate == AzureVoiceLiveProtocol.sampleRate else {
+                throw AzureVoiceLiveError.unsupportedSampleRate(sampleRate)
+            }
+            update = try AzureVoiceLiveProtocol.sessionUpdateJSON(
+                model: model, language: language, eventID: active.sessionEventID
+            )
+            if let failure = held.failure { throw failure }
+            request = built
+        } catch {
+            fail(error, active, &effects)
+            return nil
+        }
+        active.outgoing = [.sessionUpdate(update)]
+        held.audio.forEach { enqueueAudio($0, active) }
+        return AzureVoiceLiveConnectionPlan(run: active, request: request)
+    }
+
+    /// Ends a run. The connection is cancelled after the lock is released,
+    /// and waiting finishes resume, after any earlier delivery, with the
+    /// confirmed transcript.
+    func close(_ active: AzureVoiceLiveRun, _ effects: inout AzureVoiceLiveEffects) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        if let connection = active.connection { effects.append { connection.cancel() } }
+        active.connection = nil
+        active.outgoing.removeAll()
+        active.queuedAudioBytes = 0
+        active.queuedAudioFrames = 0
+        active.inFlightAudioBytes = 0
+        active.sending = false
+        let transcript = active.transcript.confirmedOrNil
+        active.waiters.forEach { deliveries.append(.finish($0, transcript)) }
+        active.waiters.removeAll()
+        active.onTranscript = nil
+        active.onError = nil
+        if active === run { readiness.reset() }
+    }
+
+    /// Closes the run, then publishes the error once. Deliveries are ordered,
+    /// so every finish waiter, including one that joins while the error is
+    /// being delivered, resumes only after the callback returns. The run is
+    /// already closed, so the callback may start a replacement session.
+    func fail(_ error: Error, _ active: AzureVoiceLiveRun, _ effects: inout AzureVoiceLiveEffects) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        close(active, &effects)
+        log("Session failed")
+        if let callback { deliveries.append(.failure(callback, error)) }
+        let transcript = active.transcript.confirmedOrNil
+        waiters.forEach { deliveries.append(.finish($0, transcript)) }
+    }
+
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "Azure Speech") }
+
+    /// Schedules `action` for this run after the lock is released. It runs
+    /// under the lock, and only while the run is still current.
+    func after(
+        _ seconds: TimeInterval, _ active: AzureVoiceLiveRun, _ effects: inout AzureVoiceLiveEffects,
+        action: @escaping @Sendable (AzureVoiceLiveClient, AzureVoiceLiveRun, inout AzureVoiceLiveEffects) -> Void
+    ) {
+        let schedule = self.schedule
+        effects.append {
+            schedule(seconds) { [weak self, weak active] in
+                guard let self, let active else { return }
+                self.transact { effects in
+                    guard self.isCurrent(active) else { return }
+                    action(self, active, &effects)
+                }
+            }
+        }
+    }
+
+    /// Lifecycle events only: never a key, a frame or transcript text.
+    func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "AzureVoiceLiveClient").info("\(event, privacy: .public)")
+        #endif
+    }
 }

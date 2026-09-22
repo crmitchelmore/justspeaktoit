@@ -131,24 +131,31 @@ bool localPath(const char *text, std::wstring &path) {
 }
 
 void openSource(const std::wstring &path, uint64_t limit, jsti::Handle &handle, uint64_t &size) {
-    handle.value = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+    if (handle.value) throw Failure{E_INVALIDARG, "Audio playback input handle is already owned"};
+    // Validation can throw after CreateFile succeeds. Retain the candidate
+    // locally so a refused input cannot leave a pin in the caller's output,
+    // which might then be reused for a later open.
+    jsti::Handle candidate;
+    candidate.value = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
                                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (handle.value == INVALID_HANDLE_VALUE) {
-        handle.value = nullptr;
+    if (candidate.value == INVALID_HANDLE_VALUE) {
+        candidate.value = nullptr;
         throw Failure{HRESULT_FROM_WIN32(GetLastError()), "Open local audio file for playback"};
     }
     FILE_ATTRIBUTE_TAG_INFO attributes{};
     LARGE_INTEGER length{};
-    if (GetFileType(handle.value) != FILE_TYPE_DISK ||
-        !GetFileInformationByHandleEx(handle.value, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
+    if (GetFileType(candidate.value) != FILE_TYPE_DISK ||
+        !GetFileInformationByHandleEx(candidate.value, FileAttributeTagInfo, &attributes, sizeof(attributes)) ||
         (attributes.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ||
-        !GetFileSizeEx(handle.value, &length)) {
+        !GetFileSizeEx(candidate.value, &length)) {
         throw Failure{E_INVALIDARG, "Audio playback input must be a regular local file"};
     }
     if (length.QuadPart <= 0 || static_cast<uint64_t>(length.QuadPart) > limit) {
         throw Failure{HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE), "Audio playback input is empty or exceeds 1 GiB"};
     }
     size = static_cast<uint64_t>(length.QuadPart);
+    handle.value = candidate.value;
+    candidate.value = nullptr;
 }
 
 FormatSpec parseFormat(const WAVEFORMATEX *wave, size_t size) {

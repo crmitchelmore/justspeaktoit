@@ -215,6 +215,7 @@ enum SpeakWindowsMain {
                 try WindowsNative.stagingSelfTest()
                 try WindowsNative.checked { jsti_websocket_self_test($0, $1) }
                 try WindowsNative.checked { jsti_audio_conversion_self_test($0, $1) }
+                try WindowsNative.checked { jsti_audio_playback_self_test($0, $1) }
                 guard !DesktopTranscription.batchModels.isEmpty else {
                     throw WindowsNativeError(message: "No canonical desktop models available.")
                 }

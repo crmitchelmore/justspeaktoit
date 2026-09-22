@@ -404,6 +404,9 @@ int selfTestSourceValidation(const std::wstring &fixture, const std::wstring &ro
     } catch (const Failure &failure) {
         if (describe(failure).find("exceeds") == std::string::npos) return jsti::fail(describe(failure), error, capacity);
     }
+    if (handle.value || !writable(fixture)) {
+        return jsti::fail("Refusing an oversized input retained its file handle.", error, capacity);
+    }
     try {
         openSource(root, inputLimit, handle, size);
         return jsti::fail("Audio playback accepted a directory as input.", error, capacity);
@@ -417,6 +420,12 @@ int selfTestSourceValidation(const std::wstring &fixture, const std::wstring &ro
         return jsti::fail("Audio playback measured its input incorrectly.", error, capacity);
     }
     if (writable(fixture)) return jsti::fail("The pinned playback input could be opened for writing.", error, capacity);
+    const HANDLE owned = handle.value;
+    bool existingRefused = false;
+    try { openSource(fixture, inputLimit, handle, size); } catch (const Failure &) { existingRefused = true; }
+    if (!existingRefused || handle.value != owned) {
+        return jsti::fail("Opening into an owned input replaced or lost its handle.", error, capacity);
+    }
     const FormatSpec mix = floatFormat(48000, 2, stereoMask);
     if (mix.blockAlign != 8 || mix.byteRate() != 48000 * 8 || sampleBound(mix) != 48000 * 8 * sampleBoundSeconds ||
         sampleBound(pcm16Format(8000, 1)) != minimumSampleBound) {

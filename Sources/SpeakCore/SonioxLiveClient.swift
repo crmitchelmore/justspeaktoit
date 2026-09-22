@@ -44,6 +44,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     private let sampleRate: Int
     let makeConnection: ConnectionFactory
     private let schedule: Scheduler
+    private var finishTimeout: TimeInterval = SonioxLiveClient.finishDeadline
     private let queue = DispatchQueue(label: "SonioxLiveClient.state")
     private let queueKey = DispatchSpecificKey<Bool>()
     private let ownedSession: URLSession?
@@ -88,6 +89,35 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         self.run = SonioxLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
         queue.setSpecific(key: queueKey, value: true)
+    }
+
+    /// An explicit caller budget for drain plus provider completion. The
+    /// original initializers remain intact; every existing caller keeps 8 s.
+    /// This is a deadline, not a delay on a healthy stream.
+    public convenience init(
+        apiKey: String, model: String = "stt-rt-v5", language: String? = nil,
+        sampleRate: Int = 16_000, session: URLSession = .shared, finishTimeout: TimeInterval
+    ) {
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) },
+            finishTimeout: finishTimeout
+        )
+    }
+
+    public convenience init(
+        apiKey: String, model: String = "stt-rt-v5", language: String? = nil,
+        sampleRate: Int = 16_000, makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        },
+        ownedSession: URLSession? = nil, finishTimeout: TimeInterval
+    ) {
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            makeConnection: makeConnection, schedule: schedule, ownedSession: ownedSession
+        )
+        self.finishTimeout = finishTimeout.isFinite && finishTimeout > 0 ? finishTimeout : Self.finishDeadline
     }
 
     deinit {
@@ -214,7 +244,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             active.outgoing.append(.endOfStream)
         }
         pump(active)
-        after(Self.finishDeadline, active) { client, active in
+        after(finishTimeout, active) { client, active in
             let error = active.endOfStreamSent && !active.sending
                 ? SonioxStreamingError.missingCompletion : client.stalledError
             client.fail(error, active)

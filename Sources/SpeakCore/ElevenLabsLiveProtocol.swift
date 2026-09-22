@@ -12,16 +12,18 @@ import FoundationNetworking
 // shipping Apple `ElevenLabsLiveTranscriber`: a `/v1/speech-to-text/realtime`
 // socket, `xi-api-key` auth, base64 `input_audio_chunk` frames and
 // `partial_transcript` / `committed_transcript` results under
-// `commit_strategy=vad`. No field here is invented; unknown frames are ignored.
+// `commit_strategy=manual`. No field here is invented; unknown frames are ignored.
 public enum ElevenLabsLiveProtocol {
     public static let host = "api.elevenlabs.io"
     public static let path = "/v1/speech-to-text/realtime"
+    static let supportedSampleRates: Set<Int> = [8_000, 16_000, 22_050, 24_000, 44_100, 48_000]
 
     /// Builds the streaming URL for `modelID`. `audio_format` encodes the
-    /// stream's PCM rate (`pcm_16000`); `commit_strategy=vad` keeps server-side
-    /// silence segmentation, and an optional ISO-639 `language_code` is added
+    /// stream's PCM rate (`pcm_16000`); `commit_strategy=manual` uses client-owned
+    /// bounded segmentation, and an optional ISO-639 `language_code` is added
     /// only when the caller pins a language.
     public static func webSocketURL(modelID: String, language: String?, sampleRate: Int) -> URL? {
+        guard supportedSampleRates.contains(sampleRate) else { return nil }
         var components = URLComponents()
         components.scheme = "wss"
         components.host = host
@@ -29,9 +31,9 @@ public enum ElevenLabsLiveProtocol {
         var items = [
             URLQueryItem(name: "model_id", value: modelID),
             URLQueryItem(name: "audio_format", value: "pcm_\(sampleRate)"),
-            URLQueryItem(name: "commit_strategy", value: "vad")
+            URLQueryItem(name: "commit_strategy", value: "manual")
         ]
-        if let language {
+        if let language = TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") {
             items.append(URLQueryItem(name: "language_code", value: language.localeLanguageCode))
         }
         components.queryItems = items
@@ -47,7 +49,7 @@ public enum ElevenLabsLiveProtocol {
     }
 
     /// A manual commit: an empty chunk carrying `commit:true`, which flushes any
-    /// audio the VAD strategy is still holding so the trailing words come back
+    /// audio in the current manually owned segment so the trailing words come back
     /// as a `committed_transcript` before the socket closes.
     public static func commitJSON() -> String {
         #"{"message_type":"input_audio_chunk","audio_base_64":"","commit":true}"#
@@ -70,15 +72,13 @@ public enum ElevenLabsRealtimeEvent: Equatable, Sendable {
     case serverError(type: String, message: String)
     /// A non-fatal notice the session survives.
     case warning(String)
-    /// The server closed the session cleanly.
-    case sessionClosed
     /// A recognised but non-actionable frame.
     case ignored(type: String)
 
     /// Error `message_type`s that end the session, per the realtime reference.
     /// `auth_error` and `warning` are handled separately (invalid key vs. survivable).
     static let terminalErrorTypes: Set<String> = [
-        "quota_exceeded", "rate_limited", "commit_throttled", "input_error",
+        "error", "quota_exceeded", "rate_limited", "commit_throttled", "input_error",
         "invalid_request", "chunk_size_exceeded", "insufficient_audio_activity",
         "transcriber_error", "session_time_limit_exceeded", "resource_exhausted",
         "queue_overflow", "unaccepted_terms"
@@ -94,14 +94,16 @@ public enum ElevenLabsRealtimeEvent: Equatable, Sendable {
             return .sessionStarted
         case "partial_transcript":
             return .partialTranscript(text)
-        case "committed_transcript", "committed_transcript_with_timestamps":
+        case "committed_transcript":
             return .committedTranscript(text)
+        case "committed_transcript_with_timestamps":
+            // Additional metadata for an already delivered segment. Text-only
+            // consumers must not append it as another utterance.
+            return .ignored(type: messageType)
         case "auth_error":
             return .authError(object["error"] as? String ?? messageType)
         case "warning":
             return .warning(object["warning"] as? String ?? object["error"] as? String ?? messageType)
-        case "session_closed":
-            return .sessionClosed
         case let type where terminalErrorTypes.contains(type):
             return .serverError(type: type, message: object["error"] as? String ?? type)
         default:
@@ -116,6 +118,10 @@ public enum ElevenLabsRealtimeEvent: Equatable, Sendable {
 public enum ElevenLabsStreamingError: LocalizedError, Equatable, Sendable {
     case sessionNotReady
     case serverError(type: String, message: String)
+    case invalidSampleRate(Int)
+    case invalidPCM
+    case missingCompletion
+    case unexpectedCompletion
 
     public var errorDescription: String? {
         switch self {
@@ -123,6 +129,14 @@ public enum ElevenLabsStreamingError: LocalizedError, Equatable, Sendable {
             return "ElevenLabs did not start the transcription session in time."
         case .serverError(let type, let message):
             return "ElevenLabs reported a streaming error (\(type)): \(message)"
+        case .invalidSampleRate(let rate):
+            return "ElevenLabs does not support the configured PCM sample rate (\(rate) Hz)."
+        case .invalidPCM:
+            return "ElevenLabs requires complete 16-bit PCM samples."
+        case .unexpectedCompletion:
+            return "ElevenLabs returned an unrequested transcription segment. The recording is available to retry."
+        case .missingCompletion:
+            return "ElevenLabs did not confirm the completed transcription. The recording is available to retry."
         }
     }
 }

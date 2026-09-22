@@ -14,9 +14,14 @@ final class ElevenLabsLiveRun: @unchecked Sendable {
     var outgoing: [Data] = []
     var sending = false
     var sendID: UInt64 = 0
-    /// The finalising manual commit has been handed to the transport, so the
-    /// next `committed_transcript` (or the finish budget) ends the session.
-    var commitSent = false
+    /// Bytes handed to the transport for the current manual segment, including
+    /// an in-flight chunk. No segment may cross the client-owned time boundary.
+    var segmentBytes = 0
+    var commitSequence: UInt64 = 0
+    var pendingCommit: UInt64?
+    /// A response can precede its send completion; both must succeed before
+    /// another segment is sent or graceful finish is acknowledged.
+    var commitFinalReceived = false
     let sendBudget: StreamingAudioSendBudget
     var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
     var waiters: [CheckedContinuation<String?, Never>] = []
@@ -24,8 +29,10 @@ final class ElevenLabsLiveRun: @unchecked Sendable {
     var onError: ((Error) -> Void)?
 
     init(sampleRate: Int) {
+        let budgetRate = ElevenLabsLiveProtocol.supportedSampleRates.contains(sampleRate)
+            ? sampleRate : LiveTranscriptionProviderID.elevenlabs.expectedSampleRate
         self.sendBudget = StreamingAudioSendBudget(
-            sampleRate: sampleRate, seconds: StreamingAudioPreroll.defaultBudgetSeconds
+            sampleRate: budgetRate, seconds: StreamingAudioPreroll.defaultBudgetSeconds
         )
     }
 

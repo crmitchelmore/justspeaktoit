@@ -13,9 +13,9 @@ import os.log
 /// One `/v1/speech-to-text/realtime` socket per run. Audio is admitted
 /// synchronously into a bounded queue and sent one base64 `input_audio_chunk`
 /// at a time, but only after the server's `session_started` frame. Finalisation
-/// drains the queue, sends a manual `commit` (`commit_strategy=vad` otherwise
-/// segments on silence) and waits, within a bounded budget, for the trailing
-/// `committed_transcript`. The transport is injectable; framing, admission and
+/// owns manual segments of at most twenty seconds, waits for each commit before
+/// sending the next segment, and drains admitted audio on finish. A commit
+/// requires its `committed_transcript` within a bounded budget. The transport is injectable; framing, admission and
 /// lifecycle stay here so the platforms cannot drift.
 public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     /// Each `committed_transcript` is a newly finalised segment, so finals append.
@@ -31,6 +31,10 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     public static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
     /// How long a finish waits, after the manual commit, for the trailing final.
     public static let finishBudget: TimeInterval = 1.5
+    /// Stay below the provider's approximately 36-second automatic commit.
+    static let segmentSeconds = 20
+    /// Bounds readiness, all queued sends and both a pending and trailing commit.
+    static let finishDrainBudget = finishReadyBudget + sendDeadline + 2 * finishBudget
     /// Queued frames are bounded by count as well as by the five-second byte budget.
     public static let maximumQueuedFrames = 256
 
@@ -39,7 +43,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private let language: String?
     /// PCM16 rate the caller streams in; it is declared to the endpoint and used
     /// to size the send budget and pre-roll.
-    private let sampleRate: Int
+    let sampleRate: Int
     private let makeConnection: ConnectionFactory
     private let schedule: Scheduler
     private let queue = DispatchQueue(label: "ElevenLabsLiveClient.state")
@@ -79,7 +83,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         self.makeConnection = makeConnection
         self.schedule = schedule
         self.run = ElevenLabsLiveRun(sampleRate: sampleRate)
-        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        let budgetRate = ElevenLabsLiveProtocol.supportedSampleRates.contains(sampleRate)
+            ? sampleRate : LiveTranscriptionProviderID.elevenlabs.expectedSampleRate
+        self.preroll = StreamingAudioPreroll(sampleRate: budgetRate)
         queue.setSpecific(key: queueKey, value: true)
     }
 
@@ -89,6 +95,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
 
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         synchronized {
+            let opening = run.phase == .idle ? preroll.drain() : []
             close(run)
             let active = ElevenLabsLiveRun(sampleRate: sampleRate)
             run = active
@@ -96,6 +103,10 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             active.onError = onError
             let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { fail(ElevenLabsLiveError.missingAPIKey, active); return }
+            guard ElevenLabsLiveProtocol.supportedSampleRates.contains(sampleRate) else {
+                fail(ElevenLabsStreamingError.invalidSampleRate(sampleRate), active)
+                return
+            }
             guard let url = ElevenLabsLiveProtocol.webSocketURL(
                 modelID: modelID, language: language, sampleRate: sampleRate
             ) else {
@@ -117,6 +128,10 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             after(Self.readyDeadline, active) { client, active in
                 if !active.ready { client.fail(ElevenLabsLiveError.connectionFailed, active) }
             }
+            for audio in opening {
+                guard isCurrent(active) else { break }
+                sendAudio(audio)
+            }
         }
     }
 
@@ -130,6 +145,10 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             let active = run
             if active.phase == .idle { preroll.append(audioData); return }
             guard active.phase == .connecting || active.phase == .active else { return }
+            guard audioData.count.isMultiple(of: 2) else {
+                fail(ElevenLabsStreamingError.invalidPCM, active)
+                return
+            }
             guard active.outgoing.count + (active.sending ? 1 : 0) < Self.maximumQueuedFrames,
                   active.sendBudget.admit(audioData.count) else {
                 fail(stalledError, active)
@@ -145,13 +164,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         sendAudio(PCM16Converter.data(from: samples, frameCount: frameCount))
     }
 
-    /// The realtime endpoint has no end-of-stream frame, so a finish is only a
-    /// bounded wait for an already-pending final: a caller with nothing
-    /// outstanding may close immediately rather than burn the drain budget.
-    public var finishFlushesBufferedAudio: Bool { false }
+    /// Manual commit flushes audio that the provider may not yet have exposed
+    /// as text. Shared consumers must always allow that finalisation path.
+    public var finishFlushesBufferedAudio: Bool { true }
 
-    /// Graceful stop: drains admitted audio, sends a manual commit to flush the
-    /// VAD buffer and waits (bounded) for the trailing `committed_transcript`.
+    /// Graceful stop waits for any current commit, drains admitted audio, then
+    /// commits a nonempty remainder and awaits its `committed_transcript`.
     /// Returns the session's full transcript, or `nil` when nothing was
     /// transcribed; a trailing final consumed here is not also delivered through
     /// `onTranscript`.
@@ -173,6 +191,13 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                     active.waiters.append(continuation)
                     guard active.phase != .finishing else { return }
                     active.phase = .finishing
+                    if active.outgoing.isEmpty, active.segmentBytes == 0, !active.sending {
+                        close(active)
+                        return
+                    }
+                    after(Self.finishDrainBudget, active) { client, active in
+                        client.fail(ElevenLabsStreamingError.missingCompletion, active)
+                    }
                     if active.ready {
                         pump(active)
                     } else {
@@ -200,47 +225,11 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// drive the client without a live transport.
     func parseTranscriptResponse(_ json: String) { synchronized { parse(json, run) } }
 
-    // MARK: - Private
+}
+
+extension ElevenLabsLiveClient {
 
     var stalledError: Error { StreamingClientError.transportStalled(provider: "ElevenLabs") }
-
-    /// Exactly one send is in flight. Audio waits for the acknowledged session;
-    /// once the queue is empty a finishing run sends its single manual commit.
-    private func pump(_ active: ElevenLabsLiveRun) {
-        guard isCurrent(active), active.ready, !active.sending, let connection = active.connection else { return }
-        let message: StreamingWebSocketMessage
-        let audioBytes: Int
-        if !active.outgoing.isEmpty {
-            let data = active.outgoing.removeFirst()
-            message = .text(ElevenLabsLiveProtocol.audioChunkJSON(pcm16: data, sampleRate: sampleRate))
-            audioBytes = data.count
-        } else if active.phase == .finishing, !active.commitSent {
-            active.commitSent = true
-            message = .text(ElevenLabsLiveProtocol.commitJSON())
-            audioBytes = 0
-        } else { return }
-        active.sending = true
-        active.sendID += 1
-        let sendID = active.sendID
-        connection.send(message) { [weak self, weak active] error in
-            guard let self, let active else { return }
-            self.synchronized {
-                guard self.isCurrent(active), active.sendID == sendID else { return }
-                active.sending = false
-                active.sendBudget.release(audioBytes)
-                if let error { self.fail(error, active); return }
-                if audioBytes == 0 {
-                    // The commit has left; bound the wait for the trailing final.
-                    self.after(Self.finishBudget, active) { client, active in client.close(active) }
-                } else {
-                    self.pump(active)
-                }
-            }
-        }
-        after(Self.sendDeadline, active) { client, active in
-            if active.sending, active.sendID == sendID { client.fail(client.stalledError, active) }
-        }
-    }
 
     private func receive(_ active: ElevenLabsLiveRun) {
         guard isCurrent(active), let connection = active.connection else { return }
@@ -250,16 +239,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                 guard self.isCurrent(active) else { return }
                 switch result {
                 case .failure(let error):
-                    // A socket that drops after our commit is a clean finish, not a failure.
-                    if active.phase == .finishing, active.commitSent, !active.sending {
-                        self.close(active)
-                    } else {
-                        self.fail(error, active)
-                    }
+                    self.fail(error, active)
                 case .success(let message):
                     switch message {
                     case .text(let text): self.parse(text, active)
-                    case .binary(let data): self.parse(String(decoding: data, as: UTF8.self), active)
+                    case .binary(let data):
+                        if let text = String(data: data, encoding: .utf8) { self.parse(text, active) }
                     }
                     self.receive(active)
                 }
@@ -272,37 +257,49 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         guard let event = ElevenLabsRealtimeEvent.parse(json) else { return }
         switch event {
         case .sessionStarted:
-            guard !active.ready else { return }
-            active.ready = true
-            if active.phase == .connecting { active.phase = .active }
-            log("Session started")
-            pump(active)
+            markReady(active)
         case .partialTranscript(let text):
             guard active.phase != .finishing, !text.isEmpty else { return }
             active.onTranscript?(text, false)
         case .committedTranscript(let text):
-            if !text.isEmpty { active.accumulated.append(final: text) }
-            if active.phase == .finishing {
-                // The trailing final after our commit ends the wait; it is folded
-                // into the full transcript the waiter receives, never re-delivered.
-                if active.commitSent { close(active) }
-            } else if !text.isEmpty {
-                active.onTranscript?(text, true)
-            }
+            handleCommitted(text, active)
         case .authError:
             fail(StreamingClientError.invalidAPIKey(provider: "ElevenLabs"), active)
         case .serverError(let type, let message):
             fail(ElevenLabsStreamingError.serverError(type: type, message: message), active)
         case .warning:
             break
-        case .sessionClosed:
-            close(active)
         case .ignored:
             break
         }
     }
 
-    private func fail(_ error: Error, _ active: ElevenLabsLiveRun) {
+    private func markReady(_ active: ElevenLabsLiveRun) {
+        guard !active.ready else { return }
+        active.ready = true
+        if active.phase == .connecting { active.phase = .active }
+        log("Session started")
+        pump(active)
+    }
+
+    private func handleCommitted(_ text: String, _ active: ElevenLabsLiveRun) {
+        // The offline parser seam preserves existing transcript tests. A
+        // live socket, however, must only finalise its one owned commit.
+        if active.phase == .idle {
+            if !text.isEmpty { active.accumulated.append(final: text) }
+            return
+        }
+        guard active.pendingCommit != nil, !active.commitFinalReceived else {
+            fail(ElevenLabsStreamingError.unexpectedCompletion, active)
+            return
+        }
+        active.commitFinalReceived = true
+        if !text.isEmpty { active.accumulated.append(final: text) }
+        if active.phase != .finishing, !text.isEmpty { active.onTranscript?(text, true) }
+        pump(active)
+    }
+
+    func fail(_ error: Error, _ active: ElevenLabsLiveRun) {
         guard active === run, active.phase != .closed else { return }
         let onError = active.onError
         let waiters = active.waiters
@@ -316,7 +313,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         waiters.forEach { $0.resume(returning: transcript) }
     }
 
-    private func close(_ active: ElevenLabsLiveRun) {
+    func close(_ active: ElevenLabsLiveRun) {
         guard active.phase != .closed else { return }
         active.phase = .closed
         let connection = active.connection
@@ -334,17 +331,19 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         active.onError = nil
     }
 
-    private func isCurrent(_ active: ElevenLabsLiveRun) -> Bool { active === run && active.phase != .closed }
+    func isCurrent(_ active: ElevenLabsLiveRun) -> Bool { active === run && active.phase != .closed }
 
-    private func after(_ seconds: TimeInterval, _ active: ElevenLabsLiveRun,
-                       action: @escaping @Sendable (ElevenLabsLiveClient, ElevenLabsLiveRun) -> Void) {
+    func after(
+        _ seconds: TimeInterval, _ active: ElevenLabsLiveRun,
+        action: @escaping @Sendable (ElevenLabsLiveClient, ElevenLabsLiveRun) -> Void
+    ) {
         schedule(seconds) { [weak self, weak active] in
             guard let self, let active else { return }
             self.synchronized { if self.isCurrent(active) { action(self, active) } }
         }
     }
 
-    private func synchronized<Value>(_ action: () -> Value) -> Value {
+    func synchronized<Value>(_ action: () -> Value) -> Value {
         if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
         return queue.sync(execute: action)
     }

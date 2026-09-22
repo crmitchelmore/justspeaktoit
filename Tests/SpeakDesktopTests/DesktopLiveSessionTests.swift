@@ -346,7 +346,7 @@ extension DesktopLiveSessionTests {
         }
         XCTAssertTrue(client is ElevenLabsLiveClient)
         XCTAssertEqual(client?.finalShape, .standaloneSegments)
-        XCTAssertEqual(client?.finishFlushesBufferedAudio, false)
+        XCTAssertEqual(client?.finishFlushesBufferedAudio, true)
     }
 }
 

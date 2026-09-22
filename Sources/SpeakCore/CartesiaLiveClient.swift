@@ -8,7 +8,10 @@ import os.log
 
 // MARK: - Cartesia Live Client (portable, injected transport)
 
-/// Shared Cartesia Ink-2 streaming client used by macOS, iOS and Windows.
+/// Shared Cartesia Ink-2 streaming client. The iOS live path reaches it through
+/// `LiveTranscriptionClientFactory` and Windows through `DesktopLiveTranscription`;
+/// the macOS app still records through its own `CartesiaLiveController` and
+/// `CartesiaLiveTranscriber` and does not use this client yet.
 ///
 /// One `/stt/turns/websocket` socket per run (see `CartesiaLiveProtocol`). PCM16
 /// mono is admitted synchronously into a bounded queue and sent as one binary
@@ -179,8 +182,9 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
     /// session transcript, or `nil` when no turn produced words; turns that end
     /// during the finish are folded into it rather than also delivered through
     /// `onTranscript`. A finish that cannot reach that documented end publishes
-    /// its error before returning the confirmed text. Concurrent callers share
-    /// one outcome; cancelling the calling task aborts the session.
+    /// its error before returning the confirmed text, also to callers that join
+    /// while the error is being delivered. Concurrent callers share one outcome;
+    /// cancelling the calling task aborts the session.
     public func finishAndWait() async -> String? {
         let active: CartesiaLiveRun = withState { _ in run }
         return await withTaskCancellationHandler {
@@ -214,6 +218,12 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
             retire(active, &effects)
             effects.add { continuation.resume(returning: transcript) }
         case .closed:
+            // A failure still being published keeps late callers until its
+            // error is out, exactly like callers that were already waiting.
+            guard !active.deliveringFailure else {
+                active.lateWaiters.append(continuation)
+                return
+            }
             effects.add { continuation.resume(returning: transcript) }
         }
     }
@@ -253,9 +263,10 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
 extension CartesiaLiveClient {
     var stalledError: Error { StreamingClientError.transportStalled(provider: "Cartesia") }
 
-    /// Finish callers waiting on the active run; lets tests observe that a
-    /// finish has registered without sleeping.
-    var pendingFinishes: Int { withState { _ in run.waiters.count } }
+    /// Finish callers waiting on the active run, including those held while a
+    /// failure is delivered; lets tests observe that a finish has registered
+    /// without sleeping.
+    var pendingFinishes: Int { withState { _ in run.waiters.count + run.lateWaiters.count } }
 
     /// Runs `body` under the lock, then performs the effects it recorded.
     func withState<Value>(_ body: (inout CartesiaLiveEffects) -> Value) -> Value {
@@ -278,10 +289,12 @@ extension CartesiaLiveClient {
     }
 
     /// Retires the run, then, outside the lock, publishes the failure before any
-    /// detached finish waiter resumes. Words a finish had withheld are delivered
-    /// first, so the host's visible draft keeps everything the server sent,
-    /// while the waiters receive confirmed text only. A callback that starts a
-    /// new session cannot be touched by this cleanup: the run is already detached.
+    /// finish caller of this run returns: those already waiting and those that
+    /// join while it is being delivered. Words a finish had withheld are
+    /// delivered first, so the host's visible draft keeps everything the server
+    /// sent, while finish callers receive confirmed text only. A callback that
+    /// starts a new session cannot be touched by this cleanup: the run is
+    /// already detached, and only its own late callers are released after it.
     func fail(_ active: CartesiaLiveRun, _ error: Error, _ effects: inout CartesiaLiveEffects) {
         guard isCurrent(active) else { return }
         let onTranscript = active.onTranscript
@@ -291,6 +304,7 @@ extension CartesiaLiveClient {
         let waiters = active.waiters
         let transcript = active.transcript
         active.waiters.removeAll()
+        active.deliveringFailure = true
         retire(active, &effects)
         log("Session failed")
         effects.add {
@@ -300,7 +314,17 @@ extension CartesiaLiveClient {
             }
             onError?(error)
             waiters.forEach { $0.resume(returning: transcript) }
+            self.withState { effects in self.endFailureDelivery(active, &effects) }
         }
+    }
+
+    /// The error is out: callers that joined while it was being delivered return.
+    private func endFailureDelivery(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+        active.deliveringFailure = false
+        let late = active.lateWaiters
+        let transcript = active.transcript
+        active.lateWaiters.removeAll()
+        effects.add { late.forEach { $0.resume(returning: transcript) } }
     }
 
     /// Ends the run for good: its socket is cancelled, admitted audio and its

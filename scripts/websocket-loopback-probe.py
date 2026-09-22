@@ -27,7 +27,7 @@ CARTESIA_ROUTE = "/stt/turns/websocket"
 CARTESIA_QUERY = "model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-03-01"
 CARTESIA_AUTHORIZATION = "Bearer loopback-synthetic-key"
 CARTESIA_VERSION = "2026-03-01"
-CARTESIA_SCENARIOS = ("complete", "failure", "incomplete", "hold")
+CARTESIA_SCENARIOS = ("complete", "failure", "incomplete", "hold", "abrupt", "abnormal")
 CARTESIA_FRAMES = 10
 CARTESIA_FRAME_BYTES = 3200
 # (update, end) per turn. The second turn carries its own leading space, as
@@ -339,6 +339,14 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             self.send_json({"type": "turn.start"})
             self.send_json({"type": "turn.update", "transcript": "Unfinished thought"})
             self.close_cartesia(1000, b"stream-complete")
+        elif scenario == "abrupt":
+            # The flush arrives, then the connection drops without a close frame.
+            self.send_turn(*CARTESIA_TURNS[1])
+            log("cartesia-abrupt-disconnect")
+        elif scenario == "abnormal":
+            # The flush arrives, then the server closes with a non-normal status.
+            self.send_turn(*CARTESIA_TURNS[1])
+            self.close_cartesia(1011, b"loopback-abnormal")
         else:
             self.send_turn(*CARTESIA_TURNS[1])
             if scenario == "failure":

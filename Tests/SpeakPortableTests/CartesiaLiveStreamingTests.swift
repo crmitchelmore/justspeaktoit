@@ -94,6 +94,47 @@ final class CartesiaLiveStreamingTests: XCTestCase {
         XCTAssertEqual(fixture.log.entries, [.error("transportStalled(provider: \"Cartesia\")")])
     }
 
+    func testEmptyFramesAreIgnoredAndTakeNoFrameSlots() {
+        let fixture = CartesiaLiveFixture()
+        for _ in 0..<1_000 { fixture.client.sendAudio(Data()) }
+        fixture.startAndOpen()
+        defer { fixture.client.cancel() }
+        for _ in 0..<1_000 { fixture.client.sendAudio(Data()) }
+        XCTAssertTrue(fixture.socket.sent.isEmpty)
+        for _ in 0..<256 { fixture.client.sendAudio(Data([0, 0])) }
+        XCTAssertTrue(fixture.log.errors.isEmpty, "Empty frames took none of the 256 frame slots")
+    }
+
+    func testTinyFramesBeforeStartAreBoundedByCountAndReportedByStart() {
+        let fixture = CartesiaLiveFixture()
+        for _ in 0..<257 { fixture.client.sendAudio(Data([0, 0])) }
+        fixture.start()
+        XCTAssertTrue(fixture.factory.sockets.isEmpty)
+        XCTAssertEqual(fixture.log.entries, [.error("transportStalled(provider: \"Cartesia\")")])
+    }
+
+    func testExactlyFullPreStartQueueIsReplayedIntact() {
+        let fixture = CartesiaLiveFixture()
+        fixture.useSynchronousSends()
+        let frames = (0..<256).map { Data([UInt8(truncatingIfNeeded: $0), 0]) }
+        frames.forEach(fixture.client.sendAudio)
+        fixture.startAndOpen()
+        defer { fixture.client.cancel() }
+        XCTAssertEqual(fixture.socket.binary, frames)
+        XCTAssertTrue(fixture.log.errors.isEmpty)
+    }
+
+    func testPartialSampleFrameBeforeStartIsReportedByStart() {
+        let fixture = CartesiaLiveFixture()
+        fixture.client.sendAudio(CartesiaLiveFixture.frame(1))
+        fixture.client.sendAudio(Data([1, 2, 3]))
+        fixture.client.sendAudio(CartesiaLiveFixture.frame(2))
+        fixture.start()
+        XCTAssertTrue(fixture.factory.sockets.isEmpty, "Audio that can no longer be sent intact never connects")
+        XCTAssertEqual(fixture.log.errors.count, 1)
+        XCTAssertEqual(fixture.log.errors.first as? CartesiaStreamingError, .invalidPCM)
+    }
+
     func testPartialSampleFrameIsRefusedBeforeItMisalignsTheStream() {
         let fixture = CartesiaLiveFixture()
         fixture.startAndOpen()

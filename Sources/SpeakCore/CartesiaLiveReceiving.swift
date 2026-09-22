@@ -103,27 +103,32 @@ extension CartesiaLiveClient {
     }
 
     /// The receive failed: the server closed the stream or the transport
-    /// broke. Only a closure after `close` has been sent can end the stream
-    /// normally; if its send has not completed yet, that completion decides.
+    /// broke. Only a closure after `close` has been sent can end the stream;
+    /// if that command's send has not completed yet, its completion settles it.
     private func closed(by error: Error, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
         guard active.closeSent else {
             fail(active, CartesiaLiveProtocol.connectionError(error), &effects)
             return
         }
-        if active.closeDelivered {
-            completeStream(active, &effects)
-        } else {
-            active.peerClosed = true
+        guard active.closeDelivered else {
+            active.peerClosure = error
+            return
         }
+        settle(closure: error, active, &effects)
     }
 
     /// The documented end of the stream: after `close`, the server flushes its
-    /// events and closes the socket. The shared transport boundary does not
-    /// report the close code, so a clean closure cannot be told apart from a
-    /// broken one here. Words of a turn the server never ended are therefore
-    /// reported rather than dropped from a completed transcript; a started turn
-    /// that produced no words loses nothing and completes normally.
-    func completeStream(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+    /// events and then closes the socket normally. Only that affirmative close
+    /// (1000), as the transport reports it, completes a finish. Any other code,
+    /// or a transport failure without a close frame, fails it: the words it
+    /// flushed are still released to the host and the confirmed text returned.
+    /// Words of a turn the server never ended are reported rather than dropped;
+    /// a started turn that produced no words loses nothing.
+    func settle(closure error: Error, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+        guard CartesiaLiveProtocol.isNormalClosure(error) else {
+            fail(active, CartesiaLiveProtocol.connectionError(error), &effects)
+            return
+        }
         guard active.openTurnDraft == nil else {
             fail(active, CartesiaStreamingError.incompleteTurn, &effects)
             return

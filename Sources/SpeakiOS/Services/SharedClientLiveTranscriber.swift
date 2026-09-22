@@ -44,17 +44,19 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     private var cleanupTask: Task<Void, Never>?
     private var isStopping = false
     private var activeCaptureID: UUID?
+    private var transcriptState: SharedClientTranscriptState?
+    private var displayedRevision: UInt64 = 0
+    private var displayedTranscriptRevision: UInt64 = 0
+    private var reportedClientFailure = false
+
     private var ownsAudioSession = false
     private var hasInputTap = false
     // Isolates system boundaries in lifecycle tests.
     var drainCaptureWork: (() async -> Void)?
     var clientFactory: (() -> StreamingTranscriptionClient?)?
     var startCaptureAudio: (() throws -> Void)?
-
-    private func releaseAudioSession() {
-        guard ownsAudioSession else { return }
-        audioSessionManager.deactivate()
-        ownsAudioSession = false
+    var enqueueClientUpdate: @Sendable (@escaping @MainActor @Sendable () -> Void) -> Void = { update in
+        Task { @MainActor in update() }
     }
 
     private func removeInputTap() {
@@ -181,19 +183,27 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 
     private func startClient(_ client: StreamingTranscriptionClient) {
         let captureID = UUID()
+        let state = SharedClientTranscriptState(shape: client.finalShape)
+        transcriptState = state
         activeCaptureID = captureID
+        displayedRevision = 0
+        displayedTranscriptRevision = 0
+        reportedClientFailure = false
         firstInputSignal = FirstInputSignal()
+        let enqueue = enqueueClientUpdate
         client.start(
             onTranscript: { [weak self] text, isFinal in
-                Task { @MainActor in
+                guard let snapshot = state.receive(text, isFinal: isFinal) else { return }
+                enqueue { [weak self] in
                     guard self?.activeCaptureID == captureID else { return }
-                    self?.handleTranscript(text: text, isFinal: isFinal)
+                    self?.apply(snapshot, from: state)
                 }
             },
             onError: { [weak self] error in
-                Task { @MainActor in
+                guard let snapshot = state.fail(error) else { return }
+                enqueue { [weak self] in
                     guard self?.activeCaptureID == captureID else { return }
-                    self?.handleError(error)
+                    self?.apply(snapshot, from: state)
                 }
             }
         )
@@ -294,6 +304,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
         guard isRunning || ownsAudioSession || hasInputTap else { return nil }
         audioEngine.stop()
         removeInputTap()
+        if let state = transcriptState { apply(state.cancel(), from: state, notify: false) }
         activeCaptureID = nil
         isRunning = false
         let task = Task { @MainActor in
@@ -310,7 +321,7 @@ public final class SharedClientLiveTranscriber: ObservableObject {
     }
 
     private func finishCaptureCleanup() {
-        client?.stop()
+        client?.cancel()
         client = nil
         // Cancelled audio is thrown away, so there is nothing to drain — just
         // drop the converter so the next session builds a fresh one.
@@ -323,50 +334,75 @@ public final class SharedClientLiveTranscriber: ObservableObject {
 }
 
 extension SharedClientLiveTranscriber {
+    /// Captured from the actual active client, with time for capture drain and
+    /// terminal UI delivery. Providers without a declared budget retain 10s.
+    var stopCompletionTimeout: TimeInterval {
+        guard let budget = (client as? FinalizingStreamingTranscriptionClient)?.finalisationBudget,
+              budget.isFinite, budget > 0 else { return 10 }
+        return max(10, budget + 1)
+    }
+
     // MARK: - Private
+
+    private func releaseAudioSession() {
+        guard ownsAudioSession else { return }
+        audioSessionManager.deactivate()
+        ownsAudioSession = false
+    }
 
     /// Closes the client, giving providers that can still deliver words a
     /// bounded grace period first.
     ///
-    /// Providers whose finish flushes buffered audio (Deepgram's `CloseStream`)
-    /// always drain, because untranscribed audio can still yield words. For
-    /// providers whose finish is only a bounded wait (ElevenLabs), draining
-    /// with nothing outstanding would just add latency, so the socket closes
-    /// straight away when every interim has already been finalised.
+    /// Clients that flush buffered audio always drain, because unseen words
+    /// can still arrive. A client declaring a wait-only finish can close as
+    /// soon as its last interim and all sent audio have been accounted for.
     private func finishClient() async {
-        let finishingClient = client
+        guard let finishingClient = client, let state = transcriptState else { return }
         let captureID = activeCaptureID
         defer { if client === finishingClient { client = nil } }
-        guard let finalizingClient = finishingClient as? FinalizingStreamingTranscriptionClient else {
-            finishingClient?.stop()
-            return
+        let beforeFinish = state.snapshot
+        var whole: String?
+        if let finalizingClient = finishingClient as? FinalizingStreamingTranscriptionClient,
+           StreamingFinalisationPolicy.shouldAwaitFinalisation(
+               finishFlushesBufferedAudio: finalizingClient.finishFlushesBufferedAudio,
+               hasUnfinalisedTranscript: beforeFinish.text != beforeFinish.confirmedText,
+               hasUnansweredAudio: unansweredAudio.isSet
+           ) {
+            whole = await finalizingClient.finishAndWait()
+        } else {
+            finishingClient.stop()
         }
-        guard StreamingFinalisationPolicy.shouldAwaitFinalisation(
-            finishFlushesBufferedAudio: finalizingClient.finishFlushesBufferedAudio,
-            hasUnfinalisedTranscript: partialText != accumulated.text,
-            hasUnansweredAudio: unansweredAudio.isSet
-        ) else {
-            finalizingClient.stop()
-            return
-        }
-        // Contract: the return is the session's *full* transcript, not the
-        // trailing segment, so it replaces what we accumulated. Appending it
-        // would double every word the client already streamed.
-        if let finalTranscript = await finalizingClient.finishAndWait(),
-           activeCaptureID == captureID,
-           !finalTranscript.isEmpty,
-           finalText != finalTranscript {
-            applyFullTranscript(finalTranscript)
-        }
+        if Task.isCancelled { finishingClient.cancel() }
+        guard activeCaptureID == captureID else { return }
+        // Error callbacks update state synchronously. Deliver the terminal
+        // snapshot before retiring the run, even when their UI tasks are pending.
+        apply(state.finish(whole: whole, cancelled: Task.isCancelled), from: state)
     }
 
-    /// Adopts a transcript that is already complete (the `finishAndWait()`
-    /// return) as the whole session transcript.
-    private func applyFullTranscript(_ transcript: String) {
-        accumulated.replace(with: transcript)
-        finalText = accumulated.text
-        partialText = accumulated.text
-        onPartialResult?(partialText, true)
+    private func apply(
+        _ snapshot: SharedClientTranscriptState.Snapshot,
+        from state: SharedClientTranscriptState,
+        notify: Bool = true
+    ) {
+        guard transcriptState === state, snapshot.revision >= displayedRevision else { return }
+        displayedRevision = snapshot.revision
+        if finalText != snapshot.confirmedText {
+            accumulated.replace(with: snapshot.confirmedText)
+            finalText = snapshot.confirmedText
+        }
+        partialText = snapshot.text
+        if let failure = snapshot.error { error = failure }
+        if snapshot.transcriptRevision > displayedTranscriptRevision {
+            displayedTranscriptRevision = snapshot.transcriptRevision
+            unansweredAudio.clear()
+            if notify { onPartialResult?(snapshot.text, snapshot.isFinal) }
+        }
+        // User callbacks can synchronously cancel this run. Never deliver a
+        // second notification into the cancellation or a replacement session.
+        guard notify, activeCaptureID != nil, transcriptState === state,
+              let failure = snapshot.error, !reportedClientFailure else { return }
+        reportedClientFailure = true
+        onError?(failure)
     }
 
     private func makeResult(text: String, duration: TimeInterval) -> TranscriptionResult {
@@ -416,30 +452,6 @@ extension SharedClientLiveTranscriber {
         isRunning = true
     }
 
-    private func handleTranscript(text: String, isFinal: Bool) {
-        // The provider has answered for everything sent so far; anything
-        // captured after this point becomes outstanding again.
-        unansweredAudio.clear()
-        if isFinal {
-            // Folds by the client's declared final shape: standalone segments
-            // append (repeated identical text is a genuine repeat), cumulative
-            // finals replace (issue #700).
-            accumulated.append(final: text)
-            finalText = accumulated.text
-            partialText = accumulated.text
-        } else {
-            partialText = accumulated.display(withInterim: text)
-        }
-        // Contract: always deliver the full display transcript (accumulated
-        // finals plus any trailing partial), matching iOSLiveTranscriber and
-        // OpenAIRealtimeLiveTranscriber.
-        onPartialResult?(partialText, isFinal)
-    }
-
-    private func handleError(_ error: Error) {
-        self.error = error
-        onError?(error)
-    }
 }
 
 // MARK: - Audio capture

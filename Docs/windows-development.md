@@ -33,11 +33,10 @@ $bin = swift build --configuration release --show-bin-path
 & (Join-Path $bin.Trim() 'SpeakWindows.exe')
 ```
 
-The current source offers microphone recording, audio-file import and **24 batch
-models across fourteen providers**: OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini,
-xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox and Rev.ai. These are projections of the canonical
-shared catalogue and execute through shared provider clients. Three Deepgram live
-models are wired through shared Swift session snapshots and the native WinHTTP
+The current source offers microphone recording, audio-file import and **28 batch
+models across sixteen providers**: OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini,
+xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox, Rev.ai, Modulate and AssemblyAI. These are projections of the canonical
+shared catalogue and execute through shared provider clients. Three Deepgram live models and AssemblyAI Universal-3.5 Pro are wired through shared Swift session snapshots and the native WinHTTP
 adapter, whose five Windows runtime probes passed. Final-head CI for the host
 integration and real provider acceptance are pending. Batch and Live keep separate
 model selections. Native capture is joined before finalisation; received text
@@ -55,9 +54,12 @@ hot-plug refresh is still pending. Transcription and post-processing can be
 cancelled while keeping audio and any completed result.
 
 Imports are checked before copying: regular audio files, supported extensions,
-non-empty and at most 25 MB. Meta and Azure currently accept the app's canonical
-16 kHz mono PCM16 WAV directly; other imported encodings require a future Windows
-conversion adapter. Azure keys accept `key:region` (a raw key defaults to eastus);
+non-empty and at most 25 MB. Meta and Azure accept the app's canonical 16 kHz mono PCM16 WAV directly.
+Other inputs for those providers use a cancellable in-process Media Foundation
+converter, retaining the original in History and removing private temporary WAV
+output afterwards. The converter uses installed Windows codecs; it does not
+promise support for every Ogg, Opus or WebM encoding. Native Windows decode/cancellation adapter tests passed in run 35721370500;
+compressed-format and physical-device acceptance remain pending. Canonical recordings bypass decoding after a 44-byte header probe. Azure keys accept `key:region` (a raw key defaults to eastus);
 custom resource endpoint UI remains pending. Mistral, Soniox and Rev.ai stream multipart bodies
 from temporary files, using a native protected ACL for the current Windows user
 and SYSTEM. Creation refuses existing files and reparse-point paths; completed,
@@ -190,8 +192,8 @@ but must not be presented as the identical Apple-only engine or service.
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
-| Batch transcription | 24 canonical models across OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox and Rev.ai, through shared clients | Final-head Windows/Linux CI, real provider receipts, supported formats/languages and remaining macOS providers |
-| Live transcription | Three Deepgram routes use shared sessions and a runtime-qualified native WinHTTP transport | Final-head native host checks, real provider receipts and remaining streaming providers |
+| Batch transcription | 28 canonical models across OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox, Rev.ai, Modulate and AssemblyAI, through shared clients | Final-head Windows/Linux CI, real provider receipts, supported formats/languages and remaining macOS providers |
+| Live transcription | Deepgram and AssemblyAI routes use shared sessions and a runtime-qualified native WinHTTP transport | Final-head native host checks, real provider receipts and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
 | Text output | Captured native Edit/RichEdit insertion and explicit copy implemented | Browser/Electron/Office coverage, selections, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
@@ -202,7 +204,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
 | Voice output | Shared catalogues and some request contracts compile | Provider execution, native playback, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
-| Credentials | Windows Credential Manager uses canonical identifiers for the fourteen transcription providers and OpenRouter | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
+| Credentials | Windows Credential Manager uses canonical identifiers for the sixteen transcription providers and OpenRouter | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
 | Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
 | Automation and integrations | Shared protocol data available in source | Windows CLI/IPC, OpenClaw, deep links and applicable automation surface parity |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
@@ -281,6 +283,16 @@ Verified baseline on 22 September 2026:
   exact 2 MiB echoes and oversized-message rejection. Portable macOS/Linux passed.
   The overall run failed in executable self-test on private staging ownership;
   this run therefore does not qualify the expanded native window or host.
+- [Run 35721370500](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35721370500)
+  built source `1e4b2f7a` on Windows and passed all five native Swift/conversion
+  tests: 48 kHz stereo to canonical PCM, source preservation, pre-cancellation,
+  cancellation during decoding/completion, invalid input cleanup and existing
+  output protection. The overall run failed only a Modulate test header-case
+  assumption, also caught on Linux; `b54d5170` fixes that assertion. The native
+  executable self-test and window smoke were skipped after this test failure.
+- The full Apple `make test` suite at pushed source `1e4b2f7a` passed **3,577
+  tests, 16 skipped, zero failures**. This includes the Modulate and AssemblyAI
+  extractions and the shared live error/finalisation ordering fix.
 - **Final-head Windows, macOS and Linux CI for the current source is pending.**
   Provider contract tests use the shared URLProtocol stub and no live provider
   keys; test success must not be reported as a live transcription receipt.

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <memory>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -82,7 +83,9 @@ void realSleep(DWORD milliseconds) { Sleep(milliseconds); }
 HRESULT realFocusedElement(IUIAutomation *automation, HWND, IUIAutomationElement **element) {
     return automation->GetFocusedElement(element);
 }
-bool realSendPaste(std::string &error);
+unsigned realSendPaste(std::string &error);
+bool prepareRealPaste(std::string &error);
+void releaseRealPasteKeys(unsigned sent);
 Clipboard *systemClipboard();
 
 std::mutex environmentMutex;
@@ -101,12 +104,19 @@ std::condition_variable workerChanged;
 size_t liveWorkers = 0;
 
 struct WorkerScope {
-    WorkerScope() { std::lock_guard<std::mutex> lock(workerMutex); ++liveWorkers; }
+    WorkerScope() = default; // Slot was reserved before the thread was created.
     ~WorkerScope() {
         { std::lock_guard<std::mutex> lock(workerMutex); --liveWorkers; }
         workerChanged.notify_all();
     }
 };
+
+bool reserveWorker() {
+    std::lock_guard<std::mutex> lock(workerMutex);
+    if (liveWorkers >= 4) return false;
+    ++liveWorkers;
+    return true;
+}
 
 // ---- clipboard ---------------------------------------------------------------
 
@@ -173,9 +183,8 @@ struct ClipboardClose {
     ~ClipboardClose() { clipboard.close(); }
 };
 
-bool snapshotClipboard(Clipboard &clipboard, HWND owner, ClipboardSnapshot &snapshot, std::string &error) {
-    if (!clipboard.open(owner)) { error = systemError("Opening the clipboard"); return false; }
-    ClipboardClose close{clipboard};
+bool snapshotClipboard(Clipboard &clipboard, ClipboardSnapshot &snapshot, std::string &error) {
+    (void)error; // Clipboard is already owned for the complete snapshot/replace transaction.
     bool unicodeText = false;
     for (UINT format = clipboard.next(0); format; format = clipboard.next(format)) {
         if (format == CF_UNICODETEXT) unicodeText = true;
@@ -203,44 +212,7 @@ bool snapshotClipboard(Clipboard &clipboard, HWND owner, ClipboardSnapshot &snap
     return true;
 }
 
-bool placeText(Clipboard &clipboard, HWND owner, const std::wstring &text, bool excludeFromHistory,
-               DWORD &sequenceAfter, std::string &error) {
-    HGLOBAL memory = globalBytes(text.c_str(), (text.size() + 1) * sizeof(wchar_t));
-    if (!memory) { error = systemError("Allocating clipboard text"); return false; }
-    if (!clipboard.open(owner)) {
-        const DWORD code = GetLastError();
-        GlobalFree(memory);
-        error = systemError("Opening the clipboard", code);
-        return false;
-    }
-    bool success = false;
-    {
-        ClipboardClose close{clipboard};
-        success = clipboard.empty() && clipboard.set(CF_UNICODETEXT, memory);
-        const DWORD code = GetLastError();
-        if (!success) {
-            GlobalFree(memory);
-            error = systemError("Writing the clipboard", code);
-        } else if (excludeFromHistory) {
-            // Best effort: a transient transcript must not enter clipboard
-            // history or cloud sync. Documented Windows marker formats.
-            const UINT markers[] = {excludeFromMonitoringFormat(), excludeFromHistoryFormat(), excludeFromCloudFormat()};
-            for (const UINT marker : markers) {
-                if (!marker) continue;
-                const DWORD zero = 0;
-                HGLOBAL flag = globalBytes(&zero, sizeof(zero));
-                if (flag && !clipboard.set(marker, flag)) GlobalFree(flag);
-            }
-        }
-    }
-    sequenceAfter = clipboard.sequence();
-    return success;
-}
-
-int restoreClipboard(Clipboard &clipboard, HWND owner, const ClipboardSnapshot &snapshot, DWORD expectedSequence) {
-    if (clipboard.sequence() != expectedSequence) return JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE;
-    if (!clipboard.open(owner)) return JSTI_INSERTION_CLIPBOARD_RESTORE_FAILED;
-    ClipboardClose close{clipboard};
+int restoreOpenClipboard(Clipboard &clipboard, const ClipboardSnapshot &snapshot) {
     bool success = clipboard.empty();
     for (const ClipboardItem &item : snapshot.items) {
         if (!success) break;
@@ -252,29 +224,98 @@ int restoreClipboard(Clipboard &clipboard, HWND owner, const ClipboardSnapshot &
     return snapshot.complete ? JSTI_INSERTION_CLIPBOARD_RESTORED : JSTI_INSERTION_CLIPBOARD_RESTORED_PARTIALLY;
 }
 
+bool placeText(Clipboard &clipboard, HWND owner, const std::wstring &text, bool excludeFromHistory,
+               DWORD &sequenceAfter, std::string &error, ClipboardSnapshot *replaced = nullptr, int *failureState = nullptr,
+               const std::function<bool()> &mayWrite = {}) {
+    HGLOBAL memory = globalBytes(text.c_str(), (text.size() + 1) * sizeof(wchar_t));
+    if (!memory) { error = systemError("Allocating clipboard text"); return false; }
+    if (!clipboard.open(owner)) {
+        const DWORD code = GetLastError();
+        GlobalFree(memory);
+        error = systemError("Opening the clipboard", code);
+        return false;
+    }
+    ClipboardClose close{clipboard};
+    ClipboardSnapshot snapshot;
+    if (!snapshotClipboard(clipboard, snapshot, error)) { GlobalFree(memory); return false; }
+    if (mayWrite && !mayWrite()) {
+        GlobalFree(memory);
+        error = "The pending clipboard operation was cancelled.";
+        return false;
+    }
+    if (!clipboard.empty()) {
+        GlobalFree(memory);
+        error = systemError("Preparing the clipboard");
+        return false;
+    }
+    if (!clipboard.set(CF_UNICODETEXT, memory)) {
+        GlobalFree(memory);
+        error = systemError("Writing the clipboard");
+        const int restored = restoreOpenClipboard(clipboard, snapshot);
+        if (failureState) *failureState = restored;
+        return false;
+    }
+    if (excludeFromHistory) {
+        const UINT markers[] = {excludeFromMonitoringFormat(), excludeFromHistoryFormat(), excludeFromCloudFormat()};
+        for (const UINT marker : markers) {
+            if (!marker) continue;
+            const DWORD zero = 0;
+            HGLOBAL flag = globalBytes(&zero, sizeof(zero));
+            if (flag && !clipboard.set(marker, flag)) GlobalFree(flag);
+        }
+    }
+    // Capture our sequence while ownership is still held; a copy immediately
+    // after CloseClipboard must never be mistaken for our own write.
+    sequenceAfter = clipboard.sequence();
+    if (replaced) *replaced = std::move(snapshot);
+    return true;
+}
+
+int restoreClipboard(Clipboard &clipboard, HWND owner, const ClipboardSnapshot &snapshot, DWORD expectedSequence) {
+    if (!clipboard.open(owner)) return JSTI_INSERTION_CLIPBOARD_RESTORE_FAILED;
+    ClipboardClose close{clipboard};
+    // OpenClipboard can wait. Check only after acquiring ownership, so a copy
+    // during that wait is preserved rather than overwritten by stale data.
+    if (clipboard.sequence() != expectedSequence) return JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE;
+    return restoreOpenClipboard(clipboard, snapshot);
+}
+
 // ---- keyboard ----------------------------------------------------------------
 
 bool modifiersHeld() {
-    for (const int key : {VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN}) {
+    for (const int key : {VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN}) {
         if (GetAsyncKeyState(key) & 0x8000) return true;
     }
     return false;
 }
 
-bool realSendPaste(std::string &error) {
+bool prepareRealPaste(std::string &error) {
     for (int attempt = 0; attempt < 50 && modifiersHeld(); ++attempt) Sleep(20);
     if (modifiersHeld()) {
         error = "Shift, Alt or the Windows key is held down, so the paste shortcut was not sent. Copy the transcript instead.";
         return false;
     }
+    return true;
+}
+
+unsigned realSendPaste(std::string &error) {
     INPUT inputs[4];
     pasteInputs(inputs);
     SetLastError(ERROR_SUCCESS);
-    if (SendInput(4, inputs, sizeof(INPUT)) != 4) {
-        error = systemError("Sending the paste shortcut");
-        return false;
-    }
-    return true;
+    const unsigned sent = SendInput(4, inputs, sizeof(INPUT));
+    if (sent != 4) error = systemError("Sending the paste shortcut");
+    return sent;
+}
+
+void releaseRealPasteKeys(unsigned sent) {
+    if (sent == 0 || sent >= 4) return;
+    INPUT releases[2]{};
+    unsigned count = 0;
+    if (sent == 2) { releases[count].type = INPUT_KEYBOARD; releases[count].ki.wVk = 'V';
+        releases[count++].ki.dwFlags = KEYEVENTF_KEYUP; }
+    releases[count].type = INPUT_KEYBOARD; releases[count].ki.wVk = VK_CONTROL;
+    releases[count++].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(count, releases, sizeof(INPUT));
 }
 
 // ---- integrity ---------------------------------------------------------------
@@ -388,10 +429,12 @@ const char *refusal(NativeKind kind) {
 // receives global keyboard input. Verification uses the packed EM_GETSEL
 // result: the caret must land after the former selection start and at most
 // one UTF-16 unit per inserted unit later (RichEdit folds CRLF).
-bool nativeReplaceSelection(HWND focus, const std::wstring &text, bool replaceField, bool &verified, std::string &error) {
+bool nativeReplaceSelection(HWND focus, const std::wstring &text, bool replaceField, bool &verified, std::string &error,
+                            const std::function<bool()> &mayMutate = {}) {
     constexpr UINT flags = SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT;
     verified = false;
     DWORD_PTR ignored = 0;
+    if (replaceField && mayMutate && !mayMutate()) return false;
     if (replaceField && !SendMessageTimeoutW(focus, EM_SETSEL, 0, static_cast<LPARAM>(-1), flags, 1000, &ignored)) {
         error = systemError("Selecting the original text field");
         return false;
@@ -400,6 +443,7 @@ bool nativeReplaceSelection(HWND focus, const std::wstring &text, bool replaceFi
     const bool haveBefore = SendMessageTimeoutW(focus, EM_GETSEL, 0, 0, flags, 1000, &before) != 0 &&
         static_cast<DWORD>(before) != static_cast<DWORD>(-1);
     DWORD_PTR result = 0;
+    if (mayMutate && !mayMutate()) return false;
     SetLastError(ERROR_SUCCESS);
     if (!SendMessageTimeoutW(focus, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(text.c_str()), flags, 1000, &result)) {
         error = systemError("Inserting into the original text field");
@@ -436,25 +480,41 @@ void fetchPatterns(IUIAutomationElement *element, Patterns &patterns) {
 struct Facts {
     CONTROLTYPEID type = 0;
     bool password = false;
-    bool enabled = true;
-    bool readOnly = false;
+    bool enabled = false;
+    bool readOnly = true;
+    bool passwordKnown = false;
+    bool enabledKnown = false;
+    bool readOnlyKnown = false;
 };
 
 Facts inspect(IUIAutomationElement *element, const Patterns &patterns) {
     Facts facts;
     element->get_CurrentControlType(&facts.type);
     BOOL flag = FALSE;
-    if (SUCCEEDED(element->get_CurrentIsPassword(&flag))) facts.password = flag != FALSE;
+    if (SUCCEEDED(element->get_CurrentIsPassword(&flag))) { facts.passwordKnown = true; facts.password = flag != FALSE; }
     flag = TRUE;
-    if (SUCCEEDED(element->get_CurrentIsEnabled(&flag))) facts.enabled = flag != FALSE;
+    if (SUCCEEDED(element->get_CurrentIsEnabled(&flag))) { facts.enabledKnown = true; facts.enabled = flag != FALSE; }
     if (patterns.value) {
         flag = FALSE;
-        if (SUCCEEDED(patterns.value->get_CurrentIsReadOnly(&flag))) facts.readOnly = flag != FALSE;
+        if (SUCCEEDED(patterns.value->get_CurrentIsReadOnly(&flag))) { facts.readOnlyKnown = true; facts.readOnly = flag != FALSE; }
+    }
+    if (!facts.readOnlyKnown && patterns.text) {
+        Ref<IUIAutomationTextRange> range;
+        VARIANT value;
+        VariantInit(&value);
+        if (SUCCEEDED(patterns.text->get_DocumentRange(range.put())) && range &&
+            SUCCEEDED(range->GetAttributeValue(UIA_IsReadOnlyAttributeId, &value)) && value.vt == VT_BOOL) {
+            facts.readOnlyKnown = true;
+            facts.readOnly = value.boolVal != VARIANT_FALSE;
+        }
+        VariantClear(&value);
     }
     return facts;
 }
 
 bool editable(const Facts &facts, const Patterns &patterns) {
+    if (!facts.passwordKnown || !facts.enabledKnown || !facts.readOnlyKnown ||
+        facts.password || !facts.enabled || facts.readOnly) return false;
     if (facts.type == UIA_EditControlTypeId || facts.type == UIA_DocumentControlTypeId ||
         facts.type == UIA_ComboBoxControlTypeId) return true;
     return patterns.text && patterns.value && !facts.readOnly;
@@ -555,6 +615,10 @@ struct State {
     bool insertBusy = false;
     bool insertFinished = false;
     bool abandoned = false;
+    bool mutationStarted = false;
+    uint64_t focusRevision = 0;
+    FocusEvent focusEvent;
+    jsti::Handle process;
     std::wstring text;
     unsigned flags = 0;
     JSTIInsertionResult result{};
@@ -573,6 +637,43 @@ class Worker {
         return state->abandoned || state->shutdown;
     }
 
+    bool focusUnchanged() {
+        return state->focusRevision != 0 && state->environment.focusRevision &&
+            state->environment.focusRevision() == state->focusRevision;
+    }
+
+    bool verifyField(std::string &error) {
+        if (!focusUnchanged() || !captured) { error = changedMessage; return false; }
+        if (!verifyIdentity(state->environment, state->identity, error)) return false;
+        Ref<IUIAutomationElement> current;
+        BOOL same = FALSE;
+        if (FAILED(state->environment.focusedElement(automation.value, state->identity.focus, current.put())) || !current ||
+            FAILED(automation->CompareElements(captured.value, current.value, &same)) || !same) {
+            error = changedMessage;
+            return false;
+        }
+        Patterns patterns;
+        fetchPatterns(current.value, patterns);
+        const Facts facts = inspect(current.value, patterns);
+        if (!editable(facts, patterns)) { error = unsupportedMessage; return false; }
+        return true;
+    }
+
+    bool beginMutation(const JSTIInsertionResult &result, std::string &error) {
+        if (WaitForSingleObject(state->process.value, 0) != WAIT_TIMEOUT) {
+            error = "The original application process has exited."; return false;
+        }
+        if (!focusUnchanged() || !verifyIdentity(state->environment, state->identity, error)) {
+            error = changedMessage;
+            return false;
+        }
+        std::lock_guard<std::mutex> lock(state->mutex);
+        if (state->abandoned || state->shutdown) { error = timeoutMessage; return false; }
+        state->mutationStarted = true;
+        state->result = result;
+        return true;
+    }
+
     void createAutomation() {
         const Environment &environment = state->environment;
         Ref<IUIAutomation2> modern;
@@ -589,39 +690,68 @@ class Worker {
         }
     }
 
-    // Background field identity capture; failure only downgrades later
-    // verification from field to window identity.
+    // Background capture is usable only if no focus transition occurred while
+    // the provider was resolving it. Failure never downgrades a virtual field
+    // to HWND-only identity.
     void captureFocus() {
-        if (!automation) return;
+        if (!automation || !focusUnchanged() || !state->focusEvent.window || !state->environment.resolveFocusEvent) return;
         Ref<IUIAutomationElement> element;
-        if (FAILED(state->environment.focusedElement(automation.value, state->identity.focus, element.put())) || !element) return;
-        if (elementBelongs(automation.value, element.value, state->identity)) captured.retain(element.value);
+        if (FAILED(state->environment.resolveFocusEvent(automation.value, state->focusEvent, element.put())) || !element) return;
+        if (focusUnchanged() && elementBelongs(automation.value, element.value, state->identity)) captured.retain(element.value);
     }
 
     int paste(const std::wstring &text, unsigned flags, const Patterns &patterns, JSTIInsertionResult &result, std::string &error) {
         const Environment &environment = state->environment;
         Clipboard &clipboard = *environment.clipboard();
-        OwnerWindow owner;
-        if (!owner.handle) { error = systemError("Creating clipboard owner", owner.error); return -1; }
         const bool keep = (flags & JSTI_INSERTION_KEEP_TRANSCRIPT_ON_CLIPBOARD) != 0;
         ClipboardSnapshot snapshot;
-        if (!keep && !snapshotClipboard(clipboard, owner.handle, snapshot, error)) return -1;
         std::wstring before;
         bool readable = false;
         readField(patterns, before, readable);
         const size_t expected = readable ? occurrences(normalizedForComparison(before), normalizedForComparison(text)) + 1 : 0;
         DWORD sequence = 0;
-        if (!placeText(clipboard, owner.handle, text, true, sequence, error)) return -1;
+        {
+            OwnerWindow owner;
+            if (!owner.handle) { error = systemError("Creating clipboard owner", owner.error); return -1; }
+            if (!placeText(clipboard, owner.handle, text, true, sequence, error, &snapshot, &result.clipboard,
+                           [&] { return !abandoned(); })) return -1;
+        }
         auto restore = [&]() -> int {
-            return keep ? JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT : restoreClipboard(clipboard, owner.handle, snapshot, sequence);
+            if (keep) return JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT;
+            OwnerWindow owner;
+            return owner.handle ? restoreClipboard(clipboard, owner.handle, snapshot, sequence)
+                                : JSTI_INSERTION_CLIPBOARD_RESTORE_FAILED;
         };
-        // The keystroke is irreversible: confirm nothing moved and that the
-        // caller is still waiting for this exact operation.
-        if (abandoned()) { result.clipboard = restore(); error = timeoutMessage; return -1; }
-        if (!verifyIdentity(environment, state->identity, error)) { result.clipboard = restore(); return -1; }
+        // Modifier waits and all provider reads precede the final dispatch
+        // guard. Cancellation/focus changes during a wait prevent the paste.
         std::string pasteError;
-        if (!environment.sendPaste(pasteError)) { result.clipboard = restore(); error = pasteError; return -1; }
+        if (environment.preparePaste && !environment.preparePaste(pasteError)) {
+            result.clipboard = restore(); error = pasteError; return -1;
+        }
+        if (!verifyField(error)) { result.clipboard = restore(); return -1; }
+        if (clipboard.sequence() != sequence) {
+            result.clipboard = JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE;
+            error = "The clipboard changed before paste dispatch. Copy the transcript instead.";
+            return -1;
+        }
         result.method = JSTI_INSERTION_METHOD_PASTE;
+        result.clipboard = JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT;
+        if (!beginMutation(result, error)) {
+            result.method = JSTI_INSERTION_METHOD_NONE; result.clipboard = restore(); return -1;
+        }
+        const unsigned sent = environment.sendPaste(pasteError);
+        if (sent != 4) {
+            if (environment.releasePasteKeys) environment.releasePasteKeys(sent);
+            error = pasteError;
+            if (sent == 0) {
+                result.method = JSTI_INSERTION_METHOD_NONE;
+                result.clipboard = restore();
+                return -1;
+            }
+            // Some shortcut events reached the input queue. Keep the transcript
+            // available for a delayed paste; never substitute the old clipboard.
+            return 1;
+        }
         bool verified = false;
         if (readable) {
             const ULONGLONG deadline = GetTickCount64() + environment.verifyTimeoutMs;
@@ -637,14 +767,7 @@ class Worker {
         result.verified = verified ? 1 : 0;
         if (keep) { result.clipboard = JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT; return 0; }
         if (verified) { result.clipboard = restore(); return 0; }
-        if (!readable) {
-            // No way to observe the paste: allow the application to read the
-            // clipboard before restoring it.
-            environment.sleep(environment.unverifiedSettleMs);
-            result.clipboard = restore();
-            return 0;
-        }
-        // Readable but the text never appeared: the application may still be
+        // The text could not be confirmed: the application may still be
         // processing or may have transformed it. Keep the transcript
         // available rather than risk a later paste of the old content.
         result.clipboard = JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT;
@@ -669,6 +792,7 @@ class Worker {
             return -1;
         }
         if (!elementBelongs(automation.value, current.value, state->identity)) { error = movedMessage; return -1; }
+        if (!captured || !focusUnchanged()) { error = changedMessage; return -1; }
         if (captured) {
             BOOL same = FALSE;
             if (FAILED(automation->CompareElements(captured.value, current.value, &same)) || !same) {
@@ -682,7 +806,7 @@ class Worker {
         const Facts facts = inspect(current.value, patterns);
         if (facts.password) { error = passwordMessage; return -1; }
         if (!facts.enabled) { error = disabledMessage; return -1; }
-        if (patterns.value && facts.readOnly) { error = readOnlyMessage; return -1; }
+        if (facts.readOnlyKnown && facts.readOnly) { error = readOnlyMessage; return -1; }
         if (!editable(facts, patterns)) { error = unsupportedMessage; return -1; }
         const bool replaceField = (flags & JSTI_INSERTION_REPLACE_FIELD) != 0;
         if (patterns.value) {
@@ -698,9 +822,11 @@ class Worker {
                 BStr payload;
                 payload.value = SysAllocStringLen(text.data(), static_cast<UINT>(text.size()));
                 if (!payload.value) { error = "Could not allocate the insertion text."; return -1; }
-                if (abandoned()) { error = timeoutMessage; return -1; }
+                if (!verifyField(error)) return -1;
+                result.method = JSTI_INSERTION_METHOD_UIA_VALUE;
+                if (!beginMutation(result, error)) { result.method = JSTI_INSERTION_METHOD_NONE; return -1; }
                 const HRESULT set = patterns.value->SetValue(payload.value);
-                if (FAILED(set)) { error = automationError("Setting the field value", set); return -1; }
+                if (FAILED(set)) { error = automationError("Setting the field value", set); return 1; }
                 result.method = JSTI_INSERTION_METHOD_UIA_VALUE;
                 std::wstring after;
                 bool readable = false;
@@ -724,8 +850,9 @@ public:
     void run() {
         WorkerScope scope;
         const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+        try {
         if (state->environment.beforeAutomation) state->environment.beforeAutomation(state->environment.hookContext);
-        if (com) {
+        if (com && !abandoned()) {
             createAutomation();
             captureFocus();
         }
@@ -753,6 +880,15 @@ public:
             }
             state->changed.notify_all();
         }
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->status = state->mutationStarted ? 1 : -1;
+            try { state->error = "The insertion worker could not complete the operation."; } catch (...) {}
+            state->insertBusy = false;
+            state->insertFinished = true;
+            state->shutdown = true;
+            state->changed.notify_all();
+        }
         captured.reset();
         automation.reset();
         if (com) CoUninitialize();
@@ -767,6 +903,11 @@ Environment defaultEnvironment() {
     environment.foregroundWindow = &realForeground;
     environment.clipboard = &systemClipboard;
     environment.sendPaste = &realSendPaste;
+    environment.preparePaste = &prepareRealPaste;
+    environment.releasePasteKeys = &releaseRealPasteKeys;
+    environment.focusRevision = &observedFocusRevision;
+    environment.captureFocusEvent = &observedFocusEvent;
+    environment.resolveFocusEvent = &resolveObservedFocusEvent;
     environment.sleep = &realSleep;
     environment.focusedElement = &realFocusedElement;
     return environment;
@@ -898,15 +1039,29 @@ int jsti_clipboard_write(const char *text, char *error, size_t capacity) {
 
 // ---- opaque insertion API --------------------------------------------------------
 
+void jsti_insertion_prepare(void) { (void)observedFocusRevision(); }
+
 JSTIInsertionTarget *jsti_insertion_capture(char *error, size_t capacity) {
     try {
         const Environment environment = currentEnvironment();
+        const uint64_t revision = environment.focusRevision ? environment.focusRevision() : 0;
         Identity identity;
         std::string reason;
         if (!captureIdentity(environment, identity, reason)) { jsti::fail(reason, error, capacity); return nullptr; }
         auto state = std::make_shared<State>();
         state->environment = environment;
         state->identity = identity;
+        state->focusRevision = revision;
+        FocusEvent event;
+        if (environment.captureFocusEvent && environment.captureFocusEvent(event) && event.revision == revision &&
+            event.thread == identity.thread && GetAncestor(event.window, GA_ROOT) == identity.window) {
+            state->focusEvent = event;
+        }
+        state->process.value = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, identity.process);
+        if (!state->process.value) {
+            jsti::fail("The original application process could not be retained.", error, capacity);
+            return nullptr;
+        }
         state->exited.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         if (!state->exited.value) {
             jsti::fail(jsti::systemError("Creating insertion worker state"), error, capacity);
@@ -914,7 +1069,10 @@ JSTIInsertionTarget *jsti_insertion_capture(char *error, size_t capacity) {
         }
         auto target = std::make_unique<JSTIInsertionTarget>();
         target->state = state;
-        target->worker = std::thread([state] { Worker(state).run(); });
+        if (reserveWorker()) {
+            try { target->worker = std::thread([state] { Worker(state).run(); }); }
+            catch (...) { WorkerScope releaseReservedSlot; throw; }
+        }
         if (error && capacity) error[0] = 0;
         return target.release();
     } catch (const std::exception &) {
@@ -937,6 +1095,13 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
     State &state = *target->state;
     const Environment &environment = state.environment;
     std::string reason;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (state.abandoned || state.shutdown) return jsti::fail("This insertion target was cancelled.", error, capacity);
+    }
+    if (WaitForSingleObject(state.process.value, 0) != WAIT_TIMEOUT) {
+        return jsti::fail("The original application process has exited.", error, capacity);
+    }
     if (!verifyIdentity(environment, state.identity, reason)) return jsti::fail(reason, error, capacity);
     if (!integrityAllows(state.identity.process, reason)) return jsti::fail(reason, error, capacity);
     const NativeKind kind = environment.nativeDirectPath ? classifyNative(state.identity.focus) : NativeKind::NotNative;
@@ -946,9 +1111,38 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
     if (kind == NativeKind::Editable) {
         // Never waits on the UI Automation worker: native controls are
         // addressed directly on the caller's thread.
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            if (state.insertBusy) return jsti::fail("An insertion is already in progress.", error, capacity);
+            state.insertBusy = true;
+            state.mutationStarted = false;
+        }
+        struct BusyGuard {
+            State &state;
+            ~BusyGuard() { std::lock_guard<std::mutex> lock(state.mutex); state.insertBusy = false; }
+        } busy{state};
         bool verified = false;
-        if (!nativeReplaceSelection(state.identity.focus, value, (flags & JSTI_INSERTION_REPLACE_FIELD) != 0, verified, reason)) {
-            return jsti::fail(reason, error, capacity);
+        auto mayMutate = [&] {
+            if (WaitForSingleObject(state.process.value, 0) != WAIT_TIMEOUT) {
+                reason = "The original application process has exited."; return false;
+            }
+            if (!verifyIdentity(environment, state.identity, reason)) return false;
+            if (classifyNative(state.identity.focus) != NativeKind::Editable) { reason = unsupportedMessage; return false; }
+            std::lock_guard<std::mutex> lock(state.mutex);
+            if (state.abandoned || state.shutdown) { reason = "This insertion target was cancelled."; return false; }
+            state.mutationStarted = true;
+            return true;
+        };
+        if (!nativeReplaceSelection(state.identity.focus, value, (flags & JSTI_INSERTION_REPLACE_FIELD) != 0,
+                                    verified, reason, mayMutate)) {
+            jsti::fail(reason, error, capacity);
+            std::lock_guard<std::mutex> lock(state.mutex);
+            if (state.mutationStarted) {
+                local.method = JSTI_INSERTION_METHOD_NATIVE_EDIT;
+                if (result) *result = local;
+                return 1;
+            }
+            return -1;
         }
         local.method = JSTI_INSERTION_METHOD_NATIVE_EDIT;
         local.verified = verified ? 1 : 0;
@@ -956,9 +1150,10 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
         if (error && capacity) error[0] = 0;
         return 0;
     }
+    if (!target->worker.joinable()) return jsti::fail("Text insertion workers are busy. Copy the transcript instead.", error, capacity);
     try {
         std::unique_lock<std::mutex> lock(state.mutex);
-        if (state.shutdown || state.insertBusy) {
+        if (state.abandoned || state.shutdown || state.insertBusy) {
             return jsti::fail("An insertion is already in progress for this field.", error, capacity);
         }
         state.text = value;
@@ -966,22 +1161,85 @@ int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigne
         state.insertRequested = true;
         state.insertBusy = true;
         state.insertFinished = false;
-        state.abandoned = false;
+        state.mutationStarted = false;
+        state.result = local;
         state.changed.notify_all();
         if (!state.changed.wait_for(lock, std::chrono::milliseconds(environment.insertTimeoutMs),
                                     [&] { return state.insertFinished; })) {
             // The worker finishes or abandons the job on its own and still
             // restores the clipboard; it must not paste after this report.
             state.abandoned = true;
-            return jsti::fail(timeoutMessage, error, capacity);
+            if (result) *result = state.result;
+            jsti::fail(timeoutMessage, error, capacity);
+            return state.mutationStarted ? 1 : -1;
         }
         if (result) *result = state.result;
-        if (state.status != 0) return jsti::fail(state.error, error, capacity);
+        if (state.status != 0) { jsti::fail(state.error, error, capacity); return state.status; }
     } catch (const std::exception &) {
         return jsti::fail("Could not queue the insertion request.", error, capacity);
     }
     if (error && capacity) error[0] = 0;
     return 0;
+}
+
+int jsti_insertion_copy_text(JSTIInsertionTarget *target, const char *text, JSTIInsertionResult *result,
+                              char *error, size_t capacity) {
+    if (result) *result = {};
+    if (!target || !target->state) return jsti::fail("No captured output request.", error, capacity);
+    try {
+        const auto state = target->state;
+        std::wstring value;
+        if (!jsti::wide(text, value)) return jsti::fail("Clipboard text is not valid UTF-8.", error, capacity);
+        OwnerWindow owner;
+        if (!owner.handle) return jsti::fail(jsti::systemError("Creating clipboard owner", owner.error), error, capacity);
+        std::string reason;
+        DWORD sequence = 0;
+        int clipboard = JSTI_INSERTION_CLIPBOARD_UNTOUCHED;
+        const bool copied = placeText(*state->environment.clipboard(), owner.handle, value, false, sequence, reason,
+                                     nullptr, &clipboard, [&] {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            return !state->abandoned && !state->shutdown;
+        });
+        if (result) result->clipboard = copied ? JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT : clipboard;
+        if (!copied) return jsti::fail(reason, error, capacity);
+        if (error && capacity) error[0] = 0;
+        return 0;
+    } catch (...) { return jsti::fail("Could not copy the transcript.", error, capacity); }
+}
+
+void jsti_insertion_cancel(JSTIInsertionTarget *target) {
+    if (!target || !target->state) return;
+    const auto state = target->state;
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        state->abandoned = true;
+        state->shutdown = true;
+    }
+    state->changed.notify_all();
+}
+
+int jsti_insertion_executable_path(const JSTIInsertionTarget *target, char *path, size_t pathCapacity,
+                                   size_t *requiredBytes, char *error, size_t errorCapacity) {
+    if (requiredBytes) *requiredBytes = 0;
+    if (path && pathCapacity) path[0] = 0;
+    if (!target || !target->state || !target->state->process.value) {
+        return jsti::fail("The original application process is unavailable.", error, errorCapacity);
+    }
+    try {
+        std::wstring value(32768, L'\0');
+        DWORD length = static_cast<DWORD>(value.size());
+        if (!QueryFullProcessImageNameW(target->state->process.value, 0, value.data(), &length)) {
+            return jsti::fail(jsti::systemError("Reading the original application path"), error, errorCapacity);
+        }
+        value.resize(length);
+        const std::string encoded = jsti::utf8(value);
+        if (encoded.empty()) return jsti::fail("The original application path is unavailable.", error, errorCapacity);
+        if (requiredBytes) *requiredBytes = encoded.size() + 1;
+        if (!path || pathCapacity <= encoded.size()) return 2;
+        std::memcpy(path, encoded.c_str(), encoded.size() + 1);
+        if (error && errorCapacity) error[0] = 0;
+        return 0;
+    } catch (...) { return jsti::fail("Could not read the original application path.", error, errorCapacity); }
 }
 
 void jsti_insertion_destroy(JSTIInsertionTarget *target) {

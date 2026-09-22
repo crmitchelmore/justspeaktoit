@@ -60,6 +60,7 @@ actor WindowsAppController {
     var cancellationRequested = false
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
+    var insertion = WindowsInsertionState()
 
     init(directory: URL) throws {
         self.directory = directory
@@ -84,6 +85,7 @@ actor WindowsAppController {
 
     func toggle(target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
+        cancelInsertion()
         selectModel(modelIndex)
         selectMicrophone(deviceID)
         busy = true
@@ -214,6 +216,7 @@ actor WindowsAppController {
         guard isReady, !busy, !closed, recording == nil,
               WindowsModels.all.indices.contains(modelIndex),
               !WindowsModels.isLive(WindowsModels.all[modelIndex].id) else { return }
+        cancelInsertion()
         selectModel(modelIndex)
         busy = true
         activeOperations += 1
@@ -252,6 +255,7 @@ extension WindowsAppController {
         }
         closed = true
         modelDiscoveryTask?.cancel()
+        cancelInsertion()
         cancellationRequested = true
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()

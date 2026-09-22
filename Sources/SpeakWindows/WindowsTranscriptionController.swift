@@ -65,7 +65,9 @@ extension WindowsAppController {
             status = "Original transcript saved; post-processing failed. \(failure)"
         }
         if let target, !transcript.isEmpty, !closed, record.failure == nil, record.postProcessingFailure == nil {
-            status = deliver(transcript, to: target)
+            status = beginInsertion(transcript, to: target, recordID: record.id)
+                ? "Saved. Inserting into the original text field…"
+                : "Saved. An earlier insertion is still finishing; select Copy."
         }
         if selectedHistoryID == record.id {
             showTranscriptVariant(.processed, for: record)
@@ -76,32 +78,10 @@ extension WindowsAppController {
         update(status, transcript: transcript, state: 0)
     }
 
-    /// Delivers a finished transcript to the field captured at the hotkey.
-    /// The native adapter re-verifies that field first, so a changed focus,
-    /// a password field or an elevated application ends in the Copy fallback.
-    func deliver(_ text: String, to target: WindowsInsertionTarget) -> String {
-        let options = settings.textOutput ?? .init()
-        guard options.method != .clipboardOnly else {
-            do {
-                try text.withCString { pointer in
-                    try WindowsNative.checked { jsti_clipboard_write(pointer, $0, $1) }
-                }
-                return "Transcript copied to the clipboard and saved to History."
-            } catch {
-                return "Saved. The transcript could not be copied; select Copy. \(error.localizedDescription)"
-            }
-        }
-        do {
-            return WindowsInsertionStatus.message(for: try target.insert(text, options: options))
-        } catch let failure as WindowsTextOutputError {
-            return WindowsInsertionStatus.message(for: failure)
-        } catch {
-            return "Saved. Automatic insertion unavailable; select Copy. \(error.localizedDescription)"
-        }
-    }
-
     func cancelTranscription() {
-        guard !closed, busy else { return }
+        guard !closed else { return }
+        cancelInsertion()
+        guard busy else { return }
         cancellationRequested = true
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()

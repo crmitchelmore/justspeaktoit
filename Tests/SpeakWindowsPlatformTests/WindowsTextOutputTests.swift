@@ -61,6 +61,17 @@ final class WindowsTextOutputTests: XCTestCase {
         XCTAssertEqual(roundTrip, all)
     }
 
+    func testUncertainInsertion_DoesNotRecommendAnImmediateRetry() {
+        let failure = WindowsTextOutputError(
+            "Only part of the shortcut was submitted.", clipboard: .transcriptLeft, mayHaveInserted: true
+        )
+        let status = WindowsInsertionStatus.message(for: failure)
+        XCTAssertTrue(status.contains("could not be confirmed"))
+        XCTAssertTrue(status.contains("Check the original field before trying again"))
+        XCTAssertFalse(status.contains("select Copy"))
+        XCTAssertTrue(status.contains("remains on the clipboard"))
+    }
+
     func testStatusMessages_DescribeMethodVerificationAndClipboard() {
         typealias Outcome = WindowsInsertionTarget.Outcome
         let native = Outcome(method: .nativeEdit, verified: true, fieldIdentity: false, clipboard: .untouched)

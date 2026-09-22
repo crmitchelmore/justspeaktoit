@@ -183,8 +183,8 @@ int jsti_clipboard_write(const char *text, char *error, size_t error_capacity);
 /* Opaque insertion target with explicit lifetime. Capture synchronously at the
  * recording hotkey: it records the foreground window, its thread and the
  * focused control immediately and never blocks on the target application. A
- * dedicated worker then asks UI Automation for the focused element in the
- * background so later insertion can prove field identity; recording startup
+ * dedicated worker resolves the snapshotted focus event to its exact UI
+ * Automation element so later insertion can prove field identity; startup
  * never waits for that provider. Every insertion re-verifies the original
  * process, thread, window and focused control, refuses password/read-only
  * fields and never steals focus or types into another application.
@@ -206,8 +206,8 @@ int jsti_clipboard_write(const char *text, char *error, size_t error_capacity);
  * fails closed because Windows UIPI blocks both messages and input.
  *
  * Insert blocks the caller for a bounded time (about six seconds worst case)
- * and may be called at most once at a time per target. Destroy is always safe
- * and bounded: a worker still blocked inside a provider call is detached and
+ * and may be called at most once at a time per target. Destroy is nonblocking:
+ * a worker still blocked inside a provider call is detached and
  * releases its own resources when that call returns. Destroy after insert
  * returns, never from another thread concurrently with insert. */
 typedef struct JSTIInsertionTarget JSTIInsertionTarget;
@@ -251,13 +251,28 @@ typedef struct JSTIInsertionResult {
     int identity;  /* JSTIInsertionIdentity */
     int clipboard; /* JSTIInsertionClipboard */
 } JSTIInsertionResult;
+/* Start the bounded focus-event observer during normal application startup. */
+void jsti_insertion_prepare(void);
 /* Null with an error when no external application field is focused. */
 JSTIInsertionTarget *jsti_insertion_capture(char *error, size_t error_capacity);
-/* Zero: text was delivered by result->method (verified says whether it was
- * read back). -1: nothing was inserted; the error says why and the clipboard
- * state is reported in result->clipboard. Text must be non-empty UTF-8. */
+/* Zero: input was submitted by result->method; verified reports read-back.
+ * -1: no text mutation was submitted. 1: mutation may have occurred or shortcut
+ * submission was partial; do not retry automatically. Clipboard state is
+ * reported in result->clipboard. Text must be non-empty UTF-8. */
 int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigned flags,
                           JSTIInsertionResult *result, char *error, size_t error_capacity);
+/* Thread-safe nonblocking abandonment. Prevents pending mutations; an operation
+ * already dispatched may complete, and insert then reports its actual/uncertain
+ * outcome. The target remains owned until insert returns and destroy is called. */
+void jsti_insertion_cancel(JSTIInsertionTarget *target);
+/* Explicit clipboard-only output, guarded by the captured request's cancellation
+ * state immediately before replacement. Does not follow or mutate field focus. */
+int jsti_insertion_copy_text(JSTIInsertionTarget *target, const char *text, JSTIInsertionResult *result,
+                              char *error, size_t error_capacity);
+/* Original captured process handle, never a fresh focus/PID lookup. required_bytes
+ * includes the NUL; 0 success, 2 insufficient buffer, -1 unavailable. */
+int jsti_insertion_executable_path(const JSTIInsertionTarget *target, char *path, size_t path_capacity,
+                                   size_t *required_bytes, char *error, size_t error_capacity);
 void jsti_insertion_destroy(JSTIInsertionTarget *target);
 /* Deterministic native checks on app-owned synthetic hidden controls with
  * injected foreground, clipboard and keystroke seams: caret/selection

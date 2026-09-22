@@ -60,19 +60,24 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
 public struct WindowsTextOutputError: LocalizedError, Equatable, Sendable {
     public let message: String
     public let clipboard: WindowsInsertionTarget.ClipboardState
+    public let mayHaveInserted: Bool
     public var errorDescription: String? { message }
 
-    public init(_ message: String, clipboard: WindowsInsertionTarget.ClipboardState = .untouched) {
+    public init(
+        _ message: String, clipboard: WindowsInsertionTarget.ClipboardState = .untouched,
+        mayHaveInserted: Bool = false
+    ) {
         self.message = message
         self.clipboard = clipboard
+        self.mayHaveInserted = mayHaveInserted
     }
 }
 
 /// Owns the opaque native insertion target captured at the recording hotkey.
-/// Capture is synchronous and cheap; the native worker that looks up the
-/// focused UI Automation element runs in the background. Insertion re-verifies
+/// Capture is synchronous and cheap; the native worker resolves the captured
+/// focus event to its UI Automation element in the background. Insertion re-verifies
 /// the original process, thread, window and focused control and never types
-/// into another application. Destruction is bounded and happens exactly once,
+/// into another application. Destruction is nonblocking and happens exactly once,
 /// on the last reference, so every recording outcome releases its worker.
 public final class WindowsInsertionTarget: @unchecked Sendable {
     public enum Method: Equatable, Sendable {
@@ -123,6 +128,9 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
 
     deinit { jsti_insertion_destroy(handle) }
 
+    /// Start focus-event observation before the user switches to a target app.
+    public static func prepare() { jsti_insertion_prepare() }
+
     /// Call from the native UI callback before any actor hop, so the target is
     /// the field that had focus when the hotkey fired.
     public static func capture() throws -> WindowsInsertionTarget {
@@ -131,6 +139,44 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
             throw WindowsTextOutputError(String(cString: error))
         }
         return WindowsInsertionTarget(handle: handle)
+    }
+
+    /// Requests abandonment without waiting for a blocked provider. Keep this
+    /// object alive until the insertion call returns; its worker owns native state.
+    public func cancel() { jsti_insertion_cancel(handle) }
+
+    /// Full executable path from the process retained at capture. This performs
+    /// no focus lookup or accessibility query, including after focus has moved.
+    public var executablePath: String? {
+        var required = 0
+        var error = [CChar](repeating: 0, count: 512)
+        let status = jsti_insertion_executable_path(handle, nil, 0, &required, &error, error.count)
+        guard status == 2, required > 1, required <= 131_073 else { return nil }
+        var path = [CChar](repeating: 0, count: required)
+        guard jsti_insertion_executable_path(
+            handle, &path, path.count, &required, &error, error.count
+        ) == 0 else { return nil }
+        return String(cString: path)
+    }
+
+    /// Copies for an explicit clipboard-only output request. Native cancellation
+    /// is checked after acquiring and snapshotting the clipboard, before writing.
+    public func copy(_ text: String) throws {
+        let claimed = lock.withLock { () -> Bool in
+            guard !inserting else { return false }
+            inserting = true
+            return true
+        }
+        guard claimed else { throw WindowsTextOutputError("An output operation is already in progress.") }
+        defer { lock.withLock { inserting = false } }
+        var result = JSTIInsertionResult()
+        var error = [CChar](repeating: 0, count: 1_024)
+        let status = text.withCString { pointer in
+            jsti_insertion_copy_text(handle, pointer, &result, &error, error.count)
+        }
+        guard status == 0 else {
+            throw WindowsTextOutputError(String(cString: error), clipboard: ClipboardState(code: result.clipboard))
+        }
     }
 
     /// Blocks for a bounded time (about six seconds worst case). One insertion
@@ -149,7 +195,9 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
             jsti_insertion_insert(handle, pointer, options.nativeFlags, &result, &error, error.count)
         }
         let clipboard = ClipboardState(code: result.clipboard)
-        guard status == 0 else { throw WindowsTextOutputError(String(cString: error), clipboard: clipboard) }
+        guard status == 0 else {
+            throw WindowsTextOutputError(String(cString: error), clipboard: clipboard, mayHaveInserted: status == 1)
+        }
         let method: Method
         switch UInt32(clamping: result.method) {
         case JSTI_INSERTION_METHOD_NATIVE_EDIT.rawValue: method = .nativeEdit
@@ -187,11 +235,14 @@ public enum WindowsInsertionStatus {
     }
 
     public static func message(for failure: WindowsTextOutputError) -> String {
-        var status = "Saved. Automatic insertion unavailable; select Copy. \(failure.message)"
+        let prefix = failure.mayHaveInserted
+            ? "Saved. Insertion could not be confirmed. Check the original field before trying again."
+            : "Saved. Automatic insertion unavailable; select Copy."
+        var status = "\(prefix) \(failure.message)"
         switch failure.clipboard {
-        case .transcriptLeft, .restoreFailed, .changedMeanwhile:
+        case .transcriptLeft, .restoreFailed, .changedMeanwhile, .restoredPartially:
             if let note = clipboardNote(for: failure.clipboard) { status += " " + note }
-        case .untouched, .restored, .restoredPartially:
+        case .untouched, .restored:
             break
         }
         return status

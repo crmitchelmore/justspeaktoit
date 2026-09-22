@@ -154,12 +154,22 @@ struct FakeClipboard final : Clipboard {
     DWORD sequenceNumber = 100;
     bool isOpen = false;
     int opens = 0;
+    int closes = 0;
+    int changeOnOpen = 0;
+    int changeOnClose = 0;
+    bool failUnicodeSet = false;
+    void replaceLocked(const std::wstring &text) {
+        items.clear();
+        const auto *bytes = reinterpret_cast<const uint8_t *>(text.c_str());
+        items[CF_UNICODETEXT].assign(bytes, bytes + (text.size() + 1) * sizeof(wchar_t));
+        ++sequenceNumber;
+    }
 
     bool open(HWND) override {
         std::lock_guard<std::mutex> lock(mutex);
         if (isOpen) return false;
         isOpen = true;
-        ++opens;
+        if (++opens == changeOnOpen) replaceLocked(L"new copy at acquisition");
         return true;
     }
     void close() override {
@@ -167,6 +177,7 @@ struct FakeClipboard final : Clipboard {
         for (HGLOBAL handle : borrowed) GlobalFree(handle);
         borrowed.clear();
         isOpen = false;
+        if (++closes == changeOnClose) replaceLocked(L"new copy after close");
     }
     bool empty() override {
         std::lock_guard<std::mutex> lock(mutex);
@@ -199,6 +210,7 @@ struct FakeClipboard final : Clipboard {
     bool set(UINT format, HGLOBAL data) override {
         std::lock_guard<std::mutex> lock(mutex);
         if (!isOpen || !data) return false;
+        if (format == CF_UNICODETEXT && failUnicodeSet) { failUnicodeSet = false; return false; }
         const SIZE_T size = GlobalSize(data);
         const void *source = GlobalLock(data);
         if (!source) return false;
@@ -253,8 +265,13 @@ struct Fixture {
     FakeClipboard clipboard;
     HWND foreground = nullptr;
     HWND resolveOverride = nullptr;
-    enum class PasteMode { Insert, Fail, Ignore, InsertThenUserCopies } pasteMode = PasteMode::Insert;
+    enum class PasteMode { Insert, Fail, Ignore, InsertThenUserCopies, Partial, BlockAfterInsert } pasteMode = PasteMode::Insert;
+    enum class PrepareMode { Ready, Cancel, MoveFocus } prepareMode = PrepareMode::Ready;
+    JSTIInsertionTarget *pendingTarget = nullptr;
+    bool failFocusResolution = false;
     std::atomic<int> pasteCalls{0};
+    std::atomic<uint64_t> focusRevision{1};
+    std::atomic<unsigned> releasedKeys{0};
     bool markersSeen = false;
     std::wstring pastedText;
     // Blocking hook for timeout/lifetime checks.
@@ -266,34 +283,58 @@ Fixture *fixture = nullptr;
 
 HWND fakeForeground() { return fixture->foreground; }
 Clipboard *fakeClipboard() { return &fixture->clipboard; }
+bool stubPreparePaste(std::string &) {
+    if (fixture->prepareMode == Fixture::PrepareMode::Cancel) jsti_insertion_cancel(fixture->pendingTarget);
+    if (fixture->prepareMode == Fixture::PrepareMode::MoveFocus) fixture->foreground = GetDesktopWindow();
+    return true;
+}
+void stubReleasePasteKeys(unsigned count) { fixture->releasedKeys = count; }
+uint64_t fakeFocusRevision() { return fixture->focusRevision.load(); }
+bool fakeCaptureFocusEvent(FocusEvent &event) {
+    event = FocusEvent{fixture->host.focused(), fixture->host.threadID, OBJID_CLIENT, 0, fixture->focusRevision.load()};
+    return event.window != nullptr;
+}
+HRESULT fakeResolveFocusEvent(IUIAutomation *automation, const FocusEvent &event, IUIAutomationElement **element) {
+    return fixture->failFocusResolution ? E_FAIL : automation->ElementFromHandle(event.window, element);
+}
 void shortSleep(DWORD milliseconds) { Sleep(std::min<DWORD>(milliseconds, 10)); }
 
 HRESULT elementFromCapturedHandle(IUIAutomation *automation, HWND focus, IUIAutomationElement **element) {
+    if (fixture->failFocusResolution) return E_FAIL;
     const HWND handle = fixture->resolveOverride ? fixture->resolveOverride : focus;
     return automation->ElementFromHandle(handle, element);
 }
 
 // Emulates the target application's paste handler: read the clipboard the
 // adapter prepared and insert it at the focused control's selection.
-bool stubSendPaste(std::string &error) {
+unsigned stubSendPaste(std::string &error) {
     Fixture &state = *fixture;
     ++state.pasteCalls;
     state.markersSeen = state.clipboard.has(excludeFromMonitoringFormat()) &&
         state.clipboard.has(excludeFromHistoryFormat()) && state.clipboard.has(excludeFromCloudFormat());
     state.pastedText = state.clipboard.unicodeText();
-    if (state.pasteMode == Fixture::PasteMode::Fail) { error = "Synthetic keystroke failure."; return false; }
-    if (state.pasteMode == Fixture::PasteMode::Ignore) return true;
+    if (state.pasteMode == Fixture::PasteMode::Fail) { error = "Synthetic keystroke failure."; return 0; }
+    if (state.pasteMode == Fixture::PasteMode::Ignore) return 4;
+    if (state.pasteMode == Fixture::PasteMode::Partial) { error = "Synthetic partial shortcut."; return 2; }
     const HWND focus = state.host.focused();
     DWORD_PTR result = 0;
     SendMessageTimeoutW(focus, EM_REPLACESEL, TRUE, reinterpret_cast<LPARAM>(state.pastedText.c_str()),
                         SMTO_ABORTIFHUNG | SMTO_BLOCK, 2000, &result);
     if (state.pasteMode == Fixture::PasteMode::InsertThenUserCopies) state.clipboard.userWrites(L"user copied meanwhile");
-    return true;
+    if (state.pasteMode == Fixture::PasteMode::BlockAfterInsert) WaitForSingleObject(state.release.value, 30000);
+    return 4;
+}
+
+bool waitForHook(int count) {
+    const ULONGLONG deadline = GetTickCount64() + 3000;
+    while (fixture->hookCalls < count && GetTickCount64() < deadline) Sleep(1);
+    return fixture->hookCalls >= count;
 }
 
 void blockingHook(void *) {
     Fixture &state = *fixture;
-    if (++state.hookCalls == state.blockOnCall) WaitForSingleObject(state.release.value, 30000);
+    const int call = ++state.hookCalls;
+    if (state.blockOnCall < 0 || call == state.blockOnCall) WaitForSingleObject(state.release.value, 30000);
 }
 
 struct EnvironmentGuard {
@@ -311,6 +352,11 @@ Environment testEnvironment(bool nativeDirectPath) {
     environment.foregroundWindow = &fakeForeground;
     environment.clipboard = &fakeClipboard;
     environment.sendPaste = &stubSendPaste;
+    environment.preparePaste = &stubPreparePaste;
+    environment.releasePasteKeys = &stubReleasePasteKeys;
+    environment.focusRevision = &fakeFocusRevision;
+    environment.captureFocusEvent = &fakeCaptureFocusEvent;
+    environment.resolveFocusEvent = &fakeResolveFocusEvent;
     environment.sleep = &shortSleep;
     environment.focusedElement = &elementFromCapturedHandle;
     environment.allowCurrentProcess = true;
@@ -721,7 +767,7 @@ std::string checkLifetimes(Fixture &state) {
         return describe("timeout", "a blocked provider did not produce a bounded timeout", attempt.error);
     }
     attempt = insert(target, "again");
-    if (attempt.status != -1 || !contains(attempt.error, "already in progress")) {
+    if (attempt.status != -1 || !contains(attempt.error, "cancelled")) {
         return describe("timeout", "a second insertion was accepted while the worker was still busy", attempt.error);
     }
     SetEvent(state.release.value);
@@ -738,6 +784,7 @@ std::string checkLifetimes(Fixture &state) {
     state.hookCalls = 0;
     state.blockOnCall = 1;
     if (!capture(target, error)) return describe("blocked destroy", "capture failed", error.c_str());
+    if (!waitForHook(1)) { SetEvent(state.release.value); return describe("blocked destroy", "provider hook did not start"); }
     const ULONGLONG destroyStarted = GetTickCount64();
     target.destroy();
     if (GetTickCount64() - destroyStarted > 2000 || liveWorkerCount() != 1) {
@@ -754,6 +801,7 @@ std::string checkLifetimes(Fixture &state) {
     state.hookCalls = 0;
     state.blockOnCall = 1;
     if (!capture(target, error)) return describe("native during capture", "capture failed", error.c_str());
+    if (!waitForHook(1)) { SetEvent(state.release.value); return describe("native during capture", "provider hook did not start"); }
     attempt = insert(target, "!");
     if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_NATIVE_EDIT || textOf(host.edit) != L"Hello!") {
         return describe("native during capture", "native insertion waited on the background capture", attempt.error);
@@ -761,6 +809,190 @@ std::string checkLifetimes(Fixture &state) {
     SetEvent(state.release.value);
     target.destroy();
     if (!waitForWorkersToExit(10000) || liveWorkerCount() != 0) return describe("native during capture", "workers leaked");
+    return {};
+}
+
+
+std::string checkClipboardRacesAndCancellation(Fixture &state) {
+    SyntheticHost &host = state.host;
+    setEnvironment(testEnvironment(false));
+    Target target;
+    std::string error;
+    auto prepare = [&]() {
+        setText(host.edit, L"before");
+        select(host.edit, 6, 6);
+        state.clipboard.preload(L"original clipboard", 0, {});
+        state.pasteCalls = 0;
+        state.pasteMode = Fixture::PasteMode::Insert;
+        state.prepareMode = Fixture::PrepareMode::Ready;
+        state.clipboard.changeOnOpen = 0;
+        state.clipboard.changeOnClose = 0;
+        return host.focus(host.edit) && capture(target, error);
+    };
+    if (!prepare()) return describe("clipboard transaction", "capture failed", error.c_str());
+    state.clipboard.changeOnOpen = state.clipboard.opens + 1;
+    Attempt attempt = insert(target, " appended");
+    if (attempt.status != 0 || state.clipboard.unicodeText() != L"new copy at acquisition") {
+        return describe("clipboard transaction", "did not restore the content actually replaced", attempt.error);
+    }
+    if (!prepare()) return describe("clipboard restore race", "capture failed", error.c_str());
+    state.clipboard.changeOnOpen = state.clipboard.opens + 2;
+    attempt = insert(target, " appended");
+    if (attempt.status != 0 || attempt.result.clipboard != JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE ||
+        state.clipboard.unicodeText() != L"new copy at acquisition") {
+        return describe("clipboard restore race", "overwrote a copy made while restoration acquired ownership", attempt.error);
+    }
+    if (!prepare()) return describe("clipboard close race", "capture failed", error.c_str());
+    state.clipboard.changeOnClose = state.clipboard.closes + 1;
+    attempt = insert(target, " appended");
+    if (attempt.status != -1 || state.pasteCalls != 0 || textOf(host.edit) != L"before" ||
+        state.clipboard.unicodeText() != L"new copy after close") {
+        return describe("clipboard close race", "pasted another copy or overwrote it", attempt.error);
+    }
+    if (!prepare()) return describe("clipboard placement rollback", "capture failed", error.c_str());
+    state.clipboard.failUnicodeSet = true;
+    attempt = insert(target, " appended");
+    if (attempt.status != -1 || state.pasteCalls != 0 || state.clipboard.unicodeText() != L"original clipboard" ||
+        attempt.result.clipboard != JSTI_INSERTION_CLIPBOARD_RESTORED) {
+        return describe("clipboard placement rollback", "failed placement lost the original clipboard", attempt.error);
+    }
+    if (!prepare()) return describe("late focus", "capture failed", error.c_str());
+    state.prepareMode = Fixture::PrepareMode::MoveFocus;
+    attempt = insert(target, " appended");
+    state.foreground = host.window;
+    if (attempt.status != -1 || state.pasteCalls != 0 || textOf(host.edit) != L"before" ||
+        state.clipboard.unicodeText() != L"original clipboard") {
+        return describe("late focus", "a moved focus during modifier preparation still pasted", attempt.error);
+    }
+    if (!prepare()) return describe("late cancellation", "capture failed", error.c_str());
+    state.pendingTarget = target.value;
+    state.prepareMode = Fixture::PrepareMode::Cancel;
+    attempt = insert(target, " appended");
+    state.pendingTarget = nullptr;
+    if (attempt.status != -1 || state.pasteCalls != 0 || textOf(host.edit) != L"before" ||
+        state.clipboard.unicodeText() != L"original clipboard") {
+        return describe("late cancellation", "cancel during modifier preparation still pasted", attempt.error);
+    }
+    if (!prepare()) return describe("partial shortcut", "capture failed", error.c_str());
+    state.pasteMode = Fixture::PasteMode::Partial;
+    state.releasedKeys = 0;
+    attempt = insert(target, " appended");
+    if (attempt.status != 1 || attempt.result.method != JSTI_INSERTION_METHOD_PASTE || state.releasedKeys != 2 ||
+        attempt.result.clipboard != JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT ||
+        state.clipboard.unicodeText() != L" appended") {
+        return describe("partial shortcut", "partial input was misreported or old clipboard substituted", attempt.error);
+    }
+    state.pasteMode = Fixture::PasteMode::Insert;
+    state.prepareMode = Fixture::PrepareMode::Ready;
+    if (!prepare()) return describe("cancelled clipboard-only output", "capture failed", error.c_str());
+    jsti_insertion_cancel(target.value);
+    JSTIInsertionResult copied{};
+    char copyError[256]{};
+    if (jsti_insertion_copy_text(target.value, "cancelled copy", &copied, copyError, sizeof(copyError)) != -1 ||
+        state.clipboard.unicodeText() != L"original clipboard") {
+        return describe("cancelled clipboard-only output", "a cancelled request replaced the clipboard", copyError);
+    }
+    return {};
+}
+
+std::string checkCapturedProcessAndWorkerBounds(Fixture &state) {
+    SyntheticHost &host = state.host;
+    Environment environment = testEnvironment(false);
+    setEnvironment(environment);
+    Target target;
+    std::string error;
+    if (!host.focus(host.edit) || !capture(target, error)) return describe("captured process", "capture failed", error.c_str());
+    size_t required = 0;
+    char message[256]{};
+    if (jsti_insertion_executable_path(target.value, nullptr, 0, &required, message, sizeof(message)) != 2 || required < 2) {
+        return describe("captured process", "size query failed", message);
+    }
+    char shortBuffer[1] = {'x'};
+    if (jsti_insertion_executable_path(target.value, shortBuffer, 1, &required, message, sizeof(message)) != 2 || shortBuffer[0]) {
+        return describe("captured process", "short-buffer contract failed", message);
+    }
+    std::vector<char> path(required);
+    if (jsti_insertion_executable_path(target.value, path.data(), path.size(), &required, message, sizeof(message)) != 0 ||
+        std::strlen(path.data()) + 1 != required) return describe("captured process", "path query failed", message);
+    const std::string original(path.data());
+    state.foreground = GetDesktopWindow();
+    jsti_insertion_cancel(target.value);
+    const int status = jsti_insertion_executable_path(target.value, path.data(), path.size(), &required, message, sizeof(message));
+    state.foreground = host.window;
+    if (status != 0 || original != path.data()) return describe("captured process", "getter followed changed focus", message);
+    target.destroy();
+    if (!waitForWorkersToExit(10000)) return describe("worker bounds", "earlier workers did not exit");
+    if (!state.release.value) state.release.value = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!state.release.value) return describe("worker bounds", "release event failed");
+    ResetEvent(state.release.value);
+    environment.beforeAutomation = &blockingHook;
+    environment.destroyWaitMs = 100;
+    state.blockOnCall = -1;
+    state.hookCalls = 0;
+    setEnvironment(environment);
+    std::vector<std::unique_ptr<Target>> targets;
+    for (int index = 0; index < 7; ++index) {
+        auto next = std::make_unique<Target>();
+        if (!capture(*next, error)) { SetEvent(state.release.value); return describe("worker bounds", "capture failed", error.c_str()); }
+        targets.push_back(std::move(next));
+    }
+    const size_t peak = liveWorkerCount();
+    Attempt attempt = insert(*targets.back(), "queued");
+    SetEvent(state.release.value);
+    targets.clear();
+    if (peak != 4 || attempt.status != -1 || !contains(attempt.error, "workers are busy") || !waitForWorkersToExit(10000)) {
+        return describe("worker bounds", "worker admission or drain was not bounded", attempt.error);
+    }
+    state.blockOnCall = 0;
+    setEnvironment(testEnvironment(false));
+    return {};
+}
+
+std::string checkDeferredFocusAndUncertainTimeout(Fixture &state) {
+    SyntheticHost &host = state.host;
+    Target target;
+    std::string error;
+    Environment environment = testEnvironment(false);
+    environment.beforeAutomation = &blockingHook;
+    state.blockOnCall = 1;
+    state.hookCalls = 0;
+    ResetEvent(state.release.value);
+    setEnvironment(environment);
+    setText(host.edit, L"before");
+    if (!host.focus(host.edit) || !capture(target, error)) return describe("delayed focus", "capture failed", error.c_str());
+    const ULONGLONG deadline = GetTickCount64() + 2000;
+    while (state.hookCalls == 0 && GetTickCount64() < deadline) Sleep(1);
+    ++state.focusRevision; // A virtual field moved while provider resolution was blocked.
+    SetEvent(state.release.value);
+    state.pasteCalls = 0;
+    Attempt attempt = insert(target, "late");
+    if (attempt.status != -1 || state.pasteCalls != 0 || textOf(host.edit) != L"before") {
+        return describe("delayed focus", "a field resolved after a focus transition was accepted", attempt.error);
+    }
+    target.destroy();
+    setEnvironment(testEnvironment(false));
+    state.failFocusResolution = true;
+    if (!capture(target, error)) { state.failFocusResolution = false; return describe("failed focus", "capture failed"); }
+    attempt = insert(target, "late");
+    target.destroy();
+    state.failFocusResolution = false;
+    if (attempt.status != -1 || state.pasteCalls != 0) return describe("failed focus", "failed UIA capture fell back to an HWND");
+
+    environment = testEnvironment(false);
+    environment.insertTimeoutMs = 200;
+    setEnvironment(environment);
+    state.pasteMode = Fixture::PasteMode::BlockAfterInsert;
+    ResetEvent(state.release.value);
+    select(host.edit, 6, 6);
+    if (!capture(target, error)) return describe("uncertain timeout", "capture failed", error.c_str());
+    attempt = insert(target, " appended");
+    SetEvent(state.release.value);
+    target.destroy();
+    state.pasteMode = Fixture::PasteMode::Insert;
+    if (attempt.status != 1 || attempt.result.method != JSTI_INSERTION_METHOD_PASTE ||
+        textOf(host.edit) != L"before appended" || !waitForWorkersToExit(10000)) {
+        return describe("uncertain timeout", "a submitted operation was reported as nothing inserted", attempt.error);
+    }
     return {};
 }
 
@@ -779,6 +1011,9 @@ int jsti_text_output_self_test(char *error, size_t capacity) {
         failure = checkNativePaths(*state);
         if (failure.empty()) failure = checkAutomationPaths(*state);
         if (failure.empty()) failure = checkLifetimes(*state);
+        if (failure.empty()) failure = checkClipboardRacesAndCancellation(*state);
+        if (failure.empty()) failure = checkCapturedProcessAndWorkerBounds(*state);
+        if (failure.empty()) failure = checkDeferredFocusAndUncertainTimeout(*state);
         if (state->release.value) SetEvent(state->release.value);
         if (!waitForWorkersToExit(10000)) {
             // A worker that never exited may still call the seams; keep the

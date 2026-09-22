@@ -12,8 +12,8 @@ what each method can and cannot do, and which acceptance gates remain open.
 Source: `Sources/CWindowsSupport/WindowsTextOutput.cpp` (adapter),
 `WindowsTextOutputSelfTest.cpp` (deterministic checks),
 `Sources/SpeakWindowsPlatform/WindowsTextOutput.swift` (ownership, settings
-and status text) and the `present`/`deliver` path in
-`Sources/SpeakWindows/WindowsTranscriptionController.swift`.
+and status text), and `Sources/SpeakWindows/WindowsInsertionController.swift`
+(the actor-owned output task and cancellation).
 
 ## Capture
 
@@ -23,19 +23,28 @@ that thread's focused control (`GetGUIThreadInfo`), and refuses this
 application's own windows. It never calls into the target application, so
 recording startup does not wait on a slow or hung provider.
 
-A dedicated worker thread then asks UI Automation for the focused element in
-the background (`IUIAutomation::GetFocusedElement`) and keeps it only when its
-process and nearest native window match the captured control. That element
-gives field identity for controls that share one native window, such as every
-field in a browser tab. If the lookup fails or times out, later insertion still
-requires window-level identity but reports `identity = window`.
+One bounded observer starts during normal app startup. It stores only the last
+focus event's HWND, object/child IDs, thread and revision; it makes no provider
+calls and stores no field content. Capture snapshots that identity. A worker
+resolves that exact event through `AccessibleObjectFromEvent` and
+`IUIAutomation::ElementFromIAccessible`, retaining the resulting field only
+while focus has not changed. It never treats a later `GetFocusedElement`
+lookup as evidence of what was focused at the hotkey.
 
-The target is an opaque object owned by `WindowsInsertionTarget` on the Swift
-side and destroyed exactly once on its last reference, whichever way the
-recording ends. Destroy is bounded: a worker still blocked inside a provider
-call is detached, keeps its own reference to the shared state and releases the
-COM interfaces and thread when the call returns. Provider round trips are
-capped with `IUIAutomation2` connection and transaction timeouts.
+If an appropriate focus event was not observed, its provider cannot resolve
+the original object, or focus changed during resolution, virtual-field output
+falls back to Copy. Native Edit/RichEdit uses its captured control HWND. Events
+are asynchronous and application support must be verified during physical
+acceptance. See Microsoft's [focus hook contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook)
+and [event support guidance](https://learn.microsoft.com/en-us/windows/win32/winauto/event-constants).
+
+`WindowsInsertionTarget` owns the native target. Capture retains the original
+process handle; the executable-path getter uses that handle without a fresh
+focus or PID lookup. Destruction requests cancellation and detaches promptly
+if a provider is blocked. At most four native workers can exist, including
+detached workers, and each owns its state until cleanup. Native controls remain
+available when provider-worker capacity is exhausted. Provider round trips use
+`IUIAutomation2` timeouts when available.
 
 ## Verification before every delivery
 
@@ -53,10 +62,11 @@ Insertion re-checks, in this order:
    `RICHEDIT50W`, `RICHEDIT60W` and `RichEditD2DPT` controls are refused when
    they carry `ES_PASSWORD` or `ES_READONLY` or are disabled. Any other control
    goes through UI Automation, which must return a focused element of the same
-   process under the same window and, when a capture element exists, the same
-   element (`CompareElements`). `IsPassword`, disabled elements and a read-only
-   Value pattern are refused. Editable means control type Edit, Document or
-   ComboBox, or a writable Value pattern together with a Text pattern.
+   process under the same window and the same
+   captured element (`CompareElements`). Password, disabled, read-only and
+   unknown protection/editability states are refused. Read-only state comes
+   from the Value pattern or the Text pattern's `IsReadOnly` attribute. These
+   checks repeat after modifier waits and provider reads, before mutation.
 
 ## Methods
 
@@ -73,7 +83,8 @@ not of this adapter.
 
 ### Guarded paste details
 
-1. Snapshot the clipboard: every global-memory format in enumeration order up
+1. Read the field, then snapshot and replace the clipboard within one short
+   ownership transaction. Snapshot every global-memory format in enumeration order up
    to 64 formats, 16 MiB per format and 32 MiB in total. Handle-based formats
    (bitmaps, metafiles, palettes, owner-display, private and GDI ranges) are
    not preserved and make the restore partial; text synthesized from
@@ -82,20 +93,19 @@ not of this adapter.
    `ExcludeClipboardContentFromMonitorProcessing`,
    `CanIncludeInClipboardHistory = 0` and `CanUploadToCloudClipboard = 0`
    formats, so the transient transcript does not enter clipboard history or
-   cloud sync.
-3. Re-verify identity, confirm the caller is still waiting for this operation,
-   wait up to one second for Shift, Alt and the Windows key to be released, and
-   send Ctrl down, V down, V up, Ctrl up with `SendInput`. Nothing is sent when
-   the foreground window or focused control changed in the meantime.
-4. Poll the field through UI Automation for up to 1.5 seconds until the
-   transcript appears one more time than before the paste. A field that cannot
-   be read at all waits a fixed settle time instead.
-5. Restore the previous clipboard content when the paste was confirmed or the
-   field is unreadable, unless the clipboard sequence number shows another
-   application wrote to it meanwhile (then it is left alone). When the field is
-   readable but the transcript never appeared, the transcript stays on the
-   clipboard and the outcome is reported as unconfirmed rather than restored,
-   because a late paste of the old content would be worse.
+   cloud sync, when Windows accepts those marker formats. Failed text placement
+   rolls back the content it replaced while ownership is still held.
+3. Wait up to one second for modifiers to be released, then re-check the
+   original field, protection state, focus-event revision, clipboard sequence
+   and cancellation immediately before submitting Ctrl down, V down, V up,
+   Ctrl up. A changed clipboard is left alone and no paste is submitted.
+4. Poll readable fields for up to 1.5 seconds. Only confirmed insertion permits
+   clipboard restoration. Unreadable or unconfirmed fields keep the transcript
+   available for a delayed paste; there is no fixed-delay restoration.
+5. Restoration checks the sequence after acquiring clipboard ownership, so a
+   copy made during the acquisition wait is preserved. Partial shortcut
+   submission releases owned modifier keydowns and reports an uncertain
+   outcome; it never substitutes the old clipboard under a delayed paste.
 
 The status line reports the method, whether the field was read back, and what
 happened to the clipboard. The keystroke can only be addressed to the
@@ -123,15 +133,25 @@ object; there is no settings UI yet. Unknown values fall back to the defaults.
 
 | Bound | Default |
 |---|---|
-| Insert call, worst case | 6 s (caller timeout; the abandoned job restores the clipboard and never pastes afterwards) |
+| Insert call, worst case | 6 s; pending work is abandoned, already-dispatched operations report an uncertain result |
 | Provider connection/transaction timeout | 2 s each |
 | Paste verification polling | 1.5 s at 50 ms |
-| Unreadable-field settle before restore | 400 ms |
-| Destroy wait before detaching a blocked worker | 2 s |
+| Native UI Automation workers | 4, including detached blocked workers |
+| Destroy wait before detaching a blocked worker | 0 ms |
+| Pending host output jobs | 1 |
 
-Native controls are addressed on the caller's thread and never wait for the
-background UI Automation capture. One insertion at a time is accepted per
-target; a second call while the worker is busy fails instead of queueing.
+The host executes blocking native output outside its controller actor, so
+capture, cancellation and shutdown can proceed. New capture/import, cancellation
+and close abandon the old native target. One output job retains its slot until
+completion; another transcript remains in History with Copy available while a
+blocked old job finishes. Results from cancelled or superseded jobs cannot
+replace the current UI. Clipboard-only output also checks cancellation after
+acquiring the clipboard and before replacement.
+
+A native return of `1` means mutation may have occurred, including partial
+shortcut submission or timeout after dispatch. The UI asks the user to inspect
+the original field before retrying. Cancellation cannot retract an OS/provider
+operation that has already been dispatched.
 
 ## Deterministic native self-test
 
@@ -152,7 +172,11 @@ restoration and history-exclusion markers, disabled fallback, keep-transcript,
 multi-line text, keystroke failure, an ignored paste, a clipboard changed by
 another application, a bounded caller timeout with no late paste, bounded
 destroy of a blocked worker, native insertion during a blocked capture, and
-worker cleanup. The legacy `jsti_target_capture`/`jsti_target_insert_text`
+worker cleanup. Additional cases cover clipboard acquisition/close races,
+rollback after failed placement, focus/cancel during modifier preparation,
+partial shortcut counts, exact captured-event identity, worker saturation,
+original process paths, cancelled clipboard-only output, and timeout after
+mutation starts. The legacy `jsti_target_capture`/`jsti_target_insert_text`
 entrypoints are covered for compatibility.
 
 The self-test never sends real input, never opens the system clipboard and
@@ -171,6 +195,6 @@ a real browser, Electron, XAML or Office window.
 - Provider-specific normalisation: applications that transform pasted text
   (auto-correct, smart quotes, newline stripping) report the paste as
   unconfirmed and keep the transcript on the clipboard.
-- Read-only detection for UI Automation fields needs the Value pattern. A
-  read-only Document without one (a protected Word view, for example) is not
-  refused up front; its ignored paste is reported as unconfirmed instead.
+- Virtual-field support requires a matching observed focus event and a provider
+  that resolves it to the original object. Missing events or unknown protection
+  state produce a Copy fallback; native-control support is independent.

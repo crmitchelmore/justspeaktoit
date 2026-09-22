@@ -26,6 +26,8 @@ final class WindowsEventContext {
         }
     }
 
+    var currentSettingsTask: Task<Void, Never>? { settingsTask }
+
     func finishSettings() async { await settingsTask?.value }
 }
 
@@ -72,8 +74,17 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         // No external field focused is not an error here: the transcript is
         // still saved and offered for Copy.
         let captured = try? WindowsInsertionTarget.capture()
-        Task { await controller.toggle(target: captured, modelIndex: Int(index), deviceID: value) }
-    case 2: Task { await controller.importAudio(path: value, modelIndex: Int(index)) }
+        let pendingSettings = holder.currentSettingsTask
+        Task {
+            await pendingSettings?.value
+            await controller.toggle(target: captured, modelIndex: Int(index), deviceID: value)
+        }
+    case 2:
+        let pendingSettings = holder.currentSettingsTask
+        Task {
+            await pendingSettings?.value
+            await controller.importAudio(path: value, modelIndex: Int(index))
+        }
     case 3, 15, 16: transcriptEvent(event, value: value, holder: holder)
     case 4: holder.enqueueSettings { await controller.saveKey(value, modelIndex: Int(index)) }
     case 5: holder.enqueueSettings { await controller.selectModel(Int(index)) }
@@ -103,7 +114,11 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
 }
 
 private func ready(_ holder: WindowsEventContext) {
-    guard holder.smokeTest else { Task { await holder.controller.ready() }; return }
+    guard holder.smokeTest else {
+        WindowsInsertionTarget.prepare()
+        Task { await holder.controller.ready() }
+        return
+    }
     do {
         try WindowsNative.checked { jsti_window_self_test($0, $1) }
         if let path = ProcessInfo.processInfo.environment["JSTI_UI_SNAPSHOT_PATH"] {

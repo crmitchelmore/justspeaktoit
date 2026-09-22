@@ -26,11 +26,25 @@ struct Clipboard {
     virtual DWORD sequence() = 0;
 };
 
+struct FocusEvent {
+    HWND window = nullptr;
+    DWORD thread = 0;
+    LONG object = 0;
+    LONG child = 0;
+    uint64_t revision = 0;
+};
+
 struct Environment {
     HWND (*foregroundWindow)() = nullptr;
     Clipboard *(*clipboard)() = nullptr;
     // Delivers Ctrl+V to the foreground thread; production uses SendInput.
-    bool (*sendPaste)(std::string &error) = nullptr;
+    unsigned (*sendPaste)(std::string &error) = nullptr;
+    bool (*preparePaste)(std::string &error) = nullptr;
+    void (*releasePasteKeys)(unsigned sent) = nullptr;
+    uint64_t (*focusRevision)() = nullptr;
+    bool (*captureFocusEvent)(FocusEvent &event) = nullptr;
+    HRESULT (*resolveFocusEvent)(IUIAutomation *automation, const FocusEvent &event,
+                                 IUIAutomationElement **element) = nullptr;
     void (*sleep)(DWORD milliseconds) = nullptr;
     // Resolves the focused UI Automation element for the captured control.
     // Production uses IUIAutomation::GetFocusedElement (foreground-thread
@@ -51,10 +65,13 @@ struct Environment {
     DWORD verifyTimeoutMs = 1500;
     DWORD verifyIntervalMs = 50;
     DWORD unverifiedSettleMs = 400;
-    DWORD destroyWaitMs = 2000;
+    DWORD destroyWaitMs = 0; // Detached state remains owned by a globally bounded worker.
     DWORD providerTimeoutMs = 2000;
 };
 
+uint64_t observedFocusRevision();
+bool observedFocusEvent(FocusEvent &event);
+HRESULT resolveObservedFocusEvent(IUIAutomation *automation, const FocusEvent &event, IUIAutomationElement **element);
 Environment defaultEnvironment();
 // Self-test only. Copied into each target at capture, so a running target is
 // never affected by a later change.

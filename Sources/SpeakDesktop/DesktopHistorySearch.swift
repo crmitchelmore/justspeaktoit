@@ -7,20 +7,20 @@ import SpeakCore
 /// which records are visible and in what order; it never alters a record, its
 /// identifier or its transcript contents.
 public enum DesktopHistorySearch {
-    /// Folds case, canonical diacritics and whitespace runs so "Café" matches
-    /// "cafe", "CAFÉ" and "cafe\u{301}". Normalisation is deterministic and
-    /// locale-independent, so every desktop host agrees on the same matches.
+    /// Folds case with full Unicode case folding ("Straße" matches "STRASSE",
+    /// every Greek sigma matches), removes Latin, Greek and Cyrillic diacritics
+    /// ("Café" matches "cafe" and "CAFE\u{301}") and collapses whitespace runs.
+    /// Marks that spell words in other scripts, such as Devanagari vowel
+    /// signs, are kept so "किताब" stays distinct from "कतब". The POSIX locale
+    /// keeps the result deterministic on every host.
     public static func fold(_ text: String) -> String {
+        let cased = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: foldingLocale)
         var folded = String.UnicodeScalarView()
         var pendingSpace = false
-        for scalar in text.lowercased().decomposedStringWithCanonicalMapping.unicodeScalars {
+        for scalar in cased.unicodeScalars {
             if scalar.properties.isWhitespace {
                 pendingSpace = !folded.isEmpty
                 continue
-            }
-            switch scalar.properties.generalCategory {
-            case .nonspacingMark, .spacingMark, .enclosingMark: continue
-            default: break
             }
             if pendingSpace {
                 folded.append(" ")
@@ -30,6 +30,8 @@ public enum DesktopHistorySearch {
         }
         return String(folded)
     }
+
+    private static let foldingLocale = Locale(identifier: "en_US_POSIX")
 
     /// The friendly name shown for a record's model. Search matches this name
     /// rather than the raw identifier, so hosts must display the same string.

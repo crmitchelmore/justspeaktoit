@@ -74,8 +74,10 @@ confirming save dialog, and opens retained audio in its registered Windows
 application. Copy, retry, export and audio actions capture the selected record's
 identifier so later selection changes cannot redirect them. A native search box
 filters the rows by original transcript, processed transcript or canonical
-friendly model name. Matching folds case and canonical diacritics through the
-shared `SpeakDesktop` policy, records and transcripts are never modified, and
+friendly model name. Matching uses Foundation's full case folding and Latin,
+Greek and Cyrillic diacritic folding through the shared `SpeakDesktop` policy,
+keeps marks that spell words in other scripts, never modifies records or
+transcripts, and
 rows keep their stable identifiers in newest-first order. Keystrokes coalesce
 into one in-flight query, so typing never queues work per keystroke. If the
 selected record stops matching, its displayed text and record-bound actions

@@ -18,6 +18,47 @@ final class DesktopHistorySearchTests: XCTestCase {
         XCTAssertTrue(DesktopHistorySearch.isActive(" é "))
     }
 
+    func testFold_UsesFullCaseFoldingForSharpSAndGreekSigma() throws {
+        XCTAssertEqual(DesktopHistorySearch.fold("Straße"), "strasse")
+        XCTAssertEqual(DesktopHistorySearch.fold("STRASSE"), "strasse")
+        XCTAssertEqual(DesktopHistorySearch.fold("ς"), "σ")
+        XCTAssertEqual(DesktopHistorySearch.fold("Σ"), "σ")
+        XCTAssertEqual(DesktopHistorySearch.fold("σ"), "σ")
+        XCTAssertEqual(DesktopHistorySearch.fold("Οδυσσεύς"), DesktopHistorySearch.fold("ΟΔΥΣΣΕΎΣ"))
+
+        let street = try makeRecord(original: "Die Straße ist nass", processed: nil, model: "test")
+        let odysseus = try makeRecord(original: "ΟΔΥΣΣΕΎΣ", processed: nil, model: "test")
+        let records = [street, odysseus]
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "STRASSE").map(\.id), [street.id])
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "straße").map(\.id), [street.id])
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "Οδυσσεύς").map(\.id), [odysseus.id])
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "οδυσσευσ").map(\.id), [odysseus.id])
+    }
+
+    func testFold_PreservesMeaningfulMarksOutsideLatinGreekAndCyrillic() throws {
+        XCTAssertEqual(DesktopHistorySearch.fold("किताब"), "किताब")
+        XCTAssertEqual(DesktopHistorySearch.fold("कतब"), "कतब")
+        XCTAssertNotEqual(DesktopHistorySearch.fold("किताब"), DesktopHistorySearch.fold("कतब"))
+        XCTAssertEqual(DesktopHistorySearch.fold("ทดสอบ"), "ทดสอบ")
+        XCTAssertEqual(DesktopHistorySearch.fold("العربية"), "العربية")
+        XCTAssertEqual(DesktopHistorySearch.fold("Café"), "cafe", "Latin accents still fold")
+        XCTAssertEqual(DesktopHistorySearch.fold("Ёлка"), "елка", "Cyrillic diacritics still fold")
+
+        let book = try makeRecord(original: "मेरी किताब", processed: nil, model: "test", createdAt: base)
+        let other = try makeRecord(
+            original: "मेरा कतब", processed: nil, model: "test", createdAt: base.addingTimeInterval(-1)
+        )
+        let cafe = try makeRecord(
+            original: "Café", processed: nil, model: "test", createdAt: base.addingTimeInterval(-2)
+        )
+        let records = [book, other, cafe]
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "किताब").map(\.id), [book.id])
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "कतब").map(\.id), [other.id])
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "cafe").map(\.id), [cafe.id])
+        XCTAssertEqual(DesktopHistorySearch.filter(records, query: "").map(\.id), records.map(\.id))
+        XCTAssertEqual(records.map(\.originalText), ["मेरी किताब", "मेरा कतब", "Café"], "Records are untouched")
+    }
+
     func testFilter_MatchesOriginalProcessedAndCanonicalFriendlyModelName() throws {
         let original = try makeRecord(
             original: "Résumé of the meeting", processed: "Summary of the meeting.",

@@ -197,18 +197,23 @@ enum JSTITextOutputInsertion {
 typedef void (*JSTITextOutputSettingsCallback)(int method, int insertion, int restore_clipboard, void *context);
 /* Thread safe; valid before window_run and from any thread afterwards. Invalid
  * values or a null callback return -1 and keep the previous configuration.
- * The context stays borrowed until a later configuration or
- * jsti_window_clear_text_output replaces it. The dialog opens from the latest
- * configuration; refresh it with the persisted choices after every save
- * attempt so a reopened dialog never shows unsaved choices. */
+ * The context is borrowed: keep it alive until a later configuration or
+ * jsti_window_clear_text_output has replaced it AND any dialog opened from it
+ * has closed, because an open dialog keeps its own copy of the callback and
+ * context and can still Apply. No dialog is open once window_run returns. The
+ * dialog opens from the latest configuration; refresh it with the persisted
+ * choices after every save attempt so a reopened dialog never shows unsaved
+ * choices. */
 int jsti_window_set_text_output(int method, int insertion, int restore_clipboard,
                                 JSTITextOutputSettingsCallback callback, void *context);
 /* Reads the configuration the dialog will open with. -1 when unconfigured or
  * an output pointer is null. */
 int jsti_window_text_output(int *method, int *insertion, int *restore_clipboard);
-/* Thread safe. Drops the callback and context; the dialog is unavailable until
- * configured again. Call before releasing the context. A dialog already open
- * keeps its own copy until it closes. */
+/* Thread safe. Drops the configured callback and context so no later dialog
+ * can use them; the dialog is unavailable until configured again. A dialog
+ * already open is unaffected and keeps its copied callback and context until
+ * it closes, so the caller must retain the context until then as well. Once
+ * window_run has returned no dialog is open, and clearing ends the borrow. */
 void jsti_window_clear_text_output(void);
 
 /* Borrowed UTF-8 draft values. Choice -1 inherits the app setting, -2 preserves

@@ -25,6 +25,7 @@ final class SonioxLiveRun: @unchecked Sendable {
     /// The configuration frame has been handed to the transport, so audio may
     /// follow it.
     var configSent = false
+    /// End-of-stream was handed to the transport, including an in-flight send.
     var endOfStreamSent = false
     var deliverWhileFinishing = false
 

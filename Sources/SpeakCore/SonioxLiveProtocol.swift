@@ -52,7 +52,7 @@ extension SonioxLiveClient {
             "sample_rate": sampleRate,
             "num_channels": 1
         ]
-        if let language {
+        if let language = TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") {
             payload["language_hints"] = [language.localeLanguageCode]
         }
         return payload
@@ -162,6 +162,8 @@ public enum SonioxStreamingError: LocalizedError, Equatable {
     case invalidSampleRate(Int)
     case invalidPCM
     case server(code: Int, message: String)
+    case missingCompletion
+    case unexpectedCompletion
 
     public var errorDescription: String? {
         switch self {
@@ -173,6 +175,10 @@ public enum SonioxStreamingError: LocalizedError, Equatable {
             return "Soniox requires complete 16-bit PCM samples."
         case .server(let code, let message):
             return "Soniox reported a streaming error (\(code)): \(message)"
+        case .missingCompletion:
+            return "Soniox did not confirm the completed transcription. The recording is available to retry."
+        case .unexpectedCompletion:
+            return "Soniox ended transcription before all recorded audio was sent. The recording is available to retry."
         }
     }
 }

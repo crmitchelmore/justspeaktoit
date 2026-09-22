@@ -42,7 +42,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     private let model: String
     private let language: String?
     private let sampleRate: Int
-    private let makeConnection: ConnectionFactory
+    let makeConnection: ConnectionFactory
     private let schedule: Scheduler
     private let queue = DispatchQueue(label: "SonioxLiveClient.state")
     private let queueKey = DispatchSpecificKey<Bool>()
@@ -120,9 +120,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             // Replay audio captured before this run existed, in capture order,
             // ahead of the live frames. Best-effort: the leading buffer is
             // bounded, so an overflow here caps the replay rather than failing.
-            for chunk in carried {
-                if !admitAudio(chunk, into: active) { break }
-            }
+            for chunk in carried where !admitAudio(chunk, into: active) { break }
             active.phase = .connecting
             connect(active, request: request)
         }
@@ -200,155 +198,11 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         return true
     }
 
-    // MARK: - Connection lifecycle
-
-    private func connect(_ active: SonioxLiveRun, request: URLRequest) {
-        let connection = makeConnection(request)
-        active.connection = connection
-        connection.resume { [weak self, weak active] in
-            guard let self, let active else { return }
-            self.synchronized {
-                guard self.isCurrent(active), !active.didOpen else { return }
-                active.didOpen = true
-                // Soniox has no configuration acknowledgement: the completed
-                // handshake is readiness. A finishing run keeps its phase.
-                if active.phase == .connecting { active.phase = .active }
-                self.log("WebSocket handshake completed")
-                self.pump(active)
-            }
-        }
-        receive(active, connection)
-        after(Self.readyDeadline, active) { client, active in
-            if !active.didOpen { client.fail(SonioxStreamingError.connectionFailed, active) }
-        }
-    }
-
-    private func receive(_ active: SonioxLiveRun, _ connection: any StreamingWebSocketConnection) {
-        guard isCurrent(active) else { return }
-        connection.receive { [weak self, weak active] result in
-            guard let self, let active else { return }
-            self.synchronized {
-                guard self.isCurrent(active) else { return }
-                switch result {
-                case .failure(let error):
-                    // A close during finishing, after we asked to end the
-                    // stream, is the expected teardown: settle with what we have.
-                    if active.phase == .finishing, active.endOfStreamSent {
-                        self.settleFinish(active)
-                    } else if WebSocketErrorFilter.shouldIgnore(error) {
-                        self.close(active)
-                    } else {
-                        self.fail(self.mapReceiveError(error), active)
-                    }
-                case .success(let message):
-                    let text: String?
-                    switch message {
-                    case .text(let value): text = value
-                    case .binary(let data): text = String(data: data, encoding: .utf8)
-                    }
-                    if let text, let frame = Self.parse(text) { self.handle(frame, active) }
-                    self.receive(active, connection)
-                }
-            }
-        }
-    }
-
-    // MARK: - Frame handling
-
-    private func handle(_ frame: SonioxLiveFrame, _ active: SonioxLiveRun) {
-        guard isCurrent(active) else { return }
-        if let error = frame.error {
-            // A provider error after we asked to close is the expected teardown;
-            // settle with the best available text rather than reporting it.
-            if active.phase == .finishing, active.endOfStreamSent {
-                settleFinish(active)
-            } else {
-                fail(mapServerError(error), active)
-            }
-            return
-        }
-
-        active.accumulatedFinalText.append(frame.newFinalText)
-        // Interims flow only while streaming. During a finish the whole
-        // transcript is either returned by `finishAndWait` or delivered once as
-        // a final by `settleFinish`, so nothing is doubled.
-        if active.phase == .active {
-            let display = active.display(nonFinalTail: frame.nonFinalText)
-            if !display.isEmpty { active.onTranscript?(display, false) }
-        }
-
-        if frame.finished {
-            if active.phase == .finishing {
-                settleFinish(active)
-            } else {
-                // The server ended the stream on its own (e.g. duration limit).
-                if let whole = active.transcript { active.onTranscript?(whole, true) }
-                close(active)
-            }
-        }
-    }
-
-    // MARK: - Sending
-
-    private enum Payload: Sendable { case config, audio(Int), endOfStream }
-
-    /// Exactly one send is in flight. The configuration frame needs only the
-    /// open socket; audio and the end-of-stream frame follow behind it.
-    private func pump(_ active: SonioxLiveRun) {
-        guard isCurrent(active), !active.sending, active.didOpen,
-              let connection = active.connection, let next = active.outgoing.first else { return }
-        let message: StreamingWebSocketMessage
-        let payload: Payload
-        switch next {
-        case .config(let json):
-            message = .text(json)
-            payload = .config
-        case .audio(let data):
-            guard active.configSent else { return }
-            message = .binary(data)
-            payload = .audio(data.count)
-            active.queuedAudioBytes -= data.count
-            active.queuedAudioFrames -= 1
-        case .endOfStream:
-            guard active.configSent else { return }
-            message = .binary(Data())
-            payload = .endOfStream
-        }
-        active.outgoing.removeFirst()
-        active.sending = true
-        active.sendID += 1
-        let sendID = active.sendID
-        connection.send(message) { [weak self, weak active] error in
-            guard let self, let active else { return }
-            self.synchronized { self.completeSend(error, payload: payload, sendID: sendID, active: active) }
-        }
-        after(Self.sendDeadline, active) { client, active in
-            if active.sending, active.sendID == sendID { client.fail(client.stalledError, active) }
-        }
-    }
-
-    private func completeSend(_ error: Error?, payload: Payload, sendID: UInt64, active: SonioxLiveRun) {
-        guard isCurrent(active), active.sending, active.sendID == sendID else { return }
-        active.sending = false
-        if case .audio(let bytes) = payload { active.budget.release(bytes) }
-        if let error {
-            if active.phase == .finishing, active.endOfStreamSent { close(active) } else { fail(error, active) }
-            return
-        }
-        switch payload {
-        case .config: active.configSent = true
-        case .audio: break
-        case .endOfStream: active.endOfStreamSent = true
-        }
-        pump(active)
-    }
-
     // MARK: - Finalisation
 
     /// Drains admitted PCM, then sends the empty end-of-stream frame that
-    /// flushes buffered audio and finalises pending tokens. `finished`, a server
-    /// close, or the finish deadline settles the run. No admitted audio still
-    /// ends the stream so the server can finalise anything already sent.
+    /// flushes buffered audio and finalises pending tokens. Only `finished`
+    /// completes a run successfully; disconnects and deadlines fail visibly.
     private func beginFinish(_ active: SonioxLiveRun, deliverCallbacks: Bool) {
         guard isCurrent(active), active.connection != nil else { close(active); return }
         if !deliverCallbacks { active.deliverWhileFinishing = false }
@@ -361,14 +215,16 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         }
         pump(active)
         after(Self.finishDeadline, active) { client, active in
-            if active.endOfStreamSent { client.settleFinish(active) } else { client.fail(client.stalledError, active) }
+            let error = active.endOfStreamSent && !active.sending
+                ? SonioxStreamingError.missingCompletion : client.stalledError
+            client.fail(error, active)
         }
     }
 
     /// Ends a finishing run: delivers the whole transcript as a final when the
     /// graceful `stop()` asked for callbacks, then closes. `close` resolves the
     /// `finishAndWait` waiters with the same transcript.
-    private func settleFinish(_ active: SonioxLiveRun) {
+    func settleFinish(_ active: SonioxLiveRun) {
         guard isCurrent(active), active.phase == .finishing else { return }
         if active.deliverWhileFinishing, let whole = active.transcript {
             active.onTranscript?(whole, true)
@@ -378,7 +234,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
 
     var stalledError: Error { StreamingClientError.transportStalled(provider: "Soniox") }
 
-    private func fail(_ error: Error, _ active: SonioxLiveRun) {
+    func fail(_ error: Error, _ active: SonioxLiveRun) {
         guard isCurrent(active) else { return }
         let callback = active.onError
         let waiters = active.waiters
@@ -392,7 +248,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         waiters.forEach { $0.resume(returning: transcript) }
     }
 
-    private func close(_ active: SonioxLiveRun) {
+    func close(_ active: SonioxLiveRun) {
         guard active.phase != .closed else { return }
         active.phase = .closed
         let connection = active.connection
@@ -412,31 +268,33 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         active.onError = nil
     }
 
-    private func isCurrent(_ active: SonioxLiveRun) -> Bool { active === run && active.phase != .closed }
+    func isCurrent(_ active: SonioxLiveRun) -> Bool { active === run && active.phase != .closed }
 
-    private func after(_ seconds: TimeInterval, _ active: SonioxLiveRun,
-                       action: @escaping @Sendable (SonioxLiveClient, SonioxLiveRun) -> Void) {
+    func after(
+        _ seconds: TimeInterval, _ active: SonioxLiveRun,
+        action: @escaping @Sendable (SonioxLiveClient, SonioxLiveRun) -> Void
+    ) {
         schedule(seconds) { [weak self, weak active] in
             guard let self, let active else { return }
             self.synchronized { if self.isCurrent(active) { action(self, active) } }
         }
     }
 
-    private func synchronized<Value>(_ action: () -> Value) -> Value {
+    func synchronized<Value>(_ action: () -> Value) -> Value {
         if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
         return queue.sync(execute: action)
     }
 
     /// 401/403 error frames are an invalid key; everything else is a typed
     /// server error. Nothing here logs the key, transcript or audio.
-    private func mapServerError(_ error: (code: Int, message: String)) -> Error {
+    func mapServerError(_ error: (code: Int, message: String)) -> Error {
         if error.code == 401 || error.code == 403 {
             return StreamingClientError.invalidAPIKey(provider: "Soniox")
         }
         return SonioxStreamingError.server(code: error.code, message: error.message)
     }
 
-    private func mapReceiveError(_ error: Error) -> Error {
+    func mapReceiveError(_ error: Error) -> Error {
         let nsError = error as NSError
         let description = nsError.localizedDescription.lowercased()
         if nsError.code == 401 || nsError.code == 403
@@ -447,7 +305,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         return error
     }
 
-    private func log(_ event: String) {
+    func log(_ event: String) {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
         SpeakLogger.logger(category: "SonioxLiveClient").info("\(event, privacy: .public)")
         #endif

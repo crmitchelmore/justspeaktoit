@@ -25,9 +25,18 @@ public enum RevAIStreaming {
         "en", "fr", "de", "it", "ja", "ko", "cmn", "pt", "es"
     ]
 
-    /// How long `finishAndWait()` waits for the trailing hypothesis and the
-    /// server's close after `EOS`.
+    /// The one deadline that bounds `finishAndWait()` as a whole: waiting for
+    /// `connected` if the handshake is still in flight, draining admitted
+    /// audio, sending `EOS`, and receiving the trailing hypothesis and the
+    /// server's normal close. A healthy stream ends at that close, not here.
     static let finishBudget: TimeInterval = 5
+
+    /// The `rate` range Rev AI documents for `audio/x-raw`, in Hz.
+    static let supportedSampleRates: ClosedRange<Int> = 8_000...48_000
+
+    /// The status of the close frame that follows the trailing hypothesis
+    /// after `EOS`: RFC 6455 "normal closure".
+    static let normalClosureCode = 1_000
 
     /// The `content_type` for the PCM both platforms capture. Rev AI requires
     /// `layout`, `rate`, `format` and `channels` for `audio/x-raw`, and
@@ -92,7 +101,9 @@ public enum RevAIStreamingError: LocalizedError, Equatable {
     }
 
     /// Maps a documented close code. `nil` for codes that are not a failure
-    /// (a normal close after `EOS`) or that carry no Rev AI meaning.
+    /// (a normal close after `EOS`) or that carry no Rev AI meaning. A `nil`
+    /// here is not a completion: the client separately requires a 1000 close
+    /// after `EOS` before it treats the stream as finished.
     static func forCloseCode(_ closeCode: Int) -> Error? {
         switch closeCode {
         case 4001:
@@ -113,6 +124,43 @@ public enum RevAIStreamingError: LocalizedError, Equatable {
     }
 }
 
+/// Lifecycle failures of the shared Rev AI client that no close code names.
+/// Hosts show `errorDescription`; nothing here carries a key or transcript.
+enum RevAILiveError: LocalizedError, Equatable {
+    /// The socket did not open, or `connected` did not follow, in time, so no
+    /// audio could be sent.
+    case sessionNotReady
+    /// All of the recording and `EOS` were sent, but the stream ended without
+    /// the normal close that confirms the trailing hypothesis was delivered.
+    case missingCompletion
+    /// The server closed normally before `EOS` was sent, so audio the
+    /// recording still held was never transcribed.
+    case unexpectedCompletion
+    /// PCM16 is two bytes per sample; an odd-length chunk would misalign every
+    /// sample after it.
+    case invalidPCM
+    /// More audio was offered before `start()` than the session can hold.
+    /// Reported by that start, because nothing is evicted silently.
+    case overflowBeforeStart
+
+    var errorDescription: String? {
+        switch self {
+        case .sessionNotReady:
+            return "Rev.ai did not start the streaming session in time. Try again in a moment."
+        case .missingCompletion:
+            return "Rev.ai did not confirm the end of the transcript. The recording is available to retry."
+        case .unexpectedCompletion:
+            return "Rev.ai ended the stream before all recorded audio was sent. "
+                + "The recording is available to retry."
+        case .invalidPCM:
+            return "Rev.ai requires complete 16-bit PCM samples."
+        case .overflowBeforeStart:
+            return "More audio was captured before the Rev.ai session started than it can hold. "
+                + "The recording is available to retry."
+        }
+    }
+}
+
 /// One decoded Rev AI streaming server frame.
 ///
 /// Rev AI has exactly three frame types. Anything else decodes to `nil` and is
@@ -127,6 +175,18 @@ enum RevAIStreamingEvent {
     case connected
     case partial(String)
     case final(String)
+
+    /// Decodes one frame from the injected transport. Rev AI sends JSON text;
+    /// binary JSON is read the same way, and anything else is ignored.
+    init?(message: StreamingWebSocketMessage) {
+        let data: Data
+        switch message {
+        case .text(let text): data = Data(text.utf8)
+        case .binary(let bytes): data = bytes
+        }
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        self.init(object: object)
+    }
 
     init?(object: [String: Any]) {
         guard let type = object["type"] as? String else { return nil }

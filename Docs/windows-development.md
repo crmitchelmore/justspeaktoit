@@ -37,8 +37,8 @@ The current source offers microphone recording, audio-file import and **28 batch
 models across sixteen providers**: OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini,
 xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox, Rev.ai, Modulate and AssemblyAI. These are projections of the canonical
 shared catalogue and execute through shared provider clients. Three Deepgram live models and AssemblyAI Universal-3.5 Pro are wired through shared Swift session snapshots and the native WinHTTP
-adapter, whose five Windows runtime probes passed. Final-head CI for the host
-integration and real provider acceptance are pending. Batch and Live keep separate
+adapter, whose five Windows runtime probes passed. Windows host integration
+passed at `6fcb528d`; real provider acceptance remains pending. Batch and Live keep separate
 model selections. Native capture is joined before finalisation; received text
 and audio survive cancellation or failure, with no automatic insertion on failure.
 `Ctrl+Alt+Space` starts and stops recording when registration succeeds. Save the
@@ -154,7 +154,7 @@ flowchart TB
 | Layer | Current responsibility | Source |
 |---|---|---|
 | Canonical domain | Model identifiers, provider routes, transcript semantics, Unicode reconciliation, lifecycle ownership, PCM/WAV, comparison and history projections | `Sources/SpeakCore/` |
-| Shared batch transport | Fourteen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
+| Shared batch transport | Sixteen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
 | Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
@@ -319,8 +319,16 @@ Verified baseline on 22 September 2026:
   origin shows the complete client area. This receipt precedes 24 kHz capture.
 - The subsequent direct 16/24 kHz native capture implementation and expanded
   self-tests were authored by Claude Fable 5.1 at `max`, session
-  `8bef4c77-0e20-4453-a9d3-9a9af8757bfc`. Native strict compile/link checks passed;
-  final-head Windows execution and physical microphone acceptance are pending.
+  `8bef4c77-0e20-4453-a9d3-9a9af8757bfc`. Integrated source `6fcb528d` passed
+  [run 35722960563](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35722960563)
+  on Windows, macOS and Linux, including native capture self-tests and window
+  checks. Physical microphone acceptance remains pending.
+- Fable-authored History search and transcript-version selection were integrated
+  as `38867775`. Local portable validation passed **186 tests, five skipped,
+  zero failures**, plus strict SwiftLint, native C++ warnings-as-errors and the
+  Windows Swift host typecheck. Its
+  [native run 35723903725](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35723903725)
+  is pending. This is not a physical History acceptance receipt.
 - **Final-head Windows, macOS and Linux CI for the current source is pending.**
   Provider contract tests use the shared URLProtocol stub and no live provider
   keys; test success must not be reported as a live transcription receipt.

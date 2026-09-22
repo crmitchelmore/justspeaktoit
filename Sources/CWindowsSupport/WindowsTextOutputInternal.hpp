@@ -5,6 +5,7 @@
 // self-test injects synthetic hidden windows, an in-memory clipboard and a
 // keystroke stub so no test ever reaches the user's desktop or clipboard.
 #include "WindowsSupportInternal.hpp"
+#include <ole2.h>
 #include <uiautomationclient.h>
 #include <cstdint>
 #include <string>

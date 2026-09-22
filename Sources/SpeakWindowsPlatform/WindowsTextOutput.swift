@@ -95,12 +95,12 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
         case changedMeanwhile
 
         init(code: Int32) {
-            switch UInt32(clamping: code) {
-            case JSTI_INSERTION_CLIPBOARD_RESTORED.rawValue: self = .restored
-            case JSTI_INSERTION_CLIPBOARD_RESTORED_PARTIALLY.rawValue: self = .restoredPartially
-            case JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT.rawValue: self = .transcriptLeft
-            case JSTI_INSERTION_CLIPBOARD_RESTORE_FAILED.rawValue: self = .restoreFailed
-            case JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE.rawValue: self = .changedMeanwhile
+            switch code {
+            case Int32(JSTI_INSERTION_CLIPBOARD_RESTORED.rawValue): self = .restored
+            case Int32(JSTI_INSERTION_CLIPBOARD_RESTORED_PARTIALLY.rawValue): self = .restoredPartially
+            case Int32(JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT.rawValue): self = .transcriptLeft
+            case Int32(JSTI_INSERTION_CLIPBOARD_RESTORE_FAILED.rawValue): self = .restoreFailed
+            case Int32(JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE.rawValue): self = .changedMeanwhile
             default: self = .untouched
             }
         }
@@ -199,10 +199,10 @@ public final class WindowsInsertionTarget: @unchecked Sendable {
             throw WindowsTextOutputError(String(cString: error), clipboard: clipboard, mayHaveInserted: status == 1)
         }
         let method: Method
-        switch UInt32(clamping: result.method) {
-        case JSTI_INSERTION_METHOD_NATIVE_EDIT.rawValue: method = .nativeEdit
-        case JSTI_INSERTION_METHOD_UIA_VALUE.rawValue: method = .automationValue
-        case JSTI_INSERTION_METHOD_PASTE.rawValue: method = .paste
+        switch result.method {
+        case Int32(JSTI_INSERTION_METHOD_NATIVE_EDIT.rawValue): method = .nativeEdit
+        case Int32(JSTI_INSERTION_METHOD_UIA_VALUE.rawValue): method = .automationValue
+        case Int32(JSTI_INSERTION_METHOD_PASTE.rawValue): method = .paste
         default:
             throw WindowsTextOutputError(
                 "The native adapter reported success without an insertion method.", clipboard: clipboard

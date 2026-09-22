@@ -3,6 +3,7 @@
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <vector>
+#include <unordered_set>
 
 namespace {
 struct Apartment {
@@ -29,6 +30,7 @@ struct Device {
 
 int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context,
                                  char *error, size_t errorCapacity) {
+    if (error && errorCapacity) error[0] = 0;
     if (!callback) return jsti::fail("No microphone list callback supplied.", error, errorCapacity);
     try {
         Apartment apartment;
@@ -45,7 +47,8 @@ int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context
         UINT count = 0;
         result = collection->GetCount(&count);
         if (FAILED(result)) return jsti::fail(jsti::systemError("Counting active microphones", result), error, errorCapacity);
-        if (count > 4096) return jsti::fail("Windows returned an excessive number of microphones.", error, errorCapacity);
+        // Leave room for the default and unavailable-selection rows.
+        if (count > 510) return jsti::fail("Windows returned an excessive number of microphones.", error, errorCapacity);
         if (!count) return 0;
 
         std::wstring defaultID;
@@ -63,6 +66,7 @@ int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context
         }
 
         std::vector<Device> devices;
+        std::unordered_set<std::string> identifiers;
         devices.reserve(count);
         for (UINT index = 0; index < count; ++index) {
             jsti::COM<IMMDevice> endpoint;
@@ -86,11 +90,14 @@ int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context
             if (FAILED(result) || name.value.vt != VT_LPWSTR || !name.value.pwszVal) {
                 return jsti::fail("Windows did not provide a readable microphone name.", error, errorCapacity);
             }
+            if (std::wcslen(identifier.value) > 4096 || std::wcslen(name.value.pwszVal) > 4096) {
+                return jsti::fail("Windows returned an excessive microphone name or identifier.", error, errorCapacity);
+            }
             Device device;
             device.id = jsti::utf8(identifier.value);
             device.name = jsti::utf8(name.value.pwszVal);
             device.isDefault = !defaultID.empty() && defaultID == identifier.value;
-            if (device.id.empty() || device.name.empty()) {
+            if (device.id.empty() || device.name.empty() || !identifiers.insert(device.id).second) {
                 return jsti::fail("Windows returned an invalid microphone name or identifier.", error, errorCapacity);
             }
             devices.push_back(std::move(device));
@@ -127,5 +134,5 @@ int jsti_audio_devices_self_test(char *error, size_t errorCapacity) {
     if (started != -1 || !detail[0] || callbacks.audio || callbacks.errors) {
         return jsti::fail("An unavailable explicit microphone did not fail synchronously without fallback.", error, errorCapacity);
     }
-    return 0;
+    return jsti_audio_device_monitor_self_test(error, errorCapacity);
 }

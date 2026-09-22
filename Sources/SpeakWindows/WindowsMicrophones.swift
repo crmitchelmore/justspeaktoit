@@ -15,6 +15,46 @@ private func microphoneFound(
     list.devices.append((String(cString: identifier), label))
 }
 
+/// One native worker owns subscription, enumeration and notification coalescing.
+/// The callback is stateless: no Swift context pointer can outlive its owner.
+final class WindowsMicrophoneMonitor: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: OpaquePointer?
+
+    init() throws {
+        var error = [CChar](repeating: 0, count: 1_024)
+        guard let handle = jsti_audio_device_monitor_create(microphonesChanged, nil, &error, error.count) else {
+            throw WindowsNativeError(message: String(cString: error))
+        }
+        self.handle = handle
+    }
+
+    deinit { stop() }
+
+    /// Nonblocking; called on UI close before the window disappears.
+    func cancel() {
+        lock.withLock { if let handle { jsti_audio_device_monitor_cancel(handle) } }
+    }
+
+    /// Drains the native worker outside the UI/controller actor.
+    func stop() {
+        let owned = lock.withLock { () -> OpaquePointer? in
+            defer { handle = nil }
+            return handle
+        }
+        if let owned { _ = jsti_audio_device_monitor_destroy(owned, nil, 0) }
+    }
+}
+
+private func microphonesChanged(
+    _ devices: UnsafePointer<JSTIAudioDevice>?, _ count: Int,
+    _ error: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
+) {
+    // Copies into the window's latest-only mailbox before this callback returns;
+    // it neither reads settings nor changes the session's captured endpoint.
+    _ = jsti_window_refresh_microphones(devices, count, error)
+}
+
 extension WindowsNative {
     static func createCapture(
         context: WindowsCaptureContext, deviceID: String, sampleRate: Int = 16_000

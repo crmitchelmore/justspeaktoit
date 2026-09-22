@@ -43,6 +43,9 @@ struct WindowState {
     bool historyChanged = false;
     bool historySelectionProvided = false;
     bool variantChanged = false;
+    bool microphonesChanged = false;
+    std::vector<MicrophoneRow> pendingMicrophones;
+    std::wstring microphoneError;
     bool modelsChanged = false;
     bool modelsRefreshing = false;
     std::wstring modelStatus;
@@ -446,8 +449,56 @@ bool createControls(HWND window) {
     return okay;
 }
 
+
+// UI thread only. The persisted choice is an opaque ID, never a row index.
+// Missing devices retain that choice; a programmatic rebuild emits no event.
+bool populateMicrophones(HWND window) {
+    HWND combo = GetDlgItem(window, microphoneID);
+    SendMessageW(combo, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    LRESULT selected = CB_ERR;
+    bool okay = true;
+    for (size_t index = 0; index < state.microphones.size(); ++index) {
+        const auto &row = state.microphones[index];
+        const LRESULT added = SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(row.name.c_str()));
+        if (added == CB_ERR || added == CB_ERRSPACE) { okay = false; break; }
+        if (row.id == state.microphoneSelection) selected = added;
+    }
+    SendMessageW(combo, CB_SETCURSEL, static_cast<WPARAM>(selected), 0);
+    SendMessageW(combo, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(combo, nullptr, TRUE);
+    return okay && selected != CB_ERR;
+}
+
+bool applyMicrophones(HWND window, std::vector<MicrophoneRow> rows) {
+    const auto selected = std::find_if(rows.begin(), rows.end(), [](const auto &row) {
+        return row.id == state.microphoneSelection;
+    });
+    if (selected == rows.end()) {
+        const auto previous = std::find_if(state.microphones.begin(), state.microphones.end(), [](const auto &row) {
+            return row.id == state.microphoneSelection;
+        });
+        std::wstring name = previous == state.microphones.end() ? L"Previously selected microphone" : previous->name;
+        const std::wstring defaultMarker = L" (system default)";
+        const size_t marker = name.find(defaultMarker);
+        if (marker != std::wstring::npos) name.erase(marker, defaultMarker.size());
+        const std::wstring suffix = L" (unavailable)";
+        if (name.size() < suffix.size() || name.substr(name.size() - suffix.size()) != suffix) name += suffix;
+        rows.push_back({state.microphoneSelection, std::move(name)});
+    }
+    auto previous = std::move(state.microphones);
+    state.microphones = std::move(rows);
+    if (populateMicrophones(window)) return true;
+    state.microphones = std::move(previous);
+    populateMicrophones(window);
+    return false;
+}
+
 void applyUpdate(HWND window) {
     std::wstring status, transcript;
+    bool microphonesChanged;
+    std::vector<MicrophoneRow> microphones;
+    std::wstring microphoneError;
     bool statusChanged, transcriptChanged, historyChanged, variantChanged, variantSwitchable;
     bool modelsChanged, modelsRefreshing;
     std::vector<ModelRow> models;
@@ -477,6 +528,19 @@ void applyUpdate(HWND window) {
         state.variantChanged = false;
         state.posted = false;
         recording = state.recording;
+        microphonesChanged = state.microphonesChanged && recording == 0;
+        if (microphonesChanged) {
+            microphones = std::move(state.pendingMicrophones);
+            microphoneError = state.microphoneError;
+            state.microphonesChanged = false;
+        }
+    }
+    if (microphonesChanged) {
+        if (!microphones.empty() && !applyMicrophones(window, std::move(microphones))) {
+            microphoneError = L"Could not display updated microphone choices";
+        }
+        const std::wstring label = microphoneError.empty() ? L"&Microphone" : L"&Microphone — list refresh unavailable";
+        SetDlgItemTextW(window, 94, label.c_str());
     }
     if (modelsChanged) {
         if (!applyModelRows(window, models)) modelStatus = L"Could not display refreshed models. Previous selection retained.";
@@ -633,7 +697,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         case microphoneID:
             if (HIWORD(wparam) == CBN_SELCHANGE) {
+                if (!idleControl(window, microphoneID)) { populateMicrophones(window); return 0; }
                 const std::string device = selectedMicrophone(window);
+                state.microphoneSelection = device;
                 emit(window, JSTI_EVENT_MICROPHONE_CHANGED, device.c_str());
             }
             return 0;
@@ -742,6 +808,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         if (state.microphones.empty()) state.microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
+        state.microphonesChanged = false;
+        state.pendingMicrophones.clear(); state.microphoneError.clear();
         state.posted = false;
         state.statusChanged = false;
         state.transcriptChanged = false;
@@ -885,6 +953,43 @@ int jsti_window_set_microphones(const char *const *ids, const char *const *names
         state.microphoneSelection = selection;
         return 0;
     } catch (const std::exception &) { return -1; }
+}
+
+
+int jsti_window_refresh_microphones(const JSTIAudioDevice *devices, size_t count, const char *error) {
+    if ((!devices && count) || count > 512) return -1;
+    try {
+        std::vector<MicrophoneRow> copied;
+        std::wstring warning;
+        if (error) {
+            if (!jsti::wide(error, warning) || warning.empty() || warning.size() > 4096) return -1;
+        } else {
+            std::unordered_set<std::string> identifiers;
+            std::wstring defaultName;
+            copied.push_back({"", L"Default communications microphone"});
+            for (size_t index = 0; index < count; ++index) {
+                std::wstring identifier, name;
+                if (!jsti::wide(devices[index].id, identifier) || identifier.empty() || identifier.size() > 4096 ||
+                    !jsti::wide(devices[index].name, name) || name.empty() || name.size() > 4096 ||
+                    !identifiers.insert(devices[index].id).second ||
+                    (devices[index].is_default != 0 && devices[index].is_default != 1)) return -1;
+                if (devices[index].is_default) {
+                    if (!defaultName.empty()) return -1;
+                    defaultName = name;
+                    name += L" (system default)";
+                }
+                copied.push_back({devices[index].id, std::move(name)});
+            }
+            if (!defaultName.empty()) copied[0].name += L" — " + defaultName;
+        }
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (!state.window || !state.running) return -1;
+        if (!error) state.pendingMicrophones = std::move(copied);
+        state.microphoneError = std::move(warning);
+        state.microphonesChanged = true;
+        if (!state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+        return state.posted ? 0 : -1;
+    } catch (...) { return -1; }
 }
 
 int jsti_window_update(const char *status, const char *transcript, int recording) {
@@ -1040,6 +1145,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) {
         return jsti::fail("Window checks must run on the UI thread after READY.", error, errorCapacity);
     }
+    const std::vector<MicrophoneRow> originalMicrophones = state.microphones;
+    const std::string originalMicrophoneID = state.microphoneSelection;
     const std::vector<HistoryRow> originalHistory = state.displayedHistory;
     const std::string originalSelection = selectedHistory(window);
     const std::vector<std::wstring> originalModelNames = state.modelNames;
@@ -1237,6 +1344,84 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         if (!microphoneChanged || !recordingSnapshot) {
             failure = "Microphone selection and recording did not retain the exact selected device."; return false;
         }
+        const JSTIAudioDevice connected[] = {{"usb-a", "USB Alpha", 1}, {"usb-b", "USB Beta", 0}};
+        observed.event = -500;
+        if (jsti_window_refresh_microphones(connected, 2, nullptr) != 0) {
+            failure = "A live microphone snapshot was rejected."; return false;
+        }
+        applyUpdate(window);
+        SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, 1, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(microphoneID, CBN_SELCHANGE), 0);
+        if (observed.event != JSTI_EVENT_MICROPHONE_CHANGED || observed.id != "usb-a") {
+            failure = "A refreshed microphone did not keep its opaque ID."; return false;
+        }
+        observed.event = -500;
+        const size_t beforeRecordingMicrophoneCount = state.microphones.size();
+        jsti_window_update("Microphone refresh status sentinel", "Microphone transcript sentinel", 1);
+        applyUpdate(window);
+        const JSTIAudioDevice removed[] = {{"usb-b", "USB Beta", 1}};
+        if (jsti_window_refresh_microphones(removed, 1, nullptr) != 0) {
+            failure = "A microphone removal during capture was rejected."; return false;
+        }
+        applyUpdate(window);
+        if (selectedMicrophone(window) != "usb-a" || state.microphones.size() != beforeRecordingMicrophoneCount ||
+            IsWindowEnabled(GetDlgItem(window, microphoneID)) || observed.event != -500) {
+            failure = "Hot-plug replaced the active capture selection or unlocked controls."; return false;
+        }
+        SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, 0, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(microphoneID, CBN_SELCHANGE), 0);
+        if (selectedMicrophone(window) != "usb-a" || observed.event != -500) {
+            failure = "A synthetic selection change bypassed microphone lockout."; return false;
+        }
+        jsti_window_update(nullptr, nullptr, 0);
+        applyUpdate(window);
+        if (selectedMicrophone(window) != "usb-a" || state.microphones.size() != 3 ||
+            state.microphones.back().name.find(L"unavailable") == std::wstring::npos ||
+            state.microphones.front().name.find(L"USB Beta") == std::wstring::npos || observed.event != -500) {
+            failure = "An unplugged selection silently changed or lost its unavailable/default label."; return false;
+        }
+        const JSTIAudioDevice restored[] = {{"usb-b", "USB Beta", 1}, {"usb-a", "USB Alpha renamed", 0}};
+        jsti_window_refresh_microphones(restored, 2, nullptr);
+        applyUpdate(window);
+        if (selectedMicrophone(window) != "usb-a" || state.microphones.size() != 3 ||
+            state.microphones.back().name != L"USB Alpha renamed" || observed.event != -500) {
+            failure = "A restored microphone lost the selected ID or kept an unavailable label."; return false;
+        }
+        wchar_t microphoneStatus[128]{}, microphoneTranscript[128]{};
+        GetDlgItemTextW(window, statusID, microphoneStatus, 128);
+        GetDlgItemTextW(window, transcriptID, microphoneTranscript, 128);
+        if (std::wstring(microphoneStatus) != L"Microphone refresh status sentinel" ||
+            std::wstring(microphoneTranscript) != L"Microphone transcript sentinel") {
+            failure = "Microphone refresh overwrote the recording status or transcript."; return false;
+        }
+        SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, 0, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(microphoneID, CBN_SELCHANGE), 0);
+        observed.event = -500;
+        const JSTIAudioDevice duplicate[] = {connected[0], connected[0]};
+        const JSTIAudioDevice malformed[] = {{"\xff", "Invalid", 0}};
+        if (jsti_window_refresh_microphones(duplicate, 2, nullptr) != -1 ||
+            jsti_window_refresh_microphones(malformed, 1, nullptr) != -1) {
+            failure = "Invalid or duplicate microphone identities were accepted."; return false;
+        }
+        jsti_window_refresh_microphones(removed, 1, nullptr);
+        jsti_window_refresh_microphones(connected, 1, nullptr);
+        applyUpdate(window);
+        if (!selectedMicrophone(window).empty() || state.microphones.size() != 2 ||
+            state.microphones.front().name.find(L"USB Alpha") == std::wstring::npos || observed.event != -500) {
+            failure = "Microphone snapshots did not coalesce or the dynamic default changed ID."; return false;
+        }
+        jsti_window_refresh_microphones(removed, 1, nullptr);
+        jsti_window_refresh_microphones(nullptr, 0, "Synthetic enumeration error");
+        applyUpdate(window);
+        if (state.microphones.size() != 2 || !selectedMicrophone(window).empty() ||
+            state.microphones.front().name.find(L"USB Beta") == std::wstring::npos) {
+            failure = "An enumeration failure discarded the last complete microphone snapshot."; return false;
+        }
+        jsti_window_refresh_microphones(nullptr, 0, nullptr);
+        applyUpdate(window);
+        if (state.microphones.size() != 1 || !selectedMicrophone(window).empty() || observed.event != -500) {
+            failure = "No active microphones did not retain the dynamic default without emitting a user change."; return false;
+        }
         const JSTIHistoryRow first[] = {{"one", "First recording", "Completed"}, {"two", "Second recording", "Failed"}};
         if (jsti_window_set_history(first, 2, "two") != 0) { failure = "Initial history update failed."; return false; }
         applyUpdate(window);
@@ -1429,6 +1614,15 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     bool passed = false;
     try { passed = check(); }
     catch (const std::exception &) { failure = "Window smoke test could not allocate its temporary state."; }
+    state.microphones = originalMicrophones;
+    state.microphoneSelection = originalMicrophoneID;
+    populateMicrophones(window);
+    SetDlgItemTextW(window, 94, L"&Microphone");
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.microphonesChanged = false;
+        state.pendingMicrophones.clear(); state.microphoneError.clear();
+    }
     state.modelNames = originalModelNames;
     state.modelModes = originalModelModes;
     state.modelOrder = originalModelOrder;

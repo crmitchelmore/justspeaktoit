@@ -75,6 +75,38 @@ void jsti_window_request_close(void);
 int jsti_window_set_microphones(const char *const *ids, const char *const *names,
                                 size_t count, const char *selected_id);
 
+
+/* A complete active capture-device snapshot; borrowed only during the callback.
+ * Endpoint IDs are opaque; an empty ID is reserved for the system-default row. */
+typedef struct JSTIAudioDevice {
+    const char *id;
+    const char *name;
+    int is_default;
+} JSTIAudioDevice;
+/* Latest-only refresh on the UI thread. Does not change the selected ID or emit
+ * selection events; a missing selection becomes an unavailable row. Snapshots
+ * received while recording/busy are deferred until idle. Error-only snapshots
+ * (non-null error) retain the prior list. Must be called after window creation. */
+int jsti_window_refresh_microphones(const JSTIAudioDevice *devices, size_t count, const char *error);
+/* One owned worker registers endpoint notifications and enumerates off the UI
+ * and capture threads. OS callbacks only signal coalesced work. The callback
+ * receives a complete snapshot or an error, never a partial list; it must return
+ * promptly and must not destroy the monitor. No credentials or capture access. */
+typedef void (*JSTIAudioDevicesChangedCallback)(const JSTIAudioDevice *devices, size_t count,
+                                               const char *error, void *context);
+typedef struct JSTIAudioDeviceMonitor JSTIAudioDeviceMonitor;
+JSTIAudioDeviceMonitor *jsti_audio_device_monitor_create(JSTIAudioDevicesChangedCallback callback, void *context,
+                                                        char *error, size_t error_capacity);
+/* Nonblocking and valid from the callback. No later snapshot is dispatched once
+ * cancellation is observed; an already-running callback finishes normally. */
+void jsti_audio_device_monitor_cancel(JSTIAudioDeviceMonitor *monitor);
+/* Cancels, unregisters off the notification callback, drains and joins. The
+ * caller retains context until success. Returns -1 without destroying when
+ * called by the snapshot worker, preventing self-join. Do not call concurrently
+ * with another destroy. Call outside the UI/actor after the window loop ends. */
+int jsti_audio_device_monitor_destroy(JSTIAudioDeviceMonitor *monitor, char *error, size_t error_capacity);
+int jsti_audio_device_monitor_self_test(char *error, size_t error_capacity);
+
 typedef struct JSTIHistoryRow {
     const char *id;
     const char *title;

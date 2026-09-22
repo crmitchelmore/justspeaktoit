@@ -52,8 +52,13 @@ durable recording records under
 before network transcription starts, so an interrupted request does not discard
 the source recording. The microphone selector persists either the Windows default
 or an exact endpoint identifier; an unavailable selected device is reported
-without silently switching microphones. The device list refreshes at launch;
-hot-plug refresh is still pending. Transcription and post-processing can be
+without silently switching microphones. A coalesced native subscription refreshes
+the device list after connections, removals, names and default-device changes.
+Snapshots are enumerated off the UI/controller and applied only when idle;
+recording keeps its captured device. Missing selected devices retain an
+unavailable row and recover their normal label when reconnected. See
+[Windows microphone discovery](windows-microphone-discovery.md) for lifecycle,
+synthetic checks and remaining hardware acceptance. Transcription and post-processing can be
 cancelled while keeping audio and any completed result.
 
 Imports are checked before copying: regular audio files, supported extensions,

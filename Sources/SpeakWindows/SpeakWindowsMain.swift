@@ -7,6 +7,7 @@ final class WindowsEventContext {
     let controller: WindowsAppController
     let smokeTest: Bool
     var smokeTestFailure: Error?
+    var microphoneMonitor: WindowsMicrophoneMonitor?
     let search: WindowsSearchCoalescer
     private var settingsTask: Task<Void, Never>?
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
@@ -92,7 +93,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
             await pendingSettings?.value
             await controller.importAudio(path: value, modelIndex: Int(index))
         }
-    case 3, 15, 16: transcriptEvent(event, value: value, holder: holder)
+    case 3, 6, 15, 16: transcriptEvent(event, value: value, holder: holder)
     case 4: holder.enqueueSettings { await controller.saveKey(value, modelIndex: Int(index)) }
     case 5: holder.enqueueSettings { await controller.selectModel(Int(index)) }
     case 7:
@@ -122,6 +123,7 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
     case 3:
         let variant = WindowsNative.displayedTranscriptVariant()
         Task { await controller.copyTranscript(identifier: value, variant: variant) }
+    case 6: holder.microphoneMonitor?.cancel()
     case 15: holder.search.submit(value)
     case 16:
         if let variant = WindowsNative.displayedTranscriptVariant() {
@@ -134,6 +136,11 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
 private func ready(_ holder: WindowsEventContext) {
     guard holder.smokeTest else {
         WindowsInsertionTarget.prepare()
+        do {
+            holder.microphoneMonitor = try WindowsMicrophoneMonitor()
+        } catch {
+            error.localizedDescription.withCString { _ = jsti_window_refresh_microphones(nil, 0, $0) }
+        }
         Task { await holder.controller.ready() }
         return
     }
@@ -232,7 +239,10 @@ enum SpeakWindowsMain {
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
-        let warning = try WindowsNative.configureMicrophones(selected: microphone, smokeTest: holder.smokeTest)
+        let smokeTest = holder.smokeTest
+        let warning = try await Task.detached {
+            try WindowsNative.configureMicrophones(selected: microphone, smokeTest: smokeTest)
+        }.value
         await controller.setMicrophoneWarning(warning)
         let processing = await controller.postProcessingOptions()
         try WindowsNative.configurePostProcessing(
@@ -261,6 +271,9 @@ enum SpeakWindowsMain {
                 }
             }
         } catch { windowFailure = error }
+        let monitor = holder.microphoneMonitor
+        await Task.detached { monitor?.stop() }.value
+        holder.microphoneMonitor = nil
         await holder.finishSettings()
         await controller.close()
         withExtendedLifetime(holder) {}

@@ -5,8 +5,9 @@ import SpeakWindowsPlatform
 import CWindowsSupport
 
 extension WindowsAppController {
+    /// Output is the recording's own authority; imports and retries pass nil.
     func transcribe(
-        _ original: DesktopRecordingStore.Record, duration: TimeInterval, target: WindowsInsertionTarget?,
+        _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: WindowsRecordingOutput?,
         profile: DesktopProfileSession? = nil
     ) async {
         var record = original
@@ -17,7 +18,7 @@ extension WindowsAppController {
         )
         do {
             guard !closed else { throw CancellationError() }
-            let key = try WindowsNative.apiKey(name: credentialIdentifier(for: record.modelIdentifier))
+            let key = try effects.apiKey(name: credentialIdentifier(for: record.modelIdentifier))
             let audio = try await store.audioURL(for: record)
             guard !closed else { throw CancellationError() }
             let size = try audio.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
@@ -27,12 +28,13 @@ extension WindowsAppController {
                 )
             }
             update("Transcribing… Your recording is saved locally.", state: 2)
-            let model = record.modelIdentifier
+            let request = WindowsTranscriptionRequest(
+                audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language
+            )
+            let effects = self.effects
             let task = Task {
                 try Task.checkCancellation()
-                return try await transcribePreparedAudio(
-                    audio, model: model, key: key, duration: duration, language: session.language
-                )
+                return try await effects.transcribe(request, with: self)
             }
             transcriptionTask = task
             defer { transcriptionTask = nil }
@@ -49,7 +51,7 @@ extension WindowsAppController {
             // A response already received is still durably saved during shutdown,
             // but closing must never insert text or update a destroyed window.
             guard !closed else { return }
-            present(record, target: target)
+            present(record, output: output)
         } catch {
             record.failure = cancellationRequested
                 ? "Transcription cancelled. Audio retained." : error.localizedDescription
@@ -61,7 +63,7 @@ extension WindowsAppController {
         }
     }
 
-    func present(_ record: DesktopRecordingStore.Record, target: WindowsInsertionTarget?) {
+    func present(_ record: DesktopRecordingStore.Record, output: WindowsRecordingOutput?) {
         selectedHistoryID = record.id
         transcriptVariant = .processed
         refreshHistory(selectRecord: true)
@@ -70,10 +72,9 @@ extension WindowsAppController {
         if let failure = record.postProcessingFailure {
             status = "Original transcript saved; post-processing failed. \(failure)"
         }
-        if let target, !transcript.isEmpty, !closed, record.failure == nil, record.postProcessingFailure == nil {
-            status = beginInsertion(transcript, to: target, recordID: record.id)
-                ? "Saved. Inserting into the original text field…"
-                : "Saved. An earlier insertion is still finishing; select Copy."
+        if let output, !transcript.isEmpty, !closed, record.failure == nil, record.postProcessingFailure == nil,
+           let started = beginOutput(transcript, output: output, recordID: record.id).status {
+            status = started
         }
         if selectedHistoryID == record.id {
             WindowsNative.recordingState(0)
@@ -87,7 +88,7 @@ extension WindowsAppController {
 
     func cancelTranscription() {
         guard !closed else { return }
-        cancelInsertion()
+        cancelOutput()
         guard busy else { return }
         cancellationRequested = true
         transcriptionTask?.cancel()

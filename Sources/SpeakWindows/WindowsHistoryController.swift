@@ -111,7 +111,8 @@ extension WindowsAppController {
         activeOperations += 1
         defer { busy = false; finishOperation() }
         selectedHistoryID = id
-        await transcribe(record, duration: record.result?.duration ?? 0, target: nil)
+        // A retry has no recording hotkey, so it never outputs automatically.
+        await transcribe(record, duration: record.result?.duration ?? 0, output: nil)
     }
 
     /// Text and version were captured on the UI thread before the save dialog.

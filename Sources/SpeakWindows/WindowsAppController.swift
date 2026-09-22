@@ -11,18 +11,21 @@ actor WindowsAppController {
         var microphoneDeviceID: String?
         var batchModel: String?
         var liveModel: String?
-        // No settings UI yet; edited by hand in settings.json. Absent keys keep
-        // the smart insert-at-cursor default with clipboard restoration.
+        // Edited in the Text output dialog. Absent or unknown keys keep the
+        // smart insert-at-cursor default with clipboard restoration.
         var textOutput: WindowsTextOutputOptions?
     }
 
+    /// Target, profile and text output are fixed when recording starts; a
+    /// later settings change applies only to later recordings.
     struct Recording {
-        let native: OpaquePointer
+        let capture: any WindowsRecordingCapture
         let context: WindowsCaptureContext
         var record: DesktopRecordingStore.Record
         let target: WindowsInsertionTarget?
         let live: DesktopLiveSession?
         let profile: DesktopProfileSession
+        let textOutput: WindowsTextOutputOptions
     }
 
     struct StoppedRecording {
@@ -31,9 +34,12 @@ actor WindowsAppController {
         let target: WindowsInsertionTarget?
         let live: DesktopLiveSession?
         let profile: DesktopProfileSession
+        let textOutput: WindowsTextOutputOptions
+        var output: WindowsRecordingOutput { WindowsRecordingOutput(options: textOutput, target: target) }
     }
 
     let directory: URL
+    let effects: any WindowsControllerEffects
     let store: DesktopRecordingStore
     let uploadStaging: SharedMultipartUploadStaging
     let modelCatalog: OpenRouterAudioCatalogStore
@@ -65,7 +71,7 @@ actor WindowsAppController {
     var cancellationRequested = false
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
-    var insertion = WindowsInsertionState()
+    var outputSlot = WindowsOutputState()
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     let playback = WindowsAudioPlaybackController(
@@ -73,8 +79,9 @@ actor WindowsAppController {
         presenter: WindowsAudioPlaybackPresenter(show: { WindowsNative.playback($0) }, status: { _ in })
     )
 
-    init(directory: URL) throws {
+    init(directory: URL, effects: any WindowsControllerEffects = WindowsNativeEffects()) throws {
         self.directory = directory
+        self.effects = effects
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
         self.uploadStaging = WindowsNative.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
         let profileStore = DesktopDictationProfileStore(directory: directory)
@@ -104,13 +111,16 @@ actor WindowsAppController {
         targetExecutablePath: String? = nil
     ) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
-        cancelInsertion()
+        cancelOutput()
         selectModel(modelIndex)
         selectMicrophone(deviceID)
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
         if recording != nil { await stopAndTranscribe(); return }
+        // Before any suspension: settings applied ahead of this event have been
+        // awaited, and a later Apply cannot change how this recording is output.
+        let textOutput = textOutputOptions()
         do {
             // Wait for acknowledged silence, while slow decoder release stays
             // off this actor. Busy prevents another capture during suspension.
@@ -118,26 +128,13 @@ actor WindowsAppController {
             guard !closed else { return }
             let profile = resolvedProfile(executablePath: targetExecutablePath)
             if let limitation = profile.blockingLimitation { throw WindowsNativeError(message: limitation.message) }
-            try await startRecording(target: target, deviceID: deviceID, profile: profile)
+            try await startRecording(target: target, deviceID: deviceID, profile: profile, textOutput: textOutput)
         } catch { update(error.localizedDescription, state: 0) }
     }
 
-    func stopCapture() throws -> StoppedRecording? {
-        guard let active = recording else { return nil }
-        recording = nil
-        liveUpdates?.cancel()
-        liveUpdates = nil
-        defer { jsti_capture_destroy(active.native) }
-        var stopFailure: Error?
-        do { try WindowsNative.checked { jsti_capture_stop(active.native, $0, $1) } } catch { stopFailure = error }
-        let duration: TimeInterval
-        do { duration = try active.context.file.finish() } catch { active.live?.cancel(); throw error }
-        if let stopFailure { active.live?.cancel(); throw stopFailure }
-        return StoppedRecording(
-            record: active.record, duration: active.context.file.isDigitalSilence ? 0 : duration,
-            target: active.target, live: active.live, profile: active.profile
-        )
-    }
+    /// Self-test only: startup without model discovery, which could reach the
+    /// network with a real saved credential.
+    func markReadyForSelfTest() { isReady = true }
 }
 
 extension WindowsAppController {
@@ -158,7 +155,7 @@ extension WindowsAppController {
                 await finishLive(stopped, session: live)
             } else {
                 await transcribe(
-                    stopped.record, duration: stopped.duration, target: stopped.target, profile: stopped.profile
+                    stopped.record, duration: stopped.duration, output: stopped.output, profile: stopped.profile
                 )
             }
         } catch {
@@ -169,7 +166,7 @@ extension WindowsAppController {
                     update("Recording and history error: \(error.localizedDescription)", state: 0)
                     return
                 }
-                present(pending, target: nil)
+                present(pending, output: nil)
                 return
             }
             update("Recording retained: \(error.localizedDescription)", state: 0)
@@ -194,7 +191,7 @@ extension WindowsAppController {
             update("\(message) History error: \(error.localizedDescription)", state: 0)
             return
         }
-        if let record { present(record, target: nil) } else {
+        if let record { present(record, output: nil) } else {
             update("Recording stopped and retained: \(message)", state: 0)
         }
     }
@@ -203,7 +200,7 @@ extension WindowsAppController {
         guard isReady, !busy, !closed, recording == nil,
               WindowsModels.all.indices.contains(modelIndex),
               !WindowsModels.isLive(WindowsModels.all[modelIndex].id) else { return }
-        cancelInsertion()
+        cancelOutput()
         selectModel(modelIndex)
         busy = true
         activeOperations += 1
@@ -211,7 +208,7 @@ extension WindowsAppController {
         do {
             try await playback.stopAndWait()
             guard !closed else { return }
-            guard !(try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))).isEmpty else {
+            guard !(try effects.apiKey(name: credentialIdentifier(for: settings.model))).isEmpty else {
                 throw TranscriptionProviderError.apiKeyMissing
             }
             let source = URL(fileURLWithPath: path)
@@ -228,7 +225,8 @@ extension WindowsAppController {
                 try await saveRecord(cancelled)
                 return
             }
-            await transcribe(record, duration: 0, target: nil)
+            // An import has no recording hotkey, so it never outputs automatically.
+            await transcribe(record, duration: 0, output: nil)
         } catch { update(error.localizedDescription, state: 0) }
     }
 
@@ -244,7 +242,7 @@ extension WindowsAppController {
         }
         closed = true
         modelDiscoveryTask?.cancel()
-        cancelInsertion()
+        cancelOutput()
         cancellationRequested = true
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()

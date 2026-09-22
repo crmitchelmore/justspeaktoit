@@ -12,6 +12,10 @@ bool jsti_settings_self_test(HWND owner, std::string &error);
 bool jsti_profiles_self_test(HWND owner, std::string &error);
 void jsti_show_profiles(HWND owner);
 void jsti_cancel_profiles_request();
+bool jsti_text_output_available();
+void jsti_show_text_output(HWND owner);
+bool jsti_text_output_settings_self_test(HWND owner, int button, void (*setRecording)(HWND, int),
+                                         bool (*recordingBlocked)(HWND, void *), void *context, std::string &error);
 
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
@@ -32,6 +36,8 @@ constexpr int playbackLabelID = 98;
 constexpr int playPauseID = 160;
 constexpr int stopPlaybackID = 161;
 constexpr int playbackTimeID = 162;
+// Opens the native Text output dialog directly; it emits no window event.
+constexpr int textOutputID = 170;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 struct HistoryRow {
@@ -379,7 +385,8 @@ void layout(HWND window) {
     move(saveID, contentLeft + width - saveWidth, keyTop, saveWidth, row);
     const int microphoneTop = keyTop + row + gap;
     move(94, contentLeft, microphoneTop, width, scale(window, 22));
-    move(microphoneID, contentLeft, microphoneTop + scale(window, 26), width, scale(window, 260));
+    move(microphoneID, contentLeft, microphoneTop + scale(window, 26), width - settingsWidth - gap, scale(window, 260));
+    move(textOutputID, contentLeft + width - settingsWidth, microphoneTop + scale(window, 26), settingsWidth, row);
     const int actionsTop = microphoneTop + scale(window, 26) + row + gap;
     const int actionWidth = (width - 2 * gap) / 3;
     move(recordID, contentLeft, actionsTop, actionWidth, row);
@@ -485,6 +492,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Save key", BS_PUSHBUTTON | WS_TABSTOP, saveID) &&
         add(L"STATIC", L"&Microphone", 0, 94) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, microphoneID) &&
+        add(L"BUTTON", L"Text o&utput…", BS_PUSHBUTTON | WS_TABSTOP, textOutputID) &&
         add(L"BUTTON", L"&Record", BS_PUSHBUTTON | WS_TABSTOP, recordID) &&
         add(L"BUTTON", L"&Import audio", BS_PUSHBUTTON | WS_TABSTOP, importID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID) &&
@@ -512,6 +520,7 @@ bool createControls(HWND window) {
     applyVariant(window, -1, false, 0);
     updateHistoryControls(window, 0);
     EnableWindow(GetDlgItem(window, processingID), jsti_postprocessing_available());
+    EnableWindow(GetDlgItem(window, textOutputID), jsti_text_output_available());
     std::wstring modelStatus;
     bool refreshing;
     {
@@ -642,6 +651,7 @@ void applyUpdate(HWND window) {
     for (int id : {keyID, saveID, microphoneID, profilesID}) EnableWindow(GetDlgItem(window, id), recording == 0);
     updateModelAvailability(window, recording);
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
+    EnableWindow(GetDlgItem(window, textOutputID), recording == 0 && jsti_text_output_available());
     if (historyChanged) {
         HWND list = GetDlgItem(window, historyID);
         const LRESULT oldTop = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
@@ -772,6 +782,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         case processingID: jsti_show_postprocessing(window); return 0;
+        case textOutputID:
+            // Only while idle and not already behind another modal editor.
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, textOutputID) && IsWindowEnabled(window)) {
+                jsti_show_text_output(window);
+            }
+            return 0;
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
         case exportID:
             if (IsWindowEnabled(GetDlgItem(window, exportID))) emitHistory(window, JSTI_EVENT_HISTORY_EXPORT);
@@ -2022,7 +2038,19 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             windowBounds.bottom - windowBounds.top < scale(window, 684) || !checkBounds() || !changeMode(1, 4)) {
             failure = "Adding the first live mode lost its preference or overlapped the model controls."; return false;
         }
-        return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure);
+        // The Text output modal must block both background recording paths.
+        auto setRecording = [](HWND owner, int recording) {
+            jsti_window_update(nullptr, nullptr, recording);
+            applyUpdate(owner);
+        };
+        auto recordingBlocked = [](HWND owner, void *context) {
+            const int before = static_cast<Event *>(context)->event;
+            SendMessageW(owner, WM_HOTKEY, hotkeyID, 0);
+            SendMessageW(owner, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
+            return static_cast<Event *>(context)->event == before;
+        };
+        return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
+            jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure);
     };
     bool passed = false;
     try { passed = check(); }

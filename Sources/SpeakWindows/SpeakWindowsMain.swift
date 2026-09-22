@@ -104,15 +104,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         // Capture synchronously before an actor hop or another app gains focus.
         // No external field focused is not an error here: the transcript is
         // still saved and offered for Copy.
-        let captured = try? WindowsInsertionTarget.capture()
-        let pendingSettings = holder.currentSettingsTask
-        Task {
-            await pendingSettings?.value
-            await controller.toggle(
-                target: captured, modelIndex: Int(index), deviceID: value,
-                targetExecutablePath: captured?.executablePath
-            )
-        }
+        toggleRecording(holder, target: try? WindowsInsertionTarget.capture(), modelIndex: Int(index), deviceID: value)
     case 2:
         let pendingSettings = holder.currentSettingsTask
         Task {
@@ -127,6 +119,22 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     case 8: WindowsNative.update(value)
     case 13: holder.enqueueSettings { await controller.selectMicrophone(value) }
     default: secondaryWindowEvent(event, value: value, holder: holder)
+    }
+}
+
+/// Settings applied before this event finish first, so a recording starts with
+/// them; the controller then fixes its text output for the whole recording.
+@discardableResult
+func toggleRecording(
+    _ holder: WindowsEventContext, target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String
+) -> Task<Void, Never> {
+    let pendingSettings = holder.currentSettingsTask
+    let controller = holder.controller
+    return Task {
+        await pendingSettings?.value
+        await controller.toggle(
+            target: target, modelIndex: modelIndex, deviceID: deviceID, targetExecutablePath: target?.executablePath
+        )
     }
 }
 
@@ -241,6 +249,8 @@ enum SpeakWindowsMain {
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
                 try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
+                try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
+                try await WindowsTextOutputSelfTest.run()
                 try WindowsNative.checked { jsti_private_storage_self_test($0, $1) }
                 try WindowsNative.stagingSelfTest()
                 try WindowsNative.checked { jsti_websocket_self_test($0, $1) }
@@ -286,6 +296,8 @@ enum SpeakWindowsMain {
         try WindowsNative.configurePostProcessing(
             processing, context: Unmanaged.passUnretained(holder).toOpaque()
         )
+        let textOutput = await controller.textOutputOptions()
+        try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         let preferences = await controller.preferredModelIDs()
         try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
         try await controller.configureModelCatalog()

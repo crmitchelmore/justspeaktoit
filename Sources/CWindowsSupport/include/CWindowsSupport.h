@@ -179,6 +179,33 @@ int jsti_window_set_postprocessing(const char *const *model_names, size_t model_
                                    int selected_index, int enabled, const char *prompt,
                                    JSTIPostProcessingCallback callback, void *context);
 
+/* Stable text output choices across the native boundary. restore_clipboard is
+ * 0/1 and only affects a Smart paste at the cursor; the dialog keeps every
+ * stored choice even while it is irrelevant to the selected method. */
+enum JSTITextOutputMethod {
+    JSTI_TEXT_OUTPUT_SMART = 0,
+    JSTI_TEXT_OUTPUT_DIRECT_ONLY = 1,
+    JSTI_TEXT_OUTPUT_CLIPBOARD_ONLY = 2
+};
+enum JSTITextOutputInsertion {
+    JSTI_TEXT_OUTPUT_AT_CURSOR = 0,
+    JSTI_TEXT_OUTPUT_REPLACE_FIELD = 1
+};
+/* Atomic Apply from the native Text output dialog, on the UI thread: exactly
+ * one complete snapshot per Apply. Cancel, Escape and closing emit nothing.
+ * Return promptly; never wait for a Swift actor here. */
+typedef void (*JSTITextOutputSettingsCallback)(int method, int insertion, int restore_clipboard, void *context);
+/* Thread safe; valid before window_run and from any thread afterwards. Invalid
+ * values or a null callback return -1 and keep the previous configuration.
+ * The context is borrowed until window_run returns. The dialog opens from the
+ * latest configuration; refresh it with the persisted choices after every save
+ * attempt so a reopened dialog never shows unsaved choices. */
+int jsti_window_set_text_output(int method, int insertion, int restore_clipboard,
+                                JSTITextOutputSettingsCallback callback, void *context);
+/* Reads the configuration the dialog will open with. -1 when unconfigured or
+ * an output pointer is null. */
+int jsti_window_text_output(int *method, int *insertion, int *restore_clipboard);
+
 /* Borrowed UTF-8 draft values. Choice -1 inherits the app setting, -2 preserves
  * an existing unavailable value, otherwise indexes the supplied catalogue.
  * polish_mode: 0 inherit, 1 disabled, 2 enabled. Paths are newline-separated. */
@@ -362,6 +389,36 @@ int jsti_insertion_copy_text(JSTIInsertionTarget *target, const char *text, JSTI
 int jsti_insertion_executable_path(const JSTIInsertionTarget *target, char *path, size_t path_capacity,
                                    size_t *required_bytes, char *error, size_t error_capacity);
 void jsti_insertion_destroy(JSTIInsertionTarget *target);
+
+/* Automatic clipboard output for one completed recording whose method is copy
+ * to clipboard, including recordings started with Record in this window, which
+ * have no captured field. It never queries or follows focus, never inserts and
+ * never sends input. The transcript is left as plain Unicode text, exactly like
+ * jsti_insertion_copy_text. A job copies at most once. */
+typedef struct JSTIClipboardOutput JSTIClipboardOutput;
+/* Allocates a job without touching the clipboard. */
+JSTIClipboardOutput *jsti_clipboard_output_create(char *error, size_t error_capacity);
+/* Blocks for a bounded time; call off the UI thread and outside actors. A
+ * cancelled job, or one used by an earlier attempt, is refused before the text
+ * is read or the clipboard opened; any other attempt uses the job up.
+ * Otherwise the clipboard is opened (10 attempts, 20 ms apart) and its content
+ * snapshotted; then, while it is still owned, cancellation is checked under the
+ * job's lock immediately before replacement. A cancel that returned before
+ * that check guarantees no clipboard change; a later cancel cannot stop the
+ * committed write, which is reported. 0 copied; -1 nothing copied, and
+ * clipboard_state (JSTIInsertionClipboard, optional) reports whether a failed
+ * write restored the previous content. Text must be non-empty UTF-8. */
+int jsti_clipboard_output_copy(JSTIClipboardOutput *job, const char *text, int *clipboard_state,
+                               char *error, size_t error_capacity);
+/* Thread safe and nonblocking, including while copy runs on another thread. */
+void jsti_clipboard_output_cancel(JSTIClipboardOutput *job);
+/* Call once, after copy has returned or when it was never called. */
+void jsti_clipboard_output_destroy(JSTIClipboardOutput *job);
+/* Synthetic in-memory clipboard only: copy, cancellation before and inside the
+ * owned section, single use, failed-write restore and bounded busy failure.
+ * Never touches the system clipboard. */
+int jsti_clipboard_output_self_test(char *error, size_t error_capacity);
+
 /* Deterministic native checks on app-owned synthetic hidden controls with
  * injected foreground, clipboard and keystroke seams: caret/selection
  * insertion, surrogate pairs, stale identity, password/read-only refusal,
@@ -557,8 +614,11 @@ int jsti_native_self_test(char *error, size_t error_capacity);
 int jsti_audio_devices_self_test(char *error, size_t error_capacity);
 /* Call on the UI thread from READY in smoke-test mode. Verifies native control
  * bounds, history updates/events, search/filter selection handling, transcript
- * variant action identities and an invisible settings Apply round-trip.
- * Restores history afterwards; never uses microphone, clipboard or credentials. */
+ * variant action identities, an invisible settings Apply round-trip and the Text
+ * output dialog: every choice through its controls, Cancel/Escape/Enter,
+ * keyboard order, minimum bounds and its modal loop blocking recording.
+ * Restores history and text output configuration afterwards; never uses
+ * microphone, clipboard or credentials. */
 int jsti_window_self_test(char *error, size_t error_capacity);
 /* Smoke-test diagnostics only: writes a 32-bit BMP of this application's client
  * window and controls. Call on the UI thread after READY. Never captures the

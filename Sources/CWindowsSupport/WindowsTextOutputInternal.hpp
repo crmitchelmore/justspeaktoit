@@ -8,6 +8,7 @@
 #include <ole2.h>
 #include <uiautomationclient.h>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -92,5 +93,15 @@ bool waitForWorkersToExit(DWORD timeoutMs);
 UINT excludeFromMonitoringFormat();
 UINT excludeFromHistoryFormat();
 UINT excludeFromCloudFormat();
+
+// Clipboard-only output, the same placement jsti_insertion_copy_text uses: a
+// private owner opens the clipboard through the environment (bounded retry)
+// and snapshots it; mayWrite then runs while ownership is held, immediately
+// before replacement, and false leaves the clipboard untouched. On success the
+// text stays as plain CF_UNICODETEXT for the user. On failure clipboardState
+// (JSTIInsertionClipboard) reports whether a failed write restored the
+// previous content.
+bool copyTextToClipboard(const Environment &environment, const std::wstring &text,
+                         const std::function<bool()> &mayWrite, int &clipboardState, std::string &error);
 
 } // namespace jsti::textoutput

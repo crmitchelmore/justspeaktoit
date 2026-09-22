@@ -6,9 +6,8 @@ import CWindowsSupport
 
 extension WindowsAppController {
     func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
-        guard WindowsModels.isLive(model), let client = DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, makeConnection: { WinHTTPStreamingConnection(request: $0) }
-        ) else { return nil }
+        guard WindowsModels.isLive(model),
+              let client = effects.makeLiveClient(model: model, key: key, language: language) else { return nil }
         return DesktopLiveSession(client: client, id: id)
     }
 
@@ -58,7 +57,7 @@ extension WindowsAppController {
             if record.failure == nil { record = await postProcess(record, options: options) }
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
-            if !closed { present(record, target: stopped.target) }
+            if !closed { present(record, output: stopped.output) }
         } catch {
             update("Live recording retained; history could not be saved: \(error.localizedDescription)", state: 0)
         }

@@ -6,9 +6,10 @@ import CWindowsSupport
 
 extension WindowsAppController {
     func startRecording(
-        target: WindowsInsertionTarget?, deviceID: String, profile: DesktopProfileSession
+        target: WindowsInsertionTarget?, deviceID: String, profile: DesktopProfileSession,
+        textOutput: WindowsTextOutputOptions
     ) async throws {
-        let key = try WindowsNative.apiKey(name: credentialIdentifier(for: profile.modelIdentifier))
+        let key = try effects.apiKey(name: credentialIdentifier(for: profile.modelIdentifier))
         guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
         let id = UUID()
         let filename = id.uuidString + ".wav"
@@ -28,16 +29,17 @@ extension WindowsAppController {
             let context = WindowsCaptureContext(file: file, live: live) { message in
                 Task { await self.captureFailed(message, recordingID: id) }
             }
-            let native = try WindowsNative.createCapture(
+            let capture = try effects.makeCapture(
                 context: context, deviceID: deviceID, sampleRate: rate,
                 frameMilliseconds: DesktopLiveTranscription.captureFrameMilliseconds(forID: profile.modelIdentifier)
             )
-            do { try WindowsNative.checked { jsti_capture_start(native, $0, $1) } } catch {
-                withExtendedLifetime(context) { jsti_capture_destroy(native) }
+            do { try capture.start() } catch {
+                capture.destroy()
                 throw error
             }
             recording = Recording(
-                native: native, context: context, record: record, target: target, live: live, profile: profile
+                capture: capture, context: context, record: record, target: target, live: live, profile: profile,
+                textOutput: textOutput
             )
             if let live { monitorLive(live) }
         } catch {
@@ -58,5 +60,22 @@ extension WindowsAppController {
             throw startupFailure
         }
         update(profileRecordingStatus(profile), state: 1)
+    }
+
+    func stopCapture() throws -> StoppedRecording? {
+        guard let active = recording else { return nil }
+        recording = nil
+        liveUpdates?.cancel()
+        liveUpdates = nil
+        defer { active.capture.destroy() }
+        var stopFailure: Error?
+        do { try active.capture.stop() } catch { stopFailure = error }
+        let duration: TimeInterval
+        do { duration = try active.context.file.finish() } catch { active.live?.cancel(); throw error }
+        if let stopFailure { active.live?.cancel(); throw stopFailure }
+        return StoppedRecording(
+            record: active.record, duration: active.context.file.isDigitalSilence ? 0 : duration,
+            target: active.target, live: active.live, profile: active.profile, textOutput: active.textOutput
+        )
     }
 }

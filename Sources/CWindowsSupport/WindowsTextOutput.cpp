@@ -981,6 +981,18 @@ UINT excludeFromCloudFormat() {
     return format;
 }
 
+bool copyTextToClipboard(const Environment &environment, const std::wstring &text,
+                         const std::function<bool()> &mayWrite, int &clipboardState, std::string &error) {
+    clipboardState = JSTI_INSERTION_CLIPBOARD_UNTOUCHED;
+    OwnerWindow owner;
+    if (!owner.handle) { error = systemError("Creating clipboard owner", owner.error); return false; }
+    DWORD sequence = 0;
+    if (!placeText(*environment.clipboard(), owner.handle, text, false, sequence, error, nullptr, &clipboardState,
+                   mayWrite)) return false;
+    clipboardState = JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT;
+    return true;
+}
+
 } // namespace jsti::textoutput
 
 using namespace jsti::textoutput;

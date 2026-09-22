@@ -55,6 +55,56 @@ public struct WindowsTextOutputOptions: Codable, Equatable, Sendable {
         if method == .directOnly { flags |= UInt32(JSTI_INSERTION_NO_PASTE_FALLBACK.rawValue) }
         return flags
     }
+
+    /// Stable integers for the native Text output dialog.
+    public var nativeChoice: WindowsTextOutputNativeChoice {
+        let method: JSTITextOutputMethod
+        switch self.method {
+        case .smart: method = JSTI_TEXT_OUTPUT_SMART
+        case .directOnly: method = JSTI_TEXT_OUTPUT_DIRECT_ONLY
+        case .clipboardOnly: method = JSTI_TEXT_OUTPUT_CLIPBOARD_ONLY
+        }
+        let insertion = self.insertion == .replaceField ? JSTI_TEXT_OUTPUT_REPLACE_FIELD : JSTI_TEXT_OUTPUT_AT_CURSOR
+        return WindowsTextOutputNativeChoice(
+            method: Int32(method.rawValue), insertion: Int32(insertion.rawValue),
+            restoreClipboard: restoreClipboard ? 1 : 0
+        )
+    }
+
+    /// Nil outside the native contract, so a malformed Apply is never saved as
+    /// a different choice.
+    public init?(nativeChoice choice: WindowsTextOutputNativeChoice) {
+        let method: Method
+        switch choice.method {
+        case Int32(JSTI_TEXT_OUTPUT_SMART.rawValue): method = .smart
+        case Int32(JSTI_TEXT_OUTPUT_DIRECT_ONLY.rawValue): method = .directOnly
+        case Int32(JSTI_TEXT_OUTPUT_CLIPBOARD_ONLY.rawValue): method = .clipboardOnly
+        default: return nil
+        }
+        let insertion: Insertion
+        switch choice.insertion {
+        case Int32(JSTI_TEXT_OUTPUT_AT_CURSOR.rawValue): insertion = .insertAtCursor
+        case Int32(JSTI_TEXT_OUTPUT_REPLACE_FIELD.rawValue): insertion = .replaceField
+        default: return nil
+        }
+        guard choice.restoreClipboard == 0 || choice.restoreClipboard == 1 else { return nil }
+        self.init(method: method, insertion: insertion, restoreClipboard: choice.restoreClipboard == 1)
+    }
+}
+
+/// The three values exchanged with `jsti_window_set_text_output` and its
+/// Apply callback: method 0 smart, 1 direct only, 2 clipboard only; insertion
+/// 0 at the cursor, 1 replace the field; restore 0 or 1.
+public struct WindowsTextOutputNativeChoice: Equatable, Sendable {
+    public let method: Int32
+    public let insertion: Int32
+    public let restoreClipboard: Int32
+
+    public init(method: Int32, insertion: Int32, restoreClipboard: Int32) {
+        self.method = method
+        self.insertion = insertion
+        self.restoreClipboard = restoreClipboard
+    }
 }
 
 public struct WindowsTextOutputError: LocalizedError, Equatable, Sendable {

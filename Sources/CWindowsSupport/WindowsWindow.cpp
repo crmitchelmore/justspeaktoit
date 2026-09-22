@@ -199,6 +199,9 @@ std::string selectedMicrophone(HWND window) {
 }
 
 void emitRecording(HWND window) {
+    // Registered hotkeys still reach a disabled owner through a modal loop.
+    // Child controls keep their enabled flags, so check the owner as well.
+    if (!IsWindowEnabled(window)) return;
     int recording;
     { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
     if (recording == 2) { emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION); return; }
@@ -294,7 +297,7 @@ void layout(HWND window) {
     const int width = availableWidth - historyWidth - margin;
     const int saveWidth = scale(window, 112);
     auto move = [&](int id, int x, int y, int w, int h) { MoveWindow(GetDlgItem(window, id), x, y, w, h, TRUE); };
-    const int modelTop = margin + (hasModeChoice() ? row : 0);
+    const int modelTop = margin + row; // The App profiles action always occupies the top row.
     move(95, contentLeft, margin + scale(window, 3), scale(window, 64), scale(window, 22));
     const int profilesWidth = scale(window, 118);
     move(modeID, contentLeft + scale(window, 70), margin,
@@ -362,7 +365,7 @@ void refreshFont(HWND window) {
 void updateModelLayout(HWND window) {
     RECT bounds{};
     GetWindowRect(window, &bounds);
-    const int minimumHeight = scale(window, hasModeChoice() ? 684 : 650);
+    const int minimumHeight = scale(window, 684);
     if (bounds.bottom - bounds.top < minimumHeight) {
         SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, minimumHeight,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -555,7 +558,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return createControls(window) ? 0 : -1;
     case WM_GETMINMAXINFO: {
         auto info = reinterpret_cast<MINMAXINFO *>(lparam);
-        info->ptMinTrackSize = {scale(window, 820), scale(window, hasModeChoice() ? 684 : 650)};
+        info->ptMinTrackSize = {scale(window, 820), scale(window, 684)};
         return 0;
     }
     case WM_SIZE:
@@ -770,7 +773,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Just Speak to It — Windows Preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        1100, hasModeChoice() ? 804 : 770, nullptr, nullptr, instance, nullptr) : nullptr;
+        1100, 804, nullptr, nullptr, instance, nullptr) : nullptr;
     int outcome = 0;
     if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     else {
@@ -1065,7 +1068,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     state.context = &observed;
     std::string failure;
     auto checkBounds = [&]() -> bool {
-        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, hasModeChoice() ? 684 : 650),
+        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, 684),
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         layout(window);
         RECT client{};
@@ -1123,6 +1126,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(saveID, BN_CLICKED), 0);
         if (observed.event != JSTI_EVENT_SAVE_CREDENTIAL || observed.model != 1) {
             failure = "Credential callback did not identify the global live model."; return false;
+        }
+        const int beforeModalRecording = observed.event;
+        EnableWindow(window, FALSE);
+        SendMessageW(window, WM_HOTKEY, hotkeyID, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
+        const bool modalBlocked = observed.event == beforeModalRecording;
+        EnableWindow(window, TRUE);
+        SendMessageW(window, WM_HOTKEY, hotkeyID, 0);
+        if (!modalBlocked || observed.event != JSTI_EVENT_TOGGLE_RECORDING || observed.model != 1) {
+            failure = "A modal editor allowed background recording, or recording did not recover on close."; return false;
         }
         // Disabled Live import must never open a modal chooser or emit an event.
         const int previousEvent = observed.event;
@@ -1379,6 +1392,12 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             selection(window) != 2 || SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 4) {
             if (failure.empty()) failure = "The all-batch model catalogue lost legacy behaviour.";
             return false;
+        }
+        RECT profileButton{}, modelLabel{};
+        GetWindowRect(GetDlgItem(window, profilesID), &profileButton);
+        GetWindowRect(GetDlgItem(window, 90), &modelLabel);
+        if (!IsWindowVisible(GetDlgItem(window, profilesID)) || profileButton.bottom > modelLabel.top) {
+            failure = "The all-batch catalogue overlapped App profiles and the model label."; return false;
         }
         // A host initially exposing only batch can add its first live route
         // without restarting or changing the current batch preference.

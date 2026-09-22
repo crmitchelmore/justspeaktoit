@@ -307,8 +307,11 @@ extension DesktopProfileEditing {
         var cleaned: [String] = []
         for raw in paths {
             let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let key = DictationProfileMatcher.normalizedWindowsExecutablePath(path),
-                  seen.insert(key).inserted else { continue }
+            guard !path.isEmpty else { continue }
+            // Nonblank invalid paths must reach validation. A device prefix
+            // alone normalises to nil; dropping it would silently erase a rule.
+            let key = DictationProfileMatcher.normalizedWindowsExecutablePath(path) ?? path
+            guard seen.insert(key).inserted else { continue }
             cleaned.append(path)
         }
         return cleaned

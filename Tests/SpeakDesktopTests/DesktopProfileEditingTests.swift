@@ -233,6 +233,19 @@ final class DesktopProfileEditingTests: XCTestCase {
         XCTAssertTrue(unnamedFailure.message.hasPrefix("Unnamed profile"))
     }
 
+    func testNonblankDevicePrefixIsRejectedInsteadOfErasingItsMatcher() {
+        let invalid = #"\\?\"#
+        let draft = DesktopProfileEditing.Draft(name: "Incomplete path", executablePaths: [invalid])
+        guard case .failure(let failure) = DesktopProfileEditing.merge([draft], into: [], catalogue: catalogue) else {
+            return XCTFail("A nonblank incomplete path must be rejected")
+        }
+        XCTAssertEqual(failure.rejections.first?.issues, [.invalidWindowsExecutablePath(path: invalid)])
+        XCTAssertEqual(DesktopProfileEditing.cleanedPaths(["", " \t", invalid, invalid]), [invalid])
+        let blank = DesktopProfileEditing.Draft(name: "No Windows matcher", executablePaths: ["", " \t"])
+        let saved = try? DesktopProfileEditing.merge([blank], into: [], catalogue: catalogue).get()
+        XCTAssertEqual(saved?.first?.windowsExecutablePaths, [])
+    }
+
     func testInvalidCatalogueSelectionsCannotSilentlyBecomeAppDefaults() {
         var draft = DesktopProfileEditing.Draft(name: "Invalid selections")
         for choice in [DesktopProfileEditing.TranscriptionChoice.batch(index: -1), .live(index: Int.max)] {

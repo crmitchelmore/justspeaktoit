@@ -138,7 +138,7 @@ bool controls(HWND window, Dialog &dialog) {
     const DWORD combo = CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL;
     const DWORD edit = ES_AUTOHSCROLL | WS_TABSTOP;
     const DWORD multiline = ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_TABSTOP | WS_VSCROLL;
-    const DWORD button = BS_PUSHBUTTON | WS_TABSTOP;
+    const DWORD button = BS_PUSHBUTTON | BS_NOTIFY | WS_TABSTOP;
     if (!(add(L"STATIC", L"&Profiles\nFirst matching profile wins", 0, 600) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | WS_BORDER | WS_VSCROLL | WS_TABSTOP, listID) &&
         add(L"BUTTON", L"&Add", button, addID) && add(L"BUTTON", L"&Remove", button, removeID) &&
@@ -153,7 +153,7 @@ bool controls(HWND window, Dialog &dialog) {
         add(L"STATIC", L"Polish &instructions (blank keeps the app setting)", 0, 607) &&
         add(L"EDIT", L"", multiline, promptID) && add(L"STATIC", L"Polish &output language", 0, 608) &&
         add(L"EDIT", L"", edit, outputID) && add(L"STATIC", L"", SS_LEFT, notesID) &&
-        add(L"BUTTON", L"&Apply", BS_DEFPUSHBUTTON | WS_TABSTOP, IDOK) &&
+        add(L"BUTTON", L"&Apply", BS_DEFPUSHBUTTON | BS_NOTIFY | WS_TABSTOP, IDOK) &&
         add(L"BUTTON", L"Cancel", button, IDCANCEL))) return false;
     for (const wchar_t *value : {L"Use app setting", L"Disabled", L"Enabled"})
         SendDlgItemMessageW(window, polishModeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(value));
@@ -243,14 +243,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             else if (control.bottom > bounds.bottom) dialog->scroll += control.bottom - bounds.bottom + scale(window, 8);
             layout(window);
         }
-        if (id == IDCANCEL) { DestroyWindow(window); return 0; }
-        if (id == IDOK) { if (apply(window, *dialog)) DestroyWindow(window); return 0; }
-        if (id == browseID) { browse(window); return 0; }
+        if (id == IDCANCEL && HIWORD(wparam) == BN_CLICKED) { DestroyWindow(window); return 0; }
+        if (id == IDOK && HIWORD(wparam) == BN_CLICKED) { if (apply(window, *dialog)) DestroyWindow(window); return 0; }
+        if (id == browseID && HIWORD(wparam) == BN_CLICKED) { browse(window); return 0; }
         if (id == listID && HIWORD(wparam) == LBN_SELCHANGE) {
             const int selected = static_cast<int>(SendDlgItemMessageW(window, listID, LB_GETCURSEL, 0, 0));
             storeCurrent(window, *dialog); dialog->selected = selected; populate(window, *dialog); return 0;
         }
-        if (id == addID || id == removeID || id == upID || id == downID) {
+        if (HIWORD(wparam) == BN_CLICKED && (id == addID || id == removeID || id == upID || id == downID)) {
             storeCurrent(window, *dialog); auto &rows = dialog->config.drafts;
             if (id == addID && rows.size() < 1000) {
                 rows.emplace_back(); rows.back().name = L"New profile"; dialog->selected = static_cast<int>(rows.size() - 1);
@@ -383,6 +383,28 @@ bool jsti_profiles_self_test(HWND owner, std::string &error) {
     SendDlgItemMessageW(window, languageID, CB_SETCURSEL, 2, 0);
     SendMessageW(window, WM_COMMAND, MAKEWPARAM(upID, BN_CLICKED), 0);
     SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, 440), SWP_NOMOVE | SWP_NOZORDER);
+    // Focus notifications must reveal offscreen actions without invoking them.
+    // Buttons need BS_NOTIFY, and only BN_CLICKED may mutate/apply/cancel drafts.
+    ShowWindow(window, SW_SHOW); SetActiveWindow(window);
+    bool focusReachable = true;
+    const int focusControls[] = {IDOK, IDCANCEL, addID, removeID, downID};
+    for (int id : focusControls) {
+        SendMessageW(window, WM_VSCROLL, SB_TOP, 0);
+        SetFocus(GetDlgItem(window, nameID));
+        const HWND control = GetDlgItem(window, id);
+        SetFocus(control);
+        if (!IsWindow(window)) { focusReachable = false; break; }
+        RECT position{}, client{};
+        GetWindowRect(control, &position);
+        MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&position), 2);
+        GetClientRect(window, &client);
+        focusReachable = focusReachable && GetFocus() == control && position.top >= 0 && position.bottom <= client.bottom
+            && !dialog.accepted && outcome.calls == 0 && dialog.config.drafts.size() == 2 && dialog.selected == 0;
+    }
+    if (!focusReachable) {
+        if (IsWindow(window)) DestroyWindow(window);
+        error = "Profile action focus either stayed offscreen or changed an unapplied draft."; return false;
+    }
     SendMessageW(window, WM_VSCROLL, SB_BOTTOM, 0);
     RECT button{}, bounds{}; GetWindowRect(GetDlgItem(window, IDOK), &button);
     MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&button), 2); GetClientRect(window, &bounds);

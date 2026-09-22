@@ -34,7 +34,12 @@ final class SpeechmaticsLiveRun: @unchecked Sendable {
     /// reports this, floored by the server's own `AudioAdded` acknowledgements.
     var sentAudioFrameCount = 0
     var lastAcknowledgedSeqNo = -1
-    var endOfStreamSent = false
+    /// The client's ordered `EndOfStream` has been handed to the socket. From
+    /// that moment the server's `EndOfTranscript` is the authoritative terminal
+    /// answer, even when it arrives before the transport reports the send
+    /// complete; before it, an `EndOfTranscript` means the session ended with
+    /// audio still local and is a failure.
+    var endOfStreamHandedOff = false
 
     let budget: StreamingAudioSendBudget
     var accumulated = TranscriptAccumulator(shape: .standaloneSegments)

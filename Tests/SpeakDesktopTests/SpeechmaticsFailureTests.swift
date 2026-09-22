@@ -276,6 +276,10 @@ final class SpeechmaticsAutoSocket: StreamingWebSocketConnection, @unchecked Sen
         let callback = lock.withLock { let value = receiver; receiver = nil; return value }
         callback?(.success(.text(#"{"message":"RecognitionStarted","id":"sess_1"}"#)))
     }
+    func failReceive(_ error: Error) {
+        let callback = lock.withLock { let value = receiver; receiver = nil; return value }
+        callback?(.failure(error))
+    }
 }
 
 private final class SpeechmaticsFinishGate: @unchecked Sendable {

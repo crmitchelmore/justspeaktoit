@@ -19,20 +19,18 @@ extension SpeechmaticsLiveClient {
             guard active.ready else { return }
             message = .binary(data)
             payload = .audio(data.count)
-            // Counted at hand-off, exactly as the tail's `last_seq_no` expects.
-            active.sentAudioFrameCount += 1
         case .endOfStream:
             guard active.ready else { return }
+            // Every audio frame ahead of this one has completed, so the count is
+            // final; the server's acknowledgements are its floor.
             let lastSeqNo = Self.endOfStreamLastSequenceNumber(
                 lastAcknowledged: active.lastAcknowledgedSeqNo, sentFrameCount: active.sentAudioFrameCount
             )
-            guard let json = Self.endOfStreamPayload(lastSeqNo: lastSeqNo) else {
-                active.outgoing.removeFirst()
-                close(active)
-                return
-            }
-            message = .text(json)
+            message = .text(Self.endOfStreamPayload(lastSeqNo: lastSeqNo))
             payload = .endOfStream
+            // From here the server's `EndOfTranscript` is the authoritative
+            // answer, even if it lands before this send's completion callback.
+            active.endOfStreamHandedOff = true
         }
         active.outgoing.removeFirst()
         active.sending = true
@@ -51,13 +49,17 @@ extension SpeechmaticsLiveClient {
         guard isCurrent(active), active.sending, active.sendID == sendID else { return }
         active.sending = false
         if case .audio(let bytes) = payload { active.budget.release(bytes) }
-        if let error, !WebSocketErrorFilter.shouldIgnore(error) {
-            // A failed `AddAudio` or `EndOfStream` send is reported, never
-            // absorbed and then presented as a successful finalisation.
+        if let error {
+            // A rejected `StartRecognition`, `AddAudio` or `EndOfStream` is a
+            // failed session, never a frame to skip: the service did not receive
+            // it, so nothing after it could be a successful finalisation. A
+            // teardown-shaped `ENOTCONN` is no exception while the run is still
+            // current; a late one after `EndOfTranscript` finds the run closed.
             fail(mapConnectionError(error), active)
             return
         }
-        if case .endOfStream = payload { active.endOfStreamSent = true }
+        // Only a frame the transport confirmed counts towards `last_seq_no`.
+        if case .audio = payload { active.sentAudioFrameCount += 1 }
         pump(active)
     }
 
@@ -66,10 +68,12 @@ extension SpeechmaticsLiveClient {
     /// readiness sleep, so a finish never blocks the caller's actor.
     ///
     /// A short recording finished during an ordinary handshake used to lose
-    /// everything the user said. The queued capture is sent when readiness
-    /// arrives inside the budget; a session that cannot become ready is still
-    /// closed with its best available transcript, because `EndOfStream` on an
-    /// unstarted session would be rejected.
+    /// everything the user said; the queued capture is now sent when readiness
+    /// arrives inside the budget. A session that cannot become ready, drain, or
+    /// receive `EndOfTranscript` inside the budget fails with a provider error
+    /// while keeping the text received so far: `EndOfStream` on an unstarted
+    /// session would be rejected, and a missing `EndOfTranscript` means the
+    /// tail may never have been transcribed, so neither is a success.
     func beginFinish(_ active: SpeechmaticsLiveRun) {
         guard isCurrent(active), active.connection != nil else { close(active); return }
         guard active.phase != .finishing else { return }
@@ -79,10 +83,22 @@ extension SpeechmaticsLiveClient {
         pump(active)
         if !active.ready {
             after(Self.finishReadyBudget, active) { client, active in
-                if !active.ready { client.close(active) }
+                if !active.ready { client.fail(SpeechmaticsRealtimeError.recognitionNotStarted, active) }
             }
         }
-        after(Self.finishBudget, active) { client, active in client.close(active) }
+        // One deadline, armed here, bounds readiness, the audio drain,
+        // `EndOfStream` and `EndOfTranscript` together; the finish never waits
+        // longer than this budget whatever stage it stalls in.
+        after(Self.finishBudget, active) { client, active in
+            client.fail(client.finishTimeoutError(active), active)
+        }
+    }
+
+    /// The most specific provider error for a finish that ran out of budget.
+    private func finishTimeoutError(_ active: SpeechmaticsLiveRun) -> Error {
+        if !active.ready { return SpeechmaticsRealtimeError.recognitionNotStarted }
+        if !active.endOfStreamHandedOff { return stalledError }
+        return SpeechmaticsRealtimeError.transcriptNotFinalised
     }
 
     /// Enqueues whatever is left in the framing buffer as the stream's final

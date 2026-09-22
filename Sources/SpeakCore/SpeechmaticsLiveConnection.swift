@@ -38,25 +38,20 @@ extension SpeechmaticsLiveClient {
                 guard self.isCurrent(active) else { return }
                 switch result {
                 case .failure(let error):
-                    self.handleReceiveFailure(error, active)
+                    // A valid `EndOfTranscript` closes the run before any expected
+                    // disconnect can reach it, so a failure that still finds the
+                    // run current is always premature: the session was waiting
+                    // for readiness, draining audio, or waiting for its terminal
+                    // frame. That includes a teardown-shaped `ENOTCONN`. Report
+                    // it and keep the accumulated text; only an explicit cancel
+                    // (which closes first) silences a later closure.
+                    self.fail(self.mapConnectionError(error), active)
                 case .success(let message):
                     self.parse(message, active)
                     self.receive(active, connection)
                 }
             }
         }
-    }
-
-    /// A closure while finishing is the expected end of a graceful stop; a
-    /// teardown race (`ENOTCONN`) is ignored the same way. Any other mid-session
-    /// drop is a reported transport failure so a dropped recording is not saved
-    /// as a silent success.
-    private func handleReceiveFailure(_ error: Error, _ active: SpeechmaticsLiveRun) {
-        if active.phase == .finishing || WebSocketErrorFilter.shouldIgnore(error) {
-            close(active)
-            return
-        }
-        fail(mapConnectionError(error), active)
     }
 
     func parse(_ message: StreamingWebSocketMessage, _ active: SpeechmaticsLiveRun) {
@@ -88,6 +83,15 @@ extension SpeechmaticsLiveClient {
             active.accumulated.append(final: text)
             active.onTranscript?(text, true)
         case .endOfTranscript:
+            // The authoritative terminal frame, valid only once our ordered
+            // `EndOfStream` has been handed to the socket. Earlier, it means the
+            // service ended the session while audio or the hand-off was still
+            // pending, which must surface as a failure rather than leave the
+            // host recording into a closed client.
+            guard active.endOfStreamHandedOff else {
+                fail(SpeechmaticsRealtimeError.unexpectedEndOfTranscript, active)
+                return
+            }
             close(active)
         case .failure(let error):
             fail(error, active)

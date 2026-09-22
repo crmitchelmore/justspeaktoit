@@ -107,6 +107,33 @@ final class SpeechmaticsDesktopFactoryTests: XCTestCase {
         client.cancel()
     }
 
+    func testDesktopFactoryGivesOpenAITheBareLanguageCodeAndDeepgramTheLocale() throws {
+        let openAIFactory = AssemblyAISocketFactory()
+        let openAI = try XCTUnwrap(DesktopLiveTranscription.makeClient(
+            model: OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID, apiKey: "k", language: "fr_FR",
+            makeConnection: { openAIFactory.make($0) }
+        ) as? OpenAIRealtimeLiveClient)
+        openAI.start(onTranscript: { _, _ in }, onError: { _ in })
+        openAIFactory.sockets[0].open()
+        let session = try XCTUnwrap(openAIFactory.sockets[0].sessionUpdate?["session"] as? [String: Any])
+        let input = try XCTUnwrap((session["audio"] as? [String: Any])?["input"] as? [String: Any])
+        let transcription = try XCTUnwrap(input["transcription"] as? [String: Any])
+        XCTAssertEqual(transcription["languages"] as? [String], ["fr"], "OpenAI sends the supplied string verbatim")
+        openAI.cancel()
+
+        let deepgramFactory = AssemblyAISocketFactory()
+        let deepgram = DesktopLiveTranscription.makeClient(
+            model: "deepgram/nova-3-streaming", apiKey: "k", language: "fr_FR",
+            makeConnection: { deepgramFactory.make($0) }
+        )
+        XCTAssertTrue(deepgram is DeepgramLiveClient)
+        deepgram?.start(onTranscript: { _, _ in }, onError: { _ in })
+        let url = try XCTUnwrap(deepgramFactory.requests[0].url)
+        let query = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(query.first { $0.name == "language" }?.value, "fr", "Deepgram normalises the locale itself")
+        deepgram?.cancel()
+    }
+
     func testDesktopFactoryDefaultLanguageKeepsTheSystemLocaleFallback() throws {
         let factory = AssemblyAISocketFactory()
         let client = try XCTUnwrap(DesktopLiveTranscription.makeClient(

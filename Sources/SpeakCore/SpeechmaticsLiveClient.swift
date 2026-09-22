@@ -35,10 +35,11 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     /// A single `AddAudio` or control send that has not completed by then means
     /// the transport stalled.
     static let sendDeadline: TimeInterval = 5
-    /// How long a finish waits for `RecognitionStarted` before giving up on the
-    /// held capture and closing with the best available transcript.
+    /// How long a finish waits for `RecognitionStarted` before failing with
+    /// `recognitionNotStarted`; the text received so far is still returned.
     static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
-    /// How long a finish waits for `EndOfTranscript` after `EndOfStream`.
+    /// One deadline armed when a finish begins that bounds readiness, the audio
+    /// drain, `EndOfStream` and `EndOfTranscript` together.
     static let finishBudget: TimeInterval = SpeechmaticsRealtime.finishBudget
     /// A backstop on queued frames; the five-second byte budget is the tighter
     /// bound in practice because every frame is at least `minimumChunkBytes`.
@@ -54,9 +55,11 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     private let queueKey = DispatchSpecificKey<Bool>()
     var run: SpeechmaticsLiveRun
 
-    /// Retains the existing pre-start priming contract. Capture handed over
-    /// before a session starts is parked here; once a session is connecting,
-    /// its bounded send queue holds the audio instead.
+    /// The pre-start priming buffer the earlier client exposed. Audio handed
+    /// over before `start` is parked here and, exactly as before, cleared when
+    /// a session starts or stops; it is not replayed into the session. A
+    /// started session holds its opening capture in the run's bounded send
+    /// queue until `RecognitionStarted` instead.
     let preroll: StreamingAudioPreroll
 
     public convenience init(
@@ -119,8 +122,9 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         synchronized {
             let active = run
             if active.phase == .idle {
-                // Before a session starts there is no queue to admit into; the
-                // bounded preroll holds the opening capture (issue #641).
+                // No session yet: keep the established pre-start behaviour
+                // (parked, bounded, cleared on start). The opening capture of a
+                // started session is held by the run's queue below (issue #641).
                 preroll.append(audioData)
                 return
             }
@@ -192,9 +196,11 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     }
 
     /// The bounded wait for `EndOfTranscript`, resolved by that frame (the
-    /// common case) or by the budget. `whenArmed` runs once the waiter is
-    /// installed, so tests can deliver frames into an armed finish without a
-    /// socket, exactly as the production `EndOfStream` completion does.
+    /// common case) or failed by the budget. `whenArmed` runs once the waiter
+    /// is installed, so tests can deliver frames into an armed finish without a
+    /// socket. The helper stands in for the production `EndOfStream` hand-off,
+    /// so it marks that state explicitly: an ingested `EndOfTranscript` is then
+    /// the authoritative terminal frame rather than an unexpected one.
     func awaitFinalTranscript(
         budget: TimeInterval = SpeechmaticsRealtime.finishBudget,
         whenArmed: () -> Void = {}
@@ -206,10 +212,13 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
                     continuation.resume(returning: active.transcript)
                     return
                 }
+                active.endOfStreamHandedOff = true
                 active.finishWaiters.append(continuation)
             }
             whenArmed()
-            after(budget, active) { client, active in client.resolveFinishWaiters(active) }
+            after(budget, active) { client, active in
+                client.fail(SpeechmaticsRealtimeError.transcriptNotFinalised, active)
+            }
         }
     }
 
@@ -260,20 +269,13 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         active.onError = nil
     }
 
-    /// Resolves every pending finish waiter with the run's best available
-    /// transcript, leaving the run otherwise intact (used by the finish budget).
-    func resolveFinishWaiters(_ active: SpeechmaticsLiveRun) {
-        let waiters = active.finishWaiters
-        active.finishWaiters.removeAll()
-        let transcript = active.transcript
-        waiters.forEach { $0.resume(returning: transcript) }
-    }
-
     var stalledError: Error { StreamingClientError.transportStalled(provider: "Speechmatics") }
 
     func isCurrent(_ active: SpeechmaticsLiveRun) -> Bool { active === run && active.phase != .closed }
 
     var isSessionReady: Bool { synchronized { isCurrent(run) && run.ready } }
+    /// Whether a graceful finish has begun on the current run.
+    var isFinishing: Bool { synchronized { isCurrent(run) && run.phase == .finishing } }
     var audioFrameCount: Int { synchronized { run.sentAudioFrameCount } }
 
     func after(_ seconds: TimeInterval, _ active: SpeechmaticsLiveRun,
@@ -345,12 +347,10 @@ extension SpeechmaticsLiveClient {
         max(lastAcknowledged, sentFrameCount, 0)
     }
 
-    static func endOfStreamPayload(lastSeqNo: Int) -> String? {
-        let payload: [String: Any] = ["message": "EndOfStream", "last_seq_no": lastSeqNo]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
+    /// The `EndOfStream` frame, written directly (an integer and a fixed name
+    /// need no serialiser) in the same sorted-key form the other frames use.
+    static func endOfStreamPayload(lastSeqNo: Int) -> String {
+        "{\"last_seq_no\":\(lastSeqNo),\"message\":\"EndOfStream\"}"
     }
 
     /// Speechmatics rejects an `AddAudio` frame below its minimum size, so the

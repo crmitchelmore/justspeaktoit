@@ -86,6 +86,8 @@ final class AssemblyAITestClock: @unchecked Sendable {
         selected.forEach { $0.1() }
     }
     func drain() -> [@Sendable () -> Void] { lock.withLock { let old = actions; actions = []; return old.map(\.1) } }
+    /// Deadlines still armed for exactly this many seconds.
+    func pending(_ seconds: TimeInterval) -> Int { lock.withLock { actions.filter { $0.0 == seconds }.count } }
 }
 
 final class AssemblyAITestEvents: @unchecked Sendable {

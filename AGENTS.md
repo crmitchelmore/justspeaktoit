@@ -281,7 +281,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - Validate OpenAI Realtime transcription changes against the live WebSocket API before shipping; this API changed during rollout and stale docs/assumptions caused regressions.
 - All OpenAI transcription models use `wss://api.openai.com/v1/realtime?intent=transcription` with a GA `session.update` payload; do **not** use `?model=<name>` for transcription.
 - Do **not** send the legacy `OpenAI-Beta: realtime=v1` header for transcription sessions; it pins the old schema and rejects `session.type`.
-- Keep macOS and iOS OpenAI Realtime wiring in sync when changing endpoint shape, event names, payload fields, or stop/finalisation sequencing.
+- Endpoint shape, event names, payload fields and stop/finalisation sequencing live once in the shared SpeakCore client (see Key files below); macOS and iOS only adapt it, so change the shared client rather than a platform copy.
 
 ### Prompt semantics
 - `gpt-live-transcribe`, `gpt-transcribe`, `gpt-4o-transcribe`, and `gpt-4o-mini-transcribe`
@@ -292,6 +292,11 @@ version/baseline authority. `VERSION` is a build hint only.
   completed recordings. Although `gpt-transcribe` can run in Realtime after a
   committed turn, do not present it as a live-delta model.
 - Treat the OpenAI transcription `prompt` as vocabulary/keyterm biasing, not a custom formatting or tone prompt. Keep tone/style changes in post-processing.
+
+### Key files
+- `Sources/SpeakCore/OpenAIRealtimeLiveClient.swift` (+ `…LiveConnection`, `…LiveSending`, `…LiveRun`, `…Protocol`, `…TranscriptAssembler`) — the shared portable client: endpoint, GA `session.update`, readiness gating on `session.updated`, bounded PCM admission, ordered single-in-flight sends, commit/finalisation and per-run identity. Transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows).
+- `Sources/SpeakApp/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
+- Portable lifecycle tests live in `Tests/SpeakDesktopTests/OpenAIRealtime*Tests.swift` and drive the real client through a fake `StreamingWebSocketConnection`.
 
 ## Accessibility Text Insertion
 

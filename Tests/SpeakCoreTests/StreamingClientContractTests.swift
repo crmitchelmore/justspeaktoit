@@ -408,6 +408,12 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         // Voxtral Realtime emits no per-utterance final: `transcription.done`
         // restates the whole session.
         XCTAssertEqual(MistralVoxtralLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+        // OpenAI Realtime restates the item-ordered session transcript on
+        // every delivery, so finals replace rather than append.
+        XCTAssertEqual(
+            OpenAIRealtimeLiveClient(apiKey: "k", model: "gpt-live-transcribe").finalShape,
+            .cumulativeTranscript
+        )
     }
 
     /// Every catalogued model must have a transport. A model the factory

@@ -78,27 +78,20 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
         XCTAssertEqual(name, OpenAITranscriptionModels.gptLiveTranscribeAPIName)
     }
 
-    // MARK: - Event parser
+    // MARK: - Shared event parser (the adapter delegates to SpeakCore)
 
     func testParser_decodesSessionCreatedAsSessionCreatedNotReady() {
         let json = """
         {"type":"transcription_session.created","session":{"id":"sess_1"}}
         """
-        let outcomes = OpenAIRealtimeEventParser.parse(json)
-        XCTAssertEqual(outcomes.count, 1)
         // `created` is informational only — readiness must wait for `updated`,
-        // which acknowledges *our* transcription_session.update payload.
-        guard case .event(.sessionCreated) = outcomes.first else {
-            return XCTFail("Expected .sessionCreated event, got \(outcomes)")
-        }
+        // which acknowledges *our* session.update payload.
+        XCTAssertEqual(OpenAIRealtimeServerEvent.parse(json), .sessionCreated)
     }
 
     func testParser_decodesSessionUpdatedAsSessionReady() {
         let json = #"{"type":"transcription_session.updated"}"#
-        let outcomes = OpenAIRealtimeEventParser.parse(json)
-        guard case .event(.sessionReady) = outcomes.first else {
-            return XCTFail("Expected .sessionReady event, got \(outcomes)")
-        }
+        XCTAssertEqual(OpenAIRealtimeServerEvent.parse(json), .sessionUpdated(sessionType: nil))
     }
 
     func testParser_decodesTranscriptionDelta() {
@@ -106,12 +99,10 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
         {"type":"conversation.item.input_audio_transcription.delta",\
         "item_id":"item_42","delta":"hello"}
         """
-        let outcomes = OpenAIRealtimeEventParser.parse(json)
-        guard case .event(.delta(let text, let itemId)) = outcomes.first else {
-            return XCTFail("Expected .delta event, got \(outcomes)")
-        }
-        XCTAssertEqual(text, "hello")
-        XCTAssertEqual(itemId, "item_42")
+        XCTAssertEqual(
+            OpenAIRealtimeServerEvent.parse(json),
+            .transcriptionDelta(itemID: "item_42", delta: "hello")
+        )
     }
 
     func testParser_dropsEmptyDelta() {
@@ -119,10 +110,10 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
         {"type":"conversation.item.input_audio_transcription.delta",\
         "item_id":"item_1","delta":""}
         """
-        let outcomes = OpenAIRealtimeEventParser.parse(json)
-        guard case .ignored = outcomes.first else {
-            return XCTFail("Expected .ignored for empty delta, got \(outcomes)")
-        }
+        XCTAssertEqual(
+            OpenAIRealtimeServerEvent.parse(json),
+            .ignored(type: "conversation.item.input_audio_transcription.delta")
+        )
     }
 
     func testParser_decodesTranscriptionCompleted() {
@@ -130,37 +121,40 @@ final class OpenAIRealtimeProviderTests: XCTestCase {
         {"type":"conversation.item.input_audio_transcription.completed",\
         "item_id":"item_42","transcript":"Hello there."}
         """
-        let outcomes = OpenAIRealtimeEventParser.parse(json)
-        guard case .event(.completed(let transcript, let itemId)) = outcomes.first else {
-            return XCTFail("Expected .completed event, got \(outcomes)")
-        }
-        XCTAssertEqual(transcript, "Hello there.")
-        XCTAssertEqual(itemId, "item_42")
+        XCTAssertEqual(
+            OpenAIRealtimeServerEvent.parse(json),
+            .transcriptionCompleted(itemID: "item_42", transcript: "Hello there.")
+        )
     }
 
     func testParser_decodesServerErrorIntoErrorOutcome() {
         let json = """
         {"type":"error","error":{"code":"invalid_request_error","message":"bad audio format"}}
         """
-        let outcomes = OpenAIRealtimeEventParser.parse(json)
-        guard case .error(let error) = outcomes.first else {
-            return XCTFail("Expected .error outcome, got \(outcomes)")
+        guard case .error(let code, let message)? = OpenAIRealtimeServerEvent.parse(json) else {
+            return XCTFail("Expected an error event")
         }
-        let description = error.localizedDescription
+        let description = OpenAIRealtimeStreamingError.serverError(code: code, message: message).localizedDescription
         XCTAssertTrue(description.contains("invalid_request_error"))
         XCTAssertTrue(description.contains("bad audio format"))
     }
 
     func testParser_ignoresUnknownEventType() {
         let json = #"{"type":"response.audio.delta","data":"..."}"#
-        let outcomes = OpenAIRealtimeEventParser.parse(json)
-        guard case .ignored = outcomes.first else {
-            return XCTFail("Expected .ignored for unknown event, got \(outcomes)")
-        }
+        XCTAssertEqual(OpenAIRealtimeServerEvent.parse(json), .ignored(type: "response.audio.delta"))
     }
 
     func testParser_handlesGarbageJSONWithoutCrashing() {
-        XCTAssertEqual(OpenAIRealtimeEventParser.parse("not json").count, 0)
-        XCTAssertEqual(OpenAIRealtimeEventParser.parse("{}").count, 0)
+        XCTAssertNil(OpenAIRealtimeServerEvent.parse("not json"))
+        XCTAssertNil(OpenAIRealtimeServerEvent.parse("{}"))
+    }
+
+    // MARK: - Adapter
+
+    func testTranscriber_exposesTheSharedCanonicalEvents() {
+        // The controller pattern-matches these cases; the adapter must keep
+        // exposing the shared event type rather than a platform copy.
+        let event: OpenAIRealtimeLiveTranscriber.Event = .delta("hello", itemId: "item_1")
+        XCTAssertEqual(event, OpenAIRealtimeLiveClient.Event.delta("hello", itemId: "item_1"))
     }
 }

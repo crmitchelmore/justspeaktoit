@@ -60,12 +60,9 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     /// frame the count bound admits, so that much audio fits in any framing.
     let maximumBufferedBytes: Int
     let lock = NSLock()
-    /// Guarded by `lock`.
+    /// Guarded by `lock`. Before the first `start()` this is the idle run,
+    /// which holds audio offered early under the same bounds as a live run.
     var run = MistralVoxtralLiveRun()
-    /// The pre-start priming contract shared with the other clients: audio
-    /// offered before `start()` is held here and carried into the run, in
-    /// capture order, through the same bounded admission as live audio.
-    let preroll: StreamingAudioPreroll
 
     /// Existing Apple entry point. It adapts the caller's session, which the
     /// client uses but does not own or invalidate.
@@ -98,7 +95,6 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
         let pcmBytes = max(sampleRate, 1) * 2 * Self.bufferedAudioSeconds
         self.maximumBufferedBytes = 4 * ((pcmBytes + 2) / 3)
             + Self.maximumBufferedFrames * (Self.appendFrameWrapperBytes + 3)
-        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
     }
 
     deinit { run.connection?.cancel() }
@@ -108,8 +104,8 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         let request = Self.webSocketRequest(apiKey: apiKey, model: model)
         let armed: MistralVoxtralLiveRun? = withState { effects in
-            let active = arm(onTranscript: onTranscript, onError: onError, &effects)
-            // Carried pre-start audio can already have failed the run.
+            let active = arm(onTranscript: onTranscript, onError: onError, usesTransport: true, &effects)
+            // Audio refused before this start has already failed the run.
             guard isCurrent(active) else { return nil }
             guard !apiKey.isEmpty else {
                 fail(StreamingClientError.missingAPIKey(provider: "Mistral"), active, &effects)
@@ -130,13 +126,15 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     /// or in flight, audio held before readiness included. Exceeding either is
     /// evidence the transport stopped working or the session is not coming, and
     /// is reported as a terminal failure rather than discarding opening words.
-    /// Nothing is accepted once a finish has begun.
+    /// Audio offered before `start()` is held under the same bounds and carried
+    /// into that session; one that cannot be held fails the next start. Nothing
+    /// is accepted once a finish has begun.
     public func sendAudio(_ audioData: Data) {
         guard !audioData.isEmpty else { return }
         withState { effects in
             let active = run
             switch active.phase {
-            case .idle: preroll.append(audioData)
+            case .idle: holdBeforeStart(audioData, in: active)
             case .connecting, .streaming: admit(audioData, into: active, &effects)
             case .finishing, .closed: break
             }
@@ -154,7 +152,8 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     /// deadline. Returns the whole session transcript, so a done it consumes
     /// is not also delivered through `onTranscript`. A finish that does not
     /// reach `transcription.done` publishes its error before returning the text
-    /// folded so far. Concurrent finishes share that one outcome.
+    /// folded so far, including to a finish that joins while that error is
+    /// still being delivered. Concurrent finishes share that one outcome.
     public func finishAndWait() async -> String? {
         let active = lock.withLock { run }
         return await withTaskCancellationHandler {
@@ -162,8 +161,7 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
                 withState { effects in
                     guard isCurrent(active), !Task.isCancelled else {
                         if isCurrent(active) { close(active, &effects) }
-                        let transcript = active.transcript
-                        effects.append { continuation.resume(returning: transcript) }
+                        active.answerRetired(continuation, &effects)
                         return
                     }
                     active.waiters.append(continuation)
@@ -190,7 +188,7 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
     /// Arms the callbacks and a fresh run without opening a socket. `start` is
     /// this plus `connect`; tests pair it with `ingest`.
     func beginSession(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
-        withState { effects in _ = arm(onTranscript: onTranscript, onError: onError, &effects) }
+        withState { effects in _ = arm(onTranscript: onTranscript, onError: onError, usesTransport: false, &effects) }
     }
 
     /// Feeds one raw server frame through the receive path. The socket loop is
@@ -209,8 +207,7 @@ public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionCli
         return await withCheckedContinuation { continuation in
             let armed: Bool = withState { effects in
                 guard isCurrent(active) else {
-                    let transcript = active.transcript
-                    effects.append { continuation.resume(returning: transcript) }
+                    active.answerRetired(continuation, &effects)
                     return false
                 }
                 active.waiters.append(continuation)
@@ -239,23 +236,46 @@ extension MistralVoxtralLiveClient {
         return value
     }
 
-    /// Retires the current run and installs a fresh one with its callbacks,
-    /// carrying audio offered before the first start into it.
+    /// Retires the current run and installs a fresh one with its callbacks.
+    /// Audio held by the idle run before the first start is carried in behind
+    /// the configuration; a refusal recorded then fails the new run at once,
+    /// through its `onError`, because there was no callback to report it to.
     func arm(
         onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void,
-        _ effects: inout MistralVoxtralLiveEffects
+        usesTransport: Bool, _ effects: inout MistralVoxtralLiveEffects
     ) -> MistralVoxtralLiveRun {
-        let carried = run.phase == .idle ? preroll.drain() : []
-        close(run, &effects)
-        preroll.reset()
+        let previous = run
         let active = MistralVoxtralLiveRun()
-        run = active
+        active.usesTransport = usesTransport
         active.onTranscript = onTranscript
         active.onError = onError
         active.phase = .connecting
         active.outgoing.append(.sessionUpdate)
-        for chunk in carried where isCurrent(active) { admit(chunk, into: active, &effects) }
+        let refusal = previous.phase == .idle ? previous.deferredFailure : nil
+        if previous.phase == .idle, refusal == nil { active.adoptHeldAudio(from: previous) }
+        close(previous, &effects)
+        run = active
+        if let refusal { fail(refusal, active, &effects) }
         return active
+    }
+
+    /// There is no callback before `start()`, so a chunk that cannot be held is
+    /// recorded for the next start to report, and what was held is released
+    /// with it: a partial or misaligned opening is never sent, and nothing is
+    /// evicted silently. Nothing more is held once a refusal is recorded.
+    func holdBeforeStart(_ pcm: Data, in idle: MistralVoxtralLiveRun) {
+        guard idle.deferredFailure == nil else { return }
+        let refusal: Error
+        if !pcm.count.isMultiple(of: 2) {
+            refusal = MistralRealtimeStreamingError.invalidPCM
+        } else if idle.admit(pcm, frameLimit: Self.maximumBufferedFrames, byteLimit: maximumBufferedBytes) {
+            return
+        } else {
+            refusal = MistralRealtimeStreamingError.overflowBeforeStart
+        }
+        idle.deferredFailure = refusal
+        idle.discardOutbound()
+        log("Audio offered before start was refused")
     }
 
     func admit(_ pcm: Data, into active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
@@ -272,13 +292,14 @@ extension MistralVoxtralLiveClient {
 
     /// Stop sequencing: stop accepting audio, drain what was admitted, flush,
     /// then end, then wait for `transcription.done`. A session that is still
-    /// connecting keeps its capture and sends it once configured. One deadline
-    /// bounds the whole finish; which step it catches decides the error.
+    /// connecting, including one whose transport factory has not returned yet,
+    /// keeps its capture and sends it once configured. One deadline bounds the
+    /// whole finish; which step it catches decides the error.
     func beginFinish(_ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
         guard active.phase != .finishing else { return }
         // The socket-free seam, or a session that captured no audio: there is
         // nothing to flush, so the finish is the text heard so far.
-        guard active.connection != nil, active.admittedAudioBytes > 0 else {
+        guard active.usesTransport, active.admittedAudioBytes > 0 else {
             close(active, &effects)
             return
         }
@@ -303,35 +324,32 @@ extension MistralVoxtralLiveClient {
 
     var stalledError: Error { StreamingClientError.transportStalled(provider: "Mistral") }
 
-    /// Retires the run, then publishes `error` before any waiting finish
-    /// resumes. The run is detached first, so the callback may start a
-    /// replacement; these waiters still resume with the failed run's text.
+    /// Retires the run, then publishes `error` before any finish of it
+    /// returns. The run is detached first, so the callback may start a
+    /// replacement. Its waiters, and any finish that joins while the callback
+    /// runs, stay on the failed run and resume with its text only once the
+    /// callback has returned; nothing is held under the lock meanwhile.
     func fail(_ error: Error, _ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
         guard isCurrent(active) else { return }
         let callback = active.onError
-        let waiters = active.waiters
-        active.waiters.removeAll()
-        let transcript = active.transcript
-        close(active, &effects)
+        active.retire(&effects)
+        active.deliveringFailure = true
         log("Session failed")
         effects.append { callback?(error) }
-        effects.append { waiters.forEach { $0.resume(returning: transcript) } }
+        effects.append { self.completeFailureDelivery(active) }
+    }
+
+    /// Ends a failed run's delivery and resumes every finish that waited on it.
+    func completeFailureDelivery(_ active: MistralVoxtralLiveRun) {
+        withState { effects in
+            active.deliveringFailure = false
+            active.releaseWaiters(&effects)
+        }
     }
 
     func close(_ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
-        guard active.phase != .closed else { return }
-        active.phase = .closed
-        let connection = active.connection
-        active.connection = nil
-        active.discardOutbound()
-        if active === run { preroll.reset() }
-        let waiters = active.waiters
-        active.waiters.removeAll()
-        let transcript = active.transcript
-        active.onTranscript = nil
-        active.onError = nil
-        if let connection { effects.append { connection.cancel() } }
-        if !waiters.isEmpty { effects.append { waiters.forEach { $0.resume(returning: transcript) } } }
+        guard active.retire(&effects) else { return }
+        active.releaseWaiters(&effects)
     }
 
     func isCurrent(_ active: MistralVoxtralLiveRun) -> Bool { active === run && active.phase != .closed }

@@ -37,6 +37,10 @@ final class MistralVoxtralLiveRun: @unchecked Sendable {
     }
 
     var phase = Phase.idle
+    /// Set by `start()`: the run owns a socket, attached as soon as the
+    /// injected factory returns it. `beginSession` runs are the socket-free
+    /// parser seam, so a missing connection alone never means "no transport".
+    var usesTransport = false
     var connection: (any StreamingWebSocketConnection)?
     /// The transport finished its handshake.
     var didOpen = false
@@ -72,21 +76,39 @@ final class MistralVoxtralLiveRun: @unchecked Sendable {
 
     /// Append-only `transcription.text.delta` fragments, folded in order.
     var streamedText = ""
-    /// The trimmed, non-empty `transcription.done` text. Authoritative for the
-    /// whole session, including revisions shorter than the folded deltas.
+    /// The trimmed, non-empty text of the `transcription.done` that completed
+    /// the session. Authoritative, including revisions shorter than the deltas.
     var completedText: String?
+    /// The text of a `transcription.done` that arrived too early to complete
+    /// the session. Never authoritative: it is recovery text only when no
+    /// draft was ever visible.
+    var unconfirmedText: String?
+    /// A chunk offered before `start()` that could not be held. With no
+    /// callback yet, the refusal fails the next run as soon as it starts.
+    var deferredFailure: Error?
+    /// The run failed and its `onError` has not returned yet. Finishes of it,
+    /// including ones that join now, wait in `waiters` until it has.
+    var deliveringFailure = false
 
     var waiters: [CheckedContinuation<String?, Never>] = []
     var onTranscript: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
 
-    /// The best whole-session text: the `transcription.done` text when it
-    /// arrived, otherwise the folded deltas, or `nil` when nothing was heard.
+    /// The best whole-session text, by provenance rather than by comparing
+    /// texts: the done that completed the session; otherwise the visible
+    /// folded draft; otherwise an early done's text, the only text heard.
+    /// `nil` when nothing was heard. Only the first is ever a success.
     var transcript: String? {
         if let completedText { return completedText }
         let folded = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return folded.isEmpty ? nil : folded
+        return folded.isEmpty ? unconfirmedText : folded
     }
+
+    /// Whether a `transcription.done` now completes the session. The flush is
+    /// handed off only when every admitted append has completed its send
+    /// without error (one frame in flight, in order; a failed send ends the
+    /// run), so from then on the service has all of the recording.
+    var acceptsCompletion: Bool { phase == .finishing && flushHandedOff && bufferedFrames == 0 }
 
     /// Whether the head of the queue may leave now. Configuration needs the
     /// real handshake and `session.created`; everything after it needs the
@@ -123,12 +145,59 @@ final class MistralVoxtralLiveRun: @unchecked Sendable {
         return item
     }
 
+    /// Moves audio held before `start()` into this run, behind its
+    /// configuration and with the reservations it already holds. The idle run
+    /// admitted it against the same bounds, so the bounds still hold.
+    func adoptHeldAudio(from idle: MistralVoxtralLiveRun) {
+        outgoing.append(contentsOf: idle.outgoing)
+        bufferedFrames += idle.bufferedFrames
+        bufferedBytes += idle.bufferedBytes
+        admittedAudioBytes += idle.admittedAudioBytes
+    }
+
     /// Clears everything the transport held, for a closed run.
     func discardOutbound() {
         outgoing.removeAll(keepingCapacity: false)
         bufferedFrames = 0
         bufferedBytes = 0
         sending = false
+    }
+
+    /// Detaches the run: nothing more is sent, received or delivered for it,
+    /// and its deadlines become inert. Answers `false` if it already was.
+    @discardableResult
+    func retire(_ effects: inout MistralVoxtralLiveEffects) -> Bool {
+        guard phase != .closed else { return false }
+        phase = .closed
+        let detached = connection
+        connection = nil
+        discardOutbound()
+        onTranscript = nil
+        onError = nil
+        if let detached { effects.append { detached.cancel() } }
+        return true
+    }
+
+    /// Resumes every waiting finish with the run's text.
+    func releaseWaiters(_ effects: inout MistralVoxtralLiveEffects) {
+        let resumed = waiters
+        waiters.removeAll()
+        let text = transcript
+        if !resumed.isEmpty { effects.append { resumed.forEach { $0.resume(returning: text) } } }
+    }
+
+    /// Answers a finish of this run once it is no longer current: with its
+    /// text at once, or, while its failure is still being delivered, only
+    /// after that delivery, so a late finish cannot return before the error.
+    func answerRetired(
+        _ continuation: CheckedContinuation<String?, Never>, _ effects: inout MistralVoxtralLiveEffects
+    ) {
+        guard !deliveringFailure else {
+            waiters.append(continuation)
+            return
+        }
+        let text = transcript
+        effects.append { continuation.resume(returning: text) }
     }
 }
 

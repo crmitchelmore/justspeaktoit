@@ -80,12 +80,12 @@ extension MistralVoxtralLiveClient {
         if proceed { receive(active, connection) }
     }
 
-    /// Once the flush has left, only `transcription.done` completes the
-    /// session, so a failed receive or send then is a missing completion,
-    /// whichever of the two the transport reports first. Earlier, the
-    /// transport's own error is the failure.
+    /// Once the service has all of the recording, only `transcription.done`
+    /// completes the session, so a failed receive or send then is a missing
+    /// completion, whichever of the two the transport reports first. Earlier,
+    /// the transport's own error is the failure.
     func transportError(_ error: Error, _ active: MistralVoxtralLiveRun) -> Error {
-        if active.phase == .finishing, active.flushHandedOff { return MistralRealtimeStreamingError.missingCompletion }
+        if active.acceptsCompletion { return MistralRealtimeStreamingError.missingCompletion }
         return mapConnectionError(error)
     }
 
@@ -126,17 +126,23 @@ extension MistralVoxtralLiveClient {
         effects.append { callback(running, false) }
     }
 
-    /// A non-empty `transcription.done` is authoritative for the whole session
-    /// and replaces the folded deltas; an empty one keeps them. After the flush
-    /// has left it completes the finish at once, which returns the text, so it
-    /// is not also delivered as a final. Earlier, audio the recording still
-    /// held can no longer be transcribed, so the run fails with the text kept.
+    /// `transcription.done` ends the session. Mistral's SDK stops reading at
+    /// it and then cancels its sender (`transcribe_stream`, client-python
+    /// 80e32d2), so an authoritative done supersedes a flush or end whose send
+    /// has not completed. It is accepted once `acceptsCompletion` holds, which
+    /// is only after every admitted append has completed successfully. A
+    /// non-empty done then replaces the folded deltas, including a shorter or
+    /// re-punctuated revision, and an empty one keeps them; the finish returns
+    /// that text, so it is not also delivered as a final. Any earlier done
+    /// means admitted audio may never be transcribed: the run fails, the done
+    /// is not adopted as confirmed, and the visible draft stays the recovery
+    /// text (the done's own text only when no draft was ever visible).
     private func handleDone(_ text: String, _ active: MistralVoxtralLiveRun,
                             _ effects: inout MistralVoxtralLiveEffects) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty { active.completedText = trimmed }
-        guard active.connection != nil else {
+        guard active.usesTransport else {
             // The socket-free parser seam keeps its established contract.
+            if !trimmed.isEmpty { active.completedText = trimmed }
             if !active.waiters.isEmpty {
                 close(active, &effects)
             } else if let final = active.transcript, let callback = active.onTranscript {
@@ -144,11 +150,13 @@ extension MistralVoxtralLiveClient {
             }
             return
         }
-        if active.phase == .finishing, active.flushHandedOff {
-            close(active, &effects)
-        } else {
+        guard active.acceptsCompletion else {
+            if !trimmed.isEmpty { active.unconfirmedText = trimmed }
             fail(MistralRealtimeStreamingError.unexpectedCompletion, active, &effects)
+            return
         }
+        if !trimmed.isEmpty { active.completedText = trimmed }
+        close(active, &effects)
     }
 
     /// An HTTP 401/403 upgrade rejection is an invalid key. Nothing here logs
@@ -214,6 +222,11 @@ extension MistralVoxtralLiveClient {
         }
         let sent = MistralVoxtralLiveRun.Sent(next.item)
         let sendID = next.sendID
+        // One deadline per send, holding weak references and the send's
+        // identity only; it is inert once that send completes. Outstanding
+        // deadlines are bounded by the sends of the last `sendDeadline`: about
+        // fifty at 100 ms frames, plus up to `maximumBufferedFrames` replayed
+        // at readiness, as the other shared clients arrange it.
         after(Self.sendDeadline, active) { client, active, effects in
             if active.sending, active.sendID == sendID { client.fail(client.stalledError, active, &effects) }
         }

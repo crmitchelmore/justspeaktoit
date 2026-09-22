@@ -95,23 +95,30 @@ final class MistralVoxtralIsolationTests: XCTestCase {
         fixture.client.cancel()
     }
 
-    func testAudioOfferedBeforeStartIsCarriedIntoTheRunInCaptureOrder() {
-        let fixture = Fixture()
-        fixture.client.sendAudio(Fixture.frame(0))
-        fixture.client.sendAudio(Fixture.frame(1))
-        XCTAssertEqual(fixture.client.preroll.snapshot.chunkCount, 2)
-        fixture.start()
-        XCTAssertTrue(fixture.client.preroll.isEmpty)
-        XCTAssertEqual(fixture.client.bufferedAudioFrames, 2)
-        fixture.client.sendAudio(Fixture.frame(2))
-        fixture.becomeReady()
-        fixture.socket.completeSend()
-        fixture.socket.completeSend()
-        XCTAssertEqual(fixture.socket.appendedAudio, (0..<3).map { Fixture.frame($0) })
-        fixture.client.stop()
-        fixture.client.sendAudio(Fixture.frame(3))
-        XCTAssertTrue(fixture.client.preroll.isEmpty, "A stopped client holds nothing for a later start")
-        XCTAssertEqual(fixture.client.bufferedAudioFrames, 0)
+    func testStoppedAndFailedRunsNeverReconnect() async {
+        let stopped = Fixture()
+        stopped.start()
+        stopped.becomeReady()
+        stopped.client.sendAudio(Fixture.frame(0))
+        stopped.client.stop()
+        stopped.client.sendAudio(Fixture.frame(1))
+        let stoppedTranscript = await stopped.client.finishAndWait()
+        XCTAssertNil(stoppedTranscript)
+        stopped.clock.drain().forEach { $0() }
+        XCTAssertEqual(stopped.factory.sockets.count, 1, "A stopped run never reconnects")
+        XCTAssertEqual(stopped.socket.cancels, 1)
+        XCTAssertTrue(stopped.events.errors.isEmpty)
+
+        let failed = Fixture()
+        failed.start()
+        failed.becomeReady()
+        failed.socket.fail()
+        failed.client.sendAudio(Fixture.frame(1))
+        _ = await failed.client.finishAndWait()
+        failed.clock.drain().forEach { $0() }
+        XCTAssertEqual(failed.factory.sockets.count, 1, "A failed run never reconnects")
+        XCTAssertEqual(failed.events.errors.count, 1)
+        XCTAssertEqual(failed.socket.appendedAudio, [], "Nothing is sent after the failure")
     }
 
     func testSocketFreeSeamsKeepTheirEstablishedContract() async {

@@ -106,7 +106,7 @@ final class MistralVoxtralLiveClientTests: XCTestCase {
 
         client.sendAudio(Data())
 
-        XCTAssertTrue(client.preroll.isEmpty)
+        XCTAssertEqual(client.bufferedAudioFrames, 0)
     }
 
     // MARK: - Delta folding

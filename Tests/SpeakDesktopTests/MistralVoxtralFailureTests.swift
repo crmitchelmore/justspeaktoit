@@ -85,7 +85,7 @@ final class MistralVoxtralFailureTests: XCTestCase {
         XCTAssertEqual(provider, "Mistral")
     }
 
-    func testFailedDrainFlushAndEndSendsAreVisibleAndKeepTheDraft() async {
+    func testFailedDrainFlushAndEndSendsStayFailuresWhenALateDoneArrives() async {
         let expected: [MistralRealtimeStreamingError?] = [nil, .missingCompletion, .missingCompletion]
         for step in 0..<3 {
             let fixture = Fixture()
@@ -97,6 +97,8 @@ final class MistralVoxtralFailureTests: XCTestCase {
             await fixture.waitForScheduled(budget)
             for _ in 0..<step { fixture.socket.completeSend() }
             fixture.socket.completeSend(URLError(.networkConnectionLost))
+            // The receive registered before the failure still delivers a done.
+            fixture.socket.done("Late and unconfirmed.")
             let transcript = await finish.value
             XCTAssertEqual(transcript, "Heard", "step \(step)")
             XCTAssertEqual(fixture.events.errors.count, 1, "step \(step)")
@@ -104,21 +106,9 @@ final class MistralVoxtralFailureTests: XCTestCase {
             XCTAssertEqual(error as? MistralRealtimeStreamingError, expected[step], "step \(step)")
             if step == 0 { XCTAssertTrue(fixture.events.errors.first is URLError) }
             XCTAssertEqual(fixture.clock.pending(budget), 1, "The failure ended the finish before its deadline")
+            let again = await fixture.client.finishAndWait()
+            XCTAssertEqual(again, "Heard", "A done after an observed failure is never adopted: step \(step)")
         }
-    }
-
-    func testUnsolicitedDoneWhileStreamingFailsAndKeepsItsTextForRecovery() async {
-        let fixture = Fixture()
-        fixture.start()
-        fixture.becomeReady()
-        fixture.client.sendAudio(Fixture.frame(0))
-        fixture.socket.delta("Cut")
-        fixture.socket.done("Cut short.")
-        XCTAssertEqual(fixture.events.errors.map { $0 as? MistralRealtimeStreamingError }, [.unexpectedCompletion])
-        XCTAssertEqual(fixture.socket.cancels, 1)
-        XCTAssertFalse(fixture.events.finals.contains(true))
-        let transcript = await fixture.client.finishAndWait()
-        XCTAssertEqual(transcript, "Cut short.", "A finish after the failure returns the retained text at once")
     }
 
     func testConcurrentFinishesShareOneOutcomeOneFlushAndOneDeadline() async {

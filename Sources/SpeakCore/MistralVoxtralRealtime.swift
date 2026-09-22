@@ -20,7 +20,9 @@ import Foundation
 /// `error` first is a handshake failure), send `session.update` before any
 /// audio without waiting for `session.updated`, send each chunk as an awaited
 /// `input_audio.append`, then `input_audio.flush` and `input_audio.end`, and
-/// stop at `transcription.done` or `error`.
+/// stop at `transcription.done` or `error`. Stopping at done cancels the
+/// sender (`transcribe_stream`), so a done supersedes a flush or end whose
+/// send is still pending.
 public enum MistralVoxtralRealtime {
     /// Streaming catalogue identifier. The dated model id is pinned rather than
     /// the `-latest` alias so a future realtime model cannot silently change
@@ -104,15 +106,20 @@ public enum MistralRealtimeStreamingError: LocalizedError, Equatable {
     /// The socket did not open, or `session.created` did not arrive, in time,
     /// so the session could never be configured and no audio was sent.
     case sessionNotReady
-    /// The flush and end left but `transcription.done` never followed, either
-    /// because the finish deadline elapsed or because the socket closed first.
+    /// All of the recording was sent and the flush left, but
+    /// `transcription.done` never followed: the finish deadline elapsed after
+    /// the end, or the socket failed first.
     case missingCompletion
-    /// `transcription.done` arrived before the flush was sent, so audio the
-    /// recording still held was never transcribed.
+    /// `transcription.done` arrived before every admitted append had been sent
+    /// and the flush had left, so audio the recording held may never have
+    /// been transcribed.
     case unexpectedCompletion
     /// PCM16 is two bytes per sample; an odd-length chunk would misalign every
     /// sample after it.
     case invalidPCM
+    /// More audio was offered before `start()` than the session's bounds can
+    /// hold. Reported by that start, because nothing is evicted silently.
+    case overflowBeforeStart
 
     public var errorDescription: String? {
         switch self {
@@ -125,6 +132,9 @@ public enum MistralRealtimeStreamingError: LocalizedError, Equatable {
                 + "The recording is available to retry."
         case .invalidPCM:
             return "Mistral requires complete 16-bit PCM samples."
+        case .overflowBeforeStart:
+            return "More audio was captured before the Mistral session started than it can hold. "
+                + "The recording is available to retry."
         }
     }
 }

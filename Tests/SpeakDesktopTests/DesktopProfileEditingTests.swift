@@ -11,9 +11,7 @@ final class DesktopProfileEditingTests: XCTestCase {
 
     private var batchIndex: Int { catalogue.batchModels.count > 1 ? 1 : 0 }
     private var polishIndex: Int { catalogue.polishModels.count > 1 ? 1 : 0 }
-    private var languageIndex: Int {
-        catalogue.languages.firstIndex { $0.id == "en_GB" } ?? 0
-    }
+    private var languageIndex: Int { catalogue.languages.firstIndex { $0.id == "en_GB" } ?? 0 }
 
     // MARK: - Drafts from profiles
 
@@ -57,18 +55,21 @@ final class DesktopProfileEditingTests: XCTestCase {
         XCTAssertEqual(preserved.polishModel, .preserved)
         XCTAssertEqual(preserved.language, .preserved)
         XCTAssertTrue(preserved.executablePaths.isEmpty)
-        XCTAssertEqual(preserved.notes.count, 5, preserved.notes.joined(separator: "\n"))
+        XCTAssertEqual(preserved.notes.count, 4, preserved.notes.joined(separator: "\n"))
         XCTAssertTrue(preserved.notes.contains { $0.contains("WhisperKit Tiny") })
         XCTAssertTrue(preserved.notes.contains { $0.contains("xx_YY") })
         XCTAssertTrue(preserved.notes.contains { $0.contains("URL matcher") })
+        XCTAssertFalse(preserved.notes.contains { $0.contains("selected live model") })
     }
 
-    func testLiveOverrideReopensAsLive() {
+    func testLiveOverrideReopensAsLive() throws {
         let profile = DictationProfile(
-            name: "Live", transcriptionModelID: catalogue.liveModels[0].id, transcriptionRouting: .remoteStreaming
+            name: "Live", transcriptionModelID: AssemblyAIModels.universal35ProStreamingID,
+            transcriptionRouting: .remoteStreaming
         )
         let draft = DesktopProfileEditing.draft(for: profile, catalogue: catalogue)
-        XCTAssertEqual(draft.transcription, .live(index: 0))
+        let index = try XCTUnwrap(catalogue.liveModels.firstIndex { $0.id == profile.transcriptionModelID })
+        XCTAssertEqual(draft.transcription, .live(index: index))
         XCTAssertEqual(DesktopProfileEditing.profile(from: draft, original: profile, catalogue: catalogue), profile)
     }
 

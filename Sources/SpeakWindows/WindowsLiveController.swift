@@ -5,9 +5,9 @@ import SpeakWindowsPlatform
 import CWindowsSupport
 
 extension WindowsAppController {
-    func makeLiveSession(model: String, key: String, id: UUID) -> DesktopLiveSession? {
+    func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
         guard WindowsModels.isLive(model), let client = DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, makeConnection: { WinHTTPStreamingConnection(request: $0) }
+            model: model, apiKey: key, language: language, makeConnection: { WinHTTPStreamingConnection(request: $0) }
         ) else { return nil }
         return DesktopLiveSession(client: client, id: id)
     }

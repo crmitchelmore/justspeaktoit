@@ -11,21 +11,26 @@ public struct DesktopProfileCapabilities: Sendable {
     /// Whether the host can layer personal-lexicon directives and context tags
     /// into the polish prompt. Desktop hosts have no personal lexicon yet.
     public var supportsPersonalLexicon: Bool
-    /// Whether the host's live sessions accept a spoken-language hint.
+    /// Legacy host-wide forwarding switch. Canonical model support still gates
+    /// every hint; new hosts should supply `liveLanguageModelIDs` instead.
     public var supportsLiveLanguage: Bool
+    /// Implemented model routes for which this host forwards spoken-language hints.
+    public var liveLanguageModelIDs: Set<String>
 
     public init(
         batchModels: [ModelCatalog.Option],
         liveModels: [ModelCatalog.Option],
         polishModels: [ModelCatalog.Option],
         supportsPersonalLexicon: Bool = false,
-        supportsLiveLanguage: Bool = false
+        supportsLiveLanguage: Bool = false,
+        liveLanguageModelIDs: Set<String> = []
     ) {
         self.batchModels = batchModels
         self.liveModels = liveModels
         self.polishModels = polishModels
         self.supportsPersonalLexicon = supportsPersonalLexicon
         self.supportsLiveLanguage = supportsLiveLanguage
+        self.liveLanguageModelIDs = liveLanguageModelIDs
     }
 
     /// The shared desktop projections: batch routes the desktop transcriber
@@ -35,7 +40,8 @@ public struct DesktopProfileCapabilities: Sendable {
         DesktopProfileCapabilities(
             batchModels: DesktopTranscription.batchModels,
             liveModels: DesktopLiveTranscription.liveModels,
-            polishModels: DesktopPostProcessing.remoteModels
+            polishModels: DesktopPostProcessing.remoteModels,
+            liveLanguageModelIDs: DesktopLiveTranscription.languageHintModelIDs
         )
     }
 
@@ -57,6 +63,11 @@ public struct DesktopProfileCapabilities: Sendable {
         return polishModels.contains { $0.id == identifier }
     }
 
+    public func supportsLiveLanguage(for modelID: String) -> Bool {
+        isLive(modelID) && ModelCatalog.liveCapabilities(for: modelID).supportsLanguageHint
+            && (supportsLiveLanguage || liveLanguageModelIDs.contains(modelID))
+    }
+
     public func isLive(_ modelID: String) -> Bool {
         liveModels.contains { $0.id == modelID }
     }
@@ -72,9 +83,10 @@ public enum DesktopProfileLimitation: Equatable, Sendable {
     /// The polish model cannot run here. Polish is skipped for the session;
     /// no other model is substituted for the one the profile chose.
     case polishModelUnavailable(modelID: String)
-    /// The spoken-language override only reaches batch requests; the live
-    /// session lets the provider detect the language.
+    /// The selected live model cannot accept this spoken-language override.
     case languageUnavailableForLiveModel(languageIdentifier: String)
+    /// An editor cannot know which app model an inherited setting will use.
+    case languageDependsOnAppModel(languageIdentifier: String)
     /// Personal-lexicon directives were requested; the host has no lexicon.
     case lexiconDirectivesUnavailable
     /// Lexicon context tags were requested; the host has no lexicon.
@@ -101,8 +113,11 @@ public enum DesktopProfileLimitation: Equatable, Sendable {
             return "Polish model \(Self.describe(modelID)) is not available in this desktop build. "
                 + "Post-processing is skipped for this profile; no other model runs in its place."
         case .languageUnavailableForLiveModel(let languageIdentifier):
-            return "Spoken language “\(languageIdentifier)” applies to batch models only; "
-                + "live models in this desktop build detect the language themselves."
+            return "Spoken language “\(languageIdentifier)” is not supported by the selected live model "
+                + "in this desktop build. Its normal language behaviour applies."
+        case .languageDependsOnAppModel(let languageIdentifier):
+            return "Spoken language “\(languageIdentifier)” applies when the app's selected model supports it. "
+                + "Some live models cannot use this override."
         case .lexiconDirectivesUnavailable:
             return "Personal lexicon directives are kept for macOS; this desktop build has no personal lexicon."
         case .contextTagsUnavailable:
@@ -125,7 +140,7 @@ public struct DesktopProfileSession: Equatable, Sendable {
     public let profileName: String?
     /// The transcription model to record with.
     public let modelIdentifier: String
-    /// Provider language for batch transcription; `nil` requests detection.
+    /// Provider language for the selected model; `nil` keeps its normal language behaviour.
     public let language: String?
     public let postProcessing: DesktopPostProcessing.Options
     public let limitations: [DesktopProfileLimitation]
@@ -194,11 +209,11 @@ public enum DesktopProfileSessionResolver {
         }
 
         var language: String?
-        if let identifier = trimmedNonEmpty(profile.languageIdentifier) {
-            if effectiveModelIsLive, !capabilities.supportsLiveLanguage {
+        if let identifier = TranscriptionLanguageCatalog.providerLanguage(for: profile.languageIdentifier ?? "") {
+            if effectiveModelIsLive, !capabilities.supportsLiveLanguage(for: model) {
                 limitations.append(.languageUnavailableForLiveModel(languageIdentifier: identifier))
             } else {
-                language = TranscriptionLanguageCatalog.providerLanguage(for: identifier)
+                language = identifier
             }
         }
 
@@ -249,27 +264,26 @@ public enum DesktopProfileSessionResolver {
         return (options, skippedPolishReason)
     }
 
-    /// The limitations a profile would meet here regardless of the current
-    /// defaults, for an editor to show next to the stored values it preserves.
-    /// The spoken-language note appears unless the profile's own override is a
-    /// batch model, because only then is it certain to reach the provider.
+    /// Editor notices describe explicit overrides precisely. An inherited app
+    /// model is unknown until recording starts, so its language notice is conditional.
     public static func limitations(
         of profile: DictationProfile, capabilities: DesktopProfileCapabilities
     ) -> [DesktopProfileLimitation] {
         var limitations: [DesktopProfileLimitation] = []
-        var overridesBatchModel = false
-        if let override = profile.resolvedTranscriptionOverride {
-            if capabilities.canRun(transcriptionModel: override.modelID, routing: override.routing) {
-                overridesBatchModel = override.routing == .remoteBatch
-            } else {
-                limitations.append(
-                    .transcriptionModelUnavailable(modelID: override.modelID, routing: override.routing)
-                )
-            }
+        let override = profile.resolvedTranscriptionOverride
+        if let override, !capabilities.canRun(transcriptionModel: override.modelID, routing: override.routing) {
+            limitations.append(.transcriptionModelUnavailable(modelID: override.modelID, routing: override.routing))
         }
-        if let identifier = trimmedNonEmpty(profile.languageIdentifier),
-           !overridesBatchModel, !capabilities.supportsLiveLanguage {
-            limitations.append(.languageUnavailableForLiveModel(languageIdentifier: identifier))
+        if let identifier = TranscriptionLanguageCatalog.providerLanguage(for: profile.languageIdentifier ?? "") {
+            if let override {
+                if override.routing == .remoteStreaming,
+                   capabilities.canRun(transcriptionModel: override.modelID, routing: override.routing),
+                   !capabilities.supportsLiveLanguage(for: override.modelID) {
+                    limitations.append(.languageUnavailableForLiveModel(languageIdentifier: identifier))
+                }
+            } else if capabilities.liveModels.contains(where: { !capabilities.supportsLiveLanguage(for: $0.id) }) {
+                limitations.append(.languageDependsOnAppModel(languageIdentifier: identifier))
+            }
         }
         if let requested = trimmedNonEmpty(profile.polishModelID), !capabilities.canRun(polishModel: requested) {
             limitations.append(.polishModelUnavailable(modelID: requested))

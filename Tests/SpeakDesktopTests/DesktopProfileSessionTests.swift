@@ -18,7 +18,7 @@ final class DesktopProfileSessionTests: XCTestCase {
         DesktopTranscription.batchModels.first { $0.id != defaultModel }?.id ?? defaultModel
     }
 
-    private var liveModel: String { DesktopLiveTranscription.liveModels[0].id }
+    private var liveModel: String { AssemblyAIModels.universal35ProStreamingID }
 
     private var alternativePolishModel: String {
         DesktopPostProcessing.remoteModels.first { $0.id != ModelCatalog.defaultPostProcessingModel }?.id
@@ -111,7 +111,7 @@ final class DesktopProfileSessionTests: XCTestCase {
 
     // MARK: - Spoken language
 
-    func testSpokenLanguageReachesBatchRequestsAndIsReportedForLiveModels() {
+    func testSpokenLanguageReachesBatchRequestsAndIsReportedForUnsupportedLiveModel() {
         let batch = resolve(DictationProfile(
             name: "French", transcriptionModelID: batchModel, languageIdentifier: "fr_FR",
             transcriptionRouting: .remoteBatch
@@ -256,7 +256,6 @@ final class DesktopProfileSessionTests: XCTestCase {
         let limitations = DesktopProfileSessionResolver.limitations(of: profile, capabilities: capabilities)
         XCTAssertEqual(limitations, [
             .transcriptionModelUnavailable(modelID: "local/whisperkit/tiny", routing: .localBatch),
-            .languageUnavailableForLiveModel(languageIdentifier: "en_GB"),
             .polishModelUnavailable(modelID: "local/post-processing/rules"),
             .lexiconDirectivesUnavailable
         ])

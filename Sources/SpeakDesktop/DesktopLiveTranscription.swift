@@ -13,22 +13,32 @@ public enum DesktopLiveTranscription {
         return provider == .deepgram || provider == .assemblyai || provider == .openai
     }
 
+    /// A host can forward hints only for implemented routes whose canonical
+    /// protocol capability accepts them. New routes inherit this projection.
+    public static var languageHintModelIDs: Set<String> {
+        Set(liveModels.filter { ModelCatalog.liveCapabilities(for: $0.id).supportsLanguageHint }.map(\.id))
+    }
+
     /// Hosts supply native I/O; provider choice and protocol behaviour stay
     /// shared so adding a route does not require another platform-owned list.
     public static func makeClient(
-        model: String, apiKey: String,
+        model: String, apiKey: String, language: String? = nil,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         guard let route = route(forID: model) else { return nil }
+        let identifier = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hint = ModelCatalog.liveCapabilities(for: identifier).supportsLanguageHint
+            ? TranscriptionLanguageCatalog.providerLanguage(for: language ?? "") : nil
         switch route.provider {
         case .openai:
             return OpenAIRealtimeLiveClient(
-                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate,
+                apiKey: apiKey, model: route.apiModelName, language: hint?.localeLanguageCode,
+                sampleRate: route.sampleRate,
                 makeConnection: makeConnection
             )
         case .deepgram:
             return DeepgramLiveClient(
-                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate,
+                apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
                 makeConnection: makeConnection
             )
         case .assemblyai:

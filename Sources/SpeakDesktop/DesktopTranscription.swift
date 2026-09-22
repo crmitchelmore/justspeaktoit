@@ -129,12 +129,15 @@ public enum DesktopTranscription {
         }
     }
 
-    private enum PreparedProvider: Sendable { case meta, azure, mistral }
+    private enum PreparedProvider: Sendable { case meta, azure, mistral, soniox }
 
     private static func transcribePrepared(
         _ input: Request, using provider: PreparedProvider, session: URLSession
     ) async throws -> TranscriptionResult {
         switch provider {
+        case .soniox:
+            return try await SonioxBatchClient(session: session, multipartStaging: secureStaging(input.staging))
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .mistral:
             return try await MistralBatchClient(
                 session: session, multipartStaging: secureStaging(input.staging),
@@ -188,6 +191,7 @@ public enum DesktopTranscription {
             if provider == "deepgram" { return .deepgram }
             if provider == "elevenlabs" { return .elevenlabs }
             if provider == "mistral" { return .prepared(.mistral) }
+            if provider == "soniox" { return .prepared(.soniox) }
         }
         return nil
     }
@@ -217,7 +221,7 @@ public enum DesktopTranscriptionError: LocalizedError {
         case .unsupportedModel:
             return "This model is not yet supported by the Windows recording workflow."
         case .secureStagingUnavailable:
-            return "Private upload storage is unavailable. Mistral transcription cannot start."
+            return "Private upload storage is unavailable. This provider cannot start transcription."
         }
     }
 }

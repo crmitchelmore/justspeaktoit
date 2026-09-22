@@ -110,60 +110,13 @@ public struct MistralBatchClient: TranscriptionProvider {
     model: String,
     language: String?
   ) throws -> URL {
-    let destinationURL = try staging.createUploadBodyFile(providerID: "mistral")
-
-    do {
-      let output = try FileHandle(forWritingTo: destinationURL)
-      defer { try? output.close() }
-
-      try output.write(contentsOf: Data(Self.formField(named: "model", value: model, boundary: boundary).utf8))
-      if let language {
-        try output.write(
-          contentsOf: Data(Self.formField(named: "language", value: language, boundary: boundary).utf8)
-        )
-      }
-      let escapedFilename = Self.escapedMultipartFilename(sourceURL.lastPathComponent)
-      let mimeType = sourceURL.pathExtension.lowercased() == "m4a"
-        ? "audio/m4a" : BatchTranscriptionJob.mimeType(for: sourceURL) ?? "audio/m4a"
-      let fileHeader =
-        "--\(boundary)\r\n"
-        + "Content-Disposition: form-data; name=\"file\"; filename=\"\(escapedFilename)\"\r\n"
-        + "Content-Type: \(mimeType)\r\n\r\n"
-      try output.write(contentsOf: Data(fileHeader.utf8))
-
-      let input = try FileHandle(forReadingFrom: sourceURL)
-      defer { try? input.close() }
-      while true {
-        try Task.checkCancellation()
-        let chunk = try input.read(upToCount: 1024 * 1024) ?? Data()
-        guard !chunk.isEmpty else { break }
-        try output.write(contentsOf: chunk)
-      }
-      try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
-      return destinationURL
-    } catch {
-      staging.removeUploadBodyFile(at: destinationURL)
-      throw error
-    }
-  }
-
-  private nonisolated static func formField(
-    named name: String,
-    value: String,
-    boundary: String
-  ) -> String {
-    "--\(boundary)\r\n"
-      + "Content-Disposition: form-data; name=\"\(name)\"\r\n"
-      + "\r\n"
-      + "\(value)\r\n"
-  }
-
-  private nonisolated static func escapedMultipartFilename(_ filename: String) -> String {
-    filename
-      .replacingOccurrences(of: "\r", with: "")
-      .replacingOccurrences(of: "\n", with: "")
-      .replacingOccurrences(of: "\\", with: "\\\\")
-      .replacingOccurrences(of: "\"", with: "\\\"")
+    var fields = [(name: "model", value: model)]
+    if let language { fields.append((name: "language", value: language)) }
+    let mimeType = sourceURL.pathExtension.lowercased() == "m4a"
+      ? "audio/m4a" : BatchTranscriptionJob.mimeType(for: sourceURL) ?? "audio/m4a"
+    return try staging.writeMultipart(
+      sourceURL: sourceURL, providerID: "mistral", boundary: boundary, fields: fields, mimeType: mimeType
+    )
   }
 
   private func buildTranscriptionResult(

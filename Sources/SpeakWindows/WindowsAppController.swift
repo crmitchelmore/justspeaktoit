@@ -86,7 +86,8 @@ actor WindowsAppController {
             let id = UUID()
             let filename = id.uuidString + ".wav"
             let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)
-            let file = try PCMRecordingFile(url: audio)
+            let rate = DesktopLiveTranscription.route(forID: settings.model)?.sampleRate ?? PCMRecordingFile.sampleRate
+            let file = try PCMRecordingFile(url: audio, sampleRate: rate)
             let record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
             var live: DesktopLiveSession?
             do {
@@ -99,7 +100,7 @@ actor WindowsAppController {
                 let context = WindowsCaptureContext(file: file, live: live) { message in
                     Task { await self.captureFailed(message, recordingID: id) }
                 }
-                let native = try WindowsNative.createCapture(context: context, deviceID: deviceID)
+                let native = try WindowsNative.createCapture(context: context, deviceID: deviceID, sampleRate: rate)
                 do { try WindowsNative.checked { jsti_capture_start(native, $0, $1) } } catch {
                     withExtendedLifetime(context) { jsti_capture_destroy(native) }
                     throw error

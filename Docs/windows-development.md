@@ -173,9 +173,9 @@ local inference acceleration and playback belong behind platform adapters.
 Keep PCM and inference in process. Do not route the hot path through JSON RPC,
 a web view or disk polling merely to share orchestration.
 
-WASAPI produces 16 kHz mono PCM16 in 100 ms frames. A preallocated, single-
-producer/single-consumer ring holds at most 128 frames (12.8 seconds, about
-400 KiB of PCM). Its capture-side push performs no heap allocation, mutex
+WASAPI produces mono PCM16 directly at the selected provider's 16 or 24 kHz
+rate in 100 ms frames. A preallocated, single-producer/single-consumer ring holds
+at most 128 frames (12.8 seconds, about 600 KiB at the maximum rate). Its capture-side push performs no heap allocation, mutex
 acquisition or disk I/O. A separate writer invokes the Swift file callback;
 stop flushes the final partial frame, drains the queue and joins the writer
 before closing the recording file. Overflow stops recording with an explicit
@@ -293,6 +293,20 @@ Verified baseline on 22 September 2026:
 - The full Apple `make test` suite at pushed source `1e4b2f7a` passed **3,577
   tests, 16 skipped, zero failures**. This includes the Modulate and AssemblyAI
   extractions and the shared live error/finalisation ordering fix.
+- [Run 35722016248](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35722016248)
+  is green for source `b54d5170` (tested merge `14ea6c3a`). Windows passed
+  **206 baseline tests, ten optional probes skipped, zero failures**, then all
+  **five WinHTTP runtime probes**, executable native/storage/decoder self-tests
+  and the expanded native window checks. Portable macOS/Linux passed.
+  [Developer artifact 10692237189](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35722016248/artifacts/10692237189)
+  contains the executable and compiler/source metadata. Executable SHA-256:
+  `81F728109F8DCE62D3A841942A5BE9D0B6482BDBCD5FFC593073CC984C625705`.
+  Its native UI snapshot was inspected; controls fit and the corrected snapshot
+  origin shows the complete client area. This receipt precedes 24 kHz capture.
+- The subsequent direct 16/24 kHz native capture implementation and expanded
+  self-tests were authored by Claude Fable 5.1 at `max`, session
+  `8bef4c77-0e20-4453-a9d3-9a9af8757bfc`. Native strict compile/link checks passed;
+  final-head Windows execution and physical microphone acceptance are pending.
 - **Final-head Windows, macOS and Linux CI for the current source is pending.**
   Provider contract tests use the shared URLProtocol stub and no live provider
   keys; test success must not be reported as a live transcription receipt.

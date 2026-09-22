@@ -92,17 +92,31 @@ typedef struct JSTICapture JSTICapture;
 typedef void (*JSTIAudioDeviceCallback)(const char *id, const char *name, int is_default, void *context);
 int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context,
                                  char *error, size_t error_capacity);
-/* Dedicated bounded writer callback, PCM16 little-endian, 16 kHz mono. Normally 1600
- * samples/100ms; stop flushes a final partial frame. Copy synchronously and
- * return promptly. Do not call capture stop/destroy from either callback. */
+/* Dedicated bounded writer callback, PCM16 little-endian mono at the capture's
+ * sample rate: 16 kHz unless created by jsti_capture_create_with_format. Normally
+ * one 100 ms frame of sample_rate/10 samples (1600 at 16 kHz, 2400 at 24 kHz);
+ * stop flushes a final partial frame. Copy synchronously and return promptly.
+ * Do not call capture stop/destroy from either callback. */
 typedef void (*JSTIAudioCallback)(const int16_t *samples, size_t sample_count, void *context);
 typedef void (*JSTIAudioErrorCallback)(const char *message, void *context);
+/* Default communications microphone at 16 kHz. */
 JSTICapture *jsti_capture_create(JSTIAudioCallback callback, JSTIAudioErrorCallback error_callback,
                                  void *context);
-/* Copies the opaque endpoint ID. Null/empty chooses the default communications
- * microphone at start. An explicit ID must still be active and a capture device;
- * it never silently falls back to another microphone. */
+/* Copies the opaque endpoint ID and captures at 16 kHz. Null/empty chooses the
+ * default communications microphone at start. An explicit ID must still be
+ * active and a capture device; it never silently falls back to another
+ * microphone. On success an error buffer is cleared rather than left stale. */
 JSTICapture *jsti_capture_create_with_device(const char *device_id, JSTIAudioCallback callback,
+                                             JSTIAudioErrorCallback error_callback, void *context,
+                                             char *error, size_t error_capacity);
+/* As create_with_device, capturing directly at sample_rate: exactly 16000 or
+ * 24000 (OpenAI Realtime canonical PCM) Hz PCM16 mono. The Windows audio engine
+ * converts to the selected rate in a single pass; frames carry sample_rate/10
+ * samples. Any other rate fails here with a descriptive error before any
+ * microphone is activated. The rate is fixed for the capture's lifetime; create
+ * a new capture to change it. */
+JSTICapture *jsti_capture_create_with_format(const char *device_id, uint32_t sample_rate,
+                                             JSTIAudioCallback callback,
                                              JSTIAudioErrorCallback error_callback, void *context,
                                              char *error, size_t error_capacity);
 /* Serialize start/stop/destroy on the caller side. start reports initialization
@@ -211,8 +225,10 @@ int jsti_audio_conversion_destroy(JSTIAudioConversion *conversion, char *error, 
  * No microphone, credentials, provider requests, or user recordings. */
 int jsti_audio_conversion_self_test(char *error, size_t error_capacity);
 
-/* Deterministic native checks: Unicode, frame boundaries, silence, invalid
- * insertion targets. Does not use microphone, clipboard or real credentials. */
+/* Deterministic native checks: Unicode, 16/24 kHz frame boundaries, silence,
+ * fixed queue capacity, writer drain, capture creation and sample-rate
+ * validation, invalid insertion targets. Does not use microphone, clipboard or
+ * real credentials. */
 int jsti_native_self_test(char *error, size_t error_capacity);
 int jsti_audio_devices_self_test(char *error, size_t error_capacity);
 /* Call on the UI thread from READY in smoke-test mode. Verifies native control

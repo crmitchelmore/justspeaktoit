@@ -16,11 +16,17 @@ private func microphoneFound(
 }
 
 extension WindowsNative {
-    static func createCapture(context: WindowsCaptureContext, deviceID: String) throws -> OpaquePointer {
+    static func createCapture(
+        context: WindowsCaptureContext, deviceID: String, sampleRate: Int = 16_000
+    ) throws -> OpaquePointer {
+        guard sampleRate == 16_000 || sampleRate == 24_000 else {
+            throw WindowsNativeError(message: "This transcription model requires an unsupported recording rate.")
+        }
         var error = [CChar](repeating: 0, count: 1024)
         let native = deviceID.withCString { device in
-            jsti_capture_create_with_device(
-                device, captureAudio, captureError, Unmanaged.passUnretained(context).toOpaque(), &error, error.count
+            jsti_capture_create_with_format(
+                device, UInt32(sampleRate), captureAudio, captureError,
+                Unmanaged.passUnretained(context).toOpaque(), &error, error.count
             )
         }
         guard let native else { throw WindowsNativeError(message: String(cString: error)) }

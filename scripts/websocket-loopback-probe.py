@@ -102,7 +102,7 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         key = headers.get("sec-websocket-key", "")
         if len(base64.b64decode(key, validate=True)) != 16:
             raise ValueError("invalid handshake key")
-        if path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay"):
+        if path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
             raise ValueError("unknown route")
         if path == "/delay":
             time.sleep(1)
@@ -133,14 +133,15 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             payload[index] ^= mask[index % 4]
         return final, opcode, payload
 
-    def send_frame(self, opcode, payload):
+    def send_frame(self, opcode, payload, final=True):
         length = len(payload)
+        flags = (0x80 if final else 0) | opcode
         if length < 126:
-            header = bytes([0x80 | opcode, length])
+            header = bytes([flags, length])
         elif length <= 65535:
-            header = bytes([0x80 | opcode, 126]) + struct.pack("!H", length)
+            header = bytes([flags, 126]) + struct.pack("!H", length)
         else:
-            header = bytes([0x80 | opcode, 127]) + struct.pack("!Q", length)
+            header = bytes([flags, 127]) + struct.pack("!Q", length)
         self.request.sendall(header)
         self.request.sendall(payload)
 
@@ -152,6 +153,7 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         message = bytearray()
         message_opcode = None
         message_count = 0
+        awaiting_pong = False
         while message_count < 64:
             final, opcode, payload = self.read_frame()
             if opcode == 8:
@@ -162,6 +164,12 @@ class ProbeHandler(socketserver.BaseRequestHandler):
                 self.send_frame(10, payload)
                 continue
             if opcode == 10:
+                if awaiting_pong:
+                    if payload != b"server-probe":
+                        raise ValueError("server ping payload not preserved")
+                    awaiting_pong = False
+                    self.send_frame(1, b"server-pong-verified")
+                    log("server-pong-verified", path=path)
                 continue
             if opcode in (1, 2) and message_opcode is None:
                 message_opcode = opcode
@@ -177,6 +185,16 @@ class ProbeHandler(socketserver.BaseRequestHandler):
                 bytes=len(message), sha256=hashlib.sha256(message).hexdigest())
             if path == "/abrupt":
                 return
+            if path == "/oversize":
+                self.send_frame(2, bytes(MAX_PAYLOAD), final=False)
+                self.send_frame(0, b"x")
+                return
+            if message_opcode == 1 and message == b"server-ping":
+                awaiting_pong = True
+                self.send_frame(9, b"server-probe")
+                message.clear()
+                message_opcode = None
+                continue
             if message_opcode == 1 and message == b"server-close":
                 self.send_frame(8, struct.pack("!H", 1000) + b"probe-complete")
                 log("server-close", path=path)
@@ -185,7 +203,13 @@ class ProbeHandler(socketserver.BaseRequestHandler):
                     raise ValueError("expected close acknowledgement")
                 log("close-acknowledged", path=path)
                 return
-            if path != "/hold":
+            if path == "/fragment":
+                # Split through a possible UTF-8 scalar and require complete
+                # message assembly, independently of TCP receive chunking.
+                split = min(2, len(message))
+                self.send_frame(message_opcode, message[:split], final=False)
+                self.send_frame(0, message[split:])
+            elif path != "/hold":
                 self.send_frame(message_opcode, message)
             message.clear()
             message_opcode = None

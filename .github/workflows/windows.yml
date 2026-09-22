@@ -8,6 +8,7 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
@@ -24,6 +25,7 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
@@ -81,7 +83,7 @@ jobs:
           swift test --configuration release --jobs 4 --xunit-output windows-tests.xml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Probe pinned Windows WebSocket runtime against loopback peer
+      - name: Verify native WinHTTP WebSocket transport against loopback peer
         id: websocket-probe
         timeout-minutes: 3
         run: |
@@ -105,7 +107,7 @@ jobs:
             }
             $env:JSTI_WEBSOCKET_PROBE_PORT = [string]$ready.port
             $probe = Start-Process -FilePath (Get-Command swift).Source -PassThru -NoNewWindow `
-              -ArgumentList @('test', '--configuration', 'release', '--skip-build', '--filter', 'WebSocketRuntimeProbeTests', `
+              -ArgumentList @('test', '--configuration', 'release', '--skip-build', '--filter', 'WinHTTPRuntimeProbeTests', `
                 '--xunit-output', 'windows-websocket-tests.xml') `
               -RedirectStandardOutput windows-websocket-probe.log -RedirectStandardError windows-websocket-probe-errors.log
             if (-not $probe.WaitForExit(90000)) {

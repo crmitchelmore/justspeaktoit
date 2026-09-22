@@ -107,6 +107,7 @@ enum SpeakWindowsMain {
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
                 try WindowsNative.checked { jsti_private_storage_self_test($0, $1) }
+                try WindowsNative.checked { jsti_websocket_self_test($0, $1) }
                 guard !DesktopTranscription.batchModels.isEmpty else {
                     throw WindowsNativeError(message: "No canonical desktop models available.")
                 }

@@ -182,12 +182,17 @@ portablePackage.targets.append(contentsOf: [
         publicHeadersPath: "include",
         linkerSettings: [
             .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
-            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"), .linkedLibrary("shell32"), .linkedLibrary("ntdll"),
-            .linkedLibrary("avrt")
+            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
+            .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"), .linkedLibrary("avrt")
         ]
     ),
-    .executableTarget(name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "CWindowsSupport"]),
-    .testTarget(name: "SpeakWindowsPlatformTests", dependencies: ["CWindowsSupport"])
+    .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport"]),
+    .executableTarget(
+        name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport"]
+    ),
+    .testTarget(
+        name: "SpeakWindowsPlatformTests", dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport"]
+    )
 ])
 portablePackage.cxxLanguageStandard = .cxx17
 #endif

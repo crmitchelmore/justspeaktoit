@@ -58,8 +58,8 @@ non-empty and at most 25 MB. Meta and Azure accept the app's canonical 16 kHz mo
 Other inputs for those providers use a cancellable in-process Media Foundation
 converter, retaining the original in History and removing private temporary WAV
 output afterwards. The converter uses installed Windows codecs; it does not
-promise support for every Ogg, Opus or WebM encoding. Native Windows decode/cancellation adapter tests passed in run 35721370500;
-compressed-format and physical-device acceptance remain pending. Canonical recordings bypass decoding after a 44-byte header probe. Azure keys accept `key:region` (a raw key defaults to eastus);
+promise support for every Ogg, Opus or WebM encoding. Native Windows decode/cancellation tests passed; run 35725040396 also decoded generated AAC/M4A and MP3 fixtures, checked their non-silent signal and retained originals.
+Other compressed formats and physical-device acceptance remain pending. Canonical recordings bypass decoding after a 44-byte header probe. Azure keys accept `key:region` (a raw key defaults to eastus);
 custom resource endpoint UI remains pending. Mistral, Soniox and Rev.ai stream multipart bodies
 from temporary files, using a native protected ACL for the current Windows user
 and SYSTEM. Creation refuses existing files and reparse-point paths; completed,
@@ -335,8 +335,17 @@ Verified baseline on 22 September 2026:
   control bounds; its captured window was visually inspected. This is not a
   physical History acceptance receipt. A subsequent Fable fix uses Foundation
   Unicode folding to match German sharp s and Greek sigma without stripping
-  meaningful Devanagari, Thai or Arabic marks; that revision passed 188 local
-  portable tests, five skipped, zero failures, with native CI pending.
+  meaningful Devanagari, Thai or Arabic marks. That policy passed on Windows,
+  macOS and Linux in source `99b2ccfa`,
+  [run 35725040396](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35725040396),
+  along with real AAC/M4A and MP3 import decoding, the transport probes and
+  native self-tests. Source fixtures contain generated tones only.
+- Fable's subsequent History recovery fix validates metadata filename/record
+  identity and rejects unsafe audio paths before header repair. Invalid records
+  cannot redirect repair outside History or replace another record's metadata.
+  The integrated local suite passed **192 tests, five skipped, zero failures**;
+  this later revision's native CI is pending. Native handle protection against
+  concurrent file replacement/hard links remains separate from these path checks.
 - **Final-head Windows, macOS and Linux CI for the current source is pending.**
   Provider contract tests use the shared URLProtocol stub and no live provider
   keys; test success must not be reported as a live transcription receipt.

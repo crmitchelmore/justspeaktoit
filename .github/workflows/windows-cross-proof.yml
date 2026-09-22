@@ -1,0 +1,100 @@
+name: macOS to Windows Swift Proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/windows-cross/**
+      - .github/workflows/windows-cross-proof.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/windows-cross/**
+      - .github/workflows/windows-cross-proof.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  compile:
+    name: Cross-compile Foundation on macOS
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build Windows PE with private pinned prerequisites
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/foundation-proof"
+          python3 scripts/windows-cross/build-foundation-proof.py \
+            --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
+            --output "$RUNNER_TEMP/foundation-proof" 2>&1 |
+            tee "$RUNNER_TEMP/foundation-proof/bootstrap.log"
+      - name: Upload proof and build evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: foundation-windows-cross-proof
+          path: ${{ runner.temp }}/foundation-proof/
+          if-no-files-found: error
+          retention-days: 14
+
+  execute:
+    name: Execute Mac-built Foundation PE on Windows
+    needs: compile
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Install pinned Windows Swift runtime
+        uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057
+        with:
+          source: swift.org
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+          build_arch: amd64
+          update-sdk-modules: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: foundation-windows-cross-proof
+          path: proof
+      - name: Verify artifact identity and run Foundation assertions
+        shell: pwsh
+        run: |
+          $metadata = Get-Content proof/build-metadata.json -Raw | ConvertFrom-Json
+          if ($metadata.host -ne 'Darwin' -or $metadata.target -ne 'x86_64-unknown-windows-msvc') {
+            throw 'Unexpected build provenance.'
+          }
+          $actual = (Get-FileHash proof/FoundationWindowsProof.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $metadata.executableSHA256) { throw 'Mac-built artifact hash mismatch.' }
+          swift --version | Set-Content proof/windows-runtime.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $process = Start-Process -FilePath (Resolve-Path proof/FoundationWindowsProof.exe).Path `
+            -PassThru -NoNewWindow -RedirectStandardOutput proof/windows-proof.log `
+            -RedirectStandardError proof/windows-proof-errors.log
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'Foundation runtime proof exceeded 30 seconds.'
+          }
+          Get-Content proof/windows-proof.log
+          Get-Content proof/windows-proof-errors.log
+          if ($process.ExitCode -ne 0) { throw "Foundation proof failed: $($process.ExitCode)" }
+          if (-not (Select-String -Path proof/windows-proof.log `
+            -Pattern '^JSTI_FOUNDATION_WINDOWS_CROSS_PROOF_OK:' -Quiet)) {
+            throw 'Foundation assertion success marker missing.'
+          }
+      - name: Upload Windows execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: foundation-windows-runtime-evidence
+          path: proof/windows-*.log
+          if-no-files-found: warn
+          retention-days: 14

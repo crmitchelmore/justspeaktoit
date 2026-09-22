@@ -11,9 +11,13 @@ what each method can and cannot do, and which acceptance gates remain open.
 
 Source: `Sources/CWindowsSupport/WindowsTextOutput.cpp` (adapter),
 `WindowsTextOutputSelfTest.cpp` (deterministic checks),
+`WindowsClipboardOutput.cpp` (clipboard-only output without a captured field),
+`WindowsTextOutputSettings.cpp` (the native Text output dialog),
 `Sources/SpeakWindowsPlatform/WindowsTextOutput.swift` (ownership, settings
-and status text), and `Sources/SpeakWindows/WindowsInsertionController.swift`
-(the actor-owned output task and cancellation).
+and status text), `Sources/SpeakWindows/WindowsInsertionController.swift`
+(the actor-owned output task and cancellation) and
+`Sources/SpeakWindows/WindowsTextOutputSettings.swift` (saving the dialog's
+choices).
 
 ## Capture
 
@@ -114,8 +118,11 @@ check and delivery is a residual risk shared with the macOS paste path.
 
 ### Settings
 
-`%LOCALAPPDATA%\JustSpeakToIt\settings.json` accepts an optional `textOutput`
-object; there is no settings UI yet. Unknown values fall back to the defaults.
+**Text output…** in the main window opens a native modal dialog built from
+standard radio buttons, group boxes and a checkbox. It saves the optional
+`textOutput` object in `%LOCALAPPDATA%\JustSpeakToIt\settings.json`; the format
+is unchanged, so hand-edited files keep working, and missing or unknown values
+fall back to the defaults.
 
 ```json
 "textOutput": { "method": "smart", "insertion": "insertAtCursor", "restoreClipboard": true }
@@ -127,7 +134,31 @@ object; there is no settings UI yet. Unknown values fall back to the defaults.
 - `insertion`: `insertAtCursor` or `replaceField`. Replace-field selects all
   in native controls or uses a writable Value pattern; it never pastes.
 - `restoreClipboard`: `false` leaves the transcript on the clipboard after a
-  paste (macOS "restore clipboard after paste" off).
+  paste (macOS "restore clipboard after paste" off); that transcript keeps the
+  paste's history and cloud exclusion.
+
+The dialog disables choices the selected method cannot use but keeps their
+stored values: insertion for clipboard-only output, and clipboard restoration
+for everything except a Smart paste at the cursor. Apply sends one complete
+choice through the app's ordered settings queue and then shows what was
+actually saved, so a failed save leaves the previous choice; Cancel, Escape
+and closing change nothing. The dialog is available only while idle, and its
+owner window ignores the recording shortcut and Record while it is open.
+
+Each Record event reads the saved choice in the same queue: an Apply made
+before Record is used, and a later Apply affects only later recordings, even
+while the earlier one is still being captured, transcribed or post-processed.
+Imports and History retries never output automatically.
+
+Clipboard-only output does not need a captured field, so it also copies
+recordings started with Record in this window. It uses a separate cancellable
+native job that never queries focus, inserts or sends input; after acquiring
+and snapshotting the clipboard it checks cancellation immediately before
+replacement. Smart and direct-only output still need the captured field and
+leave in-app recordings in History for Copy. Clipboard-only output writes plain
+`CF_UNICODETEXT` exactly like **Copy transcript**, so the copy can appear in
+clipboard history and cloud sync; only the guarded paste's transient transcript
+carries the exclusion formats described above.
 
 ## Timeouts and lifetime
 
@@ -142,11 +173,14 @@ object; there is no settings UI yet. Unknown values fall back to the defaults.
 
 The host executes blocking native output outside its controller actor, so
 capture, cancellation and shutdown can proceed. New capture/import, cancellation
-and close abandon the old native target. One output job retains its slot until
-completion; another transcript remains in History with Copy available while a
-blocked old job finishes. Results from cancelled or superseded jobs cannot
-replace the current UI. Clipboard-only output also checks cancellation after
-acquiring the clipboard and before replacement.
+and close cancel the pending output: an insertion abandons its native target,
+and a clipboard-only copy is refused unless it has already passed its final
+check. One output job, an insertion or a clipboard-only copy, retains its slot
+until completion; another transcript remains in History with Copy available
+while a blocked old job finishes. Results from cancelled or superseded jobs
+cannot replace the current UI. Clipboard-only output checks cancellation after
+acquiring the clipboard and before replacement, and refuses a transcript
+containing a NUL character instead of copying a shortened prefix.
 
 A native return of `1` means mutation may have occurred, including partial
 shortcut submission or timeout after dispatch. The UI asks the user to inspect
@@ -175,9 +209,24 @@ destroy of a blocked worker, native insertion during a blocked capture, and
 worker cleanup. Additional cases cover clipboard acquisition/close races,
 rollback after failed placement, focus/cancel during modifier preparation,
 partial shortcut counts, exact captured-event identity, worker saturation,
-original process paths, cancelled clipboard-only output, and timeout after
-mutation starts. The legacy `jsti_target_capture`/`jsti_target_insert_text`
-entrypoints are covered for compatibility.
+original process paths, clipboard-only output as an ordinary copy without the
+paste's exclusion formats, a kept paste that retains them, cancelled
+clipboard-only output, and timeout after mutation starts. The legacy
+`jsti_target_capture`/`jsti_target_insert_text` entrypoints are covered for
+compatibility.
+
+`jsti_clipboard_output_self_test` drives the field-independent clipboard-only
+job against its own in-memory clipboard: an ordinary copy, cancellation before
+opening, while the clipboard is owned and after the final check, single use,
+failed-write restoration, a busy clipboard, and no focus or input calls. The
+executable's `--self-test` also runs the controller's real recording, settings
+queue and output workflow with synthetic capture, providers and output: batch
+and live recordings keep the choice read at their Record event while a later
+Apply is saved, Apply before Record is honoured, a failed save changes nothing,
+imports and History retries never output, and closing cancels a pending copy.
+`--ui-smoke-test` exercises the Text output dialog's controls, keyboard order,
+minimum bounds and modal recording refusal. These are synthetic checks that
+must pass on Windows CI; they are not physical acceptance.
 
 The self-test never sends real input, never opens the system clipboard and
 never inserts into another application. It exercises UI Automation in
@@ -189,7 +238,9 @@ a real browser, Electron, XAML or Office window.
 - Physical journeys into Chromium/Firefox fields, Electron apps, Windows
   Terminal, WinUI/UWP/WPF controls and Word/Outlook/Excel on a real Windows
   machine, including cancellation, elevated targets and rapid focus changes.
-- A text output settings UI; the settings above are hand-edited only.
+- Windows CI evidence for the Text output dialog and field-independent
+  clipboard-only output, and physical keyboard, screen reader, high-contrast
+  and DPI acceptance of the dialog.
 - Undo integration for the paste path, streaming insertion and voice edit.
 - Clipboard restore for handle-based formats (bitmaps, metafiles).
 - Provider-specific normalisation: applications that transform pasted text

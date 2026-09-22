@@ -144,8 +144,13 @@ guarded clipboard paste that snapshots and restores the previous clipboard
 content, excludes the transcript from clipboard history and reads the field
 back to confirm the insertion. Password, read-only and disabled fields, a
 changed focus or field, and elevated applications fail closed with a Copy
-fallback message. Replace-field, direct-only and clipboard-only modes exist
-as hand-edited `textOutput` settings without UI yet. See
+fallback message. A native **Text output** dialog chooses Smart, direct-only
+or clipboard-only output, insertion at the cursor or over the whole field, and
+clipboard restoration after a Smart paste. Each recording keeps the choice
+saved when its Record event was queued; a later Apply affects only later
+recordings. Clipboard-only output needs no captured field, so it also copies
+recordings started with Record in this window, as an ordinary copy like Copy
+transcript that can appear in clipboard history. See
 [Docs/windows-text-insertion.md](windows-text-insertion.md) for the policy,
 the deterministic native self-test and the remaining physical acceptance
 gates: browser, Electron and Office insertion has synthetic coverage only.
@@ -302,7 +307,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
 | Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox and ElevenLabs streams, and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
-| Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; replace-field, direct-only and clipboard-only modes as hand-edited settings | Physical browser/Electron/Office/XAML acceptance, a text output settings UI, undo, streaming insertion and voice edit |
+| Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
@@ -345,12 +350,18 @@ restoration, keystroke failure, unverifiable pastes, a clipboard changed by
 another application, bounded timeouts, bounded destroy of a blocked worker and
 worker cleanup. It never sends real input or touches the system clipboard, and
 it is not evidence of insertion into a real browser, Electron or Office
-window. The current UI smoke test creates a real native window and checks its
+window. The self-test also checks clipboard-only output without a captured
+field on an in-memory clipboard, and runs the controller's recording, settings
+and output workflow with synthetic capture, providers and output to check
+that each recording keeps the text output read at its Record event. The
+current UI smoke test creates a real native window and checks its
 minimum-size control bounds, atomic history replacement, preserved selection,
 history action identifiers, search query events with filtered-snapshot
 selection clearing and restoration, transcript version defaults with copy and
-export version identity, microphone selection snapshots, cancellation, and a
-hidden post-processing dialog's atomic Apply callback before shutdown. Profile
+export version identity, microphone selection snapshots, cancellation, a
+hidden post-processing dialog's atomic Apply callback before shutdown, and the
+Text output dialog's choices, Cancel/Escape/Enter, keyboard order, minimum
+bounds and modal recording refusal. Profile
 smoke checks cover CRUD, ordering, preservation, validation, modal hotkey refusal,
 keyboard scrolling and narrow window layout. Model-list smoke checks exercise
 refresh, retained selection and transition from batch-only to live-capable lists. Native

@@ -64,6 +64,14 @@ constexpr int statePreparing = 0;
 constexpr int statePlaying = 1;
 constexpr int statePaused = 2;
 constexpr int stateEnded = 3;
+// Output acknowledgement (JSTIAudioPlaybackSnapshot.output_state): the engine
+// was never started, was started (running or paused, so it may start again),
+// or has been stopped by the render thread for good.
+constexpr int outputNeverStarted = 0;
+constexpr int outputStarted = 1;
+constexpr int outputStopped = 2;
+// Bound on a test read gate so a forgotten gate can never hang a run forever.
+constexpr DWORD readGateTimeout = 30000;
 
 struct Failure { HRESULT code; const char *operation; };
 struct Cancelled {};
@@ -162,9 +170,10 @@ public:
                                                      consumed.load(std::memory_order_relaxed));
         return available - available % frame;
     }
+    // Hands out whole frames only, even when the request is not frame aligned.
     size_t read(uint8_t *destination, size_t count) noexcept {
         const uint64_t read = consumed.load(std::memory_order_relaxed);
-        count = std::min(count, readable());
+        count = std::min(count - count % frame, readable());
         if (!count) return 0;
         const size_t offset = static_cast<size_t>(read % capacity);
         const size_t first = std::min(count, capacity - offset);
@@ -183,8 +192,12 @@ class FileStream final : public IStream {
     jsti::Handle file;
     std::mutex mutex;
     const uint64_t length;
+    // Test seam only: every read first waits for this manual-reset event, so
+    // a self-test can stall the codec exactly where a slow disk would.
+    jsti::Handle readGate;
+    jsti::Handle readGateEntered;
 public:
-    FileStream(jsti::Handle &handle, uint64_t length);
+    FileStream(jsti::Handle &handle, uint64_t length, HANDLE readGate = nullptr, HANDLE readGateEntered = nullptr);
     void close();
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **result) override;
     ULONG STDMETHODCALLTYPE AddRef() override { return ++references; }
@@ -215,6 +228,11 @@ struct ReadState {
     std::mutex mutex;
     std::condition_variable changed;
     bool pending = false, ready = false, flushed = false, closed = false;
+    // Set by the render thread once it has ended for any reason, after it
+    // published its result, so a reader stalled on the codec wakes at once
+    // and reports the render outcome instead of waiting for the decode timeout.
+    bool renderEnded = false;
+    bool renderEndObserved = false; // Internal regression witness: the pending read woke for the render result.
     HRESULT result = S_OK;
     DWORD flags = 0;
     IMFSample *sample = nullptr;
@@ -242,11 +260,12 @@ struct ReaderResources {
     HRESULT close();
 };
 
-// Waits for the pending asynchronous read. Cancellation is part of the
-// predicate and the owner's cancel notifies this condition under its mutex, so
-// a stalled codec never delays cancellation until the decode timeout expires.
-// Returns false on timeout; throws Cancelled.
-bool awaitSample(ReadState &state, const std::atomic<bool> &cancelled, std::chrono::seconds timeout);
+// Waits for the pending asynchronous read. Cancellation and the end of the
+// render thread are part of the predicate and both notify this condition
+// under its mutex, so a stalled codec never delays either until the decode
+// timeout expires. Throws Cancelled; renderEnded keeps the render outcome.
+enum class Wake { ready, timeout, renderEnded };
+Wake awaitSample(ReadState &state, const std::atomic<bool> &cancelled, std::chrono::seconds timeout);
 
 // Media Foundation source reader over the pinned handle, configured to one
 // verified output format. Cancellation is honoured between samples and while a
@@ -272,8 +291,10 @@ public:
     uint64_t sampleBytesBound() const noexcept { return bound; }
 
     // Takes ownership of the pinned handle. origin only identifies the
-    // container type by extension; Windows never reopens the path.
-    void open(jsti::Handle &source, uint64_t size, const std::wstring &origin);
+    // container type by extension; Windows never reopens the path. readGate is
+    // the self-test stall seam described on FileStream (null in production).
+    void open(jsti::Handle &source, uint64_t size, const std::wstring &origin,
+              HANDLE readGate = nullptr, HANDLE readGateEntered = nullptr);
     // Container duration in 100 ns units, or -1 when the source does not say.
     int64_t durationTicks() const;
     bool matches(const FormatSpec &spec) const;
@@ -302,8 +323,10 @@ public:
             { std::lock_guard<std::mutex> lock(state->mutex); state->pending = false; }
             require(read, "Read decoded audio sample");
         }
-        if (!awaitSample(*state, cancelled, std::chrono::seconds(decodeTimeoutSeconds))) {
-            throw Failure{HRESULT_FROM_WIN32(ERROR_TIMEOUT), "Read decoded audio sample"};
+        switch (awaitSample(*state, cancelled, std::chrono::seconds(decodeTimeoutSeconds))) {
+        case Wake::ready: break;
+        case Wake::timeout: throw Failure{HRESULT_FROM_WIN32(ERROR_TIMEOUT), "Read decoded audio sample"};
+        case Wake::renderEnded: throw RenderStopped{}; // The owner reports the render thread's own outcome.
         }
         jsti::COM<IMFSample> sample;
         DWORD flags;
@@ -365,6 +388,11 @@ public:
     virtual HRESULT release(UINT32 frames) noexcept = 0;
     // Device latency in 100 ns units, or 0 when unknown.
     virtual REFERENCE_TIME latency() noexcept = 0;
+    // The synthetic output records this requested delay without sleeping; the
+    // production endpoint waits only its own explicitly reported latency.
+    virtual DWORD waitForLatency(HANDLE cancelled, DWORD milliseconds) noexcept {
+        return WaitForSingleObject(cancelled, milliseconds);
+    }
 };
 
 // Opens the output for an opened decoder and settles the decode format
@@ -378,6 +406,10 @@ public:
 
 struct EngineOptions {
     DWORD eventTimeout = defaultEventTimeout;
+    // Self-test stall seam: a manual-reset event every source read waits for
+    // (bounded by readGateTimeout). Null in production.
+    HANDLE readGate = nullptr;
+    HANDLE readGateEntered = nullptr;
 };
 
 // Fixed-size failure record written on the render thread; the worker formats
@@ -403,4 +435,6 @@ void describe(const RenderFailure &failure, char *buffer, size_t capacity);
 JSTIAudioPlayback *createPlayback(const char *input, JSTIAudioPlaybackCallback callback, void *context,
                                   std::unique_ptr<OutputFactory> factory, const EngineOptions &options,
                                   char *error, size_t capacity);
+// Internal observation for the stalled-reader regression; not public C ABI.
+std::shared_ptr<ReadState> playbackReadState(JSTIAudioPlayback *playback);
 } // namespace jsti::playback

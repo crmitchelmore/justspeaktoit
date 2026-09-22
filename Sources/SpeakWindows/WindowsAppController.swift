@@ -105,9 +105,6 @@ actor WindowsAppController {
     ) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
         cancelInsertion()
-        // Capture never starts over an audible playback; the stop is immediate
-        // and the codec join drains in the background.
-        playback.stop()
         selectModel(modelIndex)
         selectMicrophone(deviceID)
         busy = true
@@ -115,6 +112,10 @@ actor WindowsAppController {
         defer { busy = false; finishOperation() }
         if recording != nil { await stopAndTranscribe(); return }
         do {
+            // Wait for acknowledged silence, while slow decoder release stays
+            // off this actor. Busy prevents another capture during suspension.
+            try await playback.stopAndWait()
+            guard !closed else { return }
             let profile = resolvedProfile(executablePath: targetExecutablePath)
             if let limitation = profile.blockingLimitation { throw WindowsNativeError(message: limitation.message) }
             try await startRecording(target: target, deviceID: deviceID, profile: profile)
@@ -137,7 +138,6 @@ actor WindowsAppController {
             target: active.target, live: active.live, profile: active.profile
         )
     }
-
 }
 
 extension WindowsAppController {
@@ -204,12 +204,13 @@ extension WindowsAppController {
               WindowsModels.all.indices.contains(modelIndex),
               !WindowsModels.isLive(WindowsModels.all[modelIndex].id) else { return }
         cancelInsertion()
-        playback.stop()
         selectModel(modelIndex)
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
         do {
+            try await playback.stopAndWait()
+            guard !closed else { return }
             guard !(try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))).isEmpty else {
                 throw TranscriptionProviderError.apiKeyMissing
             }
@@ -262,9 +263,10 @@ extension WindowsAppController {
                 FileHandle.standardError.write(Data("Could not persist recording on close.\n".utf8))
             }
         }
-        // Playback stops audibly at once; waiting here bounds the background
-        // codec joins so no native thread outlives the actor.
-        await playback.close()
+        // Includes admitted opens and every background release attempt.
+        do { try await playback.close() } catch {
+            FileHandle.standardError.write(Data("Playback cleanup failed: \(error.localizedDescription)\n".utf8))
+        }
         // The network task alone is insufficient: its owner must also finish
         // success/failure persistence and release native/file resources.
         if activeOperations > 0 {

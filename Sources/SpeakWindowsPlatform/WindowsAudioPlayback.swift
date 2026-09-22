@@ -68,18 +68,25 @@ public struct WindowsAudioPlaybackSnapshot: Equatable, Sendable {
     public let position: TimeInterval
     /// Container duration when the source reports one.
     public let duration: TimeInterval?
+    /// Valid after cancel: output is stopped and cannot start later. Decoder
+    /// teardown may still be in progress.
+    public let outputIsQuiet: Bool
 
-    public init(state: WindowsAudioPlaybackState, position: TimeInterval, duration: TimeInterval?) {
+    public init(
+        state: WindowsAudioPlaybackState, position: TimeInterval, duration: TimeInterval?, outputIsQuiet: Bool? = nil
+    ) {
         self.state = state
         self.position = position
         self.duration = duration
+        self.outputIsQuiet = outputIsQuiet ?? (state == .ended)
     }
 
     init(native: JSTIAudioPlaybackSnapshot) {
         self.init(
             state: WindowsAudioPlaybackState(rawValue: native.state) ?? .ended,
             position: native.position_seconds.isFinite && native.position_seconds >= 0 ? native.position_seconds : 0,
-            duration: native.duration_seconds.isFinite && native.duration_seconds >= 0 ? native.duration_seconds : nil
+            duration: native.duration_seconds.isFinite && native.duration_seconds >= 0 ? native.duration_seconds : nil,
+            outputIsQuiet: native.output_state == 0 || native.output_state == 2
         )
     }
 }
@@ -102,8 +109,9 @@ public struct WindowsAudioPlaybackCompletion: Equatable, Sendable {
     }
 }
 
-/// One native playback job. Every method except `destroy` is nonblocking and
-/// thread safe. `destroy` cancels, joins both native threads and frees the
+/// One native playback job. Commands and snapshots are thread safe. Owners
+/// keep even open/start off the host actor, so a stalled backend cannot freeze
+/// it. `destroy` cancels, joins both native threads and frees the
 /// job; call it off the completion thread and off UI/actor threads, only
 /// after `start` has returned, and never twice concurrently.
 public protocol WindowsAudioPlaybackHandle: AnyObject, Sendable {
@@ -242,18 +250,39 @@ private func audioPlaybackCompleted(
     box.completion(completion)
 }
 
-/// One-shot playback for `WindowsAudioPlayback.play`. Mirrors the conversion
-/// bridge: the native completion runs on the worker being joined, so
-/// destruction always happens on another queue and the continuation resumes
-/// only after that join.
-private final class AudioPlaybackOperation: @unchecked Sendable {
+/// One-shot orchestration uses a serial worker for open/start/release. Even a
+/// synchronous terminal callback is queued behind the return from start.
+/// Failed releases remain in the bounded registry and are retried on a later
+/// invocation; an unreleased native context is never dropped or called freed.
+final class AudioPlaybackOperation: @unchecked Sendable {
+    private final class Registry: @unchecked Sendable {
+        let lock = NSLock()
+        var operations: [UUID: AudioPlaybackOperation] = [:]
+
+        func admit(_ operation: AudioPlaybackOperation) -> Bool {
+            lock.withLock {
+                for previous in operations.values { previous.retryRelease() }
+                guard operations.count < 2 else { return false }
+                operations[operation.id] = operation
+                return true
+            }
+        }
+
+        func remove(_ id: UUID) { lock.withLock { _ = operations.removeValue(forKey: id) } }
+    }
+
+    private static let registry = Registry()
+    private let id = UUID()
     private let path: String
     private let backend: any WindowsAudioPlaybackBackend
     private let lock = NSLock()
+    private let worker = DispatchQueue(label: "JustSpeakToIt.playback.oneshot", qos: .utility)
     private var handle: (any WindowsAudioPlaybackHandle)?
     private var continuation: CheckedContinuation<WindowsAudioPlayback.Output, Error>?
     private var cancelled = false
     private var completing = false
+    private var releaseFailed = false
+    private var retryScheduled = false
 
     init(path: String, backend: any WindowsAudioPlaybackBackend) {
         self.path = path
@@ -261,70 +290,78 @@ private final class AudioPlaybackOperation: @unchecked Sendable {
     }
 
     func start(_ continuation: CheckedContinuation<WindowsAudioPlayback.Output, Error>) {
-        var failure: Error?
-        let opened: (any WindowsAudioPlaybackHandle)? = lock.withLock {
-            self.continuation = continuation
-            guard !cancelled else { failure = CancellationError(); return nil }
-            do {
-                let opened = try backend.open(path: path) { [weak self] completion in
-                    self?.complete(completion)
-                }
-                handle = opened
-                return opened
-            } catch {
-                failure = error
-                return nil
+        lock.withLock { self.continuation = continuation }
+        guard Self.registry.admit(self) else {
+            continuation.resume(throwing: WindowsAudioPlaybackError("Previous playback resources are still closing."))
+            lock.withLock { self.continuation = nil }
+            return
+        }
+        worker.async { self.openAndStart() }
+    }
+
+    private func openAndStart() {
+        do {
+            guard !lock.withLock({ cancelled }) else { throw CancellationError() }
+            handle = try backend.open(path: path) { [weak self] completion in
+                guard let self else { return }
+                self.worker.async { self.complete(completion) }
             }
-        }
-        // Start outside the lock: a completion may arrive before start returns.
-        if let opened {
-            do { try opened.start() } catch { failure = error }
-        }
-        if let failure { complete(.failure(failure)) }
+            guard !lock.withLock({ cancelled }) else { throw CancellationError() }
+            try handle?.start()
+            if lock.withLock({ cancelled }) { handle?.cancel() }
+        } catch { finish(.failure(error)) }
     }
 
     func cancel() {
-        let owned: (any WindowsAudioPlaybackHandle)? = lock.withLock {
-            cancelled = true
-            return handle
-        }
-        owned?.cancel()
+        lock.withLock { cancelled = true }
+        worker.async { self.handle?.cancel() }
     }
 
     private func complete(_ completion: WindowsAudioPlaybackCompletion) {
         switch completion.status {
-        case .finished: complete(.success(WindowsAudioPlayback.Output(playedDuration: completion.played)))
-        case .cancelled: complete(.failure(CancellationError()))
-        case .failed(let message): complete(.failure(WindowsAudioPlaybackError(message)))
+        case .finished: finish(.success(WindowsAudioPlayback.Output(playedDuration: completion.played)))
+        case .cancelled: finish(.failure(CancellationError()))
+        case .failed(let message): finish(.failure(WindowsAudioPlaybackError(message)))
         }
-    }
-
-    private func complete(_ result: Result<WindowsAudioPlayback.Output, Error>) {
-        let shouldFinish: Bool = lock.withLock {
-            guard !completing else { return false }
-            completing = true
-            return true
-        }
-        guard shouldFinish else { return }
-        DispatchQueue.global(qos: .utility).async { self.finish(result) }
     }
 
     private func finish(_ result: Result<WindowsAudioPlayback.Output, Error>) {
-        let owned: (any WindowsAudioPlaybackHandle)? = lock.withLock {
-            let owned = handle
-            handle = nil
-            return owned
-        }
+        guard !completing else { return }
+        completing = true
         var finalResult = result
-        if let owned {
-            do { try owned.destroy() } catch { finalResult = .failure(error) }
+        do {
+            try handle?.destroy()
+            handle = nil
+            Self.registry.remove(id)
+        } catch {
+            releaseFailed = true
+            finalResult = .failure(error)
         }
-        let completion: CheckedContinuation<WindowsAudioPlayback.Output, Error>? = lock.withLock {
-            if cancelled, case .failure = finalResult { finalResult = .failure(CancellationError()) }
-            let completion = continuation
+        let completion = lock.withLock { () -> CheckedContinuation<WindowsAudioPlayback.Output, Error>? in
+            let value = continuation
             continuation = nil
-            return completion
+            if cancelled, !releaseFailed { finalResult = .failure(CancellationError()) }
+            return value
         }
         completion?.resume(with: finalResult)
+    }
+
+    private func retryRelease() {
+        let admitted = lock.withLock { () -> Bool in
+            guard !retryScheduled else { return false }
+            retryScheduled = true
+            return true
+        }
+        guard admitted else { return }
+        worker.async {
+            defer { self.lock.withLock { self.retryScheduled = false } }
+            guard self.releaseFailed else { return }
+            do {
+                try self.handle?.destroy()
+                self.handle = nil
+                self.releaseFailed = false
+                Self.registry.remove(self.id)
+            } catch { /* Keep the native job and its registry slot owned. */ }
+        }
     }
 }

@@ -225,9 +225,19 @@ uint64_t sampleBound(const FormatSpec &format) {
     return std::min(maximumSampleBound, std::max(minimumSampleBound, format.byteRate() * sampleBoundSeconds));
 }
 
-FileStream::FileStream(jsti::Handle &handle, uint64_t length) : length(length) {
+FileStream::FileStream(jsti::Handle &handle, uint64_t length, HANDLE readGate, HANDLE readGateEntered)
+    : length(length) {
     file.value = handle.value;
     handle.value = nullptr;
+    // Media Foundation can retain a late read after the decoder owner closes.
+    // Duplicate test gates so those callbacks never wait/signal a closed handle.
+    for (auto entry : {std::pair<HANDLE, HANDLE *>{readGate, &this->readGate.value},
+                       std::pair<HANDLE, HANDLE *>{readGateEntered, &this->readGateEntered.value}}) {
+        if (entry.first && !DuplicateHandle(GetCurrentProcess(), entry.first, GetCurrentProcess(), entry.second,
+                                            0, FALSE, DUPLICATE_SAME_ACCESS)) {
+            throw Failure{HRESULT_FROM_WIN32(GetLastError()), "Retain the synthetic source-read gate"};
+        }
+    }
 }
 
 void FileStream::close() {
@@ -246,6 +256,11 @@ HRESULT STDMETHODCALLTYPE FileStream::QueryInterface(REFIID id, void **result) {
 HRESULT STDMETHODCALLTYPE FileStream::Read(void *buffer, ULONG count, ULONG *read) {
     if (read) *read = 0;
     if (count && !buffer) return STG_E_INVALIDPOINTER;
+    if (readGate.value && WaitForSingleObject(readGate.value, 0) != WAIT_OBJECT_0) {
+        if (readGateEntered.value) SetEvent(readGateEntered.value);
+        const DWORD waited = WaitForSingleObject(readGate.value, readGateTimeout);
+        if (waited != WAIT_OBJECT_0) return HRESULT_FROM_WIN32(waited == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError());
+    }
     std::lock_guard<std::mutex> lock(mutex);
     if (!file.value) return STG_E_INVALIDHANDLE;
     DWORD amount = 0;
@@ -339,13 +354,18 @@ HRESULT ReaderResources::close() {
     return result;
 }
 
-bool awaitSample(ReadState &state, const std::atomic<bool> &cancelled, std::chrono::seconds timeout) {
+Wake awaitSample(ReadState &state, const std::atomic<bool> &cancelled, std::chrono::seconds timeout) {
     std::unique_lock<std::mutex> lock(state.mutex);
     const bool ready = state.changed.wait_for(lock, timeout, [&] {
-        return state.ready || FAILED(state.result) || cancelled.load();
+        return state.ready || FAILED(state.result) || state.renderEnded || cancelled.load();
     });
+    if (state.renderEnded) {
+        state.renderEndObserved = true;
+        state.changed.notify_all();
+        return Wake::renderEnded;
+    }
     if (cancelled.load()) throw Cancelled{};
-    return ready;
+    return ready ? Wake::ready : Wake::timeout;
 }
 
 Decoder::Decoder(const std::atomic<bool> &cancelled, std::shared_ptr<ReadState> state)
@@ -356,9 +376,10 @@ Decoder::~Decoder() {
     if (file) file->close();
 }
 
-void Decoder::open(jsti::Handle &source, uint64_t size, const std::wstring &origin) {
+void Decoder::open(jsti::Handle &source, uint64_t size, const std::wstring &origin,
+                   HANDLE readGate, HANDLE readGateEntered) {
     auto &api = MediaAPI::shared();
-    file = new FileStream(source, size);
+    file = new FileStream(source, size, readGate, readGateEntered);
     stream.value = file;
     require(api.byteStream(stream.value, &bytes.value), "Create bounded audio byte stream");
     jsti::COM<IMFAttributes> streamAttributes;
@@ -554,6 +575,10 @@ struct JSTIAudioPlayback {
     jsti::Handle commandEvent; // Auto reset; pause/resume requests for the render thread.
     const std::shared_ptr<ReadState> state = std::make_shared<ReadState>();
     // Cheap snapshot for hosts: written by the engine threads, read anywhere.
+    // Sequentially consistent with cancelled: reserve a possible Start before
+    // checking cancellation. After cancel returns, a snapshot of neverStarted
+    // proves that a future reservation will see cancelled and cannot Start.
+    std::atomic<int> outputState{outputNeverStarted};
     std::atomic<int> displayState{statePreparing};
     std::atomic<uint64_t> heardFrames{0};
     std::atomic<uint32_t> rate{0};
@@ -609,7 +634,11 @@ class Session {
     void abortRender() noexcept {
         if (!render.joinable()) return;
         if (stopEvent.value) SetEvent(stopEvent.value);
-        try { render.join(); } catch (...) { /* Joining another thread cannot deadlock; keep unwinding. */ }
+        // Session exists only on the decode worker; its private render thread
+        // never owns or destroys it. Join must complete before any referenced
+        // state can unwind. An invariant-breaking join exception terminates;
+        // it must never be swallowed to free a still-running Session.
+        render.join();
     }
 
     // Real-time path: only memcpy from the fixed queue into the engine buffer,
@@ -697,6 +726,11 @@ class Session {
                 if (SUCCEEDED(output->padding(padding)) && padding <= written) publishHeard(padding);
                 owner.displayState.store(statePaused);
             } else if (!wantPause && !engineRunning) {
+                // Reserve before reading cancellation. Together with cancel's
+                // flag-then-snapshot order, seq_cst prevents both sides from
+                // observing the old state and falsely acknowledging silence.
+                owner.outputState.store(outputStarted);
+                if (owner.cancelled.load()) { outcome = 1; break; }
                 const HRESULT code = output->start();
                 if (FAILED(code)) { fail(RenderFailure::Kind::output, "Starting audio output", code); break; }
                 engineRunning = true;
@@ -731,11 +765,21 @@ class Session {
             // elapse so the tail is audible before the stream stops.
             const REFERENCE_TIME latency = output->latency();
             if (latency > 0) {
-                const auto milliseconds = static_cast<DWORD>(std::min<REFERENCE_TIME>(latency / 10000 + 1, maximumLatencyWait));
-                WaitForSingleObject(owner.cancelEvent.value, milliseconds);
+                const REFERENCE_TIME bounded = std::min<REFERENCE_TIME>(latency, REFERENCE_TIME{maximumLatencyWait} * 10000);
+                const auto milliseconds = static_cast<DWORD>((bounded + 9999) / 10000);
+                output->waitForLatency(owner.cancelEvent.value, milliseconds);
             }
         }
-        if (engineRunning) output->stop();
+        bool outputQuiet = !engineRunning;
+        if (engineRunning) {
+            const HRESULT stopped = output->stop();
+            outputQuiet = SUCCEEDED(stopped);
+            if (!outputQuiet) {
+                fail(RenderFailure::Kind::output, "Stopping audio output", stopped);
+                outcome = -1;
+            }
+        }
+        if (outputQuiet) owner.outputState.store(outputStopped);
         uint64_t played = written;
         if (outcome != 0) {
             UINT32 padding = 0;
@@ -747,6 +791,13 @@ class Session {
         result.outcome = outcome;
         owner.render = result;
         renderStopped.store(true, std::memory_order_release);
+        // Publish the render outcome before waking the actual decoder wait.
+        // This is distinct from cancellation, so device failure stays failure.
+        {
+            std::lock_guard<std::mutex> lock(owner.state->mutex);
+            owner.state->renderEnded = true;
+        }
+        owner.state->changed.notify_all();
         SetEvent(spaceEvent.value);
     }
 public:
@@ -756,7 +807,7 @@ public:
     void setup() {
         platform.initialise();
         owner.checkCancellation();
-        decoder.open(owner.source, owner.sourceSize, owner.input);
+        decoder.open(owner.source, owner.sourceSize, owner.input, owner.options.readGate, owner.options.readGateEntered);
         owner.durationTicks.store(decoder.durationTicks());
         owner.checkCancellation();
         output = owner.factory->open(decoder, format);
@@ -818,6 +869,9 @@ void JSTIAudioPlayback::run() noexcept {
     } catch (const std::exception &) {
         text("Audio playback could not allocate its bounded state.");
     }
+    // Session destruction released every endpoint reference. Even if Stop
+    // itself failed, no future Start or audible output remains possible now.
+    outputState.store(outputStopped);
     const double played = rate.load() ? static_cast<double>(render.playedFrames) / rate.load() : 0;
     displayState.store(stateEnded);
     callback(status, played, message, context);
@@ -866,6 +920,10 @@ JSTIAudioPlayback *jsti_audio_playback_create(const char *input, JSTIAudioPlayba
     }
 }
 
+std::shared_ptr<ReadState> jsti::playback::playbackReadState(JSTIAudioPlayback *playback) {
+    return playback ? playback->state : nullptr;
+}
+
 int jsti_audio_playback_start(JSTIAudioPlayback *playback, char *error, size_t capacity) {
     if (!playback) return jsti::fail("No audio playback supplied.", error, capacity);
     try {
@@ -902,6 +960,7 @@ int jsti_audio_playback_snapshot(const JSTIAudioPlayback *playback, JSTIAudioPla
     snapshot->duration_seconds = -1;
     if (!playback) return -1;
     snapshot->state = playback->displayState.load();
+    snapshot->output_state = playback->outputState.load();
     const uint32_t rate = playback->rate.load();
     snapshot->position_seconds = rate ? static_cast<double>(playback->heardFrames.load(std::memory_order_acquire)) / rate : 0;
     const int64_t ticks = playback->durationTicks.load();

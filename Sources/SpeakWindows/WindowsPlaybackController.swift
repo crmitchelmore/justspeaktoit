@@ -28,9 +28,9 @@ extension WindowsAppController {
 
     /// Terminal playback outcomes share the status line, but never while a
     /// recording or transcription owns it.
-    func playbackStatus(_ message: String) {
-        guard !closed, !busy, recording == nil else { return }
-        update(message)
+    func playbackStatus(_ status: WindowsAudioPlaybackStatus) {
+        guard !closed, !busy, recording == nil, playback.isCurrent(revision: status.revision) else { return }
+        update(status.message)
     }
 
     /// Play/Pause for the selected record: pauses or resumes an active run for

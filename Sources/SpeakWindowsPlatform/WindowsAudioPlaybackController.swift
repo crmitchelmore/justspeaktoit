@@ -1,65 +1,10 @@
 import Foundation
 
-/// What the native History pane shows for one record: the acknowledged state
-/// and the elapsed/remaining text. Record-bound so a stale update can never
-/// describe another row.
-public struct WindowsAudioPlaybackDisplay: Equatable, Sendable {
-    public enum State: Int32, Equatable, Sendable {
-        case idle = 0
-        case preparing = 1
-        case playing = 2
-        case paused = 3
-    }
-
-    public let recordID: UUID
-    public let state: State
-    public let text: String
-
-    public init(recordID: UUID, state: State, text: String) {
-        self.recordID = recordID
-        self.state = state
-        self.text = text
-    }
-
-    /// "elapsed / remaining" in the Apple History format. An unknown duration
-    /// is shown honestly as "--:--" rather than a guessed remainder.
-    public static func text(position: TimeInterval, duration: TimeInterval?) -> String {
-        guard let duration, duration.isFinite, duration >= 0 else { return "\(format(position)) / --:--" }
-        return "\(format(position)) / \(format(max(duration - position, 0)))"
-    }
-
-    static func format(_ time: TimeInterval) -> String {
-        guard time.isFinite, time >= 0 else { return "--:--.--" }
-        let hundredths = Int((time * 100).rounded())
-        return String(format: "%02d:%02d.%02d", hundredths / 6_000, (hundredths / 100) % 60, hundredths % 100)
-    }
-}
-
-/// Host seams for the controller: `show` feeds the native record-bound
-/// mailbox and may run on any thread; `status` reports terminal outcomes.
-public struct WindowsAudioPlaybackPresenter: Sendable {
-    public let show: @Sendable (WindowsAudioPlaybackDisplay) -> Void
-    public let status: @Sendable (String) -> Void
-
-    public init(
-        show: @escaping @Sendable (WindowsAudioPlaybackDisplay) -> Void,
-        status: @escaping @Sendable (String) -> Void
-    ) {
-        self.show = show
-        self.status = status
-    }
-}
-
-/// Owns at most one audible native playback for the History pane.
-///
-/// Every control is nonblocking: play pins and starts a job, pause/resume are
-/// native commands acknowledged through the sampler, stop cancels audibly at
-/// once and moves the join to a background release task. One sampler task per
-/// run reads the cheap native snapshot about every 100 ms and presents only
-/// changes; nothing is sent from the render thread and no task exists after a
-/// run ended. Runs carry a generation identity, so a completion for a replaced
-/// run never clears a newer one. Releases are bounded to one per run and are
-/// awaited by `close`.
+/// Owns at most two jobs, including opens and failed or pending releases.
+/// Each job has one serial worker, so open/start/destroy never run on the host
+/// actor and a synchronous completion cannot destroy a still-starting handle.
+/// Replacement waits for the previous output to be quiet, independently of
+/// its decoder flush. A blocked or failed release occupies its bounded slot.
 public final class WindowsAudioPlaybackController: @unchecked Sendable {
     public struct Activity: Equatable, Sendable {
         public let recordID: UUID
@@ -67,260 +12,369 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
     }
 
     private final class Run: @unchecked Sendable {
-        let id: UUID
+        let id = UUID()
         let recordID: UUID
-        let handle: any WindowsAudioPlaybackHandle
+        let path: String
         let knownDuration: TimeInterval?
-        var sampler: Task<Void, Never>?
-        var lastDisplay: WindowsAudioPlaybackDisplay
-        var ended = false
-        var releaseScheduled = false
-        var released = false
+        let worker = DispatchQueue(label: "JustSpeakToIt.playback.job", qos: .utility)
+        // All fields below are protected by the controller lock. Only the job
+        // worker invokes the handle, including destruction and cheap commands.
+        var handle: (any WindowsAudioPlaybackHandle)?
+        var sampler: DispatchSourceTimer?
+        var display: WindowsAudioPlaybackDisplay
+        var startReserved = false
+        var stopped = false
+        var outputQuiet = false
+        var pauseRequested = false
+        var pauseCommandQueued = false
+        var releaseStarted = false
+        var releaseError: String?
+        var terminal: WindowsAudioPlaybackCompletion?
 
-        init(id: UUID, recordID: UUID, handle: any WindowsAudioPlaybackHandle, knownDuration: TimeInterval?) {
-            self.id = id
+        init(recordID: UUID, path: String, duration: TimeInterval?) {
             self.recordID = recordID
-            self.handle = handle
-            self.knownDuration = knownDuration
-            self.lastDisplay = WindowsAudioPlaybackDisplay(
+            self.path = path
+            self.knownDuration = duration
+            self.display = WindowsAudioPlaybackDisplay(
                 recordID: recordID, state: .preparing,
-                text: WindowsAudioPlaybackDisplay.text(position: 0, duration: knownDuration)
+                text: WindowsAudioPlaybackDisplay.text(position: 0, duration: duration)
             )
         }
     }
 
     private let lock = NSLock()
     private let backend: any WindowsAudioPlaybackBackend
-    private let interval: Duration
+    private let progressInterval: TimeInterval
+    private let stopTimeout: TimeInterval
+    private let presentations = DispatchQueue(label: "JustSpeakToIt.playback.presentation")
     private var presenter: WindowsAudioPlaybackPresenter
     private var current: Run?
     private var live: [UUID: Run] = [:]
-    private var releases: [UUID: Task<Void, Never>] = [:]
     private var closed = false
+    private var revision: UInt64 = 0
+    private struct Presentation {
+        let display: WindowsAudioPlaybackDisplay
+        let status: String?
+        let presenter: WindowsAudioPlaybackPresenter
+    }
+    private var pendingPresentation: Presentation?
+    private var deliveryScheduled = false
 
     public init(
         backend: any WindowsAudioPlaybackBackend, presenter: WindowsAudioPlaybackPresenter,
-        progressInterval: Duration = .milliseconds(100)
+        progressInterval: Duration = .milliseconds(100), stopTimeout: TimeInterval = 3
     ) {
         self.backend = backend
         self.presenter = presenter
-        self.interval = progressInterval
+        let parts = progressInterval.components
+        self.progressInterval = max(0.005, Double(parts.seconds) + Double(parts.attoseconds) / 1e18)
+        self.stopTimeout = max(0.01, stopTimeout)
     }
 
     public func setPresenter(_ presenter: WindowsAudioPlaybackPresenter) {
         lock.withLock { self.presenter = presenter }
     }
 
-    /// The run that currently owns the output, if any.
     public var activity: Activity? {
-        lock.withLock { current.map { Activity(recordID: $0.recordID, state: $0.lastDisplay.state) } }
+        lock.withLock { current.map { Activity(recordID: $0.recordID, state: $0.display.state) } }
     }
 
-    /// Runs whose native release has not finished yet; bounded to one per run.
     public var pendingReleaseCount: Int { lock.withLock { live.count } }
 
-    /// Replaces any current playback with a new run for `recordID`. The file
-    /// is pinned and the worker started before this returns; the acknowledged
-    /// state follows through the presenter.
-    public func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {
-        let retired: Run? = try lock.withLock {
-            guard !closed else { throw WindowsAudioPlaybackError("The app is closing.") }
-            let old = current
-            current = nil
-            return old
-        }
-        if let retired { retire(retired) }
-        let runID = UUID()
-        let handle = try backend.open(path: path) { [weak self] completion in
-            self?.completed(runID: runID, completion)
-        }
-        let run = Run(id: runID, recordID: recordID, handle: handle, knownDuration: knownDuration)
-        let presenter: WindowsAudioPlaybackPresenter = lock.withLock {
-            current = run
-            live[runID] = run
-            return self.presenter
-        }
-        presenter.show(run.lastDisplay)
-        do {
-            try handle.start()
-        } catch {
-            let wasCurrent: Bool = lock.withLock {
-                guard current === run else { return false }
-                current = nil
-                return true
-            }
-            retire(run)
-            if wasCurrent { presenter.show(idleDisplay(for: run)) }
-            throw error
-        }
-        startSampler(run)
+    public func isCurrent(revision: UInt64) -> Bool {
+        lock.withLock { self.revision == revision && !closed }
     }
 
-    /// Pauses a playing/preparing run or resumes a paused one for `recordID`.
-    /// Returns false when no run for that record is active, so the host can
-    /// start a new one instead.
+    /// Admits a job without opening a file on the caller's thread. At capacity
+    /// it leaves the current playback unchanged and reports a retryable error.
+    public func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {
+        try lock.withLock {
+            guard !closed else { throw WindowsAudioPlaybackError("The app is closing.") }
+            guard live.count < 2 else {
+                throw WindowsAudioPlaybackError("Previous playback is still closing. Try again shortly.")
+            }
+            let previous = current
+            if let previous { stopLocked(previous) }
+            let run = Run(recordID: recordID, path: path, duration: knownDuration)
+            live[run.id] = run
+            current = run
+            publishLocked(run.display)
+            // Admission and the queued open are atomic relative to close.
+            run.worker.async { self.openAndStart(run, after: previous) }
+        }
+    }
+
     @discardableResult
     public func togglePause(recordID: UUID) -> Bool {
-        let run: Run? = lock.withLock {
-            guard let current, current.recordID == recordID, !current.ended else { return nil }
-            return current
+        lock.withLock {
+            guard let run = current, run.recordID == recordID, !run.stopped else { return false }
+            run.pauseRequested.toggle()
+            if !run.pauseCommandQueued {
+                run.pauseCommandQueued = true
+                run.worker.async {
+                    self.lock.withLock { run.pauseCommandQueued = false }
+                    self.applyPause(run)
+                }
+            }
+            return true
         }
-        guard let run else { return false }
-        switch run.handle.snapshot().state {
-        case .preparing, .playing: run.handle.pause()
-        case .paused: run.handle.resume()
-        case .ended: break // The completion is about to clear this run.
-        }
-        return true
     }
 
-    /// Stops the current run: audible output ends now, the display resets to
-    /// zero and the native join happens in the background.
+    /// Requests cancellation. The display resets only after output is quiet.
+    /// Call stopAndWait before starting a microphone or another audio owner.
     public func stop() {
-        let retired: Run? = lock.withLock {
-            let old = current
-            current = nil
-            return old
+        lock.withLock {
+            for run in live.values where !run.stopped { stopLocked(run) }
         }
-        guard let retired else { return }
-        retire(retired)
-        let presenter = lock.withLock { self.presenter }
-        presenter.show(idleDisplay(for: retired))
-        presenter.status("Playback stopped.")
     }
 
-    /// Stops the current run unless it belongs to `recordID`.
     public func stop(unless recordID: UUID) {
-        let differs: Bool = lock.withLock { current.map { $0.recordID != recordID } ?? false }
-        if differs { stop() }
+        lock.withLock {
+            if let run = current, run.recordID != recordID { stopLocked(run) }
+        }
     }
 
-    /// Stops playback and waits for every background release. Bounded by the
-    /// native destroy timeouts; no new run can start afterwards.
-    public func close() async {
-        lock.withLock { closed = true }
+    public func stopAndWait() async throws {
         stop()
-        let pending: [Task<Void, Never>] = lock.withLock { Array(releases.values) }
-        for task in pending { await task.value }
-    }
-
-    private func idleDisplay(for run: Run) -> WindowsAudioPlaybackDisplay {
-        let duration = run.handle.snapshot().duration ?? run.knownDuration
-        let text = WindowsAudioPlaybackDisplay.text(position: 0, duration: duration)
-        return WindowsAudioPlaybackDisplay(recordID: run.recordID, state: .idle, text: text)
-    }
-
-    /// Cancels audibly and schedules the join; never presents (the caller
-    /// decides whether the display belongs to this run).
-    private func retire(_ run: Run) {
-        let sampler: Task<Void, Never>? = lock.withLock {
-            let sampler = run.sampler
-            run.sampler = nil
-            return sampler
-        }
-        sampler?.cancel()
-        run.handle.cancel()
-        scheduleRelease(run)
-    }
-
-    private func scheduleRelease(_ run: Run) {
-        let first: Bool = lock.withLock {
-            guard !run.releaseScheduled else { return false }
-            run.releaseScheduled = true
-            return true
-        }
-        guard first else { return }
-        let task = Task.detached(priority: .utility) { [weak self] in
-            do {
-                try run.handle.destroy()
-            } catch {
-                let presenter = self?.lock.withLock { self?.presenter }
-                let reason = error.localizedDescription
-                presenter?.status("Playback resources could not be released: \(reason)")
+        let deadline = ContinuousClock.now + .seconds(stopTimeout)
+        while !lock.withLock({ live.values.allSatisfy { $0.outputQuiet } }) {
+            try Task.checkCancellation()
+            guard ContinuousClock.now < deadline else {
+                throw WindowsAudioPlaybackError("Audio output has not stopped. Recording has not started.")
             }
-            self?.finishRelease(run)
+            try await Task.sleep(for: .milliseconds(5))
         }
+    }
+
+    /// Includes already-admitted opens/starts and all release attempts. A failed
+    /// destroy remains owned; close reports it instead of claiming successful
+    /// release. Calling close again safely retries those bounded failures.
+    public func close() async throws {
         lock.withLock {
-            // A release that already finished must not be recorded as pending.
-            if !run.released { releases[run.id] = task }
-        }
-    }
-
-    private func finishRelease(_ run: Run) {
-        lock.withLock {
-            run.released = true
-            releases[run.id] = nil
-            live[run.id] = nil
-        }
-    }
-
-    private struct Ended {
-        let run: Run
-        let wasCurrent: Bool
-        let presenter: WindowsAudioPlaybackPresenter
-    }
-
-    /// Runs on the native completion thread: quick, no destroy, no waiting.
-    private func completed(runID: UUID, _ completion: WindowsAudioPlaybackCompletion) {
-        let ended: Ended? = lock.withLock {
-            guard let run = live[runID], !run.ended else { return nil }
-            run.ended = true
-            let wasCurrent = current === run
-            if wasCurrent { current = nil }
-            run.sampler?.cancel()
-            run.sampler = nil
-            return Ended(run: run, wasCurrent: wasCurrent, presenter: presenter)
-        }
-        guard let ended else { return }
-        if ended.wasCurrent {
-            ended.presenter.show(idleDisplay(for: ended.run))
-            switch completion.status {
-            case .finished: ended.presenter.status("Playback finished.")
-            case .cancelled: ended.presenter.status("Playback stopped.")
-            case .failed(let message): ended.presenter.status("Playback failed: \(message)")
+            closed = true
+            for run in live.values {
+                if run.releaseError != nil {
+                    run.releaseError = nil
+                    run.releaseStarted = false
+                    run.worker.async { self.release(run) }
+                } else if !run.stopped { stopLocked(run) }
             }
         }
-        scheduleRelease(ended.run)
-    }
-
-    private func startSampler(_ run: Run) {
-        let interval = self.interval
-        let task = Task { [weak self] in
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: interval) } catch { return }
-                guard let self, !Task.isCancelled else { return }
-                self.sample(run)
+        while true {
+            let outcome: (Bool, String?) = lock.withLock {
+                let allAttempted = live.values.allSatisfy { $0.releaseError != nil }
+                return (live.isEmpty || allAttempted, live.values.compactMap(\.releaseError).first)
+            }
+            if outcome.0 {
+                await withCheckedContinuation { continuation in
+                    presentations.async { continuation.resume() }
+                }
+                if let error = outcome.1 { throw WindowsAudioPlaybackError(error) }
+                return
+            }
+            // Close owns cleanup even if its caller is cancelled.
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(5)) { continuation.resume() }
             }
         }
-        let keep: Bool = lock.withLock {
-            guard current === run, !run.ended, run.sampler == nil else { return false }
-            run.sampler = task
-            return true
+    }
+
+    private func stopLocked(_ run: Run) {
+        guard !run.stopped else { return }
+        run.stopped = true
+        // Reserving start and observing cancellation use the same lock. If
+        // open is still blocked, cancellation forbids every future start.
+        if !run.startReserved { run.outputQuiet = true }
+        run.worker.async { self.release(run) }
+    }
+
+}
+
+private extension WindowsAudioPlaybackController {
+    private func openAndStart(_ run: Run, after previous: Run?) {
+        do {
+            let handle = try backend.open(path: run.path) { [weak self, weak run] completion in
+                guard let self, let run else { return }
+                // Queued behind open/start: completion never joins its caller.
+                run.worker.async { self.completed(run, completion) }
+            }
+            lock.withLock { run.handle = handle }
+            if let previous { try waitForOutput(previous) }
+            let start = lock.withLock { () -> Bool in
+                guard !closed, !run.stopped else { run.outputQuiet = true; return false }
+                run.startReserved = true
+                return true
+            }
+            guard start else { release(run); return }
+            try handle.start()
+            if lock.withLock({ run.stopped }) { release(run); return }
+            applyPause(run)
+            installSampler(run)
+        } catch {
+            completed(run, WindowsAudioPlaybackCompletion(status: .failed(error.localizedDescription), played: 0))
         }
-        if !keep { task.cancel() }
+    }
+
+    private func waitForOutput(_ previous: Run) throws {
+        let deadline = ContinuousClock.now + .seconds(stopTimeout)
+        while !lock.withLock({ previous.outputQuiet }) {
+            guard ContinuousClock.now < deadline else {
+                throw WindowsAudioPlaybackError("Previous audio output has not stopped. Playback has not started.")
+            }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+    }
+
+    private func applyPause(_ run: Run) {
+        let value = lock.withLock { () -> ((any WindowsAudioPlaybackHandle), Bool)? in
+            guard !run.stopped, run.startReserved, !run.releaseStarted, let handle = run.handle else { return nil }
+            return (handle, run.pauseRequested)
+        }
+        guard let (handle, pause) = value else { return }
+        let state = handle.snapshot().state
+        if pause, state != .paused { handle.pause() } else if !pause, state == .paused { handle.resume() }
+    }
+
+    private func installSampler(_ run: Run) {
+        let timer = DispatchSource.makeTimerSource(queue: run.worker)
+        timer.schedule(deadline: .now() + progressInterval, repeating: progressInterval)
+        timer.setEventHandler { [weak self, weak run] in
+            if let self, let run { self.sample(run) }
+        }
+        lock.withLock { run.sampler = timer }
+        timer.resume()
     }
 
     private func sample(_ run: Run) {
-        let update: (WindowsAudioPlaybackDisplay, WindowsAudioPlaybackPresenter)? = lock.withLock {
-            guard current === run, !run.ended else { return nil }
-            let snapshot = run.handle.snapshot()
-            let state: WindowsAudioPlaybackDisplay.State
-            switch snapshot.state {
-            case .preparing: state = .preparing
-            case .playing: state = .playing
-            case .paused: state = .paused
-            case .ended: return nil
-            }
-            let display = WindowsAudioPlaybackDisplay(
-                recordID: run.recordID, state: state,
-                text: WindowsAudioPlaybackDisplay.text(
-                    position: snapshot.position, duration: snapshot.duration ?? run.knownDuration
-                )
-            )
-            guard display != run.lastDisplay else { return nil }
-            run.lastDisplay = display
-            return (display, presenter)
+        let handle = lock.withLock { !run.stopped && current === run ? run.handle : nil }
+        guard let handle else { return }
+        let snapshot = handle.snapshot()
+        guard snapshot.state != .ended else { return }
+        let state: WindowsAudioPlaybackDisplay.State
+        switch snapshot.state {
+        case .preparing: state = .preparing
+        case .playing: state = .playing
+        case .paused: state = .paused
+        case .ended: return
         }
-        if let update { update.1.show(update.0) }
+        let display = WindowsAudioPlaybackDisplay(
+            recordID: run.recordID, state: state,
+            text: WindowsAudioPlaybackDisplay.text(
+                position: snapshot.position, duration: snapshot.duration ?? run.knownDuration
+            )
+        )
+        lock.withLock {
+            guard current === run, !run.stopped, display != run.display else { return }
+            run.display = display
+            publishLocked(display)
+        }
+    }
+
+    private func completed(_ run: Run, _ completion: WindowsAudioPlaybackCompletion) {
+        lock.withLock {
+            guard live[run.id] != nil, run.terminal == nil else { return }
+            run.terminal = completion
+            run.stopped = true
+        }
+        release(run)
+    }
+
+    private struct Release { let handle: (any WindowsAudioPlaybackHandle)? }
+
+    private func release(_ run: Run) {
+        let claim = lock.withLock { () -> Release? in
+            guard live[run.id] != nil, !run.releaseStarted else { return nil }
+            run.releaseStarted = true
+            run.sampler?.cancel()
+            run.sampler = nil
+            return Release(handle: run.handle)
+        }
+        guard let claim else { return }
+        let owned = claim.handle
+        var acknowledgedRevision: UInt64?
+        // A failed open owns no handle. Open is the first command on its
+        // serial worker, so nil here never races a future handle publication.
+        do {
+            if let owned {
+                owned.cancel()
+                let deadline = ContinuousClock.now + .seconds(stopTimeout)
+                while !owned.snapshot().outputIsQuiet {
+                    guard ContinuousClock.now < deadline else {
+                        throw WindowsAudioPlaybackError("Audio output did not acknowledge stopping.")
+                    }
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+            }
+            lock.withLock {
+                run.outputQuiet = true
+                if current === run {
+                    current = nil
+                    let display = WindowsAudioPlaybackDisplay(
+                        recordID: run.recordID, state: .idle,
+                        text: WindowsAudioPlaybackDisplay.text(position: 0, duration: run.knownDuration)
+                    )
+                    publishLocked(display, status: terminalMessage(run.terminal))
+                    acknowledgedRevision = revision
+                }
+            }
+            try owned?.destroy()
+            lock.withLock {
+                run.handle = nil
+                live[run.id] = nil
+            }
+        } catch {
+            lock.withLock {
+                run.releaseError = error.localizedDescription
+                if current === run || revision == acknowledgedRevision {
+                    let display = WindowsAudioPlaybackDisplay(
+                        recordID: run.recordID, state: run.outputQuiet ? .idle : run.display.state,
+                        text: run.display.text
+                    )
+                    publishLocked(display, status: "Playback could not close: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func terminalMessage(_ completion: WindowsAudioPlaybackCompletion?) -> String {
+        switch completion?.status {
+        case .finished: return "Playback finished."
+        case .failed(let message): return "Playback failed: \(message)"
+        case .cancelled, .none: return "Playback stopped."
+        }
+    }
+
+    /// Enqueue while holding the state lock, deliver outside it on one serial
+    /// queue. A blocked or reentrant callback cannot let a later publication
+    /// overtake it, even when both generations refer to the same History row.
+    private func publishLocked(_ display: WindowsAudioPlaybackDisplay, status: String? = nil) {
+        revision &+= 1
+        let version = revision
+        let display = WindowsAudioPlaybackDisplay(
+            recordID: display.recordID, state: display.state, text: display.text, revision: version
+        )
+        pendingPresentation = Presentation(display: display, status: status, presenter: presenter)
+        guard !deliveryScheduled else { return }
+        deliveryScheduled = true
+        presentations.async { self.deliverPresentations() }
+    }
+
+    private func deliverPresentations() {
+        while true {
+            let next = lock.withLock { () -> Presentation? in
+                guard !closed, let next = pendingPresentation else {
+                    pendingPresentation = nil
+                    deliveryScheduled = false
+                    return nil
+                }
+                pendingPresentation = nil
+                return next
+            }
+            guard let next else { return }
+            next.presenter.show(next.display)
+            if let status = next.status, lock.withLock({ revision == next.display.revision && !closed }) {
+                next.presenter.status(WindowsAudioPlaybackStatus(revision: next.display.revision, message: status))
+            }
+        }
     }
 }

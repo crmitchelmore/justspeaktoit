@@ -45,23 +45,40 @@ start (finished, cancelled or failed, with the heard duration). The
 completion runs outside native locks and never after a successful destroy.
 Destroy refuses to join from its own completion callback and keeps the job
 owned by the caller on any failure. A missing codec, an empty decode, no
-active render endpoint, a disabled device, a device change, and an engine
+active render endpoint, a disabled or invalidated device, and an engine
 that stops requesting audio are explicit errors; nothing falls back silently.
 
 ## Controls and ownership
 
-`WindowsAudioPlaybackController` (Swift, `SpeakWindowsPlatform`) owns at most
-one audible run. Play pins and starts a job synchronously and never blocks
-the actor; pause and resume are native commands acknowledged through a
-100 ms sampler that reads the cheap native snapshot and presents only
-changes; Stop cancels audibly at once, resets the display to zero and moves
-the codec join to a background release task, so starting a recording is not
-blocked by decoder teardown. Runs carry a generation identity: a completion
-for a replaced run never clears a newer one, one release task exists per run,
-and `close` awaits every release. The app controller stops playback before
-recording or importing, when another record is selected, when a search hides
-the selected record and on shutdown, and it only ever plays the URL resolved
-by `DesktopRecordingStore.audioURL(for:)`.
+`WindowsAudioPlaybackController` (Swift, `SpeakWindowsPlatform`) admits at most
+two jobs in total, including pending file opens, active playback, background
+releases and failed releases. Each job has a serial worker. File open, start,
+commands and joins stay off the host actor; a completion arriving inside
+`start` is handled only after `start` returns. At capacity, a new request is
+rejected with a retry message while the current playback stays unchanged.
+
+Pause and resume are commands acknowledged through a 100 ms sampler that
+presents only changes. Stop requests cancellation and resets the display only
+after output acknowledges silence. Replacement playback and microphone capture
+wait for that acknowledgement, with a three-second deadline that reports an
+error instead of pretending output stopped. Decoder flush and resource release
+can continue in the background. Cancelling a suspended file open forbids its
+future start, allowing silence to be acknowledged without waiting for that open.
+
+Display delivery retains only one pending update beside the callback in flight,
+so a slow presenter coalesces progress instead of accumulating a queue.
+All display callbacks are ordered on one delivery queue and carry increasing
+revisions, including replacements for the same History row. Status callbacks
+carry the same revision through the host actor, which rejects stale delivery.
+`close` prevents new admission, waits for admitted opens, starts, release attempts
+and display callbacks, and reports any failed release while retaining its job.
+Calling `close` again retries those bounded failures. The one-shot playback
+helper separately bounds itself to two operations and retains failed releases
+for retry on its next invocation.
+
+The app stops playback before recording or importing, when another record is
+selected, when a search hides the selected record and on shutdown. It only
+plays the URL resolved by `DesktopRecordingStore.audioURL(for:)`.
 
 The native window keeps the controls record-bound: a playback report applies
 only while its record is still the selected row, selecting another row resets
@@ -83,11 +100,19 @@ pause/resume, cancel while paused, pause and cancel during the final drain
 (1,000 heard frames of 2,400 queued report 1,000), pause requested before
 start, the event timeout, a device failure at start, immediate completion,
 refused second start, callback self-destroy refusal and release of the
-pinned source. The window smoke test covers the record-bound controls,
+pinned source. A 100 ms source in a 500 ms synthetic buffer must submit and
+consume exactly 2,400 frames, with no padded tail and only the explicitly
+modelled 0 or 25 ms device latency. A gated Media Foundation read verifies
+that render failure wakes the decoder and preserves its original error;
+failed Stop must keep output unacknowledged until endpoint release.
+The window smoke test covers the record-bound controls,
 recording lockout, stale reports and minimum-size bounds. Swift tests cover
 the bridge (refused inputs, codec errors with or without an endpoint,
 pre-start cancellation) and the controller's ownership rules against an
-injected engine. Hardware playback tests probe the endpoint explicitly and
+injected engine, including suspended open/close, completion before start returns,
+cancellation before output acknowledgement, bounded rapid replacement, delayed
+same-record presentation, reentrant callbacks and retained release failures.
+Hardware playback tests probe the endpoint explicitly and
 skip only the audible checks when Windows reports no endpoint; a probe
 failure or a playback failure with an endpoint present is a test failure.
 

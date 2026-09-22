@@ -460,9 +460,11 @@ typedef void (*JSTIAudioPlaybackCallback)(int status, double played_seconds, con
  * codec work never run on the render thread, which submits only real source
  * frames (never synthesised silence) so the reported position is the source
  * audio actually consumed. A missing Media Foundation (Windows N), a missing
- * codec, an empty decode, no active render endpoint, a device change or an
+ * codec, an empty decode, no active render endpoint, an invalidated device or an
  * engine that stops requesting audio all fail with a descriptive error; there
- * is no silent fallback. Creation itself does not touch any device. */
+ * is no silent fallback, and a render failure wakes a decoder stalled on a
+ * slow codec at once so the failure is reported promptly. Creation itself
+ * does not touch any device. */
 JSTIAudioPlayback *jsti_audio_playback_create(const char *input_path, JSTIAudioPlaybackCallback callback,
                                               void *context, char *error, size_t error_capacity);
 /* Starts once. A cancelled or already started job is refused synchronously
@@ -482,6 +484,19 @@ typedef struct JSTIAudioPlaybackSnapshot {
     int state;               /* 0 preparing, 1 playing, 2 paused, 3 ended (see the completion). */
     double position_seconds; /* Source audio actually consumed by the engine so far. */
     double duration_seconds; /* Container duration when the source reports one, otherwise -1. */
+    /* Output acknowledgement: 0 the engine was never started, 1 it was started
+     * (running or paused, so it may start again), 2 the render thread stopped
+     * the stream (or ended without ever starting it) and it can never start
+     * again. After cancel, 2 arrives as soon as the render thread has stopped
+     * the WASAPI stream, well before the decoder teardown that destroy joins;
+     * hosts wait for it before another audible playback or microphone capture
+     * and treat a bounded wait that expires as a failure, not as silence.
+     * After cancel has returned, 0 is also proof of quiet: each potential Start
+     * reserves state 1 before checking cancellation, so a later reservation
+     * cannot start an engine after the caller has observed 0. State 1 includes
+     * an in-flight Start; never interpret it as quiet. A failed Stop retains 1
+     * until the endpoint is released, rather than falsely acknowledging it. */
+    int output_state;
 } JSTIAudioPlaybackSnapshot;
 /* Cheap cached read of atomics; safe from any thread at any rate, never
  * blocks. The position is stable while paused, monotonic while playing and

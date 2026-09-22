@@ -123,6 +123,10 @@ final class PortableCoreTests: XCTestCase {
 
     func testFoundationNumericBridgingPreservesBooleanIntegerAndFloatTypes() throws {
         XCTAssertEqual(try AnyCodable(NSNumber(value: true)).storage, .bool(true))
+        XCTAssertEqual(try AnyCodable(NSNumber(value: false)).storage, .bool(false))
+        XCTAssertEqual(try AnyCodable(NSNumber(value: Int8(0))).storage, .int(0))
+        XCTAssertEqual(try AnyCodable(NSNumber(value: Int8(1))).storage, .int(1))
+        XCTAssertEqual(try AnyCodable(NSNumber(value: Int8(-1))).storage, .int(-1))
         XCTAssertEqual(try AnyCodable(NSNumber(value: 42)).storage, .int(42))
         XCTAssertEqual(try AnyCodable(NSNumber(value: 2.5)).storage, .double(2.5))
         let payload = try JSONSerialization.jsonObject(with: Data("{\"enabled\":true,\"count\":42}".utf8))

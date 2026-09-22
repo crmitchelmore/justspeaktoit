@@ -23,10 +23,10 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         var target = JSTITextTarget()
         var error = [CChar](repeating: 0, count: 1024)
         let captured = jsti_target_capture(&target, &error, error.count) == 0 ? target : nil
-        Task { await controller.toggle(target: captured) }
-    case 2: Task { await controller.importAudio(path: value) }
+        Task { await controller.toggle(target: captured, modelIndex: Int(index)) }
+    case 2: Task { await controller.importAudio(path: value, modelIndex: Int(index)) }
     case 3: Task { await controller.copyTranscript() }
-    case 4: Task { await controller.saveKey(value) }
+    case 4: Task { await controller.saveKey(value, modelIndex: Int(index)) }
     case 5: Task { await controller.selectModel(Int(index)) }
     case 7:
         if holder.smokeTest { jsti_window_request_close() } else { Task { await controller.ready() } }

@@ -38,7 +38,10 @@ final class DesktopRecordingTests: XCTestCase {
 
     func testDesktopModels_AreCanonicalImplementedModels() {
         XCTAssertFalse(DesktopTranscription.batchModels.isEmpty)
-        XCTAssertEqual(Set(DesktopTranscription.batchModels.map(\.id)), OpenAITranscriptionModels.directBatchModelIDs)
+        let expected = OpenAITranscriptionModels.directBatchModelIDs
+            .union([CartesiaBatchClient.catalogID, GladiaBatchClient.catalogID])
+            .union(SpeechmaticsBatchClient.catalogIDs)
+        XCTAssertEqual(Set(DesktopTranscription.batchModels.map(\.id)), expected)
         XCTAssertTrue(DesktopTranscription.batchModels.allSatisfy { option in
             ModelCatalog.batchTranscription.contains(option)
         })

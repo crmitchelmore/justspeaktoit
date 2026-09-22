@@ -4,13 +4,136 @@
 #include <mmdeviceapi.h>
 #include <avrt.h>
 #include <array>
+#include <atomic>
 #include <future>
 #include <mutex>
+#include <memory>
+#include <stdexcept>
 #include <new>
 #include <thread>
 #include <vector>
 
 namespace {
+// Identifies callbacks on both capture and writer threads without shared mutable
+// thread IDs. A callback must never join its own capture/writer lifecycle.
+thread_local const JSTICapture *activeCaptureCallback = nullptr;
+class CaptureCallbackScope {
+    const JSTICapture *previous;
+public:
+    explicit CaptureCallbackScope(const JSTICapture *capture)
+        : previous(activeCaptureCallback) { activeCaptureCallback = capture; }
+    ~CaptureCallbackScope() { activeCaptureCallback = previous; }
+};
+
+// One producer and one consumer. Slots remain owned by the consumer until its
+// borrowed-pointer callback returns. No allocation, mutex or disk I/O in push.
+class PCMFrameRing {
+public:
+    static constexpr size_t frameSamples = 1600;
+    static constexpr size_t capacity = 128; // 12.8 seconds, about 400 KiB.
+    struct Frame { std::array<int16_t, frameSamples> samples{}; size_t count = 0; };
+private:
+    std::array<Frame, capacity> slots{};
+    alignas(64) std::atomic<size_t> written{0};
+    alignas(64) std::atomic<size_t> consumed{0};
+public:
+    static_assert(std::atomic<size_t>::is_always_lock_free, "Capture indices must be lock-free.");
+    bool push(const int16_t *source, size_t count) noexcept {
+        if (!count || count > frameSamples) return false;
+        const size_t write = written.load(std::memory_order_relaxed);
+        if (write - consumed.load(std::memory_order_acquire) >= capacity) return false;
+        Frame &slot = slots[write % capacity];
+        if (source) std::copy_n(source, count, slot.samples.data());
+        else std::fill_n(slot.samples.data(), count, 0);
+        slot.count = count;
+        written.store(write + 1, std::memory_order_release);
+        return true;
+    }
+    const Frame *front() const noexcept {
+        const size_t read = consumed.load(std::memory_order_relaxed);
+        if (read == written.load(std::memory_order_acquire)) return nullptr;
+        return &slots[read % capacity];
+    }
+    void pop() noexcept {
+        consumed.store(consumed.load(std::memory_order_relaxed) + 1, std::memory_order_release);
+    }
+};
+
+class BufferedAudioWriter {
+    enum class Failure { none, overflow, callback, wake, wait };
+    // Heap allocation avoids exhausting the Windows capture thread's stack.
+    std::unique_ptr<PCMFrameRing> ring = std::make_unique<PCMFrameRing>();
+    jsti::Handle available;
+    std::thread worker;
+    std::atomic<bool> closed{false};
+    std::atomic<Failure> failure{Failure::none};
+    JSTIAudioCallback callback;
+    void *context;
+    const JSTICapture *owner;
+
+    void fail(Failure value) noexcept {
+        auto expected = Failure::none;
+        failure.compare_exchange_strong(expected, value, std::memory_order_relaxed);
+    }
+    void run() noexcept {
+        while (true) {
+            if (const auto *frame = ring->front()) {
+                try {
+                    CaptureCallbackScope scope(owner);
+                    callback(frame->samples.data(), frame->count, context);
+                } catch (...) {
+                    fail(Failure::callback);
+                    return;
+                }
+                ring->pop();
+                continue;
+            }
+            // Re-read the ring after acquiring close: a final publication can
+            // race the first empty check, but always precedes producer close.
+            if (closed.load(std::memory_order_acquire)) {
+                if (ring->front()) continue;
+                return;
+            }
+            // A bounded wait also permits shutdown if signalling itself fails.
+            const DWORD result = WaitForSingleObject(available.value, 100);
+            if (result != WAIT_OBJECT_0 && result != WAIT_TIMEOUT) {
+                fail(Failure::wait);
+                return;
+            }
+        }
+    }
+public:
+    BufferedAudioWriter(JSTIAudioCallback callback, void *context, const JSTICapture *owner = nullptr)
+        : callback(callback), context(context), owner(owner) {
+        available.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!available.value) throw std::runtime_error("Could not create the audio writer event.");
+        worker = std::thread(&BufferedAudioWriter::run, this);
+    }
+    ~BufferedAudioWriter() { finish(); }
+    bool append(const int16_t *source, size_t count) noexcept {
+        if (closed.load(std::memory_order_relaxed) || failure.load(std::memory_order_relaxed) != Failure::none) {
+            return false;
+        }
+        if (!ring->push(source, count)) { fail(Failure::overflow); return false; }
+        if (!SetEvent(available.value)) { fail(Failure::wake); return false; }
+        return true;
+    }
+    void finish() {
+        if (!closed.exchange(true, std::memory_order_release) && !SetEvent(available.value)) fail(Failure::wake);
+        if (worker.joinable()) worker.join();
+    }
+    const char *error() const noexcept {
+        switch (failure.load(std::memory_order_relaxed)) {
+        case Failure::none: return nullptr;
+        case Failure::overflow: return "The recording writer could not keep up. Recording stopped to avoid silently losing audio.";
+        case Failure::callback: return "The recording writer callback failed. Recorded audio may be incomplete.";
+        case Failure::wake: return "Signalling the recording writer failed.";
+        case Failure::wait: return "Waiting for recording data failed.";
+        }
+        return "The recording writer failed.";
+    }
+};
+
 class Frames {
     std::array<int16_t, 1600> samples{};
     size_t used = 0;
@@ -67,7 +190,10 @@ struct JSTICapture {
             if (!announced) { ready.set_value(message); announced = true; }
             else {
                 { std::lock_guard<std::mutex> lock(failureMutex); failure = message; }
-                if (errorCallback) errorCallback(message.c_str(), context);
+                if (errorCallback) {
+                    CaptureCallbackScope scope(this);
+                    try { errorCallback(message.c_str(), context); } catch (...) { /* Never cross the C ABI. */ }
+                }
             }
         };
         try {
@@ -109,12 +235,17 @@ struct JSTICapture {
                 report("The microphone driver returned an invalid or excessive capture buffer."); return;
             }
             std::vector<int16_t> packet(capacity);
-            Frames frames(callback, context);
+            BufferedAudioWriter writer(callback, context, this);
+            auto enqueue = [](const int16_t *samples, size_t count, void *value) {
+                static_cast<BufferedAudioWriter *>(value)->append(samples, count);
+            };
+            Frames frames(enqueue, &writer);
             jsti::COM<IAudioCaptureClient> reader;
             result = client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void **>(&reader.value));
             if (FAILED(result)) { report(audioError("Opening microphone capture stream", result)); return; }
             Scheduling scheduling;
-            if (!scheduling.handle) { report(jsti::systemError("Scheduling microphone audio thread")); return; }
+            // MMCSS is an optimisation. Capture still works at normal priority
+            // when the scheduler service is unavailable or disabled by policy.
             result = client->Start();
             if (FAILED(result)) { report(audioError("Starting microphone", result)); return; }
             ready.set_value({});
@@ -154,6 +285,7 @@ struct JSTICapture {
                     firstPacket = false;
                     // Release the driver-owned buffer before entering Swift.
                     frames.append(silence ? nullptr : packet.data(), count);
+                    if (const char *error = writer.error()) { streamFailure = error; return false; }
                 }
             };
             HANDLE events[] = {stop.value, available.value};
@@ -171,6 +303,10 @@ struct JSTICapture {
             if (FAILED(result) && streamFailure.empty()) streamFailure = audioError("Stopping microphone", result);
             if (streamFailure.empty()) drain();
             frames.flush();
+            // The producer is finished. Drain all accepted frames, including the
+            // final partial frame, before allowing stop/destroy to return.
+            writer.finish();
+            if (const char *error = writer.error(); error && streamFailure.empty()) streamFailure = error;
             SecureZeroMemory(packet.data(), packet.size() * sizeof(int16_t));
             if (!streamFailure.empty()) report(streamFailure);
         } catch (const std::exception &) {
@@ -206,6 +342,9 @@ int jsti_capture_start(JSTICapture *capture, char *error, size_t capacity) {
 
 int jsti_capture_stop(JSTICapture *capture, char *error, size_t capacity) {
     if (!capture) return jsti::fail("No microphone capture instance.", error, capacity);
+    if (activeCaptureCallback == capture) {
+        return jsti::fail("Microphone stop must run outside its capture and writer callbacks.", error, capacity);
+    }
     if (capture->worker.joinable()) {
         if (capture->worker.get_id() == std::this_thread::get_id()) {
             return jsti::fail("Microphone stop must run outside its audio callback.", error, capacity);
@@ -220,7 +359,8 @@ int jsti_capture_stop(JSTICapture *capture, char *error, size_t capacity) {
 void jsti_capture_destroy(JSTICapture *capture) {
     if (!capture) return;
     // Refuse a self-join/use-after-free; the caller must destroy on its owner queue.
-    if (capture->worker.joinable() && capture->worker.get_id() == std::this_thread::get_id()) return;
+    if (activeCaptureCallback == capture ||
+        (capture->worker.joinable() && capture->worker.get_id() == std::this_thread::get_id())) return;
     jsti_capture_stop(capture, nullptr, 0);
     delete capture;
 }
@@ -251,6 +391,81 @@ int jsti_native_self_test(char *error, size_t capacity) {
     frames.flush();
     if (!check.valid || check.calls != 3 || check.samples != 3299) {
         return jsti::fail("PCM frame boundaries, silent packets or stop flush failed.", error, capacity);
+    }
+    try {
+        auto ring = std::make_unique<PCMFrameRing>();
+        std::array<int16_t, PCMFrameRing::frameSamples> data{};
+        if (ring->push(data.data(), 0) || ring->push(data.data(), data.size() + 1)) {
+            return jsti::fail("The PCM queue accepted an invalid frame size.", error, capacity);
+        }
+        // Fill before any consumer runs: overflow and wrap checks cannot depend
+        // on scheduler timing. Rejected pushes must leave every accepted frame intact.
+        for (size_t pass = 0; pass < 3; ++pass) {
+            for (size_t index = 0; index < PCMFrameRing::capacity; ++index) {
+                data.fill(static_cast<int16_t>(pass * PCMFrameRing::capacity + index + 1));
+                const size_t count = index + 1 == PCMFrameRing::capacity ? 99 : data.size();
+                if (!ring->push(index % 3 == 0 ? nullptr : data.data(), count)) {
+                    return jsti::fail("The PCM queue rejected a frame before capacity.", error, capacity);
+                }
+            }
+            if (ring->push(data.data(), 1)) return jsti::fail("The PCM queue exceeded its fixed capacity.", error, capacity);
+            for (size_t index = 0; index < PCMFrameRing::capacity; ++index) {
+                const auto *frame = ring->front();
+                const size_t count = index + 1 == PCMFrameRing::capacity ? 99 : data.size();
+                const int16_t expected = index % 3 == 0 ? 0
+                    : static_cast<int16_t>(pass * PCMFrameRing::capacity + index + 1);
+                if (!frame || frame->count != count ||
+                    !std::all_of(frame->samples.begin(), frame->samples.begin() + count,
+                                 [expected](int16_t value) { return value == expected; })) {
+                    return jsti::fail("PCM queue FIFO, silence, wrap or partial-frame check failed.", error, capacity);
+                }
+                ring->pop();
+            }
+            if (ring->front()) return jsti::fail("The PCM queue did not drain completely.", error, capacity);
+        }
+        struct WriterCheck { size_t calls = 0; bool valid = true; } written;
+        auto writtenCallback = [](const int16_t *data, size_t count, void *context) {
+            auto &state = *static_cast<WriterCheck *>(context);
+            const size_t expectedCount = state.calls == 2 ? 99 : 1600;
+            const int16_t expected = state.calls == 1 ? 0 : 42;
+            if (count != expectedCount || !std::all_of(data, data + count,
+                [expected](int16_t value) { return value == expected; })) state.valid = false;
+            ++state.calls;
+        };
+        BufferedAudioWriter writer(writtenCallback, &written);
+        data.fill(42);
+        const bool accepted = writer.append(data.data(), data.size()) && writer.append(nullptr, data.size())
+            && writer.append(data.data(), 99);
+        writer.finish();
+        writer.finish();
+        if (!accepted || writer.error() || !written.valid || written.calls != 3 || writer.append(data.data(), 1)) {
+            return jsti::fail("Writer drain, repeated close or post-close rejection failed.", error, capacity);
+        }
+        auto throwingCallback = [](const int16_t *, size_t, void *) { throw 1; };
+        BufferedAudioWriter throwingWriter(throwingCallback, nullptr);
+        const bool queued = throwingWriter.append(data.data(), 1);
+        throwingWriter.finish();
+        if (!queued || !throwingWriter.error()) {
+            return jsti::fail("The writer did not contain and report a callback exception.", error, capacity);
+        }
+        struct ReentrancyCheck { JSTICapture *capture; int stopResult = 0; } reentrancy{};
+        auto guardedCallback = [](const int16_t *, size_t, void *context) {
+            auto &state = *static_cast<ReentrancyCheck *>(context);
+            state.stopResult = jsti_capture_stop(state.capture, nullptr, 0);
+            // This must be rejected too, leaving the outer owner able to destroy.
+            jsti_capture_destroy(state.capture);
+        };
+        reentrancy.capture = jsti_capture_create(guardedCallback, nullptr, &reentrancy);
+        if (!reentrancy.capture) return jsti::fail("Could not allocate callback guard fixture.", error, capacity);
+        std::unique_ptr<JSTICapture> guardedCapture(reentrancy.capture);
+        BufferedAudioWriter guardedWriter(guardedCallback, &reentrancy, reentrancy.capture);
+        const bool guardQueued = guardedWriter.append(data.data(), 1);
+        guardedWriter.finish();
+        if (!guardQueued || guardedWriter.error() || reentrancy.stopResult != -1) {
+            return jsti::fail("Writer callback stop/destroy reentrancy was not rejected.", error, capacity);
+        }
+    } catch (...) {
+        return jsti::fail("PCM queue/writer self-test failed to manage its resources.", error, capacity);
     }
     JSTITextTarget target{};
     char expectedError[256]{};

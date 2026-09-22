@@ -25,6 +25,7 @@ actor WindowsAppController {
     private let store: DesktopRecordingStore
     private var settings: Settings
     private var recording: Recording?
+    private var isReady = false
     private var busy = false
     private var closed = false
     private var shutdownComplete = false
@@ -50,14 +51,17 @@ actor WindowsAppController {
         self.settings = loadedSettings
     }
 
-    func toggle(target: JSTITextTarget?) async {
-        guard !busy, !closed else { return }
+    func toggle(target: JSTITextTarget?, modelIndex: Int) async {
+        guard isReady, !busy, !closed, DesktopTranscription.batchModels.indices.contains(modelIndex) else { return }
+        selectModel(modelIndex)
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
         if recording != nil { await stopAndTranscribe(); return }
         do {
-            guard !(try WindowsNative.apiKey()).isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
+            guard !(try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))).isEmpty else {
+                throw TranscriptionProviderError.apiKeyMissing
+            }
             let id = UUID()
             let filename = id.uuidString + ".wav"
             let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)
@@ -152,13 +156,17 @@ actor WindowsAppController {
         update("Recording stopped and retained: \(message)", state: 0)
     }
 
-    func importAudio(path: String) async {
-        guard !busy, !closed, recording == nil else { return }
+    func importAudio(path: String, modelIndex: Int) async {
+        guard isReady, !busy, !closed, recording == nil,
+              DesktopTranscription.batchModels.indices.contains(modelIndex) else { return }
+        selectModel(modelIndex)
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
         do {
-            guard !(try WindowsNative.apiKey()).isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
+            guard !(try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))).isEmpty else {
+                throw TranscriptionProviderError.apiKeyMissing
+            }
             let source = URL(fileURLWithPath: path)
             let id = UUID()
             let filename = id.uuidString + "." + source.pathExtension
@@ -182,12 +190,12 @@ actor WindowsAppController {
         var record = original
         do {
             guard !closed else { throw CancellationError() }
-            let key = try WindowsNative.apiKey()
+            let key = try WindowsNative.apiKey(name: credentialIdentifier(for: record.modelIdentifier))
             let audio = directory.appendingPathComponent("History").appendingPathComponent(record.audioFilename)
             let size = try audio.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             guard size <= 25_000_000 else {
                 throw WindowsNativeError(
-                    message: "Audio exceeds the provider's 25 MB upload limit. The recording is saved."
+                    message: "Audio exceeds this Windows preview’s 25 MB upload cap. The recording is saved."
                 )
             }
             update("Transcribing… Your recording is saved locally.", state: 2)
@@ -259,6 +267,9 @@ actor WindowsAppController {
         waiters.forEach { $0.resume() }
     }
 
+}
+
+extension WindowsAppController {
     private func finishOperation() {
         activeOperations -= 1
         guard activeOperations == 0 else { return }
@@ -271,14 +282,19 @@ actor WindowsAppController {
         guard !closed else { return }
         WindowsNative.update(status, transcript: transcript, state: state)
     }
-}
 
-extension WindowsAppController {
+    private func credentialIdentifier(for model: String) throws -> String {
+        guard let provider = DesktopTranscription.provider(for: model) else {
+            throw DesktopTranscriptionError.unsupportedModel
+        }
+        return provider.apiKeyIdentifier
+    }
     func selectedIndex() -> Int {
         DesktopTranscription.batchModels.firstIndex { $0.id == settings.model } ?? 0
     }
 
     func ready() async {
+        defer { isReady = true }
         guard !closed else { return }
         activeOperations += 1
         defer { finishOperation() }
@@ -287,8 +303,8 @@ extension WindowsAppController {
             guard !closed, !busy, recording == nil else { return }
             let records = recovery.records
             transcript = records.first(where: { $0.result != nil })?.result?.text ?? ""
-            let key = try WindowsNative.apiKey()
-            var status = key.isEmpty ? "Enter and save your OpenAI API key to record or import audio."
+            let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
+            var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
                 : "Ready. Ctrl+Alt+Space starts or stops recording. \(records.count) saved recordings."
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
@@ -307,11 +323,16 @@ extension WindowsAppController {
         } catch { update("Could not save settings: \(error.localizedDescription)") }
     }
 
-    func saveKey(_ key: String) {
+    func saveKey(_ key: String, modelIndex: Int) {
         guard !closed, !busy, recording == nil else { return }
         do {
-            try WindowsNative.saveAPIKey(key)
-            update(key.isEmpty ? "API key removed." : "API key saved in Windows Credential Manager.")
+            guard DesktopTranscription.batchModels.indices.contains(modelIndex),
+                  let provider = DesktopTranscription.provider(
+                    for: DesktopTranscription.batchModels[modelIndex].id
+                  ) else { throw DesktopTranscriptionError.unsupportedModel }
+            let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            try WindowsNative.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
+            update(cleaned.isEmpty ? "API key removed." : "API key saved in Windows Credential Manager.")
         } catch { update(error.localizedDescription) }
     }
 

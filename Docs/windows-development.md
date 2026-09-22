@@ -33,10 +33,12 @@ $bin = swift build --configuration release --show-bin-path
 & (Join-Path $bin.Trim() 'SpeakWindows.exe')
 ```
 
-The application offers microphone recording, audio-file import, an OpenAI model
-selector and credential entry. `Ctrl+Alt+Space` starts and stops recording when
-registration succeeds. Save the key through the application; it goes to Windows
-Credential Manager. The app stores settings and durable recording records under
+The application offers microphone recording, audio-file import and batch models
+from OpenAI, Cartesia, Gladia and Speechmatics. These are projections of the
+canonical shared catalogue; other providers and live models remain unavailable.
+`Ctrl+Alt+Space` starts and stops recording when registration succeeds. Save the
+selected provider's key through the application; each provider uses its canonical
+credential identifier in Windows Credential Manager. The app stores settings and durable recording records under
 `%LOCALAPPDATA%\JustSpeakToIt`. A recorded file and pending history record exist
 before network transcription starts, so an interrupted request does not discard
 the source recording.
@@ -101,7 +103,7 @@ flowchart TB
 | Layer | Current responsibility | Source |
 |---|---|---|
 | Canonical domain | Model identifiers, provider routes, transcript semantics, Unicode reconciliation, lifecycle ownership, PCM/WAV, comparison and history projections | `Sources/SpeakCore/` |
-| Shared batch transport | OpenAI request/response semantics, with an injected duration resolver; macOS provider remains a native adapter | `Sources/SpeakCore/OpenAIBatchClient.swift`, `Sources/SpeakApp/OpenAITranscriptionProvider.swift` |
+| Shared batch transport | Direct OpenAI transcription plus the existing Cartesia, Gladia and Speechmatics clients; no copied HTTP, polling or cancellation logic | `Sources/SpeakCore/OpenAIBatchClient.swift`, `CartesiaBatchClient.swift`, `GladiaBatchClient.swift`, `SpeechmaticsBatchClient.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
 | Windows services | Event-driven WASAPI capture, Win32 UI/hotkey, Credential Manager, clipboard and guarded native-control insertion | `Sources/CWindowsSupport/` |
@@ -140,7 +142,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
-| Batch transcription | Direct OpenAI models from canonical catalogue wired | Live provider receipt, supported formats/languages, cancellation, quotas and all other macOS providers |
+| Batch transcription | Canonical direct OpenAI models, Cartesia Ink Whisper, Gladia Solaria-1 and Speechmatics Enhanced/Standard wired through shared clients | Final-head Windows/Linux CI, real provider receipts, supported formats/languages and remaining macOS providers |
 | Live transcription | Shared routes/protocols/transcript policies compile | Windows transport integration and every provider's streaming/finalisation acceptance |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
 | Text output | Captured native Edit/RichEdit insertion and explicit copy implemented | Browser/Electron/Office coverage, selections, undo, streaming insertion and voice edit |
@@ -152,7 +154,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
 | Voice output | Shared catalogues and some request contracts compile | Provider execution, native playback, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
-| Credentials | Windows Credential Manager adapter implemented | Credential lifecycle acceptance and all provider credentials |
+| Credentials | Windows Credential Manager adapter uses canonical provider-specific identifiers for the four wired providers | Physical credential lifecycle acceptance and remaining providers |
 | Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
 | Automation and integrations | Shared protocol data available in source | Windows CLI/IPC, OpenClaw, deep links and applicable automation surface parity |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
@@ -179,11 +181,28 @@ target. The UI smoke test creates and closes a real native window. Neither test
 proves microphone capture, real provider transcription, credential access,
 successful external insertion or user-visible feature parity.
 
-The initial local portable run on 22 September 2026 passed 13 core contract tests
-and four desktop tests on macOS. This is a local baseline only; consult the
-current workflow run for the current revision. Record Windows CI and physical
-acceptance receipts separately, with commit, executable hash, OS/architecture,
-device, input fixture, provider/model and observed result.
+Verified baseline on 22 September 2026:
+
+- The full Apple `make test` run at the initial extraction completed **3,434
+  tests, 16 skipped, zero failures**. This is regression evidence for that
+  extraction, not a performance measurement or a later-head test result.
+- [Windows and Portable Swift run 35710382001](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35710382001)
+  at commit `317ae843d59755f31d4ca911bef8f23a019a9752` passed native Windows x64
+  release compilation, **26 tests**, executable self-test and native window
+  creation/shutdown. Its macOS and Linux portable jobs also passed.
+- That run produced [developer artifact 10686856024](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35710382001/artifacts/10686856024),
+  with source/compiler provenance. It is the initial OpenAI-only build;
+  it does not contain the later four-provider expansion.
+- The expanded desktop routing passed **33 local portable/desktop tests** on
+  macOS, including every exposed model's authentication/quota failures,
+  transport cancellation, Gladia/Speechmatics accepted-job cleanup and
+  provider-specific credentials. These tests use the canonical URLProtocol
+  stub and no live provider keys. **The expanded-provider final-head native CI
+  is pending**; the earlier green run must not be attributed to these changes.
+
+Record Windows CI and physical acceptance receipts separately, with commit,
+executable hash, OS/architecture, device, input fixture, provider/model and
+observed result. Consult the current workflow run for the current revision.
 
 Before Windows feature acceptance, prove a physical microphone → provider →
 transcript → intended external field journey and its cancellation/failure paths.

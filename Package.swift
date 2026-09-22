@@ -172,7 +172,7 @@ let portablePackage = Package(
         ),
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
         .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
-        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop"]),
+        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
         .testTarget(
             name: "SpeakPortableTests",
             dependencies: ["SpeakCore", "SpeakTestSupport"],
@@ -256,7 +256,7 @@ let package = portableCoreBuild ? portablePackage : Package(
             checksum: "b7a3442e2f3552cac1ee71b5e164934dd4db243f6b4b16b1e3e3ed5d1645eefd"
         ),
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
-        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop"]),
+        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
         .target(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"

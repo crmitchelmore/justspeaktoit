@@ -59,7 +59,6 @@ let appleCoreSources: [String] = [
     "GeminiLiveClient.swift",
     "GeminiLiveProtocol.swift",
     "GeminiTTSAPI.swift",
-    "GladiaLiveClient.swift",
     "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",
     "HandsFreeDictation.swift",

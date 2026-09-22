@@ -1,35 +1,58 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
 import os.log
+#endif
 
-// MARK: - Gladia Live Client (Cross-platform, 2-step init)
+// MARK: - Gladia Live Client (portable, injected transports)
 
-/// Cross-platform Gladia Solaria streaming speech-to-text client.
+/// Shared Gladia Solaria live client used by macOS, iOS and Windows.
 ///
-/// Gladia uses a two-step handshake: a POST to `/v2/live` returns a
-/// single-use WebSocket URL, which this client then connects to. Audio that
-/// arrives before the socket is ready is buffered. Transcript messages already
-/// carry `(text, is_final)`, so they map straight onto
-/// ``StreamingTranscriptionClient``. Shared by macOS and iOS.
-public final class GladiaLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
-    /// Final shape: each final transcript event carries one utterance.
+/// Gladia is two-stage: `POST /v2/live` with `x-gladia-key` creates a session
+/// and returns a single-use WebSocket URL carrying its own temporary token.
+/// PCM16 mono chunks are admitted synchronously into one bounded queue from
+/// `start()` onward and sent one at a time, as binary frames, once the socket
+/// handshake completes. A finish drains that queue, sends `stop_recording`
+/// behind the last chunk and waits for `end_session` inside one whole deadline.
+/// Both transports are injected — `URLSession` on Apple platforms, a native
+/// socket on Windows — while framing, admission, ordering and run identity
+/// stay here so the platforms cannot drift. See `GladiaLive` for the contract.
+///
+/// State changes happen under one lock. Transport calls, deadlines, callbacks
+/// and finish waiters run after it is released, in the order the state changed.
+public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    /// Each final `transcript` carries one utterance, identified by `data.id`.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
+    /// `stop_recording` makes Gladia process audio it has not transcribed yet,
+    /// so a caller must always finish gracefully.
+    public let finishFlushesBufferedAudio = true
+    /// The whole bound `finishAndWait()` applies, for host stop watchdogs.
+    public var finalisationBudget: TimeInterval? { GladiaLive.finishBudget }
 
-    private static let baseURL = URL(string: "https://api.gladia.io")!
+    public typealias SessionInitiator = @Sendable (
+        URLRequest, @escaping @Sendable (Result<(statusCode: Int, body: Data), Error>) -> Void
+    ) -> any GladiaLiveSessionRequest
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-    private let apiKey: String
-    private let model: String
-    private let language: String?
-    private let sampleRate: Int
-    private let session: URLSession
-    private let logger = SpeakLogger.logger(category: "GladiaLiveClient")
-    private let stateLock = NSLock()
+    /// The session request and the socket handshake must complete in this bound.
+    static let readyDeadline: TimeInterval = 10
+    /// Admitted chunks are bounded by count as well as by the byte budget.
+    static let maximumQueuedChunks = 256
 
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isStopping = false
-    private var isConnected = false
-    private var pendingAudio: [Data] = []
+    let apiKey: String
+    let model: String
+    let language: String?
+    let sampleRate: Int
+    let endpoint: URL
+    let initiateSession: SessionInitiator
+    let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    private let lock = NSLock()
+    /// The current run. Read and replaced only under `lock`.
+    var run: GladiaLiveRun
 
     public init(
         apiKey: String,
@@ -39,258 +62,204 @@ public final class GladiaLiveClient: StreamingTranscriptionClient, @unchecked Se
         session: URLSession = .shared
     ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.model = model
+        self.model = GladiaLiveProtocol.apiModelName(from: model)
         self.language = language
         self.sampleRate = sampleRate
-        self.session = session
+        self.endpoint = GladiaLive.baseURL.appendingPathComponent(GladiaLiveProtocol.initPath)
+        self.initiateSession = Self.sessionInitiator(session: session)
+        self.makeConnection = { URLSessionStreamingConnection(session: session, request: $0) }
+        self.schedule = Self.defaultScheduler
+        self.run = GladiaLiveRun(sampleRate: sampleRate)
     }
 
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
+    /// Injected transports: `initiateSession` performs `POST /v2/live` and
+    /// `makeConnection` opens the returned socket, so each can be held or
+    /// completed independently. `baseURL` defaults to Gladia's API.
+    public init(
+        apiKey: String,
+        model: String = GladiaLive.defaultModel,
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        baseURL: URL = GladiaLive.baseURL,
+        initiateSession: @escaping SessionInitiator,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
     ) {
-        withStateLock {
-            isStopping = false
-            isConnected = false
-            pendingAudio = []
-            self.onTranscript = onTranscript
-            self.onError = onError
-        }
-        initiateSession()
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.model = GladiaLiveProtocol.apiModelName(from: model)
+        self.language = language
+        self.sampleRate = sampleRate
+        self.endpoint = baseURL.appendingPathComponent(GladiaLiveProtocol.initPath)
+        self.initiateSession = initiateSession
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.run = GladiaLiveRun(sampleRate: sampleRate)
     }
 
-    public func sendAudio(_ audioData: Data) {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard isConnected, let task = webSocketTask, task.state == .running else {
-                pendingAudio.append(audioData)
-                let maxBytes = sampleRate * 2 * 5 // 5s of PCM16
-                var total = pendingAudio.reduce(0) { $0 + $1.count }
-                while total > maxBytes, !pendingAudio.isEmpty {
-                    total -= pendingAudio.removeFirst().count
+    deinit {
+        let (request, connection) = lock.withLock { (run.sessionRequest, run.connection) }
+        request?.cancel()
+        connection?.cancel()
+    }
+
+    /// The production `POST /v2/live`: one cancellable `URLSessionDataTask`.
+    public static func sessionInitiator(session: URLSession) -> SessionInitiator {
+        { request, completion in
+            let pending = GladiaURLSessionRequest(session: session, request: request, completion: completion)
+            pending.resume()
+            return pending
+        }
+    }
+
+    static let defaultScheduler: Scheduler = { seconds, action in
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+    }
+
+    // MARK: - StreamingTranscriptionClient
+
+    /// Starts a new run, aborting any previous one first. Its waiters resume
+    /// with that run's confirmed text; nothing of it can reach the new run.
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        perform { effects in
+            close(run, &effects)
+            let active = GladiaLiveRun(sampleRate: sampleRate)
+            run = active
+            active.onTranscript = onTranscript
+            active.onError = onError
+            begin(active, &effects)
+        }
+    }
+
+    /// Immediate abort: abandons the session request or socket and wakes
+    /// every finish waiter with the confirmed text. No error is reported.
+    public func stop() { perform { close(run, &$0) } }
+
+    /// Immediate abort, identical to `stop()`.
+    public func cancel() { perform { close(run, &$0) } }
+
+    /// Drains admitted PCM, sends `stop_recording` behind it and waits for
+    /// `end_session`, inside `GladiaLive.finishBudget` from the moment the
+    /// first finish begins. Concurrent and repeated finishes share one
+    /// outcome. Returns the confirmed transcript of the whole session, or
+    /// `nil` when nothing was transcribed; a failure is published through
+    /// `onError` before any finish returns. Cancelling the calling task
+    /// aborts the run.
+    public func finishAndWait() async -> String? {
+        let active = lock.withLock { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+                perform { effects in
+                    guard isCurrent(active), active.stage != .idle else {
+                        let transcript = active.transcript
+                        effects.append { continuation.resume(returning: transcript) }
+                        return
+                    }
+                    active.waiters.append(continuation)
+                    if Task.isCancelled {
+                        close(active, &effects)
+                    } else {
+                        beginFinish(active, &effects)
+                    }
                 }
-                return nil
             }
-            return task
-        }
-        guard let task else { return }
-        send(audioData, on: task)
-    }
-
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            if let task = webSocketTask, task.state == .running {
-                task.send(.string(#"{"type":"stop_recording"}"#)) { _ in }
-            }
-            return webSocketTask
-        }
-        task?.cancel(with: .normalClosure, reason: nil)
-        withStateLock { webSocketTask = nil }
-    }
-
-    // MARK: - Session init (step 1)
-
-    private func initiateSession() {
-        let request: URLRequest
-        do {
-            request = try makeInitRequest()
-        } catch {
-            currentOnError()?(error)
-            return
-        }
-
-        session.dataTask(with: request) { [weak self] data, _, error in
-            guard let self else { return }
-            if self.isStoppingState() { return }
-            if let error {
-                self.currentOnError()?(error)
-                return
-            }
-            guard let data,
-                  let response = try? JSONDecoder().decode(GladiaInitResponse.self, from: data),
-                  let url = URL(string: response.url) else {
-                self.currentOnError()?(StreamingClientError.invalidURL)
-                return
-            }
-            self.connectWebSocket(url: url)
-        }.resume()
-    }
-
-    private func makeInitRequest() throws -> URLRequest {
-        let payload = GladiaInitRequest(
-            model: model,
-            sampleRate: sampleRate,
-            languageConfig: .from(language: language)
-        )
-        var request = URLRequest(url: Self.baseURL.appendingPathComponent("v2/live"))
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-gladia-key")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-        return request
-    }
-
-    // MARK: - WebSocket (step 2)
-
-    private func connectWebSocket(url: URL) {
-        let task = session.webSocketTask(with: url)
-        let (proceed, buffered) = withStateLock { () -> (Bool, [Data]) in
-            guard !isStopping else { return (false, []) }
-            webSocketTask = task
-            isConnected = true
-            let pending = pendingAudio
-            pendingAudio = []
-            return (true, pending)
-        }
-        guard proceed else {
-            task.cancel(with: .goingAway, reason: nil)
-            return
-        }
-        task.resume()
-        for frame in buffered { send(frame, on: task) }
-        receiveMessages()
-    }
-
-    private func send(_ audioData: Data, on task: URLSessionWebSocketTask) {
-        task.send(.data(audioData)) { [weak self] error in
-            guard let self, let error else { return }
-            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-            self.currentOnError()?(error)
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.perform { effects in if self.isCurrent(active) { self.close(active, &effects) } }
         }
     }
 
-    private func receiveMessages() {
-        guard let task = currentWebSocketTask() else { return }
-        task.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let message):
-                self.handleMessage(message)
-                self.receiveMessages()
-            case .failure(let error):
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-                self.currentOnError()?(error)
-            }
-        }
-    }
+    // MARK: - Test and diagnostics seams
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-        let text: String?
-        switch message {
-        case .string(let payload): text = payload
-        case .data(let data): text = String(data: data, encoding: .utf8)
-        @unknown default: text = nil
-        }
-        guard let text, let data = text.data(using: .utf8),
-              let envelope = try? JSONDecoder().decode(GladiaMessage.self, from: data) else {
-            return
-        }
-        if envelope.type == "transcript",
-           let transcript = envelope.data,
-           let utterance = transcript.utterance?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !utterance.isEmpty {
-            currentOnTranscript()?(utterance, transcript.isFinal)
-        } else if envelope.type == "error" || envelope.error != nil {
-            let message = envelope.error?.message ?? "Gladia streaming error"
-            currentOnError()?(NSError(
-                domain: "Gladia", code: -1, userInfo: [NSLocalizedDescriptionKey: message]
-            ))
-        }
-    }
+    var currentStage: GladiaLiveRun.Stage { lock.withLock { run.stage } }
+    var admittedAudioBytes: Int { lock.withLock { run.admittedAudioBytes } }
+    var admittedAudioChunks: Int { lock.withLock { run.admittedAudioChunks } }
+    var finishWaiterCount: Int { lock.withLock { run.waiters.count } }
 
-    private func withStateLock<T>(_ block: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return block()
-    }
+    // MARK: - Lifecycle core
 
-    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func isStoppingState() -> Bool { withStateLock { isStopping } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-}
-
-// MARK: - Wire models
-
-private struct GladiaInitRequest: Encodable {
-    let model: String
-    let encoding = "wav/pcm"
-    let bitDepth = 16
-    let sampleRate: Int
-    let channels = 1
-    let languageConfig: GladiaLanguageConfig
-    let messagesConfig = GladiaMessagesConfig()
-
-    private enum CodingKeys: String, CodingKey {
-        case model, encoding, channels
-        case bitDepth = "bit_depth"
-        case sampleRate = "sample_rate"
-        case languageConfig = "language_config"
-        case messagesConfig = "messages_config"
+    /// Applies a state change under the lock, then performs the effects it
+    /// decided on after releasing it.
+    @discardableResult
+    func perform<Value>(_ change: (inout GladiaLiveEffects) -> Value) -> Value {
+        var effects = GladiaLiveEffects()
+        let value = lock.withLock { change(&effects) }
+        effects.run()
+        return value
     }
 }
 
-private struct GladiaLanguageConfig: Encodable {
-    let languages: [String]
-    let codeSwitching: Bool
+extension GladiaLiveClient {
+    /// Caller holds the lock.
+    func isCurrent(_ active: GladiaLiveRun) -> Bool { active === run && active.stage != .closed }
 
-    private enum CodingKeys: String, CodingKey {
-        case languages
-        case codeSwitching = "code_switching"
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "Gladia") }
+
+    /// Retires the run, then reports the error, then resumes its finish waiters
+    /// with the confirmed text. The run is closed before `onError` runs, so the
+    /// callback may start a replacement that nothing here can touch.
+    func fail(_ error: Error, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        close(active, &effects)
+        log("Gladia live session failed")
+        effects.append { callback?(error) }
+        effects.append { waiters.forEach { $0.resume(returning: transcript) } }
     }
 
-    static func from(language: String?) -> GladiaLanguageConfig {
-        guard let language,
-              let code = language
-                .replacingOccurrences(of: "_", with: "-")
-                .split(separator: "-").first,
-              !code.isEmpty else {
-            return GladiaLanguageConfig(languages: [], codeSwitching: true)
+    /// Ends the run: abandons its request and socket, invalidates every
+    /// pending send, receive and deadline, and resumes its waiters.
+    func close(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
+        guard active.stage != .closed else { return }
+        active.stage = .closed
+        let request = active.sessionRequest
+        let connection = active.connection
+        active.sessionRequest = nil
+        active.connection = nil
+        active.outgoing.removeAll()
+        active.admittedAudioBytes = 0
+        active.admittedAudioChunks = 0
+        active.inFlightAudioBytes = 0
+        active.sending = false
+        active.sendCallActive = false
+        active.earlySendOutcome = nil
+        active.sendGeneration &+= 1
+        active.receiveCallActive = false
+        active.earlyReceive = nil
+        active.receiveGeneration &+= 1
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        active.onTranscript = nil
+        active.onError = nil
+        effects.append {
+            request?.cancel()
+            connection?.cancel()
+            waiters.forEach { $0.resume(returning: transcript) }
         }
-        return GladiaLanguageConfig(languages: [String(code).lowercased()], codeSwitching: false)
     }
-}
 
-private struct GladiaMessagesConfig: Encodable {
-    let receivePartialTranscripts = true
-    let receiveFinalTranscripts = true
-    let receiveErrors = true
-    let receiveLifecycleEvents = true
-
-    private enum CodingKeys: String, CodingKey {
-        case receivePartialTranscripts = "receive_partial_transcripts"
-        case receiveFinalTranscripts = "receive_final_transcripts"
-        case receiveErrors = "receive_errors"
-        case receiveLifecycleEvents = "receive_lifecycle_events"
+    /// Schedules `action` for the run. A deadline that fires after the run
+    /// closed or was replaced does nothing.
+    func arm(
+        _ seconds: TimeInterval, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects,
+        action: @escaping @Sendable (GladiaLiveClient, GladiaLiveRun, inout GladiaLiveEffects) -> Void
+    ) {
+        let deadline: @Sendable () -> Void = { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.perform { effects in if self.isCurrent(active) { action(self, active, &effects) } }
+        }
+        let schedule = schedule
+        effects.append { schedule(seconds, deadline) }
     }
-}
 
-private struct GladiaInitResponse: Decodable {
-    let id: String
-    let url: String
-}
-
-private struct GladiaMessage: Decodable {
-    let type: String?
-    let data: GladiaTranscriptData?
-    let error: GladiaError?
-}
-
-private struct GladiaError: Decodable {
-    let message: String?
-}
-
-private struct GladiaTranscriptData: Decodable {
-    let isFinal: Bool
-    let utterance: GladiaUtterance?
-
-    private enum CodingKeys: String, CodingKey {
-        case isFinal = "is_final"
-        case utterance
+    func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "GladiaLiveClient").info("\(event, privacy: .public)")
+        #endif
     }
-}
-
-private struct GladiaUtterance: Decodable {
-    let text: String?
 }

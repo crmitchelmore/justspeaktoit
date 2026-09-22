@@ -112,9 +112,11 @@ extension ModelCatalog {
         "cartesia/ink-2-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        // Gladia's trailing finals and `end_session` follow `stop_recording`;
+        // the shared client's whole finish bound is built from this window.
         "gladia/solaria-1-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 1.5
+            postStopFinalizeBudget: GladiaLive.finalEventWindow
         ),
         // Gemini finalises a turn after server-side VAD detects the pause; the
         // client audioStreamEnd flush needs a moment to bring the trailing

@@ -170,20 +170,30 @@ jobs:
             Get-Content "app/windows-$label-errors.log"
             if ($process.ExitCode -ne 0) { throw "$label failed: $($process.ExitCode)" }
           }
-          Invoke-CrossBuilt 'SpeakAppPackageTests.exe' '' 'tests' 180
-          if (-not (Select-String -Path app/windows-tests.log -Pattern 'Executed [1-9][0-9]* tests' -Quiet)) {
-            throw 'No XCTest execution evidence found.'
-          }
-          Invoke-CrossBuilt 'SpeakWindows.exe' '--self-test' 'native' 90
-          if (-not (Select-String -Path app/windows-native.log -Pattern 'self-test passed' -Quiet)) {
-            throw 'Native self-test success marker missing.'
-          }
-          $env:JSTI_UI_SNAPSHOT_PATH = Join-Path (Resolve-Path app).Path 'windows-ui-smoke.bmp'
-          Invoke-CrossBuilt 'SpeakWindows.exe' '--ui-smoke-test' 'ui' 30
-          if (-not (Select-String -Path app/windows-ui.log -Pattern 'Native window creation and shutdown passed' -Quiet)) {
-            throw 'Native UI success marker missing.'
-          }
-          if (-not (Test-Path $env:JSTI_UI_SNAPSHOT_PATH)) { throw 'Native client snapshot missing.' }
+          # Independent checks all produce evidence; any failure still fails
+          # this gate, after source/hash validation above has succeeded.
+          $failures = [System.Collections.Generic.List[string]]::new()
+          try {
+            Invoke-CrossBuilt 'SpeakAppPackageTests.exe' '' 'tests' 180
+            if (-not (Select-String -Path app/windows-tests.log -Pattern 'Executed [1-9][0-9]* tests' -Quiet)) {
+              throw 'No XCTest execution evidence found.'
+            }
+          } catch { $failures.Add($_.Exception.Message) }
+          try {
+            Invoke-CrossBuilt 'SpeakWindows.exe' '--self-test' 'native' 90
+            if (-not (Select-String -Path app/windows-native.log -Pattern 'self-test passed' -Quiet)) {
+              throw 'Native self-test success marker missing.'
+            }
+          } catch { $failures.Add($_.Exception.Message) }
+          try {
+            $env:JSTI_UI_SNAPSHOT_PATH = Join-Path (Resolve-Path app).Path 'windows-ui-smoke.bmp'
+            Invoke-CrossBuilt 'SpeakWindows.exe' '--ui-smoke-test' 'ui' 30
+            if (-not (Select-String -Path app/windows-ui.log -Pattern 'Native window creation and shutdown passed' -Quiet)) {
+              throw 'Native UI success marker missing.'
+            }
+            if (-not (Test-Path $env:JSTI_UI_SNAPSHOT_PATH)) { throw 'Native client snapshot missing.' }
+          } catch { $failures.Add($_.Exception.Message) }
+          if ($failures.Count) { throw ($failures -join '; ') }
       - name: Upload Mac-built app execution evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1

@@ -86,6 +86,7 @@ jobs:
 
       - name: Verify native WinHTTP WebSocket transport against loopback peer
         id: websocket-probe
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
         timeout-minutes: 3
         run: |
           $readyPath = Join-Path $env:RUNNER_TEMP 'jsti-websocket-ready.json'
@@ -125,14 +126,25 @@ jobs:
 
       - name: Run executable self-test and native window smoke test
         id: native-smoke
-        if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.native-tests.outcome == 'success' }}
-        timeout-minutes: 2
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 3
         run: |
           $bin = swift build --configuration release --show-bin-path
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $exe = Join-Path $bin.Trim() 'SpeakWindows.exe'
-          & $exe --self-test
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $native = Start-Process -FilePath $exe -ArgumentList '--self-test' -PassThru -NoNewWindow `
+            -RedirectStandardOutput windows-self-test.log -RedirectStandardError windows-self-test-errors.log
+          $nativeFailure = $null
+          if (-not $native.WaitForExit(90000)) {
+            $native.Kill()
+            $nativeFailure = 'Native adapter self-test exceeded 90 seconds.'
+          } elseif ($native.ExitCode -ne 0) {
+            $nativeFailure = "Native adapter self-test failed: $($native.ExitCode)"
+          }
+          Get-Content windows-self-test.log
+          Get-Content windows-self-test-errors.log
+          # Window checks are independent of adapter assertions. Run both while
+          # retaining a failing job if either result fails.
           $env:JSTI_UI_SNAPSHOT_PATH = Join-Path $env:GITHUB_WORKSPACE 'windows-ui-smoke.bmp'
           $process = Start-Process -FilePath $exe -ArgumentList '--ui-smoke-test' -PassThru -NoNewWindow `
             -RedirectStandardOutput windows-ui-smoke.log -RedirectStandardError windows-ui-smoke-errors.log
@@ -142,11 +154,12 @@ jobs:
           }
           Get-Content windows-ui-smoke.log
           Get-Content windows-ui-smoke-errors.log
-          if ($process.ExitCode -ne 0) { throw "Native window smoke test failed: $($process.ExitCode)" }
+          if ($process.ExitCode -ne 0) { throw "Native window smoke test failed: $($process.ExitCode); $nativeFailure" }
+          if ($nativeFailure) { throw $nativeFailure }
 
       - name: Stage developer executable with provenance
         id: developer-stage
-        if: ${{ !cancelled() && steps.native-tests.outcome == 'success' && steps.native-smoke.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.native-tests.outcome == 'success' && steps.websocket-probe.outcome == 'success' && steps.native-smoke.outcome == 'success' }}
         run: |
           $bin = swift build --configuration release --show-bin-path
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -196,6 +209,7 @@ jobs:
           path: |
             windows-tests.xml
             windows-native-tests.log
+            windows-self-test*.log
             windows-ui-smoke*.log
             windows-ui-smoke.bmp
             windows-websocket-tests.xml

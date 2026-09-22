@@ -15,7 +15,7 @@ public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox: return true
+        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs: return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
         }
@@ -67,6 +67,11 @@ public enum DesktopLiveTranscription {
             return SpeechmaticsLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
                 makeConnection: makeConnection
+            )
+        case .elevenlabs:
+            return ElevenLabsLiveClient(
+                apiKey: apiKey, modelID: route.apiModelName, language: hint,
+                sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         case .soniox:
             return SonioxLiveClient(

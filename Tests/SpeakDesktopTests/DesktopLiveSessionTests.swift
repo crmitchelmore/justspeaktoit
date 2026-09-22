@@ -264,7 +264,7 @@ extension DesktopLiveSessionTests {
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
             guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
-            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox].contains(route.provider)
+            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs].contains(route.provider)
                 || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
@@ -286,6 +286,7 @@ extension DesktopLiveSessionTests {
             if route.provider == .assemblyai { XCTAssertTrue(client is AssemblyAILiveClient) }
             if route.provider == .speechmatics { XCTAssertTrue(client is SpeechmaticsLiveClient) }
             if route.provider == .soniox { XCTAssertTrue(client is SonioxLiveClient) }
+            if route.provider == .elevenlabs { XCTAssertTrue(client is ElevenLabsLiveClient) }
             if route.provider == .openai {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)
                 XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)
@@ -320,6 +321,32 @@ extension DesktopLiveSessionTests {
         )
         XCTAssertEqual(DesktopLiveTranscription.provider(forID: XAISpeechToText.liveCatalogID)?.apiKeyIdentifier,
                        "xai.apiKey")
+    }
+    /// The canonical ElevenLabs Scribe v2 live route flows through the shared
+    /// desktop factory to the shared `ElevenLabsLiveClient`, and the Windows
+    /// executable projection (a filter over the same `liveModels`) follows it
+    /// automatically — no Windows-owned list is edited to add a route.
+    func testElevenLabsScribeV2IsAProjectedLiveRouteAndSelectsTheSharedClient() throws {
+        let modelID = "elevenlabs/scribe-v2-streaming"
+        let option = try XCTUnwrap(ModelCatalog.liveTranscription.first { $0.id == modelID })
+        XCTAssertTrue(DesktopLiveTranscription.liveModels.contains { $0.id == option.id },
+                      "The canonical ElevenLabs live model must be a projected desktop route")
+
+        let route = try XCTUnwrap(DesktopLiveTranscription.route(forID: modelID))
+        XCTAssertEqual(route.provider, .elevenlabs)
+        XCTAssertEqual(route.apiModelName, "scribe_v2_realtime")
+        XCTAssertEqual(route.sampleRate, LiveTranscriptionProviderID.elevenlabs.expectedSampleRate)
+
+        let provider = try XCTUnwrap(DesktopLiveTranscription.provider(forID: modelID))
+        XCTAssertEqual(provider.id, LiveTranscriptionProviderID.elevenlabs.rawValue)
+        XCTAssertEqual(provider.apiKeyIdentifier, route.apiKeyIdentifier)
+
+        let client = DesktopLiveTranscription.makeClient(model: modelID, apiKey: "k", language: "en") { _ in
+            fatalError("Constructing a client must not open a connection")
+        }
+        XCTAssertTrue(client is ElevenLabsLiveClient)
+        XCTAssertEqual(client?.finalShape, .standaloneSegments)
+        XCTAssertEqual(client?.finishFlushesBufferedAudio, false)
     }
 }
 

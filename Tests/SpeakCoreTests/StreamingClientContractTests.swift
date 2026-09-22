@@ -514,8 +514,10 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
     }
 
     private static func elevenLabs(_ text: String, isFinal: Bool) -> String {
-        let event = isFinal ? "FINAL_TRANSCRIPT" : "PARTIAL_TRANSCRIPT"
-        return #"{"speech_event_type":"\#(event)","transcript":"\#(text)"}"#
+        // Current ElevenLabs Scribe v2 realtime shape: `message_type` frames
+        // carrying `text`, not the retired `speech_event_type`/`transcript`.
+        let messageType = isFinal ? "committed_transcript" : "partial_transcript"
+        return #"{"message_type":"\#(messageType)","text":"\#(text)"}"#
     }
 
     private static func xai(_ text: String, type: String) -> String {

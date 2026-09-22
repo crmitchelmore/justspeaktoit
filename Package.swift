@@ -55,7 +55,6 @@ let appleCoreSources: [String] = [
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
-    "ElevenLabsLiveClient.swift",
     "FileProductAnalyticsStateStore.swift",
     "GeminiLiveClient.swift",
     "GeminiLiveProtocol.swift",

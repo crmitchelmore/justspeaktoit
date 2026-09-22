@@ -7,8 +7,7 @@ final class OpenAIRealtimeLiveRun: @unchecked Sendable {
     enum Phase { case idle, connecting, active, finishing, closed }
     /// Raw PCM stays raw in the queue; base64/JSON exists only for the one
     /// frame in flight, so the retained expansion is bounded by a single frame.
-    enum Outbound: Sendable { case sessionUpdate(String), audio(Data), commit }
-    enum CommitState { case none, queued, inFlight, sent }
+    enum Outbound: Sendable { case sessionUpdate(String), audio(Data), commit(UInt64) }
     struct Waiter<Value> { let id: UInt64; let continuation: CheckedContinuation<Value, Never> }
 
     var phase = Phase.idle
@@ -23,14 +22,28 @@ final class OpenAIRealtimeLiveRun: @unchecked Sendable {
     var queuedAudioFrames = 0
     var sending = false
     var sendID: UInt64 = 0
-    var admittedAudioBytes = 0
     var audioBytesSinceCommit = 0
     var overflowReported = false
     var deliverWhileFinishing = false
-    var commitState = CommitState.none
-    /// Item created by the latest commit, once `input_audio_buffer.committed` names it.
-    var expectedItemKey: String?
-    var completedBeforeFinish: Set<String> = []
+
+    /// Client event identity for this run's `session.update` and commits, so
+    /// server errors and `input_audio_buffer.committed` acknowledgements
+    /// correlate to the exact client event instead of to "some new item".
+    let eventPrefix: String
+    var commitSequence: UInt64 = 0
+    var lastCommitSequence: UInt64?
+    /// The commit whose acknowledged item, together with every other
+    /// outstanding commit item, must settle before a finish returns.
+    var finalCommitSequence: UInt64?
+    /// Commits handed to the transport whose acknowledgement is still pending.
+    /// The server acknowledges commits in order, so the FIFO names each item.
+    var commitsAwaitingAck: [UInt64] = []
+    var sentCommits: Set<UInt64> = []
+    var itemKeysByCommit: [UInt64: String] = [:]
+    var failedItemKeys: Set<String> = []
+    var failedCommits: Set<UInt64> = []
+    var finalizeDeadlineScheduled = false
+
     let budget: StreamingAudioSendBudget
     var assembler = OpenAIRealtimeTranscriptAssembler()
     var finishWaiters: [CheckedContinuation<String?, Never>] = []
@@ -41,10 +54,13 @@ final class OpenAIRealtimeLiveRun: @unchecked Sendable {
     var onEvent: ((OpenAIRealtimeLiveClient.Event) -> Void)?
     var onError: ((Error) -> Void)?
 
-    init(sampleRate: Int) {
+    init() {
+        // Only 24 kHz PCM is ever streamed: a different requested rate is
+        // rejected visibly at start, so allocation never depends on caller input.
         budget = StreamingAudioSendBudget(
-            sampleRate: max(sampleRate, 1), seconds: StreamingAudioPreroll.defaultBudgetSeconds
+            sampleRate: OpenAIRealtimeProtocol.sampleRate, seconds: StreamingAudioPreroll.defaultBudgetSeconds
         )
+        eventPrefix = "jsti-" + String(UUID().uuidString.lowercased().prefix(8))
     }
 
     var transcript: String? { assembler.transcriptOrNil }
@@ -53,7 +69,47 @@ final class OpenAIRealtimeLiveRun: @unchecked Sendable {
     /// empty queue or a queue that cannot move until the session is ready.
     var isDrained: Bool { !sending && (outgoing.isEmpty || !ready) }
 
-    var commitIsInTransport: Bool { commitState == .inFlight || commitState == .sent }
+    // MARK: - Commit identity
+
+    var sessionUpdateEventID: String { "\(eventPrefix)-session-update" }
+
+    func eventID(forCommit sequence: UInt64) -> String { "\(eventPrefix)-commit-\(sequence)" }
+
+    func commitSequence(forEventID eventID: String?) -> UInt64? {
+        let prefix = "\(eventPrefix)-commit-"
+        guard let eventID, eventID.hasPrefix(prefix) else { return nil }
+        return UInt64(eventID.dropFirst(prefix.count))
+    }
+
+    var finalCommitItemKey: String? { finalCommitSequence.flatMap { itemKeysByCommit[$0] } }
+
+    var finalCommitSent: Bool { finalCommitSequence.map { sentCommits.contains($0) } ?? false }
+
+    /// Every commit has been acknowledged and every acknowledged item has
+    /// completed or failed. Items can complete out of order, so the final
+    /// commit's own completion is necessary but not sufficient.
+    var finishIsSettled: Bool {
+        guard finalCommitSent, let finalCommitSequence,
+              finalCommitItemKey != nil || failedCommits.contains(finalCommitSequence),
+              commitsAwaitingAck.isEmpty else { return false }
+        return itemKeysByCommit.values.allSatisfy {
+            assembler.completedItemKeys.contains($0) || failedItemKeys.contains($0)
+        }
+    }
+
+    // MARK: - Padding reservation
+
+    /// Bytes and the frame slot held for the silence that pads the current
+    /// turn to the server's 100 ms minimum. Reserved when audio is admitted,
+    /// so the padding frame a commit appends never exceeds the byte budget or
+    /// the frame bound. A turn with no audio reserves nothing.
+    static func turnReservation(bytesSinceCommit: Int) -> (bytes: Int, frames: Int) {
+        guard bytesSinceCommit > 0 else { return (0, 0) }
+        let shortfall = max(0, OpenAIRealtimeProtocol.minimumCommitBytes - bytesSinceCommit)
+        return (shortfall, shortfall > 0 ? 1 : 0)
+    }
+
+    // MARK: - Waiters
 
     func addReadyWaiter(_ continuation: CheckedContinuation<Bool, Never>) -> UInt64 {
         nextWaiterID += 1

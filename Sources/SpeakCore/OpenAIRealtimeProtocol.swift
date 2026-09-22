@@ -36,13 +36,16 @@ public enum OpenAIRealtimeProtocol {
         return request
     }
 
-    /// Serialised `session.update` for the shared GA payload.
+    /// Serialised `session.update` for the shared GA payload. The optional
+    /// client `event_id` lets a server `error` be correlated to this exact
+    /// event; the session schema itself comes only from the shared helper.
     public static func sessionUpdateJSON(
-        model: String, language: String?, prompt: String?, sampleRate: Int
+        model: String, language: String?, prompt: String?, sampleRate: Int, eventID: String? = nil
     ) -> String? {
-        let payload = OpenAITranscriptionModels.realtimeSessionUpdatePayload(
+        var payload = OpenAITranscriptionModels.realtimeSessionUpdatePayload(
             model: model, language: language, prompt: prompt, sampleRate: sampleRate
         )
+        if let eventID { payload["event_id"] = eventID }
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
             return nil
         }
@@ -55,7 +58,17 @@ public enum OpenAIRealtimeProtocol {
         "{\"type\":\"input_audio_buffer.append\",\"audio\":\"" + pcm16.base64EncodedString() + "\"}"
     }
 
-    public static let commitJSON = #"{"type":"input_audio_buffer.commit"}"#
+    /// `input_audio_buffer.commit`, tagged with a client `event_id` so the
+    /// server's `error.event_id` names the commit it refers to.
+    public static func commitJSON(eventID: String? = nil) -> String {
+        guard let eventID, isPlainEventID(eventID) else { return #"{"type":"input_audio_buffer.commit"}"# }
+        return "{\"type\":\"input_audio_buffer.commit\",\"event_id\":\"" + eventID + "\"}"
+    }
+
+    /// Event identifiers are inlined into JSON, so only unescaped characters are accepted.
+    static func isPlainEventID(_ eventID: String) -> Bool {
+        !eventID.isEmpty && eventID.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+    }
 }
 
 /// Server events a transcription session can receive, parsed without a socket.
@@ -72,8 +85,9 @@ public enum OpenAIRealtimeServerEvent: Equatable, Sendable {
     case transcriptionDelta(itemID: String, delta: String)
     case transcriptionCompleted(itemID: String, transcript: String)
     case transcriptionFailed(itemID: String, code: String, message: String)
-    /// "Most errors are recoverable and the session will stay open."
-    case error(code: String, message: String)
+    /// "Most errors are recoverable and the session will stay open." `eventID`
+    /// is the client event that caused the error, when the server names one.
+    case error(code: String, message: String, eventID: String?)
     case ignored(type: String)
 
     /// `nil` for anything that is not a typed JSON object.
@@ -100,17 +114,23 @@ public enum OpenAIRealtimeServerEvent: Equatable, Sendable {
             return .transcriptionFailed(itemID: itemID, code: details.code, message: details.message)
         case "error":
             let details = errorDetails(object["error"], fallbackMessage: object["message"] as? String)
-            return .error(code: details.code, message: details.message)
+            return .error(code: details.code, message: details.message, eventID: details.eventID)
         default:
             return .ignored(type: type)
         }
     }
 
-    private static func errorDetails(_ value: Any?, fallbackMessage: String?) -> (code: String, message: String) {
+    private struct ErrorDetails {
+        let code: String
+        let message: String
+        let eventID: String?
+    }
+
+    private static func errorDetails(_ value: Any?, fallbackMessage: String?) -> ErrorDetails {
         let payload = value as? [String: Any]
         let code = payload?["code"] as? String ?? "unknown"
         let message = payload?["message"] as? String ?? fallbackMessage ?? "Unknown OpenAI Realtime error"
-        return (code, message)
+        return ErrorDetails(code: code, message: message, eventID: payload?["event_id"] as? String)
     }
 }
 

@@ -54,11 +54,11 @@ final class OpenAIRealtimeProtocolTests: XCTestCase {
         let error = #"{"type":"error","error":{"code":"invalid_request_error","message":"bad audio format"}}"#
         XCTAssertEqual(
             OpenAIRealtimeServerEvent.parse(error),
-            .error(code: "invalid_request_error", message: "bad audio format")
+            .error(code: "invalid_request_error", message: "bad audio format", eventID: nil)
         )
         XCTAssertEqual(
             OpenAIRealtimeServerEvent.parse(#"{"type":"error","message":"top level"}"#),
-            .error(code: "unknown", message: "top level")
+            .error(code: "unknown", message: "top level", eventID: nil)
         )
         XCTAssertEqual(
             OpenAIRealtimeServerEvent.parse(#"{"type":"response.audio.delta","data":"..."}"#),
@@ -88,7 +88,7 @@ final class OpenAIRealtimeProtocolTests: XCTestCase {
         XCTAssertEqual(object["type"] as? String, "input_audio_buffer.append")
         XCTAssertEqual(Data(base64Encoded: try XCTUnwrap(object["audio"] as? String)), pcm)
         let commit = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(OpenAIRealtimeProtocol.commitJSON.utf8)) as? [String: Any]
+            JSONSerialization.jsonObject(with: Data(OpenAIRealtimeProtocol.commitJSON().utf8)) as? [String: Any]
         )
         XCTAssertEqual(commit["type"] as? String, "input_audio_buffer.commit")
     }

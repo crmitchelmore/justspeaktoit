@@ -94,7 +94,7 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
         self.makeConnection = makeConnection
         self.schedule = schedule
         self.ownedSession = ownedSession
-        self.run = OpenAIRealtimeLiveRun(sampleRate: sampleRate)
+        self.run = OpenAIRealtimeLiveRun()
         queue.setSpecific(key: queueKey, value: true)
     }
 
@@ -125,36 +125,6 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
     /// per-item bookkeeping. Events are delivered throughout finalisation.
     public func start(onEvent: @escaping (Event) -> Void, onError: @escaping (Error) -> Void) {
         begin(onTranscript: nil, onEvent: onEvent, onError: onError)
-    }
-
-    /// Admission is synchronous and bounded: at most five seconds of PCM may be
-    /// queued or in flight and at most `maximumQueuedFrames` frames may wait.
-    /// Exceeding either is reported exactly once; later frames are dropped so
-    /// the admitted prefix stays contiguous and can still be finalised.
-    public func sendAudio(_ audioData: Data) {
-        guard !audioData.isEmpty else { return }
-        synchronized {
-            let active = run
-            guard active.phase == .connecting || active.phase == .active else { return }
-            guard audioData.count.isMultiple(of: OpenAIRealtimeProtocol.bytesPerSample) else {
-                fail(OpenAIRealtimeStreamingError.invalidPCM, active)
-                return
-            }
-            guard !active.overflowReported else { return }
-            guard active.queuedAudioFrames + (active.sending ? 1 : 0) < Self.maximumQueuedFrames,
-                  active.budget.admit(audioData.count) else {
-                active.overflowReported = true
-                log("Audio budget exceeded; further audio is dropped")
-                active.onError?(OpenAIRealtimeStreamingError.audioOverflow)
-                return
-            }
-            active.outgoing.append(.audio(audioData))
-            active.queuedAudioBytes += audioData.count
-            active.queuedAudioFrames += 1
-            active.admittedAudioBytes += audioData.count
-            active.audioBytesSinceCommit += audioData.count
-            pump(active)
-        }
     }
 
     /// Graceful finalisation with callbacks: commits admitted audio and closes
@@ -202,7 +172,8 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
     public func commitInputBuffer() {
         synchronized {
             let active = run
-            guard isCurrent(active), active.phase != .idle, enqueueCommit(active) else { return }
+            guard isCurrent(active), active.phase == .connecting || active.phase == .active,
+                  enqueueCommit(active) else { return }
             pump(active)
         }
     }
@@ -242,7 +213,7 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
     ) {
         synchronized {
             close(run)
-            let active = OpenAIRealtimeLiveRun(sampleRate: sampleRate)
+            let active = OpenAIRealtimeLiveRun()
             run = active
             active.onTranscript = onTranscript
             active.onEvent = onEvent
@@ -253,7 +224,8 @@ public final class OpenAIRealtimeLiveClient: FinalizingStreamingTranscriptionCli
                 return
             }
             guard let update = OpenAIRealtimeProtocol.sessionUpdateJSON(
-                model: model, language: language, prompt: prompt, sampleRate: sampleRate
+                model: model, language: language, prompt: prompt, sampleRate: sampleRate,
+                eventID: active.sessionUpdateEventID
             ) else { fail(OpenAIRealtimeStreamingError.encodingFailed, active); return }
             guard let request = OpenAIRealtimeProtocol.webSocketRequest(apiKey: apiKey) else {
                 fail(OpenAIRealtimeStreamingError.invalidURL, active)

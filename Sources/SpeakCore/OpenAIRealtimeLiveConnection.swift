@@ -53,7 +53,14 @@ extension OpenAIRealtimeLiveClient {
         case .inputAudioBufferCommitted(let itemID, _):
             let key = OpenAIRealtimeTranscriptAssembler.key(forItemID: itemID)
             active.assembler.noteCommitted(itemKey: key)
-            if active.commitIsInTransport, active.expectedItemKey == nil { active.expectedItemKey = key }
+            // With manual turn detection disabled, ordered commit commands
+            // receive ordered acknowledgements; transcription completions can
+            // arrive in any order. A duplicate ACK cannot consume the next one.
+            if !itemID.isEmpty, !active.itemKeysByCommit.values.contains(key), !active.commitsAwaitingAck.isEmpty {
+                let sequence = active.commitsAwaitingAck.removeFirst()
+                active.itemKeysByCommit[sequence] = key
+            }
+            finishIfSettled(active)
         case .transcriptionDelta(let itemID, let delta):
             let text = active.assembler.consume(delta: delta, itemID: itemID)
             active.onEvent?(.delta(delta, itemId: itemID))
@@ -63,11 +70,15 @@ extension OpenAIRealtimeLiveClient {
         case .transcriptionFailed(let itemID, _, let message):
             let error = OpenAIRealtimeStreamingError.transcriptionFailed(itemID: itemID, message: message)
             let key = OpenAIRealtimeTranscriptAssembler.key(forItemID: itemID)
-            if active.phase == .finishing, isAwaitedCompletion(key, active) {
+            active.failedItemKeys.insert(key)
+            if active.phase == .finishing, active.finalCommitItemKey == key {
                 fail(error, active)
-            } else { active.onError?(error) }
-        case .error(let code, let message):
-            handleServerError(code, message, active)
+            } else {
+                active.onError?(error)
+                finishIfSettled(active)
+            }
+        case .error(let code, let message, let eventID):
+            handleServerError(code, message, eventID: eventID, active)
         case .ignored:
             break
         }
@@ -94,21 +105,16 @@ extension OpenAIRealtimeLiveClient {
     }
 
     private func handleCompleted(_ itemID: String, _ transcript: String, _ active: OpenAIRealtimeLiveRun) {
-        let key = OpenAIRealtimeTranscriptAssembler.key(forItemID: itemID)
         let text = active.assembler.consume(completed: transcript, itemID: itemID)
         active.onEvent?(.completed(transcript, itemId: itemID))
         deliverTranscript(text, isFinal: true, active)
         // A callback may cancel or restart; only the current finishing run closes here.
-        guard isCurrent(active), active.phase == .finishing, isAwaitedCompletion(key, active) else { return }
-        close(active)
+        finishIfSettled(active)
     }
 
-    /// The commit's own item, named by `input_audio_buffer.committed`; before
-    /// that arrives, any item not already complete when finishing began.
-    private func isAwaitedCompletion(_ key: String, _ active: OpenAIRealtimeLiveRun) -> Bool {
-        guard active.commitIsInTransport else { return false }
-        if let expected = active.expectedItemKey { return expected == key }
-        return !active.completedBeforeFinish.contains(key)
+    private func finishIfSettled(_ active: OpenAIRealtimeLiveRun) {
+        guard isCurrent(active), active.phase == .finishing, active.finishIsSettled else { return }
+        close(active)
     }
 
     /// "Most errors are recoverable and the session will stay open", so errors
@@ -116,9 +122,23 @@ extension OpenAIRealtimeLiveClient {
     /// acknowledged still ends at the readiness deadline. Once a commit is in
     /// transport during finalisation no completion can follow, so that ends the
     /// finish with the error and the best available text.
-    private func handleServerError(_ code: String, _ message: String, _ active: OpenAIRealtimeLiveRun) {
+    private func handleServerError(
+        _ code: String, _ message: String, eventID: String?, _ active: OpenAIRealtimeLiveRun
+    ) {
         let error = OpenAIRealtimeStreamingError.serverError(code: code, message: message)
-        if active.phase == .finishing, active.commitIsInTransport {
+        if let sequence = active.commitSequence(forEventID: eventID), sequence <= active.commitSequence {
+            active.failedCommits.insert(sequence)
+            active.commitsAwaitingAck.removeAll { $0 == sequence }
+            if active.phase == .finishing, active.finalCommitSequence == sequence {
+                fail(error, active)
+            } else {
+                active.onError?(error)
+                finishIfSettled(active)
+            }
+        } else if eventID == active.sessionUpdateEventID {
+            fail(error, active)
+        } else if eventID == nil, active.phase == .finishing,
+                  active.finalCommitSent || !active.commitsAwaitingAck.isEmpty {
             fail(error, active)
         } else {
             active.onError?(error)

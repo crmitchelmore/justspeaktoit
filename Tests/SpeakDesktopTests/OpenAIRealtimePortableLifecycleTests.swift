@@ -148,7 +148,7 @@ final class OpenAIRealtimePortableLifecycleTests: XCTestCase {
         frames.start()
         for _ in 0...OpenAIRealtimeLiveClient.maximumQueuedFrames { frames.client.sendAudio(Data([1, 0])) }
         XCTAssertEqual(frames.events.errors.count, 1)
-        XCTAssertEqual(frames.client.queuedAudioByteCount, OpenAIRealtimeLiveClient.maximumQueuedFrames * 2)
+        XCTAssertEqual(frames.client.queuedAudioByteCount, (OpenAIRealtimeLiveClient.maximumQueuedFrames - 1) * 2)
         frames.client.cancel()
     }
 

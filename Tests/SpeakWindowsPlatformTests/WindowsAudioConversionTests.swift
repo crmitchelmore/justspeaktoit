@@ -5,6 +5,47 @@ import XCTest
 @testable import SpeakWindowsPlatform
 
 final class WindowsAudioConversionTests: XCTestCase {
+    func testCompressedAACImportDecodesNonSilentAudioAndPreservesOriginal() async throws {
+        try await assertCompressedImport(fixture: "tone-aac", extension: "m4a")
+    }
+
+    func testCompressedMP3ImportDecodesNonSilentAudioAndPreservesOriginal() async throws {
+        try await assertCompressedImport(fixture: "tone-mp3", extension: "mp3")
+    }
+
+    private func assertCompressedImport(fixture: String, extension fileExtension: String) async throws {
+        let directory = try privateDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let resource = try XCTUnwrap(Bundle.module.url(
+            forResource: fixture, withExtension: fileExtension, subdirectory: "Fixtures"
+        ))
+        let input = directory.appendingPathComponent("original.\(fileExtension)")
+        let output = directory.appendingPathComponent("decoded.wav")
+        let original = try Data(contentsOf: resource)
+        try original.write(to: input)
+        let result = try await WindowsAudioConversion.convert(input: input, output: output)
+        // Codec priming and trailing frames may extend the 250 ms fixture.
+        XCTAssertGreaterThan(result.duration, 0.2)
+        XCTAssertLessThan(result.duration, 0.4)
+        XCTAssertEqual(try NativePCM16WAVReader.canonicalDuration(at: output), result.duration, accuracy: 1e-9)
+        let decoded = try Data(contentsOf: output)
+        XCTAssertEqual(decoded.count, 44 + Int(result.sampleCount) * 2)
+        let samples = decoded.dropFirst(44)
+        var squareSum = 0.0
+        for offset in stride(from: 0, to: samples.count, by: 2) {
+            let index = samples.startIndex + offset
+            let sample = Int16(bitPattern: UInt16(samples[index]) | UInt16(samples[index + 1]) << 8)
+            let normalised = Double(sample) / Double(Int16.max)
+            squareSum += normalised * normalised
+        }
+        let rms = sqrt(squareSum / Double(result.sampleCount))
+        XCTAssertGreaterThan(rms, 0.01, "Compressed audio must not decode to silence")
+        XCTAssertLessThan(rms, 0.2, "Decoding must preserve the low-amplitude fixture without clipping")
+        XCTAssertEqual(try Data(contentsOf: input), original)
+        try FileManager.default.removeItem(at: output)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+    }
+
     func testConversionReturnsCompleteCanonicalFileAndPreservesSource() async throws {
         let directory = try privateDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -191,7 +191,8 @@ portablePackage.targets.append(contentsOf: [
         name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport"]
     ),
     .testTarget(
-        name: "SpeakWindowsPlatformTests", dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport"]
+        name: "SpeakWindowsPlatformTests", dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport"],
+        resources: [.copy("Fixtures")]
     )
 ])
 portablePackage.cxxLanguageStandard = .cxx17

@@ -40,7 +40,7 @@ Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI and OpenRouter. The canonic
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
-Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics and xAI's dedicated speech-to-text
+Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox and xAI's dedicated speech-to-text
 live models use shared Swift clients with the native WinHTTP transport. The xAI
 stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is source-wired with
 fake-transport tests only and still needs a Windows provider receipt; the Grok
@@ -197,6 +197,11 @@ WinHTTP probes, and native self/window checks. Its matching
 also passed. The subsequent Speechmatics integration passed **435 portable
 tests, five optional skips and zero failures**; its isolated corrected source
 also passed 78 focused Apple tests, including the 25 existing client tests.
+Adding the corrected Soniox client brought the combined portable suite to
+**466 tests, five optional skips and zero failures**. Its focused normal Apple
+gate passed 160 tests. Soniox disconnects, server errors and missing terminal
+responses now retain confirmed text for recovery and report failure before
+finalisation returns. Physical provider acceptance remains separate.
 
 ## Architecture and ownership
 
@@ -266,7 +271,7 @@ but must not be presented as the identical Apple-only engine or service.
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
-| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI and Speechmatics streams, and remaining streaming providers |
+| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics and Soniox streams, and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; replace-field, direct-only and clipboard-only modes as hand-edited settings | Physical browser/Electron/Office/XAML acceptance, a text output settings UI, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |

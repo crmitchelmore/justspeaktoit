@@ -23,7 +23,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_HISTORY_RETRY = 10,
     JSTI_EVENT_HISTORY_EXPORT = 11,
     JSTI_EVENT_HISTORY_OPEN_AUDIO = 12,
-    JSTI_EVENT_MICROPHONE_CHANGED = 13
+    JSTI_EVENT_MICROPHONE_CHANGED = 13,
+    JSTI_EVENT_CANCEL_TRANSCRIPTION = 14
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -124,6 +125,56 @@ int jsti_credential_write(const char *name, const uint8_t *bytes, size_t count,
 int jsti_credential_read(const char *name, uint8_t *bytes, size_t capacity, size_t *count,
                          char *error, size_t error_capacity);
 int jsti_credential_delete(const char *name, char *error, size_t error_capacity);
+
+/* App-owned multipart staging only. Absolute local paths; relative paths,
+ * alternate data streams and all reparse points in the path are rejected.
+ * Directory preparation creates/repairs only the supplied leaf directory; its
+ * parent must exist and an existing leaf must belong to the current user.
+ * Both APIs apply an explicit protected DACL granting only the current user
+ * and SYSTEM full control. File creation is exclusive: existing files are
+ * never opened, truncated or followed. No parent ACL is changed. */
+int jsti_private_directory_prepare(const char *path, char *error, size_t error_capacity);
+int jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
+ * directory repair, existing-file preservation and junction refusal. */
+int jsti_private_storage_self_test(char *error, size_t error_capacity);
+
+typedef struct JSTIWebSocket JSTIWebSocket;
+enum JSTIWebSocketEvent {
+    JSTI_WEBSOCKET_OPEN = 1,
+    JSTI_WEBSOCKET_TEXT = 2,
+    JSTI_WEBSOCKET_BINARY = 3,
+    JSTI_WEBSOCKET_SEND_COMPLETE = 4,
+    JSTI_WEBSOCKET_CLOSED = 5,
+    JSTI_WEBSOCKET_ERROR = 6
+};
+/* All callbacks run serially on one dedicated worker. Bytes are borrowed until
+ * return; copy synchronously. Messages are complete and bounded to 4 MiB. Code
+ * is the native error for ERROR/SEND_COMPLETE (zero means send succeeded), or
+ * the peer close status for CLOSED. Error bytes never include URL/header data.
+ * Callbacks may send or cancel, but must not destroy this socket. */
+typedef void (*JSTIWebSocketCallback)(int event, const uint8_t *bytes, size_t count,
+                                     int code, void *context);
+/* Copies all inputs. wss is required except ws on literal loopback addresses
+ * or localhost for local probes. Credentials in URLs and redirects are refused.
+ * Header names/values are validated; WinHTTP owns the upgrade control headers. */
+JSTIWebSocket *jsti_websocket_create(const char *url, const char *const *header_names,
+                                     const char *const *header_values, size_t header_count,
+                                     JSTIWebSocketCallback callback, void *context,
+                                     char *error, size_t error_capacity);
+int jsti_websocket_start(JSTIWebSocket *socket, char *error, size_t error_capacity);
+/* Copies at most 4 MiB. Exactly one send may be outstanding. A return of zero
+ * guarantees one later SEND_COMPLETE callback, including during cancellation. */
+int jsti_websocket_send(JSTIWebSocket *socket, const uint8_t *bytes, size_t count,
+                        int is_text, char *error, size_t error_capacity);
+/* Thread safe cancellation, including during the HTTP upgrade. No join. */
+void jsti_websocket_cancel(JSTIWebSocket *socket);
+/* Serialize destruction against all caller API calls. Cancels, drains native
+ * callbacks and joins the worker. On failure the socket/context remain owned
+ * by the caller and must be retained; zero releases the socket permanently. */
+int jsti_websocket_destroy(JSTIWebSocket *socket, char *error, size_t error_capacity);
+/* Deterministic URL/header validation; no network or credentials. */
+int jsti_websocket_self_test(char *error, size_t error_capacity);
 
 /* Deterministic native checks: Unicode, frame boundaries, silence, invalid
  * insertion targets. Does not use microphone, clipboard or real credentials. */

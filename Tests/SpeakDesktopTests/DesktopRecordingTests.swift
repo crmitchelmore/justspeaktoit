@@ -46,6 +46,9 @@ final class DesktopRecordingTests: XCTestCase {
             .union(DeepgramBatchClient().supportedModels().map(\.id))
             .union(ElevenLabsBatchClient().supportedModels().map(\.id))
             .union(GeminiTranscribeModels.directBatchModelIDs)
+            .union([MetaMuseVoiceTranscribe.batchCatalogID])
+            .union(AzureTranscriptionModels.batchIDs)
+            .union(ModelCatalog.batchTranscriptionOptions(forProvider: "mistral").map(\.id))
         XCTAssertEqual(Set(DesktopTranscription.batchModels.map(\.id)), expected)
         XCTAssertTrue(DesktopTranscription.batchModels.allSatisfy { option in
             ModelCatalog.batchTranscription.contains(option)

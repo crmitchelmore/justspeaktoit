@@ -15,13 +15,14 @@ constexpr UINT updateMessage = WM_APP + 1;
 constexpr int hotkeyID = 1;
 enum Control {
     modelID = 100, keyID, saveID, recordID, importID, copyID, transcriptID, statusID,
-    historyID, historyDetailID, retryID, exportID, openAudioID, processingID
+    historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID
 };
 struct HistoryRow {
     std::string id;
     std::wstring title;
     std::wstring detail;
 };
+struct MicrophoneRow { std::string id; std::wstring name; };
 struct WindowState {
     std::mutex mutex;
     HWND window = nullptr;
@@ -34,6 +35,8 @@ struct WindowState {
     int recording = 0;
     std::wstring status;
     std::wstring transcript;
+    std::vector<MicrophoneRow> microphones;
+    std::string microphoneSelection;
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
@@ -51,6 +54,20 @@ int selection(HWND window) {
 
 void emit(HWND window, int event, const char *text = "") {
     if (state.callback) state.callback(event, text, selection(window), state.context);
+}
+
+std::string selectedMicrophone(HWND window) {
+    const LRESULT index = SendDlgItemMessageW(window, microphoneID, CB_GETCURSEL, 0, 0);
+    if (index == CB_ERR || static_cast<size_t>(index) >= state.microphones.size()) return {};
+    return state.microphones[static_cast<size_t>(index)].id;
+}
+
+void emitRecording(HWND window) {
+    int recording;
+    { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    if (recording == 2) { emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION); return; }
+    const std::string device = selectedMicrophone(window);
+    emit(window, JSTI_EVENT_TOGGLE_RECORDING, device.c_str());
 }
 
 void showFailure(HWND window, const std::string &message) {
@@ -101,7 +118,10 @@ void layout(HWND window) {
     const int keyTop = margin + scale(window, 96);
     move(keyID, contentLeft, keyTop, width - saveWidth - gap, row);
     move(saveID, contentLeft + width - saveWidth, keyTop, saveWidth, row);
-    const int actionsTop = keyTop + row + gap;
+    const int microphoneTop = keyTop + row + gap;
+    move(94, contentLeft, microphoneTop, width, scale(window, 22));
+    move(microphoneID, contentLeft, microphoneTop + scale(window, 26), width, scale(window, 260));
+    const int actionsTop = microphoneTop + scale(window, 26) + row + gap;
     const int actionWidth = (width - 2 * gap) / 3;
     move(recordID, contentLeft, actionsTop, actionWidth, row);
     move(importID, contentLeft + actionWidth + gap, actionsTop, actionWidth, row);
@@ -157,12 +177,23 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&API key (Windows Credential Manager)", 0, 91) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&
         add(L"BUTTON", L"&Save key", BS_PUSHBUTTON | WS_TABSTOP, saveID) &&
+        add(L"STATIC", L"&Microphone", 0, 94) &&
+        add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, microphoneID) &&
         add(L"BUTTON", L"&Record", BS_PUSHBUTTON | WS_TABSTOP, recordID) &&
         add(L"BUTTON", L"&Import audio", BS_PUSHBUTTON | WS_TABSTOP, importID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID) &&
         add(L"STATIC", L"Transcript — Ctrl+Alt+Space starts or stops recording", 0, 92) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"STATIC", L"Ready. Choose a model and save its API key to begin.", SS_LEFT, statusID);
+    LRESULT selectedDevice = 0;
+    for (size_t i = 0; i < state.microphones.size(); ++i) {
+        const auto &device = state.microphones[i];
+        const LRESULT added = SendDlgItemMessageW(window, microphoneID, CB_ADDSTRING, 0,
+            reinterpret_cast<LPARAM>(device.name.c_str()));
+        if (added == CB_ERR || added == CB_ERRSPACE) return false;
+        if (device.id == state.microphoneSelection) selectedDevice = static_cast<LRESULT>(i);
+    }
+    SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, selectedDevice, 0);
     SendDlgItemMessageW(window, keyID, EM_LIMITTEXT, 2048, 0);
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
     refreshFont(window);
@@ -193,9 +224,9 @@ void applyUpdate(HWND window) {
     }
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
     if (transcriptChanged) SetDlgItemTextW(window, transcriptID, transcript.c_str());
-    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"Working…" : L"&Record"));
-    EnableWindow(GetDlgItem(window, recordID), recording != 2);
-    for (int id : {modelID, keyID, saveID, importID}) EnableWindow(GetDlgItem(window, id), recording == 0);
+    SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel transcription" : L"&Record"));
+    EnableWindow(GetDlgItem(window, recordID), TRUE);
+    for (int id : {modelID, keyID, saveID, importID, microphoneID}) EnableWindow(GetDlgItem(window, id), recording == 0);
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
     if (historyChanged) {
         HWND list = GetDlgItem(window, historyID);
@@ -233,7 +264,7 @@ void importAudio(HWND window) {
     OPENFILENAMEW chooser{};
     chooser.lStructSize = sizeof(chooser);
     chooser.hwndOwner = window;
-    chooser.lpstrFilter = L"Audio files\0*.wav;*.mp3;*.m4a;*.flac;*.ogg;*.webm\0All files\0*.*\0\0";
+    chooser.lpstrFilter = L"Audio files\0*.wav;*.mp3;*.mp4;*.m4a;*.aac;*.flac;*.ogg;*.opus;*.webm\0\0";
     chooser.lpstrFile = path.data();
     chooser.nMaxFile = static_cast<DWORD>(path.size());
     chooser.lpstrTitle = L"Choose audio to transcribe";
@@ -267,11 +298,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case updateMessage:
         applyUpdate(window); return 0;
     case WM_HOTKEY:
-        if (wparam == hotkeyID && IsWindowEnabled(GetDlgItem(window, recordID))) emit(window, JSTI_EVENT_TOGGLE_RECORDING);
+        if (wparam == hotkeyID && IsWindowEnabled(GetDlgItem(window, recordID))) emitRecording(window);
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
-        case recordID: emit(window, JSTI_EVENT_TOGGLE_RECORDING); return 0;
+        case recordID: emitRecording(window); return 0;
         case importID: importAudio(window); return 0;
         case copyID: {
             const std::string id = selectedHistory(window);
@@ -292,6 +323,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 }
                 updateHistoryControls(window, recording);
                 emitHistory(window, JSTI_EVENT_HISTORY_SELECTED);
+            }
+            return 0;
+        case microphoneID:
+            if (HIWORD(wparam) == CBN_SELCHANGE) {
+                const std::string device = selectedMicrophone(window);
+                emit(window, JSTI_EVENT_MICROPHONE_CHANGED, device.c_str());
             }
             return 0;
         case modelID:
@@ -337,6 +374,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         if (state.running) return jsti::fail("The desktop window is already running.", error, capacity);
+        if (state.microphones.empty()) state.microphones.push_back({"", L"Default communications microphone"});
         state.running = true;
         state.recording = 0;
         state.posted = false;
@@ -392,6 +430,30 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     if (registered) UnregisterClassW(type.lpszClassName, instance);
     { std::lock_guard<std::mutex> lock(state.mutex); state.running = false; state.window = nullptr; }
     return outcome;
+}
+
+int jsti_window_set_microphones(const char *const *ids, const char *const *names, size_t count,
+                                 const char *selectedID) {
+    if (!ids || !names || !count || count > 512) return -1;
+    try {
+        std::vector<MicrophoneRow> devices;
+        std::unordered_set<std::string> unique;
+        bool found = false;
+        const std::string selection = selectedID ? selectedID : "";
+        for (size_t i = 0; i < count; ++i) {
+            std::wstring identifier, name;
+            if (!jsti::wide(ids[i], identifier) || !jsti::wide(names[i], name) || name.empty() ||
+                identifier.size() > 4096 || name.size() > 4096 || !unique.insert(ids[i]).second) return -1;
+            devices.push_back({ids[i], std::move(name)});
+            if (devices.back().id == selection) found = true;
+        }
+        if (!found) return -1;
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (state.running) return -1;
+        state.microphones = std::move(devices);
+        state.microphoneSelection = selection;
+        return 0;
+    } catch (const std::exception &) { return -1; }
 }
 
 int jsti_window_update(const char *status, const char *transcript, int recording) {
@@ -495,7 +557,7 @@ int jsti_shell_open_file(const char *path, char *error, size_t errorCapacity) {
     if (attributes & FILE_ATTRIBUTE_DIRECTORY) return jsti::fail("The audio path refers to a directory.", error, errorCapacity);
     const size_t dot = filename.find_last_of(L'.');
     const wchar_t *extension = dot == std::wstring::npos ? L"" : filename.c_str() + dot;
-    const wchar_t *audioExtensions[] = {L".wav", L".mp3", L".m4a", L".flac", L".ogg", L".webm",
+    const wchar_t *audioExtensions[] = {L".wav", L".mp3", L".m4a", L".flac", L".ogg", L".opus", L".webm",
                                        L".mp4", L".mpeg", L".mpga", L".aac", L".aif", L".aiff", L".wma"};
     bool isAudio = false;
     for (const auto allowed : audioExtensions) if (_wcsicmp(extension, allowed) == 0) { isAudio = true; break; }
@@ -540,6 +602,17 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                 return false;
             }
         }
+        const LRESULT originalMicrophone = SendDlgItemMessageW(window, microphoneID, CB_GETCURSEL, 0, 0);
+        if (state.microphones.size() < 2) { failure = "Smoke test requires two synthetic microphone choices."; return false; }
+        SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, 1, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(microphoneID, CBN_SELCHANGE), 0);
+        const bool microphoneChanged = observed.event == JSTI_EVENT_MICROPHONE_CHANGED && observed.id == state.microphones[1].id;
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
+        const bool recordingSnapshot = observed.event == JSTI_EVENT_TOGGLE_RECORDING && observed.id == state.microphones[1].id;
+        SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, static_cast<WPARAM>(originalMicrophone), 0);
+        if (!microphoneChanged || !recordingSnapshot) {
+            failure = "Microphone selection and recording did not retain the exact selected device."; return false;
+        }
         const JSTIHistoryRow first[] = {{"one", "First recording", "Completed"}, {"two", "Second recording", "Failed"}};
         if (jsti_window_set_history(first, 2, "two") != 0) { failure = "Initial history update failed."; return false; }
         applyUpdate(window);
@@ -570,6 +643,14 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                 failure = "A history action did not report its selected record ID."; return false;
             }
         }
+        jsti_window_update(nullptr, nullptr, 2);
+        applyUpdate(window);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
+        const bool cancellation = observed.event == JSTI_EVENT_CANCEL_TRANSCRIPTION &&
+            IsWindowEnabled(GetDlgItem(window, recordID));
+        jsti_window_update(nullptr, nullptr, 0);
+        applyUpdate(window);
+        if (!cancellation) { failure = "Busy transcription could not be cancelled from the native control."; return false; }
         return jsti_settings_self_test(window, failure);
     };
     bool passed = false;
@@ -655,8 +736,18 @@ int jsti_window_save_snapshot(const char *path, char *error, size_t errorCapacit
     }
     // Native children render into the same app-owned client bitmap even when a
     // runner's window compositor is headless. This never samples desktop pixels.
+    const int savedDC = SaveDC(resources.memory);
+    RECT windowBounds{};
+    POINT clientOrigin{};
+    if (!savedDC || !GetWindowRect(window, &windowBounds) || !ClientToScreen(window, &clientOrigin) ||
+        !SetViewportOrgEx(resources.memory, windowBounds.left - clientOrigin.x,
+            windowBounds.top - clientOrigin.y, nullptr)) {
+        if (savedDC) RestoreDC(resources.memory, savedDC);
+        return jsti::fail(jsti::systemError("Aligning the native client snapshot"), error, errorCapacity);
+    }
     SendMessageW(window, WM_PRINT, reinterpret_cast<WPARAM>(resources.memory),
         PRF_CLIENT | PRF_CHILDREN | PRF_ERASEBKGND);
+    RestoreDC(resources.memory, savedDC);
     if (!GdiFlush()) return jsti::fail(jsti::systemError("Completing native snapshot drawing"), error, errorCapacity);
     const auto *values = static_cast<const uint32_t *>(pixels);
     const uint32_t first = values[0] & 0x00FFFFFF;

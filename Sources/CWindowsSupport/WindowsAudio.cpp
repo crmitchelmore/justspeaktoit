@@ -168,6 +168,9 @@ struct Scheduling {
 };
 
 std::string audioError(const char *operation, HRESULT result) {
+    if (result == AUDCLNT_E_DEVICE_INVALIDATED || result == AUDCLNT_E_RESOURCES_INVALIDATED) {
+        return "The microphone disconnected or its configuration changed. Recording stopped; choose an available microphone and try again.";
+    }
     return jsti::systemError(operation, static_cast<DWORD>(result));
 }
 }
@@ -176,13 +179,15 @@ struct JSTICapture {
     JSTIAudioCallback callback;
     JSTIAudioErrorCallback errorCallback;
     void *context;
+    std::wstring deviceIdentifier;
     jsti::Handle stop;
     std::thread worker;
     std::mutex failureMutex;
     std::string failure;
 
-    JSTICapture(JSTIAudioCallback callback, JSTIAudioErrorCallback errorCallback, void *context)
-        : callback(callback), errorCallback(errorCallback), context(context) {}
+    JSTICapture(JSTIAudioCallback callback, JSTIAudioErrorCallback errorCallback, void *context,
+                std::wstring deviceIdentifier = {})
+        : callback(callback), errorCallback(errorCallback), context(context), deviceIdentifier(std::move(deviceIdentifier)) {}
 
     void run(std::promise<std::string> ready) {
         bool announced = false;
@@ -204,8 +209,27 @@ struct JSTICapture {
                 __uuidof(IMMDeviceEnumerator), reinterpret_cast<void **>(&enumerator.value));
             if (FAILED(result)) { report(audioError("Finding microphones", result)); return; }
             jsti::COM<IMMDevice> device;
-            result = enumerator->GetDefaultAudioEndpoint(eCapture, eCommunications, &device.value);
-            if (FAILED(result)) { report(audioError("Opening the default communications microphone", result)); return; }
+            result = deviceIdentifier.empty()
+                ? enumerator->GetDefaultAudioEndpoint(eCapture, eCommunications, &device.value)
+                : enumerator->GetDevice(deviceIdentifier.c_str(), &device.value);
+            if (FAILED(result)) {
+                report(deviceIdentifier.empty() ? audioError("Opening the default communications microphone", result)
+                    : "The selected microphone is no longer available. Choose an available microphone; no fallback was used.");
+                return;
+            }
+            DWORD deviceState = 0;
+            result = device->GetState(&deviceState);
+            if (FAILED(result) || !(deviceState & DEVICE_STATE_ACTIVE)) {
+                report("The selected microphone is disconnected or disabled. Choose an active microphone; no fallback was used.");
+                return;
+            }
+            jsti::COM<IMMEndpoint> endpoint;
+            result = device->QueryInterface(__uuidof(IMMEndpoint), reinterpret_cast<void **>(&endpoint.value));
+            EDataFlow flow = eAll;
+            if (FAILED(result) || FAILED(endpoint->GetDataFlow(&flow)) || flow != eCapture) {
+                report("The selected endpoint is not a microphone. Choose an input device; no fallback was used.");
+                return;
+            }
             jsti::COM<IAudioClient> client;
             result = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void **>(&client.value));
             if (FAILED(result)) { report(audioError("Activating microphone", result)); return; }
@@ -318,6 +342,24 @@ struct JSTICapture {
 JSTICapture *jsti_capture_create(JSTIAudioCallback callback, JSTIAudioErrorCallback errorCallback, void *context) {
     if (!callback) return nullptr;
     return new (std::nothrow) JSTICapture(callback, errorCallback, context);
+}
+
+JSTICapture *jsti_capture_create_with_device(const char *deviceID, JSTIAudioCallback callback,
+                                             JSTIAudioErrorCallback errorCallback, void *context,
+                                             char *error, size_t errorCapacity) {
+    try {
+        std::wstring identifier;
+        if (!callback || !jsti::wide(deviceID ? deviceID : "", identifier) || identifier.size() > 32767) {
+            jsti::fail("No audio callback or valid microphone identifier supplied.", error, errorCapacity);
+            return nullptr;
+        }
+        auto capture = new (std::nothrow) JSTICapture(callback, errorCallback, context, std::move(identifier));
+        if (!capture) jsti::fail("Could not allocate microphone capture.", error, errorCapacity);
+        return capture;
+    } catch (const std::exception &) {
+        jsti::fail("Could not retain the selected microphone identifier.", error, errorCapacity);
+        return nullptr;
+    }
 }
 
 int jsti_capture_start(JSTICapture *capture, char *error, size_t capacity) {
@@ -472,5 +514,5 @@ int jsti_native_self_test(char *error, size_t capacity) {
     if (jsti_target_insert_text(&target, "must not be inserted", expectedError, sizeof(expectedError)) != -1) {
         return jsti::fail("Invalid text target was not rejected.", error, capacity);
     }
-    return 0;
+    return jsti_audio_devices_self_test(error, capacity);
 }

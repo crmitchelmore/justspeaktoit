@@ -77,7 +77,8 @@ enum WindowsNative {
         let rows = records.map { record in
             let model = ModelCatalog.batchTranscription.first { $0.id == record.modelIdentifier }?.displayName
                 ?? record.modelIdentifier.split(separator: "/").last.map(String.init) ?? record.modelIdentifier
-            let detail = record.failure ?? record.displayText ?? "Recording saved; awaiting transcription."
+            let detail = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
+                ?? record.displayText ?? "Recording saved; awaiting transcription."
             return JSTIHistoryRow(
                 id: owned(record.id.uuidString), title: owned("\(formatter.string(from: record.createdAt)) · \(model)"),
                 detail: owned(String(detail.prefix(180)).replacingOccurrences(of: "\n", with: " "))

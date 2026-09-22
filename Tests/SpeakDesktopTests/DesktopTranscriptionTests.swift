@@ -261,7 +261,14 @@ private extension DesktopTranscriptionTests {
     static let rejection = #"{"error":{"message":"provider rejection"}}"#
 
     func assertProviderFailure(_ error: Error, model: String, status: Int) {
-        if model == XAISpeechToText.batchCatalogID {
+        if model == MetaMuseVoiceTranscribe.batchCatalogID {
+            XCTAssertEqual(error as? MetaMuseError, status == 401 ? .authentication : .rateLimited)
+        } else if AzureTranscriptionModels.batchIDs.contains(model) {
+            guard case AzureSpeechError.service(let reportedStatus) = error else {
+                return XCTFail("Unexpected Azure error: \(error)")
+            }
+            XCTAssertEqual(reportedStatus, status)
+        } else if model == XAISpeechToText.batchCatalogID {
             let expected: XAISpeechToTextError = status == 401
                 ? .unauthorized(statusCode: status) : .rateLimited(message: "provider rejection")
             XCTAssertEqual(error as? XAISpeechToTextError, expected)
@@ -280,9 +287,11 @@ private extension DesktopTranscriptionTests {
     }
 
     func transcribe(_ audio: URL, model: String) async throws -> TranscriptionResult {
-        try await DesktopTranscription.transcribe(
+        let multipart = DesktopMultipartFixture()
+        defer { multipart.remove() }
+        return try await DesktopTranscription.transcribe(
             audioURL: audio, model: model, apiKey: "  desktop-test  ", duration: 7,
-            language: "en_GB", session: StubURLProtocol.makeSession()
+            language: "en_GB", staging: multipart.staging, session: StubURLProtocol.makeSession()
         )
     }
 

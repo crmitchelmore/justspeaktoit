@@ -8,6 +8,7 @@ extension WindowsAppController {
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, target: JSTITextTarget?
     ) async {
         var record = original
+        cancellationRequested = false
         let processingOptions = settings.postProcessing ?? .init()
         do {
             guard !closed else { throw CancellationError() }
@@ -25,7 +26,7 @@ extension WindowsAppController {
             let task = Task {
                 try Task.checkCancellation()
                 return try await DesktopTranscription.transcribe(
-                    audioURL: audio, model: model, apiKey: key, duration: duration
+                    audioURL: audio, model: model, apiKey: key, duration: duration, staging: uploadStaging
                 )
             }
             transcriptionTask = task
@@ -38,18 +39,20 @@ extension WindowsAppController {
             record.postProcessingFailure = nil
             try await saveRecord(record)
             record = await postProcess(record, options: processingOptions)
+            if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
             // A response already received is still durably saved during shutdown,
             // but closing must never insert text or update a destroyed window.
             guard !closed else { return }
             present(record, target: target)
         } catch {
-            record.failure = error.localizedDescription
+            record.failure = cancellationRequested
+                ? "Transcription cancelled. Audio retained." : error.localizedDescription
             do { try await saveRecord(record) } catch {
                 update("History could not be saved: \(error.localizedDescription)", state: 0)
                 return
             }
-            update("Audio retained in History. \(error.localizedDescription)", state: 0)
+            update(record.failure ?? "Audio retained in History.", state: 0)
         }
     }
 
@@ -57,11 +60,11 @@ extension WindowsAppController {
         selectedHistoryID = record.id
         refreshHistory()
         transcript = record.displayText ?? ""
-        var status = "Saved to History. Select Copy to use the transcript."
+        var status = record.failure ?? "Saved to History. Select Copy to use the transcript."
         if let failure = record.postProcessingFailure {
             status = "Original transcript saved; post-processing failed. \(failure)"
         }
-        if var target, !transcript.isEmpty, !closed, record.postProcessingFailure == nil {
+        if var target, !transcript.isEmpty, !closed, record.failure == nil, record.postProcessingFailure == nil {
             do {
                 try transcript.withCString { text in
                     try WindowsNative.checked { jsti_target_insert_text(&target, text, $0, $1) }
@@ -72,5 +75,13 @@ extension WindowsAppController {
             }
         }
         update(status, transcript: transcript, state: 0)
+    }
+
+    func cancelTranscription() {
+        guard !closed, busy else { return }
+        cancellationRequested = true
+        transcriptionTask?.cancel()
+        postProcessingTask?.cancel()
+        update("Cancelling… Saved audio and completed results will be retained.", state: 2)
     }
 }

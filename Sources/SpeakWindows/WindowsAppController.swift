@@ -7,6 +7,7 @@ actor WindowsAppController {
     struct Settings: Codable {
         var model = OpenAITranscriptionModels.gptTranscribeCatalogID
         var postProcessing: DesktopPostProcessing.Options?
+        var microphoneDeviceID: String?
     }
 
     private struct Recording {
@@ -24,6 +25,7 @@ actor WindowsAppController {
 
     let directory: URL
     let store: DesktopRecordingStore
+    let uploadStaging: SharedMultipartUploadStaging
     var settings: Settings
     private var recording: Recording?
     private var isReady = false
@@ -38,10 +40,13 @@ actor WindowsAppController {
     var selectedHistoryID: UUID?
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
+    var microphoneWarning: String?
+    var cancellationRequested = false
 
     init(directory: URL) throws {
         self.directory = directory
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
+        self.uploadStaging = WindowsNative.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
         let settingsURL = directory.appendingPathComponent("settings.json")
         var loadedSettings: Settings
         if FileManager.default.fileExists(atPath: settingsURL.path) {
@@ -61,9 +66,10 @@ actor WindowsAppController {
         self.settings = loadedSettings
     }
 
-    func toggle(target: JSTITextTarget?, modelIndex: Int) async {
+    func toggle(target: JSTITextTarget?, modelIndex: Int, deviceID: String) async {
         guard isReady, !busy, !closed, DesktopTranscription.batchModels.indices.contains(modelIndex) else { return }
         selectModel(modelIndex)
+        selectMicrophone(deviceID)
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
@@ -85,9 +91,7 @@ actor WindowsAppController {
                 let context = WindowsCaptureContext(file: file) { message in
                     Task { await self.captureFailed(message, recordingID: id) }
                 }
-                guard let native = jsti_capture_create(
-                    captureAudio, captureError, Unmanaged.passUnretained(context).toOpaque()
-                ) else { throw WindowsNativeError(message: "Could not create microphone capture.") }
+                let native = try WindowsNative.createCapture(context: context, deviceID: deviceID)
                 do { try WindowsNative.checked { jsti_capture_start(native, $0, $1) } } catch {
                     withExtendedLifetime(context) { jsti_capture_destroy(native) }
                     throw error
@@ -178,6 +182,7 @@ actor WindowsAppController {
                 throw TranscriptionProviderError.apiKeyMissing
             }
             let source = URL(fileURLWithPath: path)
+            try WindowsNative.validateImport(source)
             let id = UUID()
             let filename = id.uuidString + "." + source.pathExtension
             let destination = directory.appendingPathComponent("History").appendingPathComponent(filename)
@@ -202,6 +207,7 @@ actor WindowsAppController {
             return
         }
         closed = true
+        cancellationRequested = true
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()
         if var record = recording?.record {
@@ -282,6 +288,7 @@ extension WindowsAppController {
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
+            if let microphoneWarning { status += " \(microphoneWarning)" }
             update(status, transcript: transcript, state: 0)
         } catch { update(error.localizedDescription, state: 0) }
     }
@@ -293,6 +300,10 @@ extension WindowsAppController {
             try JSONEncoder().encode(settings).write(
                 to: directory.appendingPathComponent("settings.json"), options: .atomic
             )
+            let hint = DesktopTranscription.provider(for: settings.model)?.apiKeyIdentifier
+                == AzureSpeechConfiguration.credentialIdentifier
+                ? " Enter Azure credentials as key:region (for example, your key followed by :uksouth)." : ""
+            update("Selected \(DesktopTranscription.batchModels[index].displayName).\(hint)")
         } catch { update("Could not save settings: \(error.localizedDescription)") }
     }
 
@@ -304,6 +315,9 @@ extension WindowsAppController {
                     for: DesktopTranscription.batchModels[modelIndex].id
                   ) else { throw DesktopTranscriptionError.unsupportedModel }
             let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty, provider.apiKeyIdentifier == AzureSpeechConfiguration.credentialIdentifier {
+                _ = try AzureSpeechConfiguration(credentials: cleaned)
+            }
             try WindowsNative.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
             update(cleaned.isEmpty ? "API key removed." : "API key saved in Windows Credential Manager.")
         } catch { update(error.localizedDescription) }

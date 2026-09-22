@@ -1,5 +1,10 @@
+#if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
 import AVFoundation
+#endif
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public enum MetaMuseMode: String, Codable, Sendable {
     case pushToTalk = "PUSH_TO_TALK"
@@ -260,7 +265,7 @@ enum MetaMuseAudioPreparer {
         let duration: TimeInterval
     }
 
-    static let sampleRate = 16_000
+    static let sampleRate = NativePCM16WAVReader.sampleRate
     /// 80 ms of valid silence: enough for the endpoint to parse and authorize
     /// the request without charging for a meaningful transcription.
     /// The constants here are a valid 16 kHz mono format, so the writer cannot
@@ -271,6 +276,7 @@ enum MetaMuseAudioPreparer {
         sampleRate: sampleRate
     ) ?? Data()
 
+    #if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
     // Conversion is one bounded pipeline so cancellation always stops before upload.
     // swiftlint:disable:next function_body_length
     static func prepareWAV(at url: URL) async throws -> PreparedAudio {
@@ -334,6 +340,26 @@ enum MetaMuseAudioPreparer {
         }
         return try prepared(pcm: pcm, duration: duration)
     }
+
+    #else
+    /// Native Windows recordings already match the provider's PCM format.
+    /// Validate the complete container; unsupported imports never reach upload.
+    static func prepareWAV(at url: URL) async throws -> PreparedAudio {
+        do {
+            let audio = try NativePCM16WAVReader.prepare(
+                at: url, maximumDuration: MetaMuseVoiceTranscribe.maximumAudioDuration,
+                maximumBytes: MetaMuseVoiceTranscribe.maximumRequestBytes
+            )
+            return PreparedAudio(data: audio.data, duration: audio.duration)
+        } catch NativePCM16WAVReader.PreparationError.limitExceeded {
+            throw MetaMuseError.requestTooLarge
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw MetaMuseError.invalidAudio(error.localizedDescription)
+        }
+    }
+    #endif
 
     /// Wraps the converted samples, turning a format the RIFF header cannot
     /// describe into an error rather than a trap.

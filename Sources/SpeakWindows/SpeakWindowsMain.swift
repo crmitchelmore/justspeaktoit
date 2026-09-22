@@ -37,7 +37,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         var target = JSTITextTarget()
         var error = [CChar](repeating: 0, count: 1024)
         let captured = jsti_target_capture(&target, &error, error.count) == 0 ? target : nil
-        Task { await controller.toggle(target: captured, modelIndex: Int(index)) }
+        Task { await controller.toggle(target: captured, modelIndex: Int(index), deviceID: value) }
     case 2: Task { await controller.importAudio(path: value, modelIndex: Int(index)) }
     case 3: Task { await controller.copyTranscript(identifier: value) }
     case 4: holder.enqueueSettings { await controller.saveKey(value, modelIndex: Int(index)) }
@@ -45,6 +45,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     case 7:
         ready(holder)
     case 8: WindowsNative.update(value)
+    case 13: holder.enqueueSettings { await controller.selectMicrophone(value) }
     default: historyEvent(event, value: value, controller: controller)
     }
 }
@@ -94,6 +95,7 @@ private func historyEvent(_ event: Int32, value: String, controller: WindowsAppC
             }
         } catch { WindowsNative.update(error.localizedDescription) }
     case 12: Task { await controller.openHistoryAudio(value) }
+    case 14: Task { await controller.cancelTranscription() }
     default: break
     }
 }
@@ -104,6 +106,7 @@ enum SpeakWindowsMain {
         do {
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
+                try WindowsNative.checked { jsti_private_storage_self_test($0, $1) }
                 guard !DesktopTranscription.batchModels.isEmpty else {
                     throw WindowsNativeError(message: "No canonical desktop models available.")
                 }
@@ -132,6 +135,9 @@ enum SpeakWindowsMain {
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        let microphone = await controller.selectedMicrophone()
+        let warning = try WindowsNative.configureMicrophones(selected: microphone, smokeTest: holder.smokeTest)
+        await controller.setMicrophoneWarning(warning)
         let processing = await controller.postProcessingOptions()
         try WindowsNative.configurePostProcessing(
             processing, context: Unmanaged.passUnretained(holder).toOpaque()

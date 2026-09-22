@@ -28,7 +28,6 @@ let appleCoreSources: [String] = [
     "AutoCorrectionEngine.swift",
     "AutoCorrectionStore.swift",
     "AutomationIntentSupport.swift",
-    "AzureBatchTranscriptionClient.swift",
     "AzureSpeechEndpointField.swift",
     "AzureVoiceLiveClient.swift",
     "BrandColors.swift",
@@ -44,8 +43,6 @@ let appleCoreSources: [String] = [
     "CartesiaLiveClient.swift",
     "CartesiaTTSAPI.swift",
     "DeepgramBalanceClient.swift",
-    "DeepgramLiveClient.swift",
-    "DeepgramLiveProtocol.swift",
     "DeepgramTTSAPI.swift",
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",
@@ -79,7 +76,6 @@ let appleCoreSources: [String] = [
     "Logging.swift",
     "MacConnection.swift",
     "MetaMuseLiveClient.swift",
-    "MetaMuseVoiceTranscribe.swift",
     "MistralTTSAPI.swift",
     "MistralVoxtralLiveClient.swift",
     "ModulateLiveClient.swift",
@@ -186,7 +182,7 @@ portablePackage.targets.append(contentsOf: [
         publicHeadersPath: "include",
         linkerSettings: [
             .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
-            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"), .linkedLibrary("shell32"),
+            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"), .linkedLibrary("shell32"), .linkedLibrary("ntdll"),
             .linkedLibrary("avrt")
         ]
     ),

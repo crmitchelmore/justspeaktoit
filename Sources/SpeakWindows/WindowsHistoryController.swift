@@ -7,7 +7,8 @@ extension WindowsAppController {
               let record = history[id] else { return }
         selectedHistoryID = id
         transcript = record.displayText ?? ""
-        let status = record.failure ?? "Saved transcript. Retry uses this recording’s original model."
+        let status = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
+            ?? "Saved transcript. Retry uses this recording’s original model."
         update(status, transcript: transcript)
     }
 

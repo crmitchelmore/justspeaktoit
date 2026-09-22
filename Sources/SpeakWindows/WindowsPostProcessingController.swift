@@ -36,7 +36,7 @@ extension WindowsAppController {
             record.processedText = ""
             return record
         }
-        guard !closed, options.mode == .remote else { return record }
+        guard !closed, !cancellationRequested, options.mode == .remote else { return record }
         do {
             let key = try WindowsNative.apiKey(
                 name: postProcessingCredential(for: options.modelIdentifier)

@@ -330,7 +330,13 @@ Verified baseline on 22 September 2026:
   zero failures**, plus strict SwiftLint, native C++ warnings-as-errors and the
   Windows Swift host typecheck. Its
   [native run 35723903725](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35723903725)
-  is pending. This is not a physical History acceptance receipt.
+  is green on Windows, macOS and Linux. The native window smoke verified search
+  events, filtered selection, transcript variants, record-bound actions and
+  control bounds; its captured window was visually inspected. This is not a
+  physical History acceptance receipt. A subsequent Fable fix uses Foundation
+  Unicode folding to match German sharp s and Greek sigma without stripping
+  meaningful Devanagari, Thai or Arabic marks; that revision passed 188 local
+  portable tests, five skipped, zero failures, with native CI pending.
 - **Final-head Windows, macOS and Linux CI for the current source is pending.**
   Provider contract tests use the shared URLProtocol stub and no live provider
   keys; test success must not be reported as a live transcription receipt.

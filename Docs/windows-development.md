@@ -33,14 +33,17 @@ $bin = swift build --configuration release --show-bin-path
 & (Join-Path $bin.Trim() 'SpeakWindows.exe')
 ```
 
-The current source offers microphone recording, audio-file import and **28 batch
-models across sixteen providers**: OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini,
-xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox, Rev.ai, Modulate and AssemblyAI. These are projections of the canonical
-shared catalogue and execute through shared provider clients. Three Deepgram live models and AssemblyAI Universal-3.5 Pro are wired through shared Swift session snapshots and the native WinHTTP
-adapter, whose five Windows runtime probes passed. Windows host integration
-passed at `6fcb528d`; real provider acceptance remains pending. Batch and Live keep separate
-model selections. Native capture is joined before finalisation; received text
-and audio survive cancellation or failure, with no automatic insertion on failure.
+The current source offers microphone recording, audio-file import and **all 31
+static remote batch models across seventeen provider families**: OpenAI, Groq,
+Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta,
+Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI and OpenRouter. The canonical
+shared catalogue owns their identifiers, metadata and routes. OpenRouter model
+discovery uses the same cache and refresh policy as Apple; native model controls
+refresh without changing an active recording or reusing an earlier model index.
+Four OpenAI, three Deepgram and one AssemblyAI live models use shared Swift
+clients with the native WinHTTP transport. Batch and Live retain separate model
+selections. Native capture is joined before finalisation; received text and audio
+survive cancellation or failure, with no automatic insertion on failure.
 `Ctrl+Alt+Space` starts and stops recording when registration succeeds. Save the
 selected provider's key through the application; each provider uses its canonical
 credential identifier in Windows Credential Manager. The app stores settings and
@@ -73,8 +76,8 @@ the recording's original model, exports transcript text through an overwrite-
 confirming save dialog, and opens retained audio in its registered Windows
 application. Copy, retry, export and audio actions capture the selected record's
 identifier so later selection changes cannot redirect them. A native search box
-filters the rows by original transcript, processed transcript or canonical
-friendly model name. Matching uses Foundation's full case folding and Latin,
+filters the rows by original transcript, processed transcript, captured app
+profile name or canonical friendly model name. Matching uses Foundation's full case folding and Latin,
 Greek and Cyrillic diacritic folding through the shared `SpeakDesktop` policy,
 keeps marks that spell words in other scripts, never modifies records or
 transcripts, and
@@ -95,6 +98,16 @@ settings together. The original transcript is saved before the shared
 post-processing client runs; processed text is stored separately. Empty
 transcripts remain empty, and a processing failure retains the original and its
 failure reason. Local post-processing and live polish are not wired into Windows.
+
+App profiles use the canonical `DictationProfile` data model and ordered matching
+policy. The native editor supports add/remove/reorder, full executable paths,
+model and language overrides, post-processing mode/model/prompt and output
+language. The original executable identity is captured before recording. Its
+first matching profile becomes an immutable session snapshot, leaving normal
+settings unchanged. Unavailable models, inherited values and Apple-only matchers
+survive edits; unsupported overrides have an explicit notice retained in History.
+Atomic persistence and queued settings application precede the next recording.
+Personal lexicon overrides and live language hints are not applied yet.
 
 Automatic insertion targets the control that had focus when the hotkey fired
 and re-verifies the captured process, thread, foreground window and focused
@@ -143,11 +156,14 @@ The portable graph has no external Swift package dependencies and may remove
 that file from the starting revision after portable validation, provided it had
 no unrelated changes before the run. Do not commit its deletion.
 
-**Cross-compiling a Windows executable from macOS has not been verified.**
-Native compilation on Windows is the current build path. The official Swift
-Windows installer establishes that Windows is a supported Swift host; it does
-not prove this repository can cross-compile from macOS. Any future cross-build
-must produce an artifact that passes the same tests on a real Windows host.
+The app and complete XCTest executable now **cross-compile from macOS** using a
+private, pinned official Swift 6.2.3 toolchain, LLVM 20, Microsoft SDK and MSVC
+libraries. The existing Xcode installation and normal Apple build graph stay
+unchanged. Follow [the cross-build guide](../scripts/windows-cross/README.md).
+A Foundation proof compiled on the Mac has already executed successfully on
+Windows. The full app workflow copies those exact Mac-built executables to a
+Windows runner and verifies their source revision and hashes before tests and
+native window checks; its first runtime result remains pending at this checkpoint.
 
 ## Architecture and ownership
 
@@ -167,7 +183,7 @@ flowchart TB
 | Layer | Current responsibility | Source |
 |---|---|---|
 | Canonical domain | Model identifiers, provider routes, transcript semantics, Unicode reconciliation, lifecycle ownership, PCM/WAV, comparison and history projections | `Sources/SpeakCore/` |
-| Shared batch transport | Sixteen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
+| Shared batch transport | Seventeen provider routes reuse shared clients, including their HTTP, polling and cancellation behaviour | `Sources/SpeakCore/` provider clients; `Sources/SpeakDesktop/DesktopTranscription.swift` |
 | Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
@@ -216,19 +232,19 @@ but must not be presented as the identical Apple-only engine or service.
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
-| Batch transcription | 28 canonical models across OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox, Rev.ai, Modulate and AssemblyAI, through shared clients | Final-head Windows/Linux CI, real provider receipts, supported formats/languages and remaining macOS providers |
-| Live transcription | Deepgram and AssemblyAI routes use shared sessions and a runtime-qualified native WinHTTP transport | Final-head native host checks, real provider receipts and remaining streaming providers |
+| Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
+| Live transcription | Four OpenAI, three Deepgram and one AssemblyAI models use shared clients and native WinHTTP | Final-head native host checks, Windows provider receipts and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; replace-field, direct-only and clipboard-only modes as hand-edited settings | Physical browser/Electron/Office/XAML acceptance, a text output settings UI, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
-| Profiles and settings | Shared profile models; basic Windows model persistence | Full settings, per-application profiles and migration |
+| Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides and preserved unknown values | Final-head native UI, physical executable matching, remaining settings, lexicon and live-language overrides |
 | History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export and external audio opening; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, embedded playback, history import and retention controls |
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
 | Voice output | Shared catalogues and some request contracts compile | Provider execution, native playback, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
-| Credentials | Windows Credential Manager uses canonical identifiers for the sixteen transcription providers and OpenRouter | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
+| Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
 | Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
 | Automation and integrations | Shared protocol data available in source | Windows CLI/IPC, OpenClaw, deep links and applicable automation surface parity |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
@@ -267,7 +283,10 @@ minimum-size control bounds, atomic history replacement, preserved selection,
 history action identifiers, search query events with filtered-snapshot
 selection clearing and restoration, transcript version defaults with copy and
 export version identity, microphone selection snapshots, cancellation, and a
-hidden post-processing dialog's atomic Apply callback before shutdown. Native
+hidden post-processing dialog's atomic Apply callback before shutdown. Profile
+smoke checks cover CRUD, ordering, preservation, validation, modal hotkey refusal,
+keyboard scrolling and narrow window layout. Model-list smoke checks exercise
+refresh, retained selection and transition from batch-only to live-capable lists. Native
 storage tests check protected ACLs, existing-file refusal and junction rejection.
 The microphone/cancellation/storage/search/transcript-version additions still
 require final-head CI.
@@ -276,100 +295,51 @@ transcription, successful external insertion or user-visible feature parity.
 Separate adapter unit tests exercise Credential Manager with isolated synthetic
 test entries; they do not validate a user's provider credentials.
 
-Verified baseline on 22 September 2026:
+Verified checkpoints on 22 September 2026:
 
-- The full Apple `make test` run at the initial extraction completed **3,434
-  tests, 16 skipped, zero failures**. This is regression evidence for that
-  extraction, not a performance measurement or a later-head test result.
-- [Windows and Portable Swift run 35710382001](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35710382001)
-  at commit `317ae843d59755f31d4ca911bef8f23a019a9752` passed native Windows x64
-  release compilation, **26 tests**, executable self-test and native window
-  creation/shutdown. Its macOS and Linux portable jobs also passed.
-- That run produced [developer artifact 10686856024](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35710382001/artifacts/10686856024),
-  with source/compiler provenance. It is the initial OpenAI-only build;
-  it does not contain the later four-provider expansion.
-- [Windows and Portable Swift run 35712163693](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35712163693)
-  passed Windows x64 release compilation, **36 tests with zero failures**, the
-  native adapter/queue self-test and basic window creation/shutdown. Its macOS
-  and Linux portable jobs also passed. The source head was
-  `b9ed4cf0ca6098469a970580333d4a46d0c6ece4`; the PR workflow checked out and
-  built merge commit `2ded43f35129842e9a9b9f03083a907f46c8fb48` containing that
-  source. This distinction is recorded in the artifact's source provenance.
-- That run produced [developer artifact 10687273137](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35712163693/artifacts/10687273137).
-  It predates the current native History pane, nine-provider expansion and
-  OpenRouter post-processing. Its green status does not verify those changes
-  or their expanded UI smoke checks.
-- [Run 35715629357](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35715629357)
-  at source `e5187211` (tested merge `3128c2e6`) passed Windows release build,
-  **69 baseline tests, five optional probes skipped, zero failures**, and the
-  expanded native history/settings window checks. Portable macOS/Linux passed.
-  [Developer artifact 10689515020](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35715629357/artifacts/10689515020)
-  contains the nine-provider implementation. Its overall workflow is **failed**:
-  the separate Windows FoundationNetworking WebSocket probe found missing pong
-  completion and partial-message delivery for a 2 MiB server echo. Handshake,
-  PCM exchange, cancellation and abrupt-disconnect checks worked. This evidence
-  requires a Windows transport adapter before any live model is exposed.
-- The full Apple suite after the nine-provider extraction passed **3,476 tests,
-  16 skipped, zero failures**. Later changes require their own regression checks.
-- [Run 35718564307](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35718564307)
-  at source `bd8b4235` (tested merge `ad89d515`) passed the Windows release build,
-  **125 baseline tests, ten optional probes skipped, zero failures**, followed by
-  **all five native WinHTTP runtime probes with zero skips or failures**. These
-  cover handshake, 100 ms PCM, server ping/autopong, close status/reason, cancelled
-  handshake/receive, abrupt disconnect, fragmented Unicode/binary messages, two
-  exact 2 MiB echoes and oversized-message rejection. Portable macOS/Linux passed.
-  The overall run failed in executable self-test on private staging ownership;
-  this run therefore does not qualify the expanded native window or host.
-- [Run 35721370500](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35721370500)
-  built source `1e4b2f7a` on Windows and passed all five native Swift/conversion
-  tests: 48 kHz stereo to canonical PCM, source preservation, pre-cancellation,
-  cancellation during decoding/completion, invalid input cleanup and existing
-  output protection. The overall run failed only a Modulate test header-case
-  assumption, also caught on Linux; `b54d5170` fixes that assertion. The native
-  executable self-test and window smoke were skipped after this test failure.
-- The full Apple `make test` suite at pushed source `1e4b2f7a` passed **3,577
-  tests, 16 skipped, zero failures**. This includes the Modulate and AssemblyAI
-  extractions and the shared live error/finalisation ordering fix.
-- [Run 35722016248](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35722016248)
-  is green for source `b54d5170` (tested merge `14ea6c3a`). Windows passed
-  **206 baseline tests, ten optional probes skipped, zero failures**, then all
-  **five WinHTTP runtime probes**, executable native/storage/decoder self-tests
-  and the expanded native window checks. Portable macOS/Linux passed.
-  [Developer artifact 10692237189](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35722016248/artifacts/10692237189)
-  contains the executable and compiler/source metadata. Executable SHA-256:
-  `81F728109F8DCE62D3A841942A5BE9D0B6482BDBCD5FFC593073CC984C625705`.
-  Its native UI snapshot was inspected; controls fit and the corrected snapshot
-  origin shows the complete client area. This receipt precedes 24 kHz capture.
-- The subsequent direct 16/24 kHz native capture implementation and expanded
-  self-tests were authored by Claude Fable 5.1 at `max`, session
-  `8bef4c77-0e20-4453-a9d3-9a9af8757bfc`. Integrated source `6fcb528d` passed
-  [run 35722960563](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35722960563)
-  on Windows, macOS and Linux, including native capture self-tests and window
-  checks. Physical microphone acceptance remains pending.
-- Fable-authored History search and transcript-version selection were integrated
-  as `38867775`. Local portable validation passed **186 tests, five skipped,
-  zero failures**, plus strict SwiftLint, native C++ warnings-as-errors and the
-  Windows Swift host typecheck. Its
-  [native run 35723903725](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35723903725)
-  is green on Windows, macOS and Linux. The native window smoke verified search
-  events, filtered selection, transcript variants, record-bound actions and
-  control bounds; its captured window was visually inspected. This is not a
-  physical History acceptance receipt. A subsequent Fable fix uses Foundation
-  Unicode folding to match German sharp s and Greek sigma without stripping
-  meaningful Devanagari, Thai or Arabic marks. That policy passed on Windows,
-  macOS and Linux in source `99b2ccfa`,
-  [run 35725040396](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35725040396),
-  along with real AAC/M4A and MP3 import decoding, the transport probes and
-  native self-tests. Source fixtures contain generated tones only.
-- Fable's subsequent History recovery fix validates metadata filename/record
-  identity and rejects unsafe audio paths before header repair. Invalid records
-  cannot redirect repair outside History or replace another record's metadata.
-  The integrated local suite passed **192 tests, five skipped, zero failures**;
-  this later revision's native CI is pending. Native handle protection against
-  concurrent file replacement/hard links remains separate from these path checks.
-- **Final-head Windows, macOS and Linux CI for the current source is pending.**
-  Provider contract tests use the shared URLProtocol stub and no live provider
-  keys; test success must not be reported as a live transcription receipt.
+- [Windows/macOS/Linux run 35729527217](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35729527217)
+  passed at source `e20a085e` (tested merge `b2e46fdd`). Windows passed **360
+  baseline tests, ten optional probes skipped, zero failures**, then all five
+  WinHTTP runtime probes and native/storage/converter/window self-tests.
+  [Developer artifact 10695526230](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35729527217/artifacts/10695526230)
+  includes source/compiler provenance. This checkpoint contains the shared
+  OpenAI/OpenRouter implementations and profiles policy, before the later native
+  profile editor, dynamic model controls and expanded insertion adapter.
+- [Mac-to-Windows Foundation run 35729527364](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35729527364)
+  passed at the same source: the Mac-built Windows executable ran Unicode,
+  Array, Codable, Data, URL, regex and atomic file assertions on Windows.
+  Its SHA-256 is `05290d2d91fac670d27c688eb23500d939d1fa9c1cb6f99d697d636161e57aed`.
+  This is a Foundation runtime receipt, not the full application runtime receipt.
+- The full normal Apple `make test` suite at source `5a8decf6` passed **3,652
+  tests, sixteen skipped, zero failures**. Focused Apple profile checks at
+  `01a06c18` passed **96 tests**. The full Apple run for the combined native profiles,
+  dynamic model and insertion checkpoint `0c50d046` passed **3,688 tests, sixteen
+  skipped, zero failures**.
+- Local combined portable validation passed **339 tests, five optional probes
+  skipped, zero failures**; the subsequent profile review regressions passed
+  **39 focused tests**. Strict SwiftLint, full Windows Swift host typecheck and
+  native C++ warnings-as-errors passed. Host typecheck is supplementary: real
+  Microsoft compilation found and fixed COM include and enum-ABI differences.
+- A real shared-client `gpt-live-transcribe` probe sent 4.404 seconds of locally
+  generated speech and received the expected words without provider errors.
+  Readiness was 2,052 ms, first text 3,314 ms and finalisation 532 ms in that
+  single macOS probe. These figures are not a Windows or comparative performance
+  result. A later silence probe stopped at Keychain access before connecting;
+  silence requalification remains unverified.
+- [Native Windows run 35732516867](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35732516867)
+  and [full app cross-build run 35732516925](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35732516925)
+  are in progress for `0c50d046`. They contain native profiles, model refresh and
+  broader insertion, including modal focus, path-validation and ABI corrections.
+  Their results must be checked before treating this later checkpoint as verified.
+- Earlier [run 35725040396](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35725040396)
+  verified generated AAC/M4A and MP3 imports through real Media Foundation,
+  preserving original files and non-silent decoded samples. It also verified
+  Fable's Unicode History search policy on all three platforms.
+
+Provider contract tests use synthetic fixtures and no real provider keys. A
+passing suite is not a live provider or physical-device receipt. No current
+checkpoint establishes complete parity, clean-machine installation or measured
+performance equivalence.
 
 Record Windows CI and physical acceptance receipts separately, with commit,
 executable hash, OS/architecture, device, input fixture, provider/model and

@@ -112,7 +112,10 @@ first matching profile becomes an immutable session snapshot, leaving normal
 settings unchanged. Unavailable models, inherited values and Apple-only matchers
 survive edits; unsupported overrides have an explicit notice retained in History.
 Atomic persistence and queued settings application precede the next recording.
-Personal lexicon overrides and live language hints are not applied yet.
+Spoken-language overrides reach supported live models through their shared client:
+OpenAI, Deepgram Nova and multilingual Flux. English-only Flux and AssemblyAI
+retain a model-specific limitation; Automatic keeps the model's normal language
+behaviour without a warning. Personal lexicon overrides are not applied yet.
 
 Automatic insertion targets the control that had focus when the hotkey fired
 and re-verifies the captured process, thread, foreground window and focused
@@ -251,8 +254,8 @@ but must not be presented as the identical Apple-only engine or service.
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
-| Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides and preserved unknown values | Final-head native UI, physical executable matching, remaining settings, lexicon and live-language overrides |
-| History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export and external audio opening; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, embedded playback, history import and retention controls |
+| Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
+| History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export and external audio opening; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, embedded playback, history import and record/audio removal controls |
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
 | Voice output | Shared catalogues and some request contracts compile | Provider execution, native playback, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |

@@ -22,8 +22,15 @@ python3 scripts/windows-cross/build-windows-app.py \
   --output /path/to/windows-app-cross
 ```
 
+The app script defaults to optimised `release` builds and records the configuration
+in its provenance; `--configuration debug` is available for debugging. CI requires
+release configuration for both the app and tests. The script preserves the exact
+existing Apple `Package.resolved` bytes and permissions, including uncommitted
+pins, even if SwiftPM fails. No initial lockfile means no lockfile is left behind.
+
 The cache and outputs must be separate directories. Expect approximately 4.4 GB
-of downloads and around 16 GB total including extraction and build files. Every download has a fixed
+of downloads and around 11 GB retained after task-owned extraction staging is removed.
+Allow extra space for peak extraction and both build configurations. Every download has a fixed
 official URL, SHA-256 and actual byte count in `dependencies.json`. The Swift
 Windows installer is unpacked as data; its MSI custom actions never execute.
 The extracted macOS compiler is used by absolute path, with no global toolchain

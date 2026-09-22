@@ -63,7 +63,9 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/windows-app-cross"
+          python3 -B -m unittest discover -s scripts/windows-cross -p test_build_windows_app.py
           python3 scripts/windows-cross/build-windows-app.py \
+            --configuration release \
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --output "$RUNNER_TEMP/windows-app-cross" 2>&1 |
             tee "$RUNNER_TEMP/windows-app-cross/bootstrap.log"
@@ -140,6 +142,7 @@ jobs:
             throw 'Unexpected app build provenance.'
           }
           if ($metadata.sourceCommit -ne $env:GITHUB_SHA) { throw 'App source commit mismatch.' }
+          if ($metadata.configuration -ne 'release') { throw 'Expected optimised release executables.' }
           foreach ($entry in $metadata.executables.PSObject.Properties) {
             $actual = (Get-FileHash (Join-Path app $entry.Name) -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actual -ne $entry.Value) { throw "Mac-built artifact hash mismatch: $($entry.Name)" }

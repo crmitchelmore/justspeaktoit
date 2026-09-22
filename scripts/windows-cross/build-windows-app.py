@@ -89,6 +89,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
+    parser.add_argument("--configuration", choices=("debug", "release"), default="release")
     args = parser.parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise SystemExit("The pinned app compiler requires an Apple Silicon Mac")
@@ -111,7 +112,7 @@ def main():
     scratch = cache / "app-build"
     command = [tool / "bin/swift", "build", "--build-tests", "--package-path", HERE.parent.parent,
                "--triple", "x86_64-unknown-windows-msvc", "--sdk", sdk,
-               "--scratch-path", scratch, "--jobs", "4"]
+               "--scratch-path", scratch, "--configuration", args.configuration, "--jobs", "4"]
     for flag in ["-resource-dir", sdk / "usr/lib/swift", "-tools-directory", tool / "bin", "-use-ld=lld"]:
         command += ["-Xswiftc", flag]
     for directory in [sdk / "usr/include", headers, kits / "ucrt", kits / "um", kits / "shared", kits / "winrt"]:
@@ -134,7 +135,7 @@ def main():
     environment.update(SPEAK_WINDOWS_TARGET="1", CC=str(clang / "clang"), CXX=str(clang / "clang++"))
     print("Cross-building Windows app and all portable/native tests", flush=True)
     run_package_build(command, environment, log, HERE.parent.parent)
-    built = scratch / "x86_64-unknown-windows-msvc/debug"
+    built = scratch / "x86_64-unknown-windows-msvc" / args.configuration
     artifacts = {}
     for source_name, artifact_name in [("SpeakWindows.exe", "SpeakWindows.exe"),
                                        ("SpeakAppPackageTests.xctest", "SpeakAppPackageTests.exe")]:
@@ -151,7 +152,8 @@ def main():
         if source.is_dir():
             shutil.copytree(source, output / source.name, dirs_exist_ok=True)
     metadata = {"host": platform.system(), "hostArchitecture": platform.machine(),
-                "target": "x86_64-unknown-windows-msvc", "sourceCommit": os.environ.get("GITHUB_SHA"),
+                "target": "x86_64-unknown-windows-msvc", "configuration": args.configuration,
+                "sourceCommit": os.environ.get("GITHUB_SHA"),
                 "swiftCompiler": subprocess.check_output([tool / "bin/swift", "--version"], text=True).strip(),
                 "nativeCompiler": subprocess.check_output([clang / "clang", "--version"], text=True).strip(),
                 "executables": artifacts, "dependencies": lock,

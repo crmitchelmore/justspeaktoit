@@ -1,0 +1,186 @@
+name: Windows and Portable Swift
+
+on:
+  push:
+    branches: [main, codex/windows-shared-core]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakWindows/**
+      - Sources/CWindowsSupport/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - Docs/windows-development.md
+      - .github/workflows/windows.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakWindows/**
+      - Sources/CWindowsSupport/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - Docs/windows-development.md
+      - .github/workflows/windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows:
+    name: Native Windows x64 (Swift 6.2.3)
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Swift toolchain
+        uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057
+        with:
+          source: swift.org
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+          build_arch: amd64
+          update-sdk-modules: false
+
+      - name: Verify portable source boundary
+        run: python scripts/verify-portable-core-boundary.py
+
+      - name: Build native Windows executable
+        run: |
+          swift --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          swift build --configuration release --product SpeakWindows --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test shared core, desktop workflow and native adapters
+        run: |
+          swift test --configuration release --jobs 4 --xunit-output windows-tests.xml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run executable self-test and native window smoke test
+        timeout-minutes: 2
+        run: |
+          $bin = swift build --configuration release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $bin.Trim() 'SpeakWindows.exe'
+          & $exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $process = Start-Process -FilePath $exe -ArgumentList '--ui-smoke-test' -PassThru -NoNewWindow `
+            -RedirectStandardOutput windows-ui-smoke.log -RedirectStandardError windows-ui-smoke-errors.log
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'Native window did not create and shut down within 30 seconds.'
+          }
+          Get-Content windows-ui-smoke.log
+          Get-Content windows-ui-smoke-errors.log
+          if ($process.ExitCode -ne 0) { throw "Native window smoke test failed: $($process.ExitCode)" }
+
+      - name: Stage developer executable with provenance
+        run: |
+          $bin = swift build --configuration release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $destination = New-Item -ItemType Directory -Path windows-developer-build
+          Copy-Item (Join-Path $bin.Trim() 'SpeakWindows.exe') $destination
+          Get-ChildItem -Path $bin.Trim() -Directory -Filter '*.resources' |
+            Copy-Item -Destination $destination -Recurse
+          [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            architecture = 'x86_64'
+            compiler = (swift --version) -join "`n"
+            distribution = 'developer executable; not an installer'
+            runtime = 'Requires the Swift 6.2.3 Windows runtime and Visual C++ runtime'
+          } | ConvertTo-Json | Set-Content (Join-Path $destination 'build-metadata.json') -Encoding utf8
+          @'
+          Just Speak to It — Windows developer build
+
+          This is an unsigned developer executable, not an installer or a feature-complete release.
+          Install the Swift 6.2.3 Windows toolchain/runtime and its Windows prerequisites:
+          https://www.swift.org/install/windows/
+
+          Development instructions and current parity limitations:
+          https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-development.md
+
+          Run SpeakWindows.exe normally, or pass --self-test / --ui-smoke-test.
+          The smoke tests do not use a microphone or a real provider API key.
+          See build-metadata.json for the exact source revision and compiler.
+          '@ | Set-Content (Join-Path $destination 'README.txt') -Encoding utf8
+          Get-FileHash (Join-Path $destination 'SpeakWindows.exe') -Algorithm SHA256 |
+            Format-List | Out-String | Set-Content (Join-Path $destination 'SHA256.txt') -Encoding utf8
+
+      - name: Upload developer executable
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: justspeaktoit-windows-x64-developer-${{ github.sha }}
+          path: windows-developer-build/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload native test evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-test-evidence-${{ github.sha }}
+          path: |
+            windows-tests.xml
+            windows-ui-smoke*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  portable-macos:
+    name: Portable Swift on macOS
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      SPEAK_PORTABLE_CORE: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify portable source boundary
+        run: python3 scripts/verify-portable-core-boundary.py
+      - name: Test portable graph with Xcode Apple Swift
+        run: |
+          xcrun swift --version
+          xcrun swift test --configuration release --jobs 4
+      - name: Preserve Apple dependency lockfile
+        if: always()
+        # The dependency-free graph removes pins it does not need. It must not
+        # change the Apple graph's checked-in dependencies.
+        run: git restore --source=HEAD -- Package.resolved
+
+  portable-linux:
+    name: Portable Swift on Linux (Swift 6.2.3)
+    runs-on: ubuntu-22.04
+    container:
+      image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify portable source boundary
+        run: python3 scripts/verify-portable-core-boundary.py
+      - name: Test portable graph with native Linux Swift
+        run: |
+          swift --version
+          swift test --configuration release --jobs 4

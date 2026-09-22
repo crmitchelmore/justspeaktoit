@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Gladia's asynchronous pre-recorded API: upload the recording to `/v2/upload`,
 /// start a job on `/v2/pre-recorded`, then poll the job's `result_url` until it
@@ -9,7 +12,7 @@ import Foundation
 /// Solaria provider stores is used here; Gladia issues one account key for
 /// both surfaces, so no extra credential or endpoint is required.
 public struct GladiaBatchClient: Sendable {
-    public static let catalogID = "gladia/solaria-1"
+    public static let catalogID = BatchTranscriptionModelIdentifiers.gladiaSolaria
     public static let providerName = "Gladia"
     static let modelName = "solaria-1"
     public static let defaultBaseURL = URL(string: "https://api.gladia.io")!

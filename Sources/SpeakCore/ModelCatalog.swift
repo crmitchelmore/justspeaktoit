@@ -139,21 +139,21 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     public static let batchTranscription: [Option] =
         appleBatchTranscriptionOptions + [
         Option(
-            id: CartesiaBatchClient.catalogID, displayName: "Cartesia Ink Whisper (Batch)",
+            id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",
             description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",
             estimatedLatencyMs: nil, latencyTier: .medium),
         Option(
-            id: GladiaBatchClient.catalogID, displayName: "Gladia Solaria-1 (Batch)",
+            id: BatchTranscriptionModelIdentifiers.gladiaSolaria, displayName: "Gladia Solaria-1 (Batch)",
             description: "Multilingual file transcription with per-utterance timings. "
                 + "Automatic detects the language and allows code switching.",
             estimatedLatencyMs: nil, latencyTier: .medium),
         Option(
-            id: SpeechmaticsBatchClient.enhancedCatalogID, displayName: "Speechmatics Enhanced (Batch)",
+            id: BatchTranscriptionModelIdentifiers.speechmaticsEnhanced, displayName: "Speechmatics Enhanced (Batch)",
             description: "Speechmatics' higher-accuracy file transcription tier, with word timings "
                 + "and automatic language identification.",
             estimatedLatencyMs: nil, latencyTier: .medium),
         Option(
-            id: SpeechmaticsBatchClient.standardCatalogID, displayName: "Speechmatics Standard (Batch)",
+            id: BatchTranscriptionModelIdentifiers.speechmaticsStandard, displayName: "Speechmatics Standard (Batch)",
             description: "Speechmatics' faster, lower-cost file transcription tier.",
             estimatedLatencyMs: nil, latencyTier: .fast),
         // Dedicated transcription providers (OpenAI, Rev.ai, etc.)

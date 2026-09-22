@@ -1,4 +1,6 @@
+#if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
 import AVFoundation
+#endif
 import Foundation
 
 // Small helpers that every transcription provider needs. They live here so the
@@ -45,6 +47,7 @@ public enum SpeakerLabelNormalizer {
     }
 }
 
+#if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
 /// Resolves the duration to report for a transcription, preferring what the provider
 /// said, then the last timestamp it emitted, and finally the audio file itself.
 public func resolvedTranscriptionDuration(
@@ -64,6 +67,8 @@ public func resolvedTranscriptionDuration(
     }
     return durationTime.seconds
 }
+
+#endif
 
 /// WebSocket teardown races surface as ENOTCONN ("socket is not connected"); every
 /// live transcriber ignores them rather than surfacing a spurious error to the user.

@@ -1,7 +1,205 @@
 // swift-tools-version: 5.9
+import Foundation
 import PackageDescription
 
-let package = Package(
+// The native Apple app keeps its established dependency graph. Windows and
+// Linux compile the same canonical domain sources without resolving Apple-only
+// packages or xcframeworks. This is a portable kernel, not a claim that every
+// platform has implemented every catalogued provider or OS integration.
+#if os(macOS)
+let portableCoreBuild = ProcessInfo.processInfo.environment["SPEAK_PORTABLE_CORE"] == "1"
+#else
+let portableCoreBuild = true
+#endif
+
+// New SpeakCore files are portable by default. An Apple adapter must be
+// explicitly classified here, so future domain work reaches every platform.
+let appleCoreSources: [String] = [
+    "AppGroupAvailability.swift",
+    "AppVisualDensity.swift",
+    "AppleSpeechAnalyzerLiveSession.swift",
+    "AppleSpeechAnalyzerTranscriber.swift",
+    "AppleSpeechAssets.swift",
+    "AppleSpeechDependencyWait.swift",
+    "AppleSpeechDetector.swift",
+    "AppleSpeechModelPreparation.swift",
+    "AppleSpeechPreparationOperations.swift",
+    "AssemblyAILiveClient.swift",
+    "AutoCorrectionEngine.swift",
+    "AutoCorrectionStore.swift",
+    "AutomationIntentSupport.swift",
+    "AzureBatchTranscriptionClient.swift",
+    "AzureSpeechEndpointField.swift",
+    "AzureVoiceLiveClient.swift",
+    "BrandColors.swift",
+    "CaptureDisruptionObserver.swift",
+    "CaptureEndPointing.swift",
+    "CaptureHealth.swift",
+    "CaptureHealthReportBuilder.swift",
+    "CaptureOnboarding.swift",
+    "CaptureOnboardingStore.swift",
+    "CaptureSafetyClaim.swift",
+    "CaptureSelfTest.swift",
+    "CaptureWatchdogs.swift",
+    "CartesiaLiveClient.swift",
+    "CartesiaTTSAPI.swift",
+    "DeepgramBalanceClient.swift",
+    "DeepgramLiveClient.swift",
+    "DeepgramLiveProtocol.swift",
+    "DeepgramTTSAPI.swift",
+    "DeprecatedCompatibility.swift",
+    "DeviceIdentityStore.swift",
+    "ElevenLabsBalanceClient.swift",
+    "ElevenLabsLiveClient.swift",
+    "FileProductAnalyticsStateStore.swift",
+    "GeminiInteractionsAPI.swift",
+    "GeminiInteractionsClient.swift",
+    "GeminiLiveClient.swift",
+    "GeminiLiveProtocol.swift",
+    "GeminiTTSAPI.swift",
+    "GladiaLiveClient.swift",
+    "GroqTTSAPI.swift",
+    "HandsFreeAudioPreRollBuffer.swift",
+    "HandsFreeDictation.swift",
+    "KeyDerivation.swift",
+    "KeyboardDelivery.swift",
+    "KeyboardDeliveryPolicies.swift",
+    "KeyboardDeliveryStore.swift",
+    "KeyboardDictationMachine.swift",
+    "KeyboardDictationPreferences.swift",
+    "KeyboardDictationProfile.swift",
+    "KeyboardHandoff.swift",
+    "KeyboardHandoffModels.swift",
+    "KeyboardHandoffStorage.swift",
+    "KeyboardHandoffTransitions.swift",
+    "KeyboardInstantDictation.swift",
+    "KeyboardTranscriptStreamer.swift",
+    "KeychainAccessibilityMigration.swift",
+    "KeychainSync.swift",
+    "LiveAudioConverterDrain.swift",
+    "LiveTranscriptionClientFactory.swift",
+    "Logging.swift",
+    "MacConnection.swift",
+    "MetaMuseLiveClient.swift",
+    "MetaMuseVoiceTranscribe.swift",
+    "MistralTTSAPI.swift",
+    "MistralVoxtralLiveClient.swift",
+    "ModulateLiveClient.swift",
+    "OpenClawClient.swift",
+    "OpenClawClientReceive.swift",
+    "OpenRouterAPIClient.swift",
+    "OpenRouterAudioBrowser.swift",
+    "OpenRouterAudioCatalog.swift",
+    "OpenRouterAudioCatalogLoader.swift",
+    "OpenRouterAudioCatalogRequestOrder.swift",
+    "OpenRouterAudioCatalogStorage.swift",
+    "OpenRouterAudioClient+Download.swift",
+    "OpenRouterAudioClient+Selection.swift",
+    "OpenRouterAudioClient+Wire.swift",
+    "OpenRouterAudioClient.swift",
+    "OpenRouterAudioFilter.swift",
+    "OpenRouterAudioModel.swift",
+    "OpenRouterAudioModelDetail.swift",
+    "OpenRouterAudioPreview.swift",
+    "OpenRouterBalanceClient.swift",
+    "PersonalLexiconService.swift",
+    "PersonalLexiconStore.swift",
+    "ProductAnalytics.swift",
+    "ProductAnalyticsDimensions.swift",
+    "PronunciationManager.swift",
+    "ProviderBalanceStore.swift",
+    "ProviderBalanceTransport.swift",
+    "RecordingSoundPlayer.swift",
+    "ReleaseNotes.swift",
+    "ReleaseNotesContentView.swift",
+    "ReleaseTrainCompatibility.swift",
+    "RevAIBalanceClient.swift",
+    "RevAILiveClient.swift",
+    "SecureStorage.swift",
+    "SettingsSync.swift",
+    "SharedAudioImport.swift",
+    "SharedRecordingInbox.swift",
+    "SonioxLiveClient.swift",
+    "SonioxTTSRealtime.swift",
+    "SpeakCLIManifest.swift",
+    "SpeechInsights/SpeechInsightsAggregate.swift",
+    "SpeechInsights/SpeechInsightsConfiguration.swift",
+    "SpeechInsights/SpeechInsightsEngine.swift",
+    "SpeechInsights/SpeechInsightsSummary.swift",
+    "SpeechInsights/SpeechInsightsSummaryBuilder.swift",
+    "SpeechInsights/SpeechSessionRecord.swift",
+    "SpeechInsights/SpeechTokenizer.swift",
+    "SpeechmaticsLiveClient.swift",
+    "SpeechmaticsTTSAPI.swift",
+    "StartupDiagnostics.swift",
+    "TranscriptHandoffActivity.swift",
+    "TranscriptionActivityHandle.swift",
+    "TranscriptionActivityManager+ResultRow.swift",
+    "TranscriptionActivityManager.swift",
+    "TransportChannel.swift",
+    "TransportProtocol.swift",
+    "WatchCaptureImportJournal.swift",
+    "WatchCaptureProtocol.swift",
+    "WatchComplicationState.swift",
+    "WatchRecordingLifecycle.swift",
+    "WatchRecordingToggleSerialiser.swift",
+    "WatchSharedContainer.swift",
+    "XAIBatchTranscriptionClient.swift",
+    "XAILiveClient.swift",
+    "XAILiveFinalisation.swift",
+    "XAILiveProtocol.swift",
+    "XAISpeechToTextLiveClient.swift",
+    "XAISpeechToTextLiveProtocol.swift",
+    "XAITTSAPI.swift",
+    "XAITTSRealtime.swift",
+]
+
+let portablePackage = Package(
+    name: "SpeakApp",
+    defaultLocalization: "en",
+    platforms: [.macOS(.v14)],
+    products: [
+        .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        .library(name: "SpeakDesktop", targets: ["SpeakDesktop"])
+    ],
+    targets: [
+        .target(
+            name: "SpeakCore",
+            path: "Sources/SpeakCore",
+            exclude: appleCoreSources,
+            resources: [.process("Resources")],
+            swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
+        ),
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
+        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop"]),
+        .testTarget(
+            name: "SpeakPortableTests",
+            dependencies: ["SpeakCore", "SpeakTestSupport"],
+            path: "Tests/SpeakPortableTests"
+        )
+    ]
+)
+
+#if os(Windows)
+portablePackage.products.append(.executable(name: "SpeakWindows", targets: ["SpeakWindows"]))
+portablePackage.targets.append(contentsOf: [
+    .target(
+        name: "CWindowsSupport",
+        publicHeadersPath: "include",
+        linkerSettings: [
+            .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
+            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
+            .linkedLibrary("avrt")
+        ]
+    ),
+    .executableTarget(name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "CWindowsSupport"]),
+    .testTarget(name: "SpeakWindowsPlatformTests", dependencies: ["CWindowsSupport"])
+])
+portablePackage.cxxLanguageStandard = .cxx17
+#endif
+
+let package = portableCoreBuild ? portablePackage : Package(
     name: "SpeakApp",
     defaultLocalization: "en",
     platforms: [
@@ -11,6 +209,7 @@ let package = Package(
     products: [
         .library(name: "SpeakHotKeys", targets: ["SpeakHotKeys"]),
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        .library(name: "SpeakDesktop", targets: ["SpeakDesktop"]),
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
@@ -56,6 +255,8 @@ let package = Package(
                 + "TranscribeCpp.xcframework.zip",
             checksum: "b7a3442e2f3552cac1ee71b5e164934dd4db243f6b4b16b1e3e3ed5d1645eefd"
         ),
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop"]),
         .target(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"

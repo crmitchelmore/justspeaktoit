@@ -110,3 +110,13 @@ public extension ModelCatalog {
         }
     }
 }
+
+/// Canonical identifiers shared by the catalogue and batch network clients.
+/// Keeping metadata independent of transports lets every native platform use
+/// the same catalogue without linking an audio or networking implementation.
+public enum BatchTranscriptionModelIdentifiers {
+    public static let cartesiaInkWhisper = "cartesia/ink-whisper"
+    public static let gladiaSolaria = "gladia/solaria-1"
+    public static let speechmaticsEnhanced = "speechmatics/enhanced"
+    public static let speechmaticsStandard = "speechmatics/standard"
+}

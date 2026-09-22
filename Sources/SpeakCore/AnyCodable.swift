@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 // MARK: - AnyCodable Helper
 
@@ -142,7 +143,13 @@ public struct AnyCodable: Codable, Equatable, Sendable {
         if CFGetTypeID(number) == CFBooleanGetTypeID() {
             return .bool(number.boolValue)
         }
-        if !CFNumberIsFloatType(number), let int = Int(exactly: number) {
+        #if canImport(Darwin)
+        let isFloatingPoint = CFNumberIsFloatType(number)
+        #else
+        // NSNumber is not implicitly bridgeable to CFNumber in swift-corelibs.
+        let isFloatingPoint = ["f", "d", "D"].contains(String(cString: number.objCType))
+        #endif
+        if !isFloatingPoint, let int = Int(exactly: number) {
             return .int(int)
         }
         return .double(number.doubleValue)

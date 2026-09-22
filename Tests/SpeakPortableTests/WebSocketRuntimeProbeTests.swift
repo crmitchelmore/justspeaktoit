@@ -117,6 +117,12 @@ private extension WebSocketRuntimeProbeTests {
         var request = URLRequest(url: try XCTUnwrap(URL(string: "ws://127.0.0.1:\(port)/\(path)")))
         request.setValue("local-only", forHTTPHeaderField: "X-JSTI-Probe")
         request.setValue("jsti-probe", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        #if canImport(FoundationNetworking)
+        // Swift 6.2.3 corelibs adds Connection: keep-alive for HTTP requests.
+        // curl then respects that custom header instead of adding Upgrade.
+        // Keep the peer's RFC6455 check strict and supply the required token.
+        request.setValue("Upgrade", forHTTPHeaderField: "Connection")
+        #endif
         let task = session.webSocketTask(with: request)
         task.maximumMessageSize = 4 * 1_024 * 1_024
         task.resume()

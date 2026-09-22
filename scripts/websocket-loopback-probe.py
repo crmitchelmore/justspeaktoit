@@ -36,11 +36,19 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.pending = bytearray()
             self.slow = False
+            self.upgraded = False
             self.run_connection()
         except (ConnectionError, TimeoutError, OSError) as error:
             log("connection-ended", reason=type(error).__name__)
         except ValueError as error:
             log("protocol-error", reason=str(error))
+            if not self.upgraded:
+                try:
+                    self.request.sendall(
+                        b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                except OSError:
+                    pass
         finally:
             self.server.slots.release()
 
@@ -74,10 +82,19 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         headers = {}
         for line in lines[1:]:
             name, value = line.split(":", 1)
-            headers[name.lower()] = value.strip()
+            name, value = name.lower(), value.strip()
+            headers[name] = headers[name] + ", " + value if name in headers else value
+        # Only protocol fields and the synthetic marker are recorded. No
+        # credentials, arbitrary request headers or WebSocket keys enter logs.
+        log("handshake-request", method=method, path=path, version=version,
+            connection=headers.get("connection"), upgrade=headers.get("upgrade"),
+            websocketVersion=headers.get("sec-websocket-version"),
+            subprotocol=headers.get("sec-websocket-protocol"),
+            markerVerified=headers.get("x-jsti-probe") == "local-only")
+        connection_tokens = {value.strip().lower() for value in headers.get("connection", "").split(",")}
         if (method != "GET" or version != "HTTP/1.1"
                 or headers.get("upgrade", "").lower() != "websocket"
-                or "upgrade" not in headers.get("connection", "").lower()
+                or "upgrade" not in connection_tokens
                 or headers.get("sec-websocket-version") != "13"
                 or headers.get("x-jsti-probe") != "local-only"
                 or headers.get("sec-websocket-protocol") != "jsti-probe"):
@@ -95,6 +112,7 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             f"Sec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: jsti-probe\r\n\r\n"
         )
         self.request.sendall(response.encode("ascii"))
+        self.upgraded = True
         log("handshake", path=path, headerVerified=True)
         return path
 

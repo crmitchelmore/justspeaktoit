@@ -68,6 +68,7 @@ jobs:
         run: python scripts/verify-portable-core-boundary.py
 
       - name: Build native Windows executable
+        id: native-build
         run: |
           swift --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -75,11 +76,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test shared core, desktop workflow and native adapters
+        id: native-tests
         run: |
           swift test --configuration release --jobs 4 --xunit-output windows-tests.xml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Probe pinned Windows WebSocket runtime against loopback peer
+        id: websocket-probe
         timeout-minutes: 3
         run: |
           $readyPath = Join-Path $env:RUNNER_TEMP 'jsti-websocket-ready.json'
@@ -118,6 +121,8 @@ jobs:
           }
 
       - name: Run executable self-test and native window smoke test
+        id: native-smoke
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.native-tests.outcome == 'success' }}
         timeout-minutes: 2
         run: |
           $bin = swift build --configuration release --show-bin-path
@@ -137,6 +142,8 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Native window smoke test failed: $($process.ExitCode)" }
 
       - name: Stage developer executable with provenance
+        id: developer-stage
+        if: ${{ !cancelled() && steps.native-tests.outcome == 'success' && steps.native-smoke.outcome == 'success' }}
         run: |
           $bin = swift build --configuration release --show-bin-path
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -150,6 +157,7 @@ jobs:
             compiler = (swift --version) -join "`n"
             distribution = 'developer executable; not an installer'
             runtime = 'Requires the Swift 6.2.3 Windows runtime and Visual C++ runtime'
+            webSocketRuntimeProbe = '${{ steps.websocket-probe.outcome }}'
           } | ConvertTo-Json | Set-Content (Join-Path $destination 'build-metadata.json') -Encoding utf8
           @"
           Just Speak to It — Windows developer build
@@ -169,6 +177,7 @@ jobs:
             Format-List | Out-String | Set-Content (Join-Path $destination 'SHA256.txt') -Encoding utf8
 
       - name: Upload developer executable
+        if: ${{ !cancelled() && steps.developer-stage.outcome == 'success' }}
         uses: actions/upload-artifact@v7.0.1
         with:
           name: justspeaktoit-windows-x64-developer-${{ github.sha }}

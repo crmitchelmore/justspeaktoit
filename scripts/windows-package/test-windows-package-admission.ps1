@@ -172,7 +172,8 @@ try {
     Assert-Check 'The existing user data is intact before the refused run' $report.existing.data.passed $report.existing.data
 
     # --- the lifecycle test must refuse this machine and change nothing ---
-    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'test-windows-package-lifecycle.ps1'),
+    # The child runs under the machine's normal execution policy; nothing overrides it.
+    $arguments = @('-NoProfile', '-NonInteractive', '-File', (Join-Path $PSScriptRoot 'test-windows-package-lifecycle.ps1'),
         '-BaseLayout', $BaseLayout, '-BasePackage', $BasePackage, '-UpgradeLayout', $UpgradeLayout,
         '-UpgradePackage', $UpgradePackage, '-ToolCache', $ToolCache, '-Workspace', $childWorkspace, '-Python', $Python)
     if ($DisposableMachine) { $arguments += '-DisposableMachine' }

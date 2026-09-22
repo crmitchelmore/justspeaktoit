@@ -218,7 +218,9 @@ A final step, `test-windows-package-admission.ps1`, is a negative control for
 the lifecycle test itself. After its own pristine admission it installs the
 base version with its own ephemeral certificate, seeds the portable data and
 leaves the installed app running with its History open. It then runs the
-lifecycle test, which must refuse admission, skip cleanup and exit non-zero.
+lifecycle test in a child Windows PowerShell (`-NoProfile -NonInteractive
+-File`, under the runner's normal execution policy). The test must refuse
+admission, skip cleanup and exit non-zero.
 The registration and version, the running app and its window, the user data,
 alias, package data and certificates must be unchanged. The control then
 removes only what it created.
@@ -251,14 +253,19 @@ with the refused run's own evidence.
   The logos were inspected visually. Runtime and package qualification of the
   integrated revision must come from fresh CI; this fixture is not a receipt
   for it.
-- A local parse of the owned PowerShell sources with PowerShell 7.6.6 found no
-  errors, and each file is ASCII. The C# helper compiled with
-  `-langversion:5` without invoking anything. The fake-machine ownership test
-  was not run locally; it runs in CI.
-- **Not yet executed:** the ownership test, MakeAppx packing, signing, the
-  admission control and every Windows install, launch, failure, upgrade and
-  uninstall step. They run only in the `package-lifecycle` job, which has not
-  run for this revision. No installation receipt exists yet.
+- On macOS with PowerShell 7.6.6, a parse of the owned PowerShell sources found
+  no errors, and each file is ASCII. The C# helper compiled with
+  `-langversion:5` without invoking anything. `test-lifecycle-ownership.ps1`
+  passed all 22 fake-machine checks with no failures. They include: a refused
+  admission performs no process, package, certificate or file operation;
+  cleanup removes only owned state; a foreign registration is kept and fails
+  the run; and each kind of incomplete cleanup fails the run. Root
+  independently reproduced the same 22 passes at `add035fe`.
+- **Not yet executed:** the Windows PowerShell 5.1 run of the ownership test,
+  MakeAppx packing, signing, the admission control and every Windows install,
+  launch, failure, upgrade and uninstall step. They run only in the
+  `package-lifecycle` job, which has not run for this revision. No
+  installation receipt exists yet.
 
 ## Remaining gates and integration needs
 

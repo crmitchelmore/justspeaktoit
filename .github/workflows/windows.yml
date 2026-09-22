@@ -80,7 +80,8 @@ jobs:
       - name: Test shared core, desktop workflow and native adapters
         id: native-tests
         run: |
-          swift test --configuration release --jobs 4 --xunit-output windows-tests.xml
+          swift test --configuration release --jobs 4 --xunit-output windows-tests.xml 2>&1 |
+            Tee-Object -FilePath windows-native-tests.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify native WinHTTP WebSocket transport against loopback peer
@@ -194,6 +195,7 @@ jobs:
           name: windows-test-evidence-${{ github.sha }}
           path: |
             windows-tests.xml
+            windows-native-tests.log
             windows-ui-smoke*.log
             windows-ui-smoke.bmp
             windows-websocket-tests.xml

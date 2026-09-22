@@ -173,7 +173,8 @@ final class DesktopModulateTests: XCTestCase {
                     return XCTFail("\(status) should reject the key")
                 }
             }
-            XCTAssertEqual(result.debug?.requestHeaders["X-API-Key"], "[REDACTED]")
+            let header = result.debug?.requestHeaders.first { $0.key.lowercased() == "x-api-key" }
+            XCTAssertEqual(header?.value, "[REDACTED]")
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: multipart.directory.path))
     }

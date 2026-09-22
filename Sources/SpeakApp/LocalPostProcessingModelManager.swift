@@ -51,35 +51,16 @@ final class LocalPostProcessingModelManager: ObservableObject {
     }
   }
 
-  nonisolated static let builtInRulesModelID = "local/post-processing/rules"
+  nonisolated static var builtInRulesModelID: String {
+    LocalPostProcessingModel.builtInRulesModelID
+  }
 
   #if !APP_STORE
-  static let recommendedModels: [LocalPostProcessingModel] = [
-    LocalPostProcessingModel(
-      id: "local/post-processing/qwen3-1.7b-q4",
-      displayName: "Qwen3 1.7B Q4",
-      repoID: "unsloth/Qwen3-1.7B-GGUF",
-      filename: "Qwen3-1.7B-Q4_K_M.gguf",
-      approximateSizeMB: 1_100,
-      description: "Recommended tiny local LLM for higher-quality cleanup. Current Qwen3 family, stronger instructions."
-    ),
-    LocalPostProcessingModel(
-      id: "local/post-processing/qwen3-0.6b-q4",
-      displayName: "Qwen3 0.6B Q4",
-      repoID: "unsloth/Qwen3-0.6B-GGUF",
-      filename: "Qwen3-0.6B-Q4_K_M.gguf",
-      approximateSizeMB: 450,
-      description: "Fastest current Qwen3 tiny local model. Good for quick simple cleanup on-device."
-    ),
-    LocalPostProcessingModel(
-      id: "local/post-processing/smollm2-360m-instruct-q4",
-      displayName: "SmolLM2 360M Instruct Q4",
-      repoID: "bartowski/SmolLM2-360M-Instruct-GGUF",
-      filename: "SmolLM2-360M-Instruct-Q4_K_M.gguf",
-      approximateSizeMB: 230,
-      description: "Smallest recommended download. Best for quick cleanup, with lower quality on complex transcripts."
-    )
-  ]
+  /// The canonical GGUF catalogue. It needs the installable llama.cpp runtime,
+  /// so App Store builds do not compile this projection.
+  nonisolated static var recommendedModels: [LocalPostProcessingModel] {
+    ModelCatalog.localPostProcessing
+  }
 
   @Published private(set) var runtimeState: InstallState = .notInstalled
   @Published private(set) var modelStates: [String: InstallState] = [:]
@@ -178,16 +159,14 @@ final class LocalPostProcessingModelManager: ObservableObject {
         "Use owner/repo, for example unsloth/Qwen3-0.6B-GGUF."
       )
     }
-    guard filename.lowercased().hasSuffix(".gguf") else {
+    guard LocalPostProcessingModel.isGGUFFilename(filename) else {
       throw LocalPostProcessingModelError.invalidHuggingFaceSource("The file must be a .gguf model file.")
     }
 
-    let model = LocalPostProcessingModel(
-      displayName: Self.displayName(repoID: repoID, filename: filename),
+    let model = LocalPostProcessingModel.importedModel(
       repoID: repoID,
       filename: filename,
-      approximateSizeMB: approximateSizeMB ?? Self.approximateSizeMB(from: filename),
-      description: "Imported from Hugging Face. Runs locally through the llama.cpp post-processing runtime."
+      approximateSizeMB: approximateSizeMB
     )
     importedModels.removeAll { $0.id == model.id }
     importedModels.append(model)
@@ -460,28 +439,19 @@ final class LocalPostProcessingModelManager: ObservableObject {
   }
   #endif
 
+  // Identity rules are canonical in SpeakCore; these forwarders keep existing
+  // macOS call sites unchanged.
+
   nonisolated static func isDownloadedLocalModelID(_ id: String) -> Bool {
-    id.lowercased().hasPrefix("local/post-processing/")
-      && id.lowercased() != builtInRulesModelID
+    LocalPostProcessingModel.isDownloadedModelID(id)
   }
 
   nonisolated static func huggingFaceModelID(repoID: String, filename: String) -> String {
-    "local/post-processing/huggingface/\(LocalModelManager.slug(repoID))/\(LocalModelManager.slug(filename))"
+    LocalPostProcessingModel.huggingFaceModelID(repoID: repoID, filename: filename)
   }
 
   nonisolated static func approximateSizeMB(from filename: String) -> Int? {
-    let lower = filename.lowercased()
-    let pattern = #"([0-9]+(?:\.[0-9]+)?)\s*(gb|mb)"#
-    guard let regex = try? NSRegularExpression(pattern: pattern),
-      let match = regex.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)),
-      let valueRange = Range(match.range(at: 1), in: lower),
-      let unitRange = Range(match.range(at: 2), in: lower),
-      let value = Double(lower[valueRange])
-    else {
-      return nil
-    }
-    let multiplier = lower[unitRange] == "gb" ? 1024.0 : 1.0
-    return Int((value * multiplier).rounded())
+    LocalPostProcessingModel.approximateSizeMB(fromFilename: filename)
   }
 
   nonisolated static func localUserPrompt(systemPrompt _: String, rawText: String) -> String {
@@ -531,14 +501,6 @@ final class LocalPostProcessingModelManager: ObservableObject {
         options: .regularExpression
       )
       .trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  private nonisolated static func displayName(repoID: String, filename: String) -> String {
-    let base = filename
-      .replacingOccurrences(of: ".gguf", with: "", options: .caseInsensitive)
-      .replacingOccurrences(of: "_", with: " ")
-      .replacingOccurrences(of: "-", with: " ")
-    return "\(base) from \(repoID)"
   }
 
   #if !APP_STORE
@@ -630,43 +592,7 @@ if __name__ == "__main__":
   #endif
 }
 
-struct LocalPostProcessingModel: Codable, Equatable, Identifiable, Sendable {
-  let id: String
-  let displayName: String
-  let repoID: String
-  let filename: String
-  let approximateSizeMB: Int?
-  let description: String
-
-  init(
-    id: String? = nil,
-    displayName: String,
-    repoID: String,
-    filename: String,
-    approximateSizeMB: Int?,
-    description: String
-  ) {
-    self.id = id ?? LocalPostProcessingModelManager.huggingFaceModelID(repoID: repoID, filename: filename)
-    self.displayName = displayName
-    self.repoID = repoID
-    self.filename = filename
-    self.approximateSizeMB = approximateSizeMB
-    self.description = description
-  }
-
-  var option: ModelCatalog.Option {
-    ModelCatalog.Option(
-      id: id,
-      displayName: displayName,
-      description: description,
-      estimatedLatencyMs: 2_500,
-      latencyTier: .medium,
-      tags: [.privacy],
-      pricing: nil,
-      contextLength: 4_096
-    )
-  }
-
+extension LocalPostProcessingModel {
   var sizeLabel: String {
     guard let approximateSizeMB, approximateSizeMB > 0 else { return "Size unknown" }
     if approximateSizeMB >= 1024 {

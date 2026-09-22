@@ -77,4 +77,10 @@ private final class StreamingSocketDelegate: NSObject, URLSessionWebSocketDelega
         let callback = lock.withLock { onOpen }
         callback?()
     }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        // The receive completion carries closure to the shared lifecycle.
+        lock.withLock { onOpen = nil }
+    }
 }

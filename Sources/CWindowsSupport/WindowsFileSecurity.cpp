@@ -3,6 +3,7 @@
 #include <aclapi.h>
 #include <winternl.h>
 #include <winioctl.h>
+#include <objbase.h>
 #include <exception>
 #include <iterator>
 #include <memory>

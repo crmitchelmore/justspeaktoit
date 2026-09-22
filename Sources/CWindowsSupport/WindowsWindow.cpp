@@ -15,8 +15,11 @@ constexpr UINT updateMessage = WM_APP + 1;
 constexpr int hotkeyID = 1;
 enum Control {
     modelID = 100, keyID, saveID, recordID, importID, copyID, transcriptID, statusID,
-    historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID, modeID
+    historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID, modeID,
+    searchID, clearSearchID, variantID
 };
+constexpr int searchLabelID = 96;
+constexpr int variantLabelID = 97;
 struct HistoryRow {
     std::string id;
     std::wstring title;
@@ -32,6 +35,10 @@ struct WindowState {
     bool transcriptChanged = false;
     bool historyChanged = false;
     bool historySelectionProvided = false;
+    bool variantChanged = false;
+    std::string pendingVariantRecord;
+    int pendingVariant = -1;
+    bool pendingVariantSwitchable = false;
     int recording = 0;
     std::wstring status;
     std::wstring transcript;
@@ -48,6 +55,9 @@ struct WindowState {
     std::vector<HWND> controls;
     // Only accessed by the UI thread. Pending snapshots above use mutex.
     std::vector<HistoryRow> displayedHistory;
+    int displayedVariant = -1;
+    bool variantSwitchable = false;
+    bool suppressSearchEvents = false;
     std::vector<std::wstring> modelNames;
     std::vector<int> modelModes;
     std::vector<int> filteredModels;
@@ -145,18 +155,66 @@ std::string selectedHistory(HWND window) {
     return state.displayedHistory[static_cast<size_t>(index)].id;
 }
 
+bool searching(HWND window) { return GetWindowTextLengthW(GetDlgItem(window, searchID)) > 0; }
+
+// The variant control never infers a version: it shows only what the host
+// reported for the selected record, and a user choice is echoed back by event.
+void applyVariant(HWND window, int selected, bool switchable, int recording) {
+    state.displayedVariant = selected == 0 || selected == 1 ? selected : -1;
+    state.variantSwitchable = switchable && state.displayedVariant >= 0;
+    SendDlgItemMessageW(window, variantID, CB_SETCURSEL,
+        state.displayedVariant < 0 ? static_cast<WPARAM>(-1) : static_cast<WPARAM>(state.displayedVariant), 0);
+    EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
+}
+
 void updateHistoryControls(HWND window, int recording) {
     const LRESULT index = SendDlgItemMessageW(window, historyID, LB_GETCURSEL, 0, 0);
     const bool selected = index != LB_ERR && static_cast<size_t>(index) < state.displayedHistory.size();
+    const bool filtering = searching(window);
     SetDlgItemTextW(window, historyDetailID, selected ? state.displayedHistory[static_cast<size_t>(index)].detail.c_str()
-        : (state.displayedHistory.empty() ? L"Your saved recordings will appear here." : L"Select a saved recording."));
+        : (state.displayedHistory.empty()
+            ? (filtering ? L"No saved recordings match this search." : L"Your saved recordings will appear here.")
+            : L"Select a saved recording."));
     EnableWindow(GetDlgItem(window, historyID), recording == 0);
+    EnableWindow(GetDlgItem(window, searchID), recording == 0);
+    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && filtering);
     for (int id : {retryID, exportID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
+    if (!selected) applyVariant(window, -1, false, recording);
+    else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
 }
 
 void emitHistory(HWND window, int event) {
     const std::string id = selectedHistory(window);
     if (!id.empty()) emit(window, event, id.c_str());
+}
+
+std::wstring searchText(HWND window) {
+    const HWND control = GetDlgItem(window, searchID);
+    const int length = std::max(GetWindowTextLengthW(control), 0);
+    std::wstring text(static_cast<size_t>(length) + 1, 0);
+    const int copied = GetWindowTextW(control, &text[0], length + 1);
+    text.resize(static_cast<size_t>(std::max(copied, 0)));
+    return text;
+}
+
+// Every keystroke reports the whole current query; the host coalesces bursts
+// and answers with a replacement snapshot, so no filtering happens here.
+void searchChanged(HWND window) {
+    if (state.suppressSearchEvents) return;
+    int recording;
+    { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
+    EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && searching(window));
+    const std::string query = jsti::utf8(searchText(window));
+    emit(window, JSTI_EVENT_HISTORY_SEARCH, query.c_str());
+}
+
+void clearSearch(HWND window) {
+    if (!searching(window)) return;
+    state.suppressSearchEvents = true;
+    SetDlgItemTextW(window, searchID, L"");
+    state.suppressSearchEvents = false;
+    searchChanged(window);
+    if (GetActiveWindow() == window) SetFocus(GetDlgItem(window, searchID));
 }
 
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
@@ -198,15 +256,24 @@ void layout(HWND window) {
     const int transcriptHeight = std::max(scale(window, 80), static_cast<int>(bounds.bottom) - transcriptTop - statusHeight - 2 * margin);
     move(transcriptID, contentLeft, transcriptTop, width, transcriptHeight);
     move(statusID, contentLeft, transcriptTop + transcriptHeight + gap, width, statusHeight);
-    move(93, margin, margin, historyWidth, scale(window, 22));
-    const int historyTop = margin + scale(window, 26);
+    move(searchLabelID, margin, margin, historyWidth, scale(window, 22));
+    const int searchTop = margin + scale(window, 26);
+    const int clearWidth = scale(window, 64);
+    move(searchID, margin, searchTop, historyWidth - clearWidth - gap, row);
+    move(clearSearchID, margin + historyWidth - clearWidth, searchTop, clearWidth, row);
+    const int historyLabelTop = searchTop + row + gap;
+    move(93, margin, historyLabelTop, historyWidth, scale(window, 22));
+    const int historyTop = historyLabelTop + scale(window, 26);
     const int detailHeight = scale(window, 72);
     const int historyHeight = std::max(scale(window, 120), static_cast<int>(bounds.bottom) - historyTop -
-        detailHeight - 2 * row - 3 * gap - margin);
+        detailHeight - scale(window, 26) - 3 * row - 4 * gap - margin);
     move(historyID, margin, historyTop, historyWidth, historyHeight);
     const int detailTop = historyTop + historyHeight + gap;
     move(historyDetailID, margin, detailTop, historyWidth, detailHeight);
-    const int buttonsTop = detailTop + detailHeight + gap;
+    const int variantLabelTop = detailTop + detailHeight + gap;
+    move(variantLabelID, margin, variantLabelTop, historyWidth, scale(window, 22));
+    move(variantID, margin, variantLabelTop + scale(window, 26), historyWidth, scale(window, 120));
+    const int buttonsTop = variantLabelTop + scale(window, 26) + row + gap;
     const int buttonWidth = (historyWidth - gap) / 2;
     move(retryID, margin, buttonsTop, buttonWidth, row);
     move(exportID, margin + buttonWidth + gap, buttonsTop, buttonWidth, row);
@@ -231,9 +298,16 @@ bool createControls(HWND window) {
         if (control) state.controls.push_back(control);
         return control != nullptr;
     };
-    const bool okay = add(L"STATIC", L"&History", 0, 93) &&
+    // Each STATIC label immediately precedes its control so assistive
+    // technology and Alt mnemonics resolve the intended target.
+    const bool okay = add(L"STATIC", L"&Find in history", 0, searchLabelID) &&
+        add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
+        add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
+        add(L"STATIC", L"&History", 0, 93) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP, historyID) &&
         add(L"STATIC", L"Your saved recordings will appear here.", SS_LEFT, historyDetailID) &&
+        add(L"STATIC", L"Transcript &version", 0, variantLabelID) &&
+        add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, variantID) &&
         add(L"BUTTON", L"Retr&y", BS_PUSHBUTTON | WS_TABSTOP, retryID) &&
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
@@ -263,11 +337,15 @@ bool createControls(HWND window) {
     }
     SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, selectedDevice, 0);
     SendDlgItemMessageW(window, keyID, EM_LIMITTEXT, 2048, 0);
+    SendDlgItemMessageW(window, searchID, EM_LIMITTEXT, 512, 0);
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
     refreshFont(window);
     if (SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Batch")) < 0 ||
         SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Live")) < 0 ||
+        SendDlgItemMessageW(window, variantID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Processed transcript")) < 0 ||
+        SendDlgItemMessageW(window, variantID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Original transcript")) < 0 ||
         !populateModels(window)) return false;
+    applyVariant(window, -1, false, 0);
     updateHistoryControls(window, 0);
     EnableWindow(GetDlgItem(window, processingID), jsti_postprocessing_available());
     return okay;
@@ -275,10 +353,10 @@ bool createControls(HWND window) {
 
 void applyUpdate(HWND window) {
     std::wstring status, transcript;
-    bool statusChanged, transcriptChanged, historyChanged;
+    bool statusChanged, transcriptChanged, historyChanged, variantChanged, variantSwitchable;
     std::vector<HistoryRow> history;
-    std::string historySelection;
-    int recording;
+    std::string historySelection, variantRecord;
+    int recording, variant;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         status.swap(state.status); transcript.swap(state.transcript);
@@ -290,6 +368,11 @@ void applyUpdate(HWND window) {
             historySelection = state.historySelectionProvided ? state.pendingHistorySelection : state.selectedHistoryID;
             state.historyChanged = false;
         }
+        variantChanged = state.variantChanged;
+        variantRecord = state.pendingVariantRecord;
+        variant = state.pendingVariant;
+        variantSwitchable = state.pendingVariantSwitchable;
+        state.variantChanged = false;
         state.posted = false;
         recording = state.recording;
     }
@@ -325,9 +408,21 @@ void applyUpdate(HWND window) {
         }
         SendMessageW(list, WM_SETREDRAW, TRUE, 0);
         InvalidateRect(list, nullptr, TRUE);
-        { std::lock_guard<std::mutex> lock(state.mutex); state.selectedHistoryID = selectedHistory(window); }
+        const std::string nowSelected = selectedHistory(window);
+        bool selectionChanged;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            selectionChanged = nowSelected != state.selectedHistoryID;
+            state.selectedHistoryID = nowSelected;
+        }
+        // A different (or no) record is displayed: its version is unknown
+        // until the host reports it, so never keep the previous record's.
+        if (selectionChanged) applyVariant(window, -1, false, recording);
         if (failed) showFailure(window, "Windows could not display the saved recording list.");
     }
+    // A report for a record the user has since left is stale; the new row's
+    // version stays unknown until its own report arrives.
+    if (variantChanged && variantRecord == selectedHistory(window)) applyVariant(window, variant, variantSwitchable, recording);
     updateHistoryControls(window, recording);
 }
 
@@ -395,8 +490,31 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                     state.selectedHistoryID = selectedHistory(window);
                     recording = state.recording;
                 }
+                applyVariant(window, -1, false, recording);
                 updateHistoryControls(window, recording);
                 emitHistory(window, JSTI_EVENT_HISTORY_SELECTED);
+            }
+            return 0;
+        case searchID:
+            if (HIWORD(wparam) == EN_CHANGE) searchChanged(window);
+            return 0;
+        case clearSearchID:
+            if (idleControl(window, clearSearchID)) clearSearch(window);
+            return 0;
+        case IDCANCEL:
+            // Escape inside the search box is a keyboard clear affordance.
+            if (GetFocus() == GetDlgItem(window, searchID) && idleControl(window, searchID)) clearSearch(window);
+            return 0;
+        case variantID:
+            if (HIWORD(wparam) == CBN_SELCHANGE) {
+                const LRESULT chosen = SendDlgItemMessageW(window, variantID, CB_GETCURSEL, 0, 0);
+                if (!idleControl(window, variantID) || !state.variantSwitchable || (chosen != 0 && chosen != 1)) {
+                    SendDlgItemMessageW(window, variantID, CB_SETCURSEL, state.displayedVariant < 0
+                        ? static_cast<WPARAM>(-1) : static_cast<WPARAM>(state.displayedVariant), 0);
+                    return 0;
+                }
+                state.displayedVariant = static_cast<int>(chosen);
+                emitHistory(window, JSTI_EVENT_TRANSCRIPT_VARIANT);
             }
             return 0;
         case microphoneID:
@@ -498,12 +616,19 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         state.transcriptChanged = false;
         state.historyChanged = false;
         state.historySelectionProvided = false;
+        state.variantChanged = false;
+        state.pendingVariantRecord.clear();
+        state.pendingVariant = -1;
+        state.pendingVariantSwitchable = false;
         state.pendingHistory.clear(); state.pendingHistorySelection.clear(); state.selectedHistoryID.clear();
         state.status.clear(); state.transcript.clear();
     }
     state.callback = callback; state.context = context;
     state.controls.clear();
     state.displayedHistory.clear();
+    state.displayedVariant = -1;
+    state.variantSwitchable = false;
+    state.suppressSearchEvents = false;
     // The process may already have a manifest-defined awareness context.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HINSTANCE instance = GetModuleHandleW(nullptr);
@@ -643,6 +768,33 @@ int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char
     } catch (const std::exception &) {
         return -1;
     }
+}
+
+int jsti_window_set_transcript_variant(const char *recordID, int selected, int canSwitch) {
+    if (selected < -1 || selected > 1 || (canSwitch != 0 && canSwitch != 1)) return -1;
+    std::wstring checked;
+    if (recordID && (!jsti::wide(recordID, checked) || checked.size() > 128)) return -1;
+    try {
+        std::string record = recordID ? recordID : "";
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (!state.window) return -1;
+        state.pendingVariant = record.empty() ? -1 : selected;
+        state.pendingVariantRecord = std::move(record);
+        state.pendingVariantSwitchable = canSwitch != 0;
+        state.variantChanged = true;
+        if (!state.posted) {
+            state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+            if (!state.posted) return -1;
+        }
+        return 0;
+    } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_transcript_variant(void) {
+    HWND window;
+    { std::lock_guard<std::mutex> lock(state.mutex); window = state.window; }
+    if (!window || GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId()) return -1;
+    return selectedHistory(window).empty() ? -1 : state.displayedVariant;
 }
 
 int jsti_window_choose_export_path(const char *suggestedFilename, char *path, size_t pathCapacity,
@@ -832,6 +984,113 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
                 failure = "A history action did not report its selected record ID."; return false;
             }
         }
+        // Search: every edit reports the exact current query (UTF-8), and the
+        // clear affordance becomes available only while a query is present.
+        if (IsWindowEnabled(GetDlgItem(window, clearSearchID)) || jsti_window_transcript_variant() != -1) {
+            failure = "Search or transcript version controls were active before any query or version."; return false;
+        }
+        SetDlgItemTextW(window, searchID, L"Caf\x00e9");
+        if (observed.event != JSTI_EVENT_HISTORY_SEARCH || observed.id != "Caf\xc3\xa9" || observed.model != 1 ||
+            !IsWindowEnabled(GetDlgItem(window, clearSearchID))) {
+            failure = "Typing a search did not report the exact query text."; return false;
+        }
+        // The host answers with a filtered snapshot. When the selected record is
+        // absent, the stale selection, detail and record-bound actions clear.
+        const JSTIHistoryRow filtered[] = {first[1]};
+        if (jsti_window_set_history(filtered, 1, "") != 0) { failure = "Filtered history update failed."; return false; }
+        applyUpdate(window);
+        observed.id = "sentinel";
+        const int previousSearchEvent = observed.event;
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(retryID, BN_CLICKED), 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(exportID, BN_CLICKED), 0);
+        if (SendDlgItemMessageW(window, historyID, LB_GETCOUNT, 0, 0) != 1 || !selectedHistory(window).empty() ||
+            IsWindowEnabled(GetDlgItem(window, retryID)) || IsWindowEnabled(GetDlgItem(window, exportID)) ||
+            IsWindowEnabled(GetDlgItem(window, openAudioID)) || IsWindowEnabled(GetDlgItem(window, variantID)) ||
+            jsti_window_transcript_variant() != -1 || observed.event != previousSearchEvent || observed.id != "sentinel") {
+            failure = "A filtered history did not clear the hidden selection and its actions."; return false;
+        }
+        if (jsti_window_set_history(nullptr, 0, "") != 0) { failure = "Empty search result update failed."; return false; }
+        applyUpdate(window);
+        wchar_t detail[64] = {};
+        GetDlgItemTextW(window, historyDetailID, detail, 64);
+        if (std::wstring(detail) != L"No saved recordings match this search.") {
+            failure = "An empty search result did not explain the missing rows."; return false;
+        }
+        // Clearing empties the box, reports a blank query and lets the host
+        // restore the full rows with a consistent selection.
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(clearSearchID, BN_CLICKED), 0);
+        if (observed.event != JSTI_EVENT_HISTORY_SEARCH || !observed.id.empty() || searching(window) ||
+            IsWindowEnabled(GetDlgItem(window, clearSearchID))) {
+            failure = "Clearing the search did not report a blank query."; return false;
+        }
+        if (jsti_window_set_history(reordered, 2, "one") != 0) { failure = "History restore after search failed."; return false; }
+        applyUpdate(window);
+        GetDlgItemTextW(window, historyDetailID, detail, 64);
+        if (selectedHistory(window) != "one" || !IsWindowEnabled(GetDlgItem(window, retryID)) ||
+            std::wstring(detail) != L"Completed" || jsti_window_transcript_variant() != -1) {
+            failure = "Restoring rows after clearing the search did not restore the selection."; return false;
+        }
+        // Transcript version: the host reports both versions; processed is the
+        // default, and a user choice is echoed for the selected record.
+        if (jsti_window_set_transcript_variant("one", 2, 0) != -1 || jsti_window_set_transcript_variant("one", 0, 1) != 0) {
+            failure = "Transcript version configuration validation failed."; return false;
+        }
+        applyUpdate(window);
+        if (!IsWindowEnabled(GetDlgItem(window, variantID)) || jsti_window_transcript_variant() != 0 ||
+            SendDlgItemMessageW(window, variantID, CB_GETCURSEL, 0, 0) != 0) {
+            failure = "The transcript version did not default to the processed text."; return false;
+        }
+        SendDlgItemMessageW(window, variantID, CB_SETCURSEL, 1, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(variantID, CBN_SELCHANGE), 0);
+        if (observed.event != JSTI_EVENT_TRANSCRIPT_VARIANT || observed.id != "one" || observed.model != 1 ||
+            jsti_window_transcript_variant() != 1) {
+            failure = "Choosing the original transcript did not report the selected record."; return false;
+        }
+        // Copy and Export identify the record and the displayed version together.
+        const int variantActions[] = {copyID, exportID};
+        const int variantEvents[] = {JSTI_EVENT_COPY_TRANSCRIPT, JSTI_EVENT_HISTORY_EXPORT};
+        for (size_t i = 0; i < 2; ++i) {
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(variantActions[i], BN_CLICKED), 0);
+            if (observed.event != variantEvents[i] || observed.id != "one" || jsti_window_transcript_variant() != 1) {
+                failure = "A transcript action lost the displayed version or record identity."; return false;
+            }
+        }
+        // A record with only an original transcript reports it without a choice.
+        if (jsti_window_set_transcript_variant("one", 1, 0) != 0) { failure = "Original-only version update failed."; return false; }
+        applyUpdate(window);
+        if (IsWindowEnabled(GetDlgItem(window, variantID)) || jsti_window_transcript_variant() != 1) {
+            failure = "An original-only record offered a processed version."; return false;
+        }
+        // Selecting another record forgets the previous record's version until
+        // the host reports the new one; a late report for the old record is ignored.
+        SendDlgItemMessageW(window, historyID, LB_SETCURSEL, 0, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(historyID, LBN_SELCHANGE), 0);
+        if (observed.event != JSTI_EVENT_HISTORY_SELECTED || observed.id != "two" ||
+            jsti_window_transcript_variant() != -1 || IsWindowEnabled(GetDlgItem(window, variantID))) {
+            failure = "A new selection kept the previous record's transcript version."; return false;
+        }
+        if (jsti_window_set_transcript_variant("one", 1, 1) != 0) { failure = "Stale version update failed."; return false; }
+        applyUpdate(window);
+        if (jsti_window_transcript_variant() != -1 || IsWindowEnabled(GetDlgItem(window, variantID))) {
+            failure = "A stale transcript version report was applied to a different record."; return false;
+        }
+        if (jsti_window_set_transcript_variant("two", 0, 1) != 0) { failure = "Version update for the new record failed."; return false; }
+        applyUpdate(window);
+        jsti_window_update(nullptr, nullptr, 1);
+        applyUpdate(window);
+        const bool searchLockedWhileRecording = !IsWindowEnabled(GetDlgItem(window, searchID)) &&
+            !IsWindowEnabled(GetDlgItem(window, clearSearchID)) && !IsWindowEnabled(GetDlgItem(window, variantID));
+        jsti_window_update(nullptr, nullptr, 0);
+        applyUpdate(window);
+        if (!searchLockedWhileRecording || !IsWindowEnabled(GetDlgItem(window, searchID)) ||
+            !IsWindowEnabled(GetDlgItem(window, variantID)) || jsti_window_transcript_variant() != 0) {
+            failure = "Recording did not lock search and transcript version controls."; return false;
+        }
+        SendDlgItemMessageW(window, historyID, LB_SETCURSEL, 1, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(historyID, LBN_SELCHANGE), 0);
+        if (observed.event != JSTI_EVENT_HISTORY_SELECTED || observed.id != "one") {
+            failure = "History selection could not return to the first record."; return false;
+        }
         jsti_window_update(nullptr, nullptr, 2);
         applyUpdate(window);
         SendMessageW(window, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
@@ -862,6 +1121,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     state.preferredModels[1] = originalPreferredModels[1];
     state.activeMode = originalMode;
     if (!populateModels(window)) { passed = false; failure = "The model catalogue could not be restored after its smoke test."; }
+    state.suppressSearchEvents = true;
+    SetDlgItemTextW(window, searchID, L"");
+    state.suppressSearchEvents = false;
+    applyVariant(window, -1, false, 0);
     state.callback = originalCallback;
     state.context = originalContext;
     {

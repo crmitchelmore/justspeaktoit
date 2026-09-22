@@ -17,6 +17,22 @@ public actor DesktopRecordingStore {
 
         public var displayText: String? { processedText ?? result?.text }
 
+        /// The provider transcript exactly as transcribed, before post-processing.
+        public var originalText: String? { result?.text }
+
+        /// True when both transcripts are retained, so a host can offer an
+        /// explicit original/processed choice instead of only `displayText`.
+        public var hasTranscriptVariants: Bool { processedText != nil && result != nil }
+
+        /// `.processed` keeps the historical `displayText` fallback to the
+        /// original; `.original` never substitutes processed text.
+        public func text(for variant: DesktopTranscriptVariant) -> String? {
+            switch variant {
+            case .processed: return displayText
+            case .original: return originalText
+            }
+        }
+
         public init(id: UUID, audioFilename: String, modelIdentifier: String) {
             self.id = id
             self.createdAt = Date()
@@ -75,8 +91,14 @@ public actor DesktopRecordingStore {
     }
 
     public func exportTranscript(id: UUID, to destination: URL) throws {
+        try exportTranscript(id: id, variant: .processed, to: destination)
+    }
+
+    /// Exports exactly the requested retained transcript. The stored record,
+    /// its other transcript and its audio are never changed by an export.
+    public func exportTranscript(id: UUID, variant: DesktopTranscriptVariant, to destination: URL) throws {
         let record = try record(id: id)
-        guard let text = record.displayText else { throw CocoaError(.fileReadUnknown) }
+        guard let text = record.text(for: variant) else { throw CocoaError(.fileReadUnknown) }
         // A save dialog can accept a manually typed path. Never replace the
         // retained audio/metadata with its exported transcript.
         let root = directory.resolvingSymlinksInPath().standardizedFileURL
@@ -127,4 +149,14 @@ public actor DesktopRecordingStore {
         public let records: [Record]
         public let unreadableFiles: [String]
     }
+}
+
+/// Which retained transcript a desktop host displays, copies or exports.
+/// Retry and audio actions always use the original recording regardless.
+public enum DesktopTranscriptVariant: String, CaseIterable, Codable, Sendable {
+    /// Post-processed text when it exists, otherwise the original transcript.
+    /// This is the default and matches the historical `displayText` behaviour.
+    case processed
+    /// The provider transcript before any post-processing.
+    case original
 }

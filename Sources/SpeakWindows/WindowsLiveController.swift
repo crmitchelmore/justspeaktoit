@@ -15,8 +15,10 @@ extension WindowsAppController {
     func monitorLive(_ session: DesktopLiveSession) {
         liveUpdates?.cancel()
         selectedHistoryID = session.snapshot().id
+        transcriptVariant = .processed
         refreshHistory()
         transcript = ""
+        if let id = selectedHistoryID, let record = history[id] { showTranscriptVariant(.processed, for: record) }
         liveUpdates = Task {
             var revision: UInt64?
             while !Task.isCancelled {

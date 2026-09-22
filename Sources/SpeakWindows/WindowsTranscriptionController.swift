@@ -56,6 +56,7 @@ extension WindowsAppController {
 
     func present(_ record: DesktopRecordingStore.Record, target: JSTITextTarget?) {
         selectedHistoryID = record.id
+        transcriptVariant = .processed
         refreshHistory()
         transcript = record.displayText ?? ""
         var status = record.failure ?? "Saved to History. Select Copy to use the transcript."
@@ -71,6 +72,12 @@ extension WindowsAppController {
             } catch {
                 status = "Saved. Automatic insertion unavailable; select Copy. \(error.localizedDescription)"
             }
+        }
+        if selectedHistoryID == record.id {
+            showTranscriptVariant(.processed, for: record)
+        } else {
+            // An active search keeps its rows; the result is still shown here.
+            status += " This recording is hidden by the current History search."
         }
         update(status, transcript: transcript, state: 0)
     }

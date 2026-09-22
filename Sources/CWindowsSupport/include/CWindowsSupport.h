@@ -24,14 +24,20 @@ enum JSTIWindowEvent {
     JSTI_EVENT_HISTORY_EXPORT = 11,
     JSTI_EVENT_HISTORY_OPEN_AUDIO = 12,
     JSTI_EVENT_MICROPHONE_CHANGED = 13,
-    JSTI_EVENT_CANCEL_TRANSCRIPTION = 14
+    JSTI_EVENT_CANCEL_TRANSCRIPTION = 14,
+    JSTI_EVENT_HISTORY_SEARCH = 15,
+    JSTI_EVENT_TRANSCRIPT_VARIANT = 16
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
  * is the selected caller-supplied model. READY is sent after controls exist.
  * COPY_TRANSCRIPT carries the selected history ID, or empty if none is selected.
  * MICROPHONE_CHANGED and TOGGLE_RECORDING carry the selected microphone ID;
- * empty selects the default communications microphone. */
+ * empty selects the default communications microphone. HISTORY_SEARCH carries
+ * the current search text (empty when cleared); the host filters the rows it
+ * supplies through jsti_window_set_history. TRANSCRIPT_VARIANT carries the
+ * selected record ID after the user chose a transcript version; pair it with
+ * jsti_window_transcript_variant() synchronously inside the callback. */
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
@@ -61,8 +67,24 @@ typedef struct JSTIHistoryRow {
 /* Atomically replaces history; synchronously deep-copies all UTF-8 strings.
  * selected_id: null preserves the current selection if it still exists, an
  * empty string clears it. Programmatic updates do not emit selection events.
- * Events 9-12 carry the selected record ID in their borrowed text argument. */
+ * Events 9-12 and 16 carry the selected record ID in their borrowed text
+ * argument. Rows are whatever the host chose to show (for example a search
+ * result); the window never filters, reorders or edits them itself. Clearing
+ * or changing the selected row also resets the displayed transcript variant
+ * until the host reports one. */
 int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Which retained transcript the window shows for record_id. It is applied only
+ * while that record is still the selected row, so a late report can never
+ * describe a different record; null/empty record_id clears the control.
+ * selected: -1 none, 0 processed, 1 original. can_switch (0/1) lets the user
+ * choose between both versions; otherwise the control only reports the one
+ * displayed. Thread safe; updates coalesce with jsti_window_update. A user
+ * choice emits TRANSCRIPT_VARIANT and is retained until the selection changes. */
+int jsti_window_set_transcript_variant(const char *record_id, int selected, int can_switch);
+/* The displayed transcript variant: -1 none, 0 processed, 1 original. UI thread
+ * only; call synchronously from the COPY_TRANSCRIPT, HISTORY_EXPORT or
+ * TRANSCRIPT_VARIANT callback so it pairs with that event's record ID. */
+int jsti_window_transcript_variant(void);
 /* Call synchronously from the UI event callback, capturing the event's record
  * ID first. Returns 0 chosen (UTF-8 path), 1 cancelled, -1 failed. A too-small
  * output buffer is an error; paths are never silently truncated. */
@@ -232,7 +254,8 @@ int jsti_audio_conversion_self_test(char *error, size_t error_capacity);
 int jsti_native_self_test(char *error, size_t error_capacity);
 int jsti_audio_devices_self_test(char *error, size_t error_capacity);
 /* Call on the UI thread from READY in smoke-test mode. Verifies native control
- * bounds, history updates/events and an invisible settings Apply round-trip.
+ * bounds, history updates/events, search/filter selection handling, transcript
+ * variant action identities and an invisible settings Apply round-trip.
  * Restores history afterwards; never uses microphone, clipboard or credentials. */
 int jsti_window_self_test(char *error, size_t error_capacity);
 /* Smoke-test diagnostics only: writes a 32-bit BMP of this application's client

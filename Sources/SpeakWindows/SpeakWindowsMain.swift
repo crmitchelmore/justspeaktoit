@@ -6,11 +6,13 @@ final class WindowsEventContext {
     let controller: WindowsAppController
     let smokeTest: Bool
     var smokeTestFailure: Error?
+    let search: WindowsSearchCoalescer
     private var settingsTask: Task<Void, Never>?
 
     init(controller: WindowsAppController, smokeTest: Bool) {
         self.controller = controller
         self.smokeTest = smokeTest
+        self.search = WindowsSearchCoalescer { query in await controller.searchHistory(query) }
     }
 
     // Called only by the native UI thread. Persist settings in UI event order,
@@ -26,6 +28,38 @@ final class WindowsEventContext {
     func finishSettings() async { await settingsTask?.value }
 }
 
+/// Coalesces native search keystrokes. The UI thread only records the newest
+/// query and one task drains it, so a typing burst never queues an actor call
+/// per keystroke and the latest query always wins.
+final class WindowsSearchCoalescer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: String?
+    private var draining = false
+    private let perform: @Sendable (String) async -> Void
+
+    init(perform: @escaping @Sendable (String) async -> Void) { self.perform = perform }
+
+    func submit(_ query: String) {
+        lock.lock()
+        pending = query
+        let alreadyDraining = draining
+        draining = true
+        lock.unlock()
+        guard !alreadyDraining else { return }
+        Task { [self] in
+            while let query = self.next() { await self.perform(query) }
+        }
+    }
+
+    private func next() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let query = pending else { draining = false; return nil }
+        pending = nil
+        return query
+    }
+}
+
 func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
     guard let context else { return }
     let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
@@ -39,7 +73,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         let captured = jsti_target_capture(&target, &error, error.count) == 0 ? target : nil
         Task { await controller.toggle(target: captured, modelIndex: Int(index), deviceID: value) }
     case 2: Task { await controller.importAudio(path: value, modelIndex: Int(index)) }
-    case 3: Task { await controller.copyTranscript(identifier: value) }
+    case 3, 15, 16: transcriptEvent(event, value: value, holder: holder)
     case 4: holder.enqueueSettings { await controller.saveKey(value, modelIndex: Int(index)) }
     case 5: holder.enqueueSettings { await controller.selectModel(Int(index)) }
     case 7:
@@ -47,6 +81,23 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     case 8: WindowsNative.update(value)
     case 13: holder.enqueueSettings { await controller.selectMicrophone(value) }
     default: historyEvent(event, value: value, controller: controller)
+    }
+}
+
+// Copy and version events read the displayed version here, on the UI thread,
+// so it is paired with the record ID the same event carries.
+private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
+    let controller = holder.controller
+    switch event {
+    case 3:
+        let variant = WindowsNative.displayedTranscriptVariant()
+        Task { await controller.copyTranscript(identifier: value, variant: variant) }
+    case 15: holder.search.submit(value)
+    case 16:
+        if let variant = WindowsNative.displayedTranscriptVariant() {
+            Task { await controller.selectTranscriptVariant(variant, identifier: value) }
+        }
+    default: break
     }
 }
 
@@ -87,11 +138,13 @@ private func historyEvent(_ event: Int32, value: String, controller: WindowsAppC
     case 9: Task { await controller.selectHistory(value) }
     case 10: Task { await controller.retryHistory(value) }
     case 11:
-        // The dialog runs on the UI thread. Capture the record ID before opening
-        // it so a later selection change cannot export a different transcript.
+        // The dialog runs on the UI thread. Capture the record ID and displayed
+        // version before opening it so a later selection or version change
+        // cannot export a different transcript.
+        let variant = WindowsNative.displayedTranscriptVariant() ?? .processed
         do {
             if let path = try WindowsNative.chooseExportPath(identifier: value) {
-                Task { await controller.exportHistory(value, path: path) }
+                Task { await controller.exportHistory(value, variant: variant, path: path) }
             }
         } catch { WindowsNative.update(error.localizedDescription) }
     case 12: Task { await controller.openHistoryAudio(value) }

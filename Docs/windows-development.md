@@ -72,8 +72,19 @@ The native History pane selects saved recordings, retries transcription with
 the recording's original model, exports transcript text through an overwrite-
 confirming save dialog, and opens retained audio in its registered Windows
 application. Copy, retry, export and audio actions capture the selected record's
-identifier so later selection changes cannot redirect them. Search, embedded
-playback, history import and retention controls are not implemented yet.
+identifier so later selection changes cannot redirect them. A native search box
+filters the rows by original transcript, processed transcript or canonical
+friendly model name. Matching folds case and canonical diacritics through the
+shared `SpeakDesktop` policy, records and transcripts are never modified, and
+rows keep their stable identifiers in newest-first order. Keystrokes coalesce
+into one in-flight query, so typing never queues work per keystroke. If the
+selected record stops matching, its displayed text and record-bound actions
+clear until the search is cleared or another row is chosen. Where a record
+retains both transcripts, a Transcript version control switches the displayed
+text; it defaults to the processed text, Copy and Export use the version shown
+for the captured record, and Retry and Open audio always use the original
+recording. Embedded playback, history import and retention controls are not
+implemented yet.
 
 Post-processing is disabled by default. The native Post-processing dialog can
 opt into OpenRouter, choose a shared catalogue model, edit its instructions and
@@ -200,7 +211,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
 | Profiles and settings | Shared profile models; basic Windows model persistence | Full settings, per-application profiles and migration |
-| History | Native record selection, retry, text export and external audio opening; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, search, embedded playback, history import and retention controls |
+| History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export and external audio opening; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, embedded playback, history import and retention controls |
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
 | Voice output | Shared catalogues and some request contracts compile | Provider execution, native playback, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
@@ -230,10 +241,13 @@ boundaries, silent packets, stop flushing, bounded queue overflow/wrap/FIFO/drai
 behaviour, writer failure reporting and rejection of an invalid insertion
 target. The current UI smoke test creates a real native window and checks its
 minimum-size control bounds, atomic history replacement, preserved selection,
-history action identifiers, microphone selection snapshots, cancellation, and a
+history action identifiers, search query events with filtered-snapshot
+selection clearing and restoration, transcript version defaults with copy and
+export version identity, microphone selection snapshots, cancellation, and a
 hidden post-processing dialog's atomic Apply callback before shutdown. Native
 storage tests check protected ACLs, existing-file refusal and junction rejection.
-The microphone/cancellation/storage additions still require final-head CI.
+The microphone/cancellation/storage/search/transcript-version additions still
+require final-head CI.
 Neither executable smoke test proves physical microphone capture, live provider
 transcription, successful external insertion or user-visible feature parity.
 Separate adapter unit tests exercise Credential Manager with isolated synthetic

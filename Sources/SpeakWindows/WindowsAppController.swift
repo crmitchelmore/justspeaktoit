@@ -41,7 +41,12 @@ actor WindowsAppController {
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     var transcript = ""
     var history: [UUID: DesktopRecordingStore.Record] = [:]
+    /// Folded search text per record, refreshed only when a record is saved so
+    /// each keystroke filters cached strings instead of re-normalising transcripts.
+    var historySearchText: [UUID: String] = [:]
+    var historyQuery = ""
     var selectedHistoryID: UUID?
+    var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     var microphoneWarning: String?
@@ -272,13 +277,8 @@ actor WindowsAppController {
 extension WindowsAppController {
     func saveRecord(_ record: DesktopRecordingStore.Record) async throws {
         try await store.save(record)
-        history[record.id] = record
+        indexHistory(record)
         refreshHistory()
-    }
-
-    func refreshHistory() {
-        guard !closed else { return }
-        WindowsNative.history(Array(history.values).sorted { $0.createdAt > $1.createdAt }, selected: selectedHistoryID)
     }
 
     func finishOperation() {
@@ -315,10 +315,14 @@ extension WindowsAppController {
             let recovery = try await store.recoverInterruptedRecordings()
             guard !closed, !busy, recording == nil else { return }
             let records = recovery.records
-            history = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            history.removeAll()
+            historySearchText.removeAll()
+            for record in records where history[record.id] == nil { indexHistory(record) }
             selectedHistoryID = records.first(where: { $0.result != nil })?.id ?? records.first?.id
             transcript = selectedHistoryID.flatMap { history[$0]?.displayText } ?? ""
+            transcriptVariant = .processed
             refreshHistory()
+            if let id = selectedHistoryID, let record = history[id] { showTranscriptVariant(.processed, for: record) }
             let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
             var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
                 : "Ready. Ctrl+Alt+Space starts or stops recording. \(records.count) saved recordings."
@@ -363,14 +367,20 @@ extension WindowsAppController {
         } catch { update(error.localizedDescription) }
     }
 
-    func copyTranscript(identifier: String = "") {
+    /// `variant` is the version the window displayed when Copy was pressed,
+    /// captured with the record ID; a later selection change cannot redirect it.
+    func copyTranscript(identifier: String = "", variant: DesktopTranscriptVariant? = nil) {
         guard !closed else { return }
+        let record = UUID(uuidString: identifier).flatMap { history[$0] }
+        let chosen = variant ?? .processed
+        let text = record.map { $0.text(for: chosen) ?? "" } ?? transcript
+        guard !text.isEmpty else { update("There is no transcript to copy."); return }
         do {
-            let selected = UUID(uuidString: identifier).flatMap { history[$0]?.displayText }
-            try (selected ?? transcript).withCString { text in
+            try text.withCString { text in
                 try WindowsNative.checked { jsti_clipboard_write(text, $0, $1) }
             }
-            update("Transcript copied.")
+            update(record?.hasTranscriptVariants == true && chosen == .original
+                ? "Original transcript copied." : "Transcript copied.")
         } catch { update(error.localizedDescription) }
     }
 }

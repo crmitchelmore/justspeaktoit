@@ -75,9 +75,8 @@ enum WindowsNative {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         let rows = records.map { record in
-            let model = (ModelCatalog.batchTranscription + ModelCatalog.liveTranscription)
-                .first { $0.id == record.modelIdentifier }?.displayName
-                ?? record.modelIdentifier.split(separator: "/").last.map(String.init) ?? record.modelIdentifier
+            // The same canonical friendly name that search matches against.
+            let model = DesktopHistorySearch.modelDisplayName(for: record.modelIdentifier)
             let detail = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
                 ?? record.displayText ?? "Recording saved; awaiting transcription."
             return JSTIHistoryRow(
@@ -89,6 +88,26 @@ enum WindowsNative {
             (selected?.uuidString ?? "").withCString { jsti_window_set_history(rows.baseAddress, rows.count, $0) }
         }
         if result != 0 { update("The history list could not be refreshed. Saved recordings remain on disk.") }
+    }
+
+    /// Reports which transcript version the window shows for `record`; the
+    /// window applies it only while that record is still selected.
+    static func transcriptVariant(_ variant: DesktopTranscriptVariant?, for record: UUID?, switchable: Bool) {
+        let selected: Int32 = variant.map { $0 == .original ? 1 : 0 } ?? -1
+        let result = (record?.uuidString ?? "").withCString {
+            jsti_window_set_transcript_variant($0, selected, switchable ? 1 : 0)
+        }
+        if result != 0 { update("The transcript version control could not be refreshed.") }
+    }
+
+    /// The version the window displays for the selected record. Read it
+    /// synchronously inside the UI callback that carries the record ID.
+    static func displayedTranscriptVariant() -> DesktopTranscriptVariant? {
+        switch jsti_window_transcript_variant() {
+        case 0: return .processed
+        case 1: return .original
+        default: return nil
+        }
     }
 }
 

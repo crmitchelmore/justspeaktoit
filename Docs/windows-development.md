@@ -165,12 +165,17 @@ The app and complete XCTest executable now **cross-compile from macOS** using a
 private, pinned official Swift 6.2.3 toolchain, LLVM 20, Microsoft SDK and MSVC
 libraries. The existing Xcode installation and normal Apple build graph stay
 unchanged. Follow [the cross-build guide](../scripts/windows-cross/README.md).
-A Foundation proof compiled on the Mac has already executed successfully on
-Windows. The full app workflow copies those exact Mac-built executables to a
-Windows runner and verifies their source revision and hashes before tests and
-native window checks. The first full test executable ran 376 tests on Windows;
-a synthetic insertion failure matched the native build and was subsequently fixed.
-The optimised release app/test runtime check remains pending at this checkpoint.
+The full app workflow copies those exact Mac-built executables to a Windows
+runner and verifies their source revision and hashes before execution.
+[Release cross-build run 35735185760](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35735185760)
+passed at `ac7b5416`: the Mac-built XCTest executable ran **378 tests, 10 optional
+skips and zero failures** on Windows, and the production app passed native
+self-tests and window smoke checks. The production executable is built and
+copied before the separate test-enabled build; metadata verifies
+`configuration=release` and `appBuiltForTesting=false`. Its SHA-256 is
+`36d633960b12c80b5f3fec2b9aba4183c63ea915a6653723c08cecfc9934fe58`.
+The [exact developer artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35735185760/artifacts/10698245839)
+is an optimised cross-built app, with the runtime prerequisites described above.
 
 ## Architecture and ownership
 
@@ -295,8 +300,8 @@ smoke checks cover CRUD, ordering, preservation, validation, modal hotkey refusa
 keyboard scrolling and narrow window layout. Model-list smoke checks exercise
 refresh, retained selection and transition from batch-only to live-capable lists. Native
 storage tests check protected ACLs, existing-file refusal and junction rejection.
-The combined additions passed native CI at `ae61b2e8`; later revisions require
-their own checks.
+The combined additions passed native CI at `ae61b2e8` and `ac7b5416`, and the
+Mac-built release app passed at `ac7b5416`; later revisions require their own checks.
 Neither executable smoke test proves physical microphone capture, live provider
 transcription, successful external insertion or user-visible feature parity.
 Separate adapter unit tests exercise Credential Manager with isolated synthetic
@@ -356,8 +361,11 @@ Verified checkpoints on 22 September 2026:
   green. The first optimised cross attempt then exposed SwiftPM's release tests
   needing testable imports. `ac7b5416` retains the production app first and builds
   the test-enabled executable separately. Local full release cross-compilation
-  passed; [cross-runtime run 35735185760](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35735185760)
-  is running for that source. Its result remains a gate for the release cross path.
+  and [cross-runtime run 35735185760](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35735185760)
+  both passed: **378 Windows tests, ten optional skips, zero failures**, followed
+  by native self-tests and window checks on the exact Mac-built release app.
+  [Native run 35735185967](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35735185967)
+  also passed at the same source, including five independent WinHTTP probes.
 - Earlier [run 35725040396](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35725040396)
   verified generated AAC/M4A and MP3 imports through real Media Foundation,
   preserving original files and non-silent decoded samples. It also verified

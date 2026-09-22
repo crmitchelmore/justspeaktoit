@@ -143,7 +143,17 @@ final class OpenRouterAudioClientPortableTests: XCTestCase {
 
         let streamed = expectation(description: "Streamed oversize reply cancelled")
         StubURLProtocol.onStopLoading = { streamed.fulfill() }
-        Self.respond { _ in .json(String(repeating: "a", count: limit + 1)) }
+        // Keep the source in flight: a naturally completed URLProtocol need
+        // not receive stopLoading after its queued data delegate runs.
+        StubURLProtocol.handler = { request in
+            .respondWithoutFinishing(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                Data(String(repeating: "a", count: limit + 1).utf8)
+            )
+        }
         await assertAudioError(.responseTooLarge) { try await self.transcribe() }
         await fulfillment(of: [streamed], timeout: 5)
 

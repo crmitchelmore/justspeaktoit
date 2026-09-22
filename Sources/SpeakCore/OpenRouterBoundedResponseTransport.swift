@@ -201,6 +201,10 @@ private final class OpenRouterBoundedResponseCollector: NSObject, URLSessionData
             return
         }
         lock.withLock { failure = rejection }
+        // FoundationNetworking's custom URLProtocol bridge ignores response
+        // dispositions. Explicitly stop the transport as well as rejecting the
+        // response; otherwise a never-ending provider can remain active.
+        dataTask.cancel()
         completionHandler(.cancel)
         resolve(.failure(rejection))
     }

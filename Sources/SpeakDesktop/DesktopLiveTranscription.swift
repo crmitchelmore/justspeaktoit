@@ -15,7 +15,7 @@ public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs: return true
+        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral: return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
         }
@@ -77,6 +77,12 @@ public enum DesktopLiveTranscription {
             return SonioxLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
                 makeConnection: makeConnection
+            )
+        case .mistral:
+            // Voxtral detects the spoken language itself and its session has
+            // no language field, so a saved selection is never sent.
+            return MistralVoxtralLiveClient(
+                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         default: return nil
         }

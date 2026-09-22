@@ -3,6 +3,8 @@
 
 Only binds IPv4 loopback. No third-party packages or external connections.
 The slow route deliberately applies socket backpressure; it is not a benchmark.
+The Voxtral route plays Mistral's realtime transcription peer for the actual
+shared Swift client, with a synthetic key and generated audio only.
 """
 import argparse
 import base64
@@ -19,6 +21,28 @@ import time
 MAX_PAYLOAD = 4 * 1024 * 1024
 GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 LOG_LOCK = threading.Lock()
+
+# The Voxtral Realtime peer. The Swift probe sends the synthetic key, keeps
+# the client's own path and model query, and names a scenario in a header.
+MISTRAL_PATH = "/v1/audio/transcriptions/realtime"
+MISTRAL_MODEL = "voxtral-mini-transcribe-realtime-2602"
+MISTRAL_AUTHORIZATION = "Bearer jsti-loopback-synthetic"
+MISTRAL_SCENARIOS = ("complete", "fragment", "disconnect", "silent")
+MISTRAL_FRAME_BYTES = 3200  # 100 ms of 16 kHz mono PCM16
+MISTRAL_HELD_FRAMES = 10  # queued by the client before session.created
+MISTRAL_FRAMES = 20
+# Escapes keep composed U+00E9 distinct from e + U+0301 and the joiner visible.
+MISTRAL_UNICODE_HEAD = "\U0000754c \U00002014 caf\U000000e9"
+MISTRAL_UNICODE_TAIL = " e\U00000301 \U0001f469\U0001f3fd\U0000200d\U0001f4bb"
+MISTRAL_TEXT = {
+    "complete": (["helo", " wrld"], "Hello world."),
+    "fragment": ([MISTRAL_UNICODE_HEAD, MISTRAL_UNICODE_TAIL], MISTRAL_UNICODE_HEAD + MISTRAL_UNICODE_TAIL + "."),
+}
+
+
+def mistral_pcm(index):
+    """The generated frame the Swift probe sends at this index."""
+    return bytes((index * 31 + offset * 7) & 0xFF for offset in range(MISTRAL_FRAME_BYTES))
 
 
 def log(event, **fields):
@@ -102,7 +126,11 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         key = headers.get("sec-websocket-key", "")
         if len(base64.b64decode(key, validate=True)) != 16:
             raise ValueError("invalid handshake key")
-        if path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
+        route, _, query = path.partition("?")
+        if route == MISTRAL_PATH:
+            self.mistral_scenario = self.verify_mistral_request(query, headers)
+            path = route
+        elif path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
             raise ValueError("unknown route")
         if path == "/delay":
             time.sleep(1)
@@ -145,8 +173,128 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         self.request.sendall(header)
         self.request.sendall(payload)
 
+    def verify_mistral_request(self, query, headers):
+        """Checks the client's own query and synthetic credential, logging only verdicts."""
+        scenario = headers.get("x-jsti-mistral-scenario")
+        model_verified = query == f"model={MISTRAL_MODEL}"
+        authorization_verified = headers.get("authorization") == MISTRAL_AUTHORIZATION
+        log("mistral-handshake", scenario=scenario, modelVerified=model_verified,
+            authorizationVerified=authorization_verified)
+        if scenario not in MISTRAL_SCENARIOS or not model_verified or not authorization_verified:
+            raise ValueError("unexpected Voxtral handshake")
+        return scenario
+
+    def read_message(self):
+        """Returns one complete data message, answering pings; a close ends the peer."""
+        message = bytearray()
+        message_opcode = None
+        while True:
+            final, opcode, payload = self.read_frame()
+            if opcode == 8:
+                self.send_frame(8, payload)
+                raise ConnectionError("client closed")
+            if opcode == 9:
+                self.send_frame(10, payload)
+                continue
+            if opcode == 10:
+                continue
+            if opcode in (1, 2) and message_opcode is None:
+                message_opcode = opcode
+            elif opcode != 0 or message_opcode is None:
+                raise ValueError("invalid continuation")
+            if len(message) + len(payload) > MAX_PAYLOAD:
+                raise ValueError("message exceeded bound")
+            message.extend(payload)
+            if final:
+                return message_opcode, bytes(message)
+
+    def read_mistral_event(self):
+        opcode, message = self.read_message()
+        if opcode != 1:
+            raise ValueError("Voxtral client messages are JSON text")
+        event = json.loads(message.decode("utf-8"))
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            raise ValueError("Voxtral client message is not a typed JSON object")
+        return event
+
+    def send_mistral(self, event, fragmented):
+        payload = json.dumps(event, ensure_ascii=False).encode("utf-8")
+        if not fragmented:
+            self.send_frame(1, payload)
+            return
+        # Split inside a multi-byte scalar when there is one, so the client's
+        # transport must assemble the message before decoding its UTF-8.
+        split = next((index for index, byte in enumerate(payload) if 0x80 <= byte <= 0xBF), 2)
+        self.send_frame(1, payload[:split], final=False)
+        self.send_frame(0, payload[split:split + 3], final=False)
+        self.send_frame(0, payload[split + 3:])
+
+    def reject_mistral(self, reason):
+        self.send_frame(1, json.dumps({"type": "error", "error": {"message": reason, "code": 4000}}).encode())
+        self.send_frame(8, struct.pack("!H", 1008) + b"protocol")
+        raise ValueError(reason)
+
+    def run_mistral(self, scenario):
+        """Plays one Voxtral session: created, update before any audio, exact
+        PCM, flush then end, deltas and a revised done unless the scenario
+        withholds the completion."""
+        fragmented = scenario == "fragment"
+        deltas, done = MISTRAL_TEXT["fragment" if fragmented else "complete"]
+        # Hold session.created briefly: audio captured meanwhile must wait.
+        time.sleep(0.2)
+        self.send_mistral({"type": "session.created",
+                           "session": {"request_id": "loopback", "model": MISTRAL_MODEL}}, fragmented)
+        update = self.read_mistral_event()
+        if update["type"] != "session.update":
+            self.reject_mistral(f"{update['type']} before session.update")
+        session = update.get("session") or {}
+        if (session.get("audio_format") != {"encoding": "pcm_s16le", "sample_rate": 16000}
+                or session.get("target_streaming_delay_ms") != 480 or "language" in json.dumps(update)):
+            self.reject_mistral("unexpected session.update")
+        log("mistral-session-update", scenario=scenario, verified=True)
+        digest = hashlib.sha256()
+        frames = 0
+        flushed = False
+        while True:
+            event = self.read_mistral_event()
+            kind = event["type"]
+            if kind == "input_audio.append" and not flushed and frames < MISTRAL_FRAMES:
+                audio = base64.b64decode(event.get("audio", ""), validate=True)
+                if audio != mistral_pcm(frames):
+                    self.reject_mistral(f"append {frames} changed in transport")
+                digest.update(audio)
+                frames += 1
+                if frames == MISTRAL_HELD_FRAMES:
+                    self.send_mistral({"type": "session.updated", "session": session}, fragmented)
+                    self.send_mistral({"type": "transcription.language", "audio_language": "en"}, fragmented)
+                    for delta in deltas:
+                        self.send_mistral({"type": "transcription.text.delta", "text": delta}, fragmented)
+            elif kind == "input_audio.flush" and not flushed and frames == MISTRAL_FRAMES:
+                flushed = True
+            elif kind == "input_audio.end" and flushed:
+                break
+            else:
+                self.reject_mistral(f"unexpected {kind} after {frames} frames")
+        log("mistral-audio", scenario=scenario, frames=frames, bytes=frames * MISTRAL_FRAME_BYTES,
+            sha256=digest.hexdigest(), flushThenEnd=True)
+        if scenario == "disconnect":
+            # Let the end's send completion land, then drop the TCP connection.
+            time.sleep(0.1)
+            log("mistral-disconnect", scenario=scenario)
+            return
+        if scenario == "silent":
+            log("mistral-silent", scenario=scenario)
+            while True:
+                self.read_message()
+        self.send_mistral({"type": "transcription.done", "model": MISTRAL_MODEL, "text": done,
+                           "language": "en", "segments": [], "usage": {"prompt_audio_seconds": 2}}, fragmented)
+        self.send_frame(8, struct.pack("!H", 1000) + b"transcription-complete")
+        log("mistral-done", scenario=scenario)
+
     def run_connection(self):
         path = self.handshake()
+        if path == MISTRAL_PATH:
+            return self.run_mistral(self.mistral_scenario)
         self.slow = path == "/slow"
         if self.slow:
             time.sleep(0.25)

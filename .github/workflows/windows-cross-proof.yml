@@ -5,11 +5,31 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Sources/CWindowsSupport/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - .github/workflows/windows-cross-proof.yml
   push:
     branches: [main]
     paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Sources/CWindowsSupport/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - .github/workflows/windows-cross-proof.yml
 
@@ -22,9 +42,9 @@ concurrency:
 
 jobs:
   compile:
-    name: Cross-compile Foundation on macOS
+    name: Cross-compile Swift app and tests on macOS
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,6 +58,23 @@ jobs:
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --output "$RUNNER_TEMP/foundation-proof" 2>&1 |
             tee "$RUNNER_TEMP/foundation-proof/bootstrap.log"
+      - name: Cross-build the Windows app and test suite
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/windows-app-cross"
+          python3 scripts/windows-cross/build-windows-app.py \
+            --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
+            --output "$RUNNER_TEMP/windows-app-cross" 2>&1 |
+            tee "$RUNNER_TEMP/windows-app-cross/bootstrap.log"
+      - name: Upload Mac-built Windows app and tests
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: macos-built-windows-app
+          path: ${{ runner.temp }}/windows-app-cross/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload proof and build evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1
@@ -48,7 +85,7 @@ jobs:
           retention-days: 14
 
   execute:
-    name: Execute Mac-built Foundation PE on Windows
+    name: Execute Mac-built app and tests on Windows
     needs: compile
     runs-on: windows-2022
     timeout-minutes: 15
@@ -65,6 +102,10 @@ jobs:
         with:
           name: foundation-windows-cross-proof
           path: proof
+      - uses: actions/download-artifact@v5
+        with:
+          name: macos-built-windows-app
+          path: app
       - name: Verify artifact identity and run Foundation assertions
         shell: pwsh
         run: |
@@ -72,6 +113,7 @@ jobs:
           if ($metadata.host -ne 'Darwin' -or $metadata.target -ne 'x86_64-unknown-windows-msvc') {
             throw 'Unexpected build provenance.'
           }
+          if ($metadata.sourceCommit -ne $env:GITHUB_SHA) { throw 'Foundation source commit mismatch.' }
           $actual = (Get-FileHash proof/FoundationWindowsProof.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $metadata.executableSHA256) { throw 'Mac-built artifact hash mismatch.' }
           swift --version | Set-Content proof/windows-runtime.log
@@ -90,6 +132,68 @@ jobs:
             -Pattern '^JSTI_FOUNDATION_WINDOWS_CROSS_PROOF_OK:' -Quiet)) {
             throw 'Foundation assertion success marker missing.'
           }
+      - name: Verify Mac-built app, portable tests and native UI
+        shell: pwsh
+        run: |
+          $metadata = Get-Content app/app-build-metadata.json -Raw | ConvertFrom-Json
+          if ($metadata.host -ne 'Darwin' -or $metadata.target -ne 'x86_64-unknown-windows-msvc') {
+            throw 'Unexpected app build provenance.'
+          }
+          if ($metadata.sourceCommit -ne $env:GITHUB_SHA) { throw 'App source commit mismatch.' }
+          foreach ($entry in $metadata.executables.PSObject.Properties) {
+            $actual = (Get-FileHash (Join-Path app $entry.Name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $entry.Value) { throw "Mac-built artifact hash mismatch: $($entry.Name)" }
+          }
+          # SwiftPM normally supplies these when launching tests. These tests
+          # were built on the Mac, so add the installed Windows test DLL paths.
+          $developer = Split-Path (Split-Path $env:SDKROOT -Parent) -Parent
+          foreach ($library in @('XCTest', 'Testing')) {
+            $directory = Join-Path $developer "Library/$library-6.2.3/usr/bin64"
+            if (-not (Test-Path $directory)) { throw "Missing installed test runtime: $library" }
+            $env:Path = "$directory;$env:Path"
+          }
+          function Invoke-CrossBuilt([string] $name, [string] $arguments, [string] $label, [int] $seconds) {
+            $parameters = @{
+              FilePath = (Resolve-Path "app/$name").Path
+              PassThru = $true
+              NoNewWindow = $true
+              RedirectStandardOutput = "app/windows-$label.log"
+              RedirectStandardError = "app/windows-$label-errors.log"
+            }
+            if ($arguments) { $parameters.ArgumentList = $arguments }
+            $process = Start-Process @parameters
+            if (-not $process.WaitForExit($seconds * 1000)) {
+              $process.Kill()
+              throw "$label exceeded $seconds seconds."
+            }
+            Get-Content "app/windows-$label.log"
+            Get-Content "app/windows-$label-errors.log"
+            if ($process.ExitCode -ne 0) { throw "$label failed: $($process.ExitCode)" }
+          }
+          Invoke-CrossBuilt 'SpeakAppPackageTests.exe' '' 'tests' 180
+          if (-not (Select-String -Path app/windows-tests.log -Pattern 'Executed [1-9][0-9]* tests' -Quiet)) {
+            throw 'No XCTest execution evidence found.'
+          }
+          Invoke-CrossBuilt 'SpeakWindows.exe' '--self-test' 'native' 90
+          if (-not (Select-String -Path app/windows-native.log -Pattern 'self-test passed' -Quiet)) {
+            throw 'Native self-test success marker missing.'
+          }
+          $env:JSTI_UI_SNAPSHOT_PATH = Join-Path (Resolve-Path app).Path 'windows-ui-smoke.bmp'
+          Invoke-CrossBuilt 'SpeakWindows.exe' '--ui-smoke-test' 'ui' 30
+          if (-not (Select-String -Path app/windows-ui.log -Pattern 'Native window creation and shutdown passed' -Quiet)) {
+            throw 'Native UI success marker missing.'
+          }
+          if (-not (Test-Path $env:JSTI_UI_SNAPSHOT_PATH)) { throw 'Native client snapshot missing.' }
+      - name: Upload Mac-built app execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: macos-built-windows-runtime-evidence
+          path: |
+            app/windows-*.log
+            app/windows-ui-smoke.bmp
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload Windows execution evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1

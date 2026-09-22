@@ -1,9 +1,11 @@
-# macOS → Windows Swift Foundation proof
+# macOS → Windows Swift app builds
 
-This isolated check establishes that a Mac can compile and link an actual
-Windows Swift executable using `Foundation`, then verifies its behaviour on
-Windows. It does not establish that the complete app cross-compiles or that
-Windows feature parity is finished.
+This isolated workflow cross-compiles the Windows app, its shared Swift code,
+native C++ adapters and XCTest suite on an Apple Silicon Mac. Windows then runs
+the Mac-built tests, native self-tests and native window smoke checks. It also
+keeps a small Foundation proof to distinguish SDK failures from app failures.
+These build and runtime checks do not establish complete feature parity or
+physical microphone/device acceptance.
 
 The source checks Swift arrays, Unicode, Codable JSON, Foundation regular
 expressions, URLs and atomic file write/read operations. The Windows job must
@@ -15,14 +17,29 @@ Run on macOS:
 python3 scripts/windows-cross/build-foundation-proof.py \
   --cache /path/to/private/windows-cross-sdk \
   --output /path/to/foundation-proof
+python3 scripts/windows-cross/build-windows-app.py \
+  --cache /path/to/private/windows-cross-sdk \
+  --output /path/to/windows-app-cross
 ```
 
-The cache and output must be separate directories. Expect approximately 3 GB of
-downloads and additional space for extraction. Every download has a fixed
+The cache and outputs must be separate directories. Expect approximately 4.4 GB
+of downloads and around 16 GB total including extraction and build files. Every download has a fixed
 official URL, SHA-256 and actual byte count in `dependencies.json`. The Swift
 Windows installer is unpacked as data; its MSI custom actions never execute.
 The extracted macOS compiler is used by absolute path, with no global toolchain
 installation, shell changes or `swift sdk install` registration.
+
+`SPEAK_WINDOWS_TARGET=1` selects the Windows SwiftPM product graph explicitly
+because manifest `#if os(Windows)` evaluates on the Mac host. It is set only for
+the cross-build subprocess. Without it, the normal Apple package graph remains
+unchanged. The app script supplies the Windows target triple, matching SDK and
+link libraries, plus the SDK's XCTest/Testing module paths.
+
+The C++ adapters use a separately pinned official LLVM 20.1.8 compiler. The
+Clang 17 bundled with Swift 6.2.3 cannot compile the pinned Microsoft C++ standard
+library; its minimum compiler check fails. The build uses the compatible
+compiler instead of bypassing that check. Only required LLVM tools, resource
+headers and notices are extracted from its archive.
 
 The matching official Swift 6.2.3 compiler is necessary for Windows Foundation's
 binary Swift module. The Xcode 6.2.3 compiler successfully rebuilt the Windows
@@ -36,11 +53,13 @@ roots are passed through Swift `-I` so nested Swift interface compilation inheri
 them. Passing only `-Xcc -isystem` did not preserve those roots in this probe.
 
 Prerequisites are acquired for this MIT-licensed open-source application's build
-under the linked Swift, Windows SDK, Visual Studio Community OSS and 7-Zip terms.
+under the linked Swift, Windows SDK, Visual Studio Community OSS, LLVM and 7-Zip terms.
 Keep the prerequisite cache private. Do not upload or redistribute Microsoft
 headers, libraries, SDKs or compiler packages in build artifacts. The Windows CI
 job installs Swift 6.2.3 through the existing pinned setup action and runs only
-the executable produced by the Mac job.
+the executables produced by the Mac job. SwiftPM resource directories accompany
+the app and tests. The runtime artifact includes test logs and a snapshot of the
+app's synthetic smoke-test window; it never captures the desktop or other apps.
 
 The lock records a Microsoft metadata inconsistency observed on 22 September
 2026: catalogue outer digests and advertised sizes did not match downloaded

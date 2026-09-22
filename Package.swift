@@ -2,12 +2,21 @@
 import Foundation
 import PackageDescription
 
+// Manifest conditionals evaluate on the build host. Explicitly select the
+// Windows product graph when cross-compiling on macOS; default Apple builds
+// retain their established products, targets and dependencies.
+#if os(Windows)
+let windowsTargetBuild = true
+#else
+let windowsTargetBuild = ProcessInfo.processInfo.environment["SPEAK_WINDOWS_TARGET"] == "1"
+#endif
+
 // The native Apple app keeps its established dependency graph. Windows and
 // Linux compile the same canonical domain sources without resolving Apple-only
 // packages or xcframeworks. This is a portable kernel, not a claim that every
 // platform has implemented every catalogued provider or OS integration.
 #if os(macOS)
-let portableCoreBuild = ProcessInfo.processInfo.environment["SPEAK_PORTABLE_CORE"] == "1"
+let portableCoreBuild = windowsTargetBuild || ProcessInfo.processInfo.environment["SPEAK_PORTABLE_CORE"] == "1"
 #else
 let portableCoreBuild = true
 #endif
@@ -166,32 +175,32 @@ let portablePackage = Package(
     ]
 )
 
-#if os(Windows)
-portablePackage.products.append(.executable(name: "SpeakWindows", targets: ["SpeakWindows"]))
-portablePackage.targets.append(contentsOf: [
-    .target(
-        name: "CWindowsSupport",
-        publicHeadersPath: "include",
-        linkerSettings: [
-            .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
-            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
-            .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
-            .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
-            // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
-            .linkedLibrary("oleaut32"), .linkedLibrary("oleacc")
-        ]
-    ),
-    .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport"]),
-    .executableTarget(
-        name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport"]
-    ),
-    .testTarget(
-        name: "SpeakWindowsPlatformTests", dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport"],
-        resources: [.copy("Fixtures")]
-    )
-])
-portablePackage.cxxLanguageStandard = .cxx17
-#endif
+if windowsTargetBuild {
+    portablePackage.products.append(.executable(name: "SpeakWindows", targets: ["SpeakWindows"]))
+    portablePackage.targets.append(contentsOf: [
+        .target(
+            name: "CWindowsSupport",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
+                .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
+                .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
+                .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
+                // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
+                .linkedLibrary("oleaut32"), .linkedLibrary("oleacc")
+            ]
+        ),
+        .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport"]),
+        .executableTarget(
+            name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport"]
+        ),
+        .testTarget(
+            name: "SpeakWindowsPlatformTests", dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport"],
+            resources: [.copy("Fixtures")]
+        )
+    ])
+    portablePackage.cxxLanguageStandard = .cxx17
+}
 
 let package = portableCoreBuild ? portablePackage : Package(
     name: "SpeakApp",

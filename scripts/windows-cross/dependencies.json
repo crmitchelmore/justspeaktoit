@@ -56,12 +56,20 @@
   "provenanceNotes": [
     "Swift installer and NuGet/7-Zip hashes were calculated from official HTTPS downloads; the macOS Swift package also passed Apple installer signature and notarisation verification.",
     "MSVC payload hashes match the hash embedded in their official download URL and payload catalog digest. Microsoft catalog outer digest and advertised sizes were inconsistent on 2026-09-22; this lock pins actual verified payload hashes and sizes, and does not fetch a mutable catalog.",
-    "Prerequisites are used privately for this MIT-licensed open-source app. Do not redistribute SDK/MSVC files as artifacts."
+    "Prerequisites are used privately for this MIT-licensed open-source app. Do not redistribute SDK/MSVC files as artifacts.",
+    "The LLVM 20.1.8 macOS ARM64 archive SHA256 matches the official llvm-project release asset digest; only the required compiler/tools, resource headers and notices are extracted."
   ],
   "licenses": {
     "swift": "https://www.swift.org/LICENSE.txt",
     "windowsSDK": "https://aka.ms/WinSDKLicenseURL",
     "visualStudioCommunity": "https://visualstudio.microsoft.com/license-terms/vs2022-ga-community/",
-    "sevenZip": "https://www.7-zip.org/license.txt"
+    "sevenZip": "https://www.7-zip.org/license.txt",
+    "llvm": "https://llvm.org/LICENSE.txt"
+  },
+  "appCompiler": {
+    "name": "LLVM-20.1.8-macOS-ARM64.tar.xz",
+    "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-20.1.8/LLVM-20.1.8-macOS-ARM64.tar.xz",
+    "sha256": "a9a22f450d35f1f73cd61ab6a17c6f27d8f6051d56197395c1eb397f0c9bbec4",
+    "bytes": 1450038240
   }
 }

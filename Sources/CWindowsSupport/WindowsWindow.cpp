@@ -9,16 +9,20 @@
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
 bool jsti_settings_self_test(HWND owner, std::string &error);
+bool jsti_profiles_self_test(HWND owner, std::string &error);
+void jsti_show_profiles(HWND owner);
+void jsti_cancel_profiles_request();
 
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
+constexpr UINT profilesMessage = WM_APP + 17;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
 constexpr int modelStatusID = 141;
 enum Control {
     modelID = 100, keyID, saveID, recordID, importID, copyID, transcriptID, statusID,
     historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID, modeID,
-    searchID, clearSearchID, variantID
+    searchID, clearSearchID, variantID, profilesID = 150
 };
 constexpr int searchLabelID = 96;
 constexpr int variantLabelID = 97;
@@ -292,7 +296,10 @@ void layout(HWND window) {
     auto move = [&](int id, int x, int y, int w, int h) { MoveWindow(GetDlgItem(window, id), x, y, w, h, TRUE); };
     const int modelTop = margin + (hasModeChoice() ? row : 0);
     move(95, contentLeft, margin + scale(window, 3), scale(window, 64), scale(window, 22));
-    move(modeID, contentLeft + scale(window, 70), margin, width - scale(window, 70), scale(window, 160));
+    const int profilesWidth = scale(window, 118);
+    move(modeID, contentLeft + scale(window, 70), margin,
+        width - scale(window, 70) - profilesWidth - gap, scale(window, 160));
+    move(profilesID, contentLeft + width - profilesWidth, margin, profilesWidth, row);
     move(90, contentLeft, modelTop, width, scale(window, 22));
     const int settingsWidth = scale(window, 148);
     move(modelID, contentLeft, modelTop + scale(window, 26), width - settingsWidth - gap, scale(window, 260));
@@ -384,6 +391,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Retr&y", BS_PUSHBUTTON | WS_TABSTOP, retryID) &&
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
+        add(L"BUTTON", L"App &profiles", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, modeID) &&
         add(L"STATIC", L"&Transcription model", 0, 90) &&
@@ -476,7 +484,7 @@ void applyUpdate(HWND window) {
     if (transcriptChanged) SetDlgItemTextW(window, transcriptID, transcript.c_str());
     SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel transcription" : L"&Record"));
     EnableWindow(GetDlgItem(window, recordID), TRUE);
-    for (int id : {keyID, saveID, microphoneID}) EnableWindow(GetDlgItem(window, id), recording == 0);
+    for (int id : {keyID, saveID, microphoneID, profilesID}) EnableWindow(GetDlgItem(window, id), recording == 0);
     updateModelAvailability(window, recording);
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
     if (historyChanged) {
@@ -558,6 +566,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
         refreshFont(window); layout(window); return 0;
     }
+    case profilesMessage:
+        if (idleControl(window, profilesID) && IsWindowEnabled(window)) jsti_show_profiles(window);
+        else jsti_cancel_profiles_request();
+        return 0;
     case updateMessage:
         applyUpdate(window); return 0;
     case WM_HOTKEY:
@@ -565,6 +577,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
+        case profilesID:
+            if (idleControl(window, profilesID)) emit(window, 17);
+            return 0;
         case recordID: emitRecording(window); return 0;
         case importID:
             if (idleControl(window, importID) && !liveSelection(window)) importAudio(window);
@@ -888,6 +903,15 @@ int jsti_window_update(const char *status, const char *transcript, int recording
 void jsti_window_request_close(void) {
     std::lock_guard<std::mutex> lock(state.mutex);
     if (state.window) PostMessageW(state.window, WM_CLOSE, 0, 0);
+}
+
+void jsti_window_request_profiles(void) {
+    bool posted = false;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        posted = state.window && PostMessageW(state.window, profilesMessage, 0, 0);
+    }
+    if (!posted) jsti_cancel_profiles_request();
 }
 
 int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selectedID) {
@@ -1381,7 +1405,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             windowBounds.bottom - windowBounds.top < scale(window, 684) || !checkBounds() || !changeMode(1, 4)) {
             failure = "Adding the first live mode lost its preference or overlapped the model controls."; return false;
         }
-        return jsti_settings_self_test(window, failure);
+        return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

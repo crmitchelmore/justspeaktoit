@@ -9,6 +9,10 @@ final class WindowsEventContext {
     var smokeTestFailure: Error?
     let search: WindowsSearchCoalescer
     private var settingsTask: Task<Void, Never>?
+    lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
+        guard let self else { return }
+        self.enqueueSettings { await self.controller.saveProfiles(profiles) }
+    }
 
     init(controller: WindowsAppController, smokeTest: Bool) {
         self.controller = controller
@@ -92,7 +96,18 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         ready(holder)
     case 8: WindowsNative.update(value)
     case 13: holder.enqueueSettings { await controller.selectMicrophone(value) }
-    default: historyEvent(event, value: value, controller: controller)
+    default: secondaryWindowEvent(event, value: value, holder: holder)
+    }
+}
+
+private func openProfiles(_ holder: WindowsEventContext) {
+    let editor = holder.profiles
+    guard editor.begin() else { return }
+    holder.enqueueSettings {
+        do { try editor.show(await holder.controller.profileSnapshot()) } catch {
+            editor.cancel()
+            WindowsNative.update(error.localizedDescription)
+        }
     }
 }
 
@@ -149,8 +164,10 @@ func postProcessingEvent(
     }
 }
 
-private func historyEvent(_ event: Int32, value: String, controller: WindowsAppController) {
+private func secondaryWindowEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
+    let controller = holder.controller
     switch event {
+    case 17: openProfiles(holder)
     case 9: Task { await controller.selectHistory(value) }
     case 10: Task { await controller.retryHistory(value) }
     case 11:

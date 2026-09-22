@@ -37,6 +37,9 @@ actor WindowsAppController {
     let modelCatalog: OpenRouterAudioCatalogStore
     var modelDiscoveryTask: Task<Void, Never>?
     var modelCatalogRevision: UInt64 = 0
+    let profileStore: DesktopDictationProfileStore
+    var profiles: [DictationProfile]
+    var profileWarning: String?
     var settings: Settings
     var recording: Recording?
     private var isReady = false
@@ -66,6 +69,11 @@ actor WindowsAppController {
         self.directory = directory
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
         self.uploadStaging = WindowsNative.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
+        let profileStore = DesktopDictationProfileStore(directory: directory)
+        self.profileStore = profileStore
+        let loadedProfiles = try Self.loadProfiles(from: profileStore)
+        self.profiles = loadedProfiles.profiles
+        self.profileWarning = loadedProfiles.warning
         let settingsURL = directory.appendingPathComponent("settings.json")
         var loadedSettings: Settings
         if FileManager.default.fileExists(atPath: settingsURL.path) {
@@ -158,6 +166,9 @@ actor WindowsAppController {
         )
     }
 
+}
+
+extension WindowsAppController {
     private func stopAndTranscribe() async {
         let pending = recording?.record
         let live = recording?.live
@@ -346,6 +357,7 @@ extension WindowsAppController {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
             if let microphoneWarning { status += " \(microphoneWarning)" }
+            if let profileWarning { status += " \(profileWarning)" }
             update(status, transcript: transcript, state: 0)
         } catch { update(error.localizedDescription, state: 0) }
     }

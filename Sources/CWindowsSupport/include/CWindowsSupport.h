@@ -122,6 +122,27 @@ int jsti_window_set_postprocessing(const char *const *model_names, size_t model_
                                    int selected_index, int enabled, const char *prompt,
                                    JSTIPostProcessingCallback callback, void *context);
 
+/* Borrowed UTF-8 draft values. Choice -1 inherits the app setting, -2 preserves
+ * an existing unavailable value, otherwise indexes the supplied catalogue.
+ * polish_mode: 0 inherit, 1 disabled, 2 enabled. Paths are newline-separated. */
+typedef struct JSTIProfileDraft {
+    const char *id, *name, *paths, *prompt, *output_language, *notes;
+    int transcription, polish_mode, polish_model, language;
+} JSTIProfileDraft;
+/* UI-thread callback: action 1 validates/copies all drafts for an atomic save;
+ * return -1 with a readable error to keep the editor open. Action 0 cancels.
+ * All pointers expire on return. Never block waiting for a Swift actor. */
+typedef int (*JSTIProfilesCallback)(int action, const JSTIProfileDraft *drafts, size_t count,
+                                  void *context, char *error, size_t error_capacity);
+int jsti_window_set_profiles(const JSTIProfileDraft *drafts, size_t count,
+                            const char *const *transcription_names, size_t transcription_count,
+                            const char *const *polish_names, size_t polish_count,
+                            const char *const *language_names, size_t language_count,
+                            const char *notice,
+                            JSTIProfilesCallback callback, void *context);
+/* Posts an open request to the native UI thread. Ignored during recording. */
+void jsti_window_request_profiles(void);
+
 typedef struct JSTICapture JSTICapture;
 /* Active capture endpoints only; the default marker means eCommunications.
  * Callbacks run synchronously after enumeration succeeds; strings are borrowed

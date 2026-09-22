@@ -167,6 +167,16 @@ before this can be treated as verified distribution. See
 search-path isolation and the negative controls. Neither artifact is a signed
 installer, automatic update or supported Stable Windows release.
 
+The same workflow's `package-lifecycle` job packs that bundle into an
+**unsigned developer MSIX** with Microsoft's MakeAppx and uploads it as
+`windows-developer-msix-unsigned`. On the disposable runner it is designed to
+sign copies with an ephemeral test certificate, then install, launch, refuse
+failed and cancelled upgrades, upgrade and uninstall while checking that
+`%LOCALAPPDATA%\JustSpeakToIt` is kept. That job has not produced a Windows
+receipt yet. Installing the package elsewhere needs an externally supplied
+signing certificate. It is a developer identity outside the Alpha and Stable
+trains; see [Windows developer MSIX package](windows-installer.md).
+
 ### Shared-core checks on other hosts
 
 On macOS, use the Xcode Apple toolchain:
@@ -320,7 +330,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
 | Automation and integrations | Shared protocol data available in source | Windows CLI/IPC, OpenClaw, deep links and applicable automation surface parity |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
-| Distribution and updates | Unsigned developer executable artifact | Runtime packaging, signing, installer/uninstaller, upgrade/data migration and update channel |
+| Distribution and updates | Unsigned developer executable, self-contained runtime bundle, and an unsigned x64 developer MSIX with a CI install/upgrade/uninstall lifecycle job that keeps user data in the portable data directory | First Windows receipt for that job, externally supplied signing identity, clean physical Windows 10/11 installs, ARM64, update channel and Alpha/Stable Windows identities |
 
 Apple-specific UI surfaces such as Siri, Live Activities, the iOS keyboard and
 Apple Watch are not Windows operating-system APIs. Their relevant user journeys

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "packagingTools": {
+    "name": "microsoft.windows.sdk.buildtools.10.0.26100.1.nupkg",
+    "url": "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/10.0.26100.1/microsoft.windows.sdk.buildtools.10.0.26100.1.nupkg",
+    "sha512": "7bea2cd85cbdeb682a688efa42f7038b7b411da4be37e590f75bb4a84466546001ea923a6781873306760fc38d0ce063b8df73b422aa9f6ce35d632a4a293672",
+    "bytes": 22476117,
+    "catalogEntry": "https://api.nuget.org/v3/catalog0/data/2024.05.22.17.09.49/microsoft.windows.sdk.buildtools.10.0.26100.1.json",
+    "toolDirectory": "bin/10.0.26100.0/x64/",
+    "tools": ["makeappx.exe", "signtool.exe"],
+    "license": "https://aka.ms/WinSDKLicenseURL"
+  },
+  "provenanceNotes": [
+    "Microsoft.Windows.SDK.BuildTools is Microsoft's NuGet distribution of the Windows SDK packaging tools (MakeAppx, SignTool and their AppxPackaging, OPC and signing DLLs). Version 10.0.26100.1 matches the Windows SDK 10.0.26100 release already pinned for the cross build.",
+    "The SHA-512 and byte count are the packageHash and packageSize published in the nuget.org catalog entry above, converted from base64 to hex; the download is rejected on any mismatch.",
+    "Only the x64 tool directory is extracted, into a private job directory. The tools are used to build and sign packages; no SDK file is shipped in any package or artifact.",
+    "makeappx.exe and signtool.exe must additionally carry valid Microsoft Authenticode signatures on the Windows runner."
+  ]
+}

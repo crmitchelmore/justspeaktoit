@@ -198,9 +198,10 @@ separate test-enabled executable, as before.
 
 ## Remaining gates
 
-- Installer, uninstaller, upgrade and data-migration behaviour, and a
-  clean-machine installation proof: the bundle runs from a folder and registers
-  nothing.
+- Clean-machine installation proof. The bundle itself runs from a folder and
+  registers nothing; the unsigned developer MSIX built from it, and its
+  install, upgrade, failure and uninstall checks, are described in
+  [Docs/windows-installer.md](windows-installer.md).
 - Code signing and SmartScreen reputation: the executable and archive are
   unsigned.
 - ARM64 Windows: only x64 is built and verified.

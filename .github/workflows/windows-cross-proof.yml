@@ -17,6 +17,8 @@ on:
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - scripts/windows-bundle/**
+      - scripts/windows-package/**
+      - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
   push:
     branches: [main]
@@ -33,6 +35,8 @@ on:
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - scripts/windows-bundle/**
+      - scripts/windows-package/**
+      - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
 
 permissions:
@@ -269,5 +273,78 @@ jobs:
         with:
           name: windows-runtime-bundle-execution-evidence
           path: ${{ runner.temp }}/bundle-run/evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  package-lifecycle:
+    name: Pack, install, upgrade and uninstall the developer MSIX on Windows
+    needs: compile
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      # Developer package versions for this run only. Windows has no Alpha or
+      # Stable surface in the release-train manifest, so no release version exists.
+      BASE_VERSION: 0.0.${{ github.run_number }}.1
+      UPGRADE_VERSION: 0.0.${{ github.run_number }}.2
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-runtime-bundle
+          path: bundle
+      - name: Test the packaging tools and build both verified layouts
+        shell: pwsh
+        run: |
+          python --version
+          python -B -m unittest discover -s scripts/windows-package -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($kind in 'base', 'upgrade') {
+            $version = if ($kind -eq 'base') { $env:BASE_VERSION } else { $env:UPGRADE_VERSION }
+            python -B scripts/windows-package/build-windows-package-layout.py --bundle bundle `
+              --expected-commit $env:GITHUB_SHA --version $version --output (Join-Path $env:RUNNER_TEMP "package-$kind")
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Pack both layouts with the pinned Windows SDK MakeAppx
+        shell: powershell
+        run: |
+          foreach ($kind in 'base', 'upgrade') {
+            $root = Join-Path $env:RUNNER_TEMP "package-$kind"
+            $version = if ($kind -eq 'base') { $env:BASE_VERSION } else { $env:UPGRADE_VERSION }
+            ./scripts/windows-package/pack-windows-package.ps1 -Layout (Join-Path $root 'layout') `
+              -Output (Join-Path $root "JustSpeakToIt-Developer_${version}_x64_unsigned.msix") `
+              -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+          }
+      - name: Upload the unsigned developer package
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msix-unsigned
+          path: |
+            ${{ runner.temp }}/package-upgrade/*.msix
+            ${{ runner.temp }}/package-upgrade/*.json
+            ${{ runner.temp }}/package-upgrade/*.log
+          if-no-files-found: error
+          retention-days: 14
+      # The ephemeral test certificate is created, trusted and removed inside
+      # this step on this disposable runner; it is never exported or uploaded.
+      - name: Install, launch, refuse failed upgrades, upgrade and uninstall
+        shell: powershell
+        run: |
+          $base = Join-Path $env:RUNNER_TEMP 'package-base'
+          $upgrade = Join-Path $env:RUNNER_TEMP 'package-upgrade'
+          ./scripts/windows-package/test-windows-package-lifecycle.ps1 `
+            -BaseLayout (Join-Path $base 'layout') `
+            -BasePackage (Join-Path $base "JustSpeakToIt-Developer_$($env:BASE_VERSION)_x64_unsigned.msix") `
+            -UpgradeLayout (Join-Path $upgrade 'layout') `
+            -UpgradePackage (Join-Path $upgrade "JustSpeakToIt-Developer_$($env:UPGRADE_VERSION)_x64_unsigned.msix") `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'package-lifecycle')
+      - name: Upload lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msix-lifecycle-evidence
+          path: ${{ runner.temp }}/package-lifecycle/evidence/
           if-no-files-found: warn
           retention-days: 14

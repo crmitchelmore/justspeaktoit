@@ -42,11 +42,12 @@ extension WindowsAppController {
         cancellationRequested = false
         liveFinalisation = session
         defer { liveFinalisation = nil }
-        let options = settings.postProcessing ?? .init()
+        let options = stopped.profile.postProcessing
         update("Finishing live transcript… Audio is saved locally.", state: 2)
         let snapshot = await session.finish()
         record.result = liveResult(snapshot.text, record: record, duration: stopped.duration)
         record.failure = snapshot.error
+        record.postProcessingFailure = stopped.profile.skippedPolishReason
         if cancellationRequested || closed || snapshot.phase == .cancelled {
             record.failure = "Live transcription cancelled. Audio and received text retained."
         }

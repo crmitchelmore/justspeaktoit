@@ -20,6 +20,7 @@ public actor DesktopRecordingStore {
         /// The dictation profile applied to this recording, for display only;
         /// retries and imports never resolve a profile again.
         public var profileName: String?
+        public var profileNotes: [String]?
 
         public var displayText: String? { processedText ?? result?.text }
 

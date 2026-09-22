@@ -3,6 +3,31 @@ import SpeakCore
 import SpeakDesktop
 
 extension WindowsAppController {
+    func profileRecord(id: UUID, filename: String, profile: DesktopProfileSession) -> DesktopRecordingStore.Record {
+        var record = DesktopRecordingStore.Record(
+            id: id, audioFilename: filename, modelIdentifier: profile.modelIdentifier
+        )
+        record.profileName = profile.profileName
+        record.languageIdentifier = profile.language
+        record.profileNotes = profile.limitations.map(\.message)
+        return record
+    }
+
+    func resolvedProfile(executablePath: String?) -> DesktopProfileSession {
+        DesktopProfileSessionResolver.resolve(
+            profile: ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath),
+            defaultModel: settings.model, defaultPostProcessing: settings.postProcessing ?? .init(),
+            capabilities: profileCapabilities
+        )
+    }
+
+    func profileRecordingStatus(_ profile: DesktopProfileSession) -> String {
+        var status = "Recording… Ctrl+Alt+Space to finish."
+        if let name = profile.profileName { status += " App profile: \(name)." }
+        for limitation in profile.limitations { status += " " + limitation.message }
+        return status
+    }
+
     static func loadProfiles(
         from store: DesktopDictationProfileStore
     ) throws -> (profiles: [DictationProfile], warning: String?) {

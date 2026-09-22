@@ -6,11 +6,15 @@ import CWindowsSupport
 
 extension WindowsAppController {
     func transcribe(
-        _ original: DesktopRecordingStore.Record, duration: TimeInterval, target: WindowsInsertionTarget?
+        _ original: DesktopRecordingStore.Record, duration: TimeInterval, target: WindowsInsertionTarget?,
+        profile: DesktopProfileSession? = nil
     ) async {
         var record = original
         cancellationRequested = false
-        let processingOptions = settings.postProcessing ?? .init()
+        let session = profile ?? .defaults(
+            modelIdentifier: record.modelIdentifier, postProcessing: settings.postProcessing ?? .init(),
+            language: record.languageIdentifier
+        )
         do {
             guard !closed else { throw CancellationError() }
             let key = try WindowsNative.apiKey(name: credentialIdentifier(for: record.modelIdentifier))
@@ -26,7 +30,9 @@ extension WindowsAppController {
             let model = record.modelIdentifier
             let task = Task {
                 try Task.checkCancellation()
-                return try await transcribePreparedAudio(audio, model: model, key: key, duration: duration)
+                return try await transcribePreparedAudio(
+                    audio, model: model, key: key, duration: duration, language: session.language
+                )
             }
             transcriptionTask = task
             defer { transcriptionTask = nil }
@@ -35,9 +41,9 @@ extension WindowsAppController {
             record.failure = nil
             record.processedText = nil
             record.postProcessingModelIdentifier = nil
-            record.postProcessingFailure = nil
+            record.postProcessingFailure = session.skippedPolishReason
             try await saveRecord(record)
-            record = await postProcess(record, options: processingOptions)
+            record = await postProcess(record, options: session.postProcessing)
             if cancellationRequested { record.failure = "Cancelled. Completed transcription and audio retained." }
             try await saveRecord(record)
             // A response already received is still durably saved during shutdown,

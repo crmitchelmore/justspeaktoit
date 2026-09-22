@@ -22,6 +22,7 @@ actor WindowsAppController {
         var record: DesktopRecordingStore.Record
         let target: WindowsInsertionTarget?
         let live: DesktopLiveSession?
+        let profile: DesktopProfileSession
     }
 
     struct StoppedRecording {
@@ -29,6 +30,7 @@ actor WindowsAppController {
         let duration: TimeInterval
         let target: WindowsInsertionTarget?
         let live: DesktopLiveSession?
+        let profile: DesktopProfileSession
     }
 
     let directory: URL
@@ -91,7 +93,10 @@ actor WindowsAppController {
         self.settings = loadedSettings
     }
 
-    func toggle(target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String) async {
+    func toggle(
+        target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String,
+        targetExecutablePath: String? = nil
+    ) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
         cancelInsertion()
         selectModel(modelIndex)
@@ -101,51 +106,9 @@ actor WindowsAppController {
         defer { busy = false; finishOperation() }
         if recording != nil { await stopAndTranscribe(); return }
         do {
-            let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
-            guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
-            let id = UUID()
-            let filename = id.uuidString + ".wav"
-            let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)
-            let rate = DesktopLiveTranscription.route(forID: settings.model)?.sampleRate ?? PCMRecordingFile.sampleRate
-            let file = try PCMRecordingFile(url: audio, sampleRate: rate)
-            let record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
-            var live: DesktopLiveSession?
-            do {
-                // The operation remains active through every metadata write so
-                // shutdown cannot return while startup is still suspended here.
-                try await saveRecord(record)
-                guard !closed else { throw CancellationError() }
-                live = makeLiveSession(model: settings.model, key: key, id: id)
-                live?.start()
-                let context = WindowsCaptureContext(file: file, live: live) { message in
-                    Task { await self.captureFailed(message, recordingID: id) }
-                }
-                let native = try WindowsNative.createCapture(context: context, deviceID: deviceID, sampleRate: rate)
-                do { try WindowsNative.checked { jsti_capture_start(native, $0, $1) } } catch {
-                    withExtendedLifetime(context) { jsti_capture_destroy(native) }
-                    throw error
-                }
-                recording = Recording(native: native, context: context, record: record, target: target, live: live)
-                if let live { monitorLive(live) }
-            } catch {
-                live?.cancel()
-                // Finalize the WAV even if history creation or native allocation
-                // failed before capture started. finish closes the file on error.
-                var failed = record
-                let startupFailure = error
-                failed.failure = closed ? "Recording cancelled when the app closed. Audio retained."
-                    : startupFailure.localizedDescription
-                do { _ = try file.finish() } catch {
-                    failed.failure = "\(failed.failure ?? "Recording failed.") " +
-                        "Audio finalization failed: \(error.localizedDescription)"
-                }
-                do { try await saveRecord(failed) } catch {
-                    throw WindowsNativeError(message: "\(failed.failure ?? "Recording failed.") " +
-                        "History could not be saved: \(error.localizedDescription)")
-                }
-                throw startupFailure
-            }
-            update("Recording… Ctrl+Alt+Space to finish.", state: 1)
+            let profile = resolvedProfile(executablePath: targetExecutablePath)
+            if let limitation = profile.blockingLimitation { throw WindowsNativeError(message: limitation.message) }
+            try await startRecording(target: target, deviceID: deviceID, profile: profile)
         } catch { update(error.localizedDescription, state: 0) }
     }
 
@@ -162,7 +125,7 @@ actor WindowsAppController {
         if let stopFailure { active.live?.cancel(); throw stopFailure }
         return StoppedRecording(
             record: active.record, duration: active.context.file.isDigitalSilence ? 0 : duration,
-            target: active.target, live: active.live
+            target: active.target, live: active.live, profile: active.profile
         )
     }
 
@@ -184,7 +147,11 @@ extension WindowsAppController {
             }
             if let live = stopped.live {
                 await finishLive(stopped, session: live)
-            } else { await transcribe(stopped.record, duration: stopped.duration, target: stopped.target) }
+            } else {
+                await transcribe(
+                    stopped.record, duration: stopped.duration, target: stopped.target, profile: stopped.profile
+                )
+            }
         } catch {
             if var pending {
                 pending.failure = error.localizedDescription

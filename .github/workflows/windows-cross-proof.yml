@@ -260,6 +260,7 @@ jobs:
       - name: Verify hashes, isolate PATH and run the bundled production app
         shell: pwsh
         run: |
+          ./scripts/windows-bundle/test-bundle-environment.ps1
           ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
             -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA
       - name: Upload bundle execution evidence

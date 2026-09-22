@@ -19,6 +19,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'BundleEnvironment.ps1')
 $StatusDllNotFound = -1073741515  # NTSTATUS 0xC0000135 as a signed exit code
 
 function Get-Sha256([string] $path) {
@@ -101,9 +102,7 @@ try {
     $systemRoot = $env:SystemRoot
     $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
     $env:Path = $isolatedPath
-    foreach ($name in @((Get-ChildItem Env: | Where-Object { $_.Name -like 'SWIFT*' }).Name) + @('SDKROOT', 'DEVELOPER_DIR', 'ICU_DATA')) {
-        Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
-    }
+    Clear-BundleToolchainEnvironment
     if (Get-Command swift.exe -ErrorAction SilentlyContinue) { throw 'A Swift toolchain is reachable on the isolated PATH.' }
     $bundled = @{}
     foreach ($property in $manifest.dependencies.bundled.PSObject.Properties) { $bundled[$property.Name] = $property.Value }
@@ -287,7 +286,7 @@ try {
         Write-Host "UI smoke test loaded $($run.modulesFromBundle.Count) modules from the bundle and $($run.modulesFromSystemRoot.Count) from Windows."
     } catch { $failures.Add($_.Exception.Message) }
 } catch {
-    $failures.Add($_.Exception.Message)
+    $failures.Add("$($_.Exception.Message) (script line $($_.InvocationInfo.ScriptLineNumber))")
 } finally {
     $report.failures = @($failures)
     $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory 'bundle-execution-evidence.json') -Encoding utf8

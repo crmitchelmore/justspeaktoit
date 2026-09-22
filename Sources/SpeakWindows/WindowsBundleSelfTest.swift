@@ -10,7 +10,9 @@ enum WindowsBundleSelfTest {
     }
 
     static func run() async throws {
-        guard !ReleaseNotesCatalog.bundled.entries.isEmpty else {
+        guard let notes = WindowsBundledResources.releaseNotesData,
+              let payload = try JSONSerialization.jsonObject(with: notes) as? [String: Any],
+              let entries = payload["entries"] as? [[String: Any]], !entries.isEmpty else {
             throw WindowsNativeError(message: "Bundle resource lookup failed: bundled release notes are empty.")
         }
         let fixture = Fixture(text: "Hello, κόσμε 👋", values: [-1, 0, 42])

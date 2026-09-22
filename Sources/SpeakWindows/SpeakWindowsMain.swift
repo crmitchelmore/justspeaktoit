@@ -15,6 +15,7 @@ final class WindowsEventContext {
     var microphoneMonitor: WindowsMicrophoneMonitor?
     let search: WindowsSearchCoalescer
     private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
+    private let copies: DesktopTranscriptCopyDispatcher
     private var settingsTask: Task<Void, Never>?
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
         guard let self else { return }
@@ -25,6 +26,9 @@ final class WindowsEventContext {
         self.controller = controller
         self.smokeTest = smokeTest
         self.search = WindowsSearchCoalescer { query in await controller.searchHistory(query) }
+        self.copies = DesktopTranscriptCopyDispatcher { text, variant in
+            await controller.copyTranscript(text, variant: variant)
+        }
         self.historyEvents = DesktopEventDispatcher { event in
             switch event {
             case .selection(let identifier): await controller.selectHistory(identifier)
@@ -32,6 +36,10 @@ final class WindowsEventContext {
                 await controller.selectTranscriptVariant(variant, identifier: identifier)
             }
         }
+    }
+
+    func copyTranscript(_ text: String, variant: DesktopTranscriptVariant?) {
+        copies.submit(text, variant: variant)
     }
 
     func selectHistory(_ identifier: String) { historyEvents.submit(.selection(identifier)) }
@@ -143,7 +151,7 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
         let variant = WindowsNative.displayedTranscriptVariant()
         do {
             let text = try WindowsNative.displayedTranscript()
-            Task { await controller.copyTranscript(text, variant: variant) }
+            holder.copyTranscript(text, variant: variant)
         } catch { WindowsNative.update(error.localizedDescription) }
     case 6: holder.microphoneMonitor?.cancel()
     case 15: holder.search.submit(value)

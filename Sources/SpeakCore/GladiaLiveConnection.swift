@@ -30,9 +30,14 @@ extension GladiaLiveClient {
         log("Gladia live session requested")
     }
 
-    /// Outside the lock. The request is retained by its run once it exists; a
-    /// run that closed in the meantime abandons it at once.
+    /// Outside the lock, and possibly long after `begin` decided it (behind a
+    /// held scheduler, say): a run retired meanwhile never starts the
+    /// authenticated request. Once it exists the request is retained by its
+    /// run; a run that closes while it is being created abandons it at once.
     private func initiate(_ active: GladiaLiveRun, _ request: URLRequest) {
+        guard perform({ _ in isCurrent(active) && active.stage == .initiating && active.sessionRequest == nil }) else {
+            return
+        }
         let pending = initiateSession(request) { [weak self, weak active] result in
             guard let self, let active else { return }
             self.sessionReplied(result, active)
@@ -69,8 +74,12 @@ extension GladiaLiveClient {
     // MARK: - Socket (step 2)
 
     /// Outside the lock. The session URL authenticates itself, so the request
-    /// carries no account key.
+    /// carries no account key. A run retired before this effect ran creates no
+    /// socket; one retired while it was being created cancels it.
     private func connect(_ active: GladiaLiveRun, to url: URL) {
+        guard perform({ _ in isCurrent(active) && active.stage == .connecting && active.connection == nil }) else {
+            return
+        }
         let connection = makeConnection(URLRequest(url: url))
         let generation: UInt64? = perform { effects in
             guard isCurrent(active), active.stage == .connecting, active.connection == nil else {
@@ -83,6 +92,8 @@ extension GladiaLiveClient {
             return active.receiveGeneration
         }
         guard let generation else { return }
+        // Retired since the socket was stored: `close` has cancelled it.
+        guard perform({ _ in isCurrent(active) && active.connection === connection }) else { return }
         connection.resume { [weak self, weak active] in
             guard let self, let active else { return }
             self.socketOpened(active)
@@ -104,12 +115,16 @@ extension GladiaLiveClient {
 
     /// One receive is outstanding at a time. A completion that arrives before
     /// `receive` returns is parked and handled by this loop, so a transport
-    /// that answers synchronously cannot grow the stack.
+    /// that answers synchronously cannot grow the stack. A run retired while
+    /// its callbacks were delivered issues no further receive.
     private func receiveLoop(
         _ active: GladiaLiveRun, _ connection: any StreamingWebSocketConnection, generation: UInt64
     ) {
         var next: UInt64? = generation
         while let current = next {
+            guard perform({ _ in
+                isCurrent(active) && active.receiveGeneration == current && active.receiveCallActive
+            }) else { return }
             connection.receive { [weak self, weak active] result in
                 guard let self, let active else { return }
                 self.received(result, generation: current, active)
@@ -188,20 +203,25 @@ extension GladiaLiveClient {
     /// Partials are drafts for their utterance; a final folds once per
     /// utterance ID and is delivered live, including during a finish. The
     /// finish then returns the same confirmed whole, so nothing is doubled.
+    /// The run counts each callback until it returns, so a failure decided
+    /// meanwhile on another thread is reported after it, never before.
     private func deliver(
         _ text: String, utteranceID: String?, isFinal: Bool, _ active: GladiaLiveRun,
         _ effects: inout GladiaLiveEffects
     ) {
         guard !text.isEmpty else { return }
-        let callback = active.onTranscript
-        guard isFinal else {
-            if let utteranceID, active.finalUtteranceIDs.contains(utteranceID) { return }
-            effects.append { callback?(text, false) }
+        if isFinal {
+            if let utteranceID { active.finalUtteranceIDs.insert(utteranceID) }
+            let before = active.accumulator.text
+            guard active.accumulator.append(final: text, eventID: utteranceID) != before else { return }
+        } else if let utteranceID, active.finalUtteranceIDs.contains(utteranceID) {
             return
         }
-        if let utteranceID { active.finalUtteranceIDs.insert(utteranceID) }
-        let before = active.accumulator.text
-        guard active.accumulator.append(final: text, eventID: utteranceID) != before else { return }
-        effects.append { callback?(text, true) }
+        let callback = active.onTranscript
+        active.transcriptCallbacksInFlight += 1
+        effects.append { [self] in
+            callback?(text, isFinal)
+            transcriptCallbackReturned(active)
+        }
     }
 }

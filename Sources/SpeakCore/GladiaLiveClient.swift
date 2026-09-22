@@ -8,7 +8,12 @@ import os.log
 
 // MARK: - Gladia Live Client (portable, injected transports)
 
-/// Shared Gladia Solaria live client used by macOS, iOS and Windows.
+/// Portable Gladia Solaria live client.
+///
+/// iOS builds it through `LiveTranscriptionClientFactory` and Windows through
+/// the desktop live projection. It compiles for every platform, but the macOS
+/// app's production Gladia route still runs its own controller and
+/// transcriber in `SpeakApp`; Mac capture has not been moved onto this client.
 ///
 /// Gladia is two-stage: `POST /v2/live` with `x-gladia-key` creates a session
 /// and returns a single-use WebSocket URL carrying its own temporary token.
@@ -16,12 +21,16 @@ import os.log
 /// `start()` onward and sent one at a time, as binary frames, once the socket
 /// handshake completes. A finish drains that queue, sends `stop_recording`
 /// behind the last chunk and waits for `end_session` inside one whole deadline.
-/// Both transports are injected — `URLSession` on Apple platforms, a native
-/// socket on Windows — while framing, admission, ordering and run identity
-/// stay here so the platforms cannot drift. See `GladiaLive` for the contract.
+/// Both transports are injected (`URLSession` through the original
+/// initializer, as on iOS; the desktop projection's HTTPS request plus the
+/// host's native socket on Windows) while framing, admission, ordering and run
+/// identity stay here, so the platforms that use it cannot drift. See
+/// `GladiaLive` for the contract.
 ///
 /// State changes happen under one lock. Transport calls, deadlines, callbacks
-/// and finish waiters run after it is released, in the order the state changed.
+/// and finish waiters run after it is released, in the order the state changed;
+/// each transport effect re-checks its run first. A failure is reported after
+/// transcripts already being delivered, and before any finish returns.
 public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     /// Each final `transcript` carries one utterance, identified by `data.id`.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
@@ -143,14 +152,21 @@ public final class GladiaLiveClient: FinalizingStreamingTranscriptionClient, @un
     /// `end_session`, inside `GladiaLive.finishBudget` from the moment the
     /// first finish begins. Concurrent and repeated finishes share one
     /// outcome. Returns the confirmed transcript of the whole session, or
-    /// `nil` when nothing was transcribed; a failure is published through
-    /// `onError` before any finish returns. Cancelling the calling task
+    /// `nil` when nothing was transcribed. A failure is published through
+    /// `onError` before any finish returns, including one that joins while
+    /// that report is still being delivered. Cancelling the calling task
     /// aborts the run.
     public func finishAndWait() async -> String? {
         let active = lock.withLock { run }
         return await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
                 perform { effects in
+                    if active.reportingFailure {
+                        // Retired by a failure whose report has not returned:
+                        // resumed with the others once it has.
+                        active.waiters.append(continuation)
+                        return
+                    }
                     guard isCurrent(active), active.stage != .idle else {
                         let transcript = active.transcript
                         effects.append { continuation.resume(returning: transcript) }
@@ -198,21 +214,53 @@ extension GladiaLiveClient {
 
     /// Retires the run, then reports the error, then resumes its finish waiters
     /// with the confirmed text. The run is closed before `onError` runs, so the
-    /// callback may start a replacement that nothing here can touch.
+    /// callback may start a replacement that nothing here can touch. Until the
+    /// report has returned, the run keeps every finish waiter parked, including
+    /// ones that join after it closed. The report itself waits for transcript
+    /// callbacks already in flight; the caller that failed the run, perhaps on
+    /// the capture path, never waits for either.
     func fail(_ error: Error, _ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
         guard isCurrent(active) else { return }
         let callback = active.onError
-        let waiters = active.waiters
-        active.waiters.removeAll()
-        let transcript = active.transcript
+        active.reportingFailure = true
         close(active, &effects)
         log("Gladia live session failed")
-        effects.append { callback?(error) }
-        effects.append { waiters.forEach { $0.resume(returning: transcript) } }
+        let report: () -> Void = { [self] in
+            callback?(error)
+            reportDelivered(active)
+        }
+        if active.transcriptCallbacksInFlight == 0 {
+            effects.append(report)
+        } else {
+            active.deferredReport = report
+        }
+    }
+
+    /// `onError` returned: resume every waiter the failed run parked.
+    private func reportDelivered(_ active: GladiaLiveRun) {
+        perform { effects in
+            active.reportingFailure = false
+            let waiters = active.waiters
+            active.waiters.removeAll()
+            let transcript = active.transcript
+            effects.append { waiters.forEach { $0.resume(returning: transcript) } }
+        }
+    }
+
+    /// An `onTranscript` call returned; a failure report held behind the last
+    /// one in flight is delivered now, by the thread that delivered it.
+    func transcriptCallbackReturned(_ active: GladiaLiveRun) {
+        perform { effects in
+            active.transcriptCallbacksInFlight -= 1
+            guard active.transcriptCallbacksInFlight == 0, let report = active.deferredReport else { return }
+            active.deferredReport = nil
+            effects.append(report)
+        }
     }
 
     /// Ends the run: abandons its request and socket, invalidates every
-    /// pending send, receive and deadline, and resumes its waiters.
+    /// pending send, receive and deadline, and resumes its waiters unless a
+    /// failure's report still has to reach the host first.
     func close(_ active: GladiaLiveRun, _ effects: inout GladiaLiveEffects) {
         guard active.stage != .closed else { return }
         active.stage = .closed
@@ -231,8 +279,8 @@ extension GladiaLiveClient {
         active.receiveCallActive = false
         active.earlyReceive = nil
         active.receiveGeneration &+= 1
-        let waiters = active.waiters
-        active.waiters.removeAll()
+        var waiters: [CheckedContinuation<String?, Never>] = []
+        if !active.reportingFailure { swap(&waiters, &active.waiters) }
         let transcript = active.transcript
         active.onTranscript = nil
         active.onError = nil

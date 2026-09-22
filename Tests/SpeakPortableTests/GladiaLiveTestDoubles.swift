@@ -99,6 +99,7 @@ final class GladiaFakeSocket: StreamingWebSocketConnection, @unchecked Sendable 
     private var deepestSend = 0
     private var deepestReceive = 0
     private var sendHook: (@Sendable (StreamingWebSocketMessage) -> Void)?
+    private var cancelHold: (entered: @Sendable () -> Void, gate: DispatchSemaphore)?
 
     init(request: URLRequest) { self.request = request }
 
@@ -152,6 +153,14 @@ final class GladiaFakeSocket: StreamingWebSocketConnection, @unchecked Sendable 
     /// Real transports release pending work promptly on cancellation; the
     /// client must ignore those late completions by run identity.
     func cancel() {
+        let hold = lock.withLock { () -> (entered: @Sendable () -> Void, gate: DispatchSemaphore)? in
+            defer { cancelHold = nil }
+            return cancelHold
+        }
+        if let hold {
+            hold.entered()
+            hold.gate.wait()
+        }
         let (pendingReceive, pendingSends) = lock.withLock {
             cancels += 1
             let pending = (receiver, held)
@@ -164,6 +173,12 @@ final class GladiaFakeSocket: StreamingWebSocketConnection, @unchecked Sendable 
     }
 
     // MARK: Test controls
+
+    /// The next `cancel()` reports that it started, then blocks the calling
+    /// thread until `gate` is signalled.
+    func holdNextCancel(entered: @escaping @Sendable () -> Void, until gate: DispatchSemaphore) {
+        lock.withLock { cancelHold = (entered, gate) }
+    }
 
     func open() { lock.withLock { opener }?() }
 
@@ -222,54 +237,6 @@ final class GladiaFakeSocketFactory: @unchecked Sendable {
             setup?(socket)
             return socket
         }
-    }
-}
-
-/// A clock that only moves when the test advances it.
-final class GladiaManualClock: @unchecked Sendable {
-    private struct Entry {
-        let due: TimeInterval
-        let delay: TimeInterval
-        let action: @Sendable () -> Void
-    }
-
-    private let lock = NSLock()
-    private var now: TimeInterval = 0
-    private var entries: [Entry] = []
-    private var delays: [TimeInterval] = []
-    private var watchers: [(delay: TimeInterval, action: @Sendable () -> Void)] = []
-
-    var scheduledDelays: [TimeInterval] { lock.withLock { delays } }
-
-    var scheduler: GladiaLiveClient.Scheduler {
-        { [self] seconds, action in
-            let matched = lock.withLock { () -> [@Sendable () -> Void] in
-                entries.append(Entry(due: now + seconds, delay: seconds, action: action))
-                delays.append(seconds)
-                let hits = watchers.filter { $0.delay == seconds }.map(\.action)
-                watchers.removeAll { $0.delay == seconds }
-                return hits
-            }
-            matched.forEach { $0() }
-        }
-    }
-
-    /// Runs `action` once, when a deadline of exactly `delay` is next armed.
-    func whenScheduled(_ delay: TimeInterval, _ action: @escaping @Sendable () -> Void) {
-        lock.withLock { watchers.append((delay, action)) }
-    }
-
-    func count(of delay: TimeInterval) -> Int { lock.withLock { delays.filter { $0 == delay }.count } }
-
-    /// Moves time forward and fires every deadline now due, in due order.
-    func advance(by seconds: TimeInterval) {
-        let due = lock.withLock { () -> [Entry] in
-            now += seconds
-            let ready = entries.filter { $0.due <= now }.sorted { $0.due < $1.due }
-            entries.removeAll { $0.due <= now }
-            return ready
-        }
-        due.forEach { $0.action() }
     }
 }
 

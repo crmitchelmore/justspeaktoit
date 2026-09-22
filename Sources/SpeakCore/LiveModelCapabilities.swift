@@ -112,8 +112,10 @@ extension ModelCatalog {
         "cartesia/ink-2-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
-        // Gladia's trailing finals and `end_session` follow `stop_recording`;
-        // the shared client's whole finish bound is built from this window.
+        // Gladia's trailing finals and `end_session` follow `stop_recording`.
+        // The macOS Gladia controller waits this window after its own
+        // `stop_recording`; the shared client used on iOS and Windows builds
+        // its whole finish bound from the same window.
         "gladia/solaria-1-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: GladiaLive.finalEventWindow

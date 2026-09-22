@@ -85,7 +85,46 @@ final class GladiaDesktopFactoryTests: XCTestCase {
         XCTAssertEqual(socket.cancels, 1)
     }
 
+    /// Gladia's failure reaches the client on a transport thread while the
+    /// host is finishing. The session must end failed with the error, never
+    /// as a success that the late report can no longer correct.
+    func testDesktopSessionFinishingDuringAPendingFailureReportEndsFailed() async throws {
+        let socket = GladiaHeldCancelSocket()
+        let client = Self.client { _ in socket }
+        let session = DesktopLiveSession(client: client)
+        session.start()
+        socket.open()
+        session.sendAudio(Data(repeating: 3, count: 3_200))
+        socket.completeSend()
+        socket.emit(Self.transcript("Kept.", id: "00-01", isFinal: true))
+        let cancelling = expectation(description: "The failed run's socket is being cancelled")
+        let gate = DispatchSemaphore(value: 0)
+        socket.holdNextCancel(entered: { cancelling.fulfill() }, until: gate)
+        DispatchQueue.global().async {
+            socket.emit(#"{"type":"error","error":{"message":"Upstream failure"}}"#)
+        }
+        await fulfillment(of: [cancelling], timeout: 5)
+        XCTAssertEqual(client.currentStage, .closed)
+        XCTAssertEqual(session.snapshot().phase, .recording, "The host has not heard the failure yet")
+
+        let finishing = Task { await session.finish() }
+        let parked = Date().addingTimeInterval(5)
+        while client.finishWaiterCount < 1, Date() < parked { await Task.yield() }
+        XCTAssertEqual(client.finishWaiterCount, 1, "The host's finish waits for the pending report")
+        gate.signal()
+        let snapshot = await finishing.value
+        XCTAssertEqual(snapshot.phase, .failed)
+        XCTAssertEqual(snapshot.error, GladiaStreamingError.server(message: "Upstream failure").localizedDescription)
+        XCTAssertEqual(snapshot.text, "Kept.")
+    }
+
     private static func client(_ factory: AssemblyAISocketFactory) -> GladiaLiveClient {
+        client { factory.make($0) }
+    }
+
+    private static func client(
+        _ makeConnection: @escaping GladiaLiveClient.ConnectionFactory
+    ) -> GladiaLiveClient {
         GladiaLiveClient(
             apiKey: "synthetic",
             initiateSession: { _, completion in
@@ -93,7 +132,7 @@ final class GladiaDesktopFactoryTests: XCTestCase {
                 completion(.success((201, Data(body.utf8))))
                 return GladiaNoRequest()
             },
-            makeConnection: { factory.make($0) },
+            makeConnection: makeConnection,
             schedule: { _, _ in }
         )
     }
@@ -105,4 +144,52 @@ final class GladiaDesktopFactoryTests: XCTestCase {
 
 private final class GladiaNoRequest: GladiaLiveSessionRequest {
     func cancel() {}
+}
+
+/// One socket whose next `cancel()` can be held on the thread that calls it.
+private final class GladiaHeldCancelSocket: StreamingWebSocketConnection, @unchecked Sendable {
+    private let lock = NSLock()
+    private var opener: (@Sendable () -> Void)?
+    private var receiver: (@Sendable (Result<StreamingWebSocketMessage, Error>) -> Void)?
+    private var completions: [@Sendable (Error?) -> Void] = []
+    private var cancelHold: (entered: @Sendable () -> Void, gate: DispatchSemaphore)?
+
+    func resume(onOpen: @escaping @Sendable () -> Void) { lock.withLock { opener = onOpen } }
+
+    func send(_ message: StreamingWebSocketMessage, completion: @escaping @Sendable (Error?) -> Void) {
+        lock.withLock { completions.append(completion) }
+    }
+
+    func receive(completion: @escaping @Sendable (Result<StreamingWebSocketMessage, Error>) -> Void) {
+        lock.withLock { receiver = completion }
+    }
+
+    func cancel() {
+        let hold = lock.withLock { () -> (entered: @Sendable () -> Void, gate: DispatchSemaphore)? in
+            defer { cancelHold = nil }
+            return cancelHold
+        }
+        guard let hold else { return }
+        hold.entered()
+        hold.gate.wait()
+    }
+
+    func holdNextCancel(entered: @escaping @Sendable () -> Void, until gate: DispatchSemaphore) {
+        lock.withLock { cancelHold = (entered, gate) }
+    }
+
+    func open() { lock.withLock { opener }?() }
+
+    func completeSend() {
+        let completion = lock.withLock { completions.isEmpty ? nil : completions.removeFirst() }
+        completion?(nil)
+    }
+
+    func emit(_ text: String) {
+        let pending = lock.withLock { () -> (@Sendable (Result<StreamingWebSocketMessage, Error>) -> Void)? in
+            defer { receiver = nil }
+            return receiver
+        }
+        pending?(.success(.text(text)))
+    }
 }

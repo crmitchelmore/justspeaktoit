@@ -4,8 +4,9 @@ import SpeakDesktop
 import CWindowsSupport
 
 actor WindowsAppController {
-    private struct Settings: Codable {
+    struct Settings: Codable {
         var model = OpenAITranscriptionModels.gptTranscribeCatalogID
+        var postProcessing: DesktopPostProcessing.Options?
     }
 
     private struct Recording {
@@ -21,19 +22,22 @@ actor WindowsAppController {
         let target: JSTITextTarget?
     }
 
-    private let directory: URL
-    private let store: DesktopRecordingStore
-    private var settings: Settings
+    let directory: URL
+    let store: DesktopRecordingStore
+    var settings: Settings
     private var recording: Recording?
     private var isReady = false
-    private var busy = false
-    private var closed = false
+    var busy = false
+    var closed = false
     private var shutdownComplete = false
-    private var activeOperations = 0
+    var activeOperations = 0
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
-    private var transcript = ""
-    private var transcriptionTask: Task<TranscriptionResult, Error>?
+    var transcript = ""
+    var history: [UUID: DesktopRecordingStore.Record] = [:]
+    var selectedHistoryID: UUID?
+    var transcriptionTask: Task<TranscriptionResult, Error>?
+    var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
 
     init(directory: URL) throws {
         self.directory = directory
@@ -47,6 +51,12 @@ actor WindowsAppController {
         }
         if !DesktopTranscription.batchModels.contains(where: { $0.id == loadedSettings.model }) {
             loadedSettings.model = OpenAITranscriptionModels.gptTranscribeCatalogID
+        }
+        if var processing = loadedSettings.postProcessing,
+           !DesktopPostProcessing.remoteModels.contains(where: { $0.id == processing.modelIdentifier }) {
+            processing.mode = .disabled
+            processing.modelIdentifier = ModelCatalog.defaultPostProcessingModel
+            loadedSettings.postProcessing = processing
         }
         self.settings = loadedSettings
     }
@@ -70,7 +80,7 @@ actor WindowsAppController {
             do {
                 // The operation remains active through every metadata write so
                 // shutdown cannot return while startup is still suspended here.
-                try await store.save(record)
+                try await saveRecord(record)
                 guard !closed else { throw CancellationError() }
                 let context = WindowsCaptureContext(file: file) { message in
                     Task { await self.captureFailed(message, recordingID: id) }
@@ -94,7 +104,7 @@ actor WindowsAppController {
                     failed.failure = "\(failed.failure ?? "Recording failed.") " +
                         "Audio finalization failed: \(error.localizedDescription)"
                 }
-                do { try await store.save(failed) } catch {
+                do { try await saveRecord(failed) } catch {
                     throw WindowsNativeError(message: "\(failed.failure ?? "Recording failed.") " +
                         "History could not be saved: \(error.localizedDescription)")
                 }
@@ -124,7 +134,7 @@ actor WindowsAppController {
             guard stopped.duration > 0 else {
                 var empty = stopped.record
                 empty.failure = "No audio was captured."
-                try await store.save(empty)
+                try await saveRecord(empty)
                 update("No audio was captured.", state: 0)
                 return
             }
@@ -132,7 +142,7 @@ actor WindowsAppController {
         } catch {
             if var pending {
                 pending.failure = error.localizedDescription
-                do { try await store.save(pending) } catch {
+                do { try await saveRecord(pending) } catch {
                     update("Recording and history error: \(error.localizedDescription)", state: 0)
                     return
                 }
@@ -149,7 +159,7 @@ actor WindowsAppController {
         var record = recording?.record
         _ = try? stopCapture()
         record?.failure = message
-        do { if let record { try await store.save(record) } } catch {
+        do { if let record { try await saveRecord(record) } } catch {
             update("\(message) History error: \(error.localizedDescription)", state: 0)
             return
         }
@@ -173,69 +183,15 @@ actor WindowsAppController {
             let destination = directory.appendingPathComponent("History").appendingPathComponent(filename)
             try FileManager.default.copyItem(at: source, to: destination)
             let record = DesktopRecordingStore.Record(id: id, audioFilename: filename, modelIdentifier: settings.model)
-            try await store.save(record)
+            try await saveRecord(record)
             if closed {
                 var cancelled = record
                 cancelled.failure = "Import cancelled when the app closed. Audio retained."
-                try await store.save(cancelled)
+                try await saveRecord(cancelled)
                 return
             }
             await transcribe(record, duration: 0, target: nil)
         } catch { update(error.localizedDescription, state: 0) }
-    }
-
-    private func transcribe(
-        _ original: DesktopRecordingStore.Record, duration: TimeInterval, target: JSTITextTarget?
-    ) async {
-        var record = original
-        do {
-            guard !closed else { throw CancellationError() }
-            let key = try WindowsNative.apiKey(name: credentialIdentifier(for: record.modelIdentifier))
-            let audio = directory.appendingPathComponent("History").appendingPathComponent(record.audioFilename)
-            let size = try audio.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= 25_000_000 else {
-                throw WindowsNativeError(
-                    message: "Audio exceeds this Windows preview’s 25 MB upload cap. The recording is saved."
-                )
-            }
-            update("Transcribing… Your recording is saved locally.", state: 2)
-            let model = record.modelIdentifier
-            let task = Task {
-                try Task.checkCancellation()
-                return try await DesktopTranscription.transcribe(
-                    audioURL: audio, model: model, apiKey: key, duration: duration
-                )
-            }
-            transcriptionTask = task
-            defer { transcriptionTask = nil }
-            let result = try await task.value
-            record.result = result
-            record.failure = nil
-            try await store.save(record)
-            // A response already received is still durably saved during shutdown,
-            // but closing must never insert text or update a destroyed window.
-            guard !closed else { return }
-            transcript = result.text
-            var status = "Saved to History. Select Copy to use the transcript."
-            if var target, !transcript.isEmpty, !closed {
-                do {
-                    try transcript.withCString { text in
-                        try WindowsNative.checked { jsti_target_insert_text(&target, text, $0, $1) }
-                    }
-                    status = "Inserted into the original text field and saved to History."
-                } catch {
-                    status = "Saved. Automatic insertion unavailable; select Copy. \(error.localizedDescription)"
-                }
-            }
-            update(status, transcript: transcript, state: 0)
-        } catch {
-            record.failure = error.localizedDescription
-            do { try await store.save(record) } catch {
-                update("History could not be saved: \(error.localizedDescription)", state: 0)
-                return
-            }
-            update("Audio retained in History. \(error.localizedDescription)", state: 0)
-        }
     }
 
     func close() async {
@@ -247,12 +203,13 @@ actor WindowsAppController {
         }
         closed = true
         transcriptionTask?.cancel()
+        postProcessingTask?.cancel()
         if var record = recording?.record {
             record.failure = "Recording stopped when the app closed. Audio retained."
             do { _ = try stopCapture() } catch {
                 record.failure = "\(record.failure ?? "Recording stopped.") \(error.localizedDescription)"
             }
-            do { try await store.save(record) } catch {
+            do { try await saveRecord(record) } catch {
                 FileHandle.standardError.write(Data("Could not persist recording on close.\n".utf8))
             }
         }
@@ -270,7 +227,18 @@ actor WindowsAppController {
 }
 
 extension WindowsAppController {
-    private func finishOperation() {
+    func saveRecord(_ record: DesktopRecordingStore.Record) async throws {
+        try await store.save(record)
+        history[record.id] = record
+        refreshHistory()
+    }
+
+    func refreshHistory() {
+        guard !closed else { return }
+        WindowsNative.history(Array(history.values).sorted { $0.createdAt > $1.createdAt }, selected: selectedHistoryID)
+    }
+
+    func finishOperation() {
         activeOperations -= 1
         guard activeOperations == 0 else { return }
         let waiters = operationWaiters
@@ -278,17 +246,19 @@ extension WindowsAppController {
         waiters.forEach { $0.resume() }
     }
 
-    private func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {
+    func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {
         guard !closed else { return }
         WindowsNative.update(status, transcript: transcript, state: state)
     }
 
-    private func credentialIdentifier(for model: String) throws -> String {
+    func credentialIdentifier(for model: String) throws -> String {
         guard let provider = DesktopTranscription.provider(for: model) else {
             throw DesktopTranscriptionError.unsupportedModel
         }
         return provider.apiKeyIdentifier
     }
+    var canUseHistory: Bool { isReady && !closed && !busy && recording == nil }
+
     func selectedIndex() -> Int {
         DesktopTranscription.batchModels.firstIndex { $0.id == settings.model } ?? 0
     }
@@ -302,7 +272,10 @@ extension WindowsAppController {
             let recovery = try await store.recoverInterruptedRecordings()
             guard !closed, !busy, recording == nil else { return }
             let records = recovery.records
-            transcript = records.first(where: { $0.result != nil })?.result?.text ?? ""
+            history = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            selectedHistoryID = records.first(where: { $0.result != nil })?.id ?? records.first?.id
+            transcript = selectedHistoryID.flatMap { history[$0]?.displayText } ?? ""
+            refreshHistory()
             let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
             var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
                 : "Ready. Ctrl+Alt+Space starts or stops recording. \(records.count) saved recordings."
@@ -336,10 +309,11 @@ extension WindowsAppController {
         } catch { update(error.localizedDescription) }
     }
 
-    func copyTranscript() {
+    func copyTranscript(identifier: String = "") {
         guard !closed else { return }
         do {
-            try transcript.withCString { text in
+            let selected = UUID(uuidString: identifier).flatMap { history[$0]?.displayText }
+            try (selected ?? transcript).withCString { text in
                 try WindowsNative.checked { jsti_clipboard_write(text, $0, $1) }
             }
             update("Transcript copied.")

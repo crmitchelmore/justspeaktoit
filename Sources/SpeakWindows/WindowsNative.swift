@@ -1,6 +1,7 @@
 import Foundation
 import CWindowsSupport
 import SpeakDesktop
+import SpeakCore
 
 struct WindowsNativeError: LocalizedError {
     let message: String
@@ -47,6 +48,45 @@ enum WindowsNative {
                 try checked { jsti_credential_write(name, bytes.baseAddress, bytes.count, $0, $1) }
             }
         }
+    }
+
+    static func chooseExportPath(identifier: String) throws -> String? {
+        var path = [CChar](repeating: 0, count: 131_072)
+        var error = [CChar](repeating: 0, count: 1024)
+        let result = jsti_window_choose_export_path(
+            "Transcript-\(identifier).txt", &path, path.count, &error, error.count
+        )
+        if result == 1 { return nil }
+        guard result == 0 else { throw WindowsNativeError(message: String(cString: error)) }
+        return String(cString: path)
+    }
+
+    static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?) {
+        var strings: [UnsafeMutablePointer<CChar>] = []
+        defer { strings.forEach { $0.deallocate() } }
+        func owned(_ value: String) -> UnsafePointer<CChar> {
+            let bytes = Array(value.utf8CString)
+            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
+            pointer.initialize(from: bytes, count: bytes.count)
+            strings.append(pointer)
+            return UnsafePointer(pointer)
+        }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let rows = records.map { record in
+            let model = ModelCatalog.batchTranscription.first { $0.id == record.modelIdentifier }?.displayName
+                ?? record.modelIdentifier.split(separator: "/").last.map(String.init) ?? record.modelIdentifier
+            let detail = record.failure ?? record.displayText ?? "Recording saved; awaiting transcription."
+            return JSTIHistoryRow(
+                id: owned(record.id.uuidString), title: owned("\(formatter.string(from: record.createdAt)) · \(model)"),
+                detail: owned(String(detail.prefix(180)).replacingOccurrences(of: "\n", with: " "))
+            )
+        }
+        let result = rows.withUnsafeBufferPointer { rows in
+            (selected?.uuidString ?? "").withCString { jsti_window_set_history(rows.baseAddress, rows.count, $0) }
+        }
+        if result != 0 { update("The history list could not be refreshed. Saved recordings remain on disk.") }
     }
 }
 

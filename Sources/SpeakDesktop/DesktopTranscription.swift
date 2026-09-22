@@ -15,15 +15,21 @@ public enum DesktopTranscription {
     /// the Apple surfaces use. Unimplemented models never acquire a descriptor.
     public static func provider(for modelID: String) -> TranscriptionProviderMetadata? {
         let identifier = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard backend(for: identifier) != nil,
+        guard let backend = backend(for: identifier),
               case .apiKey(let credentialID, let providerName) = ModelCredentialResolver.requirement(
                 for: identifier, purpose: .batchTranscription
               ),
               let providerID = ModelRouting.family(for: identifier).providerID else { return nil }
+        let website: String
+        if case .groq = backend {
+            website = GroqBatchClient().metadata.website
+        } else {
+            website = LiveTranscriptionProviderID(rawValue: providerID)?.apiKeyURL?.absoluteString ?? ""
+        }
         return TranscriptionProviderMetadata(
             id: providerID,
             displayName: providerName,
-            website: LiveTranscriptionProviderID(rawValue: providerID)?.apiKeyURL?.absoluteString ?? "",
+            website: website,
             apiKeyIdentifier: credentialID
         )
     }
@@ -59,20 +65,10 @@ public enum DesktopTranscription {
         guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
         try Task.checkCancellation()
         do {
-            switch backend {
-            case .openai:
-                return try await OpenAIBatchClient(session: session, durationResolver: { _ in duration })
-                    .transcribeFile(at: audioURL, apiKey: key, model: identifier, language: language)
-            case .cartesia:
-                return try await CartesiaBatchClient(session: session)
-                    .transcribeFile(at: audioURL, apiKey: key, language: language)
-            case .gladia:
-                return try await GladiaBatchClient(session: session)
-                    .transcribeFile(at: audioURL, apiKey: key, model: identifier, language: language)
-            case .speechmatics:
-                return try await SpeechmaticsBatchClient(session: session)
-                    .transcribeFile(at: audioURL, apiKey: key, model: identifier, language: language)
-            }
+            return try await transcribe(
+                Request(audioURL: audioURL, model: identifier, apiKey: key, duration: duration, language: language),
+                using: backend, session: session
+            )
         } catch {
             // URLSession may report cancellation as URLError.cancelled. Keep
             // cancellation distinct from a failed recording on every route.
@@ -80,8 +76,55 @@ public enum DesktopTranscription {
         }
     }
 
+    private struct Request {
+        let audioURL: URL
+        let model: String
+        let apiKey: String
+        let duration: TimeInterval
+        let language: String?
+    }
+
+    private static func transcribe(
+        _ input: Request, using backend: Backend, session: URLSession
+    ) async throws -> TranscriptionResult {
+        switch backend {
+        case .openai:
+            return try await OpenAIBatchClient(session: session, durationResolver: { _ in input.duration })
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        case .groq:
+            return try await GroqBatchClient(session: session, durationResolver: { _ in input.duration })
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        case .deepgram:
+            return try await DeepgramBatchClient(session: session, durationResolver: { _ in input.duration })
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        case .elevenlabs:
+            return try await ElevenLabsBatchClient(session: session, durationResolver: { _ in input.duration })
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        case .google:
+            return try await GeminiInteractionsClient(session: session, durationResolver: { _ in input.duration })
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        case .xai:
+            return try await XAIBatchTranscriptionClient(session: session)
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, language: input.language)
+        case .cartesia:
+            return try await CartesiaBatchClient(session: session)
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, language: input.language)
+        case .gladia:
+            return try await GladiaBatchClient(session: session)
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        case .speechmatics:
+            return try await SpeechmaticsBatchClient(session: session)
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
+        }
+    }
+
     private enum Backend {
         case openai
+        case groq
+        case deepgram
+        case xai
+        case elevenlabs
+        case google
         case cartesia
         case gladia
         case speechmatics
@@ -90,6 +133,15 @@ public enum DesktopTranscription {
     /// One mapping controls discovery, credentials and execution. Model entries
     /// and defaults continue to be owned by the shared catalogue and clients.
     private static func backend(for model: String) -> Backend? {
+        if GeminiTranscribeModels.directBatchModelIDs.contains(model) { return .google }
+        if model == XAISpeechToText.batchCatalogID { return .xai }
+        // These clients accept every batch model owned by their canonical
+        // provider catalogue. Unknown and streaming identifiers stay hidden.
+        if case .cloudBatch(let provider) = ModelRouting.family(for: model) {
+            if provider == "groq" { return .groq }
+            if provider == "deepgram" { return .deepgram }
+            if provider == "elevenlabs" { return .elevenlabs }
+        }
         if OpenAITranscriptionModels.directBatchModelIDs.contains(model) { return .openai }
         if model == CartesiaBatchClient.catalogID { return .cartesia }
         if model == GladiaBatchClient.catalogID { return .gladia }

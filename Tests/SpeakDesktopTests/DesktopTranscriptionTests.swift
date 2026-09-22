@@ -22,7 +22,9 @@ final class DesktopTranscriptionTests: XCTestCase {
             )
             XCTAssertEqual(descriptor.id, ModelRouting.family(for: model.id).providerID)
             XCTAssertEqual(descriptor.apiKeyLabel, descriptor.displayName + " API Key")
-            XCTAssertEqual(descriptor.apiKeyURL, LiveTranscriptionProviderID(rawValue: descriptor.id)?.apiKeyURL)
+            let accountURL = descriptor.id == GroqBatchClient().metadata.id
+                ? GroqBatchClient().metadata.apiKeyURL : LiveTranscriptionProviderID(rawValue: descriptor.id)?.apiKeyURL
+            XCTAssertEqual(descriptor.apiKeyURL, accountURL)
             XCTAssertNotNil(descriptor.apiKeyURL)
         }
         XCTAssertNil(DesktopTranscription.provider(for: "apple/local/SFSpeechRecognizer"))
@@ -139,13 +141,13 @@ final class DesktopTranscriptionTests: XCTestCase {
             for status in [401, 429] {
                 StubURLProtocol.reset()
                 StubURLProtocol.handler = { request in
-                    .status(status, Data("provider rejection".utf8), url: request.url!)
+                    .status(status, Data(Self.rejection.utf8), url: request.url!)
                 }
                 do {
                     _ = try await transcribe(audio, model: model.id)
                     XCTFail("Expected failure for \(model.id)")
                 } catch {
-                    XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, "provider rejection"))
+                    assertProviderFailure(error, model: model.id, status: status)
                 }
                 XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
                 XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
@@ -256,6 +258,27 @@ final class DesktopTranscriptionTests: XCTestCase {
 }
 
 private extension DesktopTranscriptionTests {
+    static let rejection = #"{"error":{"message":"provider rejection"}}"#
+
+    func assertProviderFailure(_ error: Error, model: String, status: Int) {
+        if model == XAISpeechToText.batchCatalogID {
+            let expected: XAISpeechToTextError = status == 401
+                ? .unauthorized(statusCode: status) : .rateLimited(message: "provider rejection")
+            XCTAssertEqual(error as? XAISpeechToTextError, expected)
+        } else if GeminiTranscribeModels.directBatchModelIDs.contains(model) {
+            if status == 401 {
+                guard case StreamingClientError.invalidAPIKey(let provider) = error else {
+                    return XCTFail("Unexpected Google error: \(error)")
+                }
+                XCTAssertEqual(provider, GeminiTranscribeModels.providerDisplayName)
+            } else {
+                XCTAssertEqual(error as? GeminiBatchError, .rateLimited("provider rejection"))
+            }
+        } else {
+            XCTAssertEqual(error as? TranscriptionProviderError, .httpError(status, Self.rejection))
+        }
+    }
+
     func transcribe(_ audio: URL, model: String) async throws -> TranscriptionResult {
         try await DesktopTranscription.transcribe(
             audioURL: audio, model: model, apiKey: "  desktop-test  ", duration: 7,

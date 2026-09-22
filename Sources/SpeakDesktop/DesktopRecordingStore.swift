@@ -11,6 +11,11 @@ public actor DesktopRecordingStore {
         public let modelIdentifier: String
         public var result: TranscriptionResult?
         public var failure: String?
+        public var processedText: String?
+        public var postProcessingModelIdentifier: String?
+        public var postProcessingFailure: String?
+
+        public var displayText: String? { processedText ?? result?.text }
 
         public init(id: UUID, audioFilename: String, modelIdentifier: String) {
             self.id = id
@@ -41,6 +46,45 @@ public actor DesktopRecordingStore {
         // Surface corrupt records rather than silently hiding user history.
         return try files.map { try JSONDecoder().decode(Record.self, from: Data(contentsOf: $0)) }
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    public func record(id: UUID) throws -> Record {
+        let url = directory.appendingPathComponent(id.uuidString + ".json")
+        let record = try JSONDecoder().decode(Record.self, from: Data(contentsOf: url))
+        guard record.id == id else { throw CocoaError(.fileReadCorruptFile) }
+        return record
+    }
+
+    /// Resolves only a regular audio file inside this store, including after
+    /// symlink resolution. Imported metadata never grants access outside History.
+    public func audioURL(for record: Record) throws -> URL {
+        let name = record.audioFilename
+        guard !name.isEmpty, name != ".", name != "..",
+              !name.contains("/"), !name.contains("\\"), !name.contains(":") else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let root = directory.resolvingSymlinksInPath().standardizedFileURL
+        let url = root.appendingPathComponent(name).resolvingSymlinksInPath().standardizedFileURL
+        guard url.deletingLastPathComponent() == root,
+              try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return url
+    }
+
+    public func exportTranscript(id: UUID, to destination: URL) throws {
+        let record = try record(id: id)
+        guard let text = record.displayText else { throw CocoaError(.fileReadUnknown) }
+        // A save dialog can accept a manually typed path. Never replace the
+        // retained audio/metadata with its exported transcript.
+        let root = directory.resolvingSymlinksInPath().standardizedFileURL
+        let target = destination.resolvingSymlinksInPath().standardizedFileURL
+        guard !target.pathComponents.starts(with: root.pathComponents, by: {
+            $0.caseInsensitiveCompare($1) == .orderedSame
+        }) else {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        try Data(text.utf8).write(to: destination, options: .atomic)
     }
 
     /// Called once at launch, before capture starts. Recoverable recordings are

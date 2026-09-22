@@ -52,8 +52,6 @@ let appleCoreSources: [String] = [
     "ElevenLabsBalanceClient.swift",
     "ElevenLabsLiveClient.swift",
     "FileProductAnalyticsStateStore.swift",
-    "GeminiInteractionsAPI.swift",
-    "GeminiInteractionsClient.swift",
     "GeminiLiveClient.swift",
     "GeminiLiveProtocol.swift",
     "GeminiTTSAPI.swift",
@@ -144,7 +142,6 @@ let appleCoreSources: [String] = [
     "WatchRecordingLifecycle.swift",
     "WatchRecordingToggleSerialiser.swift",
     "WatchSharedContainer.swift",
-    "XAIBatchTranscriptionClient.swift",
     "XAILiveClient.swift",
     "XAILiveFinalisation.swift",
     "XAILiveProtocol.swift",
@@ -189,7 +186,7 @@ portablePackage.targets.append(contentsOf: [
         publicHeadersPath: "include",
         linkerSettings: [
             .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
-            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
+            .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"), .linkedLibrary("shell32"),
             .linkedLibrary("avrt")
         ]
     ),

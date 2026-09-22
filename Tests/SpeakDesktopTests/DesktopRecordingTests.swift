@@ -41,6 +41,11 @@ final class DesktopRecordingTests: XCTestCase {
         let expected = OpenAITranscriptionModels.directBatchModelIDs
             .union([CartesiaBatchClient.catalogID, GladiaBatchClient.catalogID])
             .union(SpeechmaticsBatchClient.catalogIDs)
+            .union([XAISpeechToText.batchCatalogID])
+            .union(GroqBatchClient().supportedModels().map(\.id))
+            .union(DeepgramBatchClient().supportedModels().map(\.id))
+            .union(ElevenLabsBatchClient().supportedModels().map(\.id))
+            .union(GeminiTranscribeModels.directBatchModelIDs)
         XCTAssertEqual(Set(DesktopTranscription.batchModels.map(\.id)), expected)
         XCTAssertTrue(DesktopTranscription.batchModels.allSatisfy { option in
             ModelCatalog.batchTranscription.contains(option)

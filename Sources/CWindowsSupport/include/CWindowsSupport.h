@@ -18,11 +18,16 @@ enum JSTIWindowEvent {
     JSTI_EVENT_MODEL_CHANGED = 5,
     JSTI_EVENT_CLOSING = 6,
     JSTI_EVENT_READY = 7,
-    JSTI_EVENT_ERROR = 8
+    JSTI_EVENT_ERROR = 8,
+    JSTI_EVENT_HISTORY_SELECTED = 9,
+    JSTI_EVENT_HISTORY_RETRY = 10,
+    JSTI_EVENT_HISTORY_EXPORT = 11,
+    JSTI_EVENT_HISTORY_OPEN_AUDIO = 12
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
- * is the selected caller-supplied model. READY is sent after controls exist. */
+ * is the selected caller-supplied model. READY is sent after controls exist.
+ * COPY_TRANSCRIPT carries the selected history ID, or empty if none is selected. */
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
@@ -30,6 +35,37 @@ int jsti_window_run(const char *const *model_names, size_t model_count, int sele
  * recording: -1 retains current value, 0 idle, 1 recording, 2 busy (disable controls). */
 int jsti_window_update(const char *status, const char *transcript, int recording);
 void jsti_window_request_close(void);
+
+typedef struct JSTIHistoryRow {
+    const char *id;
+    const char *title;
+    const char *detail;
+} JSTIHistoryRow;
+/* Atomically replaces history; synchronously deep-copies all UTF-8 strings.
+ * selected_id: null preserves the current selection if it still exists, an
+ * empty string clears it. Programmatic updates do not emit selection events.
+ * Events 9-12 carry the selected record ID in their borrowed text argument. */
+int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Call synchronously from the UI event callback, capturing the event's record
+ * ID first. Returns 0 chosen (UTF-8 path), 1 cancelled, -1 failed. A too-small
+ * output buffer is an error; paths are never silently truncated. */
+int jsti_window_choose_export_path(const char *suggested_filename, char *path, size_t path_capacity,
+                                   char *error, size_t error_capacity);
+/* Opens an existing audio file through its registered Windows application.
+ * Only recognised audio filename extensions are accepted; never executes an
+ * arbitrary imported file. Shell activation errors are returned. */
+int jsti_shell_open_file(const char *path, char *error, size_t error_capacity);
+
+/* Atomic Apply callback from the native settings dialog, on the UI thread.
+ * prompt/new_key are borrowed until return. Empty new_key means keep the saved
+ * credential; no saved credential is read back into the password field. */
+typedef void (*JSTIPostProcessingCallback)(int enabled, int model_index, const char *prompt,
+                                          const char *new_key, void *context);
+/* Thread safe; deep-copies model labels and persisted settings. Remote
+ * processing remains unavailable until configured, and defaults disabled. */
+int jsti_window_set_postprocessing(const char *const *model_names, size_t model_count,
+                                   int selected_index, int enabled, const char *prompt,
+                                   JSTIPostProcessingCallback callback, void *context);
 
 typedef struct JSTICapture JSTICapture;
 /* Dedicated WASAPI worker, PCM16 little-endian, 16 kHz mono. Normally 1600
@@ -71,6 +107,10 @@ int jsti_credential_delete(const char *name, char *error, size_t error_capacity)
 /* Deterministic native checks: Unicode, frame boundaries, silence, invalid
  * insertion targets. Does not use microphone, clipboard or real credentials. */
 int jsti_native_self_test(char *error, size_t error_capacity);
+/* Call on the UI thread from READY in smoke-test mode. Verifies native control
+ * bounds, history updates/events and an invisible settings Apply round-trip.
+ * Restores history afterwards; never uses microphone, clipboard or credentials. */
+int jsti_window_self_test(char *error, size_t error_capacity);
 
 #ifdef __cplusplus
 }

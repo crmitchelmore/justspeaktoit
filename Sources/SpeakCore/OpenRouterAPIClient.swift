@@ -4,56 +4,6 @@ import os.log
 
 // swiftlint:disable file_length
 
-// MARK: - Errors
-
-public enum OpenRouterClientError: LocalizedError {
-    case apiKeyMissing
-    case invalidResponse
-    case httpStatus(Int, String)
-    case audioFileTooLarge(fileSize: Int64, limit: Int64)
-
-    public var errorDescription: String? {
-        switch self {
-        case .apiKeyMissing:
-            return "OpenRouter API key is missing."
-        case .invalidResponse:
-            return "The server returned an invalid response."
-        case .httpStatus(let code, let body):
-            return "OpenRouter responded with status \(code): \(body)"
-        case .audioFileTooLarge(let fileSize, let limit):
-            let fileSizeDescription = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
-            let limitDescription = ByteCountFormatter.string(fromByteCount: limit, countStyle: .file)
-            return "Audio file is too large for OpenRouter reprocessing "
-                + "(\(fileSizeDescription), limit \(limitDescription))."
-        }
-    }
-}
-
-// MARK: - Branding
-
-/// Attribution headers OpenRouter uses to identify the calling app
-/// (`X-Title` / `HTTP-Referer`). Never carries credentials.
-public struct OpenRouterBranding: Sendable {
-    public let title: String
-    public let referer: String
-
-    public init(title: String, referer: String) {
-        self.title = title
-        self.referer = referer
-    }
-
-    public static let platformDefault: OpenRouterBranding = {
-        #if os(iOS)
-        OpenRouterBranding(
-            title: "Just Speak to It (iOS)",
-            referer: "https://github.com/crmitchelmore/justspeaktoit"
-        )
-        #else
-        OpenRouterBranding(title: "SpeakApp (macOS)", referer: "https://github.com/speak")
-        #endif
-    }()
-}
-
 // MARK: - Client
 
 /// Shared OpenRouter HTTP client used by both the macOS and iOS apps.
@@ -69,7 +19,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
     BatchTranscriptionClient {
     public typealias APIKeyProvider = @Sendable () async -> String?
 
-    private let baseURL = URL(string: "https://openrouter.ai/api/v1")!
+    private let baseURL = OpenRouterService.baseURL
     private let session: URLSession
     private let apiKeyProvider: APIKeyProvider
     private let apiKeyOverride: String?
@@ -183,18 +133,12 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
         maxTokens: Int?
     ) async throws -> ChatResponse {
         if let key = await storedAPIKey() {
-            let payload = OpenRouterChatRequest(
+            return try await OpenRouterChatClient(apiKey: key, session: session, branding: branding).sendChat(
+                systemPrompt: systemPrompt,
+                messages: messages,
                 model: model,
                 temperature: temperature,
-                messages: buildMessages(systemPrompt: systemPrompt, messages: messages),
-                stream: nil,
                 maxTokens: maxTokens
-            )
-            return try await performRemoteChat(
-                apiKey: key,
-                payload: payload,
-                systemPrompt: systemPrompt,
-                messages: messages
             )
         }
 
@@ -480,74 +424,6 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
 
     // MARK: - Remote requests
 
-    private func performRemoteChat(
-        apiKey: String,
-        payload: OpenRouterChatRequest,
-        systemPrompt: String?,
-        messages: [ChatMessage]
-    ) async throws -> ChatResponse {
-        let url = baseURL.appendingPathComponent("chat/completions")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        applyBrandHeaders(&request)
-
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw OpenRouterClientError.invalidResponse
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-            throw OpenRouterClientError.httpStatus(http.statusCode, body)
-        }
-
-        let decoded = try JSONDecoder().decode(OpenRouterChatResponse.self, from: data)
-        return chatResponse(
-            from: decoded,
-            data: data,
-            systemPrompt: systemPrompt,
-            messages: messages
-        )
-    }
-
-    private func chatResponse(
-        from decoded: OpenRouterChatResponse,
-        data: Data,
-        systemPrompt: String?,
-        messages: [ChatMessage]
-    ) -> ChatResponse {
-        let assistantMessages = decoded.choices.compactMap { choice in
-            choice.message.map { ChatMessage(role: .assistant, content: $0.content) }
-        }
-
-        let finishReason = decoded.choices.first?.finishReason ?? "stop"
-        let cost = decoded.usage.map { usage in
-            ChatCostBreakdown(
-                inputTokens: usage.promptTokens,
-                outputTokens: usage.completionTokens,
-                totalCost: Decimal(usage.promptTokens + usage.completionTokens) / 1_000_000,
-                currency: "USD"
-            )
-        }
-
-        var conversation: [ChatMessage] = []
-        if let systemPrompt {
-            conversation.append(ChatMessage(role: .system, content: systemPrompt))
-        }
-        conversation.append(contentsOf: messages)
-        conversation.append(contentsOf: assistantMessages)
-
-        return ChatResponse(
-            messages: conversation,
-            finishReason: finishReason,
-            cost: cost,
-            rawPayload: String(data: data, encoding: .utf8)
-        )
-    }
-
     private func streamingChatRequest(
         apiKey: String,
         systemPrompt: String?,
@@ -710,14 +586,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
 
     private func buildMessages(systemPrompt: String?, messages: [ChatMessage])
         -> [OpenRouterChatRequest.Message] {
-        var payload: [OpenRouterChatRequest.Message] = []
-        if let systemPrompt {
-            payload.append(.init(role: "system", content: systemPrompt))
-        }
-        payload += messages.map { message in
-            .init(role: message.role.rawValue, content: message.content)
-        }
-        return payload
+        OpenRouterChatRequest.messages(systemPrompt: systemPrompt, messages: messages)
     }
 
     private func string(from data: Data?) -> String? {
@@ -843,9 +712,7 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
     }
 
     private nonisolated func applyBrandHeaders(_ request: inout URLRequest) {
-        request.setValue(branding.title, forHTTPHeaderField: "X-Title")
-        request.setValue(branding.referer, forHTTPHeaderField: "HTTP-Referer")
-        request.setValue(branding.referer, forHTTPHeaderField: "Referer")
+        branding.apply(to: &request)
     }
 
     private func allowsLocalFallback(for model: String) -> Bool {
@@ -886,59 +753,6 @@ public actor OpenRouterAPIClient: StreamingChatLLMClient, // swiftlint:disable:t
 }
 
 // MARK: - Wire models
-
-private struct OpenRouterChatRequest: Encodable {
-    struct Message: Encodable {
-        let role: String
-        let content: String
-    }
-
-    let model: String
-    let temperature: Double
-    let messages: [Message]
-    let stream: Bool?
-    let maxTokens: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case model
-        case temperature
-        case messages
-        case stream
-        case maxTokens = "max_tokens"
-    }
-}
-
-private struct OpenRouterChatResponseChoiceMessage: Decodable {
-    let role: String?
-    let content: String
-}
-
-private struct OpenRouterChatResponseChoice: Decodable {
-    let index: Int?
-    let finishReason: String?
-    let message: OpenRouterChatResponseChoiceMessage?
-
-    enum CodingKeys: String, CodingKey {
-        case index
-        case finishReason = "finish_reason"
-        case message
-    }
-}
-
-private struct OpenRouterChatUsage: Decodable {
-    let promptTokens: Int
-    let completionTokens: Int
-
-    enum CodingKeys: String, CodingKey {
-        case promptTokens = "prompt_tokens"
-        case completionTokens = "completion_tokens"
-    }
-}
-
-private struct OpenRouterChatResponse: Decodable {
-    let choices: [OpenRouterChatResponseChoice]
-    let usage: OpenRouterChatUsage?
-}
 
 private struct OpenRouterValidationResponse: Decodable {
     struct ValidationData: Decodable {

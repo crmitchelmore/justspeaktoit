@@ -490,6 +490,24 @@ shared drain bound plus the run's bounded grace and a callback-delivery margin;
 healthy completion does not wait for that deadline. Deterministic tests cover
 late finals, specific failures and retired timers across replacement recordings.
 
+The subsequent integrated recovery checkpoint `d6c4bb47` passed the full normal
+Apple suite: **3,900 tests, 16 optional skips, zero failures**. Strict baseline
+lint passed across 1,272 files. The generic macOS host now captures provider
+errors before the UI hop, preserves trailing drafts on failed finalisation,
+aborts cancellation and suppresses terminal success or utterance dispatch after
+reentrant cancellation. Its eleven new regressions run against the actual
+controller with injected capture/client boundaries; the PCM path is unchanged.
+
+The iOS shared host received the same recovery guarantees and reads the active
+client's optional finalisation budget. **Thirty-three focused iOS Simulator
+tests passed with no failures or skips**, including all nine interruption
+fixtures. The old controller failed the draft-preservation and abort-contract
+comparison cases. The production app compiled and linked; isolated fixtures
+use existing injected services rather than constructing live CloudKit state.
+The integrated portable suite passed 511 tests with five optional skips and
+zero failures. These checks do not qualify physical audio or the later branch's
+Windows runtime; use the exact Windows checkpoint below for that evidence.
+
 The shared ElevenLabs client streams partials continuously and confirms
 client-owned segments of at most twenty seconds. This changes the former macOS
 server-VAD confirmation cadence; real-provider transcript behaviour and latency

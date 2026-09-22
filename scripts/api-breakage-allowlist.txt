@@ -2,7 +2,7 @@
 #
 # Each line is the exact message from `swift package
 # diagnose-api-breaking-changes`. Only additive changes belong here: a new
-# case on one of SpeakCore's provider enums is reported as breaking because
+# case on one of SpeakCore's domain enums is reported as breaking because
 # an exhaustive `switch` in a downstream client would stop compiling, but
 # SpeakCore's only clients are this repository's own app targets, which are
 # rebuilt in the same run. Removing or re-typing a public symbol is a real
@@ -13,3 +13,10 @@
 API breakage: enumelement StreamingClientError.transportStalled has been added as a new enum case
 API breakage: enumelement XAISpeechToTextError.sessionNotReady has been added as a new enum case
 API breakage: enumelement XAISpeechToTextError.missingCompletion has been added as a new enum case
+# Native Windows profiles add a matcher and validation reasons. Existing raw
+# values, Codable fields and initializers are retained; Apple resolution ignores
+# Windows matchers while preserving them when editing a shared profile.
+API breakage: enumelement DictationProfileIssue.duplicateProfile has been added as a new enum case
+API breakage: enumelement DictationProfileIssue.invalidSelection has been added as a new enum case
+API breakage: enumelement DictationProfileIssue.invalidWindowsExecutablePath has been added as a new enum case
+API breakage: enumelement DictationProfileMatcher.Kind.windowsExecutablePath has been added as a new enum case

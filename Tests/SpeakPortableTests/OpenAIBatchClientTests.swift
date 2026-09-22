@@ -25,7 +25,9 @@ final class OpenAIBatchClientTests: XCTestCase {
             at: url, apiKey: "test-only", model: OpenAITranscriptionModels.gptTranscribeCatalogID, language: "en_GB"
         )
         let request = try XCTUnwrap(StubURLProtocol.lastRequest)
-        let body = try XCTUnwrap(String(data: StubURLProtocol.body(of: request), encoding: .utf8))
+        // Multipart includes binary WAV bytes; decode lossily to inspect only its text fields.
+        // swiftlint:disable:next optional_data_string_conversion
+        let body = String(decoding: StubURLProtocol.body(of: request), as: UTF8.self)
         XCTAssertTrue(body.contains("Content-Type: audio/wav"))
         XCTAssertTrue(body.contains("name=\"languages[]\""))
         XCTAssertTrue(body.contains("\r\nen\r\n"))
@@ -51,7 +53,9 @@ final class OpenAIBatchClientTests: XCTestCase {
         XCTAssertEqual(result.text, "Speaker 1: Hello")
         XCTAssertEqual(result.duration, 3)
         let request = try XCTUnwrap(StubURLProtocol.lastRequest)
-        let body = try XCTUnwrap(String(data: StubURLProtocol.body(of: request), encoding: .utf8))
+        // Multipart includes binary WAV bytes; decode lossily to inspect only its text fields.
+        // swiftlint:disable:next optional_data_string_conversion
+        let body = String(decoding: StubURLProtocol.body(of: request), as: UTF8.self)
         XCTAssertTrue(body.contains("diarized_json"))
         XCTAssertTrue(body.contains("chunking_strategy"))
     }

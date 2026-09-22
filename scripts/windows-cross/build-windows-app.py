@@ -95,34 +95,46 @@ def copy_executable(source, destination, clang, log):
     return BOOTSTRAP.digest(destination)
 
 
-def main():
+def positive_integer(value):
+    # SwiftPM needs at least one job; accept plain ASCII digits only, so "0",
+    # signs, whitespace and int()'s "1_0" spelling never reach the build.
+    if not (value.isascii() and value.isdecimal()) or int(value) < 1:
+        raise argparse.ArgumentTypeError("expected a positive integer, got " + repr(value))
+    return int(value)
+
+
+def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--configuration", choices=("debug", "release"), default="release")
-    args = parser.parse_args()
-    if platform.system() != "Darwin" or platform.machine() != "arm64":
-        raise SystemExit("The pinned app compiler requires an Apple Silicon Mac")
+    parser.add_argument("--scratch-path", type=pathlib.Path,
+                        help="SwiftPM scratch directory (default: CACHE/app-build)")
+    parser.add_argument("--jobs", type=positive_integer, default=4,
+                        help="SwiftPM parallel build jobs (default: 4)")
+    return parser.parse_args(argv)
+
+
+def build_locations(args):
     cache, output = args.cache.resolve(), args.output.resolve()
     if cache == output or cache in output.parents or output in cache.parents:
         raise SystemExit("Keep private prerequisites separate from publishable app output")
-    output.mkdir(parents=True, exist_ok=True)
-    log = output / "macos-app-build.log"
-    log.write_text("")
-    lock = json.loads((HERE / "dependencies.json").read_text())
-    archive = BOOTSTRAP.download(lock["appCompiler"], cache / "downloads")
-    print("Extracting the pinned LLVM 20 compiler privately", flush=True)
-    clang = extract_compiler(archive, cache / "llvm-20")
-    BOOTSTRAP.run([clang / "clang", "--version"], log)
-    tool = cache / "macos-package/swift-6.2.3-RELEASE-osx-package.pkg/Payload/usr"
-    sdk = next((cache / "swift-windows").rglob("Windows.sdk"))
-    microsoft = cache / "microsoft"
+    scratch = cache / "app-build" if args.scratch_path is None else args.scratch_path.resolve()
+    # Intermediates never enter the uploaded output, and SwiftPM never owns a
+    # directory that contains the prerequisite cache.
+    if scratch == output or scratch in output.parents or output in scratch.parents:
+        raise SystemExit("Keep the SwiftPM scratch path separate from publishable app output")
+    if scratch == cache or scratch in cache.parents:
+        raise SystemExit("The SwiftPM scratch path must not contain the prerequisite cache")
+    return cache, output, scratch
+
+
+def swift_build_command(tool, sdk, microsoft, scratch, configuration, jobs):
     headers = microsoft / "Microsoft.VC.14.44.17.14.CRT.Headers.base/Contents/VC/Tools/MSVC/14.44.35207/include"
     kits = microsoft / "microsoft.windows.sdk.cpp.10.0.26100.1/c/Include/10.0.26100.0"
-    scratch = cache / "app-build"
     command = [tool / "bin/swift", "build", "--package-path", HERE.parent.parent,
                "--triple", "x86_64-unknown-windows-msvc", "--sdk", sdk,
-               "--scratch-path", scratch, "--configuration", args.configuration, "--jobs", "4"]
+               "--scratch-path", scratch, "--configuration", configuration, "--jobs", str(jobs)]
     for flag in ["-resource-dir", sdk / "usr/lib/swift", "-tools-directory", tool / "bin", "-use-ld=lld"]:
         command += ["-Xswiftc", flag]
     for directory in [sdk / "usr/include", headers, kits / "ucrt", kits / "um", kits / "shared", kits / "winrt"]:
@@ -141,6 +153,25 @@ def main():
         libraries.append(modules / "x86_64")
     for directory in libraries:
         command += ["-Xlinker", "/libpath:" + str(directory)]
+    return command
+
+
+def main():
+    args = parse_arguments()
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        raise SystemExit("The pinned app compiler requires an Apple Silicon Mac")
+    cache, output, scratch = build_locations(args)
+    output.mkdir(parents=True, exist_ok=True)
+    log = output / "macos-app-build.log"
+    log.write_text("")
+    lock = json.loads((HERE / "dependencies.json").read_text())
+    archive = BOOTSTRAP.download(lock["appCompiler"], cache / "downloads")
+    print("Extracting the pinned LLVM 20 compiler privately", flush=True)
+    clang = extract_compiler(archive, cache / "llvm-20")
+    BOOTSTRAP.run([clang / "clang", "--version"], log)
+    tool = cache / "macos-package/swift-6.2.3-RELEASE-osx-package.pkg/Payload/usr"
+    sdk = next((cache / "swift-windows").rglob("Windows.sdk"))
+    command = swift_build_command(tool, sdk, cache / "microsoft", scratch, args.configuration, args.jobs)
     environment = os.environ.copy()
     environment.update(SPEAK_WINDOWS_TARGET="1", CC=str(clang / "clang"), CXX=str(clang / "clang++"))
     built = scratch / "x86_64-unknown-windows-msvc" / args.configuration

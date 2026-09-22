@@ -22,6 +22,10 @@ python3 scripts/windows-cross/build-windows-app.py \
   --output /path/to/windows-app-cross
 ```
 
+`--scratch-path` moves SwiftPM intermediates out of the default `CACHE/app-build`;
+it must stay outside the output and must not contain the cache. `--jobs` sets
+SwiftPM parallelism (default 4). Neither option changes the build provenance.
+
 The app script defaults to optimised `release` builds and records the configuration
 in its provenance; `--configuration debug` is available for debugging. CI requires
 release configuration for both the app and tests. It first retains the normal

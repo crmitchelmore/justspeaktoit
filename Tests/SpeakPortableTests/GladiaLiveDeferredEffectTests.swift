@@ -89,4 +89,56 @@ final class GladiaLiveDeferredEffectTests: XCTestCase {
         XCTAssertEqual(socket.sentAudio, [GladiaHarness.pcm(0)])
         XCTAssertTrue(harness.log.errors.isEmpty)
     }
+
+    /// `stop_recording` is claimed under the lock but reaches the socket only
+    /// when its deferred send runs. An `end_session` that lands in between did
+    /// not answer it: Gladia ended the session with the recording unflushed.
+    func testEndSessionBeforeTheClaimedStopReachesTheSocketIsNotACompletion() async {
+        let harness = GladiaHarness()
+        let socket = harness.startOpen()
+        harness.client.sendAudio(GladiaHarness.pcm(0))
+        socket.completeSend()
+        socket.final("Kept.", id: "00-01")
+        let gate = DispatchSemaphore(value: 0)
+        let held = expectation(description: "The finish is held arming its deadline")
+        harness.clock.holdScheduling(GladiaLive.finishBudget, entered: { held.fulfill() }, until: gate)
+        let client = harness.client
+        let log = harness.log
+        let finish = Task { () -> String? in
+            let transcript = await client.finishAndWait()
+            log.note("finish-returned")
+            return transcript
+        }
+        await fulfillment(of: [held], timeout: 5)
+        XCTAssertFalse(socket.stopRecordingSent, "stop_recording is claimed, not yet handed to the socket")
+        XCTAssertTrue(socket.hasPendingReceive, "The run's receive is already outstanding")
+
+        socket.endSession()
+        XCTAssertEqual(log.errors.first as? GladiaStreamingError, .unexpectedSessionEnd,
+                       "An end_session that precedes the handoff is not a completion")
+        gate.signal()
+        let transcript = await finish.value
+        XCTAssertEqual(transcript, "Kept.", "The confirmed text is kept")
+        XCTAssertFalse(socket.stopRecordingSent, "The failed run never hands stop_recording over")
+        XCTAssertEqual(log.timeline, ["final:Kept.", "error", "finish-returned"])
+    }
+
+    /// Once `stop_recording` has reached the socket, Gladia's `end_session` is
+    /// the authoritative answer, even ahead of the send's local completion.
+    func testEndSessionAfterTheStopReachesTheSocketCompletesAheadOfItsSendCompletion() async {
+        let harness = GladiaHarness()
+        let socket = harness.startOpen()
+        harness.client.sendAudio(GladiaHarness.pcm(0))
+        socket.completeSend()
+        socket.final("Kept.", id: "00-01")
+        let finish = await beginFinish(harness)
+        await waitUntil("stop_recording to reach the socket") { socket.stopRecordingSent }
+        XCTAssertEqual(socket.heldSendCount, 1, "Its local send completion is still outstanding")
+
+        socket.endSession()
+        let transcript = await finish.value
+        XCTAssertEqual(transcript, "Kept.")
+        XCTAssertTrue(harness.log.errors.isEmpty, "end_session after the handoff completes the finish")
+        XCTAssertEqual(socket.cancelCount, 1)
+    }
 }

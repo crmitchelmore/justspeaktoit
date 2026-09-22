@@ -64,8 +64,14 @@ final class SharedMultipartUploadStagingTests: XCTestCase {
         let fresh = directory.appendingPathComponent("mistral-upload-fresh.multipart")
         let unrelated = directory.appendingPathComponent("recording.multipart")
         for url in [old, fresh, unrelated] { try Data("fixture".utf8).write(to: url) }
-        try FileManager.default.setAttributes([.modificationDate: Date.distantPast], ofItemAtPath: old.path)
-        store.purgeStaleUploads()
+        // Windows FILETIME starts in 1601; Date.distantPast lies outside that
+        // range. Use a realistic timestamp and verify the fixture was applied.
+        let now = Date()
+        let expired = now.addingTimeInterval(-7_200)
+        try FileManager.default.setAttributes([.modificationDate: expired], ofItemAtPath: old.path)
+        let modified = try XCTUnwrap(old.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+        XCTAssertGreaterThan(now.timeIntervalSince(modified), 3_600)
+        store.purgeStaleUploads(now: now)
         XCTAssertFalse(FileManager.default.fileExists(atPath: old.path))
         for url in [active, fresh, unrelated] { XCTAssertTrue(FileManager.default.fileExists(atPath: url.path)) }
     }

@@ -22,12 +22,15 @@ enum JSTIWindowEvent {
     JSTI_EVENT_HISTORY_SELECTED = 9,
     JSTI_EVENT_HISTORY_RETRY = 10,
     JSTI_EVENT_HISTORY_EXPORT = 11,
-    JSTI_EVENT_HISTORY_OPEN_AUDIO = 12
+    JSTI_EVENT_HISTORY_OPEN_AUDIO = 12,
+    JSTI_EVENT_MICROPHONE_CHANGED = 13
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
  * is the selected caller-supplied model. READY is sent after controls exist.
- * COPY_TRANSCRIPT carries the selected history ID, or empty if none is selected. */
+ * COPY_TRANSCRIPT carries the selected history ID, or empty if none is selected.
+ * MICROPHONE_CHANGED and TOGGLE_RECORDING carry the selected microphone ID;
+ * empty selects the default communications microphone. */
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
@@ -35,6 +38,11 @@ int jsti_window_run(const char *const *model_names, size_t model_count, int sele
  * recording: -1 retains current value, 0 idle, 1 recording, 2 busy (disable controls). */
 int jsti_window_update(const char *status, const char *transcript, int recording);
 void jsti_window_request_close(void);
+/* Copies IDs/names before return; also valid before window_run. Caller may
+ * include a synthetic default row with an empty ID. Selection updates are
+ * programmatic; a user change emits MICROPHONE_CHANGED with its device ID. */
+int jsti_window_set_microphones(const char *const *ids, const char *const *names,
+                                size_t count, const char *selected_id);
 
 typedef struct JSTIHistoryRow {
     const char *id;
@@ -68,13 +76,26 @@ int jsti_window_set_postprocessing(const char *const *model_names, size_t model_
                                    JSTIPostProcessingCallback callback, void *context);
 
 typedef struct JSTICapture JSTICapture;
-/* Dedicated WASAPI worker, PCM16 little-endian, 16 kHz mono. Normally 1600
+/* Active capture endpoints only; the default marker means eCommunications.
+ * Callbacks run synchronously after enumeration succeeds; strings are borrowed
+ * until callback return. A successful empty list means no active microphones.
+ * Enumeration does not activate a microphone or request recording access. */
+typedef void (*JSTIAudioDeviceCallback)(const char *id, const char *name, int is_default, void *context);
+int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context,
+                                 char *error, size_t error_capacity);
+/* Dedicated bounded writer callback, PCM16 little-endian, 16 kHz mono. Normally 1600
  * samples/100ms; stop flushes a final partial frame. Copy synchronously and
  * return promptly. Do not call capture stop/destroy from either callback. */
 typedef void (*JSTIAudioCallback)(const int16_t *samples, size_t sample_count, void *context);
 typedef void (*JSTIAudioErrorCallback)(const char *message, void *context);
 JSTICapture *jsti_capture_create(JSTIAudioCallback callback, JSTIAudioErrorCallback error_callback,
                                  void *context);
+/* Copies the opaque endpoint ID. Null/empty chooses the default communications
+ * microphone at start. An explicit ID must still be active and a capture device;
+ * it never silently falls back to another microphone. */
+JSTICapture *jsti_capture_create_with_device(const char *device_id, JSTIAudioCallback callback,
+                                             JSTIAudioErrorCallback error_callback, void *context,
+                                             char *error, size_t error_capacity);
 /* Serialize start/stop/destroy on the caller side. start reports initialization
  * errors synchronously; later device/stream failures invoke error_callback. */
 int jsti_capture_start(JSTICapture *capture, char *error, size_t error_capacity);
@@ -107,10 +128,15 @@ int jsti_credential_delete(const char *name, char *error, size_t error_capacity)
 /* Deterministic native checks: Unicode, frame boundaries, silence, invalid
  * insertion targets. Does not use microphone, clipboard or real credentials. */
 int jsti_native_self_test(char *error, size_t error_capacity);
+int jsti_audio_devices_self_test(char *error, size_t error_capacity);
 /* Call on the UI thread from READY in smoke-test mode. Verifies native control
  * bounds, history updates/events and an invisible settings Apply round-trip.
  * Restores history afterwards; never uses microphone, clipboard or credentials. */
 int jsti_window_self_test(char *error, size_t error_capacity);
+/* Smoke-test diagnostics only: writes a 32-bit BMP of this application's client
+ * window and controls. Call on the UI thread after READY. Never captures the
+ * desktop or another app; caller provides a smoke-test state without secrets. */
+int jsti_window_save_snapshot(const char *path, char *error, size_t error_capacity);
 
 #ifdef __cplusplus
 }

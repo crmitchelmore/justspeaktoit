@@ -51,7 +51,14 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
 
 private func ready(_ holder: WindowsEventContext) {
     guard holder.smokeTest else { Task { await holder.controller.ready() }; return }
-    do { try WindowsNative.checked { jsti_window_self_test($0, $1) } } catch { holder.smokeTestFailure = error }
+    do {
+        try WindowsNative.checked { jsti_window_self_test($0, $1) }
+        if let path = ProcessInfo.processInfo.environment["JSTI_UI_SNAPSHOT_PATH"] {
+            try path.withCString { path in
+                try WindowsNative.checked { jsti_window_save_snapshot(path, $0, $1) }
+            }
+        }
+    } catch { holder.smokeTestFailure = error }
     jsti_window_request_close()
 }
 

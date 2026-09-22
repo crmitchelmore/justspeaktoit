@@ -65,7 +65,9 @@ public actor DesktopRecordingStore {
         }
         let root = directory.resolvingSymlinksInPath().standardizedFileURL
         let url = root.appendingPathComponent(name).resolvingSymlinksInPath().standardizedFileURL
-        guard url.deletingLastPathComponent() == root,
+        // Compare path components rather than URL directory-hint flags; corelibs
+        // Foundation preserves those flags differently from Apple Foundation.
+        guard url.deletingLastPathComponent().pathComponents == root.pathComponents,
               try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
             throw CocoaError(.fileReadCorruptFile)
         }

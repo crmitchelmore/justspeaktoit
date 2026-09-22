@@ -14,6 +14,7 @@ on:
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
+      - scripts/websocket-loopback-probe.py
       - Docs/windows-development.md
       - .github/workflows/windows.yml
   pull_request:
@@ -29,6 +30,7 @@ on:
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
+      - scripts/websocket-loopback-probe.py
       - Docs/windows-development.md
       - .github/workflows/windows.yml
   workflow_dispatch:
@@ -77,6 +79,44 @@ jobs:
           swift test --configuration release --jobs 4 --xunit-output windows-tests.xml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Probe pinned Windows WebSocket runtime against loopback peer
+        timeout-minutes: 3
+        run: |
+          $readyPath = Join-Path $env:RUNNER_TEMP 'jsti-websocket-ready.json'
+          Remove-Item $readyPath -ErrorAction SilentlyContinue
+          $server = $null
+          $probe = $null
+          try {
+            $server = Start-Process -FilePath (Get-Command python).Source -PassThru -NoNewWindow `
+              -ArgumentList @('-u', 'scripts/websocket-loopback-probe.py', '--ready-file', $readyPath, '--max-seconds', '120') `
+              -RedirectStandardOutput windows-websocket-server.log -RedirectStandardError windows-websocket-server-errors.log
+            $deadline = [DateTime]::UtcNow.AddSeconds(10)
+            while (-not (Test-Path $readyPath)) {
+              if ($server.HasExited) { throw 'Loopback WebSocket server exited before readiness.' }
+              if ([DateTime]::UtcNow -gt $deadline) { throw 'Loopback WebSocket server readiness timed out.' }
+              Start-Sleep -Milliseconds 100
+            }
+            $ready = Get-Content $readyPath -Raw | ConvertFrom-Json
+            if ($ready.host -ne '127.0.0.1' -or $ready.port -lt 1 -or $ready.port -gt 65535) {
+              throw 'Unexpected loopback peer address.'
+            }
+            $env:JSTI_WEBSOCKET_PROBE_PORT = [string]$ready.port
+            $probe = Start-Process -FilePath (Get-Command swift).Source -PassThru -NoNewWindow `
+              -ArgumentList @('test', '--configuration', 'release', '--skip-build', '--filter', 'WebSocketRuntimeProbeTests', `
+                '--xunit-output', 'windows-websocket-tests.xml') `
+              -RedirectStandardOutput windows-websocket-probe.log -RedirectStandardError windows-websocket-probe-errors.log
+            if (-not $probe.WaitForExit(90000)) {
+              $probe.Kill($true)
+              throw 'WebSocket runtime probe exceeded its 90-second process deadline.'
+            }
+            if ($probe.ExitCode -ne 0) { throw "WebSocket runtime probe failed: $($probe.ExitCode)" }
+          } finally {
+            Remove-Item Env:JSTI_WEBSOCKET_PROBE_PORT -ErrorAction SilentlyContinue
+            if ($probe -and -not $probe.HasExited) { $probe.Kill($true) }
+            if ($server -and -not $server.HasExited) { $server.Kill($true) }
+            Get-ChildItem windows-websocket-*.log | ForEach-Object { Get-Content $_.FullName }
+          }
+
       - name: Run executable self-test and native window smoke test
         timeout-minutes: 2
         run: |
@@ -85,6 +125,7 @@ jobs:
           $exe = Join-Path $bin.Trim() 'SpeakWindows.exe'
           & $exe --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:JSTI_UI_SNAPSHOT_PATH = Join-Path $env:GITHUB_WORKSPACE 'windows-ui-smoke.bmp'
           $process = Start-Process -FilePath $exe -ArgumentList '--ui-smoke-test' -PassThru -NoNewWindow `
             -RedirectStandardOutput windows-ui-smoke.log -RedirectStandardError windows-ui-smoke-errors.log
           if (-not $process.WaitForExit(30000)) {
@@ -110,7 +151,7 @@ jobs:
             distribution = 'developer executable; not an installer'
             runtime = 'Requires the Swift 6.2.3 Windows runtime and Visual C++ runtime'
           } | ConvertTo-Json | Set-Content (Join-Path $destination 'build-metadata.json') -Encoding utf8
-          @'
+          @"
           Just Speak to It — Windows developer build
 
           This is an unsigned developer executable, not an installer or a feature-complete release.
@@ -118,12 +159,12 @@ jobs:
           https://www.swift.org/install/windows/
 
           Development instructions and current parity limitations:
-          https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-development.md
+          https://github.com/crmitchelmore/justspeaktoit/blob/${env:GITHUB_SHA}/Docs/windows-development.md
 
           Run SpeakWindows.exe normally, or pass --self-test / --ui-smoke-test.
           The smoke tests do not use a microphone or a real provider API key.
           See build-metadata.json for the exact source revision and compiler.
-          '@ | Set-Content (Join-Path $destination 'README.txt') -Encoding utf8
+          "@ | Set-Content (Join-Path $destination 'README.txt') -Encoding utf8
           Get-FileHash (Join-Path $destination 'SpeakWindows.exe') -Algorithm SHA256 |
             Format-List | Out-String | Set-Content (Join-Path $destination 'SHA256.txt') -Encoding utf8
 
@@ -143,6 +184,9 @@ jobs:
           path: |
             windows-tests.xml
             windows-ui-smoke*.log
+            windows-ui-smoke.bmp
+            windows-websocket-tests.xml
+            windows-websocket-*.log
           if-no-files-found: ignore
           retention-days: 14
 

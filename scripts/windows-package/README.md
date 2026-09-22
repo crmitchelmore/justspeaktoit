@@ -13,6 +13,8 @@ failure and uninstall lifecycle on a disposable Windows machine.
 | `pack-windows-package.ps1` | MakeAppx pack and independent block-map verification |
 | `sign-windows-package.ps1` | Signs a copy with a certificate from a Windows store |
 | `test-windows-package-lifecycle.ps1` | Disposable-machine lifecycle test (Windows PowerShell 5.1, elevated) |
+| `LifecycleOwnership.ps1`, `test-lifecycle-ownership.ps1` | Admission and owned-state cleanup rules, verified against a fake machine |
+| `test-windows-package-admission.ps1` | Negative control: the lifecycle test must refuse, and leave untouched, an existing installation |
 | `verify-windows-package.py`, `windows_msix.py`, `lifecycle_support.py` | Shared checks, fixture and negative controls |
 
 Design, data behaviour, signing, evidence and remaining gates are in
@@ -20,4 +22,5 @@ Design, data behaviour, signing, evidence and remaining gates are in
 
 ```sh
 python3 -B -m unittest discover -s scripts/windows-package -p 'test_*.py'
+pwsh -NoProfile -File scripts/windows-package/test-lifecycle-ownership.ps1
 ```

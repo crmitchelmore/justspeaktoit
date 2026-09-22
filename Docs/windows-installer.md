@@ -162,16 +162,26 @@ On Windows (Windows PowerShell 5.1 or PowerShell 7 for packing and signing):
 ```
 
 `test-windows-package-lifecycle.ps1` refuses to run outside a GitHub-hosted
-runner unless `-DisposableMachine` is passed on a throwaway VM, and refuses
-any machine that already has the app's data, package, alias or a certificate
-with its publisher.
+runner unless `-DisposableMachine` is passed on a throwaway VM. It is then
+admitted only if none of these exist: the app's data directory, a registration
+of the package name for any user, the package data folder, the alias, a
+`SpeakWindows` process or a certificate with the package publisher. Every
+admission probe is read-only. A refused run changes nothing, and its cleanup
+is skipped. An admitted run records in `LifecycleOwnership.ps1`'s ledger each
+package full name it deploys, each process it starts, each certificate it
+creates and the data directory it proved absent. Cleanup removes exactly
+those, leaves any other registration in place (and fails the run if one
+appeared), and fails the run if any owned state cannot be removed.
 
 ## Continuous integration
 
 The `package-lifecycle` job in `windows-cross-proof.yml` runs on `windows-2022`
 after the Mac cross-build and needs no Swift installation. It runs the Python
-tests, builds base and upgrade layouts from the bundle artifact, packs both,
-uploads the unsigned upgrade package, and then, under Windows PowerShell:
+tests and `test-lifecycle-ownership.ps1` under PowerShell 7 and again under
+Windows PowerShell before the lifecycle. That test drives the real admission
+and cleanup rules against a fake machine and changes nothing real. The job
+builds base and upgrade layouts from the bundle artifact, packs both, uploads
+the unsigned upgrade package, and then, under Windows PowerShell:
 
 1. Refuses a tampered package on a fresh machine.
 2. Installs the base version; checks its registration, identity, signature
@@ -202,11 +212,22 @@ uploads the unsigned upgrade package, and then, under Windows PowerShell:
 9. Uninstall removes the registration, Start menu entry, alias and package
    data and keeps every user file; a reinstall shows the History again and is
    uninstalled.
+10. Cleanup removes only ledger-owned state and must complete.
+
+A final step, `test-windows-package-admission.ps1`, is a negative control for
+the lifecycle test itself. After its own pristine admission it installs the
+base version with its own ephemeral certificate, seeds the portable data and
+leaves the installed app running with its History open. It then runs the
+lifecycle test, which must refuse admission, skip cleanup and exit non-zero.
+The registration and version, the running app and its window, the user data,
+alias, package data and certificates must be unchanged. The control then
+removes only what it created.
 
 The job always uploads `windows-developer-msix-lifecycle-evidence`: every
 check, deployment result with HRESULT and deployment log, launch state,
-module provenance, runner facts (build, integrity, UAC settings) and cleanup,
-including removal of both test certificates.
+module provenance, runner facts (build, integrity, UAC settings), the
+admission decision, the cleanup record, and the admission control's evidence
+with the refused run's own evidence.
 
 ## Evidence at this checkpoint
 
@@ -216,15 +237,28 @@ including removal of both test certificates.
   test-enabled builds, policy and reserved-path violations, layout
   determinism, block-map verification including multi-block files, fixture
   formats, recovery checks and single-byte tampering.
-- Package-only local check: the layout was built from the Windows-verified
-  bundle artifact of [run 35753297969](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35753297969)
-  (ZIP SHA-256 `2e92ec9c2e95ec891cc17ad22b79e6d5e00f88394d4dc01e50f64eb5cedf3316`,
-  commit `386ddeb5`): 35 files, the 30 bundle files unchanged. The logos were
-  inspected visually.
-- **Not yet executed:** MakeAppx packing, signing, and every Windows
-  install, launch, failure, upgrade and uninstall step. They run only in the
-  `package-lifecycle` job, which has not run for this revision. No installation
-  receipt exists yet.
+- **Offline fixture, packaging logic only.** Local package checks used the
+  `windows-runtime-bundle` artifact of
+  [run 35753297969](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35753297969),
+  downloaded read-only and matched to its documented ZIP SHA-256
+  `2e92ec9c2e95ec891cc17ad22b79e6d5e00f88394d4dc01e50f64eb5cedf3316`. That run
+  tested PR merge `386ddeb5`, whose tree equals `5aab9c5e`. It predates this
+  branch's base `5e4169dc` and its later Windows source changes, so its
+  executable is not this revision's. From it the builder produced the 35-file
+  layout, the 30 bundle files unchanged, deterministically across runs; the
+  wrong commit was refused, and an MSIX-shaped archive of the real layout
+  passed the block-map verifier while tampered and mismatched copies failed.
+  The logos were inspected visually. Runtime and package qualification of the
+  integrated revision must come from fresh CI; this fixture is not a receipt
+  for it.
+- A local parse of the owned PowerShell sources with PowerShell 7.6.6 found no
+  errors, and each file is ASCII. The C# helper compiled with
+  `-langversion:5` without invoking anything. The fake-machine ownership test
+  was not run locally; it runs in CI.
+- **Not yet executed:** the ownership test, MakeAppx packing, signing, the
+  admission control and every Windows install, launch, failure, upgrade and
+  uninstall step. They run only in the `package-lifecycle` job, which has not
+  run for this revision. No installation receipt exists yet.
 
 ## Remaining gates and integration needs
 

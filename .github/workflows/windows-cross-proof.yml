@@ -280,7 +280,7 @@ jobs:
     name: Pack, install, upgrade and uninstall the developer MSIX on Windows
     needs: compile
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 45
     env:
       # Developer package versions for this run only. Windows has no Alpha or
       # Stable surface in the release-train manifest, so no release version exists.
@@ -300,6 +300,7 @@ jobs:
           python --version
           python -B -m unittest discover -s scripts/windows-package -p 'test_*.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/windows-package/test-lifecycle-ownership.ps1
           foreach ($kind in 'base', 'upgrade') {
             $version = if ($kind -eq 'base') { $env:BASE_VERSION } else { $env:UPGRADE_VERSION }
             python -B scripts/windows-package/build-windows-package-layout.py --bundle bundle `
@@ -307,6 +308,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - name: Pack both layouts with the pinned Windows SDK MakeAppx
+        id: pack
         shell: powershell
         run: |
           foreach ($kind in 'base', 'upgrade') {
@@ -326,11 +328,12 @@ jobs:
             ${{ runner.temp }}/package-upgrade/*.log
           if-no-files-found: error
           retention-days: 14
-      # The ephemeral test certificate is created, trusted and removed inside
-      # this step on this disposable runner; it is never exported or uploaded.
+      # The ephemeral test certificates are created, trusted and removed inside
+      # these steps on this disposable runner; they are never exported or uploaded.
       - name: Install, launch, refuse failed upgrades, upgrade and uninstall
         shell: powershell
         run: |
+          ./scripts/windows-package/test-lifecycle-ownership.ps1
           $base = Join-Path $env:RUNNER_TEMP 'package-base'
           $upgrade = Join-Path $env:RUNNER_TEMP 'package-upgrade'
           ./scripts/windows-package/test-windows-package-lifecycle.ps1 `
@@ -340,11 +343,30 @@ jobs:
             -UpgradePackage (Join-Path $upgrade "JustSpeakToIt-Developer_$($env:UPGRADE_VERSION)_x64_unsigned.msix") `
             -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') `
             -Workspace (Join-Path $env:RUNNER_TEMP 'package-lifecycle')
+      # Negative control for the lifecycle test itself: with an existing
+      # installation, running app and user data present, it must refuse
+      # admission and change nothing.
+      - name: Refuse a machine with an existing installation and change nothing
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        shell: powershell
+        run: |
+          $base = Join-Path $env:RUNNER_TEMP 'package-base'
+          $upgrade = Join-Path $env:RUNNER_TEMP 'package-upgrade'
+          ./scripts/windows-package/test-windows-package-admission.ps1 `
+            -BaseLayout (Join-Path $base 'layout') `
+            -BasePackage (Join-Path $base "JustSpeakToIt-Developer_$($env:BASE_VERSION)_x64_unsigned.msix") `
+            -UpgradeLayout (Join-Path $upgrade 'layout') `
+            -UpgradePackage (Join-Path $upgrade "JustSpeakToIt-Developer_$($env:UPGRADE_VERSION)_x64_unsigned.msix") `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'package-admission-control')
       - name: Upload lifecycle evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: windows-developer-msix-lifecycle-evidence
-          path: ${{ runner.temp }}/package-lifecycle/evidence/
+          path: |
+            ${{ runner.temp }}/package-lifecycle/evidence/
+            ${{ runner.temp }}/package-admission-control/evidence/
+            ${{ runner.temp }}/package-admission-control/refused-lifecycle/evidence/
           if-no-files-found: warn
           retention-days: 14

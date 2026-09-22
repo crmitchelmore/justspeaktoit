@@ -5,8 +5,12 @@ Installs, launches, fails, upgrades and uninstalls the developer MSIX on a dispo
 .DESCRIPTION
 Run with Windows PowerShell 5.1, elevated, on a disposable machine only: it
 trusts an ephemeral test certificate machine-wide, installs and removes the
-package for the current user and writes %LOCALAPPDATA%\JustSpeakToIt. It refuses
-to start if any of that state already exists, and removes what it created.
+package for the current user and writes %LOCALAPPDATA%\JustSpeakToIt. It is
+admitted only when none of the app's data, registrations, package data, alias,
+processes or publisher certificates exist. A refused run changes nothing, not
+even during cleanup. An admitted run records every package full name,
+process, certificate and the data directory it creates
+(LifecycleOwnership.ps1), removes exactly those, and fails if it cannot.
 
 The unsigned packages are signed with a NonExportable self-signed certificate
 created for this run through sign-windows-package.ps1, the same path an
@@ -42,6 +46,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 . (Join-Path $PSScriptRoot 'WindowsPackageTools.ps1')
+. (Join-Path $PSScriptRoot 'LifecycleOwnership.ps1')
 
 if ($PSVersionTable.PSEdition -ne 'Desktop') {
     throw 'Run this test with Windows PowerShell 5.1 (powershell.exe); it uses the Appx module and WinRT deployment API.'
@@ -94,6 +99,7 @@ $report = [ordered]@{
     schemaVersion = 1
     package = [ordered]@{ base = $base; upgrade = $upgrade }
     runner = $null
+    admission = $null
     tools = $null
     certificates = New-Object System.Collections.ArrayList
     deployments = New-Object System.Collections.ArrayList
@@ -103,8 +109,10 @@ $report = [ordered]@{
     cleanup = $null
     failures = @()
 }
-$script:certificateThumbprints = New-Object System.Collections.ArrayList
-$script:ownsDataDirectory = $false
+# Everything this run may change is recorded here after admission; cleanup
+# touches nothing else, and nothing at all when admission fails.
+$ledger = New-JstiLifecycleLedger
+$ownershipOperations = Get-JstiWindowsOwnershipOperations $name
 
 # --- recording ---------------------------------------------------------------------------
 function Add-Check([string] $Name, [bool] $Passed, $Details) {
@@ -134,11 +142,12 @@ function Wait-PathState([string] $Path, [bool] $Present, [int] $Seconds) {
 
 # --- certificates -----------------------------------------------------------------------------
 function New-EphemeralCertificate([string] $Role) {
+    Assert-JstiAdmitted $script:ledger
     $certificate = New-SelfSignedCertificate -Type Custom -Subject $base.publisher -KeyUsage DigitalSignature `
         -FriendlyName "JSTI ephemeral CI package test ($Role)" -CertStoreLocation 'Cert:\CurrentUser\My' `
         -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddHours(3) `
         -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
-    [void] $script:certificateThumbprints.Add($certificate.Thumbprint)
+    Add-JstiOwnedCertificate $script:ledger $certificate.Thumbprint
     [void] $script:report.certificates.Add([ordered]@{
         role = $Role; thumbprint = $certificate.Thumbprint; subject = $certificate.Subject
         notAfter = $certificate.NotAfter.ToUniversalTime().ToString('o'); privateKeyExportable = $false
@@ -148,6 +157,8 @@ function New-EphemeralCertificate([string] $Role) {
 
 function Add-TrustedPeople($Certificate) {
     # Only the public certificate is added; the private key never leaves CurrentUser\My.
+    Assert-JstiAdmitted $script:ledger
+    if ($script:ledger.Certificates -notcontains $Certificate.Thumbprint) { throw 'Only a certificate this run created may be trusted.' }
     $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPeople', 'LocalMachine')
     $store.Open('ReadWrite')
     try {
@@ -159,18 +170,6 @@ function Add-TrustedPeople($Certificate) {
     }
 }
 
-function Remove-EphemeralCertificates {
-    $remaining = @()
-    foreach ($thumbprint in $script:certificateThumbprints) {
-        Remove-Item -LiteralPath "Cert:\LocalMachine\TrustedPeople\$thumbprint" -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -ErrorAction SilentlyContinue
-        foreach ($store in @('Cert:\LocalMachine\TrustedPeople', 'Cert:\CurrentUser\My', 'Cert:\LocalMachine\Root', 'Cert:\CurrentUser\Root')) {
-            if (Test-Path -LiteralPath "$store\$thumbprint") { $remaining += "$store\$thumbprint" }
-        }
-    }
-    return $remaining
-}
-
 # --- deployment -----------------------------------------------------------------------------------
 function Get-HResult([string] $Message, [int] $Fallback) {
     $match = [regex]::Match($Message, '0x[0-9A-Fa-f]{8}')
@@ -178,7 +177,11 @@ function Get-HResult([string] $Message, [int] $Fallback) {
     return '0x{0:X8}' -f $Fallback
 }
 
-function Invoke-Deployment([string] $Label, [scriptblock] $Operation) {
+function Invoke-Deployment([string] $Label, [scriptblock] $Operation, [string] $Registers) {
+    # $Registers names the package full name the operation could register, so
+    # cleanup owns it even when an expected refusal unexpectedly succeeds.
+    Assert-JstiAdmitted $script:ledger
+    if ($Registers) { Add-JstiOwnedPackage $script:ledger $Registers }
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $record = [ordered]@{ label = $Label; api = 'Appx cmdlet'; succeeded = $false; hresult = $null; message = $null; log = @() }
     try {
@@ -217,9 +220,12 @@ function Initialize-WinRtDeployment {
     $script:packageManager = New-Object Windows.Management.Deployment.PackageManager
 }
 
-function Invoke-WinRtAdd([string] $Label, [string] $Path, [switch] $CancelImmediately, [int] $TimeoutSeconds = 240) {
+function Invoke-WinRtAdd([string] $Label, [string] $Path, [string] $Registers, [switch] $CancelImmediately,
+                        [int] $TimeoutSeconds = 240) {
     # The PackageManager API behind Add-AppxPackage and App Installer, used where
     # the test needs a bounded wait or a real cancellation of the operation.
+    if (-not $Registers) { throw 'A deployment must name the package full name it could register.' }
+    Add-JstiOwnedPackage $script:ledger $Registers
     Initialize-WinRtDeployment
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $source = New-Object System.Threading.CancellationTokenSource
@@ -413,6 +419,7 @@ function Invoke-AliasRun([string] $Label, [string] $Arguments, $Installed, [int]
                          [switch] $Handshake) {
     # CreateProcess on the execution alias starts the packaged app with its
     # package identity while keeping this harness's streams and environment.
+    Assert-JstiAdmitted $script:ledger
     $release = Join-Path $evidenceDirectory "$Label.release"
     Remove-Item -LiteralPath $release -Force -ErrorAction SilentlyContinue
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -433,6 +440,7 @@ function Invoke-AliasRun([string] $Label, [string] $Arguments, $Installed, [int]
     if ($Handshake) { $variables['JSTI_BUNDLE_PROBE_RELEASE_PATH'] = $release }
     foreach ($key in $Environment.Keys) { $variables[$key] = $Environment[$key] }
     $process = [System.Diagnostics.Process]::Start($startInfo)
+    Add-JstiOwnedProcess $script:ledger $process
     $standardOutput = $process.StandardOutput.ReadToEndAsync()
     $standardError = $process.StandardError.ReadToEndAsync()
     $loaded = @{}
@@ -473,6 +481,7 @@ function Invoke-AliasRun([string] $Label, [string] $Arguments, $Installed, [int]
 }
 
 function Start-FromStartMenu($Installed) {
+    Assert-JstiAdmitted $script:ledger
     $existing = @(Get-Process -Name SpeakWindows -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
     $launch = [ordered]@{ method = 'IApplicationActivationManager.ActivateApplication'; activationResult = $null; processId = $null }
     try {
@@ -496,6 +505,7 @@ function Start-FromStartMenu($Installed) {
     }
     $process = [System.Diagnostics.Process]::GetProcessById($launch.processId)
     $null = $process.Handle
+    Add-JstiOwnedProcess $script:ledger $process
     return @{ process = $process; record = $launch }
 }
 
@@ -606,18 +616,21 @@ try {
         dataDirectory = $dataDirectory
     }
 
-    # Refuse anything but a pristine machine: this test must never touch real user state.
-    $pristine = [ordered]@{
+    # Admit only a pristine machine. Every probe below is read-only; a refused
+    # run changes nothing, and its cleanup is skipped.
+    $observed = [ordered]@{
         dataDirectory = Test-Path -LiteralPath $dataDirectory
-        registered = @(Get-AppxPackage -Name $name -AllUsers).Count -gt 0
+        registrations = @(Get-AppxPackage -Name $name -AllUsers | ForEach-Object { $_.PackageFullName })
         packageData = Test-Path -LiteralPath $packageDataDirectory
         alias = Test-Path -LiteralPath $aliasPath
+        processes = @(Get-Process -Name SpeakWindows -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
         publisherCertificates = @(Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\TrustedPeople |
-            Where-Object { $_.Subject -eq $base.publisher }).Count -gt 0
+            Where-Object { $_.Subject -eq $base.publisher } | ForEach-Object { $_.PSPath })
     }
-    Assert-Check 'The machine has no prior Just Speak to It data, package or test certificate' (
-        -not ($pristine.Values -contains $true)) $pristine
-    $script:ownsDataDirectory = $true
+    $report.admission = Test-JstiLifecycleAdmission $ledger $observed
+    Assert-Check 'The machine has no Just Speak to It data, registration, alias, process or test certificate' (
+        $report.admission.admitted) $report.admission
+    Set-JstiOwnedDataDirectory $ledger $dataDirectory
 
     # --- signing with the ephemeral certificate through the external-signing path ---
     $trusted = New-EphemeralCertificate 'trusted signer'
@@ -636,12 +649,14 @@ try {
     $report.tools = (Read-JstiJson (Join-Path $packagesDirectory 'base-signed.sign.json')).signTool
 
     # --- phase 1: fresh machine ---------------------------------------------------------
-    $attempt = Invoke-Deployment 'Install a tampered package on a fresh machine' { Add-AppxPackage -Path $tamperedUpgrade }
+    $attempt = Invoke-Deployment 'Install a tampered package on a fresh machine' {
+        Add-AppxPackage -Path $tamperedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'A tampered package is refused' (-not $attempt.succeeded) $attempt
     Assert-Check 'The refused package leaves nothing registered or written' (
         (Get-Registrations).Count -eq 0 -and -not (Test-Path -LiteralPath $dataDirectory)) $null
 
-    $deployment = Invoke-Deployment 'Install the base version' { Add-AppxPackage -Path $signedBase }
+    $deployment = Invoke-Deployment 'Install the base version' {
+        Add-AppxPackage -Path $signedBase } -Registers $base.packageFullName
     Assert-Check 'The base version installs' $deployment.succeeded $deployment
     $installed = Assert-Installed 'The base version' $base $baseLayout
     Assert-Check 'Installing creates no user data' (-not (Test-Path -LiteralPath $dataDirectory)) $dataDirectory
@@ -671,12 +686,14 @@ try {
     $rows = [int] $expectations.history.rows
     Assert-UserData 'The seeded portable data' 'seeded'
 
-    $attempt = Invoke-Deployment 'Install an untrusted package over portable data' { Add-AppxPackage -Path $untrustedUpgrade }
+    $attempt = Invoke-Deployment 'Install an untrusted package over portable data' {
+        Add-AppxPackage -Path $untrustedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'A package signed by an untrusted certificate is refused' (-not $attempt.succeeded) $attempt
     Assert-Check 'The refused package leaves nothing registered' ((Get-Registrations).Count -eq 0) $null
     Assert-UserData 'The refused first install' 'seeded'
 
-    $deployment = Invoke-Deployment 'Install the base version over portable data' { Add-AppxPackage -Path $signedBase }
+    $deployment = Invoke-Deployment 'Install the base version over portable data' {
+        Add-AppxPackage -Path $signedBase } -Registers $base.packageFullName
     Assert-Check 'The base version installs over portable data' $deployment.succeeded $deployment
     $installed = Assert-Installed 'The base version over portable data' $base $baseLayout
     Assert-UserData 'Installing over portable data' 'seeded'
@@ -686,24 +703,27 @@ try {
     # --- phase 3: failed and cancelled upgrades ----------------------------------------------------
     # Cancellation runs first, before any refused attempt could leave the
     # upgrade staged and make its registration finish too quickly to cancel.
-    $attempt = Invoke-WinRtAdd 'Cancel an upgrade' $signedUpgrade -CancelImmediately
+    $attempt = Invoke-WinRtAdd 'Cancel an upgrade' $signedUpgrade -Registers $upgrade.packageFullName -CancelImmediately
     # The task is Canceled, or the service reports ERROR_INSTALL_CANCEL / ERROR_CANCELLED.
     Assert-Check 'A cancelled upgrade does not complete' ($attempt.status -eq 'Canceled' -or (
         $attempt.status -eq 'Faulted' -and @('0x80073CF8', '0x800704C7') -contains $attempt.hresult)) $attempt
     Start-Sleep -Seconds 5
     Assert-PreviousIntact 'The cancelled upgrade' $base $baseLayout 'recovered'
 
-    $attempt = Invoke-Deployment 'Upgrade with a tampered package' { Add-AppxPackage -Path $tamperedUpgrade }
+    $attempt = Invoke-Deployment 'Upgrade with a tampered package' {
+        Add-AppxPackage -Path $tamperedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'A tampered upgrade is refused' (-not $attempt.succeeded) $attempt
     Assert-PreviousIntact 'The refused tampered upgrade' $base $baseLayout 'recovered'
 
-    $attempt = Invoke-Deployment 'Upgrade with an untrusted package' { Add-AppxPackage -Path $untrustedUpgrade }
+    $attempt = Invoke-Deployment 'Upgrade with an untrusted package' {
+        Add-AppxPackage -Path $untrustedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'An upgrade signed by an untrusted certificate is refused' (-not $attempt.succeeded) $attempt
     Assert-PreviousIntact 'The refused untrusted upgrade' $base $baseLayout 'recovered'
 
     $running = Invoke-StartMenuLaunch 'The base version during an upgrade attempt' $installed $rows $transcript -LeaveRunning
     try {
-        $attempt = Invoke-WinRtAdd 'Upgrade while the base version runs' $signedUpgrade -TimeoutSeconds 120
+        $attempt = Invoke-WinRtAdd 'Upgrade while the base version runs' $signedUpgrade `
+            -Registers $upgrade.packageFullName -TimeoutSeconds 120
         Assert-Check 'An upgrade is refused while the app runs' (-not $attempt.succeeded) $attempt
         Add-Check 'The in-use refusal is ERROR_PACKAGES_IN_USE' ($attempt.hresult -eq '0x80073D02') $attempt.hresult
         $state = Read-AppState $running.window
@@ -717,7 +737,8 @@ try {
     Invoke-StartMenuLaunch 'The base version after refused upgrades' $installed $rows $transcript | Out-Null
 
     # --- phase 4: upgrade -----------------------------------------------------------------------------
-    $deployment = Invoke-Deployment 'Upgrade to the next version' { Add-AppxPackage -Path $signedUpgrade }
+    $deployment = Invoke-Deployment 'Upgrade to the next version' {
+        Add-AppxPackage -Path $signedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'The upgrade installs' $deployment.succeeded $deployment
     $previous = $installed
     $installed = Assert-Installed 'The upgraded version' $upgrade $upgradeLayout
@@ -734,7 +755,8 @@ try {
     # --- phase 5: uninstall keeps data; reinstall finds it ----------------------------------------------
     Assert-Removed 'The upgraded version' $installed
     Assert-UserData 'Uninstall' 'recovered'
-    $deployment = Invoke-Deployment 'Reinstall after uninstall' { Add-AppxPackage -Path $signedUpgrade }
+    $deployment = Invoke-Deployment 'Reinstall after uninstall' {
+        Add-AppxPackage -Path $signedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'The package reinstalls after uninstall' $deployment.succeeded $deployment
     $installed = Assert-Installed 'The reinstalled version' $upgrade $upgradeLayout
     Invoke-StartMenuLaunch 'The reinstalled version' $installed $rows $transcript | Out-Null
@@ -744,25 +766,20 @@ try {
     $failures.Add("$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))")
     Write-Host "Lifecycle stopped: $($_.Exception.Message)"
 } finally {
-    $cleanup = [ordered]@{}
+    # Only ledger-owned state is touched; nothing at all after a refused admission.
     try {
-        Get-Process -Name SpeakWindows -ErrorAction SilentlyContinue | Where-Object {
-            $_.Path -and $_.Path -like ('*\WindowsApps\' + $name + '_*') } | Stop-Process -Force
-        foreach ($package in @(Get-AppxPackage -Name $name)) { Remove-AppxPackage -Package $package.PackageFullName }
-        $cleanup.registrationsRemaining = @(Get-AppxPackage -Name $name).Count
-    } catch { $cleanup.packageError = $_.Exception.Message }
-    try {
-        $cleanup.certificatesRemaining = @(Remove-EphemeralCertificates)
-        Add-Check 'Every ephemeral test certificate and private key is removed' (
-            $cleanup.certificatesRemaining.Count -eq 0) $cleanup.certificatesRemaining
-    } catch { $cleanup.certificateError = $_.Exception.Message; $failures.Add('Certificate cleanup failed') }
-    try {
-        if ($script:ownsDataDirectory -and (Test-Path -LiteralPath $dataDirectory)) {
-            Remove-Item -LiteralPath $dataDirectory -Recurse -Force
-        }
-        $cleanup.testDataRemoved = -not (Test-Path -LiteralPath $dataDirectory)
-    } catch { $cleanup.dataError = $_.Exception.Message }
+        $cleanup = Invoke-JstiLifecycleCleanup -Ledger $ledger -Operations $ownershipOperations
+    } catch {
+        $cleanup = [ordered]@{ admitted = [bool] $ledger.Admitted; skipped = $false
+            failures = @("cleanup stopped: $($_.Exception.Message)") }
+    }
     $report.cleanup = $cleanup
+    if ($cleanup.skipped) {
+        Write-Host 'Admission was refused: no package, process, certificate or file was changed.'
+    } else {
+        Add-Check 'Every package, process, certificate and data directory this run created is removed' (
+            $cleanup.failures.Count -eq 0) $cleanup
+    }
     $report.failures = @($failures)
     Write-JstiJson (Join-Path $evidenceDirectory 'package-lifecycle-evidence.json') $report
 }

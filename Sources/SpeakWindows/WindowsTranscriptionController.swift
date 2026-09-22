@@ -1,11 +1,12 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakWindowsPlatform
 import CWindowsSupport
 
 extension WindowsAppController {
     func transcribe(
-        _ original: DesktopRecordingStore.Record, duration: TimeInterval, target: JSTITextTarget?
+        _ original: DesktopRecordingStore.Record, duration: TimeInterval, target: WindowsInsertionTarget?
     ) async {
         var record = original
         cancellationRequested = false
@@ -54,7 +55,7 @@ extension WindowsAppController {
         }
     }
 
-    func present(_ record: DesktopRecordingStore.Record, target: JSTITextTarget?) {
+    func present(_ record: DesktopRecordingStore.Record, target: WindowsInsertionTarget?) {
         selectedHistoryID = record.id
         transcriptVariant = .processed
         refreshHistory()
@@ -63,15 +64,8 @@ extension WindowsAppController {
         if let failure = record.postProcessingFailure {
             status = "Original transcript saved; post-processing failed. \(failure)"
         }
-        if var target, !transcript.isEmpty, !closed, record.failure == nil, record.postProcessingFailure == nil {
-            do {
-                try transcript.withCString { text in
-                    try WindowsNative.checked { jsti_target_insert_text(&target, text, $0, $1) }
-                }
-                status = "Inserted into the original text field and saved to History."
-            } catch {
-                status = "Saved. Automatic insertion unavailable; select Copy. \(error.localizedDescription)"
-            }
+        if let target, !transcript.isEmpty, !closed, record.failure == nil, record.postProcessingFailure == nil {
+            status = deliver(transcript, to: target)
         }
         if selectedHistoryID == record.id {
             showTranscriptVariant(.processed, for: record)
@@ -80,6 +74,30 @@ extension WindowsAppController {
             status += " This recording is hidden by the current History search."
         }
         update(status, transcript: transcript, state: 0)
+    }
+
+    /// Delivers a finished transcript to the field captured at the hotkey.
+    /// The native adapter re-verifies that field first, so a changed focus,
+    /// a password field or an elevated application ends in the Copy fallback.
+    func deliver(_ text: String, to target: WindowsInsertionTarget) -> String {
+        let options = settings.textOutput ?? .init()
+        guard options.method != .clipboardOnly else {
+            do {
+                try text.withCString { pointer in
+                    try WindowsNative.checked { jsti_clipboard_write(pointer, $0, $1) }
+                }
+                return "Transcript copied to the clipboard and saved to History."
+            } catch {
+                return "Saved. The transcript could not be copied; select Copy. \(error.localizedDescription)"
+            }
+        }
+        do {
+            return WindowsInsertionStatus.message(for: try target.insert(text, options: options))
+        } catch let failure as WindowsTextOutputError {
+            return WindowsInsertionStatus.message(for: failure)
+        } catch {
+            return "Saved. Automatic insertion unavailable; select Copy. \(error.localizedDescription)"
+        }
     }
 
     func cancelTranscription() {

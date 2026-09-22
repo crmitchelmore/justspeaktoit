@@ -176,7 +176,9 @@ portablePackage.targets.append(contentsOf: [
             .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
             .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
             .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
-            .linkedLibrary("avrt"), .linkedLibrary("mfuuid")
+            .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
+            // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
+            .linkedLibrary("oleaut32")
         ]
     ),
     .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport"]),

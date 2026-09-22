@@ -163,9 +163,11 @@ int jsti_capture_start(JSTICapture *capture, char *error, size_t error_capacity)
 int jsti_capture_stop(JSTICapture *capture, char *error, size_t error_capacity);
 void jsti_capture_destroy(JSTICapture *capture);
 
-/* Capture at the recording hotkey before showing UI. Insertion is explicitly
- * addressed to the original native Edit/RichEdit control. Other applications
- * fail closed and should offer Copy. No global keystrokes or focus stealing. */
+/* Legacy direct path, retained for source/ABI compatibility. Capture at the
+ * recording hotkey before showing UI. Insertion is explicitly addressed to the
+ * original native Edit/RichEdit control only; other applications fail closed
+ * and should offer Copy. This entrypoint never sends keystrokes or touches the
+ * clipboard. New callers use the opaque jsti_insertion_* API below. */
 typedef struct JSTITextTarget {
     uintptr_t window;
     uintptr_t focused_control;
@@ -175,7 +177,94 @@ typedef struct JSTITextTarget {
 int jsti_target_capture(JSTITextTarget *target, char *error, size_t error_capacity);
 int jsti_target_insert_text(const JSTITextTarget *target, const char *text,
                             char *error, size_t error_capacity);
+/* Deliberate user copy: plain CF_UNICODETEXT, eligible for clipboard history. */
 int jsti_clipboard_write(const char *text, char *error, size_t error_capacity);
+
+/* Opaque insertion target with explicit lifetime. Capture synchronously at the
+ * recording hotkey: it records the foreground window, its thread and the
+ * focused control immediately and never blocks on the target application. A
+ * dedicated worker then asks UI Automation for the focused element in the
+ * background so later insertion can prove field identity; recording startup
+ * never waits for that provider. Every insertion re-verifies the original
+ * process, thread, window and focused control, refuses password/read-only
+ * fields and never steals focus or types into another application.
+ *
+ * Methods, in order of preference for the captured control:
+ *  1. Native Unicode Edit/RichEdit: EM_REPLACESEL to the captured control
+ *     (inserts at the caret or replaces the selection).
+ *  2. UI Automation Value pattern SetValue, used only when it is exactly
+ *     equivalent to insertion: the field is empty or the whole text is
+ *     selected (or the replace-field flag is set). UI Automation's Text
+ *     pattern is read-only and cannot insert; the field is never replaced
+ *     wholesale to emulate a caret insertion.
+ *  3. Guarded clipboard paste: the current clipboard is snapshotted, the text
+ *     is placed as CF_UNICODETEXT excluded from clipboard history/cloud sync,
+ *     Ctrl+V is sent while the captured control still owns focus, the field is
+ *     read back through UI Automation where possible, and the previous
+ *     clipboard content is restored unless it changed meanwhile.
+ * Insertion into a process of higher integrity (for example an elevated app)
+ * fails closed because Windows UIPI blocks both messages and input.
+ *
+ * Insert blocks the caller for a bounded time (about six seconds worst case)
+ * and may be called at most once at a time per target. Destroy is always safe
+ * and bounded: a worker still blocked inside a provider call is detached and
+ * releases its own resources when that call returns. Destroy after insert
+ * returns, never from another thread concurrently with insert. */
+typedef struct JSTIInsertionTarget JSTIInsertionTarget;
+enum JSTIInsertionFlags {
+    /* Replace the whole field instead of inserting at the caret. Native
+     * controls select all first; UI Automation requires a writable Value
+     * pattern; the clipboard fallback is never used for replacement. */
+    JSTI_INSERTION_REPLACE_FIELD = 1u << 0,
+    /* Leave the transcript on the clipboard after a paste instead of
+     * restoring the previous content (macOS "restore clipboard" off). */
+    JSTI_INSERTION_KEEP_TRANSCRIPT_ON_CLIPBOARD = 1u << 1,
+    /* Never use the clipboard/keystroke fallback; fail closed instead. */
+    JSTI_INSERTION_NO_PASTE_FALLBACK = 1u << 2
+};
+enum JSTIInsertionMethod {
+    JSTI_INSERTION_METHOD_NONE = 0,
+    JSTI_INSERTION_METHOD_NATIVE_EDIT = 1,
+    JSTI_INSERTION_METHOD_UIA_VALUE = 2,
+    JSTI_INSERTION_METHOD_PASTE = 3
+};
+enum JSTIInsertionIdentity {
+    /* Process, thread, foreground window and focused control matched. */
+    JSTI_INSERTION_IDENTITY_WINDOW = 1,
+    /* Additionally the same UI Automation element that had focus at capture. */
+    JSTI_INSERTION_IDENTITY_FIELD = 2
+};
+enum JSTIInsertionClipboard {
+    JSTI_INSERTION_CLIPBOARD_UNTOUCHED = 0,
+    JSTI_INSERTION_CLIPBOARD_RESTORED = 1,
+    /* Restored what fit; oversized or non-memory formats were not preserved. */
+    JSTI_INSERTION_CLIPBOARD_RESTORED_PARTIALLY = 2,
+    /* The transcript was intentionally left on the clipboard. */
+    JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT = 3,
+    JSTI_INSERTION_CLIPBOARD_RESTORE_FAILED = 4,
+    /* Another application changed the clipboard meanwhile; it was left alone. */
+    JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE = 5
+};
+typedef struct JSTIInsertionResult {
+    int method;    /* JSTIInsertionMethod */
+    int verified;  /* 1 when the field was read back and contains the text */
+    int identity;  /* JSTIInsertionIdentity */
+    int clipboard; /* JSTIInsertionClipboard */
+} JSTIInsertionResult;
+/* Null with an error when no external application field is focused. */
+JSTIInsertionTarget *jsti_insertion_capture(char *error, size_t error_capacity);
+/* Zero: text was delivered by result->method (verified says whether it was
+ * read back). -1: nothing was inserted; the error says why and the clipboard
+ * state is reported in result->clipboard. Text must be non-empty UTF-8. */
+int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigned flags,
+                          JSTIInsertionResult *result, char *error, size_t error_capacity);
+void jsti_insertion_destroy(JSTIInsertionTarget *target);
+/* Deterministic native checks on app-owned synthetic hidden controls with
+ * injected foreground, clipboard and keystroke seams: caret/selection
+ * insertion, surrogate pairs, stale identity, password/read-only refusal,
+ * UI Automation value/paste paths, timeouts and worker cleanup. Never sends
+ * real input, touches the system clipboard or inserts into another app. */
+int jsti_text_output_self_test(char *error, size_t error_capacity);
 
 /* Generic credentials scoped to this Windows user; names are automatically
  * prefixed with com.justspeaktoit/. Read: 1 missing, 2 buffer too small (required

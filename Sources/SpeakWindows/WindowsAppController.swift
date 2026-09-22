@@ -1,6 +1,7 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakWindowsPlatform
 import CWindowsSupport
 
 actor WindowsAppController {
@@ -10,20 +11,23 @@ actor WindowsAppController {
         var microphoneDeviceID: String?
         var batchModel: String?
         var liveModel: String?
+        // No settings UI yet; edited by hand in settings.json. Absent keys keep
+        // the smart insert-at-cursor default with clipboard restoration.
+        var textOutput: WindowsTextOutputOptions?
     }
 
     struct Recording {
         let native: OpaquePointer
         let context: WindowsCaptureContext
         var record: DesktopRecordingStore.Record
-        let target: JSTITextTarget?
+        let target: WindowsInsertionTarget?
         let live: DesktopLiveSession?
     }
 
     struct StoppedRecording {
         let record: DesktopRecordingStore.Record
         let duration: TimeInterval
-        let target: JSTITextTarget?
+        let target: WindowsInsertionTarget?
         let live: DesktopLiveSession?
     }
 
@@ -78,7 +82,7 @@ actor WindowsAppController {
         self.settings = loadedSettings
     }
 
-    func toggle(target: JSTITextTarget?, modelIndex: Int, deviceID: String) async {
+    func toggle(target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
         selectModel(modelIndex)
         selectMicrophone(deviceID)

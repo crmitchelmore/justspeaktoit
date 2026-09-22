@@ -96,11 +96,22 @@ post-processing client runs; processed text is stored separately. Empty
 transcripts remain empty, and a processing failure retains the original and its
 failure reason. Local post-processing and live polish are not wired into Windows.
 
-Automatic insertion currently supports focused native Unicode `Edit` and
-`RichEdit` controls. It verifies the originally captured process, thread, window
-and focused control before replacement. Other controls, a changed focus or a
-password/read-only field result in a copy fallback message. Broad browser,
-Electron, Office and elevated-app insertion parity is not implemented.
+Automatic insertion targets the control that had focus when the hotkey fired
+and re-verifies the captured process, thread, foreground window and focused
+control before every delivery. Native Unicode `Edit`/`RichEdit` controls
+receive the text directly at the caret or over the selection. Other editable
+controls (browser, Electron, XAML, WPF and Office fields) are resolved through
+UI Automation on a bounded background worker: an empty field or a fully
+selected field is set through the Value pattern, and everything else uses a
+guarded clipboard paste that snapshots and restores the previous clipboard
+content, excludes the transcript from clipboard history and reads the field
+back to confirm the insertion. Password, read-only and disabled fields, a
+changed focus or field, and elevated applications fail closed with a Copy
+fallback message. Replace-field, direct-only and clipboard-only modes exist
+as hand-edited `textOutput` settings without UI yet. See
+[Docs/windows-text-insertion.md](windows-text-insertion.md) for the policy,
+the deterministic native self-test and the remaining physical acceptance
+gates: browser, Electron and Office insertion has synthetic coverage only.
 
 The uploaded artifact contains a developer executable, resource directories,
 source/compiler metadata and an executable SHA-256 digest. It requires the
@@ -160,7 +171,7 @@ flowchart TB
 | Shared post-processing | Canonical cloud models, cleanup prompts, silence policy and OpenRouter execution | `Sources/SpeakCore/OpenRouterChatClient.swift`, `Sources/SpeakDesktop/DesktopPostProcessing.swift` |
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
-| Windows services | Event-driven WASAPI capture with a bounded writer queue, native history/settings UI, hotkey, Credential Manager, clipboard and guarded native-control insertion | `Sources/CWindowsSupport/` |
+| Windows services | Event-driven WASAPI capture with a bounded writer queue, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |
 | Apple services | Existing SwiftUI, AVFoundation, Speech, Core ML, Keychain, CloudKit and Sparkle integrations | `Sources/SpeakApp/`, `Sources/SpeakiOS/`, `Sources/SpeakSync/` |
 
 `Package.swift` selects the portable graph on Windows/Linux and when explicitly
@@ -208,7 +219,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Batch transcription | 28 canonical models across OpenAI, Groq, Deepgram, ElevenLabs, Google Gemini, xAI, Cartesia, Gladia, Speechmatics, Meta, Azure, Mistral, Soniox, Rev.ai, Modulate and AssemblyAI, through shared clients | Final-head Windows/Linux CI, real provider receipts, supported formats/languages and remaining macOS providers |
 | Live transcription | Deepgram and AssemblyAI routes use shared sessions and a runtime-qualified native WinHTTP transport | Final-head native host checks, real provider receipts and remaining streaming providers |
 | Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
-| Text output | Captured native Edit/RichEdit insertion and explicit copy implemented | Browser/Electron/Office coverage, selections, undo, streaming insertion and voice edit |
+| Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; replace-field, direct-only and clipboard-only modes as hand-edited settings | Physical browser/Electron/Office/XAML acceptance, a text output settings UI, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
@@ -241,7 +252,17 @@ provider keys.
 The native self-test checks UTF-8/UTF-16 round trips, invalid encoding, PCM frame
 boundaries, silent packets, stop flushing, bounded queue overflow/wrap/FIFO/drain
 behaviour, writer failure reporting and rejection of an invalid insertion
-target. The current UI smoke test creates a real native window and checks its
+target. The text output self-test then drives the insertion adapter against
+app-owned hidden Edit/RichEdit controls on a helper thread through injected
+foreground, clipboard and keystroke seams: caret and selection insertion,
+surrogate pairs, replace-field, stale focus and foreground, password/read-only
+refusal on both the native and UI Automation paths, the Value pattern for
+empty and fully selected fields, the guarded paste with exact clipboard
+restoration, keystroke failure, unverifiable pastes, a clipboard changed by
+another application, bounded timeouts, bounded destroy of a blocked worker and
+worker cleanup. It never sends real input or touches the system clipboard, and
+it is not evidence of insertion into a real browser, Electron or Office
+window. The current UI smoke test creates a real native window and checks its
 minimum-size control bounds, atomic history replacement, preserved selection,
 history action identifiers, search query events with filtered-snapshot
 selection clearing and restoration, transcript version defaults with copy and

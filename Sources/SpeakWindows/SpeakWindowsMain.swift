@@ -1,6 +1,7 @@
 import Foundation
 import CWindowsSupport
 import SpeakDesktop
+import SpeakWindowsPlatform
 
 final class WindowsEventContext {
     let controller: WindowsAppController
@@ -68,9 +69,9 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     switch event {
     case 1:
         // Capture synchronously before an actor hop or another app gains focus.
-        var target = JSTITextTarget()
-        var error = [CChar](repeating: 0, count: 1024)
-        let captured = jsti_target_capture(&target, &error, error.count) == 0 ? target : nil
+        // No external field focused is not an error here: the transcript is
+        // still saved and offered for Copy.
+        let captured = try? WindowsInsertionTarget.capture()
         Task { await controller.toggle(target: captured, modelIndex: Int(index), deviceID: value) }
     case 2: Task { await controller.importAudio(path: value, modelIndex: Int(index)) }
     case 3, 15, 16: transcriptEvent(event, value: value, holder: holder)
@@ -160,6 +161,7 @@ enum SpeakWindowsMain {
         do {
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
+                try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
                 try WindowsNative.checked { jsti_private_storage_self_test($0, $1) }
                 try WindowsNative.stagingSelfTest()
                 try WindowsNative.checked { jsti_websocket_self_test($0, $1) }

@@ -25,6 +25,13 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   private let logger = SpeakLogger.logger(category: "ElevenLabsLiveController")
   private let audioProcessor = ElevenLabsAudioProcessor()
   private var hasFinished: Bool = false
+  private var isStarting = false
+  private var isStopping = false
+  private var stopGrace: TimeInterval = 0
+
+  var stopCompletionTimeout: TimeInterval {
+    ElevenLabsStopPolicy.completionTimeout(grace: stopGrace)
+  }
 
   private let targetSampleRate: Double = 16000
   private var targetFormat: AVAudioFormat?
@@ -52,18 +59,27 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     logger.info("Configured ElevenLabs with model: \(model)")
   }
 
-  // swiftlint:disable:next function_body_length
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   func start() async throws {
+    guard !isStarting, !isStopping, transcriber == nil else {
+      throw TranscriptionManagerError.liveSessionAlreadyRunning
+    }
+    isStarting = true
+    defer { isStarting = false }
+    resetStartState()
+    stopGrace = ElevenLabsStopPolicy.boundedGrace(appSettings.liveStopGracePeriod)
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.microphonePermissionMissing
     }
 
+    guard !hasFinished, !Task.isCancelled else { throw CancellationError() }
     let apiKey = try await elevenLabsAPIKey()
+    guard !hasFinished, !Task.isCancelled else { throw CancellationError() }
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
     audioEngine = AVAudioEngine()
-    resetStartState()
 
     do {
+      guard !hasFinished, !Task.isCancelled else { throw CancellationError() }
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -126,6 +142,9 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       }
 
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      guard !hasFinished, !Task.isCancelled, transcriber === newTranscriber else {
+        throw CancellationError()
+      }
       if let failure = newTranscriber.snapshot.error { throw failure }
       isRunning = true
       streamingStartTime = Date()
@@ -152,9 +171,18 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   }
 
   func stop() async {
+    if isStarting, !isRunning {
+      hasFinished = true
+      audioProcessor.setRunning(false)
+      audioEngine.stop()
+      transcriber?.stop()
+      return
+    }
     guard isRunning else { return }
     guard !hasFinished else { return }
     hasFinished = true
+    isStopping = true
+    defer { isStopping = false }
 
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
@@ -166,10 +194,12 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       audioProcessor.drainConverterTail()
       audioProcessor.flushPendingAudio(to: active)
       audioProcessor.setRunning(false)
-      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
+      await applyLiveStopGrace(stopGrace)
+      guard transcriber === active else { return }
       // The shared client owns drain/commit ordering. It can already have a
       // periodic commit pending, so a separate Mac commit must never be sent.
       snapshot = await active.finishAndWait()
+      guard transcriber === active else { return }
     } else {
       audioProcessor.setRunning(false)
     }
@@ -194,7 +224,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     }
 
     await endActiveInputSession()
-    transcriber = nil
+    if transcriber === active { transcriber = nil }
   }
 
   private final class ElevenLabsAudioProcessor: @unchecked Sendable {

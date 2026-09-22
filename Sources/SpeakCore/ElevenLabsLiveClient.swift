@@ -34,7 +34,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// Stay below the provider's approximately 36-second automatic commit.
     static let segmentSeconds = 20
     /// Bounds readiness, all queued sends and both a pending and trailing commit.
-    static let finishDrainBudget = finishReadyBudget + sendDeadline + 2 * finishBudget
+    public static let finishDrainBudget = finishReadyBudget + sendDeadline + 2 * finishBudget
+    /// Exposes the active client's bound to platform lifecycle watchdogs.
+    public var finalisationBudget: TimeInterval? { Self.finishDrainBudget }
     /// Queued frames are bounded by count as well as by the five-second byte budget.
     public static let maximumQueuedFrames = 256
 

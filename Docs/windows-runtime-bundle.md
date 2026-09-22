@@ -224,25 +224,25 @@ python3 -B scripts/windows-bundle/pin-swift-runtime.py \
 
 The temporary extraction is confined to a newly created task directory and removed after the verified lock is produced. Normal bundle builds do not redownload or retain another installer.
 
-Verified Windows checkpoint `affe2c87` (22 September 2026):
+Verified Windows checkpoint `5aab9c5e` (22 September 2026):
 
-- [Native Windows run 35750059468](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35750059468)
-  passed **578 tests, 13 optional skips, zero failures**, then all five WinHTTP
+- [Native Windows run 35753297954](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35753297954)
+  passed **580 tests, 13 optional skips, zero failures**, then all five WinHTTP
   loopback probes and native executable/window checks.
-- [Mac cross-build and Windows execution run 35750059437](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35750059437)
-  passed **578 tests, 13 optional skips, zero failures** from the exact Mac-built
+- [Mac cross-build and Windows execution run 35753297969](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35753297969)
+  passed **580 tests, 13 optional skips, zero failures** from the exact Mac-built
   release test executable. The production executable also passed playback,
   native/window and isolated runtime-bundle checks. Both runs tested PR merge
-  `ca73f4e89efa300c973b3f23847896f3f1dc677d`; its source tree is identical to
-  `affe2c87`.
-- The [runtime bundle artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35750059437/artifacts/10705016956)
+  `386ddeb5bbb5538c1f46cec28df343d989870e8b`; its source tree is identical to
+  `5aab9c5e`.
+- The [runtime bundle artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35753297969/artifacts/10706219200)
   contains a 30-file developer ZIP with 17 runtime DLLs. In all three isolated
   runs, the application and all 17 DLLs loaded from the extracted bundle with
   no foreign modules or missing static imports. Swift was absent from PATH,
   the working directory was empty, and the bundle path contained spaces and
   Greek characters. Removing the DLLs produced `STATUS_DLL_NOT_FOUND`; removing
   the real application resource produced exit 1.
-- ZIP SHA-256: `ba1f36fe2f3170ff96d698813e15853c4dd2e26afd1d7cefdd16f4cb51203a47`.
+- ZIP SHA-256: `2e92ec9c2e95ec891cc17ad22b79e6d5e00f88394d4dc01e50f64eb5cedf3316`.
   The three native/cross/bundle window screenshots were byte-identical and
   inspected for control bounds. These tests use synthetic content. The hosted
   runner had no physical output endpoint, so three audible playback cases were

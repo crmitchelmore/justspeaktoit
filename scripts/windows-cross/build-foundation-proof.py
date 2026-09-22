@@ -79,6 +79,30 @@ def extract_zip(path, destination):
         archive.extractall(destination)
 
 
+def remove_staging(path, owner):
+    """Remove one explicitly named task-owned staging path, never a linked tree."""
+    owner = owner.resolve()
+    if path.is_symlink() or owner not in path.resolve().parents:
+        raise ValueError("Refusing cleanup outside the task-owned cache")
+    if path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def remove_windows_staging(workspace):
+    # Retain MSI layout/table JSON and the signed bundle's payload manifest for
+    # provenance. CABs, opaque payload copies and expanded staging are redundant
+    # only after both reconstructed packages passed their exact size checks.
+    if workspace.is_symlink():
+        raise ValueError("Refusing cleanup of a linked Windows staging directory")
+    names = ["payloads.cab", "bootstrap.cab", "payloads", "packages", "rtl.cab-expanded",
+             "windows.cab-expanded", "sdk.windows.x64.cab-expanded",
+             "sdk.windows.arm64.cab-expanded", "sdk.windows.x86.cab-expanded"]
+    for name in names:
+        remove_staging(workspace / name, workspace)
+
+
 def swift_windows(installer, workspace, seven, output, log):
     workspace.mkdir(parents=True, exist_ok=True)
     # These exact offsets belong to the SHA256-pinned Swift 6.2.3 x64 Burn bundle.
@@ -113,9 +137,7 @@ def swift_windows(installer, workspace, seven, output, log):
     for name in ["windows", "rtl"]:
         run([sys.executable, HERE / "extract-msi.py", name, "--workspace", workspace,
              "--seven", seven, "--output", output], log)
-    # This generated duplicate is almost 900 MB. The verified installer remains
-    # cached and can recreate it; reclaim space on hosted macOS runners.
-    (workspace / "payloads.cab").unlink()
+    remove_windows_staging(workspace)
 
 
 def main():
@@ -142,20 +164,26 @@ def main():
     seven_root.mkdir(exist_ok=True)
     run(["tar", "-xf", downloads / "7z2603-mac.tar.xz", "-C", seven_root], log)
     seven = seven_root / "7zz"
+    remove_staging(downloads / "7z2603-mac.tar.xz", cache)
     run(["pkgutil", "--check-signature", downloads / "swift-6.2.3-RELEASE-osx.pkg"], log)
     mac_package = cache / "macos-package"
     if not mac_package.exists():
         run(["pkgutil", "--expand-full", downloads / "swift-6.2.3-RELEASE-osx.pkg", mac_package], log)
     tool = mac_package / "swift-6.2.3-RELEASE-osx-package.pkg/Payload/usr"
     run([tool / "bin/swiftc", "--version"], log)
+    # The verified package is ~1.7 GB; retain the expanded compiler and notices,
+    # not a second copy, before opening the Windows bundle or LLVM archive.
+    remove_staging(downloads / "swift-6.2.3-RELEASE-osx.pkg", cache)
     swift_layout = cache / "swift-windows"
     swift_windows(downloads / "swift-6.2.3-RELEASE-windows10.exe", cache / "windows-extraction",
                   seven, swift_layout, log)
+    remove_staging(downloads / "swift-6.2.3-RELEASE-windows10.exe", cache)
     sdk = next(swift_layout.rglob("Windows.sdk"))
     microsoft = cache / "microsoft"
     for entry in lock["downloads"]:
         if entry["name"].endswith((".nupkg", ".vsix")):
             extract_zip(downloads / entry["name"], microsoft / pathlib.Path(entry["name"]).stem)
+            remove_staging(downloads / entry["name"], cache)
     headers = microsoft / "Microsoft.VC.14.44.17.14.CRT.Headers.base/Contents/VC/Tools/MSVC/14.44.35207/include"
     kits = microsoft / "microsoft.windows.sdk.cpp.10.0.26100.1/c/Include/10.0.26100.0"
     # Swift's installer places these unmodified maps beside the Microsoft headers.

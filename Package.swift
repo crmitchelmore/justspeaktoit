@@ -114,7 +114,6 @@ let appleCoreSources: [String] = [
     "SettingsSync.swift",
     "SharedAudioImport.swift",
     "SharedRecordingInbox.swift",
-    "SonioxLiveClient.swift",
     "SonioxTTSRealtime.swift",
     "SpeakCLIManifest.swift",
     "SpeechInsights/SpeechInsightsAggregate.swift",

@@ -264,7 +264,7 @@ extension DesktopLiveSessionTests {
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
             guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
-            return [.deepgram, .assemblyai, .openai, .speechmatics].contains(route.provider)
+            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox].contains(route.provider)
                 || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
@@ -285,6 +285,7 @@ extension DesktopLiveSessionTests {
             if route.provider == .deepgram { XCTAssertTrue(client is DeepgramLiveClient) }
             if route.provider == .assemblyai { XCTAssertTrue(client is AssemblyAILiveClient) }
             if route.provider == .speechmatics { XCTAssertTrue(client is SpeechmaticsLiveClient) }
+            if route.provider == .soniox { XCTAssertTrue(client is SonioxLiveClient) }
             if route.provider == .openai {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)
                 XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)
@@ -388,4 +389,35 @@ private final class DesktopUnopenedSocket: StreamingWebSocketConnection, @unchec
     }
     func receive(completion: @escaping @Sendable (Result<StreamingWebSocketMessage, Error>) -> Void) {}
     func cancel() {}
+}
+
+extension DesktopLiveSessionTests {
+    /// The canonical Soniox live route resolves through the shared factory to the
+    /// shared `SonioxLiveClient`, and the Windows model projection is derived
+    /// from `DesktopLiveTranscription.liveModels`, so it follows automatically.
+    func testCanonicalSonioxLiveRouteIsSelectedAndWindowsProjectionFollowsIt() throws {
+        let sonioxID = "soniox/stt-rt-v5-streaming"
+        let route = try XCTUnwrap(DesktopLiveTranscription.route(forID: sonioxID))
+        XCTAssertEqual(route.provider, .soniox)
+        XCTAssertEqual(route.apiModelName, "stt-rt-v5")
+        XCTAssertEqual(route.sampleRate, 16_000)
+        XCTAssertEqual(route.apiKeyIdentifier, "soniox.apiKey")
+
+        // The desktop live projection — the exact list the Windows host renders
+        // through `WindowsModels.live` — now carries the canonical Soniox model.
+        XCTAssertTrue(DesktopLiveTranscription.liveModels.contains { $0.id == sonioxID })
+
+        let client = DesktopLiveTranscription.makeClient(
+            model: sonioxID, apiKey: "key", language: "fr_FR", makeConnection: { _ in
+                fatalError("Constructing a client must not open a connection")
+            }
+        )
+        XCTAssertTrue(client is SonioxLiveClient)
+        XCTAssertEqual(client?.finalShape, .cumulativeTranscript)
+        XCTAssertEqual(client?.finishFlushesBufferedAudio, true)
+
+        let provider = try XCTUnwrap(DesktopLiveTranscription.provider(forID: sonioxID))
+        XCTAssertEqual(provider.id, "soniox")
+        XCTAssertEqual(provider.apiKeyIdentifier, "soniox.apiKey")
+    }
 }

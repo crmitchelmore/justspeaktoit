@@ -34,10 +34,21 @@ public struct LiveModelCapabilities: Sendable, Hashable {
     /// Unknown models remain conservative until their wire contract is verified.
     public let supportsLanguageHint: Bool
 
+    /// Preserves the existing public initializer, including function references.
+    public init(
+        supportedSpeedModes: Set<SpeedModeID>,
+        postStopFinalizeBudget: TimeInterval = 0
+    ) {
+        self.init(
+            supportedSpeedModes: supportedSpeedModes, postStopFinalizeBudget: postStopFinalizeBudget,
+            supportsLanguageHint: false
+        )
+    }
+
     public init(
         supportedSpeedModes: Set<SpeedModeID>,
         postStopFinalizeBudget: TimeInterval = 0,
-        supportsLanguageHint: Bool = false
+        supportsLanguageHint: Bool
     ) {
         self.supportedSpeedModes = supportedSpeedModes
         self.postStopFinalizeBudget = postStopFinalizeBudget

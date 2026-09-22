@@ -8,6 +8,15 @@ final class DesktopLiveLanguageTests: XCTestCase {
     private let unsupported = AssemblyAIModels.universal35ProStreamingID
     private let options = DesktopPostProcessing.Options(mode: .disabled)
 
+    func testOriginalCapabilityInitializerRetainsItsExactFunctionSignature() {
+        let original: (Set<SpeedModeID>, TimeInterval) -> LiveModelCapabilities =
+            LiveModelCapabilities.init(supportedSpeedModes:postStopFinalizeBudget:)
+        let capabilities = original([.instant, .livePolish], 2)
+        XCTAssertEqual(capabilities.supportedSpeedModes, [.instant, .livePolish])
+        XCTAssertEqual(capabilities.postStopFinalizeBudget, 2)
+        XCTAssertFalse(capabilities.supportsLanguageHint)
+    }
+
     func testCanonicalHintsAreConservativeAndProjectionRequiresHostForwarding() {
         let supportedIDs = [
             supported, "deepgram/flux-general-multi-streaming", SpeechmaticsRealtime.liveCatalogID,

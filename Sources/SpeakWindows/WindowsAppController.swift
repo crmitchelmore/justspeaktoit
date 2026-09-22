@@ -106,9 +106,11 @@ actor WindowsAppController {
         self.settings = loadedSettings
     }
 
+    /// `textOutput` was read in settings order at the Record event, so a later
+    /// Apply cannot change how this recording is output.
     func toggle(
         target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String,
-        targetExecutablePath: String? = nil
+        targetExecutablePath: String?, textOutput: WindowsTextOutputOptions
     ) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
         cancelOutput()
@@ -118,9 +120,6 @@ actor WindowsAppController {
         activeOperations += 1
         defer { busy = false; finishOperation() }
         if recording != nil { await stopAndTranscribe(); return }
-        // Before any suspension: settings applied ahead of this event have been
-        // awaited, and a later Apply cannot change how this recording is output.
-        let textOutput = textOutputOptions()
         do {
             // Wait for acknowledged silence, while slow decoder release stays
             // off this actor. Busy prevents another capture during suspension.

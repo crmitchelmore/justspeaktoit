@@ -37,6 +37,21 @@ final class WindowsTextOutputTests: XCTestCase {
         }
     }
 
+    /// A C string ends at NUL, so a transcript containing one is refused before
+    /// the native job runs instead of being reported as copied after only its
+    /// prefix. Neither request reaches the system clipboard.
+    func testClipboardOutput_RefusesEmbeddedNULBeforeTheNativeJobRuns() throws {
+        let output = try WindowsClipboardOutput()
+        XCTAssertThrowsError(try output.copy("first\u{0}last")) { error in
+            XCTAssertTrue((error as? WindowsTextOutputError)?.message.contains("NUL") == true)
+            XCTAssertEqual((error as? WindowsTextOutputError)?.clipboard, .untouched)
+        }
+        // The job is still unused: an empty request reaches the native text check.
+        XCTAssertThrowsError(try output.copy("")) { error in
+            XCTAssertTrue((error as? WindowsTextOutputError)?.message.contains("no transcript") == true)
+        }
+    }
+
     func testNativeChoice_RoundTripsEveryCombinationWithStableValues() {
         let methods: [(WindowsTextOutputOptions.Method, Int32)] = [(.smart, 0), (.directOnly, 1), (.clipboardOnly, 2)]
         let insertions: [(WindowsTextOutputOptions.Insertion, Int32)] = [(.insertAtCursor, 0), (.replaceField, 1)]
@@ -85,6 +100,8 @@ final class WindowsTextOutputTests: XCTestCase {
         XCTAssertEqual(jsti_window_text_output(&method, &insertion, &restore), 0)
         XCTAssertEqual([method, insertion, restore], [2, 1, 0])
         XCTAssertEqual(jsti_window_text_output(nil, &insertion, &restore), -1)
+        jsti_window_clear_text_output()
+        XCTAssertEqual(jsti_window_text_output(&method, &insertion, &restore), -1)
     }
 
     func testInsertWithoutCapturedTarget_FailsClosed() {

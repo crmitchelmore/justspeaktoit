@@ -81,23 +81,32 @@ private final class TextOutputWorkflow {
     func run() async throws {
         await controller.markReadyForSelfTest()
         try WindowsNative.configureTextOutput(WindowsTextOutputOptions(), context: context)
+        // Every step drains its settings refresh, so clearing on the way out
+        // leaves no native callback holding this workflow's context.
+        defer { jsti_window_clear_text_output() }
         try await checkBatchKeepsItsStartChoice()
         try await checkLiveKeepsItsStartChoice()
         try await checkApplyBeforeRecord()
+        try await checkApplyAfterRecordCannotReachIt()
         try await checkFailedSaveKeepsSettings()
         try await checkImportAndRetryNeverOutput()
         try await checkClosingCancelsPendingOutput()
     }
 
+    /// After a failure: release every held effect, close and drain settings
+    /// within a bound, then drop the native callback before the context goes.
     func abandon() async {
         effects.releaseAll()
-        let closed = SelfTestSwitch()
+        let settled = SelfTestSwitch()
         let controller = controller
+        let holder = holder
         Task {
             await controller.close()
-            closed.open()
+            await holder.finishSettings()
+            settled.open()
         }
-        try? await eventually("abandoned workflow closed") { closed.isOpen }
+        try? await eventually("abandoned workflow closed") { settled.isOpen }
+        jsti_window_clear_text_output()
     }
 
     /// Start with Copy to the clipboard, Apply Smart while transcription is
@@ -147,8 +156,7 @@ private final class TextOutputWorkflow {
         await apply(WindowsTextOutputOptions())
         let earlier = SelfTestGate()
         holder.enqueueSettings { await earlier.pass() }
-        let choice = WindowsTextOutputOptions(method: .clipboardOnly).nativeChoice
-        textOutputEvent(choice.method, choice.insertion, choice.restoreClipboard, context)
+        submitApply(WindowsTextOutputOptions(method: .clipboardOnly))
         let starting = toggle(batchIndex)
         try await Task.sleep(for: .milliseconds(100))
         let waited = await !controller.selfTestState().recording
@@ -160,6 +168,37 @@ private final class TextOutputWorkflow {
         try require(started, "Record did not start after the Apply before it")
         await stop(batchIndex).value
         try await expectCopy(SyntheticEffects.batchText, "Record used the Apply before it")
+    }
+
+    /// Apply A, Record, Apply B in UI order, with the scheduler running the
+    /// Record task only after B has been saved. Record read its text output in
+    /// settings order, so the recording still uses A.
+    private func checkApplyAfterRecordCannotReachIt() async throws {
+        await apply(WindowsTextOutputOptions(method: .directOnly))
+        let first = WindowsTextOutputOptions(method: .clipboardOnly)
+        let later = WindowsTextOutputOptions(method: .smart)
+        let scheduler = SelfTestGate()
+        submitApply(first)
+        // The Record event, as windowEvent performs it, with its task held.
+        let read = holder.recordingTextOutput()
+        let delayed = Task { () -> WindowsTextOutputOptions in
+            let options = await read.value
+            await scheduler.pass()
+            return options
+        }
+        let recording = toggleRecording(
+            controller, target: nil, textOutput: delayed, modelIndex: batchIndex, deviceID: ""
+        )
+        submitApply(later)
+        await holder.finishSettings()
+        let saved = await controller.textOutputOptions()
+        scheduler.open()
+        await recording.value
+        try require(saved == later, "the Apply after Record was not saved before the Record task ran")
+        let started = await controller.selfTestState().recording
+        try require(started, "the delayed Record did not start")
+        await stop(batchIndex).value
+        try await expectCopy(SyntheticEffects.batchText, "an Apply after Record reached that recording")
     }
 
     /// A failed atomic write keeps every setting in memory, on disk and in the
@@ -227,11 +266,16 @@ private final class TextOutputWorkflow {
         }
     }
 
-    /// The native dialog's own Apply path: callback, settings queue, save and
-    /// the native refresh from what was saved.
-    private func apply(_ options: WindowsTextOutputOptions) async {
+    /// The native dialog's Apply callback, queued as the UI thread queues it.
+    private func submitApply(_ options: WindowsTextOutputOptions) {
         let choice = options.nativeChoice
         textOutputEvent(choice.method, choice.insertion, choice.restoreClipboard, context)
+    }
+
+    /// Apply and drain: callback, settings queue, save and the native refresh
+    /// from what was saved.
+    private func apply(_ options: WindowsTextOutputOptions) async {
+        submitApply(options)
         await holder.finishSettings()
     }
 
@@ -245,7 +289,9 @@ private final class TextOutputWorkflow {
 
     /// Record in this window: the Record event path without a captured field.
     private func toggle(_ index: Int) -> Task<Void, Never> {
-        toggleRecording(holder, target: nil, modelIndex: index, deviceID: "")
+        toggleRecording(
+            controller, target: nil, textOutput: holder.recordingTextOutput(), modelIndex: index, deviceID: ""
+        )
     }
 
     private func start(_ index: Int, _ scenario: String) async throws {

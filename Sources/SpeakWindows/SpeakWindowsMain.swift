@@ -16,7 +16,7 @@ final class WindowsEventContext {
     let search: WindowsSearchCoalescer
     private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
-    private var settingsTask: Task<Void, Never>?
+    private let settings = DesktopSettingsQueue()
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
         guard let self else { return }
         self.enqueueSettings { await self.controller.saveProfiles(profiles) }
@@ -49,17 +49,19 @@ final class WindowsEventContext {
 
     // Called only by the native UI thread. Persist settings in UI event order,
     // and let shutdown drain these short operations before closing the actor.
-    func enqueueSettings(_ action: @escaping @Sendable () async -> Void) {
-        let previous = settingsTask
-        settingsTask = Task {
-            await previous?.value
-            await action()
-        }
+    func enqueueSettings(_ action: @escaping @Sendable () async -> Void) { settings.submit(action) }
+
+    var currentSettingsTask: Task<Void, Never>? { settings.current }
+
+    func finishSettings() async { await settings.drain() }
+
+    /// Called by the UI thread at the Record event. Reads text output in
+    /// settings order: an Apply before Record is used, and one after it cannot
+    /// reach this recording however late the recording task runs.
+    func recordingTextOutput() -> Task<WindowsTextOutputOptions, Never> {
+        let controller = controller
+        return settings.read { await controller.textOutputOptions() }
     }
-
-    var currentSettingsTask: Task<Void, Never>? { settingsTask }
-
-    func finishSettings() async { await settingsTask?.value }
 }
 
 /// Coalesces native search keystrokes. The UI thread only records the newest
@@ -104,7 +106,11 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         // Capture synchronously before an actor hop or another app gains focus.
         // No external field focused is not an error here: the transcript is
         // still saved and offered for Copy.
-        toggleRecording(holder, target: try? WindowsInsertionTarget.capture(), modelIndex: Int(index), deviceID: value)
+        let captured = try? WindowsInsertionTarget.capture()
+        toggleRecording(
+            controller, target: captured, textOutput: holder.recordingTextOutput(), modelIndex: Int(index),
+            deviceID: value
+        )
     case 2:
         let pendingSettings = holder.currentSettingsTask
         Task {
@@ -122,18 +128,19 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     }
 }
 
-/// Settings applied before this event finish first, so a recording starts with
-/// them; the controller then fixes its text output for the whole recording.
+/// Starts or stops recording with the text output read at the Record event.
+/// That read also waits for every earlier settings change. The toggle runs
+/// outside the settings queue, so draining settings never waits on transcription.
 @discardableResult
 func toggleRecording(
-    _ holder: WindowsEventContext, target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String
+    _ controller: WindowsAppController, target: WindowsInsertionTarget?,
+    textOutput: Task<WindowsTextOutputOptions, Never>, modelIndex: Int, deviceID: String
 ) -> Task<Void, Never> {
-    let pendingSettings = holder.currentSettingsTask
-    let controller = holder.controller
-    return Task {
-        await pendingSettings?.value
+    Task {
+        let options = await textOutput.value
         await controller.toggle(
-            target: target, modelIndex: modelIndex, deviceID: deviceID, targetExecutablePath: target?.executablePath
+            target: target, modelIndex: modelIndex, deviceID: deviceID, targetExecutablePath: target?.executablePath,
+            textOutput: options
         )
     }
 }
@@ -325,6 +332,9 @@ enum SpeakWindowsMain {
         await Task.detached { monitor?.stop() }.value
         holder.microphoneMonitor = nil
         await holder.finishSettings()
+        // A drained Apply may have refreshed the dialog; never leave it holding
+        // this context once the holder can be released.
+        jsti_window_clear_text_output()
         await controller.close()
         withExtendedLifetime(holder) {}
         if let windowFailure { throw windowFailure }

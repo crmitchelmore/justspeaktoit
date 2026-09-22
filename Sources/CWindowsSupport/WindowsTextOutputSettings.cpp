@@ -340,6 +340,11 @@ int jsti_window_text_output(int *method, int *insertion, int *restoreClipboard) 
     return 0;
 }
 
+void jsti_window_clear_text_output(void) {
+    { std::lock_guard<std::mutex> lock(configurationMutex); configuration = Configuration(); }
+    jsti_window_update(nullptr, nullptr, -1);
+}
+
 // ---- self-test -------------------------------------------------------------
 
 namespace {
@@ -416,6 +421,12 @@ bool checkConfiguration(Applied &applied, std::string &error) {
         jsti_window_text_output(nullptr, &insertion, &restore) != -1 ||
         jsti_window_text_output(&method, &insertion, &restore) != 0 || method != 1 || insertion != 1 || restore != 0) {
         error = "A rejected text output configuration replaced the previous one."; return false;
+    }
+    // Clearing drops the borrowed callback and context entirely.
+    jsti_window_clear_text_output();
+    if (jsti_window_text_output(&method, &insertion, &restore) != -1 || jsti_text_output_available() ||
+        jsti_window_set_text_output(1, 1, 0, &recordApply, &applied) != 0) {
+        error = "Clearing text output settings kept a callback or blocked reconfiguration."; return false;
     }
     return true;
 }

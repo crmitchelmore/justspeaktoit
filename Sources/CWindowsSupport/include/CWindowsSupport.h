@@ -197,14 +197,19 @@ enum JSTITextOutputInsertion {
 typedef void (*JSTITextOutputSettingsCallback)(int method, int insertion, int restore_clipboard, void *context);
 /* Thread safe; valid before window_run and from any thread afterwards. Invalid
  * values or a null callback return -1 and keep the previous configuration.
- * The context is borrowed until window_run returns. The dialog opens from the
- * latest configuration; refresh it with the persisted choices after every save
+ * The context stays borrowed until a later configuration or
+ * jsti_window_clear_text_output replaces it. The dialog opens from the latest
+ * configuration; refresh it with the persisted choices after every save
  * attempt so a reopened dialog never shows unsaved choices. */
 int jsti_window_set_text_output(int method, int insertion, int restore_clipboard,
                                 JSTITextOutputSettingsCallback callback, void *context);
 /* Reads the configuration the dialog will open with. -1 when unconfigured or
  * an output pointer is null. */
 int jsti_window_text_output(int *method, int *insertion, int *restore_clipboard);
+/* Thread safe. Drops the callback and context; the dialog is unavailable until
+ * configured again. Call before releasing the context. A dialog already open
+ * keeps its own copy until it closes. */
+void jsti_window_clear_text_output(void);
 
 /* Borrowed UTF-8 draft values. Choice -1 inherits the app setting, -2 preserves
  * an existing unavailable value, otherwise indexes the supplied catalogue.
@@ -394,7 +399,9 @@ void jsti_insertion_destroy(JSTIInsertionTarget *target);
  * to clipboard, including recordings started with Record in this window, which
  * have no captured field. It never queries or follows focus, never inserts and
  * never sends input. The transcript is left as plain Unicode text, exactly like
- * jsti_insertion_copy_text. A job copies at most once. */
+ * jsti_insertion_copy_text and jsti_clipboard_write: an ordinary copy without
+ * the guarded paste's history and cloud exclusion formats. A job copies at
+ * most once. */
 typedef struct JSTIClipboardOutput JSTIClipboardOutput;
 /* Allocates a job without touching the clipboard. */
 JSTIClipboardOutput *jsti_clipboard_output_create(char *error, size_t error_capacity);

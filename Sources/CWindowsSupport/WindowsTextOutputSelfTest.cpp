@@ -691,13 +691,18 @@ std::string checkAutomationPaths(Fixture &state) {
         return describe("no fallback", "the disabled fallback still pasted or touched the clipboard", attempt.error);
     }
 
-    // 16. Keep the transcript on the clipboard.
+    // 16. Keep the transcript on the clipboard. It remains the guarded paste's
+    // own transient write, still excluded from history and cloud sync.
     if (!capture(target, error)) return describe("keep clipboard", "capture failed", error.c_str());
     attempt = insert(target, " there", JSTI_INSERTION_KEEP_TRANSCRIPT_ON_CLIPBOARD);
     if (attempt.status != 0 || attempt.result.method != JSTI_INSERTION_METHOD_PASTE ||
         attempt.result.clipboard != JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT || state.clipboard.unicodeText() != L" there" ||
         textOf(host.edit) != L"Hello there") {
         return describe("keep clipboard", "the transcript was not left on the clipboard", attempt.error);
+    }
+    if (!state.clipboard.has(excludeFromMonitoringFormat()) || !state.clipboard.has(excludeFromHistoryFormat()) ||
+        !state.clipboard.has(excludeFromCloudFormat())) {
+        return describe("keep clipboard", "the kept paste lost its history and cloud exclusion");
     }
 
     // 17. Multi-line text into a multi-line control.
@@ -898,6 +903,20 @@ std::string checkClipboardRacesAndCancellation(Fixture &state) {
     }
     state.pasteMode = Fixture::PasteMode::Insert;
     state.prepareMode = Fixture::PrepareMode::Ready;
+    if (!prepare()) return describe("clipboard-only output", "capture failed", error.c_str());
+    {
+        // Clipboard-only output is an ordinary copy, like Copy transcript:
+        // unlike the guarded paste it carries no history or cloud exclusion,
+        // and it never touches the field or sends keystrokes.
+        JSTIInsertionResult ordinary{};
+        char ordinaryError[256]{};
+        if (jsti_insertion_copy_text(target.value, "copied only", &ordinary, ordinaryError, sizeof(ordinaryError)) != 0 ||
+            ordinary.clipboard != JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT || state.clipboard.unicodeText() != L"copied only" ||
+            state.clipboard.has(excludeFromMonitoringFormat()) || state.clipboard.has(excludeFromHistoryFormat()) ||
+            state.clipboard.has(excludeFromCloudFormat()) || state.pasteCalls != 0 || textOf(host.edit) != L"before") {
+            return describe("clipboard-only output", "the copy was not an ordinary clipboard write", ordinaryError);
+        }
+    }
     if (!prepare()) return describe("cancelled clipboard-only output", "capture failed", error.c_str());
     jsti_insertion_cancel(target.value);
     JSTIInsertionResult copied{};

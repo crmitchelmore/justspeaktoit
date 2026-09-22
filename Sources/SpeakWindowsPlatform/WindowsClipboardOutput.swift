@@ -26,6 +26,11 @@ public final class WindowsClipboardOutput: @unchecked Sendable {
     /// Blocks for a bounded time; call off the UI thread and actors. A job
     /// copies at most once and refuses after cancellation.
     public func copy(_ text: String) throws {
+        // The native text ends at the first NUL; copying only that prefix would
+        // report a shortened transcript as copied. Refused before the job runs.
+        guard !text.utf8.contains(0) else {
+            throw WindowsTextOutputError("The transcript contains a NUL character, so it was not copied.")
+        }
         var clipboard: Int32 = 0
         var error = [CChar](repeating: 0, count: 1_024)
         let status = text.withCString { jsti_clipboard_output_copy(handle, $0, &clipboard, &error, error.count) }

@@ -26,7 +26,8 @@ enum JSTIWindowEvent {
     JSTI_EVENT_MICROPHONE_CHANGED = 13,
     JSTI_EVENT_CANCEL_TRANSCRIPTION = 14,
     JSTI_EVENT_HISTORY_SEARCH = 15,
-    JSTI_EVENT_TRANSCRIPT_VARIANT = 16
+    JSTI_EVENT_TRANSCRIPT_VARIANT = 16,
+    JSTI_EVENT_REFRESH_MODELS = 20
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -49,6 +50,21 @@ int jsti_window_run(const char *const *model_names, size_t model_count, int sele
  * continues to report a global model index, never a filtered combo row. */
 int jsti_window_set_model_modes(const int *is_live, size_t count,
                                 int preferred_batch_index, int preferred_live_index);
+typedef struct JSTIModelRow {
+    const char *id;
+    const char *name;
+    int is_live;
+    int display_order; /* -1 hidden; otherwise unique visible rank, independent of slot index. */
+} JSTIModelRow;
+/* Deep-copies a model snapshot. Configure before window_run, then append-only
+ * identity slots may be updated from any thread. Existing IDs/modes must stay
+ * at the same indices; labels and visible order may change. Current selections
+ * remain visible and selected even when their display_order becomes -1.
+ * Programmatic refresh never emits MODEL_CHANGED or changes recording state.
+ * status/refreshing update a separate discovery control; event20 requests a
+ * refresh. No network operation runs inside the native window loop. */
+int jsti_window_set_model_catalog(const JSTIModelRow *rows, size_t count,
+                                   const char *status, int refreshing);
 /* Thread safe; updates coalesce. Null status/transcript retains the prior value.
  * recording: -1 retains current value, 0 idle, 1 recording, 2 busy (disable controls). */
 int jsti_window_update(const char *status, const char *transcript, int recording);

@@ -13,6 +13,8 @@ bool jsti_settings_self_test(HWND owner, std::string &error);
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr int hotkeyID = 1;
+constexpr int modelRefreshID = 140;
+constexpr int modelStatusID = 141;
 enum Control {
     modelID = 100, keyID, saveID, recordID, importID, copyID, transcriptID, statusID,
     historyID, historyDetailID, retryID, exportID, openAudioID, processingID, microphoneID, modeID,
@@ -26,6 +28,7 @@ struct HistoryRow {
     std::wstring detail;
 };
 struct MicrophoneRow { std::string id; std::wstring name; };
+struct ModelRow { std::string id; std::wstring name; int mode = 0; int order = -1; };
 struct WindowState {
     std::mutex mutex;
     HWND window = nullptr;
@@ -36,6 +39,11 @@ struct WindowState {
     bool historyChanged = false;
     bool historySelectionProvided = false;
     bool variantChanged = false;
+    bool modelsChanged = false;
+    bool modelsRefreshing = false;
+    std::wstring modelStatus;
+    std::vector<ModelRow> pendingModels;
+    std::vector<std::pair<std::string, int>> knownModelIdentities;
     std::string pendingVariantRecord;
     int pendingVariant = -1;
     bool pendingVariantSwitchable = false;
@@ -60,6 +68,7 @@ struct WindowState {
     bool suppressSearchEvents = false;
     std::vector<std::wstring> modelNames;
     std::vector<int> modelModes;
+    std::vector<int> modelOrder;
     std::vector<int> filteredModels;
     int preferredModels[2] = {-1, -1};
     int activeMode = 0;
@@ -99,8 +108,18 @@ bool populateModels(HWND window) {
     state.filteredModels.clear();
     LRESULT selectedRow = CB_ERR;
     bool success = true;
+    std::vector<size_t> visible;
     for (size_t index = 0; index < state.modelNames.size(); ++index) {
         if (state.modelModes[index] != state.activeMode) continue;
+        const int rank = index < state.modelOrder.size() ? state.modelOrder[index] : static_cast<int>(index);
+        if (rank >= 0 || static_cast<int>(index) == state.preferredModels[state.activeMode]) visible.push_back(index);
+    }
+    auto rank = [](size_t index) {
+        const int value = index < state.modelOrder.size() ? state.modelOrder[index] : static_cast<int>(index);
+        return value < 0 ? (std::numeric_limits<int>::max)() : value;
+    };
+    std::stable_sort(visible.begin(), visible.end(), [&](size_t left, size_t right) { return rank(left) < rank(right); });
+    for (const size_t index : visible) {
         const LRESULT row = SendMessageW(combo, CB_ADDSTRING, 0,
                                          reinterpret_cast<LPARAM>(state.modelNames[index].c_str()));
         if (row == CB_ERR || row == CB_ERRSPACE) { success = false; break; }
@@ -123,6 +142,33 @@ bool populateModels(HWND window) {
     { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
     updateModelAvailability(window, recording);
     return success;
+}
+
+bool applyModelRows(HWND window, const std::vector<ModelRow> &rows) {
+    if (rows.empty()) return true;
+    bool changed = rows.size() != state.modelNames.size();
+    for (size_t index = 0; !changed && index < rows.size(); ++index) {
+        changed = rows[index].name != state.modelNames[index] || rows[index].mode != state.modelModes[index] ||
+            index >= state.modelOrder.size() || rows[index].order != state.modelOrder[index];
+    }
+    if (!changed) return true;
+    const int selected = selection(window);
+    if (selected >= 0) state.preferredModels[state.activeMode] = selected;
+    auto oldNames = state.modelNames;
+    auto oldModes = state.modelModes;
+    auto oldOrder = state.modelOrder;
+    std::vector<std::wstring> names;
+    std::vector<int> modes, order;
+    for (const auto &row : rows) {
+        names.push_back(row.name);
+        modes.push_back(row.mode);
+        order.push_back(row.order);
+    }
+    state.modelNames = std::move(names); state.modelModes = std::move(modes); state.modelOrder = std::move(order);
+    if (populateModels(window)) return true;
+    state.modelNames = std::move(oldNames); state.modelModes = std::move(oldModes); state.modelOrder = std::move(oldOrder);
+    populateModels(window);
+    return false;
 }
 
 void emit(HWND window, int event, const char *text = "") {
@@ -238,8 +284,11 @@ void layout(HWND window) {
     const int settingsWidth = scale(window, 148);
     move(modelID, contentLeft, modelTop + scale(window, 26), width - settingsWidth - gap, scale(window, 260));
     move(processingID, contentLeft + width - settingsWidth, modelTop + scale(window, 26), settingsWidth, row);
-    move(91, contentLeft, modelTop + scale(window, 70), width, scale(window, 22));
-    const int keyTop = modelTop + scale(window, 96);
+    const int discoveryTop = modelTop + scale(window, 70);
+    move(modelStatusID, contentLeft, discoveryTop, width - settingsWidth - gap, scale(window, 46));
+    move(modelRefreshID, contentLeft + width - settingsWidth, discoveryTop, settingsWidth, row);
+    move(91, contentLeft, modelTop + scale(window, 120), width, scale(window, 22));
+    const int keyTop = modelTop + scale(window, 146);
     move(keyID, contentLeft, keyTop, width - saveWidth - gap, row);
     move(saveID, contentLeft + width - saveWidth, keyTop, saveWidth, row);
     const int microphoneTop = keyTop + row + gap;
@@ -316,6 +365,8 @@ bool createControls(HWND window) {
         add(L"STATIC", L"&Transcription model", 0, 90) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
         add(L"BUTTON", L"&Post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
+        add(L"STATIC", L"OpenRouter discovery not loaded.", SS_LEFT, modelStatusID) &&
+        add(L"BUTTON", L"Refresh &models", BS_PUSHBUTTON | WS_TABSTOP, modelRefreshID) &&
         add(L"STATIC", L"&API key (Windows Credential Manager)", 0, 91) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&
         add(L"BUTTON", L"&Save key", BS_PUSHBUTTON | WS_TABSTOP, saveID) &&
@@ -348,18 +399,34 @@ bool createControls(HWND window) {
     applyVariant(window, -1, false, 0);
     updateHistoryControls(window, 0);
     EnableWindow(GetDlgItem(window, processingID), jsti_postprocessing_available());
+    std::wstring modelStatus;
+    bool refreshing;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        modelStatus = state.modelStatus;
+        refreshing = state.modelsRefreshing;
+    }
+    SetDlgItemTextW(window, modelStatusID, modelStatus.c_str());
+    EnableWindow(GetDlgItem(window, modelRefreshID), !refreshing);
     return okay;
 }
 
 void applyUpdate(HWND window) {
     std::wstring status, transcript;
     bool statusChanged, transcriptChanged, historyChanged, variantChanged, variantSwitchable;
+    bool modelsChanged, modelsRefreshing;
+    std::vector<ModelRow> models;
+    std::wstring modelStatus;
     std::vector<HistoryRow> history;
     std::string historySelection, variantRecord;
     int recording, variant;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
         status.swap(state.status); transcript.swap(state.transcript);
+        modelsChanged = state.modelsChanged;
+        modelsRefreshing = state.modelsRefreshing;
+        if (modelsChanged) { models = std::move(state.pendingModels); modelStatus = state.modelStatus; }
+        state.modelsChanged = false;
         statusChanged = state.statusChanged; transcriptChanged = state.transcriptChanged;
         state.statusChanged = false; state.transcriptChanged = false;
         historyChanged = state.historyChanged;
@@ -375,6 +442,11 @@ void applyUpdate(HWND window) {
         state.variantChanged = false;
         state.posted = false;
         recording = state.recording;
+    }
+    if (modelsChanged) {
+        if (!applyModelRows(window, models)) modelStatus = L"Could not display refreshed models. Previous selection retained.";
+        SetDlgItemTextW(window, modelStatusID, modelStatus.c_str());
+        EnableWindow(GetDlgItem(window, modelRefreshID), !modelsRefreshing);
     }
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
     if (transcriptChanged) SetDlgItemTextW(window, transcriptID, transcript.c_str());
@@ -451,7 +523,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return createControls(window) ? 0 : -1;
     case WM_GETMINMAXINFO: {
         auto info = reinterpret_cast<MINMAXINFO *>(lparam);
-        info->ptMinTrackSize = {scale(window, 820), scale(window, hasModeChoice() ? 634 : 600)};
+        info->ptMinTrackSize = {scale(window, 820), scale(window, hasModeChoice() ? 684 : 650)};
         return 0;
     }
     case WM_SIZE:
@@ -521,6 +593,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (HIWORD(wparam) == CBN_SELCHANGE) {
                 const std::string device = selectedMicrophone(window);
                 emit(window, JSTI_EVENT_MICROPHONE_CHANGED, device.c_str());
+            }
+            return 0;
+        case modelRefreshID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, modelRefreshID))) {
+                emit(window, JSTI_EVENT_REFRESH_MODELS);
             }
             return 0;
         case modelID:
@@ -595,6 +672,18 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         }
         state.modelNames = std::move(names);
         state.modelModes = state.configuredModelModes.empty() ? std::vector<int>(count, 0) : state.configuredModelModes;
+        state.modelOrder.resize(count);
+        for (size_t index = 0; index < count; ++index) state.modelOrder[index] = static_cast<int>(index);
+        if (!state.pendingModels.empty()) {
+            if (state.pendingModels.size() != count) return jsti::fail("The discovered model catalogue has the wrong slot count.", error, capacity);
+            for (size_t index = 0; index < count; ++index) {
+                const auto &row = state.pendingModels[index];
+                if (row.mode != state.modelModes[index]) return jsti::fail("The discovered model catalogue has inconsistent modes.", error, capacity);
+                state.modelNames[index] = row.name;
+                state.modelOrder[index] = row.order;
+            }
+        }
+        state.pendingModels.clear(); state.modelsChanged = false;
         for (int mode = 0; mode < 2; ++mode) {
             state.preferredModels[mode] = state.configuredPreferredModels[mode];
             if (state.preferredModels[mode] < 0) {
@@ -642,7 +731,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Just Speak to It — Windows Preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        1100, hasModeChoice() ? 754 : 720, nullptr, nullptr, instance, nullptr) : nullptr;
+        1100, hasModeChoice() ? 804 : 770, nullptr, nullptr, instance, nullptr) : nullptr;
     int outcome = 0;
     if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     else {
@@ -687,6 +776,47 @@ int jsti_window_set_model_modes(const int *isLive, size_t count, int preferredBa
         state.configuredModelModes = std::move(modes);
         state.configuredPreferredModels[0] = preferredBatch;
         state.configuredPreferredModels[1] = preferredLive;
+        return 0;
+    } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_model_catalog(const JSTIModelRow *rows, size_t count, const char *status, int refreshing) {
+    if (!rows || !count || count > 10000 || (refreshing != 0 && refreshing != 1)) return -1;
+    try {
+        std::vector<ModelRow> models;
+        std::unordered_set<std::string> identifiers;
+        std::unordered_set<int> ranks;
+        std::wstring wideStatus;
+        if (status && (!jsti::wide(status, wideStatus) || wideStatus.size() > 4096)) return -1;
+        for (size_t index = 0; index < count; ++index) {
+            const auto &row = rows[index];
+            std::wstring id, name;
+            if (!row.id || !row.name || !jsti::wide(row.id, id) || !jsti::wide(row.name, name) ||
+                id.empty() || name.empty() || id.size() > 4096 || name.size() > 4096 ||
+                (row.is_live != 0 && row.is_live != 1) || row.display_order < -1 ||
+                row.display_order >= static_cast<int>(count) || !identifiers.insert(row.id).second ||
+                (row.display_order >= 0 && !ranks.insert(row.display_order).second)) return -1;
+            models.push_back({row.id, std::move(name), row.is_live, row.display_order});
+        }
+        std::vector<std::pair<std::string, int>> identities;
+        for (const auto &row : models) identities.emplace_back(row.id, row.mode);
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (state.running) {
+            if (state.knownModelIdentities.empty() || count < state.knownModelIdentities.size()) return -1;
+            for (size_t index = 0; index < state.knownModelIdentities.size(); ++index) {
+                if (models[index].id != state.knownModelIdentities[index].first ||
+                    models[index].mode != state.knownModelIdentities[index].second) return -1;
+            }
+        }
+        state.knownModelIdentities = std::move(identities);
+        state.pendingModels = std::move(models);
+        state.modelsChanged = true;
+        state.modelsRefreshing = refreshing != 0;
+        if (status) state.modelStatus = std::move(wideStatus);
+        if (state.window && !state.posted) {
+            state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+            if (!state.posted) return -1;
+        }
         return 0;
     } catch (const std::exception &) { return -1; }
 }
@@ -863,6 +993,16 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     const std::string originalSelection = selectedHistory(window);
     const std::vector<std::wstring> originalModelNames = state.modelNames;
     const std::vector<int> originalModelModes = state.modelModes;
+    const std::vector<int> originalModelOrder = state.modelOrder;
+    std::vector<std::pair<std::string, int>> originalModelIdentities;
+    std::wstring originalModelStatus;
+    bool originalRefreshing;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        originalModelIdentities = state.knownModelIdentities;
+        originalModelStatus = state.modelStatus;
+        originalRefreshing = state.modelsRefreshing;
+    }
     const int originalPreferredModels[] = {state.preferredModels[0], state.preferredModels[1]};
     const int originalMode = state.activeMode;
     const auto originalCallback = state.callback;
@@ -877,7 +1017,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     state.context = &observed;
     std::string failure;
     auto checkBounds = [&]() -> bool {
-        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, hasModeChoice() ? 634 : 600),
+        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, hasModeChoice() ? 684 : 650),
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         layout(window);
         RECT client{};
@@ -900,6 +1040,11 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         // filtered combo index. These are never sent to the real Swift host.
         state.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
         state.modelModes = {0, 1, 0, 1};
+        state.modelOrder = {0, 1, 2, 3};
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.knownModelIdentities = {{"batch-a", 0}, {"live-a", 1}, {"batch-b", 0}, {"live-b", 1}};
+        }
         state.preferredModels[0] = 2;
         state.preferredModels[1] = 3;
         state.activeMode = 0;
@@ -942,6 +1087,83 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         jsti_window_update(nullptr, nullptr, 0);
         applyUpdate(window);
         if (!recordingModesDisabled) { failure = "Recording allowed a model mode change."; return false; }
+        // A catalogue can reorder and retire visible rows while native events
+        // continue to carry append-only global identities. Refreshing never
+        // emits a model change or unlocks the recording controls.
+        JSTIModelRow refreshedModels[] = {
+            {"batch-a", "Renamed Alpha", 0, 3}, {"live-a", "Unavailable Live One", 1, -1},
+            {"batch-b", "Batch Beta", 0, 1}, {"live-b", "Retired Live Two", 1, -1},
+            {"discovered", "Discovered Batch", 0, 0}
+        };
+        const int beforeRefresh = observed.event;
+        jsti_window_update("Recording status sentinel", "Transcript sentinel", 1);
+        applyUpdate(window);
+        if (jsti_window_set_model_catalog(refreshedModels, 5, "Refreshing models", 1) != 0) {
+            failure = "An append-only model refresh was rejected."; return false;
+        }
+        applyUpdate(window);
+        wchar_t preservedStatus[64] = {}, preservedTranscript[64] = {};
+        GetDlgItemTextW(window, statusID, preservedStatus, 64);
+        GetDlgItemTextW(window, transcriptID, preservedTranscript, 64);
+        if (selection(window) != 1 || observed.event != beforeRefresh ||
+            SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 1 ||
+            IsWindowEnabled(GetDlgItem(window, modelID)) || IsWindowEnabled(GetDlgItem(window, modelRefreshID)) ||
+            std::wstring(preservedStatus) != L"Recording status sentinel" ||
+            std::wstring(preservedTranscript) != L"Transcript sentinel") {
+            failure = "Discovery changed a selected model, recording state or transcript."; return false;
+        }
+        if (jsti_window_set_model_catalog(refreshedModels, 4, "Invalid shrink", 0) != -1) {
+            failure = "A refresh was allowed to shrink native identity slots."; return false;
+        }
+        refreshedModels[0].id = "replacement";
+        if (jsti_window_set_model_catalog(refreshedModels, 5, nullptr, 0) != -1) {
+            failure = "A refresh replaced an existing model identity."; return false;
+        }
+        refreshedModels[0].id = "batch-a";
+        refreshedModels[0].is_live = 1;
+        if (jsti_window_set_model_catalog(refreshedModels, 5, nullptr, 0) != -1) {
+            failure = "A refresh changed an existing model mode."; return false;
+        }
+        refreshedModels[0].is_live = 0;
+        refreshedModels[4].display_order = 1;
+        if (jsti_window_set_model_catalog(refreshedModels, 5, nullptr, 0) != -1) {
+            failure = "A refresh admitted ambiguous visible model positions."; return false;
+        }
+        refreshedModels[4].display_order = 0;
+        jsti_window_update(nullptr, nullptr, 0);
+        if (jsti_window_set_model_catalog(refreshedModels, 5, "Models refreshed", 0) != 0) {
+            failure = "A completed model refresh was rejected."; return false;
+        }
+        applyUpdate(window);
+        if (!changeMode(0, 0) || SendDlgItemMessageW(window, modelID, CB_GETCOUNT, 0, 0) != 3) {
+            failure = "A refreshed picker lost its preferred batch model."; return false;
+        }
+        SendDlgItemMessageW(window, modelID, CB_SETCURSEL, 0, 0);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelID, CBN_SELCHANGE), 0);
+        if (observed.model != 4 || selection(window) != 4) {
+            failure = "A discovered model callback leaked its display position."; return false;
+        }
+        refreshedModels[4].display_order = -1;
+        if (jsti_window_set_model_catalog(refreshedModels, 5, "Selected model unavailable", 0) != 0) {
+            failure = "A selected model could not be retained after retirement."; return false;
+        }
+        applyUpdate(window);
+        SendMessageW(window, WM_COMMAND, MAKEWPARAM(modelRefreshID, BN_CLICKED), 0);
+        if (observed.event != JSTI_EVENT_REFRESH_MODELS || observed.model != 4 || selection(window) != 4 ||
+            !changeMode(1, 1)) {
+            failure = "Refresh changed the selected model identity or mode preference."; return false;
+        }
+        // Restore the fixture directly; the public API deliberately forbids
+        // shrinking identities even after a model has disappeared from discovery.
+        state.modelNames = {L"Batch Alpha", L"Live One", L"Batch Beta", L"Live Two"};
+        state.modelModes = {0, 1, 0, 1};
+        state.modelOrder = {0, 1, 2, 3};
+        state.preferredModels[0] = 0;
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.knownModelIdentities = {{"batch-a", 0}, {"live-a", 1}, {"batch-b", 0}, {"live-b", 1}};
+        }
+        if (!populateModels(window)) { failure = "Model fixture restoration failed."; return false; }
         const LRESULT originalMicrophone = SendDlgItemMessageW(window, microphoneID, CB_GETCURSEL, 0, 0);
         if (state.microphones.size() < 2) { failure = "Smoke test requires two synthetic microphone choices."; return false; }
         SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, 1, 0);
@@ -1117,6 +1339,15 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     catch (const std::exception &) { failure = "Window smoke test could not allocate its temporary state."; }
     state.modelNames = originalModelNames;
     state.modelModes = originalModelModes;
+    state.modelOrder = originalModelOrder;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        state.knownModelIdentities = std::move(originalModelIdentities);
+        state.modelStatus = std::move(originalModelStatus);
+        state.modelsRefreshing = originalRefreshing;
+        state.modelsChanged = true;
+        state.pendingModels.clear();
+    }
     state.preferredModels[0] = originalPreferredModels[0];
     state.preferredModels[1] = originalPreferredModels[1];
     state.activeMode = originalMode;

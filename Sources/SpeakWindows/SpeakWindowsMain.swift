@@ -149,6 +149,7 @@ private func historyEvent(_ event: Int32, value: String, controller: WindowsAppC
         } catch { WindowsNative.update(error.localizedDescription) }
     case 12: Task { await controller.openHistoryAudio(value) }
     case 14: Task { await controller.cancelTranscription() }
+    case 20: Task { await controller.refreshModels(force: true) }
     default: break
     }
 }
@@ -180,7 +181,9 @@ enum SpeakWindowsMain {
                 directory = URL(fileURLWithPath: local).appendingPathComponent("JustSpeakToIt")
             }
             defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
-            let controller = try WindowsAppController(directory: directory)
+            let controller = try await Task.detached {
+                try WindowsAppController(directory: directory)
+            }.value
             let holder = WindowsEventContext(controller: controller, smokeTest: smokeTest)
             try await runWindow(controller: controller, holder: holder)
             if smokeTest { print("Native window creation and shutdown passed.") }
@@ -200,6 +203,7 @@ enum SpeakWindowsMain {
         )
         let preferences = await controller.preferredModelIDs()
         try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
+        try await controller.configureModelCatalog()
         let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
         let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in
             let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)

@@ -5,7 +5,7 @@ import CWindowsSupport
 
 actor WindowsAppController {
     struct Settings: Codable {
-        var model = OpenAITranscriptionModels.gptTranscribeCatalogID
+        var model = ModelCatalog.defaultBatchTranscriptionModel
         var postProcessing: DesktopPostProcessing.Options?
         var microphoneDeviceID: String?
         var batchModel: String?
@@ -30,6 +30,9 @@ actor WindowsAppController {
     let directory: URL
     let store: DesktopRecordingStore
     let uploadStaging: SharedMultipartUploadStaging
+    let modelCatalog: OpenRouterAudioCatalogStore
+    var modelDiscoveryTask: Task<Void, Never>?
+    var modelCatalogRevision: UInt64 = 0
     var settings: Settings
     var recording: Recording?
     private var isReady = false
@@ -65,9 +68,7 @@ actor WindowsAppController {
         } else {
             loadedSettings = Settings()
         }
-        if !WindowsModels.all.contains(where: { $0.id == loadedSettings.model }) {
-            loadedSettings.model = OpenAITranscriptionModels.gptTranscribeCatalogID
-        }
+        modelCatalog = try Self.prepareModelCatalog(directory: directory, settings: &loadedSettings)
         if var processing = loadedSettings.postProcessing,
            !DesktopPostProcessing.remoteModels.contains(where: { $0.id == processing.modelIdentifier }) {
             processing.mode = .disabled
@@ -235,6 +236,9 @@ actor WindowsAppController {
         } catch { update(error.localizedDescription, state: 0) }
     }
 
+}
+
+extension WindowsAppController {
     func close() async {
         if closed {
             if !shutdownComplete {
@@ -243,6 +247,7 @@ actor WindowsAppController {
             return
         }
         closed = true
+        modelDiscoveryTask?.cancel()
         cancellationRequested = true
         transcriptionTask?.cancel()
         postProcessingTask?.cancel()
@@ -266,6 +271,8 @@ actor WindowsAppController {
         if activeOperations > 0 {
             await withCheckedContinuation { operationWaiters.append($0) }
         }
+        await modelDiscoveryTask?.value
+        modelDiscoveryTask = nil
         shutdownComplete = true
         let waiters = shutdownWaiters
         shutdownWaiters.removeAll()
@@ -309,6 +316,7 @@ extension WindowsAppController {
     func ready() async {
         defer { isReady = true }
         guard !closed else { return }
+        refreshModels(force: false)
         activeOperations += 1
         defer { finishOperation() }
         do {
@@ -336,6 +344,7 @@ extension WindowsAppController {
 
     func selectModel(_ index: Int) {
         guard !closed, !busy, recording == nil, WindowsModels.all.indices.contains(index) else { return }
+        let changed = settings.model != WindowsModels.all[index].id
         settings.model = WindowsModels.all[index].id
         if WindowsModels.isLive(settings.model) { settings.liveModel = settings.model } else {
             settings.batchModel = settings.model
@@ -347,6 +356,7 @@ extension WindowsAppController {
             let hint = DesktopTranscription.provider(for: settings.model)?.apiKeyIdentifier
                 == AzureSpeechConfiguration.credentialIdentifier
                 ? " Enter Azure credentials as key:region (for example, your key followed by :uksouth)." : ""
+            if changed { publishModelCatalog(modelCatalog.snapshot) }
             update("Selected \(WindowsModels.all[index].displayName).\(hint)")
         } catch { update("Could not save settings: \(error.localizedDescription)") }
     }
@@ -363,6 +373,7 @@ extension WindowsAppController {
                 _ = try AzureSpeechConfiguration(credentials: cleaned)
             }
             try WindowsNative.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
+            if provider.id == OpenRouterService.providerID { refreshModels(force: true) }
             update(cleaned.isEmpty ? "API key removed." : "API key saved in Windows Credential Manager.")
         } catch { update(error.localizedDescription) }
     }

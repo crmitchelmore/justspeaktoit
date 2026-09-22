@@ -6,6 +6,7 @@ import SpeakCore
 /// or system audio callback. finish must follow the native worker's stop/join.
 public final class PCMRecordingFile: @unchecked Sendable {
     public let url: URL
+    public let recordingSampleRate: Int
     private let handle: FileHandle
     private let lock = NSLock()
     private var byteCount = 0
@@ -19,12 +20,17 @@ public final class PCMRecordingFile: @unchecked Sendable {
         return !containsSignal
     }
     public static let sampleRate = 16_000
+    private static let supportedSampleRates = [16_000, 24_000]
     // Bound both RIFF sizes and the duration of an accidentally abandoned run.
     public static let maximumBytes = sampleRate * 2 * 60 * 60 * 2
 
-    public init(url: URL) throws {
+    public init(url: URL, sampleRate: Int = PCMRecordingFile.sampleRate) throws {
+        guard Self.supportedSampleRates.contains(sampleRate) else { throw RecordingFileError.invalidPCM }
         self.url = url
-        guard FileManager.default.createFile(atPath: url.path, contents: try Self.header(payloadBytes: 0)) else {
+        self.recordingSampleRate = sampleRate
+        guard FileManager.default.createFile(
+            atPath: url.path, contents: try Self.header(payloadBytes: 0, sampleRate: sampleRate)
+        ) else {
             throw CocoaError(.fileWriteUnknown)
         }
         self.handle = try FileHandle(forWritingTo: url)
@@ -39,7 +45,9 @@ public final class PCMRecordingFile: @unchecked Sendable {
         guard !closed else { throw RecordingFileError.alreadyClosed }
         if let writeFailure { throw writeFailure }
         guard data.count % 2 == 0 else { throw RecordingFileError.invalidPCM }
-        guard data.count <= Self.maximumBytes - byteCount else { throw RecordingFileError.durationLimit }
+        guard data.count <= Self.maximumBytes(at: recordingSampleRate) - byteCount else {
+            throw RecordingFileError.durationLimit
+        }
         do {
             try handle.write(contentsOf: data)
             byteCount += data.count
@@ -57,12 +65,12 @@ public final class PCMRecordingFile: @unchecked Sendable {
         guard !closed else { throw RecordingFileError.alreadyClosed }
         defer { closed = true; try? handle.close() }
         // Generate only the header: patch payload lengths without copying audio.
-        let header = try Self.header(payloadBytes: byteCount)
+        let header = try Self.header(payloadBytes: byteCount, sampleRate: recordingSampleRate)
         try handle.seek(toOffset: 0)
         try handle.write(contentsOf: header)
         try handle.synchronize()
         if let writeFailure { throw writeFailure }
-        return Double(byteCount) / Double(Self.sampleRate * 2)
+        return Double(byteCount) / Double(recordingSampleRate * 2)
     }
 
     /// Repairs only our canonical PCM container after an interrupted recording.
@@ -72,26 +80,32 @@ public final class PCMRecordingFile: @unchecked Sendable {
         let handle = try FileHandle(forUpdating: url)
         defer { try? handle.close() }
         let size = try handle.seekToEnd()
-        guard size >= 44, size - 44 <= UInt64(maximumBytes), (size - 44) % 2 == 0 else {
+        guard size >= 44, (size - 44) % 2 == 0 else {
             throw RecordingFileError.invalidPCM
         }
         try handle.seek(toOffset: 0)
         guard let current = try handle.read(upToCount: 44), current.count == 44 else {
             throw RecordingFileError.invalidPCM
         }
-        let expected = try header(payloadBytes: 0)
+        let rate = current[24..<28].enumerated().reduce(0) { $0 | (Int($1.element) << ($1.offset * 8)) }
+        guard supportedSampleRates.contains(rate), size - 44 <= UInt64(maximumBytes(at: rate)) else {
+            throw RecordingFileError.invalidPCM
+        }
+        let expected = try header(payloadBytes: 0, sampleRate: rate)
         // Only the RIFF/data lengths may differ from the format we own.
         for index in 0..<44 where !(4..<8).contains(index) && !(40..<44).contains(index) {
             guard current[index] == expected[index] else { throw RecordingFileError.invalidPCM }
         }
         let bytes = Int(size - 44)
         try handle.seek(toOffset: 0)
-        try handle.write(contentsOf: header(payloadBytes: bytes))
+        try handle.write(contentsOf: header(payloadBytes: bytes, sampleRate: rate))
         try handle.synchronize()
-        return Double(bytes) / Double(sampleRate * 2)
+        return Double(bytes) / Double(rate * 2)
     }
 
-    private static func header(payloadBytes: Int) throws -> Data {
+    private static func maximumBytes(at sampleRate: Int) -> Int { sampleRate * 2 * 60 * 60 * 2 }
+
+    private static func header(payloadBytes: Int, sampleRate: Int) throws -> Data {
         guard var header = PCMWaveWriter.wavData(pcm: Data(), sampleRate: sampleRate) else {
             throw RecordingFileError.invalidPCM
         }

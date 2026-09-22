@@ -140,8 +140,14 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     func fail(_ error: Error, _ active: AssemblyAILiveRun) {
         guard isCurrent(active) else { return }
         let callback = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
         close(active)
+        // Publish failure before finish returns. The run is already detached,
+        // so an error callback may safely start a replacement session.
         callback?(error)
+        waiters.forEach { $0.resume(returning: transcript) }
     }
 
     func close(_ active: AssemblyAILiveRun) {

@@ -231,9 +231,15 @@ public final class DeepgramLiveClient: FinalizingStreamingTranscriptionClient, @
     private func fail(_ error: Error, _ active: DeepgramLiveRun) {
         guard active === run, active.phase != .closed else { return }
         let onError = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.accumulated.transcriptOrNil
         close(active)
         log("WebSocket session failed")
+        // Publish failure before finish returns. The closed run owns these
+        // waiters even when the callback starts a replacement session.
         onError?(error)
+        waiters.forEach { $0.resume(returning: transcript) }
     }
 
     private func close(_ active: DeepgramLiveRun) {

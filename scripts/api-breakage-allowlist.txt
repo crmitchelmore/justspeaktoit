@@ -13,6 +13,12 @@
 API breakage: enumelement StreamingClientError.transportStalled has been added as a new enum case
 API breakage: enumelement XAISpeechToTextError.sessionNotReady has been added as a new enum case
 API breakage: enumelement XAISpeechToTextError.missingCompletion has been added as a new enum case
+# Speechmatics now distinguishes an unready stream, a missing final response
+# and a premature terminal response. Existing cases and signatures are retained;
+# the app clients rebuilt here consume these as localised errors.
+API breakage: enumelement SpeechmaticsRealtimeError.recognitionNotStarted has been added as a new enum case
+API breakage: enumelement SpeechmaticsRealtimeError.transcriptNotFinalised has been added as a new enum case
+API breakage: enumelement SpeechmaticsRealtimeError.unexpectedEndOfTranscript has been added as a new enum case
 # Native Windows profiles add a matcher and validation reasons. Existing raw
 # values, Codable fields and initializers are retained; Apple resolution ignores
 # Windows matchers while preserving them when editing a shared profile.

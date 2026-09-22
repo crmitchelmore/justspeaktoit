@@ -211,7 +211,7 @@ separate test-enabled executable, as before.
 
 ## Independent review corrections
 
-Fable authored the initial bundle implementation at `55bd5e06`. A separate Codex correction adds authenticated per-file Swift runtime pins, embedded curl/zlib notices, Windows path and PE bounds checks, relocated runtime tests and real resource assertions. Local Python tests and assembly of a 30-file bundle (17 runtime DLLs) passed with the pinned LLVM import cross-check. Execution of this corrected helper and harness on Windows remains a CI gate; earlier application receipts do not qualify these new bundle checks.
+Fable authored the initial bundle implementation at `55bd5e06`. A separate Codex correction adds authenticated per-file Swift runtime pins, embedded curl/zlib notices, Windows path and PE bounds checks, relocated runtime tests and real resource assertions. Local Python tests and assembly of a 30-file bundle (17 runtime DLLs) passed with the pinned LLVM import cross-check. The corrected helper and harness subsequently passed their Windows execution gate at `91479ba8`, including loaded-module inspection and both negative controls. The initial empty-environment cleanup failure was reproduced and corrected before that receipt.
 
 To regenerate the runtime lock after a deliberate Swift version change, use the verified installer and private pinned 7-Zip executable:
 
@@ -223,3 +223,30 @@ python3 -B scripts/windows-bundle/pin-swift-runtime.py \
 ```
 
 The temporary extraction is confined to a newly created task directory and removed after the verified lock is produced. Normal bundle builds do not redownload or retain another installer.
+
+Verified Windows checkpoint `91479ba8` (22 September 2026):
+
+- [Native Windows run 35748290418](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748290418)
+  passed **578 tests, 13 optional skips, zero failures**, then all five WinHTTP
+  loopback probes and native executable/window checks.
+- [Mac cross-build and Windows execution run 35748289497](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748289497)
+  passed **578 tests, 13 optional skips, zero failures** from the exact Mac-built
+  release test executable. The production executable also passed playback,
+  native/window and isolated runtime-bundle checks. Both runs tested PR merge
+  `e1821430ef92d8997e84de3365fd6e46b2eae968`; its source tree is identical to
+  `91479ba8`.
+- The [runtime bundle artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748289497/artifacts/10704123666)
+  contains a 30-file developer ZIP with 17 runtime DLLs. In all three isolated
+  runs, the application and all 17 DLLs loaded from the extracted bundle with
+  no foreign modules or missing static imports. Swift was absent from PATH,
+  the working directory was empty, and the bundle path contained spaces and
+  Greek characters. Removing the DLLs produced `STATUS_DLL_NOT_FOUND`; removing
+  the real application resource produced exit 1.
+- ZIP SHA-256: `2d45734186d24cb861b5ff6c993c9dec369cb5288187ad860891085863d36c39`.
+  The unsigned production executable SHA-256 is
+  `488e76225a60e59b9f84d1ba607abc1e735d2269f14a285d5dcd74c8db57e6e9`.
+  The three native/cross/bundle window screenshots were byte-identical and
+  inspected for control bounds. These tests use synthetic content. The hosted
+  runner had no physical output endpoint, so three audible playback cases were
+  explicitly skipped; microphone, speaker/Bluetooth/USB and external-app
+  insertion acceptance remain open.

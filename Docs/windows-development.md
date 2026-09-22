@@ -144,11 +144,17 @@ as hand-edited `textOutput` settings without UI yet. See
 the deterministic native self-test and the remaining physical acceptance
 gates: browser, Electron and Office insertion has synthetic coverage only.
 
-The uploaded artifact contains a developer executable, resource directories,
-source/compiler metadata and an executable SHA-256 digest. It requires the
-installed Swift 6.2.3 Windows runtime and Visual C++ runtime. It is **not** a
-standalone installer, signed release, automatic update or supported stable
-Windows distribution.
+The native-build developer artifact contains an executable, resources and
+source/compiler metadata and requires installed Swift 6.2.3 and Visual C++
+runtimes. The cross-build workflow also produces a separate
+`windows-runtime-bundle` artifact containing an unsigned developer ZIP with the
+production executable, resources, authenticated runtime DLLs, licences and
+per-file hashes. That ZIP is intended to run after extraction without installing
+Swift or an SDK. Its isolated runtime checks must pass for the exact revision
+before this can be treated as verified distribution. See
+[Windows runtime bundle](windows-runtime-bundle.md) for extraction, provenance,
+search-path isolation and the negative controls. Neither artifact is a signed
+installer, automatic update or supported Stable Windows release.
 
 ### Shared-core checks on other hosts
 
@@ -285,7 +291,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
 | Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
-| History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, Windows runtime execution of the playback checks, physical speaker/Bluetooth/USB playback, history import and retention controls |
+| History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, physical speaker/Bluetooth/USB playback, history import and retention controls |
 | Model comparison | Shared rounds, scoring and transcript differences compile | Native comparison UI, parallel execution and audio/provider isolation |
 | Voice output | Shared catalogues and some request contracts compile; the native playback engine can render decoded audio | Provider execution, wiring synthesized audio onto the native playback engine, system voices and pronunciation controls |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
@@ -350,7 +356,7 @@ a regression checks both handle ownership and whether the file can be reopened.
 The standalone bundle run also found an empty-environment cleanup failure before
 launch. The cleanup now handles absent Swift variables, with an actual PowerShell
 regression covering empty and populated environments. Both corrected runtime
-paths require their own Windows CI receipt before qualification.
+paths subsequently passed at `91479ba8`; the receipt is recorded below.
 Neither executable smoke test proves physical microphone capture, live provider
 transcription, successful external insertion or user-visible feature parity.
 Separate adapter unit tests exercise Credential Manager with isolated synthetic
@@ -463,3 +469,45 @@ Deepgram capture uses 20 ms Windows frames; other routes keep 100 ms. Synthetic
 of 100 ms, preserving exact sample order and final tails. The queue retains its
 12.8-second bound and 600 KiB PCM storage. This isolates application batching; it
 is not a physical-device or end-to-end latency measurement.
+
+At `9e4ac674`, the complete normal Apple `make test` suite passed **3,889
+tests, 16 optional skips, zero failures**. Both macOS Soniox and ElevenLabs
+controllers now use shared protocol clients while retaining native audio
+capture. Their recovery adapters preserve visible drafts separately from
+provider-confirmed text. The ElevenLabs outer stop watchdog captures its
+shared drain bound plus the run's bounded grace and a callback-delivery margin;
+healthy completion does not wait for that deadline. Deterministic tests cover
+late finals, specific failures and retired timers across replacement recordings.
+
+The shared ElevenLabs client streams partials continuously and confirms
+client-owned segments of at most twenty seconds. This changes the former macOS
+server-VAD confirmation cadence; real-provider transcript behaviour and latency
+require qualification before release. The portable and Apple unit suites do not
+substitute for that acceptance check.
+
+Verified Windows checkpoint `91479ba8` (22 September 2026):
+
+- [Native Windows run 35748290418](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748290418)
+  passed **578 tests, 13 optional skips, zero failures**, then all five WinHTTP
+  loopback probes and native executable/window checks.
+- [Mac cross-build and Windows execution run 35748289497](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748289497)
+  passed **578 tests, 13 optional skips, zero failures** from the exact Mac-built
+  release test executable. The production executable also passed playback,
+  native/window and isolated runtime-bundle checks. Both runs tested PR merge
+  `e1821430ef92d8997e84de3365fd6e46b2eae968`; its source tree is identical to
+  `91479ba8`.
+- The [runtime bundle artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748289497/artifacts/10704123666)
+  contains a 30-file developer ZIP with 17 runtime DLLs. In all three isolated
+  runs, the application and all 17 DLLs loaded from the extracted bundle with
+  no foreign modules or missing static imports. Swift was absent from PATH,
+  the working directory was empty, and the bundle path contained spaces and
+  Greek characters. Removing the DLLs produced `STATUS_DLL_NOT_FOUND`; removing
+  the real application resource produced exit 1.
+- ZIP SHA-256: `2d45734186d24cb861b5ff6c993c9dec369cb5288187ad860891085863d36c39`.
+  The unsigned production executable SHA-256 is
+  `488e76225a60e59b9f84d1ba607abc1e735d2269f14a285d5dcd74c8db57e6e9`.
+  The three native/cross/bundle window screenshots were byte-identical and
+  inspected for control bounds. These tests use synthetic content. The hosted
+  runner had no physical output endpoint, so three audible playback cases were
+  explicitly skipped; microphone, speaker/Bluetooth/USB and external-app
+  insertion acceptance remain open.

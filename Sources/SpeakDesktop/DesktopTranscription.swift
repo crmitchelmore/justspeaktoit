@@ -145,12 +145,15 @@ public enum DesktopTranscription {
         }
     }
 
-    private enum PreparedProvider: Sendable { case meta, azure, mistral, soniox, revai, modulate }
+    private enum PreparedProvider: Sendable { case meta, azure, mistral, soniox, revai, modulate, assemblyai }
 
     private static func transcribePrepared(
         _ input: Request, using provider: PreparedProvider, session: URLSession
     ) async throws -> TranscriptionResult {
         switch provider {
+        case .assemblyai:
+            return try await AssemblyAIBatchClient(session: session, durationResolver: { _ in input.duration })
+                .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .modulate:
             return try await ModulateBatchClient(
                 session: session, features: input.modulateFeatures, multipartStaging: secureStaging(input.staging)
@@ -212,6 +215,7 @@ public enum DesktopTranscription {
         // These clients accept every batch model owned by their canonical
         // provider catalogue. Unknown and streaming identifiers stay hidden.
         if case .cloudBatch(let provider) = ModelRouting.family(for: model) {
+            if provider == "assemblyai" { return .prepared(.assemblyai) }
             if provider == "groq" { return .groq }
             if provider == "deepgram" { return .deepgram }
             if provider == "elevenlabs" { return .elevenlabs }

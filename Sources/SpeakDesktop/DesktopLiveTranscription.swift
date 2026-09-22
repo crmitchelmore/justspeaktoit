@@ -15,7 +15,7 @@ public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai: return true
+        case .deepgram, .assemblyai, .openai, .speechmatics: return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
         }
@@ -62,6 +62,11 @@ public enum DesktopLiveTranscription {
             // `route(forID:)` admits only the dedicated speech-to-text stream.
             return XAISpeechToTextLiveClient(
                 apiKey: apiKey, language: hint, sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .speechmatics:
+            return SpeechmaticsLiveClient(
+                apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                makeConnection: makeConnection
             )
         default: return nil
         }

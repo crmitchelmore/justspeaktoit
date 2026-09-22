@@ -1,19 +1,27 @@
-// The client owns connection, the RecognitionStarted gate, the sequence
-// accounting and bounded finalisation; the constants, errors and frame
-// decoding live in SpeechmaticsRealtime.swift.
-// swiftlint:disable file_length
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
+import os.log
+#endif
 
 /// Cross-platform realtime client for the Speechmatics `v2` WebSocket API.
 ///
 /// `StartRecognition` opens the session, `AddAudio` binary frames carry PCM16,
 /// `AddPartialTranscript` and `AddTranscript` come back, and `EndOfStream`
 /// commits the tail before `EndOfTranscript` closes it. Speechmatics rejects
-/// audio before `RecognitionStarted`, so leading capture is held in
-/// `StreamingAudioPreroll` and replayed on that frame (issue #641).
+/// audio before `RecognitionStarted`, so leading capture is queued and drained
+/// only once that frame arrives (issue #641).
 ///
-/// Contract: https://docs.speechmatics.com/rt-api-ref (read 2026-09-10).
-public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable { // swiftlint:disable:this type_body_length line_length
+/// The transport is injected through `StreamingWebSocketConnection`: Apple
+/// platforms reuse the caller's `URLSession`, and Windows supplies its native
+/// WinHTTP socket. Provider framing, bounded PCM admission, send ordering,
+/// restart identity and finalisation stay here so the platforms cannot drift.
+///
+/// Contract: https://docs.speechmatics.com/api-ref/realtime-transcription-websocket
+/// (read 2026-09-22).
+public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     /// `AddTranscript` finalises a new span of audio that is never restated,
     /// so each one is its own segment.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
@@ -21,212 +29,284 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
     /// transcribed, so a caller must always finish gracefully.
     public let finishFlushesBufferedAudio = true
 
-    private static let sendDrainBudget: TimeInterval = 1
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-    private let apiKey: String
-    private let accuracyModel: String
-    private let language: String?
-    private let sampleRate: Int
-    private let session: URLSession
-    private let stateLock = NSLock()
-    private let finishLock = NSLock()
-    private let pendingSends = DispatchGroup()
-    private let logger = SpeakLogger.logger(category: "SpeechmaticsLiveClient")
+    /// A single `AddAudio` or control send that has not completed by then means
+    /// the transport stalled.
+    static let sendDeadline: TimeInterval = 5
+    /// How long a finish waits for `RecognitionStarted` before giving up on the
+    /// held capture and closing with the best available transcript.
+    static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
+    /// How long a finish waits for `EndOfTranscript` after `EndOfStream`.
+    static let finishBudget: TimeInterval = SpeechmaticsRealtime.finishBudget
+    /// A backstop on queued frames; the five-second byte budget is the tighter
+    /// bound in practice because every frame is at least `minimumChunkBytes`.
+    static let maximumQueuedFrames = 256
 
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isReady = false
-    private var isStopping = false
-    private var isFinishing = false
-    private var sentAudioFrameCount = 0
-    private var lastAcknowledgedSeqNo = -1
-    private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
-    private var finishContinuation: CheckedContinuation<String?, Never>?
-    /// Audio accepted from the tap but not yet large enough to be a legal
-    /// `AddAudio` frame. See `outboundFrames(appending:)`.
-    private var outboundBuffer = Data()
+    let apiKey: String
+    let accuracyModel: String
+    let language: String?
+    let sampleRate: Int
+    let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    private let queue = DispatchQueue(label: "SpeechmaticsLiveClient.state")
+    private let queueKey = DispatchSpecificKey<Bool>()
+    var run: SpeechmaticsLiveRun
 
+    /// Retains the existing pre-start priming contract. Capture handed over
+    /// before a session starts is parked here; once a session is connecting,
+    /// its bounded send queue holds the audio instead.
     let preroll: StreamingAudioPreroll
-    let readiness = StreamingSessionReadiness()
-    let sendBudget: StreamingAudioSendBudget
 
-    public init(
+    public convenience init(
         apiKey: String,
         model: String = SpeechmaticsRealtime.defaultModel,
         language: String? = nil,
         sampleRate: Int = 16_000,
         session: URLSession = .shared
     ) {
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
+        )
+    }
+
+    public init(
+        apiKey: String,
+        model: String = SpeechmaticsRealtime.defaultModel,
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.accuracyModel = SpeechmaticsRealtime.accuracyModel(from: model)
         self.language = language
         self.sampleRate = sampleRate
-        self.session = session
+        self.makeConnection = makeConnection
+        self.schedule = schedule
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        self.sendBudget = StreamingAudioSendBudget(sampleRate: sampleRate)
+        self.run = SpeechmaticsLiveRun(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
     }
+
+    deinit { run.connection?.cancel() }
+
+    // MARK: - StreamingTranscriptionClient
 
     public func start(
         onTranscript: @escaping (String, Bool) -> Void,
         onError: @escaping (Error) -> Void
     ) {
-        guard !apiKey.isEmpty else {
-            onError(StreamingClientError.missingAPIKey(provider: "Speechmatics"))
-            return
+        synchronized {
+            let active = arm(onTranscript: onTranscript, onError: onError)
+            guard !apiKey.isEmpty else {
+                fail(StreamingClientError.missingAPIKey(provider: "Speechmatics"), active)
+                return
+            }
+            connect(active)
         }
-        beginSession(onTranscript: onTranscript, onError: onError)
-        connect()
     }
 
+    /// Speechmatics rejects an `AddAudio` frame below its minimum size, and it
+    /// rejects any audio before `RecognitionStarted`, so capture is coalesced
+    /// into legal frames and queued until the session is both open and ready.
+    public func sendAudio(_ audioData: Data) {
+        guard !audioData.isEmpty else { return }
+        synchronized {
+            let active = run
+            if active.phase == .idle {
+                // Before a session starts there is no queue to admit into; the
+                // bounded preroll holds the opening capture (issue #641).
+                preroll.append(audioData)
+                return
+            }
+            guard active.phase == .connecting || active.phase == .active else { return }
+            guard active.outgoing.count + (active.sending ? 1 : 0) < Self.maximumQueuedFrames else {
+                fail(stalledError, active)
+                return
+            }
+            // Admit the whole chunk before any framing so an oversized chunk is
+            // rejected before the queue grows. Coalescing conserves bytes, so
+            // the net admitted amount is exactly the chunk it accepted.
+            guard active.budget.admit(audioData.count) else {
+                fail(stalledError, active)
+                return
+            }
+            let (frames, remainder) = Self.outboundFrames(appending: audioData, to: active.outboundBuffer)
+            active.outboundBuffer = remainder
+            for frame in frames { active.outgoing.append(.audio(frame)) }
+            pump(active)
+        }
+    }
+
+    /// Immediate abort. Text received so far stays available to `finishAndWait`.
+    public func stop() { synchronized { close(run) } }
+
+    public func finishAndWait() async -> String? {
+        let active = synchronized { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                synchronized {
+                    // No live socket: `EndOfStream` would be rejected, so close
+                    // rather than burning the budget, and hand back what was
+                    // transcribed.
+                    guard isCurrent(active), active.connection != nil else {
+                        if active === run { close(active) }
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    if Task.isCancelled {
+                        close(active)
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    active.finishWaiters.append(continuation)
+                    beginFinish(active)
+                }
+            }
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { self.close(active) } }
+        }
+    }
+
+    // MARK: - Socket-free test helpers
+
     /// Arms the callbacks and clears per-recording state without opening a
-    /// socket. `start` is this plus `connect()`; tests pair it with `ingest`.
+    /// socket. `start` is this plus `connect`; tests pair it with `ingest`.
     func beginSession(
         onTranscript: @escaping (String, Bool) -> Void,
         onError: @escaping (Error) -> Void
     ) {
-        withStateLock {
-            self.onTranscript = onTranscript
-            self.onError = onError
-            isReady = false
-            isStopping = false
-            isFinishing = false
-            sentAudioFrameCount = 0
-            lastAcknowledgedSeqNo = -1
-            accumulated.reset()
-            finishContinuation = nil
-            outboundBuffer.removeAll(keepingCapacity: true)
-        }
-        preroll.reset()
-        readiness.reset()
-        sendBudget.reset()
+        synchronized { _ = arm(onTranscript: onTranscript, onError: onError) }
     }
 
-    /// Feeds one raw server frame through the receive path. The WebSocket loop
-    /// is the only production caller; tests drive the client with it.
+    /// Feeds one raw server frame through the receive path. The transport's
+    /// receive loop is the only production caller; tests drive the client with it.
     func ingest(_ text: String) {
-        handle(.string(text))
-    }
-
-    public func sendAudio(_ audioData: Data) {
-        guard !audioData.isEmpty else { return }
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard isReady, !isStopping, !isFinishing,
-                  let task = webSocketTask, task.state == .running else { return nil }
-            return task
-        }
-        guard let task else {
-            // Speechmatics rejects audio before `RecognitionStarted`, so the
-            // user's opening words are held rather than dropped.
-            if !isEnding { preroll.append(audioData) }
-            return
-        }
-        enqueueOutbound(audioData, on: task)
-    }
-
-    /// Accumulates capture into legal `AddAudio` frames and sends them.
-    private func enqueueOutbound(_ chunk: Data, on task: URLSessionWebSocketTask) {
-        let frames = withStateLock { () -> [Data] in
-            let (frames, remainder) = Self.outboundFrames(appending: chunk, to: outboundBuffer)
-            outboundBuffer = remainder
-            return frames
-        }
-        for frame in frames { send(frame, on: task) }
-    }
-
-    /// Sends whatever is left in the buffer as the stream's final frame,
-    /// padded to the minimum so a short tail still reaches the service.
-    private func flushOutboundTail(on task: URLSessionWebSocketTask) {
-        let tail = withStateLock { () -> Data in
-            let tail = outboundBuffer
-            outboundBuffer.removeAll(keepingCapacity: true)
-            return tail
-        }
-        guard !tail.isEmpty else { return }
-        send(Self.paddedFinalChunk(tail), on: task)
-    }
-
-    public func finishAndWait() async -> String? {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            isFinishing = true
-            return webSocketTask
-        }
-        // No socket at all: there is nothing that could become ready.
-        guard let task else {
-            stop()
-            return fullTranscript()
-        }
-        let result = await awaitFinalTranscript { [weak self, weak task] in
-            DispatchQueue.global().async { [weak self, weak task] in
-                guard let self, let task else { return }
-                self.commitHeldCapture(to: task)
-            }
-        }
-        stop()
-        return result
-    }
-
-    /// Commits the held capture and closes the stream, waiting first for
-    /// `RecognitionStarted` if the handshake is still in flight.
-    ///
-    /// A short recording finished during an ordinary handshake used to lose
-    /// everything the user said: the client saw "not ready" and `stop()`
-    /// cleared the preroll and cancelled a socket that was moments from being
-    /// usable. The bounded wait commits that capture when readiness arrives
-    /// inside the budget; a session that cannot become ready is still closed,
-    /// because `EndOfStream` on an unstarted session would be rejected.
-    private func commitHeldCapture(to task: URLSessionWebSocketTask) {
-        guard readiness.waitUntilReady(), isCurrent(task) else {
-            logger.error("Speechmatics session never started; finishing without EndOfStream")
-            resolveFinish()
-            return
-        }
-        flushPreroll(to: task)
-        flushOutboundTail(on: task)
-        _ = pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
-        sendEndOfStream(on: task)
+        synchronized { parse(.text(text), run) }
     }
 
     /// The bounded wait for `EndOfTranscript`, resolved by that frame (the
-    /// common case) or by the finish budget.
-    ///
-    /// `whenArmed` runs once the waiter is installed, so the `EndOfStream`
-    /// frame cannot race its own completion handler; tests use it to deliver
-    /// frames into an armed finish without a socket.
+    /// common case) or by the budget. `whenArmed` runs once the waiter is
+    /// installed, so tests can deliver frames into an armed finish without a
+    /// socket, exactly as the production `EndOfStream` completion does.
     func awaitFinalTranscript(
         budget: TimeInterval = SpeechmaticsRealtime.finishBudget,
         whenArmed: () -> Void = {}
     ) async -> String? {
-        await withCheckedContinuation { continuation in
-            finishLock.lock()
-            finishContinuation = continuation
-            finishLock.unlock()
-
-            whenArmed()
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + budget) { [weak self] in
-                self?.resolveFinish()
+        let active = synchronized { run }
+        return await withCheckedContinuation { continuation in
+            synchronized {
+                guard active.phase != .closed else {
+                    continuation.resume(returning: active.transcript)
+                    return
+                }
+                active.finishWaiters.append(continuation)
             }
+            whenArmed()
+            after(budget, active) { client, active in client.resolveFinishWaiters(active) }
         }
     }
 
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            isStopping = true
-            isReady = false
-            let task = webSocketTask
-            webSocketTask = nil
-            outboundBuffer.removeAll(keepingCapacity: true)
-            return task
-        }
-        preroll.reset()
-        readiness.reset()
-        sendBudget.reset()
-        task?.cancel(with: .normalClosure, reason: nil)
-        resolveFinish()
+    // MARK: - Run lifecycle
+
+    private func arm(
+        onTranscript: @escaping (String, Bool) -> Void,
+        onError: @escaping (Error) -> Void
+    ) -> SpeechmaticsLiveRun {
+        close(run)
+        let active = SpeechmaticsLiveRun(sampleRate: sampleRate)
+        run = active
+        active.onTranscript = onTranscript
+        active.onError = onError
+        return active
     }
 
-    // MARK: - Protocol frames
+    func fail(_ error: Error, _ active: SpeechmaticsLiveRun) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        let waiters = active.finishWaiters
+        active.finishWaiters.removeAll()
+        let transcript = active.transcript
+        close(active)
+        log("Speechmatics session failed")
+        // Publish the failure before finish returns. The run is already
+        // detached, so the callback may start a replacement session safely.
+        callback?(error)
+        waiters.forEach { $0.resume(returning: transcript) }
+    }
+
+    func close(_ active: SpeechmaticsLiveRun) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        let connection = active.connection
+        active.connection = nil
+        active.outgoing.removeAll()
+        active.outboundBuffer.removeAll(keepingCapacity: false)
+        active.budget.reset()
+        active.sending = false
+        if active === run { preroll.reset() }
+        let waiters = active.finishWaiters
+        active.finishWaiters.removeAll()
+        let transcript = active.transcript
+        connection?.cancel()
+        waiters.forEach { $0.resume(returning: transcript) }
+        active.onTranscript = nil
+        active.onError = nil
+    }
+
+    /// Resolves every pending finish waiter with the run's best available
+    /// transcript, leaving the run otherwise intact (used by the finish budget).
+    func resolveFinishWaiters(_ active: SpeechmaticsLiveRun) {
+        let waiters = active.finishWaiters
+        active.finishWaiters.removeAll()
+        let transcript = active.transcript
+        waiters.forEach { $0.resume(returning: transcript) }
+    }
+
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "Speechmatics") }
+
+    func isCurrent(_ active: SpeechmaticsLiveRun) -> Bool { active === run && active.phase != .closed }
+
+    var isSessionReady: Bool { synchronized { isCurrent(run) && run.ready } }
+    var audioFrameCount: Int { synchronized { run.sentAudioFrameCount } }
+
+    func after(_ seconds: TimeInterval, _ active: SpeechmaticsLiveRun,
+               action: @escaping @Sendable (SpeechmaticsLiveClient, SpeechmaticsLiveRun) -> Void) {
+        schedule(seconds) { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { action(self, active) } }
+        }
+    }
+
+    @discardableResult
+    func synchronized<Value>(_ action: () -> Value) -> Value {
+        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
+        return queue.sync(execute: action)
+    }
+
+    func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "SpeechmaticsLiveClient").info("\(event, privacy: .public)")
+        #endif
+    }
+}
+
+// MARK: - Protocol frames
+
+extension SpeechmaticsLiveClient {
+    static func webSocketURL() -> URL? {
+        var components = URLComponents()
+        components.scheme = "wss"
+        components.host = SpeechmaticsRealtime.webSocketHost
+        components.path = SpeechmaticsRealtime.webSocketPath
+        return components.url
+    }
 
     /// The `StartRecognition` frame. `enable_partials` is what produces the
     /// interim captions; `max_delay` is the documented latency/accuracy dial.
@@ -265,6 +345,14 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         max(lastAcknowledged, sentFrameCount, 0)
     }
 
+    static func endOfStreamPayload(lastSeqNo: Int) -> String? {
+        let payload: [String: Any] = ["message": "EndOfStream", "last_seq_no": lastSeqNo]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
     /// Speechmatics rejects an `AddAudio` frame below its minimum size, so the
     /// trailing partial chunk is zero-padded rather than dropped — otherwise
     /// the last words of a recording never reach the service (issues #849, #949).
@@ -298,205 +386,5 @@ public final class SpeechmaticsLiveClient: FinalizingStreamingTranscriptionClien
         // proportional to the audio, and every frame is at or above the
         // minimum by construction.
         return ([pending], Data())
-    }
-
-    // MARK: - Connection
-
-    static func webSocketURL() -> URL? {
-        var components = URLComponents()
-        components.scheme = "wss"
-        components.host = SpeechmaticsRealtime.webSocketHost
-        components.path = SpeechmaticsRealtime.webSocketPath
-        return components.url
-    }
-
-    private func connect() {
-        guard let url = Self.webSocketURL() else {
-            currentOnError()?(StreamingClientError.invalidURL)
-            return
-        }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let task = session.webSocketTask(with: request)
-        let published = withStateLock { () -> Bool in
-            guard !isStopping, !isFinishing else { return false }
-            isReady = false
-            webSocketTask = task
-            return true
-        }
-        guard published else {
-            task.cancel(with: .goingAway, reason: nil)
-            return
-        }
-        task.resume()
-        sendStartRecognition(on: task)
-        receiveMessages(on: task)
-    }
-
-    private func sendStartRecognition(on task: URLSessionWebSocketTask) {
-        guard let payload = Self.startRecognitionPayload(
-            language: language, accuracyModel: accuracyModel, sampleRate: sampleRate
-        ) else {
-            currentOnError()?(StreamingClientError.invalidURL)
-            return
-        }
-        pendingSends.enter()
-        task.send(.string(payload)) { [weak self] error in
-            guard let self else { return }
-            self.pendingSends.leave()
-            if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
-                self.handleTransportFailure(error)
-            }
-        }
-    }
-
-    private func sendEndOfStream(on task: URLSessionWebSocketTask) {
-        let lastSeqNo = withStateLock {
-            Self.endOfStreamLastSequenceNumber(
-                lastAcknowledged: self.lastAcknowledgedSeqNo,
-                sentFrameCount: self.sentAudioFrameCount
-            )
-        }
-        let payload: [String: Any] = ["message": "EndOfStream", "last_seq_no": lastSeqNo]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            resolveFinish()
-            return
-        }
-        task.send(.string(json)) { [weak self] error in
-            guard let self, let error, !WebSocketErrorFilter.shouldIgnore(error) else { return }
-            self.logger.error("Speechmatics EndOfStream send failed: \(error.localizedDescription)")
-            self.resolveFinish()
-        }
-    }
-
-    private func receiveMessages(on task: URLSessionWebSocketTask) {
-        task.receive { [weak self, weak task] result in
-            guard let self, let task, self.isCurrent(task) else { return }
-            switch result {
-            case .success(let message):
-                self.handle(message)
-                if self.isCurrent(task) { self.receiveMessages(on: task) }
-            case .failure(let error):
-                self.handleTransportFailure(error)
-            }
-        }
-    }
-
-    /// Only an explicit `Error` frame ends the session. An unrecognised frame —
-    /// `Info`, `Warning`, or a field added upstream — decodes to `nil` and is
-    /// ignored, matching every other shared client, because it must never end a
-    /// live recording.
-    private func handle(_ message: URLSessionWebSocketTask.Message) {
-        guard let event = SpeechmaticsRealtimeEvent(message: message) else { return }
-
-        switch event {
-        case .recognitionStarted:
-            withStateLock { isReady = true }
-            readiness.markReady()
-            if let task = currentTask() { flushPreroll(to: task) }
-        case .audioAdded(let seqNo):
-            withStateLock { lastAcknowledgedSeqNo = max(lastAcknowledgedSeqNo, seqNo) }
-        case .partial(let text):
-            currentOnTranscript()?(text, false)
-        case .final(let text):
-            withStateLock { accumulated.append(final: text) }
-            currentOnTranscript()?(text, true)
-        case .endOfTranscript:
-            resolveFinish()
-        case .failure(let error):
-            fail(error)
-        }
-    }
-
-    private func handleTransportFailure(_ error: Error) {
-        if isEnding || WebSocketErrorFilter.shouldIgnore(error) {
-            resolveFinish()
-            return
-        }
-        fail(mapConnectionError(error))
-    }
-
-    private func fail(_ error: Error) {
-        let callback = withStateLock { () -> ((Error) -> Void)? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            isReady = false
-            let callback = onError
-            webSocketTask?.cancel(with: .goingAway, reason: nil)
-            webSocketTask = nil
-            return callback
-        }
-        callback?(error)
-        resolveFinish()
-    }
-
-    private func send(_ audio: Data, on task: URLSessionWebSocketTask) {
-        // A socket that has stopped completing sends would otherwise retain
-        // every frame captured from here on. The budget turns that into a
-        // reported transport failure, which cancels the socket and releases
-        // the work already queued behind it.
-        guard sendBudget.admit(audio.count) else {
-            handleTransportFailure(StreamingClientError.transportStalled(provider: "Speechmatics"))
-            return
-        }
-        withStateLock { sentAudioFrameCount += 1 }
-        pendingSends.enter()
-        task.send(.data(audio)) { [weak self] error in
-            guard let self else { return }
-            self.sendBudget.release(audio.count)
-            self.pendingSends.leave()
-            if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
-                self.handleTransportFailure(error)
-            }
-        }
-    }
-
-    /// Replays held audio in capture order, through the same frame-size
-    /// accumulator the live path uses, so no replayed frame is undersized.
-    private func flushPreroll(to task: URLSessionWebSocketTask) {
-        for chunk in preroll.drain() { enqueueOutbound(chunk, on: task) }
-    }
-
-    @discardableResult
-    private func resolveFinish() -> Bool {
-        finishLock.lock()
-        let continuation = finishContinuation
-        finishContinuation = nil
-        finishLock.unlock()
-        guard let continuation else { return false }
-        continuation.resume(returning: fullTranscript())
-        return true
-    }
-
-    private func mapConnectionError(_ error: Error) -> Error {
-        let nsError = error as NSError
-        let description = nsError.localizedDescription.lowercased()
-        if description.contains("401") || description.contains("403")
-            || description.contains("unauthorized") || description.contains("not authorised")
-            || description.contains("forbidden") {
-            return StreamingClientError.invalidAPIKey(provider: "Speechmatics")
-        }
-        return error
-    }
-
-    /// Whether `RecognitionStarted` has arrived and the socket accepts audio.
-    var isSessionReady: Bool { withStateLock { isReady } }
-    var audioFrameCount: Int { withStateLock { sentAudioFrameCount } }
-
-    private var isEnding: Bool { withStateLock { isStopping || isFinishing } }
-    private func isCurrent(_ task: URLSessionWebSocketTask) -> Bool {
-        withStateLock { webSocketTask === task }
-    }
-    private func currentTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-    private func fullTranscript() -> String? { withStateLock { accumulated.transcriptOrNil } }
-
-    @discardableResult
-    private func withStateLock<T>(_ body: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return body()
     }
 }

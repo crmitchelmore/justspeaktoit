@@ -124,7 +124,6 @@ let appleCoreSources: [String] = [
     "SpeechInsights/SpeechInsightsSummaryBuilder.swift",
     "SpeechInsights/SpeechSessionRecord.swift",
     "SpeechInsights/SpeechTokenizer.swift",
-    "SpeechmaticsLiveClient.swift",
     "SpeechmaticsTTSAPI.swift",
     "StartupDiagnostics.swift",
     "TranscriptHandoffActivity.swift",

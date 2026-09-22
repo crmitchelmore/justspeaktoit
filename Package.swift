@@ -51,7 +51,6 @@ let appleCoreSources: [String] = [
     "CartesiaLiveClient.swift",
     "CartesiaTTSAPI.swift",
     "DeepgramBalanceClient.swift",
-    "DeepgramTTSAPI.swift",
     "DeprecatedCompatibility.swift",
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
@@ -189,7 +188,8 @@ if windowsTargetBuild {
             name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport"]
         ),
         .testTarget(
-            name: "SpeakWindowsPlatformTests", dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport"],
+            name: "SpeakWindowsPlatformTests",
+            dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport"],
             resources: [.copy("Fixtures")]
         )
     ])

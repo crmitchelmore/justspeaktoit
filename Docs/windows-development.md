@@ -79,10 +79,11 @@ remote file/job resources after completion, failure and cancellation; a failed
 job deletion still attempts file deletion. Rev.ai retains its existing remote-job
 retention policy.
 
-The native History pane selects saved recordings, retries transcription with
+The native History pane selects saved recordings, retries batch transcription with
 the recording's original model, exports transcript text through an overwrite-
 confirming save dialog, and opens retained audio in its registered Windows
-application. Copy, retry, export and audio actions capture the selected record's
+application. Live recordings direct users to Batch and Import for retranscription.
+Copy, retry, export and audio actions capture the selected record's
 identifier so later selection changes cannot redirect them. A native search box
 filters the rows by original transcript, processed transcript, captured app
 profile name or canonical friendly model name. Matching uses Foundation's full case folding and Latin,
@@ -264,9 +265,19 @@ local inference acceleration and playback belong behind platform adapters.
 Keep PCM and inference in process. Do not route the hot path through JSON RPC,
 a web view or disk polling merely to share orchestration.
 
+The macOS host currently executes shared live engines for eleven remote provider
+families. This includes xAI's dedicated speech-to-text route and Speechmatics
+through `SharedClientLiveController`; a platform-specific client class is not
+required for those routes. AssemblyAI, Cartesia, Gladia and Modulate still have
+duplicate macOS transports. Deepgram and OpenAI share transport but retain
+separate macOS stop orchestration. These are explicit consolidation gaps:
+provider changes must still inspect both paths until their adapters are migrated
+and their existing capabilities and finalisation behaviour are verified.
+
 WASAPI produces mono PCM16 directly at the selected provider's 16 or 24 kHz
-rate in 100 ms frames. A preallocated, single-producer/single-consumer ring holds
-at most 128 frames (12.8 seconds, about 600 KiB at the maximum rate). Its capture-side push performs no heap allocation, mutex
+rate in 20 ms frames for Deepgram and 100 ms frames for other routes. A
+preallocated, single-producer/single-consumer ring holds at most 640 or 128
+frames respectively (12.8 seconds, about 600 KiB at the maximum rate). Its capture-side push performs no heap allocation, mutex
 acquisition or disk I/O. A separate writer invokes the Swift file callback;
 stop flushes the final partial frame, drains the queue and joins the writer
 before closing the recording file. Overflow stops recording with an explicit
@@ -485,27 +496,25 @@ server-VAD confirmation cadence; real-provider transcript behaviour and latency
 require qualification before release. The portable and Apple unit suites do not
 substitute for that acceptance check.
 
-Verified Windows checkpoint `91479ba8` (22 September 2026):
+Verified Windows checkpoint `affe2c87` (22 September 2026):
 
-- [Native Windows run 35748290418](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748290418)
+- [Native Windows run 35750059468](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35750059468)
   passed **578 tests, 13 optional skips, zero failures**, then all five WinHTTP
   loopback probes and native executable/window checks.
-- [Mac cross-build and Windows execution run 35748289497](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748289497)
+- [Mac cross-build and Windows execution run 35750059437](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35750059437)
   passed **578 tests, 13 optional skips, zero failures** from the exact Mac-built
   release test executable. The production executable also passed playback,
   native/window and isolated runtime-bundle checks. Both runs tested PR merge
-  `e1821430ef92d8997e84de3365fd6e46b2eae968`; its source tree is identical to
-  `91479ba8`.
-- The [runtime bundle artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35748289497/artifacts/10704123666)
+  `ca73f4e89efa300c973b3f23847896f3f1dc677d`; its source tree is identical to
+  `affe2c87`.
+- The [runtime bundle artifact](https://github.com/crmitchelmore/justspeaktoit/actions/runs/35750059437/artifacts/10705016956)
   contains a 30-file developer ZIP with 17 runtime DLLs. In all three isolated
   runs, the application and all 17 DLLs loaded from the extracted bundle with
   no foreign modules or missing static imports. Swift was absent from PATH,
   the working directory was empty, and the bundle path contained spaces and
   Greek characters. Removing the DLLs produced `STATUS_DLL_NOT_FOUND`; removing
   the real application resource produced exit 1.
-- ZIP SHA-256: `2d45734186d24cb861b5ff6c993c9dec369cb5288187ad860891085863d36c39`.
-  The unsigned production executable SHA-256 is
-  `488e76225a60e59b9f84d1ba607abc1e735d2269f14a285d5dcd74c8db57e6e9`.
+- ZIP SHA-256: `ba1f36fe2f3170ff96d698813e15853c4dd2e26afd1d7cefdd16f4cb51203a47`.
   The three native/cross/bundle window screenshots were byte-identical and
   inspected for control bounds. These tests use synthetic content. The hosted
   runner had no physical output endpoint, so three audible playback cases were

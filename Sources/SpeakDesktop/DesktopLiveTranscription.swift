@@ -88,6 +88,15 @@ public enum DesktopLiveTranscription {
         return LiveTranscriptionRouting.route(for: identifier)
     }
 
+    /// Native desktop capture batching, independent of the driver's packet period.
+    /// Deepgram's Apple controller forwards roughly 20 ms input packets directly;
+    /// a 20 ms Windows frame avoids adding a 100 ms application batch. Other routes
+    /// retain 100 ms, including AssemblyAI's required 50–1000 ms audio messages.
+    /// Batch/unknown routes keep the existing 100 ms default. Apple capture is unchanged.
+    public static func captureFrameMilliseconds(forID modelID: String) -> Int {
+        route(forID: modelID)?.provider == .deepgram ? 20 : 100
+    }
+
     public static func provider(forID modelID: String) -> TranscriptionProviderMetadata? {
         guard let route = route(forID: modelID), let credentialID = route.apiKeyIdentifier else { return nil }
         return TranscriptionProviderMetadata(

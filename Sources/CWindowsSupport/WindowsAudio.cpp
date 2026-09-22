@@ -26,46 +26,64 @@ public:
     ~CaptureCallbackScope() { activeCaptureCallback = previous; }
 };
 
-// PCM16 mono rates the Windows audio engine converts to directly in one pass.
-// 16 kHz is the legacy default; 24 kHz is the OpenAI Realtime canonical rate.
-// Only these two are accepted, so every 100 ms frame fits the fixed storage.
+// PCM16 mono rates the Windows engine converts to directly in one pass.
 constexpr uint32_t defaultSampleRate = 16000;
 constexpr uint32_t maximumSampleRate = 24000;
-constexpr size_t maximumFrameSamples = 2400; // 100 ms at the highest supported rate.
+constexpr uint32_t defaultFrameMilliseconds = 100;
+constexpr uint32_t minimumFrameMilliseconds = 20;
+constexpr size_t maximumFrameSamples = 2400;
+constexpr size_t bufferedMilliseconds = 12800;
 constexpr bool supportedSampleRate(uint32_t sampleRate) noexcept {
     return sampleRate == defaultSampleRate || sampleRate == maximumSampleRate;
 }
-// 100 ms frame target: 1600 or 2400 samples. Clamped so no internal misuse can
-// overrun fixed storage or stall framing; the C API rejects other rates earlier.
-constexpr size_t frameSamplesFor(uint32_t sampleRate) noexcept {
-    const size_t samples = sampleRate / 10;
-    return samples < 1 ? 1 : samples > maximumFrameSamples ? maximumFrameSamples : samples;
+constexpr bool supportedFrameMilliseconds(uint32_t milliseconds) noexcept {
+    return milliseconds == minimumFrameMilliseconds || milliseconds == defaultFrameMilliseconds;
 }
-static_assert(frameSamplesFor(defaultSampleRate) == 1600 && frameSamplesFor(maximumSampleRate) == maximumFrameSamples,
-              "Frame targets must be 100 ms at each supported capture rate.");
+constexpr size_t frameSamplesFor(uint32_t sampleRate,
+                                uint32_t milliseconds = defaultFrameMilliseconds) noexcept {
+    return static_cast<size_t>(sampleRate) * milliseconds / 1000;
+}
+size_t validatedFrameSamples(uint32_t sampleRate, uint32_t milliseconds) {
+    if (!supportedSampleRate(sampleRate) || !supportedFrameMilliseconds(milliseconds)) {
+        throw std::invalid_argument("Unsupported microphone frame format.");
+    }
+    return frameSamplesFor(sampleRate, milliseconds);
+}
+static_assert(frameSamplesFor(maximumSampleRate) == maximumFrameSamples);
 
-// One producer and one consumer. Slots remain owned by the consumer until its
-// borrowed-pointer callback returns. No allocation, mutex or disk I/O in push.
-// Slots are sized for the largest supported frame so both rates share one
-// fixed layout: 128 slots of 2400 samples, about 600 KiB, 12.8 seconds.
+// One producer and one consumer. A borrowed slot stays owned by the consumer
+// until its callback returns. Push never allocates, locks or performs disk I/O.
+// The same 600 KiB PCM store supplies 128 x 100 ms or 640 x 20 ms slots, retaining
+// 12.8 seconds at either rate/duration. Slot metadata is also allocated once.
 class PCMFrameRing {
 public:
-    static constexpr size_t slotSamples = maximumFrameSamples;
-    static constexpr size_t capacity = 128;
-    struct Frame { std::array<int16_t, slotSamples> samples{}; size_t count = 0; };
+    static constexpr size_t maximumSlots = bufferedMilliseconds / minimumFrameMilliseconds;
+    static constexpr size_t storageSamples = maximumFrameSamples * bufferedMilliseconds / defaultFrameMilliseconds;
+    struct Frame { int16_t *samples = nullptr; size_t count = 0; };
+    const size_t slotSamples;
+    const size_t slotCount;
 private:
-    std::array<Frame, capacity> slots{};
+    std::array<int16_t, storageSamples> samples{};
+    std::array<Frame, maximumSlots> slots{};
     alignas(64) std::atomic<size_t> written{0};
     alignas(64) std::atomic<size_t> consumed{0};
 public:
     static_assert(std::atomic<size_t>::is_always_lock_free, "Capture indices must be lock-free.");
+    explicit PCMFrameRing(uint32_t sampleRate = maximumSampleRate,
+                          uint32_t milliseconds = defaultFrameMilliseconds)
+        : slotSamples(validatedFrameSamples(sampleRate, milliseconds)),
+          slotCount(bufferedMilliseconds / milliseconds) {
+        for (size_t index = 0; index < slotCount; ++index) {
+            slots[index].samples = samples.data() + index * slotSamples;
+        }
+    }
     bool push(const int16_t *source, size_t count) noexcept {
         if (!count || count > slotSamples) return false;
         const size_t write = written.load(std::memory_order_relaxed);
-        if (write - consumed.load(std::memory_order_acquire) >= capacity) return false;
-        Frame &slot = slots[write % capacity];
-        if (source) std::copy_n(source, count, slot.samples.data());
-        else std::fill_n(slot.samples.data(), count, 0);
+        if (write - consumed.load(std::memory_order_acquire) >= slotCount) return false;
+        Frame &slot = slots[write % slotCount];
+        if (source) std::copy_n(source, count, slot.samples);
+        else std::fill_n(slot.samples, count, 0);
         slot.count = count;
         written.store(write + 1, std::memory_order_release);
         return true;
@@ -73,7 +91,7 @@ public:
     const Frame *front() const noexcept {
         const size_t read = consumed.load(std::memory_order_relaxed);
         if (read == written.load(std::memory_order_acquire)) return nullptr;
-        return &slots[read % capacity];
+        return &slots[read % slotCount];
     }
     void pop() noexcept {
         consumed.store(consumed.load(std::memory_order_relaxed) + 1, std::memory_order_release);
@@ -83,7 +101,7 @@ public:
 class BufferedAudioWriter {
     enum class Failure { none, overflow, callback, wake, wait };
     // Heap allocation avoids exhausting the Windows capture thread's stack.
-    std::unique_ptr<PCMFrameRing> ring = std::make_unique<PCMFrameRing>();
+    std::unique_ptr<PCMFrameRing> ring;
     jsti::Handle available;
     std::thread worker;
     std::atomic<bool> closed{false};
@@ -101,7 +119,7 @@ class BufferedAudioWriter {
             if (const auto *frame = ring->front()) {
                 try {
                     CaptureCallbackScope scope(owner);
-                    callback(frame->samples.data(), frame->count, context);
+                    callback(frame->samples, frame->count, context);
                 } catch (...) {
                     fail(Failure::callback);
                     return;
@@ -124,8 +142,11 @@ class BufferedAudioWriter {
         }
     }
 public:
-    BufferedAudioWriter(JSTIAudioCallback callback, void *context, const JSTICapture *owner = nullptr)
-        : callback(callback), context(context), owner(owner) {
+    BufferedAudioWriter(JSTIAudioCallback callback, void *context, const JSTICapture *owner = nullptr,
+                        uint32_t sampleRate = maximumSampleRate,
+                        uint32_t milliseconds = defaultFrameMilliseconds)
+        : ring(std::make_unique<PCMFrameRing>(sampleRate, milliseconds)),
+          callback(callback), context(context), owner(owner) {
         available.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!available.value) throw std::runtime_error("Could not create the audio writer event.");
         worker = std::thread(&BufferedAudioWriter::run, this);
@@ -155,7 +176,7 @@ public:
     }
 };
 
-// Regroups driver packets into 100 ms frames at the capture's rate. Storage is
+// Regroups driver packets into the chosen duration at the capture's rate. Storage is
 // fixed at the largest frame; only the first `target` samples are ever used.
 class Frames {
     std::array<int16_t, maximumFrameSamples> samples{};
@@ -164,8 +185,9 @@ class Frames {
     JSTIAudioCallback callback;
     void *context;
 public:
-    Frames(uint32_t sampleRate, JSTIAudioCallback callback, void *context)
-        : target(frameSamplesFor(sampleRate)), callback(callback), context(context) {}
+    Frames(uint32_t sampleRate, JSTIAudioCallback callback, void *context,
+           uint32_t milliseconds = defaultFrameMilliseconds)
+        : target(validatedFrameSamples(sampleRate, milliseconds)), callback(callback), context(context) {}
     void append(const int16_t *source, size_t count) {
         while (count) {
             const size_t copied = std::min(count, target - used);
@@ -207,15 +229,16 @@ struct JSTICapture {
     std::wstring deviceIdentifier;
     // Validated at creation and immutable for the capture lifetime.
     const uint32_t sampleRate;
+    const uint32_t frameMilliseconds;
     jsti::Handle stop;
     std::thread worker;
     std::mutex failureMutex;
     std::string failure;
 
     JSTICapture(JSTIAudioCallback callback, JSTIAudioErrorCallback errorCallback, void *context,
-                std::wstring deviceIdentifier, uint32_t sampleRate)
+                std::wstring deviceIdentifier, uint32_t sampleRate, uint32_t frameMilliseconds)
         : callback(callback), errorCallback(errorCallback), context(context),
-          deviceIdentifier(std::move(deviceIdentifier)), sampleRate(sampleRate) {}
+          deviceIdentifier(std::move(deviceIdentifier)), sampleRate(sampleRate), frameMilliseconds(frameMilliseconds) {}
 
     void run(std::promise<std::string> ready) {
         bool announced = false;
@@ -294,11 +317,11 @@ struct JSTICapture {
                 report("The microphone driver returned an invalid or excessive capture buffer."); return;
             }
             std::vector<int16_t> packet(capacity);
-            BufferedAudioWriter writer(callback, context, this);
+            BufferedAudioWriter writer(callback, context, this, sampleRate, frameMilliseconds);
             auto enqueue = [](const int16_t *samples, size_t count, void *value) {
                 static_cast<BufferedAudioWriter *>(value)->append(samples, count);
             };
-            Frames frames(sampleRate, enqueue, &writer);
+            Frames frames(sampleRate, enqueue, &writer, frameMilliseconds);
             jsti::COM<IAudioCaptureClient> reader;
             result = client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void **>(&reader.value));
             if (FAILED(result)) { report(audioError("Opening microphone capture stream", result)); return; }
@@ -342,7 +365,7 @@ struct JSTICapture {
                         return false;
                     }
                     firstPacket = false;
-                    // Release the driver-owned buffer before entering Swift.
+                    // Publish after releasing the driver buffer; Swift runs only on the writer thread.
                     frames.append(silence ? nullptr : packet.data(), count);
                     if (const char *error = writer.error()) { streamFailure = error; return false; }
                 }
@@ -373,12 +396,14 @@ struct JSTICapture {
         }
     }
 };
-static_assert(std::is_const_v<decltype(JSTICapture::sampleRate)>, "The capture sample rate must be immutable.");
+static_assert(std::is_const_v<decltype(JSTICapture::sampleRate)> &&
+              std::is_const_v<decltype(JSTICapture::frameMilliseconds)>, "The capture format must be immutable.");
 
 namespace {
 // Shared constructor: validates the callback, rate and identifier without
 // touching any device. Hardware is only activated by jsti_capture_start.
-JSTICapture *createCapture(const char *deviceID, uint32_t sampleRate, JSTIAudioCallback callback,
+JSTICapture *createCapture(const char *deviceID, uint32_t sampleRate, uint32_t frameMilliseconds,
+                           JSTIAudioCallback callback,
                            JSTIAudioErrorCallback errorCallback, void *context, char *error, size_t errorCapacity) {
     try {
         if (!callback) { jsti::fail("No audio callback supplied.", error, errorCapacity); return nullptr; }
@@ -388,12 +413,18 @@ JSTICapture *createCapture(const char *deviceID, uint32_t sampleRate, JSTIAudioC
                        " Hz. Only 16000 Hz and 24000 Hz PCM16 mono capture are supported.", error, errorCapacity);
             return nullptr;
         }
+        if (!supportedFrameMilliseconds(frameMilliseconds)) {
+            jsti::fail("Unsupported microphone frame duration " + std::to_string(frameMilliseconds) +
+                       " ms. Only 20 ms and 100 ms capture frames are supported.", error, errorCapacity);
+            return nullptr;
+        }
         std::wstring identifier;
         if (!jsti::wide(deviceID ? deviceID : "", identifier) || identifier.size() > 32767) {
             jsti::fail("The microphone identifier is not valid UTF-8 or is too long.", error, errorCapacity);
             return nullptr;
         }
-        auto capture = new (std::nothrow) JSTICapture(callback, errorCallback, context, std::move(identifier), sampleRate);
+        auto capture = new (std::nothrow) JSTICapture(
+            callback, errorCallback, context, std::move(identifier), sampleRate, frameMilliseconds);
         if (!capture) { jsti::fail("Could not allocate microphone capture.", error, errorCapacity); return nullptr; }
         // Success never leaves a stale message from an earlier failure behind.
         if (error && errorCapacity) error[0] = 0;
@@ -406,19 +437,25 @@ JSTICapture *createCapture(const char *deviceID, uint32_t sampleRate, JSTIAudioC
 }
 
 JSTICapture *jsti_capture_create(JSTIAudioCallback callback, JSTIAudioErrorCallback errorCallback, void *context) {
-    return createCapture(nullptr, defaultSampleRate, callback, errorCallback, context, nullptr, 0);
+    return createCapture(nullptr, defaultSampleRate, defaultFrameMilliseconds, callback, errorCallback, context, nullptr, 0);
 }
 
 JSTICapture *jsti_capture_create_with_device(const char *deviceID, JSTIAudioCallback callback,
                                              JSTIAudioErrorCallback errorCallback, void *context,
                                              char *error, size_t errorCapacity) {
-    return createCapture(deviceID, defaultSampleRate, callback, errorCallback, context, error, errorCapacity);
+    return createCapture(deviceID, defaultSampleRate, defaultFrameMilliseconds, callback, errorCallback, context, error, errorCapacity);
 }
 
 JSTICapture *jsti_capture_create_with_format(const char *deviceID, uint32_t sampleRate, JSTIAudioCallback callback,
                                              JSTIAudioErrorCallback errorCallback, void *context,
                                              char *error, size_t errorCapacity) {
-    return createCapture(deviceID, sampleRate, callback, errorCallback, context, error, errorCapacity);
+    return createCapture(deviceID, sampleRate, defaultFrameMilliseconds, callback, errorCallback, context, error, errorCapacity);
+}
+
+JSTICapture *jsti_capture_create_with_options(const char *deviceID, uint32_t sampleRate, uint32_t frameMilliseconds,
+                                              JSTIAudioCallback callback, JSTIAudioErrorCallback errorCallback,
+                                              void *context, char *error, size_t errorCapacity) {
+    return createCapture(deviceID, sampleRate, frameMilliseconds, callback, errorCallback, context, error, errorCapacity);
 }
 
 int jsti_capture_start(JSTICapture *capture, char *error, size_t capacity) {
@@ -475,8 +512,8 @@ struct OwnedCapture {
 // Framing at one rate: coalescing into an exact full frame, an exact silent
 // frame, a silence/source mix that subdivides a long packet, the partial stop
 // flush, a repeated flush and zero-length no-ops. Sample order is verified.
-int selfTestFraming(uint32_t sampleRate, char *error, size_t capacity) {
-    const size_t frame = frameSamplesFor(sampleRate);
+int selfTestFraming(uint32_t sampleRate, uint32_t milliseconds, char *error, size_t capacity) {
+    const size_t frame = frameSamplesFor(sampleRate, milliseconds);
     // A non-zero ramp distinguishes source order from silence at every position.
     std::vector<int16_t> source(frame + 50);
     for (size_t index = 0; index < source.size(); ++index) source[index] = static_cast<int16_t>(index % 30000 + 1);
@@ -499,7 +536,7 @@ int selfTestFraming(uint32_t sampleRate, char *error, size_t capacity) {
         ++state.calls;
         state.samples += count;
     };
-    Frames frames(sampleRate, callback, &check);
+    Frames frames(sampleRate, callback, &check, milliseconds);
     frames.append(source.data(), frame / 2);
     frames.append(source.data() + frame / 2, frame - frame / 2); // Coalesces into exactly one full frame.
     frames.append(nullptr, frame);                                // Exact silent frame.
@@ -517,42 +554,35 @@ int selfTestFraming(uint32_t sampleRate, char *error, size_t capacity) {
     return 0;
 }
 
-// Fixed-capacity queue: invalid sizes, wrap across three full passes, overflow
-// rejection for the smallest and largest frames, FIFO order, silence and a
-// trailing partial frame. Slot sizes alternate between 1600 and 2400 samples
-// and swap each pass so every slot carries both frame sizes.
-int selfTestRing(char *error, size_t capacity) {
-    static_assert(PCMFrameRing::slotSamples == 2400 && PCMFrameRing::capacity == 128,
-                  "The PCM queue keeps 128 slots of at most 2400 samples for both rates.");
-    // Heap allocated like production; the ring is about 600 KiB.
-    auto ring = std::make_unique<PCMFrameRing>();
-    std::vector<int16_t> data(PCMFrameRing::slotSamples);
-    if (ring->push(data.data(), 0) || ring->push(data.data(), data.size() + 1)) {
-        return jsti::fail("The PCM queue accepted an invalid frame size.", error, capacity);
+// Three full wraps at each format prove a 12.8-second queue, overflow refusal,
+// FIFO order, silence and a partial tail without depending on worker scheduling.
+int selfTestRing(uint32_t sampleRate, uint32_t milliseconds, char *error, size_t capacity) {
+    static_assert(PCMFrameRing::storageSamples * sizeof(int16_t) == 614400);
+    auto ring = std::make_unique<PCMFrameRing>(sampleRate, milliseconds);
+    std::vector<int16_t> data(ring->slotSamples);
+    if (ring->slotCount * milliseconds != bufferedMilliseconds ||
+        ring->slotCount * ring->slotSamples != sampleRate * bufferedMilliseconds / 1000 ||
+        ring->push(data.data(), 0) || ring->push(data.data(), data.size() + 1)) {
+        return jsti::fail("The PCM queue time budget or frame bound is incorrect.", error, capacity);
     }
-    auto countAt = [](size_t pass, size_t index) -> size_t {
-        if (index + 1 == PCMFrameRing::capacity) return 99;
-        return (index + pass) % 2 ? frameSamplesFor(maximumSampleRate) : frameSamplesFor(defaultSampleRate);
-    };
-    // Fill before any consumer runs: overflow and wrap checks cannot depend on
-    // scheduler timing. Rejected pushes must leave every accepted frame intact.
     for (size_t pass = 0; pass < 3; ++pass) {
-        for (size_t index = 0; index < PCMFrameRing::capacity; ++index) {
-            std::fill(data.begin(), data.end(), static_cast<int16_t>(pass * PCMFrameRing::capacity + index + 1));
-            if (!ring->push(index % 3 == 0 ? nullptr : data.data(), countAt(pass, index))) {
+        for (size_t index = 0; index < ring->slotCount; ++index) {
+            std::fill(data.begin(), data.end(), static_cast<int16_t>(pass * ring->slotCount + index + 1));
+            const size_t count = index + 1 == ring->slotCount ? 99 : data.size();
+            if (!ring->push(index % 3 == 0 ? nullptr : data.data(), count)) {
                 return jsti::fail("The PCM queue rejected a frame before capacity.", error, capacity);
             }
         }
         if (ring->push(data.data(), 1) || ring->push(data.data(), data.size())) {
             return jsti::fail("The PCM queue exceeded its fixed capacity.", error, capacity);
         }
-        for (size_t index = 0; index < PCMFrameRing::capacity; ++index) {
+        for (size_t index = 0; index < ring->slotCount; ++index) {
             const auto *frame = ring->front();
-            const size_t count = countAt(pass, index);
+            const size_t count = index + 1 == ring->slotCount ? 99 : data.size();
             const int16_t expected = index % 3 == 0 ? 0
-                : static_cast<int16_t>(pass * PCMFrameRing::capacity + index + 1);
+                : static_cast<int16_t>(pass * ring->slotCount + index + 1);
             if (!frame || frame->count != count ||
-                !std::all_of(frame->samples.begin(), frame->samples.begin() + count,
+                !std::all_of(frame->samples, frame->samples + count,
                              [expected](int16_t value) { return value == expected; })) {
                 return jsti::fail("PCM queue FIFO, silence, wrap or partial-frame check failed.", error, capacity);
             }
@@ -563,12 +593,69 @@ int selfTestRing(char *error, size_t capacity) {
     return 0;
 }
 
+// Synthetic packet arrival times isolate the batching added by this code from
+// driver, scheduling, networking or provider latency. Test both driver packet
+// sizes at both sample rates, preserving every sample and the final short tail.
+int selfTestArrivalLatency(uint32_t sampleRate, uint32_t milliseconds, uint32_t packetMilliseconds,
+                           char *error, size_t capacity) {
+    struct Check {
+        size_t target, packet, delivered = 0, calls = 0;
+        uint32_t packetMilliseconds, now = 0, firstDelivery = 0, longestWait = 0;
+        bool flushing = false, valid = true;
+    } check{frameSamplesFor(sampleRate, milliseconds), frameSamplesFor(sampleRate, packetMilliseconds),
+            0, 0, packetMilliseconds};
+    auto callback = [](const int16_t *data, size_t count, void *context) {
+        auto &state = *static_cast<Check *>(context);
+        if (!state.calls) state.firstDelivery = state.now;
+        if (!count || count > state.target || (!state.flushing && count != state.target)) state.valid = false;
+        for (size_t index = 0; index < count; ++index) {
+            if (data[index] != static_cast<int16_t>((state.delivered + index) % 30000 + 1)) state.valid = false;
+        }
+        // The first sample in this frame arrived with its containing packet.
+        if (!state.flushing) {
+            const auto firstArrival = static_cast<uint32_t>((state.delivered / state.packet + 1) *
+                state.packetMilliseconds);
+            state.longestWait = std::max(state.longestWait, state.now - firstArrival);
+        }
+        state.delivered += count;
+        ++state.calls;
+    };
+    Frames frames(sampleRate, callback, &check, milliseconds);
+    std::vector<int16_t> packet(check.packet);
+    const size_t fullPackets = 200 / packetMilliseconds;
+    for (size_t index = 0; index < fullPackets; ++index) {
+        for (size_t sample = 0; sample < packet.size(); ++sample) {
+            packet[sample] = static_cast<int16_t>((index * packet.size() + sample) % 30000 + 1);
+        }
+        check.now = static_cast<uint32_t>((index + 1) * packetMilliseconds);
+        frames.append(packet.data(), packet.size());
+    }
+    if (!check.valid || check.firstDelivery != milliseconds || check.calls != 200 / milliseconds ||
+        check.delivered != sampleRate / 5 || check.longestWait != milliseconds - packetMilliseconds) {
+        return jsti::fail("Synthetic packet arrival-to-frame delivery or ordering failed.", error, capacity);
+    }
+    const size_t tail = sampleRate / 200; // 5 ms, always shorter than either frame duration.
+    for (size_t sample = 0; sample < tail; ++sample) {
+        packet[sample] = static_cast<int16_t>((sampleRate / 5 + sample) % 30000 + 1);
+    }
+    check.now = 205;
+    frames.append(packet.data(), tail);
+    if (check.calls != 200 / milliseconds) return jsti::fail("A partial frame escaped before stop.", error, capacity);
+    check.flushing = true;
+    frames.flush();
+    frames.flush();
+    if (!check.valid || check.calls != 200 / milliseconds + 1 || check.delivered != sampleRate / 5 + tail) {
+        return jsti::fail("Synthetic stop lost, duplicated or padded the final partial frame.", error, capacity);
+    }
+    return 0;
+}
+
 // Writer drain at one frame size: a full frame, a full silent frame and a
 // partial frame all reach the callback intact before finish returns; a second
 // finish is harmless and later appends are rejected.
-int selfTestWriter(uint32_t sampleRate, char *error, size_t capacity) {
+int selfTestWriter(uint32_t sampleRate, uint32_t milliseconds, char *error, size_t capacity) {
     struct Check { size_t frame = 0; size_t calls = 0; bool valid = true; } written;
-    written.frame = frameSamplesFor(sampleRate);
+    written.frame = frameSamplesFor(sampleRate, milliseconds);
     auto callback = [](const int16_t *data, size_t count, void *context) {
         auto &state = *static_cast<Check *>(context);
         const size_t expectedCount = state.calls == 2 ? 99 : state.frame;
@@ -578,7 +665,7 @@ int selfTestWriter(uint32_t sampleRate, char *error, size_t capacity) {
         ++state.calls;
     };
     std::vector<int16_t> data(written.frame, int16_t{42});
-    BufferedAudioWriter writer(callback, &written);
+    BufferedAudioWriter writer(callback, &written, nullptr, sampleRate, milliseconds);
     const bool accepted = writer.append(data.data(), data.size()) && writer.append(nullptr, data.size())
         && writer.append(data.data(), 99);
     writer.finish();
@@ -605,6 +692,25 @@ int selfTestCreation(char *error, size_t capacity) {
         OwnedCapture rejected{jsti_capture_create_with_format("", rate, audio, failed, &callbacks, detail, sizeof(detail))};
         if (rejected.value || !detail[0]) {
             return jsti::fail("An unsupported capture sample rate was accepted or left unreported.", error, capacity);
+        }
+    }
+    for (const uint32_t milliseconds : {0u, 1u, 19u, 21u, 50u, 99u, 101u, UINT32_MAX}) {
+        detail[0] = 0;
+        OwnedCapture rejected{jsti_capture_create_with_options("", defaultSampleRate, milliseconds,
+            audio, failed, &callbacks, detail, sizeof(detail))};
+        if (rejected.value || !detail[0]) {
+            return jsti::fail("An unsupported frame duration was accepted or left unreported.", error, capacity);
+        }
+    }
+    for (const uint32_t rate : {defaultSampleRate, maximumSampleRate}) {
+        for (const uint32_t milliseconds : {minimumFrameMilliseconds, defaultFrameMilliseconds}) {
+            stale();
+            OwnedCapture configured{jsti_capture_create_with_options("", rate, milliseconds,
+                audio, failed, &callbacks, detail, sizeof(detail))};
+            if (!configured.value || detail[0] || configured.value->sampleRate != rate ||
+                configured.value->frameMilliseconds != milliseconds) {
+                return jsti::fail("The explicit capture frame format was not retained.", error, capacity);
+            }
         }
     }
     detail[0] = 0;
@@ -641,7 +747,11 @@ int selfTestCreation(char *error, size_t capacity) {
     OwnedCapture legacyDevice{jsti_capture_create_with_device(nullptr, audio, failed, &callbacks, detail, sizeof(detail))};
     if (!formatted.value || !legacy.value || !legacyDevice.value || detail[0] ||
         formatted.value->sampleRate != defaultSampleRate || legacy.value->sampleRate != defaultSampleRate ||
-        legacyDevice.value->sampleRate != defaultSampleRate || !formatted.value->deviceIdentifier.empty() ||
+        legacyDevice.value->sampleRate != defaultSampleRate ||
+        formatted.value->frameMilliseconds != defaultFrameMilliseconds ||
+        legacy.value->frameMilliseconds != defaultFrameMilliseconds ||
+        legacyDevice.value->frameMilliseconds != defaultFrameMilliseconds ||
+        realtime.value->frameMilliseconds != defaultFrameMilliseconds || !formatted.value->deviceIdentifier.empty() ||
         !legacy.value->deviceIdentifier.empty() || !legacyDevice.value->deviceIdentifier.empty()) {
         return jsti::fail("Capture constructors do not agree on the 16 kHz default.", error, capacity);
     }
@@ -662,9 +772,16 @@ int jsti_native_self_test(char *error, size_t capacity) {
     }
     try {
         for (const uint32_t sampleRate : {defaultSampleRate, maximumSampleRate}) {
-            if (selfTestFraming(sampleRate, error, capacity) || selfTestWriter(sampleRate, error, capacity)) return -1;
+            for (const uint32_t milliseconds : {minimumFrameMilliseconds, defaultFrameMilliseconds}) {
+                if (selfTestFraming(sampleRate, milliseconds, error, capacity) ||
+                    selfTestRing(sampleRate, milliseconds, error, capacity) ||
+                    selfTestWriter(sampleRate, milliseconds, error, capacity)) return -1;
+                for (const uint32_t packetMilliseconds : {10u, 20u}) {
+                    if (selfTestArrivalLatency(sampleRate, milliseconds, packetMilliseconds, error, capacity)) return -1;
+                }
+            }
         }
-        if (selfTestRing(error, capacity) || selfTestCreation(error, capacity)) return -1;
+        if (selfTestCreation(error, capacity)) return -1;
         std::vector<int16_t> data(1);
         auto throwingCallback = [](const int16_t *, size_t, void *) { throw 1; };
         BufferedAudioWriter throwingWriter(throwingCallback, nullptr);

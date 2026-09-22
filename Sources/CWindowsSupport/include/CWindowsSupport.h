@@ -198,9 +198,9 @@ typedef void (*JSTIAudioDeviceCallback)(const char *id, const char *name, int is
 int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context,
                                  char *error, size_t error_capacity);
 /* Dedicated bounded writer callback, PCM16 little-endian mono at the capture's
- * sample rate: 16 kHz unless created by jsti_capture_create_with_format. Normally
- * one 100 ms frame of sample_rate/10 samples (1600 at 16 kHz, 2400 at 24 kHz);
- * stop flushes a final partial frame. Copy synchronously and return promptly.
+ * sample rate: 16 kHz unless explicitly configured. Legacy constructors emit
+ * 100 ms frames; create_with_options selects 20 or 100 ms. Stop flushes a final
+ * partial frame without padding. Copy synchronously and return promptly.
  * Do not call capture stop/destroy from either callback. */
 typedef void (*JSTIAudioCallback)(const int16_t *samples, size_t sample_count, void *context);
 typedef void (*JSTIAudioErrorCallback)(const char *message, void *context);
@@ -224,6 +224,16 @@ JSTICapture *jsti_capture_create_with_format(const char *device_id, uint32_t sam
                                              JSTIAudioCallback callback,
                                              JSTIAudioErrorCallback error_callback, void *context,
                                              char *error, size_t error_capacity);
+/* As create_with_format, with an explicit frame duration of exactly 20 or
+ * 100 ms. Rejects other durations before device activation. PCM storage stays
+ * fixed and the writer queue retains 12.8 seconds at either duration/rate.
+ * This sets application batching only, not the audio driver's packet period.
+ * Choose a duration compatible with the provider; AssemblyAI requires at least
+ * 50 ms and should use 100 ms. Legacy constructors always retain 100 ms. */
+JSTICapture *jsti_capture_create_with_options(const char *device_id, uint32_t sample_rate,
+                                              uint32_t frame_milliseconds, JSTIAudioCallback callback,
+                                              JSTIAudioErrorCallback error_callback, void *context,
+                                              char *error, size_t error_capacity);
 /* Serialize start/stop/destroy on the caller side. start reports initialization
  * errors synchronously; later device/stream failures invoke error_callback. */
 int jsti_capture_start(JSTICapture *capture, char *error, size_t error_capacity);

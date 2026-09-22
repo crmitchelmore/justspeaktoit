@@ -28,7 +28,10 @@ extension WindowsAppController {
             let context = WindowsCaptureContext(file: file, live: live) { message in
                 Task { await self.captureFailed(message, recordingID: id) }
             }
-            let native = try WindowsNative.createCapture(context: context, deviceID: deviceID, sampleRate: rate)
+            let native = try WindowsNative.createCapture(
+                context: context, deviceID: deviceID, sampleRate: rate,
+                frameMilliseconds: DesktopLiveTranscription.captureFrameMilliseconds(forID: profile.modelIdentifier)
+            )
             do { try WindowsNative.checked { jsti_capture_start(native, $0, $1) } } catch {
                 withExtendedLifetime(context) { jsti_capture_destroy(native) }
                 throw error

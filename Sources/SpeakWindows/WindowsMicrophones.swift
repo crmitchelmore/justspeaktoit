@@ -57,15 +57,19 @@ private func microphonesChanged(
 
 extension WindowsNative {
     static func createCapture(
-        context: WindowsCaptureContext, deviceID: String, sampleRate: Int = 16_000
+        context: WindowsCaptureContext, deviceID: String, sampleRate: Int = 16_000,
+        frameMilliseconds: Int = 100
     ) throws -> OpaquePointer {
         guard sampleRate == 16_000 || sampleRate == 24_000 else {
             throw WindowsNativeError(message: "This transcription model requires an unsupported recording rate.")
         }
+        guard frameMilliseconds == 20 || frameMilliseconds == 100 else {
+            throw WindowsNativeError(message: "This transcription model requires an unsupported audio frame duration.")
+        }
         var error = [CChar](repeating: 0, count: 1024)
         let native = deviceID.withCString { device in
-            jsti_capture_create_with_format(
-                device, UInt32(sampleRate), captureAudio, captureError,
+            jsti_capture_create_with_options(
+                device, UInt32(sampleRate), UInt32(frameMilliseconds), captureAudio, captureError,
                 Unmanaged.passUnretained(context).toOpaque(), &error, error.count
             )
         }

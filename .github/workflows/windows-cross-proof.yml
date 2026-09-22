@@ -142,7 +142,9 @@ jobs:
             throw 'Unexpected app build provenance.'
           }
           if ($metadata.sourceCommit -ne $env:GITHUB_SHA) { throw 'App source commit mismatch.' }
-          if ($metadata.configuration -ne 'release') { throw 'Expected optimised release executables.' }
+          if ($metadata.configuration -ne 'release' -or $metadata.appBuiltForTesting -ne $false) {
+            throw 'Expected an optimised production app and separate test executable.'
+          }
           foreach ($entry in $metadata.executables.PSObject.Properties) {
             $actual = (Get-FileHash (Join-Path app $entry.Name) -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actual -ne $entry.Value) { throw "Mac-built artifact hash mismatch: $($entry.Name)" }

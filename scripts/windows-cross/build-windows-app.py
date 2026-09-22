@@ -85,6 +85,16 @@ def run_package_build(command, environment, log, package):
                 temporary.unlink(missing_ok=True)
 
 
+def copy_executable(source, destination, clang, log):
+    binary = source.read_bytes()
+    pe_offset = struct.unpack_from("<I", binary, 0x3c)[0]
+    if binary[:2] != b"MZ" or binary[pe_offset:pe_offset + 6] != b"PE\0\0\x64\x86":
+        raise ValueError("Expected a Windows x64 executable: " + source.name)
+    shutil.copy2(source, destination)
+    BOOTSTRAP.run([clang / "llvm-readobj", "--file-headers", "--coff-imports", destination], log)
+    return BOOTSTRAP.digest(destination)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache", required=True, type=pathlib.Path)
@@ -110,7 +120,7 @@ def main():
     headers = microsoft / "Microsoft.VC.14.44.17.14.CRT.Headers.base/Contents/VC/Tools/MSVC/14.44.35207/include"
     kits = microsoft / "microsoft.windows.sdk.cpp.10.0.26100.1/c/Include/10.0.26100.0"
     scratch = cache / "app-build"
-    command = [tool / "bin/swift", "build", "--build-tests", "--package-path", HERE.parent.parent,
+    command = [tool / "bin/swift", "build", "--package-path", HERE.parent.parent,
                "--triple", "x86_64-unknown-windows-msvc", "--sdk", sdk,
                "--scratch-path", scratch, "--configuration", args.configuration, "--jobs", "4"]
     for flag in ["-resource-dir", sdk / "usr/lib/swift", "-tools-directory", tool / "bin", "-use-ld=lld"]:
@@ -133,26 +143,23 @@ def main():
         command += ["-Xlinker", "/libpath:" + str(directory)]
     environment = os.environ.copy()
     environment.update(SPEAK_WINDOWS_TARGET="1", CC=str(clang / "clang"), CXX=str(clang / "clang++"))
-    print("Cross-building Windows app and all portable/native tests", flush=True)
-    run_package_build(command, environment, log, HERE.parent.parent)
     built = scratch / "x86_64-unknown-windows-msvc" / args.configuration
-    artifacts = {}
-    for source_name, artifact_name in [("SpeakWindows.exe", "SpeakWindows.exe"),
-                                       ("SpeakAppPackageTests.xctest", "SpeakAppPackageTests.exe")]:
-        source = built / source_name
-        binary = source.read_bytes()
-        pe_offset = struct.unpack_from("<I", binary, 0x3c)[0]
-        if binary[:2] != b"MZ" or binary[pe_offset:pe_offset + 6] != b"PE\0\0\x64\x86":
-            raise ValueError("Expected a Windows x64 executable: " + source_name)
-        destination = output / artifact_name
-        shutil.copy2(source, destination)
-        artifacts[artifact_name] = BOOTSTRAP.digest(destination)
-        BOOTSTRAP.run([clang / "llvm-readobj", "--file-headers", "--coff-imports", destination], log)
+    print("Cross-building the optimised Windows application", flush=True)
+    run_package_build(command + ["--product", "SpeakWindows"], environment, log, HERE.parent.parent)
+    # Retain the production app before building tests: testable imports must
+    # not change the app artifact's optimisation or internal symbol visibility.
+    artifacts = {"SpeakWindows.exe": copy_executable(
+        built / "SpeakWindows.exe", output / "SpeakWindows.exe", clang, log)}
+    print("Cross-building optimised tests with testable imports", flush=True)
+    run_package_build(command + ["--build-tests", "-Xswiftc", "-enable-testing"],
+                      environment, log, HERE.parent.parent)
+    artifacts["SpeakAppPackageTests.exe"] = copy_executable(
+        built / "SpeakAppPackageTests.xctest", output / "SpeakAppPackageTests.exe", clang, log)
     for source in built.glob("*.resources"):
         if source.is_dir():
             shutil.copytree(source, output / source.name, dirs_exist_ok=True)
     metadata = {"host": platform.system(), "hostArchitecture": platform.machine(),
-                "target": "x86_64-unknown-windows-msvc", "configuration": args.configuration,
+                "target": "x86_64-unknown-windows-msvc", "configuration": args.configuration, "appBuiltForTesting": False,
                 "sourceCommit": os.environ.get("GITHUB_SHA"),
                 "swiftCompiler": subprocess.check_output([tool / "bin/swift", "--version"], text=True).strip(),
                 "nativeCompiler": subprocess.check_output([clang / "clang", "--version"], text=True).strip(),

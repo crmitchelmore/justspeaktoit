@@ -24,7 +24,9 @@ python3 scripts/windows-cross/build-windows-app.py \
 
 The app script defaults to optimised `release` builds and records the configuration
 in its provenance; `--configuration debug` is available for debugging. CI requires
-release configuration for both the app and tests. The script preserves the exact
+release configuration for both the app and tests. It first retains the normal
+application binary, then enables testable imports for the separate XCTest build;
+the app artifact is never replaced by the test-enabled build. The script preserves the exact
 existing Apple `Package.resolved` bytes and permissions, including uncommitted
 pins, even if SwiftPM fails. No initial lockfile means no lockfile is left behind.
 

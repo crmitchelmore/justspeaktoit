@@ -39,7 +39,7 @@ public final class DesktopLiveSession: @unchecked Sendable {
         self.accumulator = TranscriptAccumulator(shape: client.finalShape)
     }
 
-    deinit { if !stopped { client.stop() } }
+    deinit { if !stopped { client.cancel() } }
 
     public func snapshot() -> Snapshot { stateLock.withLock { currentSnapshot() } }
 
@@ -161,7 +161,7 @@ public final class DesktopLiveSession: @unchecked Sendable {
     private func stopClient() {
         guard !stopped else { return }
         stopped = true
-        client.stop()
+        client.cancel()
     }
 
     /// Caller must hold stateLock.

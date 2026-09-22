@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import SpeakCore
 
 /// Live providers implemented by the shared desktop session. Hosts must also
@@ -6,7 +9,30 @@ import SpeakCore
 /// Models, routing and credential metadata remain owned by SpeakCore.
 public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
-        LiveTranscriptionRouting.route(for: $0.id)?.provider == .deepgram
+        guard let provider = LiveTranscriptionRouting.route(for: $0.id)?.provider else { return false }
+        return provider == .deepgram || provider == .assemblyai
+    }
+
+    /// Hosts supply native I/O; provider choice and protocol behaviour stay
+    /// shared so adding a route does not require another platform-owned list.
+    public static func makeClient(
+        model: String, apiKey: String,
+        makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        guard let route = route(forID: model) else { return nil }
+        switch route.provider {
+        case .deepgram:
+            return DeepgramLiveClient(
+                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate,
+                makeConnection: makeConnection
+            )
+        case .assemblyai:
+            return AssemblyAILiveClient(
+                apiKey: apiKey, speechModel: route.apiModelName, sampleRate: route.sampleRate,
+                makeConnection: makeConnection
+            )
+        default: return nil
+        }
     }
 
     public static func route(forID modelID: String) -> LiveTranscriptionRoute? {

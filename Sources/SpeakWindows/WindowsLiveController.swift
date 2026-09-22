@@ -6,13 +6,10 @@ import CWindowsSupport
 
 extension WindowsAppController {
     func makeLiveSession(model: String, key: String, id: UUID) -> DesktopLiveSession? {
-        guard WindowsModels.isLive(model), let route = DesktopLiveTranscription.route(forID: model) else { return nil }
-        return DesktopLiveSession(
-            client: DeepgramLiveClient(
-                apiKey: key, model: route.apiModelName, sampleRate: route.sampleRate,
-                makeConnection: { WinHTTPStreamingConnection(request: $0) }
-            ), id: id
-        )
+        guard WindowsModels.isLive(model), let client = DesktopLiveTranscription.makeClient(
+            model: model, apiKey: key, makeConnection: { WinHTTPStreamingConnection(request: $0) }
+        ) else { return nil }
+        return DesktopLiveSession(client: client, id: id)
     }
 
     func monitorLive(_ session: DesktopLiveSession) {

@@ -24,7 +24,6 @@ let appleCoreSources: [String] = [
     "AppleSpeechDetector.swift",
     "AppleSpeechModelPreparation.swift",
     "AppleSpeechPreparationOperations.swift",
-    "AssemblyAILiveClient.swift",
     "AutoCorrectionEngine.swift",
     "AutoCorrectionStore.swift",
     "AutomationIntentSupport.swift",

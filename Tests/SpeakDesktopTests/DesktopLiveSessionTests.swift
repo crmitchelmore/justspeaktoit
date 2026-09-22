@@ -263,7 +263,8 @@ final class DesktopLiveSessionTests: XCTestCase {
 extension DesktopLiveSessionTests {
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
-            LiveTranscriptionRouting.route(for: $0.id)?.provider == .deepgram
+            let provider = LiveTranscriptionRouting.route(for: $0.id)?.provider
+            return provider == .deepgram || provider == .assemblyai
         }
         XCTAssertFalse(canonical.isEmpty)
         XCTAssertEqual(DesktopLiveTranscription.liveModels.map(\.id), canonical.map(\.id))
@@ -275,6 +276,12 @@ extension DesktopLiveSessionTests {
             XCTAssertEqual(provider.apiKeyIdentifier, route.apiKeyIdentifier)
             XCTAssertEqual(provider.displayName, route.provider.displayName)
             XCTAssertEqual(provider.website, route.provider.apiKeyURL?.absoluteString)
+            let client = DesktopLiveTranscription.makeClient(model: model.id, apiKey: "", makeConnection: { _ in
+                fatalError("Constructing a client must not open a connection")
+            })
+            XCTAssertNotNil(client)
+            if route.provider == .deepgram { XCTAssertTrue(client is DeepgramLiveClient) }
+            if route.provider == .assemblyai { XCTAssertTrue(client is AssemblyAILiveClient) }
         }
         XCTAssertNil(DesktopLiveTranscription.route(forID: "deepgram/unknown-streaming"))
         XCTAssertNil(DesktopLiveTranscription.provider(forID: "deepgram/nova-3"))

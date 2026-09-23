@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import SpeakCore
 import XCTest
 @testable import SpeakWindowsPlatform

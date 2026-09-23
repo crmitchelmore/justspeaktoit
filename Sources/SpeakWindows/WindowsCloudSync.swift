@@ -116,7 +116,7 @@ final class WindowsCloudSync: @unchecked Sendable {
         switch action {
         case 1: Task { await self.apply(history: history, keys: keys, passphrase: passphrase) }
         case 2:
-            let task = Task { [weak self] in await self?.performSignIn() }
+            let task = Task<Void, Never> { [weak self] in await self?.performSignIn() }
             let previous = lock.withLock { () -> Task<Void, Never>? in
                 defer { signIn = task }
                 return signIn
@@ -335,6 +335,7 @@ extension SpeakWindowsMain {
     /// Detaches dialogs that hold the event context before it can be released.
     static func releaseServices(_ holder: WindowsEventContext) async {
         jsti_window_clear_voice_output()
+        jsti_window_clear_local_models()
         await WindowsCloudSync.shutDown(holder)
     }
 }

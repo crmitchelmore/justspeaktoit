@@ -232,12 +232,12 @@ final class WinHTTPCloudKitTransportTests: XCTestCase {
             )
         }
         let connection = try await accepted.value
-        let target = try XCTUnwrap(connection.target)
+        let received = try XCTUnwrap(connection.target)
         connection.respond(Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".utf8))
         let response = try await reply.value
         listener.close()
 
-        XCTAssertEqual(target, "/cloudkit-sign-in?ckWebAuthToken=abc%2Bdef%3D")
+        XCTAssertEqual(received, target)
         XCTAssertEqual(response.statusCode, 200)
         XCTAssertEqual(String(bytes: response.body, encoding: .utf8), "ok")
     }

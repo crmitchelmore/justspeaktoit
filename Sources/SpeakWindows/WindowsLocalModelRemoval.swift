@@ -25,17 +25,22 @@ extension WindowsAppController {
             return
         }
         // Ignored while a download or an earlier removal owns this model's files.
-        guard let removal = localModels.ownership.beginRemoval(spec.catalogueID) else { return }
+        guard localModels.ownership.beginRemoval(spec.catalogueID) else { return }
         let installer = localInstaller
         let item = LocalModelInstaller.Item(spec)
+        let file = installer.fileURL(for: item)
         let teardown = localModels.teardown
-        // Freed only when the runtime may hold this model, so another stays cached.
-        let runtime = removal.freesRuntime ? localModels.runtime : nil
+        let runtime = localModels.runtime
         // Shutdown waits for the files to go; the settings queue does not.
         activeOperations += 1
         Task { [self] in
-            let failure = await teardown.remove({ try installer.remove(item) }, release: { runtime?.releaseModel() })
-            finishRemoval(spec, removal: removal, failure: failure)
+            // The runtime closed the file once loaded, so it can go first. Another
+            // recognition may replace this model while the job waits; the runtime
+            // then keeps that one, checking what it holds under its own lock.
+            let failure = await teardown.remove(
+                { try installer.remove(item) }, release: { _ = runtime?.releaseModel(loadedFrom: file) }
+            )
+            finishRemoval(spec, failure: failure)
         }
         update("Removing \(spec.displayName)\u{2026}")
         publishLocalModels()
@@ -50,8 +55,8 @@ extension WindowsAppController {
         return recorded?.catalogueID == model || localModels.ownership.isInUse(model)
     }
 
-    private func finishRemoval(_ spec: WindowsModelSpec, removal: LocalModelOwnership.Removal, failure: String?) {
-        localModels.ownership.endRemoval(removal)
+    private func finishRemoval(_ spec: WindowsModelSpec, failure: String?) {
+        localModels.ownership.endRemoval(spec.catalogueID)
         if let failure {
             update("\(spec.displayName) could not be removed: \(failure)")
         } else {

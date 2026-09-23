@@ -415,10 +415,12 @@ reused; its sherpa and bzip2 path is not.
 - **Removal.** `LocalModelOwnership` (SpeakDesktop) refuses to remove a model
   that a recording or transcription uses, which a profile may choose instead
   of the selected model, and never lets a download and a removal of one model
-  overlap. `LocalModelTeardown` deletes the files and frees the runtime's
-  cached model on its own queue, because freeing waits for a running
+  overlap. `LocalModelTeardown` deletes the files, then asks the runtime to
+  free its cached model on its own queue, because freeing waits for a running
   recognition; the controller stays free to cancel or record meanwhile. The
-  cache is freed only when it may hold the removed model.
+  runtime frees the model only if it was loaded from the removed file, checked
+  under the lock it loads under, so a model loaded in its place stays warm.
+  Deleting first is safe: the runtime closes a model's file once it is loaded.
 - **Controls.** The window's Source picker chooses Remote or Local above Batch or
   Live (Local has no live models yet, so Mode hides for it); Remote Batch,
   Remote Live and Local keep separate saved models. Local
@@ -427,7 +429,9 @@ reused; its sherpa and bzip2 path is not.
   (on-device)".
 - **Checks.** `--self-test` covers CNG vectors, a download, resume, tamper
   and removal cycle, and the controller's removal ownership with a held
-  transcription and teardown. `--local-transcription-self-test <wav> --expect <phrase>`
+  transcription and teardown. With the runtime present, the platform tests
+  also delete a loaded model's file and hold a removal while another model
+  replaces it in the cache. `--local-transcription-self-test <wav> --expect <phrase>`
   downloads the pinned model into `JSTI_LOCAL_MODEL_DIRECTORY` and transcribes
   the WAV; CI runs it on the native build and from the self-contained bundle
   with the JFK sample. `JSTI_WHISPER_RUNTIME_DIRECTORY` points a developer

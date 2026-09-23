@@ -19,8 +19,8 @@ struct WindowsLocalModelsState {
     var runtime: WindowsWhisperRuntime?
     var runtimeFailure: String?
     var context: UnsafeMutableRawPointer?
-    /// The models recordings and transcriptions use, the downloads and
-    /// removals that own model files and the model the runtime may hold.
+    /// The models recordings and transcriptions use, and the downloads and
+    /// removals that own model files.
     var ownership = LocalModelOwnership()
     /// Deletes removed models and frees the runtime's cache off the actor.
     let teardown = LocalModelTeardown()
@@ -155,11 +155,9 @@ extension WindowsAppController {
         let file = try localInstaller.verifiedFile(for: .init(spec))
         let runtime = try await localRuntime()
         update("Transcribing on this PC with \(spec.displayName)\u{2026} Your recording is saved locally.", state: 2)
-        // Whether the runtime now holds this model decides what a later removal frees.
-        let recognizer = LocalRecognitionProbe(WindowsWhisperRecognizer(runtime: runtime))
-        defer { localModels.ownership.record(recognizer.recognition, of: spec.catalogueID) }
         return try await DesktopLocalTranscription.transcribe(
-            audioURL: audio, model: spec, modelFile: file, language: language, recognizer: recognizer
+            audioURL: audio, model: spec, modelFile: file, language: language,
+            recognizer: WindowsWhisperRecognizer(runtime: runtime)
         )
     }
 

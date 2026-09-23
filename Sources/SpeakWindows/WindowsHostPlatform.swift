@@ -18,6 +18,8 @@ typealias WindowsNativeError = DesktopHostError
 /// Win32 window, Credential Manager, WASAPI, Media Foundation and UI Automation
 /// behind the shared desktop host.
 enum WindowsHostPlatform: DesktopHostPlatform {
+    typealias VoiceOutputSettings = WindowsVoiceOutputSettings
+
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
 
@@ -92,6 +94,13 @@ enum WindowsHostPlatform: DesktopHostPlatform {
     package static func isClipboard(_ job: WindowsOutputJob) -> Bool {
         if case .clipboard = job { return true }
         return false
+    }
+
+    package static func makeReadAloudState() -> WindowsReadAloudState { WindowsReadAloudState() }
+
+    package static func stopReadAloud(_ state: inout WindowsReadAloudState) {
+        state.task?.cancel()
+        state.task = nil
     }
 
     package static var defaultHotKey: WindowsHotKeySettings { WindowsHotKeySettings() }

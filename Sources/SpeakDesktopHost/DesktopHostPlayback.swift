@@ -25,6 +25,8 @@ extension DesktopHostController {
         guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
         if playback.togglePause(recordID: id) { return }
         guard canUseHistory, selectedHistoryID == id, isVisible(id) else { return }
+        // History playback replaces Read aloud, including a segment still being synthesized.
+        stopReadAloud()
         activeOperations += 1
         defer { finishOperation() }
         do {
@@ -38,6 +40,7 @@ extension DesktopHostController {
 
     package func playbackStop() {
         guard !closed else { return }
+        stopReadAloud()
         playback.stop()
     }
 }

@@ -33,6 +33,10 @@ package protocol DesktopHostPlatform: Sendable {
     associatedtype TextOutputOptions: Codable & Sendable
     /// The persisted global shortcut.
     associatedtype HotKeySettings: Codable & Sendable
+    /// The persisted Read aloud voice.
+    associatedtype VoiceOutputSettings: Codable & Sendable
+    /// The controller-owned Read aloud task and engine, if the host has one.
+    associatedtype ReadAloudState
     /// The field captured when a recording starts, if the host can capture one.
     associatedtype InsertionTarget: Sendable
     /// One automatic output owned by the controller's single output slot.
@@ -81,6 +85,11 @@ package protocol DesktopHostPlatform: Sendable {
     static func cancel(_ job: OutputJob)
     /// True when the job only copies, for the in-progress status line.
     static func isClipboard(_ job: OutputJob) -> Bool
+
+    // Read aloud. Hosts without it keep an empty state.
+    static func makeReadAloudState() -> ReadAloudState
+    /// Ends Read aloud: the current segment stops and no later one starts.
+    static func stopReadAloud(_ state: inout ReadAloudState)
 
     // Shortcut text for the status line.
     static var defaultHotKey: HotKeySettings { get }

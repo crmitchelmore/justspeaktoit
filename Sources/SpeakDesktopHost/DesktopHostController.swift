@@ -14,6 +14,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package var textOutput: Platform.TextOutputOptions?
         // Keyboard shortcut dialog; absent keeps Ctrl+Alt+Space, press-to-toggle.
         package var hotKey: Platform.HotKeySettings?
+        // The Voice dialog; absent uses the catalogue default.
+        package var voiceOutput: Platform.VoiceOutputSettings?
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -60,9 +62,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     var transcript = ""
-    /// Shortcut gesture bookkeeping, in the monotonic clock of recognition.
-    package var lastHotKeyDoubleTap: TimeInterval = -.infinity
-    package var hotKeyStartsAfter: TimeInterval = 0
+    package var hotKeySession = DesktopHostHotKeySessionState()
+    package var readAloudState = Platform.makeReadAloudState()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.
@@ -79,7 +80,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var outputSlot = DesktopHostOutputState<Platform>()
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
-    let playback = Platform.makePlayback()
+    package let playback = Platform.makePlayback()
 
     package init(directory: URL, effects: any DesktopHostEffects<Platform>) throws {
         self.directory = directory
@@ -307,7 +308,7 @@ extension DesktopHostController {
         }
         return provider.apiKeyIdentifier
     }
-    var canUseHistory: Bool { isReady && !closed && !busy && recording == nil }
+    package var canUseHistory: Bool { isReady && !closed && !busy && recording == nil }
 
     package func selectedIndex() -> Int {
         DesktopHostModels.all.firstIndex { $0.id == settings.model } ?? 0

@@ -129,6 +129,16 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
     }
 }
 
+/// Like Copy, Read aloud captures the displayed text on the UI thread, paired
+/// with the record ID its event carries.
+private func readAloudEvent(_ identifier: String, holder: WindowsEventContext) {
+    do {
+        let text = try WindowsNative.displayedTranscript()
+        let controller = holder.controller
+        Task { await controller.readAloud(identifier, text: text) }
+    } catch { WindowsNative.update(error.localizedDescription) }
+}
+
 /// Shortcut press, release and gesture deadline on the UI thread.
 private func hotKeyWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
     switch event {
@@ -239,6 +249,7 @@ func postProcessingEvent(
 
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
+    if event == 24 { return readAloudEvent(value, holder: holder) }
     otherWindowEvent(event, value: value, holder: holder)
 }
 
@@ -314,10 +325,14 @@ enum SpeakWindowsMain {
         }
     }
 
-    /// A hand-edited or corrupt shortcut falls back to the default rather than none.
+    /// A hand-edited or corrupt shortcut falls back to the default rather than
+    /// none; the Read aloud voice resolves through the canonical catalogue.
     private static func configureHotKey(_ holder: WindowsEventContext) async throws {
         var hotKey = await holder.controller.hotKeySettings()
         let context = Unmanaged.passUnretained(holder).toOpaque()
+        guard WindowsNative.configureVoiceOutput(await holder.controller.voiceOutputSettings(), context: context) else {
+            throw WindowsNativeError(message: "Could not configure Read aloud.")
+        }
         if !WindowsNative.configureHotKey(hotKey, context: context) {
             hotKey = WindowsHotKeySettings()
             guard WindowsNative.configureHotKey(hotKey, context: context) else {
@@ -372,6 +387,7 @@ enum SpeakWindowsMain {
         // this context once the holder can be released.
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
+        jsti_window_clear_voice_output()
         await holder.hotKeys.drain()
         await controller.close()
         withExtendedLifetime(holder) {}

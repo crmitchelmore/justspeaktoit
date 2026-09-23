@@ -30,6 +30,8 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         var releaseStarted = false
         var releaseError: String?
         var terminal: WindowsAudioPlaybackCompletion?
+        /// An awaiting caller reports its own outcome, so no terminal status is shown.
+        var awaiting: ((Result<TimeInterval, Error>) -> Void)?
 
         init(recordID: UUID, path: String, duration: TimeInterval?) {
             self.recordID = recordID
@@ -88,6 +90,13 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
     /// Admits a job without opening a file on the caller's thread. At capacity
     /// it leaves the current playback unchanged and reports a retryable error.
     public func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {
+        _ = try admit(recordID: recordID, path: path, knownDuration: knownDuration, awaiting: nil)
+    }
+
+    func admit(
+        recordID: UUID, path: String, knownDuration: TimeInterval?,
+        awaiting: ((Result<TimeInterval, Error>) -> Void)?
+    ) throws -> UUID {
         try lock.withLock {
             guard !closed else { throw WindowsAudioPlaybackError("The app is closing.") }
             guard live.count < 2 else {
@@ -96,11 +105,19 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
             let previous = current
             if let previous { stopLocked(previous) }
             let run = Run(recordID: recordID, path: path, duration: knownDuration)
+            run.awaiting = awaiting
             live[run.id] = run
             current = run
             publishLocked(run.display)
             // Admission and the queued open are atomic relative to close.
             run.worker.async { self.openAndStart(run, after: previous) }
+            return run.id
+        }
+    }
+
+    func stop(runID: UUID) {
+        lock.withLock {
+            if let run = live[runID], !run.stopped { stopLocked(run) }
         }
     }
 
@@ -280,7 +297,6 @@ private extension WindowsAudioPlaybackController {
     }
 
     private struct Release { let handle: (any WindowsAudioPlaybackHandle)? }
-
     private func release(_ run: Run) {
         let claim = lock.withLock { () -> Release? in
             guard live[run.id] != nil, !run.releaseStarted else { return nil }
@@ -295,16 +311,7 @@ private extension WindowsAudioPlaybackController {
         // A failed open owns no handle. Open is the first command on its
         // serial worker, so nil here never races a future handle publication.
         do {
-            if let owned {
-                owned.cancel()
-                let deadline = ContinuousClock.now + .seconds(stopTimeout)
-                while !owned.snapshot().outputIsQuiet {
-                    guard ContinuousClock.now < deadline else {
-                        throw WindowsAudioPlaybackError("Audio output did not acknowledge stopping.")
-                    }
-                    Thread.sleep(forTimeInterval: 0.005)
-                }
-            }
+            if let owned { try silence(owned) }
             lock.withLock {
                 run.outputQuiet = true
                 if current === run {
@@ -313,16 +320,14 @@ private extension WindowsAudioPlaybackController {
                         recordID: run.recordID, state: .idle,
                         text: WindowsAudioPlaybackDisplay.text(position: 0, duration: run.knownDuration)
                     )
-                    publishLocked(display, status: terminalMessage(run.terminal))
+                    publishLocked(display, status: run.awaiting == nil ? Self.terminalMessage(run.terminal) : nil)
                     acknowledgedRevision = revision
                 }
             }
             try owned?.destroy()
-            lock.withLock {
-                run.handle = nil
-                live[run.id] = nil
-            }
+            takeAwaiting(run, released: true)?(Self.outcome(run.terminal))
         } catch {
+            takeAwaiting(run, released: false)?(.failure(error))
             lock.withLock {
                 run.releaseError = error.localizedDescription
                 if current === run || revision == acknowledgedRevision {
@@ -336,11 +341,26 @@ private extension WindowsAudioPlaybackController {
         }
     }
 
-    private func terminalMessage(_ completion: WindowsAudioPlaybackCompletion?) -> String {
-        switch completion?.status {
-        case .finished: return "Playback finished."
-        case .failed(let message): return "Playback failed: \(message)"
-        case .cancelled, .none: return "Playback stopped."
+    private func silence(_ owned: any WindowsAudioPlaybackHandle) throws {
+        owned.cancel()
+        let deadline = ContinuousClock.now + .seconds(stopTimeout)
+        while !owned.snapshot().outputIsQuiet {
+            guard ContinuousClock.now < deadline else {
+                throw WindowsAudioPlaybackError("Audio output did not acknowledge stopping.")
+            }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+    }
+
+    /// Taken once, so an awaiting caller resumes exactly once, outside the lock.
+    private func takeAwaiting(_ run: Run, released: Bool) -> ((Result<TimeInterval, Error>) -> Void)? {
+        lock.withLock {
+            if released {
+                run.handle = nil
+                live[run.id] = nil
+            }
+            defer { run.awaiting = nil }
+            return run.awaiting
         }
     }
 

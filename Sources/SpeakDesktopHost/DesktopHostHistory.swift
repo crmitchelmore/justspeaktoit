@@ -25,6 +25,7 @@ extension DesktopHostController {
             transcript = ""
             transcriptVariant = .processed
             playback.stop()
+            stopReadAloud()
             Platform.history(visible, selected: nil, selectRecord: selectRecord)
             Platform.transcriptVariant(nil, for: nil, switchable: false)
             update(
@@ -53,6 +54,7 @@ extension DesktopHostController {
         // A different record is displayed: the previous record's playback ends
         // and its late progress reports are rejected by the record-bound window.
         playback.stop(unless: id)
+        if selectedHistoryID != id { stopReadAloud() }
         selectedHistoryID = id
         transcript = record.text(for: .processed) ?? ""
         let status = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
@@ -65,7 +67,7 @@ extension DesktopHostController {
 
     /// A selection event for a record that a newer search has already hidden
     /// is stale; honouring it would display text for a row that is not shown.
-    func isVisible(_ id: UUID) -> Bool {
+    package func isVisible(_ id: UUID) -> Bool {
         guard let record = history[id] else { return false }
         let searchText = historySearchText[id] ?? DesktopHistorySearch.searchText(for: record)
         return DesktopHistorySearch.matches(query: historyQuery, searchText: searchText)

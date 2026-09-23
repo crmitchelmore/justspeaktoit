@@ -36,7 +36,10 @@ enum JSTIWindowEvent {
      * no text. A press-to-toggle style keeps sending TOGGLE_RECORDING. */
     JSTI_EVENT_HOTKEY_DOWN = 21,
     JSTI_EVENT_HOTKEY_UP = 22,
-    JSTI_EVENT_HOTKEY_DEADLINE = 23
+    JSTI_EVENT_HOTKEY_DEADLINE = 23,
+    /* Carries the selected record ID; read the displayed transcript with
+     * jsti_window_transcript_snapshot synchronously in the callback, as for Copy. */
+    JSTI_EVENT_HISTORY_READ_ALOUD = 24
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -244,6 +247,14 @@ void jsti_window_clear_hotkey(void);
 /* UI thread only, from a hotkey event: arms the one gesture deadline timer,
  * which later sends HOTKEY_DEADLINE. Negative milliseconds cancel it. */
 int jsti_window_set_hotkey_deadline(int milliseconds);
+/* Voice output dialog: the canonical voices the host can speak with, as
+ * UTF-8 labels, and the selected index. The callback runs on the UI thread
+ * once per Apply with the chosen index. Thread safe; the context is borrowed
+ * like jsti_window_set_text_output's. */
+typedef void (*JSTIVoiceOutputCallback)(int voice, void *context);
+int jsti_window_set_voice_output(const char *const *voice_names, size_t voice_count, int selected,
+                                 JSTIVoiceOutputCallback callback, void *context);
+void jsti_window_clear_voice_output(void);
 /* The localised key name, for example "Ctrl+Alt+Space". */
 int jsti_hotkey_name(unsigned modifiers, unsigned virtual_key, char *name, size_t capacity);
 

@@ -77,5 +77,7 @@ extension DesktopHostController {
     func cancelOutput() {
         if let job = outputSlot.job { Platform.cancel(job) }
         outputSlot.task?.cancel()
+        // Speech is output too: recording, import and close end Read aloud.
+        stopReadAloud()
     }
 }

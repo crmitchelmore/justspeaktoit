@@ -262,7 +262,7 @@ final class RevAIDesktopSocket: StreamingWebSocketConnection, @unchecked Sendabl
     private func hypothesis(_ type: String, _ elements: [[String: String]]) {
         let object: [String: Any] = ["type": type, "ts": 0.5, "end_ts": 1.5, "elements": elements]
         let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        emit(data.map { String(decoding: $0, as: UTF8.self) } ?? "{}")
+        emit(data.flatMap { String(bytes: $0, encoding: .utf8) } ?? "{}")
     }
 
     private func emit(_ text: String) { deliver(.success(.text(text))) }

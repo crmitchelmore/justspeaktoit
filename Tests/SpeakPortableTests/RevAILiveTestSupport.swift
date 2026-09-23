@@ -100,11 +100,12 @@ extension CartesiaTestSocket {
 
     static func revAIHypothesis(_ type: String, _ elements: [[String: String]]) -> String {
         let object: [String: Any] = ["type": type, "ts": 0.5, "end_ts": 1.5, "elements": elements]
-        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let text = String(bytes: data, encoding: .utf8) else {
             XCTFail("Invalid synthetic Rev.ai hypothesis")
             return "{}"
         }
-        return String(decoding: data, as: UTF8.self)
+        return text
     }
 
     /// The final of Rev.ai's documented example session: `punct` elements

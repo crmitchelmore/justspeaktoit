@@ -40,11 +40,19 @@ Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI and OpenRouter. The canonic
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
-Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs
-and xAI's dedicated speech-to-text live models use shared Swift clients with the native WinHTTP transport. The xAI
+Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
+Mistral Voxtral, Gladia, Cartesia Ink-2 and xAI's dedicated speech-to-text live
+models use shared Swift clients with the native WinHTTP transport. The xAI
 stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is source-wired with
 fake-transport tests only and still needs a Windows provider receipt; the Grok
-Voice conversation route stays unavailable. A WinHTTP socket whose native
+Voice conversation route stays unavailable. Gladia (`gladia/solaria-1-streaming`)
+creates its single-use session with an HTTPS request, then streams on the WinHTTP
+socket that session names; the account key never reaches the socket. Cartesia
+(`cartesia/ink-2-streaming`) completes a finish only on the server's normal
+closure (1000) after its `close` command, read from the close status the
+transport reports. Both have fake-transport and synthetic loopback tests, the
+latter also over WinHTTP in the probe step, and no Windows provider receipt
+yet. A WinHTTP socket whose native
 destruction cannot yet complete keeps its handles and callback context owned by
 a release queue that retries with capped backoff; at four such sockets new live
 connections are refused with a retryable error rather than accumulating native
@@ -313,7 +321,10 @@ The macOS host currently executes shared live engines for eleven remote provider
 families. This includes xAI's dedicated speech-to-text route and Speechmatics
 through `SharedClientLiveController`; a platform-specific client class is not
 required for those routes. AssemblyAI, Cartesia, Gladia and Modulate still have
-duplicate macOS transports. Deepgram and OpenAI share transport but retain
+duplicate macOS transports. Cartesia and Gladia now also have shared, finalising
+clients, which iOS and the Windows projection build; the macOS app still records
+through its own controllers for them, and its Compare Models lanes use the
+shared clients. Deepgram and OpenAI share transport but retain
 separate macOS stop orchestration. These are explicit consolidation gaps:
 provider changes must still inspect both paths until their adapters are migrated
 and their existing capabilities and finalisation behaviour are verified.
@@ -339,7 +350,7 @@ but must not be presented as the identical Apple-only engine or service.
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
-| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox and ElevenLabs streams, and remaining streaming providers |
+| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2 and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia and Cartesia streams (Cartesia's normal-closure code in particular), and the remaining streaming providers: Azure, Google, Meta, Modulate and Rev.ai |
 | Global shortcut | Configurable Ctrl/Alt combination with conflict refusal, and all four activation styles: press-to-toggle natively; hold, double-tap and both through the shared SpeakCore gesture machine and session policy. Local Windows cross-compilation and portable gesture/policy tests pass; the native dialog, registration and release polling are covered by the window smoke test with fake registration and key state | Windows CI for this revision, physical keyboard acceptance of hold/double-tap timing, user-adjustable timing, the macOS host adopting the shared machine (it keeps its own `GestureDetector`), hands-free arming and Escape cancel |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
 | On-device transcription | Local batch recording and file import through a run-time loaded whisper.cpp 1.9.4 (best CPU variant, or Vulkan on any vendor's GPU when a driver is present). Four canonical Whisper entries (tiny, base, small, large-v3-turbo) are projected from the shared catalogue with pinned GGML files, sizes and SHA-256; the native Local models dialog downloads (resumable, atomic, verified), cancels, removes and sets the GPU choice. Source picker: Remote or Local, then Batch or Live; Local offers Batch only, so the Mode picker hides for it. Runtime DLLs are built from the pinned commit in CI and shipped in the bundle and MSIX with licence and provenance; the native job and the self-contained bundle transcribe the JFK sample with the tiny model | Windows CI receipt for this revision, local streaming, Hugging Face import, real Vulkan hardware (the runners have no GPU), CPU/GPU throughput and memory on physical PCs, and local post-processing |

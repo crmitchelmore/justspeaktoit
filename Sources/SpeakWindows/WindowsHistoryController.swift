@@ -102,11 +102,17 @@ extension WindowsAppController {
         WindowsNative.historyPresentation(record, variant: variant, status: status)
     }
 
-    func retryHistory(_ identifier: String) async {
+    /// Transcribes a saved recording again with the model it was recorded
+    /// with, never the current picker or a profile, keeping its identity,
+    /// audio and metadata. A model that cannot run now, such as an on-device
+    /// model whose download or speech runtime is missing, is refused before
+    /// anything is written. `onDeviceReadiness` replaces that on-device check
+    /// in the self-test only.
+    func retryHistory(_ identifier: String, onDeviceReadiness: (@Sendable (String) -> String?)? = nil) async {
         guard canUseHistory, let id = UUID(uuidString: identifier),
               let record = history[id], !refuseSyncedAudio(record) else { return }
-        guard DesktopTranscription.provider(for: record.modelIdentifier) != nil else {
-            update("This used a live model. Open its audio, then choose Batch and import it to transcribe again.")
+        if let refusal = retryRefusal(for: record.modelIdentifier, onDeviceReadiness: onDeviceReadiness) {
+            update(refusal)
             return
         }
         busy = true
@@ -115,6 +121,22 @@ extension WindowsAppController {
         selectedHistoryID = id
         // A retry has no recording hotkey, so it never outputs automatically.
         await transcribe(record, duration: record.result?.duration ?? 0, output: nil)
+    }
+
+    /// Why the model a recording was made with cannot transcribe it again
+    /// here, or nil when it can.
+    func retryRefusal(for model: String, onDeviceReadiness: (@Sendable (String) -> String?)? = nil) -> String? {
+        switch DesktopHistoryRetry.route(for: model) {
+        case .remote: return nil
+        case .onDevice:
+            if let onDeviceReadiness { return onDeviceReadiness(model) }
+            return localReadiness(model)
+        case .liveOnly:
+            return "This used a live model. Open its audio, then choose Batch and import it to transcribe again."
+        case .unavailable:
+            return "This recording\u{2019}s model is not available in this version. Open its audio, then import it "
+                + "with a current model to transcribe it again."
+        }
     }
 
     /// Text and version were captured on the UI thread before the save dialog.

@@ -24,13 +24,25 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
     private var outputs: [SelfTestOutput] = []
     private var clipboard: WindowsClipboardOutput?
     private var failWrite = false
+    private var requests: [WindowsTranscriptionRequest] = []
+    private var scripted: [Result<String, WindowsNativeError>] = []
 
     var lastOutput: SelfTestOutput? { lock.withLock { outputs.last } }
     var completedOutputs: Int { lock.withLock { outputs.filter { $0.delivered != nil }.count } }
     var heldOutputs: Int { lock.withLock { outputs.filter { $0.delivered == nil }.count } }
     var lastClipboard: WindowsClipboardOutput? { lock.withLock { clipboard } }
+    /// Every batch request that reached transcription, oldest first.
+    var transcriptionRequests: [WindowsTranscriptionRequest] { lock.withLock { requests } }
 
     func failNextSettingsWrite() { lock.withLock { failWrite = true } }
+
+    /// The next transcription returns `text` instead of `batchText`.
+    func scriptNextTranscription(_ text: String) { lock.withLock { scripted.append(.success(text)) } }
+
+    /// The next transcription fails with `message`, as a provider or runtime would.
+    func failNextTranscription(_ message: String) {
+        lock.withLock { scripted.append(.failure(WindowsNativeError(message: message))) }
+    }
 
     func releaseAll() {
         transcription.open()
@@ -61,8 +73,13 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
     ) async throws -> TranscriptionResult {
         await transcription.pass()
         try Task.checkCancellation()
+        let outcome = lock.withLock { () -> Result<String, WindowsNativeError> in
+            requests.append(request)
+            return scripted.isEmpty ? .success(Self.batchText) : scripted.removeFirst()
+        }
+        let text = try outcome.get()
         return TranscriptionResult(
-            text: Self.batchText, segments: [], confidence: nil, duration: request.duration,
+            text: text, segments: [], confidence: nil, duration: request.duration,
             modelIdentifier: request.model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }

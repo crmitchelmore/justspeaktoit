@@ -296,6 +296,7 @@ enum SpeakWindowsMain {
                 try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
                 try await WindowsTextOutputSelfTest.run()
                 try await WindowsHotKeySelfTest.run()
+                try await WindowsHistoryRetrySelfTest.run()
                 try WindowsNative.storageMediaAndAutomationSelfTests()
                 try await WindowsLocalSelfTest.run()
                 guard !DesktopTranscription.batchModels.isEmpty else {

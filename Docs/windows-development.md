@@ -158,9 +158,13 @@ first matching profile becomes an immutable session snapshot, leaving normal
 settings unchanged. Unavailable models, inherited values and Apple-only matchers
 survive edits; unsupported overrides have an explicit notice retained in History.
 Atomic persistence and queued settings application precede the next recording.
-Spoken-language overrides reach supported live models through their shared client:
-OpenAI, Deepgram Nova and multilingual Flux. English-only Flux and AssemblyAI
-retain a model-specific limitation; Automatic keeps the model's normal language
+Spoken-language overrides reach supported live models through their shared client,
+as each model's canonical capability allows: OpenAI, Deepgram Nova and multilingual
+Flux, Speechmatics, Soniox, ElevenLabs, xAI speech-to-text and Gladia. Gladia's
+session request pins one of its documented language codes; a language it does not
+list lets Gladia detect the language instead. English-only Flux, AssemblyAI,
+Cartesia Ink-2 (English only, with no language field) and Voxtral retain a
+model-specific limitation; Automatic keeps the model's normal language
 behaviour without a warning. Personal lexicon overrides are not applied yet.
 
 Automatic insertion targets the control that had focus when the hotkey fired

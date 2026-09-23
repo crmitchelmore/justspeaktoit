@@ -16,8 +16,8 @@ extension WindowsAppController {
         }
         guard local || DesktopTranscription.requiresCanonicalPCM16WAV(model: model), canonicalDuration == nil else {
             return try await DesktopTranscription.transcribe(
-                audioURL: audio, model: model, apiKey: key,
-                duration: canonicalDuration ?? duration, language: language, staging: uploadStaging
+                audioURL: audio, model: model, apiKey: key, duration: canonicalDuration ?? duration,
+                language: language, azureEndpoint: azureResourceEndpoint(), staging: uploadStaging
             )
         }
         update("Preparing audio… Your original file is saved in History.", state: 2)
@@ -34,8 +34,8 @@ extension WindowsAppController {
         if local { return try await transcribeLocally(output, model: model, language: language) }
         update("Transcribing… Your original file is saved in History.", state: 2)
         return try await DesktopTranscription.transcribe(
-            audioURL: output, model: model, apiKey: key,
-            duration: converted.duration, language: language, staging: uploadStaging
+            audioURL: output, model: model, apiKey: key, duration: converted.duration,
+            language: language, azureEndpoint: azureResourceEndpoint(), staging: uploadStaging
         )
     }
 }

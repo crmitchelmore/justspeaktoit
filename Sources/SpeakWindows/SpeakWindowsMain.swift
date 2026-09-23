@@ -314,6 +314,16 @@ enum SpeakWindowsMain {
         holder.hotKeys.configure(style: hotKey.activation)
     }
 
+    /// A hand-edited endpoint the dialog cannot show falls back to none rather
+    /// than blocking launch; the saved setting is unchanged until the next Apply.
+    private static func configureAzureResource(_ holder: WindowsEventContext) async throws {
+        let context = Unmanaged.passUnretained(holder).toOpaque()
+        guard WindowsNative.configureAzureResource(await holder.controller.azureResourceEndpoint(), context: context)
+                || WindowsNative.configureAzureResource("", context: context) else {
+            throw WindowsNativeError(message: "Could not configure the Azure Speech resource.")
+        }
+    }
+
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
@@ -328,6 +338,7 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
+        try await configureAzureResource(holder)
         await restoreServices(holder)
         try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
@@ -359,6 +370,7 @@ enum SpeakWindowsMain {
         // this context once the holder can be released.
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
+        jsti_window_clear_azure_resource()
         await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         await holder.hotKeys.drain()

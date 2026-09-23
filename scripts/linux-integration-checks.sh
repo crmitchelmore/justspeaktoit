@@ -58,7 +58,13 @@ with open(sys.argv[1], "wb") as tone:
 PY
 pacat --playback --device=jsti_test --format=s16le --rate=16000 --channels=1 "$work/tone.raw" & pids+=($!)
 sleep 0.5
-JSTI_TEST_SOURCE=jsti_test.monitor "$binary" --integration-test capture
+if ! JSTI_TEST_SOURCE=jsti_test.monitor "$binary" --integration-test capture; then
+    pactl info || true
+    pactl list short sinks || true
+    pactl list short sources || true
+    tail -n 40 "$work/pipewire.log" "$work/wireplumber.log" "$work/pipewire-pulse.log" >&2 || true
+    exit 1
+fi
 
 step "portals (fake GlobalShortcuts, RemoteDesktop and Clipboard)"
 "$python" "$repo/scripts/linux-fake-portal.py" "$work/portal.json" >"$work/portal.out" 2>&1 & pids+=($!)

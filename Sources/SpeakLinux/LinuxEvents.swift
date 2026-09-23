@@ -28,6 +28,7 @@ final class LinuxEventContext: @unchecked Sendable {
     private var shortcutTail: Task<Void, Never>?
     let shortcuts: LinuxShortcuts
     private(set) var gestures: LinuxShortcutGestures!
+    lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
 
     init(controller: LinuxAppController, smokeTest: Bool) {
         self.controller = controller
@@ -225,6 +226,9 @@ private func linuxReady(_ holder: LinuxEventContext) {
         let controller = holder.controller
         holder.markReady(Task { await controller.ready() })
         holder.shortcuts.start(holder)
+        do { try holder.microphones.start() } catch {
+            LinuxHostPlatform.update("Microphone changes will not be noticed: \(error.localizedDescription)")
+        }
         return
     }
     do {

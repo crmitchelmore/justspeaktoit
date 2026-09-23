@@ -71,6 +71,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     } catch { windowFailure = error }
     try blocking {
         holder.shortcuts.stop()
+        if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await holder.drainShortcuts()
         await controller.close()

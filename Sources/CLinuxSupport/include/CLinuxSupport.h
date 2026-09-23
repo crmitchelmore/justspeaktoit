@@ -142,6 +142,14 @@ void jsti_capture_destroy(jsti_capture *capture);
 typedef void (*jsti_audio_device_fn)(const char *id, const char *name, int32_t is_default, void *context);
 int32_t jsti_audio_devices_enumerate(jsti_audio_device_fn callback, void *context, char *error, size_t error_capacity);
 
+/* Reports (on the audio thread) that microphones were added, removed or
+ * changed, or that the default changed. Callers re-enumerate. */
+typedef void (*jsti_audio_devices_changed_fn)(void *context);
+int32_t jsti_audio_device_monitor_start(
+    jsti_audio_devices_changed_fn callback, void *context, char *error, size_t error_capacity);
+/* No callback runs after this returns. */
+void jsti_audio_device_monitor_stop(void);
+
 /* ------------------------------------------------------------------- files */
 
 /* Creates a directory (and parents) readable only by the current user, or

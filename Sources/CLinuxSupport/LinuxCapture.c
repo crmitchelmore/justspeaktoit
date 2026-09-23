@@ -298,6 +298,60 @@ static void source_info(pa_context *context, const pa_source_info *info, int end
     query->callback(info->name, name, g_strcmp0(info->name, query->default_source) == 0, query->context);
 }
 
+/* --------------------------------------------------------------- monitor */
+
+typedef struct Monitor {
+    JSTIPulse pulse;
+    jsti_audio_devices_changed_fn callback;
+    void *context;
+} Monitor;
+
+static GMutex monitor_lock;
+static Monitor *monitor;
+
+static void subscription_event(pa_context *context, pa_subscription_event_type_t type, uint32_t index, void *data) {
+    (void)context; (void)index;
+    Monitor *state = data;
+    pa_subscription_event_type_t facility = type & PA_SUBSCRIPTION_EVENT_FACILITY_MASK;
+    if (facility == PA_SUBSCRIPTION_EVENT_SOURCE || facility == PA_SUBSCRIPTION_EVENT_SERVER) {
+        state->callback(state->context);
+    }
+}
+
+int32_t jsti_audio_device_monitor_start(
+    jsti_audio_devices_changed_fn callback, void *context, char *error, size_t capacity) {
+    jsti_audio_device_monitor_stop();
+    Monitor *state = g_new0(Monitor, 1);
+    state->callback = callback;
+    state->context = context;
+    if (pulse_open(&state->pulse, "JustSpeakToIt device monitor", error, capacity) != 0) {
+        g_free(state);
+        return -1;
+    }
+    pa_context_set_subscribe_callback(state->pulse.context, subscription_event, state);
+    pa_operation *operation = pa_context_subscribe(
+        state->pulse.context, PA_SUBSCRIPTION_MASK_SOURCE | PA_SUBSCRIPTION_MASK_SERVER, NULL, NULL);
+    if (operation != NULL) pa_operation_unref(operation);
+    pa_threaded_mainloop_unlock(state->pulse.loop);
+    g_mutex_lock(&monitor_lock);
+    monitor = state;
+    g_mutex_unlock(&monitor_lock);
+    return 0;
+}
+
+void jsti_audio_device_monitor_stop(void) {
+    g_mutex_lock(&monitor_lock);
+    Monitor *state = monitor;
+    monitor = NULL;
+    g_mutex_unlock(&monitor_lock);
+    if (state == NULL) return;
+    pa_threaded_mainloop_lock(state->pulse.loop);
+    pa_context_set_subscribe_callback(state->pulse.context, NULL, NULL);
+    pa_threaded_mainloop_unlock(state->pulse.loop);
+    pulse_close(&state->pulse);
+    g_free(state);
+}
+
 int32_t jsti_audio_devices_enumerate(jsti_audio_device_fn callback, void *context, char *error, size_t capacity) {
     JSTIPulse pulse = { 0 };
     if (pulse_open(&pulse, "JustSpeakToIt devices", error, capacity) != 0) return -1;

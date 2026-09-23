@@ -66,6 +66,31 @@ enum LinuxIntegrationChecks {
         try require(frames.dropLast().allSatisfy { $0 == 1_600 }, "frames were not exactly 100 ms: \(frames)")
         try require(peak > 1_000, "the captured audio was silent (peak \(peak))")
         print("Capture: \(total) samples in \(frames.count) frames from \(source), peak \(peak).")
+
+        // Hotplug: adding a sink adds its monitor source, a source event.
+        final class Changes: @unchecked Sendable {
+            let lock = NSLock()
+            var count = 0
+        }
+        let changes = Changes()
+        try withExtendedLifetime(changes) {
+            try LinuxNative.call {
+                jsti_audio_device_monitor_start({ context in
+                    let changes = Unmanaged<Changes>.fromOpaque(context!).takeUnretainedValue()
+                    changes.lock.withLock { changes.count += 1 }
+                }, Unmanaged.passUnretained(changes).toOpaque(), $0, $1)
+            }
+            let pactl = Process()
+            pactl.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            pactl.arguments = ["pactl", "load-module", "module-null-sink", "sink_name=jsti_hotplug"]
+            pactl.standardOutput = FileHandle.nullDevice
+            try pactl.run()
+            pactl.waitUntilExit()
+            for _ in 0..<300 where changes.lock.withLock({ changes.count }) == 0 { Thread.sleep(forTimeInterval: 0.01) }
+            jsti_audio_device_monitor_stop()
+        }
+        try require(changes.lock.withLock { changes.count } > 0, "no device change was reported for a new source")
+        print("Device monitor: a new source was reported.")
     }
 
     /// X11 paste into a real window, with focus re-verification and clipboard

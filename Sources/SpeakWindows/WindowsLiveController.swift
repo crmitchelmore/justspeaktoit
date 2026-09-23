@@ -31,7 +31,7 @@ extension WindowsAppController {
                 guard revision != snapshot.revision else { continue }
                 revision = snapshot.revision
                 transcript = snapshot.text
-                let status = "Live transcription… Ctrl+Alt+Space to finish."
+                let status = "Live transcription… " + hotKeySettings().finishHint(for: recording?.trigger ?? .other)
                     + (recording.map { profileContext($0.record) } ?? "")
                 update(status, transcript: snapshot.text, state: 1)
             }

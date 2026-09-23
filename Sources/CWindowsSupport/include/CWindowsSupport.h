@@ -30,7 +30,13 @@ enum JSTIWindowEvent {
     /* Native History playback controls; both carry the selected record ID. */
     JSTI_EVENT_HISTORY_PLAY_PAUSE = 18,
     JSTI_EVENT_HISTORY_STOP = 19,
-    JSTI_EVENT_REFRESH_MODELS = 20
+    JSTI_EVENT_REFRESH_MODELS = 20,
+    /* Gesture activation styles only (see jsti_window_set_hotkey). DOWN carries
+     * the selected microphone ID like TOGGLE_RECORDING; UP and DEADLINE carry
+     * no text. A press-to-toggle style keeps sending TOGGLE_RECORDING. */
+    JSTI_EVENT_HOTKEY_DOWN = 21,
+    JSTI_EVENT_HOTKEY_UP = 22,
+    JSTI_EVENT_HOTKEY_DEADLINE = 23
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -215,6 +221,31 @@ int jsti_window_text_output(int *method, int *insertion, int *restore_clipboard)
  * it closes, so the caller must retain the context until then as well. Once
  * window_run has returned no dialog is open, and clearing ends the borrow. */
 void jsti_window_clear_text_output(void);
+
+/* Global recording shortcut. modifiers combine MOD_ALT (1), MOD_CONTROL (2) and
+ * MOD_SHIFT (4) and must include Ctrl or Alt; virtual_key is a non-modifier
+ * virtual-key code. The Shortcut dialog lists style_names with their
+ * descriptions; press_style is the index whose presses toggle recording
+ * natively (TOGGLE_RECORDING, or CANCEL_TRANSCRIPTION while transcribing).
+ * Every other style reports HOTKEY_DOWN on the press and HOTKEY_UP when the key
+ * is released, for the host's gesture recognition; presses while a modal
+ * dialog is open or a transcription is running are ignored. The callback runs
+ * on the UI thread once per Apply, after the new shortcut is registered;
+ * persist it and never wait for a Swift actor there. Thread safe; the
+ * combination is registered when window_run starts and afterwards changes only
+ * through the dialog. The context is borrowed like jsti_window_set_text_output's. */
+typedef void (*JSTIHotKeySettingsCallback)(unsigned modifiers, unsigned virtual_key, int style, void *context);
+int jsti_window_set_hotkey(unsigned modifiers, unsigned virtual_key,
+                           const char *const *style_names, const char *const *style_descriptions,
+                           size_t style_count, int style, int press_style,
+                           JSTIHotKeySettingsCallback callback, void *context);
+/* Drops the callback and context; the dialog is unavailable until configured again. */
+void jsti_window_clear_hotkey(void);
+/* UI thread only, from a hotkey event: arms the one gesture deadline timer,
+ * which later sends HOTKEY_DEADLINE. Negative milliseconds cancel it. */
+int jsti_window_set_hotkey_deadline(int milliseconds);
+/* The localised key name, for example "Ctrl+Alt+Space". */
+int jsti_hotkey_name(unsigned modifiers, unsigned virtual_key, char *name, size_t capacity);
 
 /* Borrowed UTF-8 draft values. Choice -1 inherits the app setting, -2 preserves
  * an existing unavailable value, otherwise indexes the supplied catalogue.

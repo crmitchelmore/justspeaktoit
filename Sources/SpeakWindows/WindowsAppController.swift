@@ -14,6 +14,8 @@ actor WindowsAppController {
         // Edited in the Text output dialog. Absent or unknown keys keep the
         // smart insert-at-cursor default with clipboard restoration.
         var textOutput: WindowsTextOutputOptions?
+        // Keyboard shortcut dialog; absent keeps Ctrl+Alt+Space, press-to-toggle.
+        var hotKey: WindowsHotKeySettings?
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -26,6 +28,8 @@ actor WindowsAppController {
         let live: DesktopLiveSession?
         let profile: DesktopProfileSession
         let textOutput: WindowsTextOutputOptions
+        /// What started this session; a shortcut gesture stops only its own kind.
+        let trigger: HotKeySessionTrigger
     }
 
     struct StoppedRecording {
@@ -58,6 +62,9 @@ actor WindowsAppController {
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     var transcript = ""
+    /// Shortcut gesture bookkeeping, in the monotonic clock of recognition.
+    var lastHotKeyDoubleTap: TimeInterval = -.infinity
+    var hotKeyStartsAfter: TimeInterval = 0
     var history: [UUID: DesktopRecordingStore.Record] = [:]
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.
@@ -107,7 +114,8 @@ actor WindowsAppController {
     /// Apply cannot change how this recording is output.
     func toggle(
         target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String,
-        targetExecutablePath: String?, textOutput: WindowsTextOutputOptions
+        targetExecutablePath: String?, textOutput: WindowsTextOutputOptions,
+        trigger: HotKeySessionTrigger = .other
     ) async {
         guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
         cancelOutput()
@@ -124,7 +132,9 @@ actor WindowsAppController {
             guard !closed else { return }
             let profile = resolvedProfile(executablePath: targetExecutablePath)
             if let limitation = profile.blockingLimitation { throw WindowsNativeError(message: limitation.message) }
-            try await startRecording(target: target, deviceID: deviceID, profile: profile, textOutput: textOutput)
+            try await startRecording(
+                target: target, deviceID: deviceID, profile: profile, textOutput: textOutput, trigger: trigger
+            )
         } catch { update(error.localizedDescription, state: 0) }
     }
 
@@ -328,7 +338,7 @@ extension WindowsAppController {
             refreshHistory(selectRecord: true)
             let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
             var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
-                : "Ready. Ctrl+Alt+Space starts or stops recording. \(records.count) saved recordings."
+                : "Ready. \(hotKeySettings().readyHint) \(records.count) saved recordings."
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }

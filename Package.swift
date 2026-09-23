@@ -180,7 +180,9 @@ if windowsTargetBuild {
                 .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
                 .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
                 // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
-                .linkedLibrary("oleaut32"), .linkedLibrary("oleacc")
+                .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"),
+                // The Keyboard shortcut dialog's native hotkey control.
+                .linkedLibrary("comctl32")
             ]
         ),
         .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport"]),

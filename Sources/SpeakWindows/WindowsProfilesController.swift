@@ -21,8 +21,8 @@ extension WindowsAppController {
         )
     }
 
-    func profileRecordingStatus(_ profile: DesktopProfileSession) -> String {
-        var status = "Recording… Ctrl+Alt+Space to finish."
+    func profileRecordingStatus(_ profile: DesktopProfileSession, trigger: HotKeySessionTrigger) -> String {
+        var status = "Recording… " + hotKeySettings().finishHint(for: trigger)
         if let name = profile.profileName { status += " App profile: \(name)." }
         for limitation in profile.limitations { status += " " + limitation.message }
         return status

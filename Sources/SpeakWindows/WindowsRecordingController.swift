@@ -7,7 +7,7 @@ import CWindowsSupport
 extension WindowsAppController {
     func startRecording(
         target: WindowsInsertionTarget?, deviceID: String, profile: DesktopProfileSession,
-        textOutput: WindowsTextOutputOptions
+        textOutput: WindowsTextOutputOptions, trigger: HotKeySessionTrigger = .other
     ) async throws {
         let key = try effects.apiKey(name: credentialIdentifier(for: profile.modelIdentifier))
         guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
@@ -39,7 +39,7 @@ extension WindowsAppController {
             }
             recording = Recording(
                 capture: capture, context: context, record: record, target: target, live: live, profile: profile,
-                textOutput: textOutput
+                textOutput: textOutput, trigger: trigger
             )
             if let live { monitorLive(live) }
         } catch {
@@ -59,7 +59,7 @@ extension WindowsAppController {
             }
             throw startupFailure
         }
-        update(profileRecordingStatus(profile), state: 1)
+        update(profileRecordingStatus(profile, trigger: trigger), state: 1)
     }
 
     func stopCapture() throws -> StoppedRecording? {

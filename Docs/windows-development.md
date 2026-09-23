@@ -51,7 +51,14 @@ connections are refused with a retryable error rather than accumulating native
 state. Batch and Live retain separate model
 selections. Native capture is joined before finalisation; received text and audio
 survive cancellation or failure, with no automatic insertion on failure.
-`Ctrl+Alt+Space` starts and stops recording when registration succeeds. Save the
+The global shortcut defaults to `Ctrl+Alt+Space` with press-to-toggle. The
+Keyboard shortcut dialog chooses another Ctrl or Alt combination and any of the
+four canonical activation styles (Press to Toggle, Press & Hold, Double Tap,
+Hold & Double Tap). A combination another app or Windows already owns is refused
+before the working one is released. Gesture styles report the native press and
+the release, observed by polling the key only while it is held, to the shared
+SpeakCore gesture machine and session policy that state the macOS rules; a
+gesture stops only the kind of session it started. Save the
 selected provider's key through the application; each provider uses its canonical
 credential identifier in Windows Credential Manager. The app stores settings and
 durable recording records under
@@ -320,7 +327,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
 | Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox and ElevenLabs streams, and remaining streaming providers |
-| Global shortcut | `Ctrl+Alt+Space` registration implemented | Configurable shortcuts, conflicts and press/hold/release parity |
+| Global shortcut | Configurable Ctrl/Alt combination with conflict refusal, and all four activation styles: press-to-toggle natively; hold, double-tap and both through the shared SpeakCore gesture machine and session policy. Local Windows cross-compilation and portable gesture/policy tests pass; the native dialog, registration and release polling are covered by the window smoke test with fake registration and key state | Windows CI for this revision, physical keyboard acceptance of hold/double-tap timing, user-adjustable timing, the macOS host adopting the shared machine (it keeps its own `GestureDetector`), hands-free arming and Escape cancel |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
 | On-device transcription | Canonical identifiers retained; Apple engines unavailable | Windows local runtime, model download/import/preparation and CPU/GPU performance |
 | Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |

@@ -17,6 +17,7 @@ final class WindowsEventContext {
     private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
+    lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
         guard let self else { return }
         self.enqueueSettings { await self.controller.saveProfiles(profiles) }
@@ -124,7 +125,22 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
         ready(holder)
     case 8: WindowsNative.update(value)
     case 13: holder.enqueueSettings { await controller.selectMicrophone(value) }
-    default: secondaryWindowEvent(event, value: value, holder: holder)
+    default: secondaryWindowEvent(event, value: value, index: Int(index), holder: holder)
+    }
+}
+
+/// Shortcut press, release and gesture deadline on the UI thread.
+private func hotKeyWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    switch event {
+    case 21:
+        // As at the Record event: capture the focused field before anything else can change it.
+        holder.hotKeys.keyDown(
+            target: try? WindowsInsertionTarget.capture(), textOutput: holder.recordingTextOutput(),
+            modelIndex: index, deviceID: value
+        )
+    case 22: holder.hotKeys.keyUp()
+    case 23: holder.hotKeys.deadlineReached()
+    default: break
     }
 }
 
@@ -221,7 +237,12 @@ func postProcessingEvent(
     }
 }
 
-private func secondaryWindowEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
+private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
+    otherWindowEvent(event, value: value, holder: holder)
+}
+
+private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
     let controller = holder.controller
     switch event {
     case 17: openProfiles(holder)
@@ -258,6 +279,7 @@ enum SpeakWindowsMain {
                 try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
                 try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
                 try await WindowsTextOutputSelfTest.run()
+                try await WindowsHotKeySelfTest.run()
                 try WindowsNative.checked { jsti_private_storage_self_test($0, $1) }
                 try WindowsNative.stagingSelfTest()
                 try WindowsNative.checked { jsti_websocket_self_test($0, $1) }
@@ -292,6 +314,19 @@ enum SpeakWindowsMain {
         }
     }
 
+    /// A hand-edited or corrupt shortcut falls back to the default rather than none.
+    private static func configureHotKey(_ holder: WindowsEventContext) async throws {
+        var hotKey = await holder.controller.hotKeySettings()
+        let context = Unmanaged.passUnretained(holder).toOpaque()
+        if !WindowsNative.configureHotKey(hotKey, context: context) {
+            hotKey = WindowsHotKeySettings()
+            guard WindowsNative.configureHotKey(hotKey, context: context) else {
+                throw WindowsNativeError(message: "Could not configure the keyboard shortcut.")
+            }
+        }
+        holder.hotKeys.configure(style: hotKey.activation)
+    }
+
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
@@ -305,6 +340,7 @@ enum SpeakWindowsMain {
         )
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
+        try await configureHotKey(holder)
         let preferences = await controller.preferredModelIDs()
         try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
         try await controller.configureModelCatalog()
@@ -335,6 +371,8 @@ enum SpeakWindowsMain {
         // A drained Apply may have refreshed the dialog; never leave it holding
         // this context once the holder can be released.
         jsti_window_clear_text_output()
+        jsti_window_clear_hotkey()
+        await holder.hotKeys.drain()
         await controller.close()
         withExtendedLifetime(holder) {}
         if let windowFailure { throw windowFailure }

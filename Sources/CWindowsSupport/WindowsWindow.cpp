@@ -16,6 +16,13 @@ bool jsti_text_output_available();
 void jsti_show_text_output(HWND owner);
 bool jsti_text_output_settings_self_test(HWND owner, int button, void (*setRecording)(HWND, int),
                                          bool (*recordingBlocked)(HWND, void *), void *context, std::string &error);
+bool jsti_hotkey_available();
+std::wstring jsti_hotkey_label();
+bool jsti_hotkey_start(HWND window, std::string &failure);
+void jsti_hotkey_stop(HWND window);
+bool jsti_hotkey_message(HWND window, UINT message, WPARAM wparam);
+void jsti_show_hotkey_settings(HWND owner);
+bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, std::string &error);
 
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
@@ -38,6 +45,9 @@ constexpr int stopPlaybackID = 161;
 constexpr int playbackTimeID = 162;
 // Opens the native Text output dialog directly; it emits no window event.
 constexpr int textOutputID = 170;
+// Opens the native Shortcut dialog directly; it emits no window event.
+constexpr int shortcutID = 171;
+constexpr int transcriptLabelID = 92;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 struct HistoryRow {
@@ -369,8 +379,10 @@ void layout(HWND window) {
     const int modelTop = margin + row; // The App profiles action always occupies the top row.
     move(95, contentLeft, margin + scale(window, 3), scale(window, 64), scale(window, 22));
     const int profilesWidth = scale(window, 118);
+    const int shortcutWidth = scale(window, 148);
     move(modeID, contentLeft + scale(window, 70), margin,
-        width - scale(window, 70) - profilesWidth - gap, scale(window, 160));
+        width - scale(window, 70) - profilesWidth - shortcutWidth - 2 * gap, scale(window, 160));
+    move(shortcutID, contentLeft + width - profilesWidth - gap - shortcutWidth, margin, shortcutWidth, row);
     move(profilesID, contentLeft + width - profilesWidth, margin, profilesWidth, row);
     move(90, contentLeft, modelTop, width, scale(window, 22));
     const int settingsWidth = scale(window, 148);
@@ -482,6 +494,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"App &profiles", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, modeID) &&
+        add(L"BUTTON", L"&Keyboard shortcut…", BS_PUSHBUTTON | WS_TABSTOP, shortcutID) &&
         add(L"STATIC", L"&Transcription model", 0, 90) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
         add(L"BUTTON", L"&Post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
@@ -496,7 +509,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"&Record", BS_PUSHBUTTON | WS_TABSTOP, recordID) &&
         add(L"BUTTON", L"&Import audio", BS_PUSHBUTTON | WS_TABSTOP, importID) &&
         add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID) &&
-        add(L"STATIC", L"Transcript — Ctrl+Alt+Space starts or stops recording", 0, 92) &&
+        add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
         add(L"STATIC", L"Ready. Choose a model and save its API key to begin.", SS_LEFT, statusID);
     LRESULT selectedDevice = 0;
@@ -521,6 +534,7 @@ bool createControls(HWND window) {
     updateHistoryControls(window, 0);
     EnableWindow(GetDlgItem(window, processingID), jsti_postprocessing_available());
     EnableWindow(GetDlgItem(window, textOutputID), jsti_text_output_available());
+    EnableWindow(GetDlgItem(window, shortcutID), jsti_hotkey_available());
     std::wstring modelStatus;
     bool refreshing;
     {
@@ -652,6 +666,14 @@ void applyUpdate(HWND window) {
     updateModelAvailability(window, recording);
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
     EnableWindow(GetDlgItem(window, textOutputID), recording == 0 && jsti_text_output_available());
+    EnableWindow(GetDlgItem(window, shortcutID), recording == 0 && jsti_hotkey_available());
+    {
+        // The shortcut can change through its dialog; avoid repainting an unchanged label.
+        const std::wstring label = jsti_hotkey_label();
+        wchar_t shown[256] = {};
+        GetDlgItemTextW(window, transcriptLabelID, shown, 256);
+        if (label != shown) SetDlgItemTextW(window, transcriptLabelID, label.c_str());
+    }
     if (historyChanged) {
         HWND list = GetDlgItem(window, historyID);
         const LRESULT oldTop = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
@@ -767,8 +789,11 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case updateMessage:
         applyUpdate(window); return 0;
     case WM_HOTKEY:
-        if (wparam == hotkeyID && IsWindowEnabled(GetDlgItem(window, recordID))) emitRecording(window);
+        jsti_hotkey_message(window, message, wparam);
         return 0;
+    case WM_TIMER:
+        if (jsti_hotkey_message(window, message, wparam)) return 0;
+        break;
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
         case profilesID:
@@ -789,6 +814,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             // Only while idle and not already behind another modal editor.
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, textOutputID) && IsWindowEnabled(window)) {
                 jsti_show_text_output(window);
+            }
+            return 0;
+        case shortcutID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, shortcutID) && IsWindowEnabled(window)) {
+                jsti_show_hotkey_settings(window);
+                SetDlgItemTextW(window, transcriptLabelID, jsti_hotkey_label().c_str());
             }
             return 0;
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
@@ -911,12 +942,36 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
-        UnregisterHotKey(window, hotkeyID);
+        jsti_hotkey_stop(window);
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = nullptr; state.posted = false; }
         PostQuitMessage(0); return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
+}
+
+// Shortcut events from WindowsHotKey.cpp, on the UI thread. A press-to-toggle
+// press behaves exactly like the former fixed shortcut; gesture presses carry
+// the selected microphone so the host can start with the device in view.
+void jsti_window_hotkey_event(HWND window, int event) {
+    switch (event) {
+    case JSTI_EVENT_TOGGLE_RECORDING:
+        if (IsWindowEnabled(GetDlgItem(window, recordID))) emitRecording(window);
+        break;
+    case JSTI_EVENT_HOTKEY_DOWN: {
+        const std::string device = selectedMicrophone(window);
+        emit(window, event, device.c_str());
+        break;
+    }
+    case JSTI_EVENT_HOTKEY_UP:
+    case JSTI_EVENT_HOTKEY_DEADLINE: emit(window, event); break;
+    default: break;
+    }
+}
+
+int jsti_window_recording_state() {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.recording;
 }
 
 int jsti_window_run(const char *const *models, size_t count, int selected,
@@ -1014,9 +1069,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         ShowWindow(window, SW_SHOWDEFAULT);
         UpdateWindow(window);
         emit(window, JSTI_EVENT_READY);
-        if (!RegisterHotKey(window, hotkeyID, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE)) {
-            showFailure(window, "Ctrl+Alt+Space is unavailable. Another app may own it; use Record in this window.");
-        }
+        std::string shortcutFailure;
+        if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
@@ -2066,8 +2120,10 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             SendMessageW(owner, WM_COMMAND, MAKEWPARAM(recordID, BN_CLICKED), 0);
             return static_cast<Event *>(context)->event == before;
         };
+        auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
-            jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure);
+            jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
+            jsti_hotkey_self_test(window, observe, &observed, failure);
     };
     bool passed = false;
     try { passed = check(); }

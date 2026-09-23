@@ -138,7 +138,7 @@ enum LinuxHostPlatform: DesktopHostPlatform {
 
     package static func isClipboard(_ job: LinuxOutputJob) -> Bool { job.plan.isClipboard }
 
-    package static func makePlayback() -> LinuxUnavailablePlayback { LinuxUnavailablePlayback() }
+    package static func makePlayback() -> LinuxAudioPlayback { LinuxAudioPlayback() }
 
     package static func makeReadAloudState() {}
 
@@ -167,19 +167,4 @@ enum LinuxHostPlatform: DesktopHostPlatform {
         case .other: return "Select Stop recording to finish."
         }
     }
-}
-
-/// History playback is not implemented on Linux yet: Open audio uses the
-/// desktop's default player instead.
-final class LinuxUnavailablePlayback: DesktopHostPlayback, @unchecked Sendable {
-    package func setStatusHandler(_ handler: @escaping @Sendable (UInt64, String) -> Void) {}
-    package func isCurrent(revision: UInt64) -> Bool { false }
-    package func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {
-        throw DesktopHostError(message: "In-app playback is not available on Linux yet. Use Open audio.")
-    }
-    package func togglePause(recordID: UUID) -> Bool { false }
-    package func stop() {}
-    package func stop(unless recordID: UUID) {}
-    package func stopAndWait() async throws {}
-    package func close() async throws {}
 }

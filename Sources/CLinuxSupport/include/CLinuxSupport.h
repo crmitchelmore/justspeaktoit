@@ -150,6 +150,24 @@ int32_t jsti_audio_device_monitor_start(
 /* No callback runs after this returns. */
 void jsti_audio_device_monitor_stop(void);
 
+/* ---------------------------------------------------------------- playback */
+
+/* Plays mono PCM16 through the sound server. The samples are copied. */
+typedef struct jsti_player jsti_player;
+enum { JSTI_PLAYER_PLAYING = 0, JSTI_PLAYER_PAUSED = 1, JSTI_PLAYER_FINISHED = 2, JSTI_PLAYER_FAILED = 3 };
+jsti_player *jsti_player_create(
+    const int16_t *samples, size_t count, uint32_t sample_rate, char *error, size_t error_capacity);
+int32_t jsti_player_set_paused(jsti_player *player, int32_t paused);
+/* Seconds heard so far, and one of JSTI_PLAYER_*. */
+double jsti_player_position(jsti_player *player);
+int32_t jsti_player_state(jsti_player *player);
+/* Stops output and releases the stream; safe from any thread. */
+void jsti_player_destroy(jsti_player *player);
+
+/* Record-bound playback controls; state 0 stopped, 1 playing, 2 paused. The
+ * window ignores reports for a record that is no longer selected. */
+int32_t jsti_window_set_playback(const char *record_id, int32_t state, const char *text);
+
 /* ------------------------------------------------------------------- files */
 
 /* Creates a directory (and parents) readable only by the current user, or

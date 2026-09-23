@@ -60,6 +60,10 @@ typedef struct UI {
     GtkButton *export_button;
     GtkButton *open_audio;
     GtkButton *import_button;
+    GtkButton *play;
+    GtkButton *stop_play;
+    GtkLabel *playback_label;
+    gint32 playback_state;
     /* Export in progress: the text and version captured at the click. */
     gchar *export_text;
 } UI;
@@ -119,6 +123,9 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.retry), idle && has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.export_button), idle && presented && has_text);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.open_audio), has_record);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.play), has_record && (idle || ui.playback_state != 0));
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.stop_play), has_record && ui.playback_state != 0);
+    gtk_button_set_label(ui.play, ui.playback_state == 1 ? "Pause" : "Play");
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
@@ -196,6 +203,8 @@ static void on_history_selected(GtkListBox *box, GtkListBoxRow *row, gpointer da
     /* Stale text never stays under another record's actions. */
     g_clear_pointer(&ui.presented_id, g_free);
     set_transcript("");
+    ui.playback_state = 0;
+    gtk_label_set_text(ui.playback_label, "");
     refresh_actions();
     emit(JSTI_EVENT_SELECT_HISTORY, id, 0);
 }
@@ -212,6 +221,16 @@ static void on_version(GObject *object, GParamSpec *spec, gpointer data) {
 static void on_retry(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id != NULL) emit(JSTI_EVENT_RETRY_HISTORY, ui.selected_id, 0);
+}
+
+static void on_play(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.selected_id != NULL) emit(JSTI_EVENT_PLAYBACK_TOGGLE, ui.selected_id, 0);
+}
+
+static void on_stop_play(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    emit(JSTI_EVENT_PLAYBACK_STOP, ui.selected_id, 0);
 }
 
 static void on_open_audio(GtkButton *button, gpointer data) {
@@ -438,6 +457,16 @@ static void build_window(void) {
     g_signal_connect(ui.retry, "clicked", G_CALLBACK(on_retry), NULL);
     g_signal_connect(ui.export_button, "clicked", G_CALLBACK(on_export), NULL);
     g_signal_connect(ui.open_audio, "clicked", G_CALLBACK(on_open_audio), NULL);
+    ui.playback_label = GTK_LABEL(gtk_label_new(""));
+    gtk_widget_add_css_class(GTK_WIDGET(ui.playback_label), "dim-label");
+    gtk_widget_add_css_class(GTK_WIDGET(ui.playback_label), "numeric");
+    ui.play = GTK_BUTTON(gtk_button_new_with_label("Play"));
+    ui.stop_play = GTK_BUTTON(gtk_button_new_with_label("Stop"));
+    g_signal_connect(ui.play, "clicked", G_CALLBACK(on_play), NULL);
+    g_signal_connect(ui.stop_play, "clicked", G_CALLBACK(on_stop_play), NULL);
+    gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.playback_label));
+    gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.play));
+    gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.stop_play));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.retry));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.export_button));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.open_audio));
@@ -952,6 +981,35 @@ int32_t jsti_window_transcript_variant(void) {
     if (ui.selected_id == NULL || g_strcmp0(ui.presented_id, ui.selected_id) != 0) return -1;
     if (!ui.presented_switchable) return ui.presented_variant < 0 ? -1 : 1;
     return (int32_t)gtk_drop_down_get_selected(ui.version);
+}
+
+typedef struct Playback {
+    gchar *id;
+    gint32 state;
+    gchar *text;
+} Playback;
+
+static void playback_free(gpointer pointer) {
+    Playback *playback = pointer;
+    g_free(playback->id);
+    g_free(playback->text);
+    g_free(playback);
+}
+
+static void playback_apply(gpointer pointer) {
+    Playback *playback = pointer;
+    if (g_strcmp0(playback->id, ui.selected_id) != 0) return;
+    ui.playback_state = playback->state;
+    gtk_label_set_text(ui.playback_label, playback->text != NULL ? playback->text : "");
+    refresh_actions();
+}
+
+int32_t jsti_window_set_playback(const char *record_id, int32_t state, const char *text) {
+    Playback *playback = g_new0(Playback, 1);
+    playback->id = g_strdup(record_id);
+    playback->state = state;
+    playback->text = g_strdup(text);
+    return post(playback_apply, playback, playback_free);
 }
 
 static void style_apply(gpointer data) {

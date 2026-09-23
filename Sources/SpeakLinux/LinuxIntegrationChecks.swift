@@ -91,6 +91,22 @@ enum LinuxIntegrationChecks {
         }
         try require(changes.lock.withLock { changes.count } > 0, "no device change was reported for a new source")
         print("Device monitor: a new source was reported.")
+
+        // Playback: half a second of tone through the default output drains.
+        let tone = (0..<8_000).map { Int16(8_000 * sin(Double($0) * 2 * .pi * 440 / 16_000)) }
+        var error = [CChar](repeating: 0, count: 256)
+        guard let player = tone.withUnsafeBufferPointer({
+            jsti_player_create($0.baseAddress, $0.count, 16_000, &error, error.count)
+        }) else { throw DesktopHostError(message: "Integration check: \(String(cString: error))") }
+        defer { jsti_player_destroy(player) }
+        var state = jsti_player_state(player)
+        for _ in 0..<300 where state == Int32(JSTI_PLAYER_PLAYING) {
+            Thread.sleep(forTimeInterval: 0.01)
+            state = jsti_player_state(player)
+        }
+        try require(state == Int32(JSTI_PLAYER_FINISHED), "playback ended in state \(state)")
+        try require(abs(jsti_player_position(player) - 0.5) < 0.01, "playback position was not the whole tone")
+        print("Playback: a 0.5 s tone played to the end.")
     }
 
     /// X11 paste into a real window, with focus re-verification and clipboard

@@ -146,6 +146,11 @@ From Apple's
   fake over a real loopback socket through WinHTTP, checks the sign-in callback
   and cancellation, and holds CNG to the independent PBKDF2 and AES-GCM vectors
   that the Apple implementation also meets.
+- The Windows executable's `--self-test` runs `WindowsPostProcessingSelfTest`:
+  the post-processing dialog's Apply through the real controller and settings
+  queue with a synthetic sync key hook, covering a typed and a blank key, a
+  setting saved while the key is saved, queued Applies, refused saves and
+  closing midway.
 
 ## Changing Apple ID
 

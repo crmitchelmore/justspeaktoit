@@ -9,9 +9,10 @@ import CWindowsSupport
 /// Hooks the controller calls into iCloud sync once it is configured.
 struct WindowsCloudSyncHooks: Sendable {
     var historyChanged: (@Sendable () -> Void)?
-    /// Saves a provider key typed in Settings (removes it when empty) and
-    /// marks it saved by hand in the same step, so a key imported from the Mac
-    /// and deleted there cannot take a newly typed key with it.
+    /// Saves a provider key typed in Settings or the post-processing dialog
+    /// (removes it when empty) and marks it saved by hand in the same step, so
+    /// a key imported from the Mac and deleted there cannot take a newly typed
+    /// key with it.
     var saveKeyByHand: (@Sendable (_ value: String, _ identifier: String) async throws -> Void)?
 }
 

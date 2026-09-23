@@ -8,6 +8,9 @@ public struct DesktopProfileCapabilities: Sendable {
     public var batchModels: [ModelCatalog.Option]
     public var liveModels: [ModelCatalog.Option]
     public var polishModels: [ModelCatalog.Option]
+    /// Downloaded local models the host runs on-device. Empty for a host
+    /// without a local runtime.
+    public var localModels: [ModelCatalog.Option]
     /// Whether the host can layer personal-lexicon directives and context tags
     /// into the polish prompt. Desktop hosts have no personal lexicon yet.
     public var supportsPersonalLexicon: Bool
@@ -21,6 +24,7 @@ public struct DesktopProfileCapabilities: Sendable {
         batchModels: [ModelCatalog.Option],
         liveModels: [ModelCatalog.Option],
         polishModels: [ModelCatalog.Option],
+        localModels: [ModelCatalog.Option] = [],
         supportsPersonalLexicon: Bool = false,
         supportsLiveLanguage: Bool = false,
         liveLanguageModelIDs: Set<String> = []
@@ -28,6 +32,7 @@ public struct DesktopProfileCapabilities: Sendable {
         self.batchModels = batchModels
         self.liveModels = liveModels
         self.polishModels = polishModels
+        self.localModels = localModels
         self.supportsPersonalLexicon = supportsPersonalLexicon
         self.supportsLiveLanguage = supportsLiveLanguage
         self.liveLanguageModelIDs = liveLanguageModelIDs
@@ -47,14 +52,14 @@ public struct DesktopProfileCapabilities: Sendable {
 
     /// Whether `modelID` can run under `routing` exactly as stored: batch
     /// identifiers must be executable batch routes, streaming identifiers
-    /// executable live routes, and local models need a local runtime the
-    /// desktop hosts do not have.
+    /// executable live routes, and local identifiers models the host's local
+    /// runtime serves.
     public func canRun(transcriptionModel modelID: String, routing: DictationProfileTranscriptionRouting) -> Bool {
         let identifier = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         switch routing {
         case .remoteBatch: return batchModels.contains { $0.id == identifier }
         case .remoteStreaming: return liveModels.contains { $0.id == identifier }
-        case .localBatch: return false
+        case .localBatch: return localModels.contains { $0.id == identifier }
         }
     }
 

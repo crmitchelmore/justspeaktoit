@@ -27,28 +27,35 @@ final class LocalModelHostSupportTests: XCTestCase {
         XCTAssertTrue(appStore.executableModels(in: postProcessing).isEmpty)
     }
 
-    func testWindowsExposesNoDownloadedModelAsAnExecutableRoute() throws {
+    func testWindowsExposesOnlyWhisperCppQualifiedCatalogueEntries() throws {
         let windows = LocalModelHostSupport.windows
 
-        XCTAssertEqual(windows, .unsupported)
-        XCTAssertTrue(windows.executableModels(in: transcription).isEmpty)
+        XCTAssertEqual(windows.backends, [.whisperCppGGML])
+        let qualified = Set(WhisperCppModels.all.map(\.catalogueID))
+        XCTAssertEqual(
+            windows.executableModels(in: transcription).map(\.id),
+            transcription.map(\.id).filter { qualified.contains($0) },
+            "Catalogue order, and only entries with pinned GGML weights"
+        )
         XCTAssertTrue(windows.executableModels(in: streaming).isEmpty)
         XCTAssertTrue(windows.executableModels(in: postProcessing).isEmpty)
-        // Records that decode on every platform are not capabilities either.
+        // Imported Core ML records decode everywhere; they never gain a
+        // whisper.cpp route by sharing a name with a catalogue entry.
         XCTAssertTrue(windows.executableModels(in: try Self.importedTranscriptionModels()).isEmpty)
         for backend in [LocalModelBackend.whisperKitCoreML, .sherpaOnnx, .llamaCppGGUF] {
             XCTAssertFalse(windows.canExecute(backend))
         }
+        for model in windows.executableModels(in: transcription) {
+            XCTAssertEqual(windows.preferredBackend(for: model), .whisperCppGGML)
+        }
     }
 
     func testCoreMLArtifactsNeedTheCoreMLRuntimeWhateverElseAHostRuns() throws {
-        // Every non-Apple backend, plus the Whisper runtime without Core ML
-        // artefacts and a Core ML loader that is not WhisperKit.
-        let whisperCpp = LocalModelRuntime(rawValue: "whisper.cpp")
+        // Every non-Apple backend, plus a Core ML loader that is not WhisperKit
+        // and WhisperKit reading another format.
         let host = LocalModelHostSupport(backends: [
             .sherpaOnnx,
             .llamaCppGGUF,
-            LocalModelBackend(runtime: whisperCpp, artifactFormat: LocalModelArtifactFormat(rawValue: "ggml")),
             LocalModelBackend(runtime: .whisperKit, artifactFormat: .onnx),
             LocalModelBackend(runtime: .sherpaOnnx, artifactFormat: .coreML)
         ])
@@ -58,6 +65,10 @@ final class LocalModelHostSupportTests: XCTestCase {
         XCTAssertEqual(host.executableModels(in: streaming), streaming)
         XCTAssertEqual(host.executableModels(in: postProcessing), postProcessing)
         XCTAssertFalse(host.canExecute(nil))
+        // whisper.cpp runs pinned GGML weights, never Core ML artefacts.
+        let whisperCpp = LocalModelHostSupport(backends: [.whisperCppGGML])
+        XCTAssertTrue(whisperCpp.executableModels(in: try Self.importedTranscriptionModels()).isEmpty)
+        XCTAssertFalse(whisperCpp.canExecute(.whisperKitCoreML))
     }
 
     func testBackendsDeriveFromAdmissionRulesNotCatalogueMembershipOrPrefixes() {

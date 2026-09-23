@@ -107,10 +107,11 @@ final class WindowsCloudSync: @unchecked Sendable {
     private func start(context: UnsafeMutableRawPointer, controller: WindowsAppController) async {
         lock.withLock { self.context = context }
         await service.prepare()
-        let service = self.service
         await controller.installCloudSync(WindowsCloudSyncHooks(
             historyChanged: { [weak self] in self?.requestSync() },
-            saveKeyByHand: { value, identifier in try await service.saveKeyByHand(value, identifier: identifier) }
+            saveKeyByHand: { [service] value, identifier in
+                try await service.saveKeyByHand(value, identifier: identifier)
+            }
         ))
         await publish()
         work.start { [weak self] in

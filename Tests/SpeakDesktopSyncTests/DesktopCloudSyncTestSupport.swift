@@ -7,7 +7,7 @@ import SpeakTestSupport
 import XCTest
 
 let apiToken = "synthetic-api-token"
-let zone = SyncSchema.zoneName
+let syncZone = SyncSchema.zoneName
 
 /// Routes the shared client to the stateful fake CloudKit server.
 struct FakeServerTransport: CloudKitWebServicesHTTPTransport {
@@ -92,7 +92,7 @@ func seedMacHistory(
         "updatedAt": (milliseconds(updatedAt), "TIMESTAMP")
     ]
     if let processed { fields["postProcessedText"] = (processed, "STRING") }
-    server.seedRecord(zone: zone, recordName: id.uuidString, recordType: "TranscriptionHistory", fields: fields)
+    server.seedRecord(zone: syncZone, recordName: id.uuidString, recordType: "TranscriptionHistory", fields: fields)
 }
 
 /// Shared fixture: a fake server, an in-memory vault and a temporary History.

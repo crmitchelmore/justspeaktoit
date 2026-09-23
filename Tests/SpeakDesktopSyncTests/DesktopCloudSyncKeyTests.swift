@@ -13,7 +13,7 @@ final class DesktopCloudSyncKeyTests: DesktopCloudSyncTestCase {
         let envelope = EncryptedSecretEnvelope(cryptography: ToyCryptography())
         let created = try envelope.makeMetadata(passphrase: passphrase)
         let name = "api-key-sync-metadata"
-        server.seedRecord(zone: zone, recordName: name, recordType: "EncryptedSecretMetadata", fields: [
+        server.seedRecord(zone: syncZone, recordName: name, recordType: "EncryptedSecretMetadata", fields: [
             "salt": (created.metadata.salt.base64EncodedString(), "BYTES"),
             "verifierNonce": (created.metadata.verifierNonce.base64EncodedString(), "BYTES"),
             "verifierCiphertext": (created.metadata.verifierCiphertext.base64EncodedString(), "BYTES"),
@@ -32,7 +32,7 @@ final class DesktopCloudSyncKeyTests: DesktopCloudSyncTestCase {
             let secret = try envelope.seal(
                 identifier: identifier, value: value, updatedAt: date, key: key, isDeleted: isDeleted
             )
-            server.seedRecord(zone: zone, recordName: SyncSchema.EncryptedSecret.recordName(for: identifier),
+            server.seedRecord(zone: syncZone, recordName: SyncSchema.EncryptedSecret.recordName(for: identifier),
                               recordType: "EncryptedSecret", fields: [
                 "identifier": (identifier, "STRING"),
                 "ciphertext": (secret.ciphertext.base64EncodedString(), "BYTES"),

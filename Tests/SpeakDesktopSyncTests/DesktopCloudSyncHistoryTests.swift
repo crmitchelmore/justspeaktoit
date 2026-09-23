@@ -94,7 +94,7 @@ final class DesktopCloudSyncHistoryTests: DesktopCloudSyncTestCase {
         let applied = await changes.all
         XCTAssertEqual(applied, [.saved(macID)])
 
-        let uploaded = try XCTUnwrap(server.recordFields(zone: zone, recordName: local.id.uuidString))
+        let uploaded = try XCTUnwrap(server.recordFields(zone: syncZone, recordName: local.id.uuidString))
         XCTAssertEqual(uploaded["originPlatform"]?.value as? String, "windows")
         XCTAssertEqual(uploaded["rawTranscription"]?.value as? String, "hello from windows")
         XCTAssertEqual(uploaded["wordCount"]?.value as? Int, 3)
@@ -114,7 +114,7 @@ final class DesktopCloudSyncHistoryTests: DesktopCloudSyncTestCase {
         try await records.save(local)
         _ = await service.sync()
 
-        let fields = try XCTUnwrap(server.recordFields(zone: zone, recordName: local.id.uuidString))
+        let fields = try XCTUnwrap(server.recordFields(zone: syncZone, recordName: local.id.uuidString))
         XCTAssertEqual(fields["postProcessedText"]?.value as? String, "First draft, tidied.")
         let stored = fields["updatedAt"]?.value
         let updatedAt = try XCTUnwrap(stored as? Int64 ?? (stored as? Int).map(Int64.init))
@@ -129,8 +129,8 @@ final class DesktopCloudSyncHistoryTests: DesktopCloudSyncTestCase {
         let (service, _) = try await signedInService { await changes.append($0) }
         _ = await service.sync()
 
-        server.seedDeletion(zone: zone, recordName: macID.uuidString)
-        server.seedDeletion(zone: zone, recordName: local.id.uuidString)
+        server.seedDeletion(zone: syncZone, recordName: macID.uuidString)
+        server.seedDeletion(zone: syncZone, recordName: local.id.uuidString)
         _ = await service.sync()
 
         let removed = await records.existingRecord(id: macID)
@@ -141,7 +141,7 @@ final class DesktopCloudSyncHistoryTests: DesktopCloudSyncTestCase {
         XCTAssertEqual(applied.suffix(2), [.removed(macID), .keptAfterRemoteDeletion(local.id)])
 
         _ = await service.sync()
-        XCTAssertNil(server.recordFields(zone: zone, recordName: local.id.uuidString),
+        XCTAssertNil(server.recordFields(zone: syncZone, recordName: local.id.uuidString),
                      "A recording deleted on the Mac is never uploaded again")
     }
 
@@ -150,11 +150,11 @@ final class DesktopCloudSyncHistoryTests: DesktopCloudSyncTestCase {
         let (service, _) = try await signedInService()
         _ = await service.sync()
 
-        var fields = try XCTUnwrap(server.recordFields(zone: zone, recordName: local.id.uuidString))
+        var fields = try XCTUnwrap(server.recordFields(zone: syncZone, recordName: local.id.uuidString))
         fields["postProcessedText"] = ("Edited on the Mac.", "STRING")
         fields["updatedAt"] = (milliseconds(Date(timeIntervalSince1970: 2_000_000_000)), "TIMESTAMP")
         server.seedRecord(
-            zone: zone, recordName: local.id.uuidString, recordType: "TranscriptionHistory", fields: fields
+            zone: syncZone, recordName: local.id.uuidString, recordType: "TranscriptionHistory", fields: fields
         )
         _ = await service.sync()
 
@@ -181,7 +181,7 @@ final class DesktopCloudSyncHistoryTests: DesktopCloudSyncTestCase {
         let bound = await state.current.boundAccount
         XCTAssertEqual(bound, "_synthetic-user-b")
         XCTAssertGreaterThan(server.requestLog.filter { $0 == "private/records/modify" }.count, before)
-        XCTAssertNotNil(server.recordFields(zone: zone, recordName: local.id.uuidString))
+        XCTAssertNotNil(server.recordFields(zone: syncZone, recordName: local.id.uuidString))
     }
 
     func testAnExpiredSessionSignsOutAndAsksToSignInAgain() async throws {

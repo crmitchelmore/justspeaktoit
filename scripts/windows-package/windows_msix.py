@@ -1,10 +1,11 @@
-"""Dependency-free helpers for the unsigned Windows x64 developer MSIX package.
+"""Dependency-free helpers for the unsigned Windows developer MSIX package (x64 or ARM64).
 
 The layout builder, the package verifier and the lifecycle test support share
 this module. It never runs Windows tooling: MakeAppx, SignTool and the
 deployment APIs run only from the PowerShell scripts on Windows. The runtime
 payload is the verified self-contained bundle, reused through the bundle
 builder's own policy, path and PE checks rather than a second dependency list.
+The package's processor architecture is the bundle's.
 """
 import base64
 import hashlib
@@ -43,6 +44,7 @@ def _load_bundle_builder():
 
 BUNDLE = _load_bundle_builder()
 windows_pe = BUNDLE.windows_pe
+windows_targets = BUNDLE.windows_targets
 
 
 class PackageError(Exception):
@@ -113,10 +115,18 @@ def publisher_id(publisher):
     return "".join(PUBLISHER_ID_ALPHABET[(value >> (60 - 5 * index)) & 31] for index in range(13))
 
 
-def package_identity(identity, version, publisher):
+def processor_architecture(identity, architecture):
+    """The manifest ProcessorArchitecture for a bundle of ``architecture`` this identity may carry."""
+    value = windows_targets.target(architecture)["msixArchitecture"]
+    if value not in identity["identity"]["processorArchitectures"]:
+        raise PackageError("package-identity.json does not allow the %s processor architecture" % value)
+    return value
+
+
+def package_identity(identity, version, publisher, architecture="x64"):
     name = identity["identity"]["name"]
     family = name + "_" + publisher_id(publisher)
-    architecture = identity["identity"]["processorArchitecture"]
+    architecture = processor_architecture(identity, architecture)
     return {"name": name, "publisher": publisher, "publisherId": publisher_id(publisher), "version": version,
             "architecture": architecture, "packageFamilyName": family,
             "packageFullName": "%s_%s_%s__%s" % (name, version, architecture, publisher_id(publisher)),
@@ -132,8 +142,11 @@ def load_identity(path=IDENTITY_PATH):
         raise PackageError("package-identity.json must describe the developer channel outside the release trains")
     validate_name(data["identity"]["name"])
     validate_publisher(data["identity"]["developerPublisher"])
-    if data["identity"]["processorArchitecture"] != "x64":
-        raise PackageError("this package slice is x64 only")
+    supported = sorted(target["msixArchitecture"] for target in windows_targets.TARGETS.values())
+    architectures = data["identity"].get("processorArchitectures")
+    if (not isinstance(architectures, list) or not architectures or len(set(architectures)) != len(architectures)
+            or not set(architectures) <= set(supported)):
+        raise PackageError("processorArchitectures must list distinct supported architectures: " + ", ".join(supported))
     presentation = data["presentation"]
     for key in ("displayName", "publisherDisplayName"):
         # Windows refuses '|' in these names when it creates the firewall profile.
@@ -335,12 +348,12 @@ NAMESPACES = {
 }
 
 
-def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH):
+def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, architecture="x64"):
     presentation, application = identity["presentation"], identity["application"]
     family = identity["targetDeviceFamily"]
     values = {
         "name": identity["identity"]["name"], "publisher": validate_publisher(publisher),
-        "version": validate_version(version), "architecture": identity["identity"]["processorArchitecture"],
+        "version": validate_version(version), "architecture": processor_architecture(identity, architecture),
         "displayName": presentation["displayName"], "publisherDisplayName": presentation["publisherDisplayName"],
         "description": presentation["description"], "language": presentation["language"],
         "fileSystemWriteVirtualization": identity["fileSystem"]["writeVirtualization"],
@@ -350,11 +363,11 @@ def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH):
     }
     escaped = {key: escape(value, {'"': "&quot;"}) for key, value in values.items()}
     data = string.Template(pathlib.Path(template_path).read_text(encoding="utf-8")).substitute(escaped).encode("utf-8")
-    check_manifest(data, identity, version, publisher)
+    check_manifest(data, identity, version, publisher, architecture)
     return data
 
 
-def check_manifest(data, identity, version, publisher):
+def check_manifest(data, identity, version, publisher, architecture="x64"):
     """Check the rendered manifest states exactly the reviewed identity and policy."""
     try:
         root = ET.fromstring(data)
@@ -367,7 +380,7 @@ def check_manifest(data, identity, version, publisher):
         raise PackageError("desktop6 must not be ignorable: an OS that cannot honour it must refuse the package")
     found = root.find("f:Identity", ns)
     expected = {"Name": identity["identity"]["name"], "Publisher": publisher, "Version": version,
-                "ProcessorArchitecture": identity["identity"]["processorArchitecture"]}
+                "ProcessorArchitecture": processor_architecture(identity, architecture)}
     if found is None or {key: found.get(key) for key in expected} != expected:
         raise PackageError("manifest identity differs from the requested identity")
     if root.findtext("f:Properties/desktop6:FileSystemWriteVirtualization", namespaces=ns) != "disabled":
@@ -485,17 +498,28 @@ def verify_bundle(bundle_dir, expected_commit=None):
     reserved = [path for path in entries if _reserved_package_path(path)]
     if reserved:
         raise PackageError("bundle uses reserved package paths: " + ", ".join(sorted(reserved)))
+    try:
+        target = windows_targets.for_bundle_architecture((manifest.get("bundle") or {}).get("architecture"))
+    except ValueError as error:
+        raise PackageError(str(error))
+    architecture = target["name"]
     image = windows_pe.PEImage(executable, BUNDLE.APPLICATION)
-    if not image.is_x64 or image.is_dll:
-        raise PackageError("SpeakWindows.exe is not a Windows x64 executable")
+    if not image.runs_natively_on(architecture) or image.is_dll:
+        raise PackageError("SpeakWindows.exe is not a Windows %s executable (it is %s)" % (
+            target["displayName"], image.architecture))
     for module in image.imports() + image.delay_imports():
         if policy.classify(module) == BUNDLE.TEST_MODULE:
             raise PackageError("SpeakWindows.exe imports the test library " + module)
+    # Every image the package installs must load natively on the architecture it declares.
+    for path, data in sorted(entries.items()):
+        if path.lower().endswith(".dll") and not windows_pe.PEImage(data, path).runs_natively_on(architecture):
+            raise PackageError("%s is not a native %s DLL (it is %s)" % (
+                path, architecture, windows_pe.PEImage(data, path).architecture))
     for module in (manifest.get("dependencies") or {}).get("bundled", {}).values():
         if module.get("name") not in entries:
             raise PackageError("bundled runtime module is missing: %r" % (module.get("name"),))
     return {"evidence": evidence, "manifest": manifest, "manifestSHA256": sha256(manifest_bytes),
-            "entries": entries, "rows": rows, "commit": commit,
+            "entries": entries, "rows": rows, "commit": commit, "architecture": architecture,
             "archive": {"name": name, "sha256": archive_record["sha256"], "bytes": archive_record["bytes"]},
             "executableSHA256": sha256(executable), "subsystem": pe_subsystem(executable)}
 
@@ -520,6 +544,7 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
     if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
         raise PackageError("package output must be a new or empty directory")
     bundle = verify_bundle(bundle_dir, expected_commit)
+    architecture = bundle["architecture"]
     executable = identity["application"]["executable"]
     if executable not in bundle["entries"]:
         raise PackageError("the bundle does not contain " + executable)
@@ -529,7 +554,8 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
         if path.lower() in {existing.lower() for existing in files}:
             raise PackageError("generated asset collides with a bundle file: " + path)
         files[path] = (data, "generated-asset")
-    files[APPX_MANIFEST] = (render_manifest(identity, version, publisher), "generated-manifest")
+    files[APPX_MANIFEST] = (render_manifest(identity, version, publisher, architecture=architecture),
+                            "generated-manifest")
     for path in files:
         _check_package_path(path)
     try:
@@ -543,10 +569,11 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
         if origin == "bundle" and path in bundle["rows"]:
             row["bundleSource"] = bundle["rows"][path]["source"]
         rows.append(row)
-    identity_record = package_identity(identity, version, publisher)
+    identity_record = package_identity(identity, version, publisher, architecture)
     package_manifest = {
         "schemaVersion": 1,
-        "package": dict(identity_record, kind="unsigned Windows x64 developer MSIX payload", signed=False,
+        "package": dict(identity_record, kind="unsigned Windows %s developer MSIX payload" % (
+                            windows_targets.target(architecture)["displayName"]), signed=False,
                         channel=identity["channel"], releaseTrain=None),
         "fileSystem": identity["fileSystem"],
         "capabilities": identity["capabilities"],

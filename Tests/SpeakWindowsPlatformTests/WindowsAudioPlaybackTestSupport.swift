@@ -36,6 +36,7 @@ final class PlaybackTestHandle: WindowsAudioPlaybackHandle, @unchecked Sendable 
     private var inStart = false
     private var destroyedInsideStart = false
     private var failuresRemaining: Int
+    private var reads = 0
 
     init(plan: PlaybackTestPlan, completion: @escaping @Sendable (WindowsAudioPlaybackCompletion) -> Void) {
         self.plan = plan
@@ -43,6 +44,8 @@ final class PlaybackTestHandle: WindowsAudioPlaybackHandle, @unchecked Sendable 
         self.failuresRemaining = plan.destroyFailures
     }
     var counts: Counts { lock.withLock { values } }
+    /// How often the controller has polled this handle's snapshot.
+    var snapshotReads: Int { lock.withLock { reads } }
     var destroyedBeforeStartReturn: Bool { lock.withLock { destroyedInsideStart } }
     func set(state: WindowsAudioPlaybackState, position: TimeInterval, duration: TimeInterval? = nil) {
         lock.withLock {
@@ -79,7 +82,12 @@ final class PlaybackTestHandle: WindowsAudioPlaybackHandle, @unchecked Sendable 
         lock.withLock { values.cancelled += 1 }
         if plan.quietOnCancel { acknowledgeQuiet() }
     }
-    func snapshot() -> WindowsAudioPlaybackSnapshot { lock.withLock { value } }
+    func snapshot() -> WindowsAudioPlaybackSnapshot {
+        lock.withLock {
+            reads += 1
+            return value
+        }
+    }
     func complete(_ completion: WindowsAudioPlaybackCompletion) {
         let deliver = lock.withLock { () -> Bool in
             guard !completed else { return false }

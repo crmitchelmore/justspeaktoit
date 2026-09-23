@@ -239,6 +239,10 @@ extension WindowsAudioPlaybackControllerTests {
             handle.set(state: .playing, position: Double(index) / 10, duration: 2)
             try await Task.sleep(for: .milliseconds(10))
         }
+        // A late timer on a loaded runner may not have polled the final value
+        // yet; a second poll after it proves that value is the retained one.
+        let polled = handle.snapshotReads
+        await playbackEventually { handle.snapshotReads >= polled + 2 }
         gate.open()
         await playbackEventually { self.recorder.displays.last?.text == "00:01.00 / 00:01.00" }
         XCTAssertEqual(recorder.displays.count, 2, "Only one in-flight and one latest publication may be retained")

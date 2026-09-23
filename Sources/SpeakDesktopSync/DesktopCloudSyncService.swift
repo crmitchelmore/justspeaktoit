@@ -43,6 +43,9 @@ public enum DesktopCloudSyncError: Error, Equatable, Sendable {
     case unavailable(String)
     case untrustedSignInURL
     case signInNotOffered
+    /// Key import was turned on or off again while this change to it was in
+    /// progress; the later change decides, and this one made no further changes.
+    case keyImportSuperseded
 }
 
 extension DesktopCloudSyncError: LocalizedError {
@@ -51,6 +54,7 @@ extension DesktopCloudSyncError: LocalizedError {
         case .unavailable(let reason): return reason
         case .untrustedSignInURL: return "iCloud offered a sign-in page that is not an Apple page; it was not opened."
         case .signInNotOffered: return "iCloud did not offer a sign-in page. Try again later."
+        case .keyImportSuperseded: return "A later change to API-key import replaced this one."
         }
     }
 }
@@ -64,19 +68,21 @@ extension DesktopCloudSyncError: LocalizedError {
 /// each account-bound write — the History cursor, applied changes and
 /// acknowledgements, imported keys, the key-sync key and the success time —
 /// holds that session through the client's gate. None lands once a sign-out or
-/// another sign-in has taken effect, or once the pass's task is cancelled.
-/// Turning History off stops a pass at its next History step; turning key
-/// import off stops it before its next credential change. Committing applied
-/// History (`DesktopHistorySyncStore.persistRemoteChanges`) is not fenced: it
-/// writes nothing account-bound and only reports records already saved.
+/// another sign-in has taken effect, or once the pass's task is cancelled;
+/// writes already made stay. Turning History off stops a pass at its next
+/// History step; turning key import off stops it before its next credential
+/// change. Committing applied History
+/// (`DesktopHistorySyncStore.persistRemoteChanges`) is not fenced: it writes
+/// nothing account-bound and only reports records already saved. Key import
+/// and keys saved by hand are in `DesktopCloudSyncService+Keys.swift`.
 public actor DesktopCloudSyncService {
     private let resolution: DesktopCloudSyncConfiguration.Resolution
     /// Internal so tests can observe its request queue.
     let client: CloudKitWebServicesClient?
-    private let state: DesktopCloudSyncStateStore
+    let state: DesktopCloudSyncStateStore
     private let historyStore: DesktopHistorySyncStore
-    private let vault: any DesktopCredentialVault
-    private let envelope: EncryptedSecretEnvelope?
+    let vault: any DesktopCredentialVault
+    let envelope: EncryptedSecretEnvelope?
     private var signedIn = false
     private var syncing = false
     private var followUpRequested = false
@@ -174,51 +180,6 @@ public actor DesktopCloudSyncService {
         }
     }
 
-    /// Turns on read-only API-key import: verifies the passphrase against the
-    /// account, keeps only the derived key (never the passphrase) in the
-    /// credential vault, and imports the keys once. It runs in one iCloud
-    /// session, whose account is confirmed first; if that session ends
-    /// partway, nothing is stored and no key is imported.
-    public func enableKeyImport(passphrase: String) async throws -> DesktopCloudSyncReport {
-        let client = try requireClient()
-        guard let envelope else { throw DesktopCloudSyncError.unavailable("API-key import is not available here.") }
-        let session = await client.session()
-        let fence = CloudKitWebSessionFence(client: client, session: session)
-        _ = try await CloudKitWebSyncAccount.validate(
-            client: client, store: state, accountBoundCursors: [state], in: session
-        )
-        let key = try await CloudKitWebKeySync.unlock(
-            passphrase: passphrase, client: client, consent: CloudKitWebSyncConsent(enabledFeatures: [.apiKeys]),
-            envelope: envelope, in: session
-        )
-        let vault = self.vault
-        try await admitted(fence) {
-            try await state.update { try DesktopKeyImport.store(key, in: &$0, vault: vault) }
-        }
-        var report = DesktopCloudSyncReport()
-        try await importKeys(client: client, fence: fence, envelope: envelope, report: &report)
-        return report
-    }
-
-    /// Stops importing keys. Keys already saved on this device stay. The
-    /// key-sync key goes in the same step, so no import step or newer key can
-    /// fall between the two.
-    public func disableKeyImport() async throws {
-        let vault = self.vault
-        try await state.update { state in
-            try vault.deleteCredential(DesktopCloudSyncCredential.apiKeySyncKey)
-            state.enabledFeatures.remove(.apiKeys)
-        }
-    }
-
-    /// Records that the user saved a key by hand, so a later remote deletion
-    /// of the imported value cannot remove it.
-    public func noteManualKeySave(identifier: String) async {
-        try? await state.update { state in
-            state.importedKeys[identifier]?.isImportedValue = false
-        }
-    }
-
     // MARK: - Sync
 
     /// One complete pass: confirm the iCloud user, then reconcile History and
@@ -252,8 +213,9 @@ public actor DesktopCloudSyncService {
 
     /// One pass in one session: the account is validated in the session
     /// current now, and every request of the pass, and every cursor,
-    /// acknowledgement, key and binding it writes, belongs to that session or
-    /// does not happen. So does the success it records.
+    /// acknowledgement, key, binding and success time it writes, happens while
+    /// that session is current. Once it ends the pass writes nothing more;
+    /// what it wrote before stays.
     private func runPass(
         client: CloudKitWebServicesClient,
         features: Set<CloudKitWebSyncFeature>,
@@ -270,7 +232,7 @@ public actor DesktopCloudSyncService {
                 try await syncHistory(client: client, fence: fence, consent: consent)
             }
             if features.contains(.apiKeys), let envelope {
-                try await importKeys(client: client, fence: fence, envelope: envelope, report: &report)
+                try await importKeys(client: client, fence: fence, revision: nil, envelope: envelope, report: &report)
             }
             try await admitted(fence) { try await state.update { $0.lastSuccessfulSync = Date() } }
             lastError = nil
@@ -317,57 +279,15 @@ public actor DesktopCloudSyncService {
         }
     }
 
-    /// Imports the synced keys in `fence`'s session. The keys are read once;
-    /// then each is decided and saved in one admitted step, so a sign-out,
-    /// another sign-in or turning import off stops the import before its next
-    /// credential change, and a stale read never writes or deletes a key.
-    private func importKeys(
-        client: CloudKitWebServicesClient,
-        fence: CloudKitWebSessionFence,
-        envelope: EncryptedSecretEnvelope,
-        report: inout DesktopCloudSyncReport
-    ) async throws {
-        let vault = self.vault
-        guard let encoded = try vault.readCredential(DesktopCloudSyncCredential.apiKeySyncKey),
-              let key = Data(base64Encoded: encoded) else {
-            throw CloudKitKeySyncError.missingPassphrase
-        }
-        let snapshot: CloudKitWebKeySyncSnapshot
-        do {
-            snapshot = try await CloudKitWebKeySync.read(
-                key: key, client: client, consent: CloudKitWebSyncConsent(enabledFeatures: [.apiKeys]),
-                envelope: envelope, in: fence.session
-            )
-        } catch CloudKitKeySyncError.incorrectPassphrase {
-            // The passphrase changed on the Mac: ask for it again, unless a
-            // newer passphrase was entered while this key was being checked.
-            let forgotten = try await admitted(fence) {
-                try await state.update { try DesktopKeyImport.forget(encoded, in: &$0, vault: vault) }
-            }
-            if forgotten { throw CloudKitKeySyncError.missingPassphrase }
-            return
-        }
-        for secret in snapshot.secrets {
-            let change = try await admitted(fence) {
-                try await state.update { try DesktopKeyImport.apply(secret, to: &$0, vault: vault) }
-            }
-            switch change {
-            case .imported?: report.importedKeys.append(secret.identifier)
-            case .removed?: report.removedKeys.append(secret.identifier)
-            case nil: break
-            }
-        }
-    }
-
     /// Runs account-bound work on this actor while `fence` admits it.
-    private func admitted<Value>(
+    func admitted<Value>(
         _ fence: any HistorySyncPassFence,
         _ work: () async throws -> Value
     ) async throws -> Value {
         try await fence.admit(isolation: self, work)
     }
 
-    private func requireClient() throws -> CloudKitWebServicesClient {
+    func requireClient() throws -> CloudKitWebServicesClient {
         guard let client else {
             if case .unavailable(let reason) = resolution { throw DesktopCloudSyncError.unavailable(reason) }
             throw DesktopCloudSyncError.unavailable("iCloud sync is not available.")

@@ -68,6 +68,10 @@ public struct DesktopCloudSyncState: Codable, Equatable, Sendable {
 public actor DesktopCloudSyncStateStore: SyncChangeTokenStore, CloudKitWebSyncAccountStore {
     public let url: URL
     private var state: DesktopCloudSyncState
+    /// Orders the user's changes to key import while the app runs: turning it
+    /// on or off takes the next revision, and a step taken for an earlier one
+    /// is refused. Not saved, because after a restart none is in progress.
+    private var keyImportRevision: UInt64 = 0
 
     public init(url: URL) throws {
         self.url = url
@@ -89,6 +93,30 @@ public actor DesktopCloudSyncStateStore: SyncChangeTokenStore, CloudKitWebSyncAc
             state = updated
         }
         return result
+    }
+
+    /// Starts a change to key import: from now on, steps taken for any earlier
+    /// change are refused.
+    func claimKeyImportRevision() -> UInt64 {
+        keyImportRevision &+= 1
+        return keyImportRevision
+    }
+
+    /// Applies a step of the key-import change holding `revision`, or throws
+    /// `keyImportSuperseded` once a later change to key import has begun.
+    func update<T>(
+        forKeyImportRevision revision: UInt64,
+        _ change: (inout DesktopCloudSyncState) throws -> T
+    ) throws -> T {
+        guard revision == keyImportRevision else { throw DesktopCloudSyncError.keyImportSuperseded }
+        return try update(change)
+    }
+
+    /// Starts a change to key import and applies it in the same step, so no
+    /// earlier change's step can land after it.
+    func updateClaimingKeyImport<T>(_ change: (inout DesktopCloudSyncState) throws -> T) throws -> T {
+        keyImportRevision &+= 1
+        return try update(change)
     }
 
     private func write(_ state: DesktopCloudSyncState) throws {

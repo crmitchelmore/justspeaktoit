@@ -88,6 +88,22 @@ enum DesktopKeyImport {
         return true
     }
 
+    /// Saves a key typed on this device, or removes it when `value` is empty,
+    /// and marks it saved by hand, so a later remote deletion leaves it alone.
+    static func saveByHand(
+        _ value: String,
+        identifier: String,
+        in state: inout DesktopCloudSyncState,
+        vault: any DesktopCredentialVault
+    ) throws {
+        if value.isEmpty {
+            try vault.deleteCredential(identifier)
+        } else {
+            try vault.writeCredential(value, name: identifier)
+        }
+        state.importedKeys[identifier]?.isImportedValue = false
+    }
+
     /// Import stops as soon as it is turned off.
     private static func requireImport(_ state: DesktopCloudSyncState) throws {
         guard state.enabledFeatures.contains(.apiKeys) else {

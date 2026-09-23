@@ -9,6 +9,10 @@ import CWindowsSupport
 /// Hooks the controller calls into iCloud sync once it is configured.
 struct WindowsCloudSyncHooks: Sendable {
     var historyChanged: (@Sendable () -> Void)?
+    /// Saves a provider key typed in Settings (removes it when empty) and
+    /// marks it saved by hand in the same step, so a key imported from the Mac
+    /// and deleted there cannot take a newly typed key with it.
+    var saveKeyByHand: (@Sendable (_ value: String, _ identifier: String) async throws -> Void)?
 }
 
 /// Windows Credential Manager as the sync credential vault: the rotating web
@@ -103,7 +107,11 @@ final class WindowsCloudSync: @unchecked Sendable {
     private func start(context: UnsafeMutableRawPointer, controller: WindowsAppController) async {
         lock.withLock { self.context = context }
         await service.prepare()
-        await controller.installCloudSync(WindowsCloudSyncHooks { [weak self] in self?.requestSync() })
+        let service = self.service
+        await controller.installCloudSync(WindowsCloudSyncHooks(
+            historyChanged: { [weak self] in self?.requestSync() },
+            saveKeyByHand: { value, identifier in try await service.saveKeyByHand(value, identifier: identifier) }
+        ))
         await publish()
         work.start { [weak self] in
             while !Task.isCancelled {
@@ -146,22 +154,27 @@ final class WindowsCloudSync: @unchecked Sendable {
         }
     }
 
+    /// The dialog's choices, applied as the user's latest intent: a typed
+    /// passphrase always turns key import on, and an unticked box always turns
+    /// it off, so an earlier Apply still in progress cannot decide the result.
     private func apply(history: Bool, keys: Bool, passphrase: String) async {
         do {
             try await service.setHistoryEnabled(history)
             let importing = await service.status().apiKeyImportEnabled
-            if keys, !importing {
-                guard !passphrase.isEmpty else {
-                    notify("Enter the API-key sync passphrase from your Mac to import its keys.")
-                    await publish()
-                    return
-                }
+            if keys, !passphrase.isEmpty {
                 let report = try await service.enableKeyImport(passphrase: passphrase)
                 notify(Self.describe(imported: report.importedKeys))
-            } else if !keys, importing {
+            } else if keys, !importing {
+                notify("Enter the API-key sync passphrase from your Mac to import its keys.")
+                await publish()
+                return
+            } else if !keys {
                 try await service.disableKeyImport()
             }
             await runSync(announce: !keys || importing)
+        } catch DesktopCloudSyncError.keyImportSuperseded {
+            // A later Apply changed key import and reports for itself.
+            await publish()
         } catch {
             notify("iCloud sync: \(error.localizedDescription)")
             await publish()

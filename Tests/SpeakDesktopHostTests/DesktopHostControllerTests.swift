@@ -66,7 +66,9 @@ enum FakePlatform: DesktopHostPlatform {
     static func uploadStaging(directory: URL) -> SharedMultipartUploadStaging {
         // No `.posix` default on Windows, where these tests also run.
         SharedMultipartUploadStaging(directory: directory, securityPolicy: .init(
-            prepareDirectory: { url, manager in try manager.createDirectory(at: url, withIntermediateDirectories: true) },
+            prepareDirectory: { url, manager in
+                try manager.createDirectory(at: url, withIntermediateDirectories: true)
+            },
             createFile: { url, manager in manager.createFile(atPath: url.path, contents: nil) }
         ))
     }
@@ -127,7 +129,9 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture { SyntheticCapture(context: context) }
-    func makeLiveClient(model: String, key: String, language: String?) -> (any FinalizingStreamingTranscriptionClient)? {
+    func makeLiveClient(
+        model: String, key: String, language: String?
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
         nil
     }
     func transcribe(
@@ -161,7 +165,9 @@ final class DesktopHostControllerTests: XCTestCase {
         effects = SyntheticEffects()
         controller = try DesktopHostController<FakePlatform>(directory: directory, effects: effects)
         await controller.markReadyForSelfTest()
-        batchIndex = try XCTUnwrap(DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil })
+        batchIndex = try XCTUnwrap(
+            DesktopHostModels.all.firstIndex { DesktopTranscription.provider(for: $0.id) != nil }
+        )
         let model = DesktopHostModels.all[batchIndex].id
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model)).apiKeyIdentifier
         FakeLog.shared.setKey("synthetic-key", name: credential)
@@ -350,7 +356,9 @@ final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture { SyntheticCapture(context: context) }
-    func makeLiveClient(model: String, key: String, language: String?) -> (any FinalizingStreamingTranscriptionClient)? {
+    func makeLiveClient(
+        model: String, key: String, language: String?
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
         nil
     }
     func transcribe(

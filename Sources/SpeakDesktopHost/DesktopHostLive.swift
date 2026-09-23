@@ -29,7 +29,8 @@ extension DesktopHostController {
                 guard revision != snapshot.revision else { continue }
                 revision = snapshot.revision
                 transcript = snapshot.text
-                let status = "Live transcription… " + Platform.finishHint(hotKeySettings(), for: recording?.trigger ?? .other)
+                let hint = Platform.finishHint(hotKeySettings(), for: recording?.trigger ?? .other)
+                let status = "Live transcription… " + hint
                     + (recording.map { profileContext($0.record) } ?? "")
                 update(status, transcript: snapshot.text, state: 1)
             }

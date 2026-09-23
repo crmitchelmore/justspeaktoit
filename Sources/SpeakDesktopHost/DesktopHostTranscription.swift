@@ -22,7 +22,8 @@ extension DesktopHostController {
             let size = try audio.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             guard size <= 25_000_000 else {
                 throw DesktopHostError(
-                    message: "Audio exceeds this \(Platform.displayName) preview’s 25 MB upload cap. The recording is saved."
+                    message: "Audio exceeds this \(Platform.displayName) preview’s 25 MB upload cap. "
+                        + "The recording is saved."
                 )
             }
             update("Transcribing… Your recording is saved locally.", state: 2)

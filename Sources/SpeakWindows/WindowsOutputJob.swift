@@ -42,4 +42,3 @@ enum WindowsOutputJob: Sendable {
         }
     }
 }
-

@@ -75,7 +75,7 @@ jobs:
             libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev libx11-dev libxtst-dev pkg-config \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             dbus dbus-x11 gnome-keyring pipewire pipewire-pulse wireplumber pulseaudio-utils \
-            xvfb openbox zenity xdotool python3 python3-gi gir1.2-glib-2.0 \
+            xvfb openbox zenity xdotool weston python3 python3-gi gir1.2-glib-2.0 \
             fonts-cantarell adwaita-icon-theme
 
       - name: Verify portable source boundary
@@ -93,6 +93,9 @@ jobs:
         env:
           JSTI_UI_SNAPSHOT_PATH: ${{ runner.temp }}/linux-window.png
         run: scripts/linux-desktop-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+
+      - name: GTK window smoke test on headless Wayland (Weston)
+        run: scripts/linux-wayland-smoke.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
 
       - name: Keyring, PipeWire capture, portal and X11 paste integration
         run: scripts/linux-integration-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"

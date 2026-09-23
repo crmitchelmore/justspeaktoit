@@ -17,6 +17,8 @@ final class LinuxEventContext: @unchecked Sendable {
     let controller: LinuxAppController
     let smokeTest: Bool
     var smokeTestFailure: Error?
+    /// Runs off the GTK thread once the window is ready, then closes it.
+    var windowCheck: (@Sendable () throws -> Void)?
     private let historyEvents: DesktopEventDispatcher<LinuxHistoryEvent>
     private let searches: DesktopEventDispatcher<String>
     private let copies: DesktopTranscriptCopyDispatcher
@@ -172,6 +174,13 @@ func linuxWindowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: In
 }
 
 private func linuxReady(_ holder: LinuxEventContext) {
+    if let check = holder.windowCheck {
+        Thread.detachNewThread {
+            do { try check() } catch { holder.smokeTestFailure = error }
+            jsti_window_request_close()
+        }
+        return
+    }
     guard holder.smokeTest else {
         let controller = holder.controller
         holder.markReady(Task { await controller.ready() })

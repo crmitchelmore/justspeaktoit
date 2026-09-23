@@ -91,7 +91,25 @@ if arguments.contains("--self-test") {
     exit(0)
 }
 
-let smokeTest = arguments.contains("--ui-smoke-test")
+let integrationCheck = arguments.firstIndex(of: "--integration-test").flatMap {
+    arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+}
+switch integrationCheck {
+case "keyring", "capture", "portal":
+    do {
+        switch integrationCheck {
+        case "keyring": try LinuxIntegrationChecks.keyring()
+        case "capture": try LinuxIntegrationChecks.capture()
+        default: try LinuxIntegrationChecks.portal()
+        }
+    } catch { fail(error) }
+    exit(0)
+case nil, "x11": break
+default: fail(DesktopHostError(message: "Unknown integration check \(integrationCheck ?? "")."))
+}
+
+// The X11 check runs inside a throwaway window like the smoke test.
+let smokeTest = arguments.contains("--ui-smoke-test") || integrationCheck == "x11"
 let session = LinuxDesktopSession()
 let directory = smokeTest
     ? FileManager.default.temporaryDirectory.appendingPathComponent("jsti-smoke-\(UUID().uuidString)")
@@ -105,9 +123,10 @@ do {
     try LinuxFiles.preparePrivateDirectory(directory)
     let controller = try LinuxAppController(directory: directory, effects: LinuxNativeEffects())
     let holder = LinuxEventContext(controller: controller, smokeTest: smokeTest)
+    if integrationCheck == "x11" { holder.windowCheck = { try LinuxIntegrationChecks.x11() } }
     defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
     try runWindow(controller: controller, holder: holder)
-    if smokeTest { print("Native window creation and shutdown passed.") }
+    if smokeTest && integrationCheck == nil { print("Native window creation and shutdown passed.") }
 } catch {
     fail(error)
 }

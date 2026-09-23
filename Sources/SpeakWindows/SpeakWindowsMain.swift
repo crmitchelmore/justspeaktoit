@@ -265,6 +265,7 @@ enum SpeakWindowsMain {
                 try await WindowsTextOutputSelfTest.run()
                 try await WindowsHotKeySelfTest.run()
                 try await WindowsHistoryRetrySelfTest.run()
+                try await WindowsPostProcessingSelfTest.run()
                 try WindowsNative.storageMediaAndAutomationSelfTests()
                 try await WindowsLocalSelfTest.run()
                 guard !DesktopTranscription.batchModels.isEmpty else {

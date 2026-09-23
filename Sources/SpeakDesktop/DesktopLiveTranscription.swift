@@ -15,7 +15,7 @@ public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia:
+        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia, .revai:
             return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
@@ -116,6 +116,13 @@ public enum DesktopLiveTranscription {
             // Ink-2's canonical capability takes no language hint, so none is sent.
             return CartesiaLiveClient(
                 apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .revai:
+            // The client maps the selection to one of Rev.ai's documented codes
+            // and resolves Automatic to the system language, as it does on
+            // Apple platforms, because Rev.ai reads a missing code as English.
+            return RevAILiveClient(
+                accessToken: apiKey, language: hint, sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         default: return nil
         }

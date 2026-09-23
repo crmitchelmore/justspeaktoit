@@ -147,10 +147,13 @@ extension ModelCatalog {
         ),
         // Rev.ai finalises a segment as soon as its hypothesis stops changing,
         // so the incremental tail rewrite can polish each one. `EOS` returns a
-        // trailing hypothesis, which the budget keeps room for.
+        // trailing hypothesis, which the budget keeps room for. The stream's
+        // documented `language` query takes the selection, which the shared
+        // client maps to Rev.ai's own code.
         RevAIStreaming.liveCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 2.0
+            postStopFinalizeBudget: 2.0,
+            supportsLanguageHint: true
         ),
         // Voxtral Realtime streams append-only deltas and emits no
         // per-utterance final: the authoritative transcript is the

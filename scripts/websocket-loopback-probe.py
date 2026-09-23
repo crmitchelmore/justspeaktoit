@@ -15,6 +15,12 @@ a synthetic marker; tokens and keys never enter the logs.
 The Cartesia route plays the Ink-2 automatic-turns stream at the shared
 client's own path and query: exact 100 ms PCM16 frames, then the close
 command, answered by the scenario's turns and the server's closure.
+
+The Rev.ai route plays the streaming speech-to-text socket at the shared
+client's own path and query: `connected` is held and nothing may arrive
+before it, then exact 100 ms PCM16 frames and the literal EOS, answered by
+the scenario's hypotheses and closure. The query carries the synthetic access
+token, so a Rev.ai route's query never enters the logs.
 """
 import argparse
 import base64
@@ -23,6 +29,7 @@ import json
 from pathlib import Path
 import re
 import secrets
+import select
 import socket
 import socketserver
 import struct
@@ -147,6 +154,49 @@ def cartesia_frame(index):
     return bytes(((index * 7 + offset * 13) & 0xFF) for offset in range(CARTESIA_FRAME_BYTES))
 
 
+# Rev.ai streaming peer for the Rev.ai loopback runtime tests. The route and
+# query items, in order, are exactly what the shared Swift client builds for a
+# French selection; only the origin is redirected here.
+REVAI_ROUTE = "/speechtotext/v1/stream"
+REVAI_QUERY = {
+    "access_token": "loopback-synthetic-token",
+    "content_type": "audio/x-raw;layout=interleaved;rate=16000;format=S16LE;channels=1",
+    "transcriber": "machine_v2",
+    "language": "fr",
+}
+REVAI_SCENARIOS = ("complete", "credits", "early", "abrupt", "incomplete", "hold")
+REVAI_FRAMES = 10
+REVAI_FRAME_BYTES = 3200
+# `connected` is held this long. Rev.ai rejects audio sent before it, so the
+# client must stay silent meanwhile.
+REVAI_CONNECTED_DELAY = 0.3
+# Mirrored scalar for scalar by the Swift tests; spelled as escapes so this
+# file stays ASCII. A partial carries words only, and a final's punct
+# elements carry its spacing and punctuation, as in Rev.ai's example session.
+REVAI_PARTIAL = ("Bonjour", "caf\U000000E9")
+REVAI_FINAL = (("text", "Bonjour"), ("punct", ","), ("punct", " "), ("text", "caf\U000000E9"), ("punct", " "),
+               ("text", "cr\U000000E8me"), ("punct", " "), ("punct", "\U00002014"), ("punct", " "),
+               ("text", "na\U000000EFve"), ("punct", "."))
+REVAI_TAIL_PARTIAL = ("\U0001F469\U0001F3FD\U0000200D\U0001F4BB",)
+REVAI_TAIL_FINAL = (("text", "\U0001F469\U0001F3FD\U0000200D\U0001F4BB"), ("punct", " "), ("text", "fin"),
+                    ("punct", "."))
+
+
+def revai_frame(index):
+    """100 ms of 16 kHz PCM16 mono, generated identically by the Swift tests."""
+    return bytes(((index * 11 + offset * 17) & 0xFF) for offset in range(REVAI_FRAME_BYTES))
+
+
+def revai_partial(words):
+    return {"type": "partial", "ts": 0.0, "end_ts": 0.5,
+            "elements": [{"type": "text", "value": word} for word in words]}
+
+
+def revai_final(elements):
+    return {"type": "final", "ts": 0.0, "end_ts": 1.0,
+            "elements": [{"type": kind, "value": value} for kind, value in elements]}
+
+
 class ProbeHandler(socketserver.BaseRequestHandler):
     def handle(self):
         if not self.server.slots.acquire(blocking=False):
@@ -209,8 +259,10 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         gladia = GLADIA_ROUTE.fullmatch(route)
         # Only protocol fields and the synthetic marker are recorded. No
         # credentials, arbitrary request headers or WebSocket keys enter logs,
-        # and a Gladia route's query, which carries its session token, is dropped.
-        log("handshake-request", method=method, path=route if gladia else path, version=version,
+        # and the query of a Gladia route (its session token) or a Rev.ai route
+        # (its access token) is dropped.
+        logged_path = route if gladia or route == REVAI_ROUTE else path
+        log("handshake-request", method=method, path=logged_path, version=version,
             connection=headers.get("connection"), upgrade=headers.get("upgrade"),
             websocketVersion=headers.get("sec-websocket-version"),
             subprotocol=headers.get("sec-websocket-protocol"),
@@ -238,6 +290,9 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             path = route
         elif route == CARTESIA_ROUTE:
             self.verify_cartesia(query, headers)
+            path = route
+        elif route == REVAI_ROUTE:
+            self.verify_revai(query, headers)
             path = route
         elif path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
             raise ValueError("unknown route")
@@ -413,6 +468,8 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             return self.run_mistral(self.mistral_scenario)
         if path == CARTESIA_ROUTE:
             return self.run_cartesia()
+        if path == REVAI_ROUTE:
+            return self.run_revai()
         if scenario is not None:
             self.run_gladia(path, scenario)
             return
@@ -628,11 +685,12 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             raise ValueError("unexpected Cartesia handshake")
         self.cartesia_scenario = scenario
 
-    def send_json(self, event):
+    def send_json(self, event, request_id="loopback"):
         """One text message, split inside a multi-byte UTF-8 scalar when it has
-        one, so the client must assemble the message before decoding it."""
-        payload = json.dumps({**event, "request_id": "loopback"}, ensure_ascii=False,
-                             separators=(",", ":")).encode("utf-8")
+        one, so the client must assemble the message before decoding it. Ink-2
+        events name their connection; Rev.ai's pass request_id=None."""
+        body = {**event, "request_id": request_id} if request_id else event
+        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         continuation = (index for index, byte in enumerate(payload) if (byte & 0xC0) == 0x80)
         split = max(1, min(next(continuation, len(payload) // 2), len(payload) - 1))
         self.send_frame(1, payload[:split], final=False)
@@ -706,6 +764,100 @@ class ProbeHandler(socketserver.BaseRequestHandler):
                 self.close_cartesia(1011, b"loopback-failure")
             else:
                 self.close_cartesia(1000, b"stream-complete")
+
+    # Rev.ai streaming speech-to-text
+
+    def verify_revai(self, query, headers):
+        """The exact request the shared client builds: route, query items in
+        order with the synthetic token, and no header credential. Only
+        verdicts are logged, never the query."""
+        scenario = headers.get("x-jsti-revai-scenario", "")
+        try:
+            items = urllib.parse.parse_qsl(query, keep_blank_values=True, strict_parsing=True)
+        except ValueError:
+            items = []
+        checks = {
+            "queryVerified": items == list(REVAI_QUERY.items()),
+            "authorizationAbsent": "authorization" not in headers,
+            "scenarioVerified": scenario in REVAI_SCENARIOS,
+        }
+        log("revai-handshake", scenario=scenario if checks["scenarioVerified"] else None, **checks)
+        if not all(checks.values()):
+            raise ValueError("unexpected Rev.ai handshake")
+        self.revai_scenario = scenario
+
+    def close_revai(self, code, reason):
+        """Ends the stream from the server side, then drains the client until its
+        closing reply or disconnect; audio already in flight may precede it."""
+        opcode = None
+        try:
+            self.send_frame(8, struct.pack("!H", code) + reason)
+            log("revai-server-close", code=code)
+            for _ in range(REVAI_FRAMES + 2):
+                opcode, _ = self.read_message(close_ends=False)
+                if opcode == 8:
+                    break
+        except (ConnectionError, OSError):
+            opcode = None
+        log("revai-closed", acknowledged=opcode == 8)
+
+    def reject_revai(self, reason):
+        """A deviation closes with Rev.ai's bad-request status, which the Swift
+        test reports as a failure."""
+        log("revai-protocol-violation", reason=reason)
+        self.close_revai(4002, b"loopback-protocol-violation")
+
+    def run_revai(self):
+        """Holds `connected` and requires silence meanwhile, then the exact
+        100 ms PCM frames in order and the literal EOS, and answers as the
+        scenario asks: a partial and a final while audio streams, then the tail
+        hypotheses and the closure that end the stream after EOS."""
+        scenario = self.revai_scenario
+        readable, _, _ = select.select([self.request], [], [], REVAI_CONNECTED_DELAY)
+        if self.pending or readable:
+            return self.reject_revai("the client sent data before connected")
+        self.send_json({"type": "connected", "id": "loopback"}, request_id=None)
+        digest = hashlib.sha256()
+        for index in range(REVAI_FRAMES):
+            opcode, payload = self.read_message(close_ends=False)
+            if opcode != 2 or payload != revai_frame(index):
+                return self.reject_revai(f"PCM frame {index} was not the exact 100 ms frame")
+            digest.update(payload)
+            if index == 1:
+                self.send_json(revai_partial(REVAI_PARTIAL), request_id=None)
+            elif index == 3:
+                self.send_json(revai_final(REVAI_FINAL), request_id=None)
+                if scenario == "credits":
+                    log("revai-credits-exhausted", frames=index + 1)
+                    return self.close_revai(4003, b"insufficient-credits")
+        if scenario == "early":
+            # The server ends the stream on its own, as at its three-hour limit,
+            # before the client has finished.
+            log("revai-early-close", frames=REVAI_FRAMES)
+            return self.close_revai(1000, b"reached-max-session-lifetime")
+        opcode, payload = self.read_message(close_ends=False)
+        if opcode != 1 or payload != b"EOS":
+            return self.reject_revai("expected the literal EOS after every audio frame")
+        log("revai-end-of-stream", scenario=scenario, frames=REVAI_FRAMES,
+            bytes=REVAI_FRAMES * REVAI_FRAME_BYTES, sha256=digest.hexdigest())
+        if scenario == "hold":
+            # Never answer: the client must bound or cancel its own finish.
+            try:
+                opcode, _ = self.read_message(close_ends=False)
+            except (ConnectionError, OSError):
+                opcode = None
+            log("revai-client-released", closeFrame=opcode == 8)
+            return None
+        self.send_json(revai_partial(REVAI_TAIL_PARTIAL), request_id=None)
+        if scenario == "incomplete":
+            # The last partial never gets its final before the closure.
+            return self.close_revai(1000, b"end-of-stream")
+        self.send_json(revai_final(REVAI_TAIL_FINAL), request_id=None)
+        if scenario == "abrupt":
+            # The tail arrives, then the connection drops without a close frame.
+            log("revai-abrupt-disconnect")
+            return None
+        return self.close_revai(1000, b"end-of-stream")
 
 
 class ProbeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):

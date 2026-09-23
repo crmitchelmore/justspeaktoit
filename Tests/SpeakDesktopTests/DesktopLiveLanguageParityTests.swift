@@ -72,6 +72,7 @@ final class DesktopLiveLanguageParityTests: XCTestCase {
             DesktopLiveTranscription.route(forID: $0)?.provider
         })
         XCTAssertTrue(accepted.contains(.gladia), "Gladia's session request pins the language")
+        XCTAssertTrue(accepted.contains(.revai), "Rev.ai's socket query carries its own language code")
         XCTAssertFalse(accepted.contains(.cartesia), "Cartesia Ink-2 is English only, with no language field")
     }
 }

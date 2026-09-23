@@ -10,13 +10,14 @@ import XCTest
 /// route in the projection must be a canonical catalogue entry, use the
 /// credential the shared resolver names (the one its batch models already use),
 /// run on the native capture as routed, and build its shared client without
-/// opening anything. Gladia and Cartesia are named so the shared routes that
-/// joined last are known to be covered, not merely filtered in.
+/// opening anything. Gladia, Cartesia and Rev.ai are named so the shared routes
+/// that joined last are known to be covered, not merely filtered in.
 final class DesktopLiveRouteInvariantTests: XCTestCase {
     /// The PCM rates native desktop capture produces for a live route.
     private let captureRates: Set<Int> = [16_000, 24_000]
+    private let latestShared: [LiveTranscriptionProviderID] = [.gladia, .cartesia, .revai]
 
-    func testProjectionIsAnOrderedCanonicalSubsetIncludingGladiaAndCartesia() {
+    func testProjectionIsAnOrderedCanonicalSubsetIncludingTheLatestSharedRoutes() {
         let projected = DesktopLiveTranscription.liveModels.map(\.id)
         let admitted = Set(projected)
         XCTAssertEqual(admitted.count, projected.count, "Each route is projected once")
@@ -25,7 +26,7 @@ final class DesktopLiveRouteInvariantTests: XCTestCase {
             "The projection filters the canonical catalogue in its order and copies nothing"
         )
         let providers = Set(projected.compactMap { DesktopLiveTranscription.route(forID: $0)?.provider })
-        for provider in [LiveTranscriptionProviderID.gladia, .cartesia] {
+        for provider in latestShared {
             XCTAssertTrue(providers.contains(provider), provider.rawValue)
         }
     }
@@ -46,7 +47,7 @@ final class DesktopLiveRouteInvariantTests: XCTestCase {
                 XCTAssertEqual(batch.apiKeyIdentifier, identifier, "One saved key serves \(model.id) and batch")
             }
         }
-        for shared in [LiveTranscriptionProviderID.gladia, .cartesia] {
+        for shared in latestShared {
             XCTAssertTrue(batchProviders.contains { $0.id == shared.rawValue }, "\(shared.rawValue) has batch models")
         }
     }

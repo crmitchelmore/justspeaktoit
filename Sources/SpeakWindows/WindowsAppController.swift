@@ -222,6 +222,8 @@ extension WindowsAppController {
             try await playback.stopAndWait()
             guard !closed else { return }
             _ = try requireCredentialOrLocalModel(settings.model)
+            let localModel = beginLocalUse(settings.model) // Held across the save until transcription ends.
+            defer { endLocalUse(localModel) }
             let source = URL(fileURLWithPath: path)
             try WindowsNative.validateImport(source)
             let id = UUID()

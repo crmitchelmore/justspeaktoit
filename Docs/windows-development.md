@@ -413,9 +413,9 @@ reused; its sherpa and bzip2 path is not.
   present, otherwise the best CPU variant. Models stay loaded between
   recordings; cancelling a recording aborts inference.
 - **Removal.** `LocalModelOwnership` (SpeakDesktop) refuses to remove a model
-  that a recording or transcription uses, which a profile may choose instead
-  of the selected model, and never lets a download and a removal of one model
-  overlap. `LocalModelTeardown` deletes the files, then asks the runtime to
+  that a recording, import or transcription uses, which a profile may choose
+  instead of the selected model, and never lets a download and a removal of one
+  model overlap. `LocalModelTeardown` deletes the files, then asks the runtime to
   free its cached model on its own queue, because freeing waits for a running
   recognition; the controller stays free to cancel or record meanwhile. The
   runtime frees the model only if it was loaded from the removed file, checked
@@ -433,12 +433,13 @@ reused; its sherpa and bzip2 path is not.
   recordings get the import guidance (`DesktopHistoryRetry`, SpeakDesktop).
 - **Checks.** `--self-test` covers CNG vectors, a download, resume, tamper
   and removal cycle, the controller's removal ownership with a held
-  transcription and teardown, and History Retry of on-device recordings
-  through the real controller: its own model, language and audio, refusal
-  without a model or runtime, and failed or silent retries keeping the
-  recording. With the runtime present, the platform tests also delete a
-  loaded model's file and hold a removal while another model replaces it in
-  the cache. `--local-transcription-self-test <wav> --expect <phrase>`
+  transcription and teardown and, with the runtime beside the app, a held
+  import, and History Retry of on-device recordings through the real
+  controller: its own model, language and audio, refusal without a model or
+  runtime, and failed or silent retries keeping the recording. With the
+  runtime present, the platform tests also delete a loaded model's file and
+  hold a removal while another model replaces it in the cache.
+  `--local-transcription-self-test <wav> --expect <phrase>`
   downloads the pinned model into `JSTI_LOCAL_MODEL_DIRECTORY` and transcribes
   the WAV; CI runs it on the native build and from the self-contained bundle
   with the JFK sample. `JSTI_WHISPER_RUNTIME_DIRECTORY` points a developer

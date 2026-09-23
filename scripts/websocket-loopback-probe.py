@@ -11,6 +11,10 @@ client: POST /<scenario>/v2/live creates a session and returns a single-use,
 tokenised WebSocket URL; that socket takes 100 ms PCM16 frames and
 stop_recording, and answers with transcripts and lifecycle events. The key is
 a synthetic marker; tokens and keys never enter the logs.
+
+The Cartesia route plays the Ink-2 automatic-turns stream at the shared
+client's own path and query: exact 100 ms PCM16 frames, then the close
+command, answered by the scenario's turns and the server's closure.
 """
 import argparse
 import base64
@@ -119,6 +123,30 @@ def gladia_lifecycle(kind, data=None):
     return event
 
 
+# Cartesia Ink-2 automatic-turns peer for the Cartesia loopback runtime tests.
+# The route, query and headers are exactly what the shared Swift client builds;
+# only the origin is redirected here. The key is synthetic and never logged.
+CARTESIA_ROUTE = "/stt/turns/websocket"
+CARTESIA_QUERY = "model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-03-01"
+CARTESIA_AUTHORIZATION = "Bearer loopback-synthetic-key"
+CARTESIA_VERSION = "2026-03-01"
+CARTESIA_SCENARIOS = ("complete", "failure", "incomplete", "hold")
+CARTESIA_FRAMES = 10
+CARTESIA_FRAME_BYTES = 3200
+# (update, end) per turn. The second turn carries its own leading space, as
+# Cartesia turns are concatenated without adding whitespace. Mirrored scalar
+# for scalar by the Swift tests; spelled as escapes so this file stays ASCII.
+CARTESIA_TURNS = (
+    ("Gr\U000000FC\U000000DFe aus", "Gr\U000000FC\U000000DFe aus Z\U000000FCrich \U00002014 \U00004E16\U0000754C"),
+    (" na\U000000EFve", " na\U000000EFve caf\U000000E9 \U0001F469\U0001F3FD\U0000200D\U0001F4BB"),
+)
+
+
+def cartesia_frame(index):
+    """100 ms of 16 kHz PCM16 mono, generated identically by the Swift test."""
+    return bytes(((index * 7 + offset * 13) & 0xFF) for offset in range(CARTESIA_FRAME_BYTES))
+
+
 class ProbeHandler(socketserver.BaseRequestHandler):
     def handle(self):
         if not self.server.slots.acquire(blocking=False):
@@ -208,6 +236,9 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         elif gladia:
             scenario = self.consume_gladia_token(gladia.group(1), query, headers)
             path = route
+        elif route == CARTESIA_ROUTE:
+            self.verify_cartesia(query, headers)
+            path = route
         elif path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
             raise ValueError("unknown route")
         if path == "/delay":
@@ -262,13 +293,18 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             raise ValueError("unexpected Voxtral handshake")
         return scenario
 
-    def read_message(self):
-        """Returns one complete data message, answering pings; a close ends the peer."""
+    def read_message(self, close_ends=True):
+        """Returns one complete data message, answering pings; a close ends the peer.
+
+        With close_ends=False a close frame is returned as (8, payload) instead,
+        for a peer that initiated the closing handshake or is waiting for one."""
         message = bytearray()
         message_opcode = None
         while True:
             final, opcode, payload = self.read_frame()
             if opcode == 8:
+                if not close_ends:
+                    return 8, bytes(payload)
                 self.send_frame(8, payload)
                 raise ConnectionError("client closed")
             if opcode == 9:
@@ -375,6 +411,8 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             return
         if path == MISTRAL_PATH:
             return self.run_mistral(self.mistral_scenario)
+        if path == CARTESIA_ROUTE:
+            return self.run_cartesia()
         if scenario is not None:
             self.run_gladia(path, scenario)
             return
@@ -573,6 +611,93 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         bounds = list(zip([0] + cuts, cuts + [len(data)]))
         for number, (start, end) in enumerate(bounds):
             self.send_frame(1 if number == 0 else 0, data[start:end], final=number == len(bounds) - 1)
+
+    # Cartesia Ink-2 automatic-turns stream
+
+    def verify_cartesia(self, query, headers):
+        """The exact request the shared client builds: route, query, bearer and version."""
+        scenario = headers.get("x-jsti-cartesia-scenario", "")
+        checks = {
+            "queryVerified": query == CARTESIA_QUERY,
+            "authorizationVerified": headers.get("authorization") == CARTESIA_AUTHORIZATION,
+            "versionVerified": headers.get("cartesia-version") == CARTESIA_VERSION,
+            "scenarioVerified": scenario in CARTESIA_SCENARIOS,
+        }
+        log("cartesia-handshake", scenario=scenario if checks["scenarioVerified"] else None, **checks)
+        if not all(checks.values()):
+            raise ValueError("unexpected Cartesia handshake")
+        self.cartesia_scenario = scenario
+
+    def send_json(self, event):
+        """One text message, split inside a multi-byte UTF-8 scalar when it has
+        one, so the client must assemble the message before decoding it."""
+        payload = json.dumps({**event, "request_id": "loopback"}, ensure_ascii=False,
+                             separators=(",", ":")).encode("utf-8")
+        continuation = (index for index, byte in enumerate(payload) if (byte & 0xC0) == 0x80)
+        split = max(1, min(next(continuation, len(payload) // 2), len(payload) - 1))
+        self.send_frame(1, payload[:split], final=False)
+        self.send_frame(0, payload[split:])
+
+    def send_turn(self, update, end):
+        self.send_json({"type": "turn.start"})
+        self.send_json({"type": "turn.update", "transcript": update})
+        self.send_json({"type": "turn.end", "transcript": end})
+
+    def close_cartesia(self, code, reason):
+        """Ends the stream from the server side, as Cartesia does after `close`."""
+        try:
+            self.send_frame(8, struct.pack("!H", code) + reason)
+            log("cartesia-server-close", code=code)
+            opcode, _ = self.read_message(close_ends=False)
+        except (ConnectionError, OSError):
+            opcode = None
+        log("cartesia-closed", acknowledged=opcode == 8)
+
+    def reject_cartesia(self, reason):
+        log("cartesia-protocol-violation", reason=reason)
+        self.send_json({"type": "error", "status_code": 400, "title": "Loopback protocol violation",
+                        "message": reason, "error_code": "loopback_protocol"})
+        self.close_cartesia(1008, b"protocol-violation")
+
+    def run_cartesia(self):
+        """Requires the exact 100 ms PCM frames in order, then the close command,
+        then answers as the scenario asks. Any deviation is reported to the client
+        as a Cartesia error frame, which fails the Swift test visibly."""
+        scenario = self.cartesia_scenario
+        self.send_json({"type": "connected"})
+        digest = hashlib.sha256()
+        for index in range(CARTESIA_FRAMES):
+            opcode, payload = self.read_message(close_ends=False)
+            if opcode != 2 or payload != cartesia_frame(index):
+                return self.reject_cartesia(f"PCM frame {index} was not the exact 100 ms frame")
+            digest.update(payload)
+            if scenario == "complete" and index == CARTESIA_FRAMES // 2 - 1:
+                # A turn that ends while audio is still streaming.
+                self.send_turn(*CARTESIA_TURNS[0])
+        opcode, payload = self.read_message(close_ends=False)
+        if opcode != 1 or payload != b'{"type":"close"}':
+            return self.reject_cartesia("expected the close command after every audio frame")
+        log("cartesia-close-command", scenario=scenario, frames=CARTESIA_FRAMES,
+            bytes=CARTESIA_FRAMES * CARTESIA_FRAME_BYTES, sha256=digest.hexdigest())
+        if scenario == "hold":
+            # Never answer: the client must bound or cancel its own finish.
+            try:
+                opcode, _ = self.read_message(close_ends=False)
+            except (ConnectionError, OSError):
+                opcode = None
+            log("cartesia-client-released", closeFrame=opcode == 8)
+        elif scenario == "incomplete":
+            self.send_json({"type": "turn.start"})
+            self.send_json({"type": "turn.update", "transcript": "Unfinished thought"})
+            self.close_cartesia(1000, b"stream-complete")
+        else:
+            self.send_turn(*CARTESIA_TURNS[1])
+            if scenario == "failure":
+                self.send_json({"type": "error", "status_code": 500, "title": "Loopback failure",
+                                "message": "Synthetic terminal failure", "error_code": "loopback_failure"})
+                self.close_cartesia(1011, b"loopback-failure")
+            else:
+                self.close_cartesia(1000, b"stream-complete")
 
 
 class ProbeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):

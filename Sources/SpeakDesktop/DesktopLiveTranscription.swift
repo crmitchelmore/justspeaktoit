@@ -15,7 +15,8 @@ public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia: return true
+        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia:
+            return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
         }
@@ -96,6 +97,11 @@ public enum DesktopLiveTranscription {
             return GladiaLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
                 initiateSession: GladiaLiveClient.sessionInitiator(session: .shared), makeConnection: makeConnection
+            )
+        case .cartesia:
+            // Ink-2's canonical capability takes no language hint, so none is sent.
+            return CartesiaLiveClient(
+                apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         default: return nil
         }

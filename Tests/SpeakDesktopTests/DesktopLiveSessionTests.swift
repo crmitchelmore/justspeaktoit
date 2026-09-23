@@ -267,7 +267,7 @@ extension DesktopLiveSessionTests {
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
             guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
-            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia]
+            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia]
                 .contains(route.provider) || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
@@ -292,6 +292,7 @@ extension DesktopLiveSessionTests {
             if route.provider == .elevenlabs { XCTAssertTrue(client is ElevenLabsLiveClient) }
             if route.provider == .mistral { XCTAssertTrue(client is MistralVoxtralLiveClient) }
             if route.provider == .gladia { XCTAssertTrue(client is GladiaLiveClient) }
+            if route.provider == .cartesia { XCTAssertTrue(client is CartesiaLiveClient) }
             if route.provider == .openai {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)
                 XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)

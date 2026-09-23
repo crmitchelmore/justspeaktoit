@@ -8,6 +8,8 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -15,11 +17,14 @@ on:
       - Sources/SpeakAutomationKit/**
       - Sources/SpeakCLI/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
+      - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
       - Resources/AppIcon.iconset/**
@@ -30,6 +35,8 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -37,11 +44,14 @@ on:
       - Sources/SpeakAutomationKit/**
       - Sources/SpeakCLI/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
+      - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
       - Resources/AppIcon.iconset/**

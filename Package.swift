@@ -141,6 +141,33 @@ let appleCoreSources: [String] = [
     "XAITTSRealtime.swift"
 ]
 
+// SpeakSync's schema, reconciliation and CloudKit Web Services transport are
+// portable by default. These files adapt the native CloudKit framework (and its
+// CryptoKit/Combine surfaces) and stay on Apple platforms.
+let appleSyncSources: [String] = [
+    "CloudKitComparisonSyncTransport.swift",
+    "CloudKitHistorySyncTransport.swift",
+    "CloudKitKeySync.swift",
+    "CloudKitRecordFields.swift",
+    "ComparisonSyncEngine.swift",
+    "ComparisonSyncRecord.swift",
+    "CryptoKitSyncEnvelopeCryptography.swift",
+    "HistorySyncEngine.swift",
+    "HistorySyncPushRouting.swift",
+    "SyncConfiguration.swift",
+    "SyncRecord.swift",
+    "SyncState.swift"
+]
+
+// Tests of those native adapters. Every other SpeakSync test runs on all platforms.
+let appleSyncTestSources: [String] = [
+    "CloudKitKeySyncTests.swift",
+    "ComparisonSyncTests.swift",
+    "HistorySyncEngineGuardTests.swift",
+    "HistorySyncEngineTests.swift",
+    "NativeRecordParityTests.swift"
+]
+
 let portablePackage = Package(
     name: "SpeakApp",
     defaultLocalization: "en",
@@ -158,8 +185,28 @@ let portablePackage = Package(
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        .target(
+            name: "SpeakSync",
+            dependencies: ["SpeakCore"],
+            path: "Sources/SpeakSync",
+            exclude: appleSyncSources,
+            swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
+        ),
+        // Desktop History and API-key sync over CloudKit Web Services. Portable
+        // only: Apple apps keep their native CloudKit engines.
+        .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
         .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .testTarget(
+            name: "SpeakDesktopSyncTests",
+            dependencies: ["SpeakDesktopSync", "SpeakDesktop", "SpeakSync", "SpeakCore", "SpeakTestSupport"]
+        ),
+        .testTarget(
+            name: "SpeakSyncTests",
+            dependencies: ["SpeakSync", "SpeakCore", "SpeakTestSupport"],
+            path: "Tests/SpeakSyncTests",
+            exclude: appleSyncTestSources
+        ),
         .testTarget(
             name: "SpeakPortableTests",
             dependencies: ["SpeakCore", "SpeakTestSupport"],
@@ -179,6 +226,9 @@ if windowsTargetBuild {
                 .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
                 .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
                 .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
+                // CloudKit sync: CNG for the API-key envelope, Winsock for the
+                // loopback sign-in callback.
+                .linkedLibrary("bcrypt"), .linkedLibrary("ws2_32"),
                 .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
                 // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
                 .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"),
@@ -204,10 +254,14 @@ if windowsTargetBuild {
             dependencies: ["SpeakAutomationKit", "SpeakCore"],
             path: "Sources/SpeakCLI"
         ),
-        .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport", "CWindowsAutomation"]),
+        .target(
+            name: "SpeakWindowsPlatform",
+            dependencies: ["SpeakCore", "SpeakSync", "CWindowsSupport", "CWindowsAutomation"]
+        ),
         .executableTarget(
             name: "SpeakWindows", dependencies: [
-                "SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation"
+                "SpeakCore", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync", "SpeakWindowsPlatform",
+                "CWindowsSupport", "CWindowsAutomation"
             ]
         ),
         .testTarget(
@@ -218,7 +272,8 @@ if windowsTargetBuild {
         .testTarget(
             name: "SpeakWindowsPlatformTests",
             dependencies: [
-                "SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport", "SpeakAutomationKit"
+                "SpeakCore", "SpeakSync", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
+                "SpeakAutomationKit"
             ],
             resources: [.copy("Fixtures")]
         )
@@ -373,7 +428,7 @@ let package = portableCoreBuild ? portablePackage : Package(
         ),
         .testTarget(
             name: "SpeakSyncTests",
-            dependencies: ["SpeakSync"]
+            dependencies: ["SpeakSync", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakAppTests",

@@ -33,4 +33,23 @@ required = {"ModelCatalog.swift", "ModelCatalogTypes.swift", "StreamingTranscrip
             "TranscriptAccumulator.swift", "RecordingLifecycleCoordinator.swift", "OpenAIBatchClient.swift"}
 if missing := required - included:
     sys.exit("Canonical domain sources excluded from portable builds: " + ", ".join(sorted(missing)))
-print(f"Portable boundary: {len(included)} shared Swift sources, {len(excluded)} explicit platform exclusions")
+
+# SpeakSync follows the same rule: portable by default, with only the native
+# CloudKit adapters excluded by name.
+sync_match = re.search(r"let appleSyncSources: \[String\] = \[(.*?)\n\]", manifest, re.S)
+if not sync_match or "exclude: appleSyncSources" not in portable:
+    sys.exit("Missing explicit appleSyncSources platform boundary")
+sync_excluded = re.findall(r'"([^"\n]+\.swift)"', sync_match.group(1))
+sync_root = root / "Sources" / "SpeakSync"
+if len(sync_excluded) != len(set(sync_excluded)):
+    sys.exit("Duplicate Apple sync source exclusion")
+for name in sync_excluded:
+    if not (sync_root / name).is_file():
+        sys.exit(f"Invalid or stale Apple sync source exclusion: {name}")
+sync_sources = {path.relative_to(sync_root).as_posix() for path in sync_root.rglob("*.swift")}
+sync_required = {"SyncSchema.swift", "SyncRecordCodecs.swift", "HistorySyncCoordinator.swift",
+                 "CloudKitWebSyncTransports.swift", "CloudKitWebKeySync.swift"}
+if missing := sync_required - (sync_sources - set(sync_excluded)):
+    sys.exit("Shared sync sources excluded from portable builds: " + ", ".join(sorted(missing)))
+print(f"Portable boundary: {len(included)} shared Swift sources, {len(excluded)} explicit platform exclusions; "
+      f"sync: {len(sync_sources) - len(sync_excluded)} shared, {len(sync_excluded)} Apple-only")

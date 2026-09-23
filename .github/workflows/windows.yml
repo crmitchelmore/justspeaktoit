@@ -7,6 +7,8 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -15,10 +17,13 @@ on:
       - Sources/SpeakCLI/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
+      - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
       - Docs/windows-development.md
       - .github/workflows/windows.yml
@@ -28,6 +33,8 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -36,10 +43,13 @@ on:
       - Sources/SpeakCLI/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
+      - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
       - Docs/windows-development.md
       - .github/workflows/windows.yml

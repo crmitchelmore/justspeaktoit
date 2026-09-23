@@ -138,10 +138,18 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         }
     }
 
+    /// Stops another record's playback and speech when `recordID` is
+    /// selected. The window resets its controls on every row change, so the
+    /// selected record's own playback or speech is presented again.
     public func stop(unless recordID: UUID) {
         lock.withLock {
             if let state = speechState, state.speech.recordID != recordID { endSpeechLocked() }
             if let run = current, run.recordID != recordID { stopLocked(run) }
+            if let run = current, !run.stopped {
+                publishLocked(run.display)
+            } else if let state = speechState {
+                publishLocked(state.display)
+            }
         }
     }
 

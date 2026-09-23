@@ -103,7 +103,8 @@ plays the URL resolved by `DesktopRecordingStore.audioURL(for:)`.
 
 The native window keeps the controls record-bound: a playback report applies
 only while its record is still the selected row, selecting another row resets
-the display until the host reports again, and a History refresh that
+the display until the host reports again (row changes that coalesce back to
+the playing or speaking record present its state again), and a History refresh that
 re-selects the same record (after Retry, for example) keeps that record's last
 report because the sampler never re-sends an unchanged paused state. Stop is
 enabled only while a playback or Read aloud speech is active, and Play/Pause
@@ -171,7 +172,8 @@ the record active before and between segments, replace playback at the click,
 end speech on Stop, another row, capture, other playback or a newer speech
 and refuse its queued segments, start a segment of paused speech paused
 before any sound, apply a pause requested during a slow open before start,
-and keep speech shown while reporting a failed segment release. Portable `SpeakDesktop`
+keep speech shown while reporting a failed segment release, and present a
+re-selected speaking or paused row again. Portable `SpeakDesktop`
 tests drive the History lane and request owner under reversed and held
 schedules: Stop after a pending or running Play, Play after Stop, clicks on a
 newly selected row, supersession by a new row or Stop, bounded bursts, Stop

@@ -116,6 +116,32 @@ final class WindowsAudioPlaybackSpeechTests: XCTestCase {
         XCTAssertEqual(ended?.state, .idle)
     }
 
+    /// The window resets its controls on every row change, and a quick
+    /// A→B→A can reach the host as A alone. Its speech, or a paused run, is
+    /// then presented again rather than left looking idle with Stop disabled.
+    func testReselectingTheActiveRow_PresentsItsStateAgain() async throws {
+        let id = UUID()
+        let speech = try controller.beginSpeech(recordID: id)
+        _ = await settledDisplay()
+        var before = recorder.displays.count
+        controller.stop(unless: id)
+        let again = await settledDisplay()
+        XCTAssertGreaterThan(recorder.displays.count, before)
+        XCTAssertEqual(again?.state, .preparing)
+        controller.endSpeech(speech)
+
+        try controller.play(recordID: id, path: "history.wav", knownDuration: 1)
+        await playbackEventually { self.backend.handles.first?.counts.started == 1 }
+        XCTAssertTrue(controller.togglePause(recordID: id))
+        await playbackEventually { self.recorder.displays.last?.state == .paused }
+        _ = await settledDisplay()
+        before = recorder.displays.count
+        controller.stop(unless: id)
+        let paused = await settledDisplay()
+        XCTAssertGreaterThan(recorder.displays.count, before)
+        XCTAssertEqual(paused?.state, .paused)
+    }
+
     /// Pausing while a segment is synthesised pauses the speech: its next
     /// segment starts paused, never heard until the user resumes.
     func testPausedSpeech_StartsItsNextSegmentPausedWithoutSound() async throws {

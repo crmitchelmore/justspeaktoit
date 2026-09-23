@@ -63,9 +63,21 @@ quiet and the native job released, with the rendered seconds or the failure;
 Stop, a replacement, recording, close or cancelling the caller end it with
 `CancellationError`. Such a run presents no terminal status of its own.
 
+Read aloud begins a speech for the selected record at its click
+(`beginSpeech`). The current playback stops at once, and until the speech
+ends the record's display stays active, preparing or paused, while a segment
+is synthesised and between segments, so Pause and Stop stay available however
+long synthesis takes. Segments play through `playToCompletion(_:path:)`; one
+that arrives while the speech is paused starts paused and is never heard
+before Play. Stop, another row, a hidden or deleted row, recording, import, a
+History playback, another Read aloud and closing end the speech, and a
+segment of an ended speech is refused before its file is opened, so nothing
+queued behind a Stop can play.
+
 Pause and resume are commands acknowledged through a 100 ms sampler that
-presents only changes. Stop requests cancellation and resets the display only
-after output acknowledges silence. Only the user's Stop reports "Playback
+presents only changes. A pause requested before a job starts is applied
+before its native start, so the engine never renders it. Stop requests
+cancellation and resets the display only after output acknowledges silence. Only the user's Stop reports "Playback
 stopped."; stopping to make way for another row, a hidden or deleted row,
 recording or import leaves the status line to that work, while a finished or
 failed playback always reports. Replacement playback and microphone capture
@@ -94,9 +106,9 @@ only while its record is still the selected row, selecting another row resets
 the display until the host reports again, and a History refresh that
 re-selects the same record (after Retry, for example) keeps that record's last
 report because the sampler never re-sends an unchanged paused state. Stop is
-enabled only while a
-playback is active, and Play/Pause is enabled for a selected idle record or
-while a playback is active so it can always be paused. Playback reports never
+enabled only while a playback or Read aloud speech is active, and Play/Pause
+is enabled for a selected idle record or while either is active so it can
+always be paused. Playback reports never
 touch the status or transcript text. Controls use explicit identifiers 160 to
 162 and events 18 and 19, outside the existing control enumeration.
 
@@ -118,14 +130,16 @@ History Play and Read aloud share one request owner,
 file and starts only if the ticket is still current afterwards. Stop, another
 row, a hidden or deleted row, recording, import and closing end every
 request, so a start suspended across any of them never plays even though its
-row may still be selected. A Read aloud ended that way reports nothing when
-its speech finally unwinds, so it cannot overwrite the status of whatever
-ended it; the user's Stop itself reports that reading stopped.
-`playToCompletion` claims its run under the controller lock, so a segment
-whose task was cancelled just before admission replaces nothing and opens no
-file. Each Read aloud still creates its own shared-engine request, so a
-cancelled one may finish unwinding while the next is synthesised; only the
-controller decides what is audible.
+row may still be selected. A Read aloud ended by any of them reports nothing
+when its task finally unwinds, so it cannot overwrite the status of whatever
+ended it. The user's Stop, clickable while a segment is synthesised, cancels
+that synthesis and every segment still to come, and itself reports that
+reading stopped. `playToCompletion` claims its run under the controller
+lock, so a segment whose task was cancelled just before admission replaces
+nothing and opens no file. Each Read aloud still creates its own
+shared-engine request, so a cancelled one may finish unwinding while the next
+is synthesised; only the controller decides what is audible, and it refuses
+every segment of an ended speech.
 
 ## Verification
 
@@ -152,7 +166,12 @@ injected engine, including suspended open/close, completion before start returns
 cancellation before output acknowledgement, bounded rapid replacement, delayed
 same-record presentation, reentrant callbacks and retained release failures,
 an awaited caller cancelled before admission, and stops that make way for
-other work reporting nothing while the user's Stop does. Portable `SpeakDesktop`
+other work reporting nothing while the user's Stop does. Speech tests keep
+the record active before and between segments, replace playback at the click,
+end speech on Stop, another row, capture, other playback or a newer speech
+and refuse its queued segments, start a segment of paused speech paused
+before any sound, apply a pause requested during a slow open before start,
+and keep speech shown while reporting a failed segment release. Portable `SpeakDesktop`
 tests drive the History lane and request owner under reversed and held
 schedules: Stop after a pending or running Play, Play after Stop, clicks on a
 newly selected row, supersession by a new row or Stop, bounded bursts, Stop

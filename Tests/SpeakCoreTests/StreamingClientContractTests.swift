@@ -440,7 +440,8 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         let clients: [StreamingTranscriptionClient] = [
             SpeechmaticsLiveClient(apiKey: "k"),
             RevAILiveClient(accessToken: "k"),
-            MistralVoxtralLiveClient(apiKey: "k")
+            MistralVoxtralLiveClient(apiKey: "k"),
+            GladiaLiveClient(apiKey: "k")
         ]
         for client in clients {
             guard let finalizing = client as? FinalizingStreamingTranscriptionClient else {

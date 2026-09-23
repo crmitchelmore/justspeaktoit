@@ -5,17 +5,26 @@ Only binds IPv4 loopback. No third-party packages or external connections.
 The slow route deliberately applies socket backpressure; it is not a benchmark.
 The Voxtral route plays Mistral's realtime transcription peer for the actual
 shared Swift client, with a synthetic key and generated audio only.
+
+The /gladia* routes play Gladia's two-stage live protocol for the shared
+client: POST /<scenario>/v2/live creates a session and returns a single-use,
+tokenised WebSocket URL; that socket takes 100 ms PCM16 frames and
+stop_recording, and answers with transcripts and lifecycle events. The key is
+a synthetic marker; tokens and keys never enter the logs.
 """
 import argparse
 import base64
 import hashlib
 import json
 from pathlib import Path
+import re
+import secrets
 import socket
 import socketserver
 import struct
 import threading
 import time
+import urllib.parse
 
 
 MAX_PAYLOAD = 4 * 1024 * 1024
@@ -45,9 +54,69 @@ def mistral_pcm(index):
     return bytes((index * 31 + offset * 7) & 0xFF for offset in range(MISTRAL_FRAME_BYTES))
 
 
+# The Gladia two-stage live peer: a marked local POST creates a session, whose
+# single-use token the WebSocket upgrade must carry instead of the account key.
+GLADIA_ROUTE = re.compile(r"/(gladia(?:-failure|-hold|-held-session)?)/(v2/live|live)")
+GLADIA_SYNTHETIC_KEY = "synthetic-loopback-key"
+GLADIA_FRAME_BYTES = 3_200
+GLADIA_FRAMES = 10
+# The failure lands once every frame was received, so it can only reach the
+# client through its receive path, after the final that precedes it.
+GLADIA_FAILURE_AFTER_FRAMES = GLADIA_FRAMES
+GLADIA_SESSION_HOLD_SECONDS = 8
+GLADIA_MAX_MESSAGES = 64
+GLADIA_CREATED_AT = "2026-09-22T12:00:00Z"
+# Mirrored exactly, scalar for scalar, by GladiaWinHTTPRuntimeTests. Spelled
+# as escapes so the file stays ASCII and no editor can normalise a scalar.
+GLADIA_PARTIAL = "Caf\U000000E9 \U00002014 na\U000000EFve"
+GLADIA_FIRST_FINAL = ("Caf\U000000E9 \U00002014 na\U000000EFve e\U00000301 "
+                      "\U0001F469\U0001F3FD\U0000200D\U0001F4BB \U0000754C.")
+GLADIA_TAIL_PARTIAL = "\U000000DCbergr\U000000F6\U000000DFe"
+GLADIA_TAIL_FINAL = "\U000000DCbergr\U000000F6\U000000DFe \U00002013 \U000000BD \U00002713 \U0001F600"
+GLADIA_FAILURE_FINAL = "Vor dem Fehler \U00002014 \U000000E7a va."
+GLADIA_HELD_FINAL = "Held \U000023F8 final."
+
+
 def log(event, **fields):
     with LOG_LOCK:
         print(json.dumps({"event": event, **fields}, sort_keys=True), flush=True)
+
+
+def gladia_pcm(index):
+    """The 100 ms PCM16 frame the runtime test sends at position `index`."""
+    return bytes((offset * 7 + index * 31) & 0xFF for offset in range(GLADIA_FRAME_BYTES))
+
+
+def gladia_session_problems(body, headers):
+    """Checks the session request against the shared client's documented init."""
+    expected = {"model": "solaria-1", "encoding": "wav/pcm", "bit_depth": 16,
+                "sample_rate": 16_000, "channels": 1}
+    problems = [f"{name} must be {value!r}" for name, value in expected.items() if body.get(name) != value]
+    messages = body.get("messages_config") or {}
+    for flag in ("receive_partial_transcripts", "receive_final_transcripts", "receive_lifecycle_events"):
+        if messages.get(flag) is not True:
+            problems.append(f"{flag} must be true")
+    if messages.get("receive_post_processing_events") is not False:
+        problems.append("post-processing events must stay off")
+    language = body.get("language_config") or {}
+    if language.get("languages") != [] or language.get("code_switching") is not True:
+        problems.append("automatic language detection expected")
+    if headers.get("content-type") != "application/json":
+        problems.append("content-type must be application/json")
+    return problems
+
+
+def gladia_transcript(utterance_id, text, is_final):
+    return {"session_id": "loopback", "created_at": GLADIA_CREATED_AT, "type": "transcript",
+            "data": {"id": utterance_id, "is_final": is_final,
+                     "utterance": {"text": text, "start": 0.0, "end": 0.5, "language": "en", "channel": 0}}}
+
+
+def gladia_lifecycle(kind, data=None):
+    event = {"session_id": "loopback", "created_at": GLADIA_CREATED_AT, "type": kind}
+    if data is not None:
+        event["data"] = data
+    return event
 
 
 class ProbeHandler(socketserver.BaseRequestHandler):
@@ -103,18 +172,24 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         self.pending = bytearray(remainder)
         lines = header.decode("ascii").split("\r\n")
         method, path, version = lines[0].split(" ")
+        route, _, query = path.partition("?")
         headers = {}
         for line in lines[1:]:
             name, value = line.split(":", 1)
             name, value = name.lower(), value.strip()
             headers[name] = headers[name] + ", " + value if name in headers else value
+        gladia = GLADIA_ROUTE.fullmatch(route)
         # Only protocol fields and the synthetic marker are recorded. No
-        # credentials, arbitrary request headers or WebSocket keys enter logs.
-        log("handshake-request", method=method, path=path, version=version,
+        # credentials, arbitrary request headers or WebSocket keys enter logs,
+        # and a Gladia route's query, which carries its session token, is dropped.
+        log("handshake-request", method=method, path=route if gladia else path, version=version,
             connection=headers.get("connection"), upgrade=headers.get("upgrade"),
             websocketVersion=headers.get("sec-websocket-version"),
             subprotocol=headers.get("sec-websocket-protocol"),
             markerVerified=headers.get("x-jsti-probe") == "local-only")
+        if gladia and gladia.group(2) == "v2/live":
+            self.create_gladia_session(method, gladia.group(1), headers)
+            return None, None
         connection_tokens = {value.strip().lower() for value in headers.get("connection", "").split(",")}
         if (method != "GET" or version != "HTTP/1.1"
                 or headers.get("upgrade", "").lower() != "websocket"
@@ -126,9 +201,12 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         key = headers.get("sec-websocket-key", "")
         if len(base64.b64decode(key, validate=True)) != 16:
             raise ValueError("invalid handshake key")
-        route, _, query = path.partition("?")
+        scenario = None
         if route == MISTRAL_PATH:
             self.mistral_scenario = self.verify_mistral_request(query, headers)
+            path = route
+        elif gladia:
+            scenario = self.consume_gladia_token(gladia.group(1), query, headers)
             path = route
         elif path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
             raise ValueError("unknown route")
@@ -142,7 +220,7 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         self.request.sendall(response.encode("ascii"))
         self.upgraded = True
         log("handshake", path=path, headerVerified=True)
-        return path
+        return path, scenario
 
     def read_frame(self):
         first, second = self.read_exact(2)
@@ -292,9 +370,14 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         log("mistral-done", scenario=scenario)
 
     def run_connection(self):
-        path = self.handshake()
+        path, scenario = self.handshake()
+        if path is None:
+            return
         if path == MISTRAL_PATH:
             return self.run_mistral(self.mistral_scenario)
+        if scenario is not None:
+            self.run_gladia(path, scenario)
+            return
         self.slow = path == "/slow"
         if self.slow:
             time.sleep(0.25)
@@ -363,11 +446,141 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             message_opcode = None
         raise ValueError("message count exceeded bound")
 
+    # Gladia two-stage live protocol
+
+    def create_gladia_session(self, method, scenario, headers):
+        if method != "POST" or headers.get("x-jsti-probe") != "local-only":
+            raise ValueError("gladia sessions are created by a marked local POST")
+        length = int(headers.get("content-length", "0"))
+        if not 0 < length <= 16 * 1024:
+            raise ValueError("gladia session body out of bounds")
+        if headers.get("expect", "").lower() == "100-continue":
+            self.request.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+        body = json.loads(bytes(self.read_exact(length)).decode("utf-8"))
+        key_verified = headers.get("x-gladia-key") == GLADIA_SYNTHETIC_KEY
+        problems = gladia_session_problems(body, headers)
+        log("gladia-session-request", scenario=scenario, keyVerified=key_verified, configVerified=not problems)
+        if not key_verified:
+            self.respond_json(401, "Unauthorized", {"statusCode": 401, "message": "Unauthorized"})
+            return
+        if problems:
+            self.respond_json(422, "Unprocessable Entity", {"statusCode": 422, "message": "; ".join(problems)})
+            return
+        if scenario == "gladia-held-session":
+            log("gladia-session-held", scenario=scenario, seconds=GLADIA_SESSION_HOLD_SECONDS)
+            time.sleep(GLADIA_SESSION_HOLD_SECONDS)
+        token = secrets.token_hex(16)
+        with self.server.gladia_lock:
+            self.server.gladia_tokens[token] = scenario
+        port = self.server.server_address[1]
+        self.respond_json(201, "Created", {
+            "id": secrets.token_hex(8), "created_at": GLADIA_CREATED_AT,
+            "url": f"ws://127.0.0.1:{port}/{scenario}/live?token={token}"})
+        log("gladia-session-created", scenario=scenario)
+
+    def respond_json(self, status, reason, payload):
+        body = json.dumps(payload).encode("utf-8")
+        head = (f"HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n")
+        self.request.sendall(head.encode("ascii") + body)
+
+    def consume_gladia_token(self, scenario, query, headers):
+        token = urllib.parse.parse_qs(query).get("token", [""])[0]
+        with self.server.gladia_lock:
+            issued = self.server.gladia_tokens.pop(token, None)
+        account_key_absent = "x-gladia-key" not in headers and "authorization" not in headers
+        log("gladia-socket-request", scenario=scenario, tokenVerified=issued == scenario,
+            accountKeyAbsent=account_key_absent)
+        if issued != scenario:
+            raise ValueError("unknown or reused gladia session token")
+        if not account_key_absent:
+            raise ValueError("account credential forwarded to the session socket")
+        return scenario
+
+    def run_gladia(self, route, scenario):
+        self.send_gladia(gladia_lifecycle("start_session"))
+        digest = hashlib.sha256()
+        frames = 0
+        for _ in range(GLADIA_MAX_MESSAGES):
+            # A client close raises ConnectionError, which ends the session.
+            opcode, payload = self.read_message()
+            if opcode == 2:
+                if payload != gladia_pcm(frames):
+                    log("gladia-pcm-mismatch", scenario=scenario, frame=frames + 1, bytes=len(payload))
+                    self.send_gladia({"type": "error", "error": {"message": f"PCM frame {frames + 1} differs"}})
+                    return
+                frames += 1
+                digest.update(payload)
+                log("gladia-audio", scenario=scenario, frame=frames, bytes=len(payload))
+                if self.reply_while_streaming(scenario, frames):
+                    return
+                continue
+            if opcode != 1 or json.loads(payload.decode("utf-8")) != {"type": "stop_recording"}:
+                raise ValueError("unexpected gladia client message")
+            log("gladia-stop-recording", scenario=scenario, frames=frames,
+                bytes=frames * GLADIA_FRAME_BYTES, sha256=digest.hexdigest())
+            self.finish_gladia(route, scenario, frames)
+            return
+        raise ValueError("gladia message count exceeded bound")
+
+    def reply_while_streaming(self, scenario, frames):
+        """Sends the scenario's live transcripts; answers whether the session ended."""
+        if scenario == "gladia" and frames == 2:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_PARTIAL, False))
+        elif scenario == "gladia" and frames == 4:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_FIRST_FINAL, True))
+        elif scenario == "gladia-hold" and frames == 1:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_HELD_FINAL, True))
+        elif scenario == "gladia-failure" and frames == GLADIA_FAILURE_AFTER_FRAMES:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_FAILURE_FINAL, True))
+            self.send_frame(8, struct.pack("!H", 1011) + b"synthetic failure")
+            log("gladia-terminal-failure", scenario=scenario, frames=frames)
+            return True
+        return False
+
+    def finish_gladia(self, route, scenario, frames):
+        if scenario == "gladia-hold":
+            # Never answers stop_recording: the client must bound its own wait,
+            # and its close or cancellation ends the session.
+            log("gladia-holding-completion", scenario=scenario)
+            for _ in range(GLADIA_MAX_MESSAGES):
+                self.read_message()
+            raise ValueError("gladia message count exceeded bound")
+        if frames != GLADIA_FRAMES:
+            self.send_gladia({"type": "error", "error": {
+                "message": f"expected {GLADIA_FRAMES} PCM frames, received {frames}"}})
+            return
+        self.send_fragmented_gladia(gladia_transcript("00-00000002", GLADIA_TAIL_PARTIAL, False))
+        self.send_fragmented_gladia(gladia_transcript("00-00000002", GLADIA_TAIL_FINAL, True))
+        self.send_gladia(gladia_lifecycle("end_recording", {
+            "reason": "user_request", "received_total_bytes": frames * GLADIA_FRAME_BYTES}))
+        self.send_gladia(gladia_lifecycle("end_session"))
+        self.send_frame(8, struct.pack("!H", 1000) + b"session-complete")
+        log("gladia-session-complete", scenario=scenario, frames=frames)
+        _, reply_opcode, _ = self.read_frame()
+        log("close-acknowledged" if reply_opcode == 8 else "close-unacknowledged", path=route)
+
+    def send_gladia(self, payload):
+        self.send_frame(1, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+    def send_fragmented_gladia(self, payload):
+        """Splits one text message inside UTF-8 scalars across continuation frames."""
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        continuation = [index for index, byte in enumerate(data) if 0x80 <= byte < 0xC0]
+        if len(continuation) < 2:
+            raise ValueError("fragmented transcript needs multi-byte text")
+        cuts = sorted({continuation[0], continuation[len(continuation) // 2]})
+        bounds = list(zip([0] + cuts, cuts + [len(data)]))
+        for number, (start, end) in enumerate(bounds):
+            self.send_frame(1 if number == 0 else 0, data[start:end], final=number == len(bounds) - 1)
+
 
 class ProbeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = False
     slots = threading.BoundedSemaphore(8)
+    gladia_lock = threading.Lock()
+    gladia_tokens = {}
 
 
 def main():

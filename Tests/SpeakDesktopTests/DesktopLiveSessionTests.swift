@@ -261,10 +261,13 @@ final class DesktopLiveSessionTests: XCTestCase {
 }
 
 extension DesktopLiveSessionTests {
+    // One client-type expectation per projected provider, so the branch count
+    // grows with the route list rather than with any logic.
+    // swiftlint:disable:next cyclomatic_complexity
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
             guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
-            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral]
+            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia]
                 .contains(route.provider) || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
@@ -288,6 +291,7 @@ extension DesktopLiveSessionTests {
             if route.provider == .soniox { XCTAssertTrue(client is SonioxLiveClient) }
             if route.provider == .elevenlabs { XCTAssertTrue(client is ElevenLabsLiveClient) }
             if route.provider == .mistral { XCTAssertTrue(client is MistralVoxtralLiveClient) }
+            if route.provider == .gladia { XCTAssertTrue(client is GladiaLiveClient) }
             if route.provider == .openai {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)
                 XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)

@@ -15,7 +15,7 @@ public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral: return true
+        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia: return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
         }
@@ -33,7 +33,11 @@ public enum DesktopLiveTranscription {
     /// `language` is the Speak selection as stored (`en_GB`, `Automatic`, nil);
     /// a route that takes a language hint maps it to its own code and omits
     /// it when the service cannot serve it, so a host never sends a raw locale.
-    public static func makeClient(
+    ///
+    /// One case per implemented route is the point of this switch: the
+    /// route-to-client mapping stays auditable in one place, so its length and
+    /// branch count grow with the provider list rather than with any logic.
+    public static func makeClient( // swiftlint:disable:this cyclomatic_complexity function_body_length
         model: String, apiKey: String, language: String? = nil,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) -> (any FinalizingStreamingTranscriptionClient)? {
@@ -83,6 +87,15 @@ public enum DesktopLiveTranscription {
             // no language field, so a saved selection is never sent.
             return MistralVoxtralLiveClient(
                 apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .gladia:
+            // The session request is plain HTTPS; only the single-use socket
+            // it returns uses the host's native WebSocket transport. The
+            // route's canonical capability accepts no language hint yet, so
+            // `hint` is nil here and Gladia detects the language itself.
+            return GladiaLiveClient(
+                apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                initiateSession: GladiaLiveClient.sessionInitiator(session: .shared), makeConnection: makeConnection
             )
         default: return nil
         }

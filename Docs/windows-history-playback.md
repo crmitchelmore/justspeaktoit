@@ -65,7 +65,10 @@ Stop, a replacement, recording, close or cancelling the caller end it with
 
 Pause and resume are commands acknowledged through a 100 ms sampler that
 presents only changes. Stop requests cancellation and resets the display only
-after output acknowledges silence. Replacement playback and microphone capture
+after output acknowledges silence. Only the user's Stop reports "Playback
+stopped."; stopping to make way for another row, a hidden or deleted row,
+recording or import leaves the status line to that work, while a finished or
+failed playback always reports. Replacement playback and microphone capture
 wait for that acknowledgement, with a three-second deadline that reports an
 error instead of pretending output stopped. Decoder flush and resource release
 can continue in the background. Cancelling a suspended file open forbids its
@@ -97,6 +100,33 @@ while a playback is active so it can always be paused. Playback reports never
 touch the status or transcript text. Controls use explicit identifiers 160 to
 162 and events 18 and 19, outside the existing control enumeration.
 
+## Event order and request ownership
+
+The window hands row selection, version, Play/Pause, Stop and Read aloud to
+the host through one ordered History lane: `DesktopHistoryEvent` events
+performed one at a time by a `DesktopEventDispatcher` (both `SpeakDesktop`).
+A click on a newly selected row therefore reaches the host after that
+selection instead of being refused for the previous row, and Stop can never
+be overtaken by the Play or Read aloud clicked before it. The lane stays
+bounded and never waits for audio: row and version changes coalesce to the
+latest, a new row drops clicks still aimed at the row it replaces, Stop drops
+the clicks before it, and at most eight Play/Pause or Read aloud clicks wait
+while the host catches up; further clicks are ignored until it does.
+
+History Play and Read aloud share one request owner,
+`DesktopPlaybackRequests`. Play takes a ticket before it resolves the audio
+file and starts only if the ticket is still current afterwards. Stop, another
+row, a hidden or deleted row, recording, import and closing end every
+request, so a start suspended across any of them never plays even though its
+row may still be selected. A Read aloud ended that way reports nothing when
+its speech finally unwinds, so it cannot overwrite the status of whatever
+ended it; the user's Stop itself reports that reading stopped.
+`playToCompletion` claims its run under the controller lock, so a segment
+whose task was cancelled just before admission replaces nothing and opens no
+file. Each Read aloud still creates its own shared-engine request, so a
+cancelled one may finish unwinding while the next is synthesised; only the
+controller decides what is audible.
+
 ## Verification
 
 `jsti_audio_playback_self_test` runs without a speaker on short low-amplitude
@@ -120,7 +150,13 @@ the bridge (refused inputs, codec errors with or without an endpoint,
 pre-start cancellation) and the controller's ownership rules against an
 injected engine, including suspended open/close, completion before start returns,
 cancellation before output acknowledgement, bounded rapid replacement, delayed
-same-record presentation, reentrant callbacks and retained release failures.
+same-record presentation, reentrant callbacks and retained release failures,
+an awaited caller cancelled before admission, and stops that make way for
+other work reporting nothing while the user's Stop does. Portable `SpeakDesktop`
+tests drive the History lane and request owner under reversed and held
+schedules: Stop after a pending or running Play, Play after Stop, clicks on a
+newly selected row, supersession by a new row or Stop, bounded bursts, Stop
+during a suspended start and a Read aloud ended by other work.
 Hardware playback tests probe the endpoint explicitly and
 skip only the audible checks when Windows reports no endpoint; a probe
 failure or a playback failure with an endpoint present is a test failure.

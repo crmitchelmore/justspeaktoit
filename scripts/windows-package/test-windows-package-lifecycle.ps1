@@ -335,6 +335,9 @@ function Assert-Installed([string] $Label, $Expected, [string] $Layout) {
 }
 
 function Assert-Removed([string] $Label, $Package) {
+    # The package object reads its location from the live registration, which
+    # is gone after removal; keep the path it had while installed.
+    $installLocation = [string] $Package.InstallLocation
     $deployment = Invoke-Deployment "Uninstall $Label" { Remove-AppxPackage -Package $Package.PackageFullName }
     Assert-Check "$Label uninstalls through the normal package removal" $deployment.succeeded $deployment
     Assert-Check "$Label leaves no registered version" ((Get-Registrations).Count -eq 0) @((Get-Registrations) | ForEach-Object { $_.PackageFullName })
@@ -342,7 +345,8 @@ function Assert-Removed([string] $Label, $Package) {
     Assert-Check "$Label removes its Start menu entry" (-not $entry.present) $entry
     Assert-Check "$Label removes its execution alias" (Wait-PathState $aliasPath $false 60) $aliasPath
     Assert-Check "$Label removes package-private app data" (Wait-PathState $packageDataDirectory $false 120) $packageDataDirectory
-    Add-Check "$Label removes its installed files" (Wait-PathState $Package.InstallLocation $false 120) $Package.InstallLocation
+    Add-Check "$Label removes its installed files" (
+        $installLocation -and (Wait-PathState $installLocation $false 120)) $installLocation
 }
 
 # --- user data ---------------------------------------------------------------------------------------
@@ -738,6 +742,8 @@ try {
     Invoke-StartMenuLaunch 'The base version after refused upgrades' $installed $rows $transcript | Out-Null
 
     # --- phase 4: upgrade -----------------------------------------------------------------------------
+    # Read before the upgrade: the object's location follows the live registration.
+    $previousLocation = [string] $installed.InstallLocation
     $deployment = Invoke-Deployment 'Upgrade to the next version' {
         Add-AppxPackage -Path $signedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'The upgrade installs' $deployment.succeeded $deployment
@@ -745,13 +751,13 @@ try {
     $installed = Assert-Installed 'The upgraded version' $upgrade $upgradeLayout
     Assert-Check 'The upgrade keeps the package family and moves to a new install location' (
         $installed.PackageFamilyName -eq $previous.PackageFamilyName -and
-        $installed.InstallLocation -ne $previous.InstallLocation) @($previous.InstallLocation, $installed.InstallLocation)
+        $installed.InstallLocation -ne $previousLocation) @($previousLocation, $installed.InstallLocation)
     Assert-UserData 'The upgrade' 'recovered'
     Assert-AliasSelfTests 'upgrade' $installed
     Invoke-StartMenuLaunch 'The upgraded version' $installed $rows $transcript | Out-Null
     Assert-UserData 'The upgraded launch' 'recovered'
     Add-Check 'The previous version''s files are removed after the upgrade' (
-        Wait-PathState $previous.InstallLocation $false 120) $previous.InstallLocation
+        $previousLocation -and (Wait-PathState $previousLocation $false 120)) $previousLocation
 
     # --- phase 5: uninstall keeps data; reinstall finds it ----------------------------------------------
     Assert-Removed 'The upgraded version' $installed

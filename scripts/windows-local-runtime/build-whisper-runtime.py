@@ -137,6 +137,9 @@ def developer_environment(kind, base):
     if environment.get("VSCMD_ARG_TGT_ARCH", "").lower() != kind:
         raise RuntimeError_("vcvarsall did not enter the %s developer environment" % kind)
     return environment
+
+
+def checkout(pins, source):
     whisper = pins["whisperCpp"]
     if not (source / ".git").exists():
         source.mkdir(parents=True, exist_ok=True)
@@ -219,13 +222,13 @@ def compiler_version(build):
     return None, None
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--work", required=True, type=pathlib.Path, help="private scratch directory")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     parser.add_argument("--architecture", default="x64", help="pinned architecture to build (default: x64)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if os.name != "nt":
         raise SystemExit("build-whisper-runtime.py builds Windows DLLs and runs on Windows only")
     pins, policy = load_pins(), load_policy()

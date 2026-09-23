@@ -57,19 +57,24 @@ enum JSTIWindowEvent {
 typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
 int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
                     JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
-/* Optional pre-run mode catalogue. is_live contains only 0/1 and must have the
- * same count/order as window_run's full model array. Preferences are global
- * indices of their respective mode; -1 chooses that mode's first model.
- * Null/count0 restores the legacy all-batch catalogue. Inputs are copied.
- * window_run's selected_index overrides that mode's preference. Every callback
- * continues to report a global model index, never a filtered combo row. */
-int jsti_window_set_model_modes(const int *is_live, size_t count,
-                                int preferred_batch_index, int preferred_live_index);
+/* Optional pre-run mode catalogue with the same count/order as window_run's
+ * full model array. Each mode is 0 remote batch, 1 remote live, 2 local batch
+ * or 3 local live: bit 0 is live, bit 1 is local. The window shows a Source
+ * picker (Remote, Local) when both sources have models, then a Mode picker
+ * (Batch, Live) when the selected source has both. Preferences are global
+ * indices of a remote batch, a remote live and a local batch row; -1 chooses
+ * that mode's first model. Null/count0 restores the legacy all-batch
+ * catalogue. Inputs are copied. window_run's selected_index overrides that
+ * mode's preference. Every callback continues to report a global model index,
+ * never a filtered combo row. */
+int jsti_window_set_model_modes(const int *modes, size_t count, int preferred_batch_index,
+                                int preferred_live_index, int preferred_local_index);
 typedef struct JSTIModelRow {
     const char *id;
     const char *name;
     int is_live;
     int display_order; /* -1 hidden; otherwise unique visible rank, independent of slot index. */
+    int is_local; /* 1 for an on-device model; the Source picker separates Local from Remote. */
 } JSTIModelRow;
 /* Deep-copies a model snapshot. Configure before window_run, then append-only
  * identity slots may be updated from any thread. Existing IDs/modes must stay
@@ -258,6 +263,36 @@ typedef void (*JSTIVoiceOutputCallback)(int voice, void *context);
 int jsti_window_set_voice_output(const char *const *voice_names, size_t voice_count, int selected,
                                  JSTIVoiceOutputCallback callback, void *context);
 void jsti_window_clear_voice_output(void);
+/* Local models dialog: rows of the on-device models the host offers, in the
+ * host's order, with their install state. Thread safe; an open dialog refreshes
+ * in place. The callback runs on the UI thread with one action and the row
+ * index (-1 for the GPU choice); it must return promptly and never block on a
+ * Swift actor. The runtime status is also shown under the model picker while
+ * the Local source is selected. The context is borrowed like the voice
+ * dialog's. */
+enum JSTILocalModelState {
+    JSTI_LOCAL_MODEL_NOT_INSTALLED = 0,
+    JSTI_LOCAL_MODEL_PARTIAL = 1,
+    JSTI_LOCAL_MODEL_DOWNLOADING = 2,
+    JSTI_LOCAL_MODEL_INSTALLED = 3
+};
+enum JSTILocalModelAction {
+    JSTI_LOCAL_MODEL_DOWNLOAD = 1,
+    JSTI_LOCAL_MODEL_CANCEL = 2,
+    JSTI_LOCAL_MODEL_REMOVE = 3,
+    JSTI_LOCAL_MODEL_GPU_ON = 4,
+    JSTI_LOCAL_MODEL_GPU_OFF = 5
+};
+typedef struct JSTILocalModelRow {
+    const char *name;
+    const char *detail;
+    const char *about;
+    int state;
+} JSTILocalModelRow;
+typedef void (*JSTILocalModelCallback)(int action, int model_index, void *context);
+int jsti_window_set_local_models(const JSTILocalModelRow *rows, size_t count, const char *runtime_status,
+                                 int use_gpu, JSTILocalModelCallback callback, void *context);
+void jsti_window_clear_local_models(void);
 /* Thread safe: checks or clears the Settings menu's automation item. */
 int jsti_window_set_automation(int enabled);
 /* The localised key name, for example "Ctrl+Alt+Space". */
@@ -761,6 +796,62 @@ int jsti_window_self_test(char *error, size_t error_capacity);
  * window and controls. Call on the UI thread after READY. Never captures the
  * desktop or another app; caller provides a smoke-test state without secrets. */
 int jsti_window_save_snapshot(const char *path, char *error, size_t error_capacity);
+
+/* Streaming SHA-256 through Windows CNG (BCrypt). One object per digest;
+ * finish writes 64 lowercase hex characters plus a terminator and ends the
+ * object's use. destroy is always required. Never logs input bytes. */
+typedef struct JSTISHA256 JSTISHA256;
+JSTISHA256 *jsti_sha256_create(char *error, size_t error_capacity);
+int jsti_sha256_update(JSTISHA256 *hasher, const void *bytes, size_t count, char *error, size_t error_capacity);
+int jsti_sha256_finish(JSTISHA256 *hasher, char *hex, size_t hex_capacity, char *error, size_t error_capacity);
+void jsti_sha256_destroy(JSTISHA256 *hasher);
+
+/* On-device transcription through whisper.cpp, loaded at run time.
+ *
+ * open loads whisper.dll (and the ggml DLLs beside it) from an absolute
+ * directory with a restricted search path, checks the exact pinned
+ * whisper.cpp version and registers ggml's dynamic backends from that
+ * directory only: every CPU variant and, when allow_gpu is 1 and the system
+ * Vulkan loader exists, Vulkan. A missing Vulkan loader is not an error; the
+ * CPU runs instead. The runtime is process-wide and stays loaded once opened;
+ * a second open must name the same directory. Implicit Vulkan layers (overlay
+ * and capture hooks) are disabled for this process unless the user already
+ * configured VK_LOADER_LAYERS_DISABLE. Returns NULL with an error when the
+ * runtime is absent or does not match. */
+typedef struct JSTIWhisperRuntime JSTIWhisperRuntime;
+JSTIWhisperRuntime *jsti_whisper_runtime_open(const char *directory, int allow_gpu,
+                                              char *error, size_t error_capacity);
+/* Writes a short UTF-8 description such as "whisper.cpp 1.9.4; GPU: Vulkan0
+ * (NVIDIA ...); CPU" listing the registered devices. */
+int jsti_whisper_runtime_describe(JSTIWhisperRuntime *runtime, char *text, size_t capacity);
+/* 1 when a GPU device is registered and would be used, otherwise 0. */
+int jsti_whisper_runtime_uses_gpu(JSTIWhisperRuntime *runtime);
+
+/* A cancellation token for one transcription. cancel is thread safe and may
+ * be called before, during or after transcribe. */
+typedef struct JSTIWhisperJob JSTIWhisperJob;
+JSTIWhisperJob *jsti_whisper_job_create(void);
+void jsti_whisper_job_cancel(JSTIWhisperJob *job);
+void jsti_whisper_job_destroy(JSTIWhisperJob *job);
+
+enum JSTIWhisperResult {
+    JSTI_WHISPER_OK = 0,
+    JSTI_WHISPER_FAILED = -1,
+    JSTI_WHISPER_CANCELLED = 1
+};
+/* Transcribes 16 kHz mono float samples with the model at model_path (UTF-8,
+ * absolute; read through a wide-character path). The loaded model is cached
+ * for later calls with the same path and released when another model is used
+ * or release_model is called. Calls are serialised. language is a Whisper code
+ * such as "en", or NULL/empty to detect it; an unknown code detects it.
+ * On success *text receives a heap UTF-8 string owned by the caller (free with
+ * jsti_whisper_free_text). Returns a JSTIWhisperResult. */
+int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *model_path, const float *samples,
+                            size_t sample_count, const char *language, int threads, JSTIWhisperJob *job,
+                            char **text, char *error, size_t error_capacity);
+void jsti_whisper_free_text(char *text);
+/* Frees the cached model, waiting for a running transcription to finish. */
+void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime);
 
 #ifdef __cplusplus
 }

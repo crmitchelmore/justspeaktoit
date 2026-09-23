@@ -73,5 +73,7 @@ extension WindowsAppController {
         )
     }
 
-    func preferredModelIDs() -> (batch: String?, live: String?) { (settings.batchModel, settings.liveModel) }
+    func preferredModelIDs() -> WindowsModelPreferences {
+        WindowsModelPreferences(batch: settings.batchModel, live: settings.liveModel, local: settings.localModel)
+    }
 }

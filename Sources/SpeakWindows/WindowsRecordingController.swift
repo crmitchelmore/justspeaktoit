@@ -9,8 +9,7 @@ extension WindowsAppController {
         target: WindowsInsertionTarget?, deviceID: String, profile: DesktopProfileSession,
         textOutput: WindowsTextOutputOptions, trigger: HotKeySessionTrigger = .other
     ) async throws {
-        let key = try effects.apiKey(name: credentialIdentifier(for: profile.modelIdentifier))
-        guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
+        let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
         let id = UUID()
         let filename = id.uuidString + ".wav"
         let audio = directory.appendingPathComponent("History").appendingPathComponent(filename)

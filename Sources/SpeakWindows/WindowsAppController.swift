@@ -17,6 +17,8 @@ actor WindowsAppController {
         var hotKey: WindowsHotKeySettings? // Absent keeps Ctrl+Alt+Space with press-to-toggle.
         var voiceOutput: WindowsVoiceOutputSettings? // The Voice dialog; absent uses the catalogue default.
         var automationEnabled: Bool? // Settings menu; `speak` is refused until allowed.
+        var localModel: String? // The last on-device model chosen under Source: Local.
+        var localUseGPU: Bool? // Local models dialog; absent lets whisper.cpp use Vulkan when available.
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -80,6 +82,8 @@ actor WindowsAppController {
     var liveFinalisation: DesktopLiveSession?
     var outputSlot = WindowsOutputState()
     var cloudSync = WindowsCloudSyncHooks() // Installed once iCloud sync is configured.
+    /// Downloads, progress and the on-device runtime for Local models.
+    var localModels = WindowsLocalModelsState()
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     let playback = WindowsAudioPlaybackController(
@@ -215,9 +219,7 @@ extension WindowsAppController {
         do {
             try await playback.stopAndWait()
             guard !closed else { return }
-            guard !(try effects.apiKey(name: credentialIdentifier(for: settings.model))).isEmpty else {
-                throw TranscriptionProviderError.apiKeyMissing
-            }
+            _ = try requireCredentialOrLocalModel(settings.model)
             let source = URL(fileURLWithPath: path)
             try WindowsNative.validateImport(source)
             let id = UUID()
@@ -331,9 +333,7 @@ extension WindowsAppController {
             transcript = selectedHistoryID.flatMap { history[$0]?.displayText } ?? ""
             transcriptVariant = .processed
             refreshHistory(selectRecord: true)
-            let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
-            var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
-                : "Ready. \(hotKeySettings().readyHint) \(records.count) saved recordings."
+            var status = try readyStatus(savedRecordings: records.count)
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
@@ -347,9 +347,7 @@ extension WindowsAppController {
         guard !closed, !busy, recording == nil, WindowsModels.all.indices.contains(index) else { return }
         let changed = settings.model != WindowsModels.all[index].id
         settings.model = WindowsModels.all[index].id
-        if WindowsModels.isLive(settings.model) { settings.liveModel = settings.model } else {
-            settings.batchModel = settings.model
-        }
+        rememberModelSlot()
         do {
             try JSONEncoder().encode(settings).write(
                 to: directory.appendingPathComponent("settings.json"), options: .atomic

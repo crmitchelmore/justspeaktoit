@@ -288,6 +288,7 @@ enum SpeakWindowsMain {
                 try await WindowsBundleSelfTest.run()
                 return
             }
+            if try await WindowsLocalSelfTest.handle(CommandLine.arguments) { return }
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
                 try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
@@ -295,6 +296,7 @@ enum SpeakWindowsMain {
                 try await WindowsTextOutputSelfTest.run()
                 try await WindowsHotKeySelfTest.run()
                 try WindowsNative.storageMediaAndAutomationSelfTests()
+                try await WindowsLocalSelfTest.run()
                 guard !DesktopTranscription.batchModels.isEmpty else {
                     throw WindowsNativeError(message: "No canonical desktop models available.")
                 }
@@ -356,8 +358,7 @@ enum SpeakWindowsMain {
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
         await restoreServices(holder)
-        let preferences = await controller.preferredModelIDs()
-        try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
+        try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
         let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
         let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in

@@ -58,8 +58,9 @@ extension WindowsAppController {
 
     var profileCapabilities: DesktopProfileCapabilities {
         DesktopProfileCapabilities(
-            batchModels: WindowsModels.visible.filter { !WindowsModels.isLive($0.id) },
+            batchModels: WindowsModels.visible.filter { !WindowsModels.isLive($0.id) && !WindowsModels.isLocal($0.id) },
             liveModels: WindowsModels.live, polishModels: DesktopPostProcessing.remoteModels,
+            localModels: WindowsModels.local,
             liveLanguageModelIDs: DesktopLiveTranscription.languageHintModelIDs
         )
     }

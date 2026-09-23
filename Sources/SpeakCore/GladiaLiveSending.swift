@@ -63,11 +63,15 @@ extension GladiaLiveClient {
 
     /// Outside the lock. A completion that arrives before `send` returns is
     /// parked and handled here, so a synchronously completing transport sends
-    /// the whole queue from this loop instead of recursing.
+    /// the whole queue from this loop instead of recursing. A send decided
+    /// before its run was retired is dropped rather than handed to the socket.
     private func sendLoop(_ active: GladiaLiveRun, _ first: GladiaLiveRun.PendingSend) {
         var next: GladiaLiveRun.PendingSend? = first
         while let send = next {
             let generation = send.generation
+            guard perform({ _ in isCurrent(active) && active.sending && active.sendGeneration == generation }) else {
+                return
+            }
             send.connection.send(send.message) { [weak self, weak active] error in
                 guard let self, let active else { return }
                 self.sendCompleted(error, generation: generation, active)

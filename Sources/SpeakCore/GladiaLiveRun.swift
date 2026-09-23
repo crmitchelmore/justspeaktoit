@@ -57,6 +57,17 @@ final class GladiaLiveRun: @unchecked Sendable {
     var onTranscript: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
 
+    /// `onTranscript` calls decided under the lock that have not returned.
+    /// A failure's report waits for them, so an error never overtakes a
+    /// transcript the run had already delivered to its host.
+    var transcriptCallbacksInFlight = 0
+    /// A failure's report, held until those transcript callbacks return.
+    var deferredReport: (() -> Void)?
+    /// A failure retired the run and its `onError` has not returned yet.
+    /// Finish waiters, whether registered before or joining now, stay parked
+    /// until it has, so no finish can return ahead of the error.
+    var reportingFailure = false
+
     let maximumAudioBytes: Int
 
     /// Five seconds of PCM16 mono, the bound this route has always held
@@ -75,7 +86,9 @@ final class GladiaLiveRun: @unchecked Sendable {
 /// Work decided under the client's lock and performed after releasing it:
 /// transport calls, deadlines, callbacks and waiter resumption. Nothing a
 /// callback or transport does can therefore re-enter a held lock, and effects
-/// run in the order the state changed.
+/// run in the order the state changed. An effect may run after its run was
+/// retired (behind a slow scheduler or callback), so every effect that
+/// touches a transport re-checks its run immediately beforehand.
 struct GladiaLiveEffects {
     private var actions: [() -> Void] = []
 

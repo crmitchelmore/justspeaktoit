@@ -61,7 +61,9 @@ def download(entry, directory):
     if destination.exists() and destination.stat().st_size == entry["bytes"] and digest(destination) == entry["sha256"]:
         return destination
     partial = destination.with_name(entry["name"] + ".partial")
-    with urllib.request.urlopen(entry["url"], timeout=300) as response, partial.open("wb") as output:
+    # sdk.lunarg.com refuses urllib's default User-Agent with 403; the bytes are pinned by SHA-256 either way.
+    request = urllib.request.Request(entry["url"], headers={"User-Agent": "justspeaktoit-windows-runtime-build/1"})
+    with urllib.request.urlopen(request, timeout=300) as response, partial.open("wb") as output:
         count = 0
         while chunk := response.read(1 << 20):
             count += len(chunk)

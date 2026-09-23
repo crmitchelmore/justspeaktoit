@@ -93,8 +93,17 @@ public final class WindowsWhisperRuntime: @unchecked Sendable {
         }
     }
 
-    /// Frees the cached model after the current transcription, if any.
+    /// Frees the cached model after the current transcription, if any,
+    /// whichever model it is.
     public func releaseModel() { jsti_whisper_runtime_release_model(native) }
+
+    /// Frees the cached model after the current transcription only if it was
+    /// loaded from `modelFile`, which may already be deleted. A model loaded in
+    /// its place stays cached. Returns whether that model was freed.
+    @discardableResult
+    public func releaseModel(loadedFrom modelFile: URL) -> Bool {
+        modelFile.path.withCString { jsti_whisper_runtime_release_model_at(native, $0) } == 1
+    }
 
     /// Runs whisper.cpp on a dedicated thread; task cancellation aborts it.
     public func transcribe(

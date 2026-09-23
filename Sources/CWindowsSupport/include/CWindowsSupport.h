@@ -852,6 +852,13 @@ int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *model_path,
 void jsti_whisper_free_text(char *text);
 /* Frees the cached model, waiting for a running transcription to finish. */
 void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime);
+/* Frees the cached model only if it was loaded from model_path (the path given
+ * to jsti_whisper_transcribe), waiting for a running transcription to finish.
+ * The check and the release are atomic with loading, so a model loaded in its
+ * place stays cached. The loaded model's file is closed once loaded, so it may
+ * already be deleted. Returns 1 when that model was freed, 0 when another model
+ * or none is cached, and -1 for an invalid argument. */
+int jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime, const char *model_path);
 
 #ifdef __cplusplus
 }

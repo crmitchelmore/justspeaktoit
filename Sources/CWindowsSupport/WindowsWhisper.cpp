@@ -278,6 +278,18 @@ extern "C" void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime) 
     releaseContext(*runtime);
 }
 
+// Checked under the lock transcribe loads under, with its path comparison, so
+// a model that replaced this one in the cache is never freed in its place.
+extern "C" int jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime, const char *modelPath) {
+    std::wstring path;
+    if (!runtime || !modelPath || !jsti::wide(modelPath, path) || path.empty()) return -1;
+    normalisePath(path);
+    std::lock_guard<std::mutex> lock(runtime->mutex);
+    if (!runtime->context || _wcsicmp(runtime->contextPath.c_str(), path.c_str()) != 0) return 0;
+    releaseContext(*runtime);
+    return 1;
+}
+
 extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *modelPath, const float *samples,
                                        size_t sampleCount, const char *language, int threads, JSTIWhisperJob *job,
                                        char **text, char *error, size_t capacity) {

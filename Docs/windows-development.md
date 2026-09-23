@@ -460,10 +460,13 @@ What the Windows app does:
   `SyncSchema.EncryptedSecret.syncableIdentifiers`. It never writes keys to
   iCloud. A key you save by hand is never removed by a later deletion on the
   Mac.
-- Sync state (the cursor, the bound iCloud user and acknowledgements) is in
-  `%LOCALAPPDATA%\JustSpeakToIt\CloudSync\state.json`. If another Apple ID
-  signs in, that state is reset, and this PC's History uploads to the new
-  account.
+- Sync state (the cursor, the bound iCloud user, acknowledgements and which
+  keys were imported) is in `%LOCALAPPDATA%\JustSpeakToIt\CloudSync\state.json`.
+  Signing out keeps it. If another Apple ID signs in, that state is reset and
+  nothing on this PC is deleted; every syncable History record then uploads to
+  the new account, both recordings made on this PC and transcripts downloaded
+  from the previous account. That second part is open for review; see
+  [Changing Apple ID](windows-cloudkit-sync.md#changing-apple-id).
 
 The CloudKit API token is not a Mac credential. Apple apps use the operating
 system's CloudKit session, and no token from them can be reused here. The API

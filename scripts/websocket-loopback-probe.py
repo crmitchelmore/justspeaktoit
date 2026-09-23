@@ -21,6 +21,11 @@ client's own path and query: `connected` is held and nothing may arrive
 before it, then exact 100 ms PCM16 frames and the literal EOS, answered by
 the scenario's hypotheses and closure. The query carries the synthetic access
 token, so a Rev.ai route's query never enters the logs.
+
+The Azure route plays Voice Live input transcription at the shared client's
+own path, query and api-key header: the transcription-only configuration,
+exact 100 ms PCM16 frames with a server-VAD turn part way, then the client's
+commit and finalisation barrier, answered as the scenario asks.
 """
 import argparse
 import base64
@@ -197,6 +202,36 @@ def revai_final(elements):
             "elements": [{"type": kind, "value": value} for kind, value in elements]}
 
 
+# Azure Voice Live input-transcription peer for the Azure loopback runtime
+# tests. The route, query and api-key header are exactly what the shared Swift
+# client builds; only the origin is redirected here. The key is synthetic and
+# never logged. Voice Live never ends a session itself; the client's close does.
+AZURE_ROUTE = "/voice-live/realtime"
+AZURE_QUERY = "api-version=2026-04-10&model=gpt-4.1"
+AZURE_KEY = "loopback-synthetic-key"
+AZURE_SCENARIOS = ("complete", "commit-empty", "barrier-error", "abrupt", "hold")
+AZURE_FRAMES = 10
+AZURE_FRAME_BYTES = 4800  # 100 ms of 24 kHz mono PCM16
+AZURE_VAD_AFTER_FRAMES = 5
+# Mirrored scalar for scalar by the Swift tests; spelled as escapes so this
+# file stays ASCII and no editor can normalise a scalar.
+AZURE_VAD_DRAFT = "Gr\U000000FC\U000000DFe aus"
+AZURE_VAD_FINAL = "Gr\U000000FC\U000000DFe aus Z\U000000FCrich \U00002014 \U00004E16\U0000754C"
+AZURE_TAIL_DRAFT = "na\U000000EFve"
+AZURE_TAIL_FINAL = "na\U000000EFve caf\U000000E9 \U0001F469\U0001F3FD\U0000200D\U0001F4BB"
+
+
+def azure_frame(index):
+    """100 ms of 24 kHz PCM16 mono, generated identically by the Swift test."""
+    return bytes(((index * 31 + offset * 7) & 0xFF) for offset in range(AZURE_FRAME_BYTES))
+
+
+def azure_transcription(kind, item, text):
+    field = "delta" if kind == "delta" else "transcript"
+    return {"type": f"conversation.item.input_audio_transcription.{kind}", "item_id": item,
+            "content_index": 0, field: text}
+
+
 class ProbeHandler(socketserver.BaseRequestHandler):
     def handle(self):
         if not self.server.slots.acquire(blocking=False):
@@ -293,6 +328,9 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             path = route
         elif route == REVAI_ROUTE:
             self.verify_revai(query, headers)
+            path = route
+        elif route == AZURE_ROUTE:
+            self.verify_azure(query, headers)
             path = route
         elif path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
             raise ValueError("unknown route")
@@ -470,6 +508,8 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             return self.run_cartesia()
         if path == REVAI_ROUTE:
             return self.run_revai()
+        if path == AZURE_ROUTE:
+            return self.run_azure()
         if scenario is not None:
             self.run_gladia(path, scenario)
             return
@@ -688,7 +728,7 @@ class ProbeHandler(socketserver.BaseRequestHandler):
     def send_json(self, event, request_id="loopback"):
         """One text message, split inside a multi-byte UTF-8 scalar when it has
         one, so the client must assemble the message before decoding it. Ink-2
-        events name their connection; Rev.ai's pass request_id=None."""
+        events name their connection; Rev.ai's and Voice Live's pass request_id=None."""
         body = {**event, "request_id": request_id} if request_id else event
         payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         continuation = (index for index, byte in enumerate(payload) if (byte & 0xC0) == 0x80)
@@ -858,6 +898,133 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             log("revai-abrupt-disconnect")
             return None
         return self.close_revai(1000, b"end-of-stream")
+
+    # Azure Voice Live input transcription
+
+    def verify_azure(self, query, headers):
+        """The exact request the shared client builds: route, query and api-key header."""
+        scenario = headers.get("x-jsti-azure-scenario", "")
+        checks = {
+            "queryVerified": query == AZURE_QUERY,
+            "keyVerified": headers.get("api-key") == AZURE_KEY,
+            "bearerAbsent": "authorization" not in headers,
+            "scenarioVerified": scenario in AZURE_SCENARIOS,
+        }
+        log("azure-handshake", scenario=scenario if checks["scenarioVerified"] else None, **checks)
+        if not all(checks.values()):
+            raise ValueError("unexpected Azure Voice Live handshake")
+        self.azure_scenario = scenario
+
+    def send_azure(self, event):
+        """Voice Live events carry their own event_id, never a request_id."""
+        self.send_json(event, request_id=None)
+
+    def read_azure_event(self):
+        opcode, message = self.read_message(close_ends=False)
+        if opcode == 8:
+            raise ConnectionError("client closed")
+        if opcode != 1:
+            raise ValueError("Voice Live client messages are JSON text")
+        event = json.loads(message.decode("utf-8"))
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            raise ValueError("Voice Live client message is not a typed JSON object")
+        return event
+
+    def reject_azure(self, reason):
+        """Reports a deviation as a Voice Live error, which fails the Swift test visibly."""
+        log("azure-protocol-violation", reason=reason)
+        self.send_azure({"type": "error", "event_id": "event_violation", "error": {
+            "type": "invalid_request_error", "code": "loopback_protocol", "message": reason}})
+        self.wait_for_azure_close()
+
+    def wait_for_azure_close(self):
+        """Voice Live never closes a session itself: the client's close ends it."""
+        opcode = None
+        try:
+            for _ in range(64):
+                opcode, _ = self.read_message(close_ends=False)
+                if opcode == 8:
+                    self.send_frame(8, struct.pack("!H", 1000))
+                    break
+        except (ConnectionError, OSError):
+            opcode = None
+        log("azure-client-closed", closeFrame=opcode == 8)
+
+    def azure_configuration_problem(self, update):
+        session = update.get("session") or {}
+        transcription = session.get("input_audio_transcription") or {}
+        turns = session.get("turn_detection") or {}
+        expected = (update.get("type") == "session.update" and bool(update.get("event_id"))
+                    and session.get("modalities") == ["text"] and session.get("input_audio_format") == "pcm16"
+                    and session.get("input_audio_sampling_rate") == 24000
+                    and transcription.get("model") == "azure-speech" and "language" not in transcription
+                    and turns.get("type") == "azure_semantic_vad" and turns.get("create_response") is False)
+        return None if expected else "expected the transcription-only session.update first"
+
+    def read_azure_audio(self, scenario):
+        """Requires the exact 100 ms frames in order; server VAD ends a turn part way."""
+        digest = hashlib.sha256()
+        for index in range(AZURE_FRAMES):
+            event = self.read_azure_event()
+            audio = event.get("audio", "") if event["type"] == "input_audio_buffer.append" else None
+            if audio is None or base64.b64decode(audio, validate=True) != azure_frame(index):
+                return None, f"PCM frame {index} was not the exact 100 ms frame"
+            digest.update(azure_frame(index))
+            if index == AZURE_VAD_AFTER_FRAMES - 1:
+                self.send_azure({"type": "input_audio_buffer.committed", "item_id": "item_vad",
+                                 "previous_item_id": None})
+                self.send_azure(azure_transcription("delta", "item_vad", AZURE_VAD_DRAFT))
+                self.send_azure(azure_transcription("completed", "item_vad", AZURE_VAD_FINAL))
+        log("azure-audio", scenario=scenario, frames=AZURE_FRAMES, bytes=AZURE_FRAMES * AZURE_FRAME_BYTES,
+            sha256=digest.hexdigest())
+        return digest, None
+
+    def run_azure(self):
+        """Plays one session: created, the configuration and its acknowledgement,
+        exact PCM, then the commit and the barrier, answered as the scenario asks.
+        Any deviation is reported to the client as a Voice Live error."""
+        scenario = self.azure_scenario
+        self.send_azure({"type": "session.created", "event_id": "event_created", "session": {"id": "sess_loopback"}})
+        update = self.read_azure_event()
+        problem = self.azure_configuration_problem(update)
+        if problem:
+            return self.reject_azure(problem)
+        self.send_azure({"type": "session.updated", "event_id": "event_configured", "session": {"id": "sess_loopback"}})
+        _, problem = self.read_azure_audio(scenario)
+        if problem:
+            return self.reject_azure(problem)
+        commit = self.read_azure_event()
+        if commit["type"] != "input_audio_buffer.commit" or not commit.get("event_id"):
+            return self.reject_azure("expected the commit after every audio frame")
+        if scenario == "commit-empty":
+            # Server VAD already committed everything, so the commit finds nothing.
+            self.send_azure({"type": "error", "event_id": "event_empty", "error": {
+                "type": "invalid_request_error", "code": "input_audio_buffer_commit_empty",
+                "message": "Synthetic empty buffer", "event_id": commit["event_id"]}})
+        else:
+            self.send_azure({"type": "input_audio_buffer.committed", "item_id": "item_tail",
+                             "previous_item_id": "item_vad"})
+        barrier = self.read_azure_event()
+        if (barrier["type"] != "session.update" or barrier.get("session") != {"modalities": ["text"]}
+                or barrier.get("event_id") in (None, update["event_id"], commit["event_id"])):
+            return self.reject_azure("expected the finalisation barrier after the commit")
+        log("azure-barrier", scenario=scenario)
+        if scenario == "abrupt":
+            # The barrier arrives, then the connection drops without a close frame.
+            log("azure-abrupt-disconnect")
+            return None
+        if scenario == "barrier-error":
+            self.send_azure(azure_transcription("completed", "item_tail", AZURE_TAIL_FINAL))
+            self.send_azure({"type": "error", "event_id": "event_barrier_failure", "error": {
+                "type": "server_error", "code": "server_error", "message": "Synthetic server failure",
+                "event_id": barrier["event_id"]}})
+        elif scenario != "hold":
+            # "hold" never answers: the client must bound or cancel its own finish.
+            self.send_azure({"type": "session.updated", "event_id": "event_barrier", "session": {"id": "sess_loopback"}})
+            if scenario == "complete":
+                self.send_azure(azure_transcription("delta", "item_tail", AZURE_TAIL_DRAFT))
+                self.send_azure(azure_transcription("completed", "item_tail", AZURE_TAIL_FINAL))
+        return self.wait_for_azure_close()
 
 
 class ProbeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):

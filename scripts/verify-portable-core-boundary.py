@@ -33,4 +33,13 @@ required = {"ModelCatalog.swift", "ModelCatalogTypes.swift", "StreamingTranscrip
             "TranscriptAccumulator.swift", "RecordingLifecycleCoordinator.swift", "OpenAIBatchClient.swift"}
 if missing := required - included:
     sys.exit("Canonical domain sources excluded from portable builds: " + ", ".join(sorted(missing)))
+# The shared desktop layers stay free of any one host's native modules, so the
+# Windows and Linux hosts compile the same orchestration.
+native_modules = {"CWindowsSupport", "SpeakWindowsPlatform", "CLinuxSupport", "SpeakLinuxPlatform",
+                  "AppKit", "UIKit", "WinSDK"}
+for shared in ("SpeakDesktop", "SpeakDesktopHost"):
+    for path in sorted((root / "Sources" / shared).rglob("*.swift")):
+        imports = set(re.findall(r"^\s*import\s+(\w+)", path.read_text(encoding="utf-8"), re.M))
+        if leaked := imports & native_modules:
+            sys.exit(f"{path.relative_to(root)} imports host-native modules: {', '.join(sorted(leaked))}")
 print(f"Portable boundary: {len(included)} shared Swift sources, {len(excluded)} explicit platform exclusions")

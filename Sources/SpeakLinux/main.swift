@@ -47,6 +47,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         let warning = LinuxWindow.configureMicrophones(selected: microphone, synthetic: holder.smokeTest)
         await controller.setMicrophoneWarning(warning)
         try await controller.configureModelCatalog()
+        holder.applyShortcutStyle(await controller.hotKeySettings())
         return await controller.selectedIndex()
     }
     let strings = LinuxWindow.Strings()
@@ -95,11 +96,12 @@ let integrationCheck = arguments.firstIndex(of: "--integration-test").flatMap {
     arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
 }
 switch integrationCheck {
-case "keyring", "capture", "portal":
+case "keyring", "capture", "portal", "x11-hotkey":
     do {
         switch integrationCheck {
         case "keyring": try LinuxIntegrationChecks.keyring()
         case "capture": try LinuxIntegrationChecks.capture()
+        case "x11-hotkey": try LinuxIntegrationChecks.x11Hotkey()
         default: try LinuxIntegrationChecks.portal()
         }
     } catch { fail(error) }

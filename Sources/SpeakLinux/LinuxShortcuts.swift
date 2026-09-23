@@ -91,9 +91,8 @@ final class LinuxShortcuts: @unchecked Sendable {
     }
 }
 
-/// X11 listener or portal thread. Press-to-toggle acts on the press only.
+/// X11 listener or portal thread: presses and releases feed the gestures.
 private func linuxShortcutPressed(_ pressed: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard pressed == 1, let context else { return }
-    Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
-        .shortcutToggle(modelIndex: nil, deviceID: nil)
+    guard let context else { return }
+    Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue().shortcutKey(pressed: pressed == 1)
 }

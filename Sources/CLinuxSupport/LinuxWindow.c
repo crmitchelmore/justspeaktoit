@@ -39,6 +39,7 @@ typedef struct UI {
     AdwComboRow *output_row;
     AdwSwitchRow *restore_row;
     AdwActionRow *shortcut_row;
+    AdwComboRow *style_row;
     /* Recording */
     GtkButton *record;
     GtkButton *cancel;
@@ -166,6 +167,11 @@ static void on_text_output(GObject *object, GParamSpec *spec, gpointer data) {
     gboolean restore = adw_switch_row_get_active(ui.restore_row);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.restore_row), method == 0);
     emit(JSTI_EVENT_TEXT_OUTPUT, restore ? "restore" : "", (gint32)method);
+}
+
+static void on_style(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    emit(JSTI_EVENT_SHORTCUT_STYLE, "", (gint32)adw_combo_row_get_selected(ui.style_row));
 }
 
 static void on_refresh(GtkButton *button, gpointer data) {
@@ -388,6 +394,13 @@ static void build_window(void) {
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.shortcut_row), "Keyboard shortcut");
     adw_action_row_set_subtitle(ui.shortcut_row, "Checking the desktop…");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(settings), GTK_WIDGET(ui.shortcut_row));
+    const char *styles[] = { "Press to toggle", "Hold to record", "Double-tap to toggle",
+                             "Hold, or double-tap to toggle", NULL };
+    ui.style_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.style_row), "Shortcut behaviour");
+    adw_combo_row_set_model(ui.style_row, G_LIST_MODEL(gtk_string_list_new(styles)));
+    g_signal_connect(ui.style_row, "notify::selected", G_CALLBACK(on_style), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(settings), GTK_WIDGET(ui.style_row));
 
     GtkWidget *catalog = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_set_margin_top(catalog, 6);
@@ -939,6 +952,17 @@ int32_t jsti_window_transcript_variant(void) {
     if (ui.selected_id == NULL || g_strcmp0(ui.presented_id, ui.selected_id) != 0) return -1;
     if (!ui.presented_switchable) return ui.presented_variant < 0 ? -1 : 1;
     return (int32_t)gtk_drop_down_get_selected(ui.version);
+}
+
+static void style_apply(gpointer data) {
+    ui.suppress = TRUE;
+    adw_combo_row_set_selected(ui.style_row, (guint)GPOINTER_TO_INT(data));
+    ui.suppress = FALSE;
+}
+
+int32_t jsti_window_set_shortcut_style(int32_t index) {
+    if (index < 0 || index > 3) return -1;
+    return post(style_apply, GINT_TO_POINTER(index), NULL);
 }
 
 static void active_work(JSTIMainCall *call, gpointer data) {

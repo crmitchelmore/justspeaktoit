@@ -286,6 +286,51 @@ final class DesktopHostControllerTests: XCTestCase {
         XCTAssertFalse(DesktopHostModels.all.contains { DesktopHostModels.isLive($0.id) })
     }
 
+    private func shortcut(
+        _ input: HotKeySessionPolicy.Input, style: HotKeyActivationStyle, at time: TimeInterval
+    ) async {
+        await controller.shortcut(.init(
+            input: input, style: style, recognisedAt: time, target: "editor", targetExecutablePath: nil,
+            textOutput: Task { FakeTextOutput() }, modelIndex: batchIndex, deviceID: ""
+        ))
+    }
+
+    func testHoldStartsAndItsReleaseStops() async throws {
+        let now = ProcessInfo.processInfo.systemUptime
+        await shortcut(.gesture(.holdStart), style: .holdAndDoubleTap, at: now)
+        let recording = await controller.recording?.trigger
+        XCTAssertEqual(recording, .hold)
+        await shortcut(.gesture(.holdEnd), style: .holdAndDoubleTap, at: now + 1)
+        let stopped = await controller.recording
+        XCTAssertNil(stopped)
+        let saved = try await records()
+        XCTAssertEqual(saved.first?.result?.text, "Synthetic transcript")
+    }
+
+    func testAHoldReleaseNeverStopsADoubleTapSession() async throws {
+        let now = ProcessInfo.processInfo.systemUptime
+        await shortcut(.gesture(.doubleTap), style: .holdAndDoubleTap, at: now)
+        await shortcut(.gesture(.holdEnd), style: .holdAndDoubleTap, at: now + 1)
+        let trigger = await controller.recording?.trigger
+        XCTAssertEqual(trigger, .doubleTap)
+        await shortcut(.gesture(.singleTap), style: .holdAndDoubleTap, at: now + 2)
+        let stopped = await controller.recording
+        XCTAssertNil(stopped)
+    }
+
+    func testStylesGateGestures() async throws {
+        let now = ProcessInfo.processInfo.systemUptime
+        await shortcut(.gesture(.holdStart), style: .pressToToggle, at: now)
+        var active = await controller.recording
+        XCTAssertNil(active, "press-to-toggle ignores holds")
+        await shortcut(.press, style: .pressToToggle, at: now)
+        active = await controller.recording
+        XCTAssertEqual(active?.trigger, .press)
+        await shortcut(.press, style: .pressToToggle, at: now + 1)
+        active = await controller.recording
+        XCTAssertNil(active)
+    }
+
     func testImportValidationRejectsUnsupportedFiles() throws {
         let text = directory.appendingPathComponent("notes.txt")
         try Data("hello".utf8).write(to: text)

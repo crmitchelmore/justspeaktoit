@@ -11,7 +11,14 @@ typealias LinuxAppController = DesktopHostController<LinuxHostPlatform>
 /// activation style for now; the key itself is chosen by the desktop (portal)
 /// or fixed at Ctrl+Alt+Space (X11).
 struct LinuxHotKeySettings: Codable, Equatable, Sendable {
+    /// Picker order; raw values keep a newer build's settings readable.
+    static let styles = HotKeyActivationStyle.windowsStyles
+
     var style: String = HotKeyActivationStyle.pressToToggle.rawValue
+
+    var activation: HotKeyActivationStyle {
+        HotKeyActivationStyle(rawValue: style).flatMap { Self.styles.contains($0) ? $0 : nil } ?? .pressToToggle
+    }
 }
 
 /// Read aloud is not implemented on Linux yet; the setting stays absent.
@@ -142,13 +149,22 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     package static var defaultHotKey: LinuxHotKeySettings { LinuxHotKeySettings() }
 
     package static func readyHint(_ hotKey: LinuxHotKeySettings) -> String {
-        "\(shortcutName) starts or stops recording."
+        let name = shortcutName
+        switch hotKey.activation {
+        case .pressToToggle: return "\(name) starts or stops recording."
+        case .holdToRecord: return "Hold \(name) to record."
+        case .doubleTapToggle: return "Double-tap \(name) to start or stop recording."
+        case .holdAndDoubleTap: return "Hold \(name) to record, or double-tap it to start and stop."
+        }
     }
 
     package static func finishHint(_ hotKey: LinuxHotKeySettings, for trigger: HotKeySessionTrigger) -> String {
+        let name = shortcutName
         switch trigger {
-        case .other: return "Select Stop recording or press \(shortcutName) to finish."
-        default: return "Press \(shortcutName) to finish."
+        case .hold: return "Release \(name) to finish."
+        case .doubleTap: return "Tap \(name) to finish."
+        case .press: return "Press \(name) to finish."
+        case .other: return "Select Stop recording to finish."
         }
     }
 }

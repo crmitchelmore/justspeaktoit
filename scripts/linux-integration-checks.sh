@@ -90,6 +90,11 @@ for _ in $(seq 1 50); do [ -e "/tmp/.X11-unix/X${display#:}" ] && break; sleep 0
 export DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 LANG=C.UTF-8 LC_ALL=C.UTF-8
 openbox >/dev/null 2>&1 & pids+=($!)
 sleep 0.5
+JSTI_TEST_READY_FILE="$work/grab-ready" "$binary" --integration-test x11-hotkey & grab=$!
+for _ in $(seq 1 100); do [ -e "$work/grab-ready" ] && break; sleep 0.05; done
+xdotool key ctrl+alt+space
+wait "$grab"
+
 zenity --entry --title "JSTI target" --text "Paste here" >"$work/zenity.out" 2>/dev/null & zenity=$!
 pids+=($zenity)
 target="$(xdotool search --sync --name 'JSTI target' | head -1)"

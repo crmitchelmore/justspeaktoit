@@ -99,6 +99,35 @@ enum LinuxIntegrationChecks {
         print("X11: pasted into the captured window, restored the clipboard and refused a stale target.")
     }
 
+    /// The X11 Ctrl+Alt+Space grab: the script presses the key with XTest once
+    /// the grab is in place (signalled by creating JSTI_TEST_READY_FILE).
+    static func x11Hotkey() throws {
+        let readyFile = try environment("JSTI_TEST_READY_FILE")
+        final class Presses: @unchecked Sendable {
+            let lock = NSLock()
+            var events: [Int32] = []
+        }
+        let presses = Presses()
+        try withExtendedLifetime(presses) {
+            try LinuxNative.call {
+                jsti_x11_hotkey_start(
+                    LinuxShortcuts.x11Keysym, LinuxShortcuts.x11Modifiers, { pressed, context in
+                        let presses = Unmanaged<Presses>.fromOpaque(context!).takeUnretainedValue()
+                        presses.lock.withLock { presses.events.append(pressed) }
+                    }, Unmanaged.passUnretained(presses).toOpaque(), $0, $1
+                )
+            }
+            FileManager.default.createFile(atPath: readyFile, contents: Data())
+            for _ in 0..<1_000 where presses.lock.withLock({ presses.events.count }) < 2 {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            jsti_x11_hotkey_stop()
+        }
+        let events = presses.lock.withLock { presses.events }
+        try require(events == [1, 0], "the grab reported \(events)")
+        print("X11 shortcut: Ctrl+Alt+Space grab reported one press and one release.")
+    }
+
     /// GlobalShortcuts and RemoteDesktop/Clipboard against the fake portal.
     static func portal() throws {
         try require(LinuxPortal.version(of: LinuxPortal.globalShortcuts) != nil, "GlobalShortcuts is not offered")

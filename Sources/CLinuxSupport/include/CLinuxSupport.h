@@ -41,7 +41,8 @@ enum {
     JSTI_EVENT_SHORTCUT_PRESSED = 21,  /* text: microphone id, index: model slot */
     JSTI_EVENT_SHORTCUT_RELEASED = 22,
     JSTI_EVENT_TEXT_OUTPUT = 30,       /* index: method, text: "restore" or "" */
-    JSTI_EVENT_COMMAND_TOGGLE = 31     /* --toggle from another process or action */
+    JSTI_EVENT_COMMAND_TOGGLE = 31,    /* --toggle from another process or action */
+    JSTI_EVENT_SHORTCUT_STYLE = 32     /* index: 0 press, 1 hold, 2 double-tap, 3 hold and double-tap */
 };
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
@@ -87,6 +88,8 @@ int32_t jsti_window_set_history_presentation(
 int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t variant, int32_t switchable);
 /* method: 0 paste into the focused app, 1 clipboard only. */
 int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, const char *shortcut_hint);
+/* The shortcut behaviour picker, indexed as JSTI_EVENT_SHORTCUT_STYLE. */
+int32_t jsti_window_set_shortcut_style(int32_t index);
 /* Main thread only: the transcript and version the window displays now. */
 int32_t jsti_window_transcript_snapshot(char *buffer, size_t capacity, size_t *required);
 int32_t jsti_window_transcript_variant(void);

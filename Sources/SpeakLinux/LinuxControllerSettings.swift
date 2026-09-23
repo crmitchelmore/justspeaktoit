@@ -25,4 +25,21 @@ extension LinuxAppController {
     }
 
     var isRecording: Bool { recording != nil }
+
+    func saveHotKey(_ hotKey: LinuxHotKeySettings) {
+        guard !closed else { return }
+        var changed = settings
+        changed.hotKey = hotKey
+        do {
+            try effects.writeSettings(
+                JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
+            )
+            settings = changed
+            guard !busy, recording == nil else { return }
+            update("Shortcut behaviour saved. \(LinuxHostPlatform.readyHint(hotKey))")
+        } catch {
+            update("The shortcut behaviour works until you close the app, but could not be saved: "
+                + error.localizedDescription)
+        }
+    }
 }

@@ -27,11 +27,26 @@ final class LinuxEventContext: @unchecked Sendable {
     private var readyTask: Task<Void, Never>?
     private var shortcutTail: Task<Void, Never>?
     let shortcuts: LinuxShortcuts
+    private(set) var gestures: LinuxShortcutGestures!
 
     init(controller: LinuxAppController, smokeTest: Bool) {
         self.controller = controller
         self.smokeTest = smokeTest
         self.shortcuts = LinuxShortcuts()
+        defer {
+            gestures = LinuxShortcutGestures(style: .pressToToggle) { [weak self] request in
+                guard let self else { return }
+                await self.ready?.value
+                // Model and microphone are the saved ones, read in settings order.
+                let index = await controller.selectedIndex()
+                let device = await controller.selectedMicrophone()
+                await controller.shortcut(.init(
+                    input: request.input, style: request.style, recognisedAt: request.recognisedAt,
+                    target: request.target, targetExecutablePath: request.targetExecutablePath,
+                    textOutput: request.textOutput, modelIndex: index, deviceID: device
+                ))
+            }
+        }
         self.searches = DesktopEventDispatcher { query in await controller.searchHistory(query) }
         self.copies = DesktopTranscriptCopyDispatcher { text, variant in
             await controller.copyTranscript(text, variant: variant)
@@ -84,7 +99,27 @@ final class LinuxEventContext: @unchecked Sendable {
         }
     }
 
-    func drainShortcuts() async { await lock.withLock { shortcutTail }?.value }
+    func drainShortcuts() async {
+        await lock.withLock { shortcutTail }?.value
+        await gestures.drain()
+    }
+
+    /// A global shortcut press or release from the X11 or portal thread. The
+    /// target and text output are captured at the press.
+    func shortcutKey(pressed: Bool) {
+        if pressed {
+            gestures.keyDown(target: Self.captureTarget(), textOutput: recordingTextOutput())
+        } else {
+            gestures.keyUp()
+        }
+    }
+
+    /// Applies a saved or newly chosen behaviour to the gestures and the window.
+    func applyShortcutStyle(_ hotKey: LinuxHotKeySettings) {
+        gestures.configure(style: hotKey.activation)
+        let index = LinuxHotKeySettings.styles.firstIndex(of: hotKey.activation) ?? 0
+        _ = jsti_window_set_shortcut_style(Int32(index))
+    }
 
     /// X11 reports the focused window; Wayland hides it, so the paste goes to
     /// whatever is focused at delivery, never to this app's own window.
@@ -169,6 +204,11 @@ func linuxWindowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: In
             await controller.saveTextOutput(options)
             LinuxWindow.textOutput(await controller.textOutputOptions(), hint: holder.shortcuts.hint)
         }
+    case Int(JSTI_EVENT_SHORTCUT_STYLE):
+        guard LinuxHotKeySettings.styles.indices.contains(slot) else { break }
+        let hotKey = LinuxHotKeySettings(style: LinuxHotKeySettings.styles[slot].rawValue)
+        holder.gestures.configure(style: hotKey.activation)
+        holder.enqueueSettings { await controller.saveHotKey(hotKey) }
     default: break
     }
 }

@@ -7,13 +7,27 @@
     "bytes": 22476117,
     "catalogEntry": "https://api.nuget.org/v3/catalog0/data/2024.05.22.17.09.49/microsoft.windows.sdk.buildtools.10.0.26100.1.json",
     "toolDirectory": "bin/10.0.26100.0/x64/",
-    "tools": ["makeappx.exe", "signtool.exe"],
+    "tools": [
+      "makeappx.exe",
+      "signtool.exe"
+    ],
     "license": "https://aka.ms/WinSDKLicenseURL"
   },
   "provenanceNotes": [
     "Microsoft.Windows.SDK.BuildTools is Microsoft's NuGet distribution of the Windows SDK packaging tools (MakeAppx, SignTool and their AppxPackaging, OPC and signing DLLs). Version 10.0.26100.1 matches the Windows SDK 10.0.26100 release already pinned for the cross build.",
     "The SHA-512 and byte count are the packageHash and packageSize published in the nuget.org catalog entry above, converted from base64 to hex; the download is rejected on any mismatch.",
     "Only the x64 tool directory is extracted, into a private job directory. The tools are used to build and sign packages; no SDK file is shipped in any package or artifact.",
-    "makeappx.exe and signtool.exe must additionally carry valid Microsoft Authenticode signatures on the Windows runner."
-  ]
+    "makeappx.exe and signtool.exe must additionally carry valid Microsoft Authenticode signatures on the Windows runner.",
+    "Microsoft.ArtifactSigning.Client is Microsoft's NuGet distribution of the Azure Artifact Signing SignTool dlib (Azure.CodeSigning.Dlib.dll and its .NET dependencies). Its SHA-512 and size are the nuget.org catalog packageHash and packageSize; only bin/x64 is extracted, only by the signing job, and the dlib must carry a valid Microsoft signature. It is never shipped in a package."
+  ],
+  "artifactSigningClient": {
+    "name": "microsoft.artifactsigning.client.1.0.128.nupkg",
+    "url": "https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/1.0.128/microsoft.artifactsigning.client.1.0.128.nupkg",
+    "sha512": "98f06a691f4fc2fa22f19dcf8556733e98607fbef91a312c453b9b0798cc9088dae0acb36e389b552a11b4d2320324785b8541c2b51091a724c05bc5df5cbf95",
+    "bytes": 14653224,
+    "catalogEntry": "https://api.nuget.org/v3/catalog0/data/2026.03.30.23.02.55/microsoft.artifactsigning.client.1.0.128.json",
+    "toolDirectory": "bin/x64/",
+    "dlib": "Azure.CodeSigning.Dlib.dll",
+    "license": "LICENSE.md inside the package (Microsoft software licence terms)"
+  }
 }

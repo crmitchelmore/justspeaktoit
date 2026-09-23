@@ -9,13 +9,20 @@ the executable's runtime on its own (a copy without the bundled DLLs must fail t
 start), then runs the production executable's self-test and native window smoke
 test while sampling the process’s loaded module paths. Any non-system module must
 come from the bundle directory. Evidence is written even when a check fails, and
-every failure is reported before the script exits non-zero.
+every failure is reported before the script exits non-zero. With
+-LocalTranscriptionAudio it also transcribes that WAV on the CPU through the
+bundled whisper.cpp runtime and requires its DLLs to load from the bundle.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)] [string] $BundleDirectory,
     [Parameter(Mandatory = $true)] [string] $Workspace,
-    [Parameter(Mandatory = $true)] [string] $ExpectedCommit
+    [Parameter(Mandatory = $true)] [string] $ExpectedCommit,
+    # Optional on-device check: a WAV the bundled whisper.cpp runtime must
+    # transcribe, the phrase it must contain and a model cache folder.
+    [string] $LocalTranscriptionAudio,
+    [string] $LocalTranscriptionPhrase,
+    [string] $LocalModelDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -285,6 +292,25 @@ try {
         if (-not (Test-Path -LiteralPath $env:JSTI_UI_SNAPSHOT_PATH)) { throw 'Bundled native client snapshot missing.' }
         Write-Host "UI smoke test loaded $($run.modulesFromBundle.Count) modules from the bundle and $($run.modulesFromSystemRoot.Count) from Windows."
     } catch { $failures.Add($_.Exception.Message) }
+    if ($LocalTranscriptionAudio) {
+        try {
+            # The runtime is loaded at run time, so the static-import check above
+            # cannot see it: require whisper.dll, ggml and a CPU backend from the bundle.
+            Remove-Item Env:JSTI_WHISPER_RUNTIME_DIRECTORY -ErrorAction SilentlyContinue
+            $env:JSTI_LOCAL_MODEL_DIRECTORY = $LocalModelDirectory
+            $env:JSTI_WHISPER_CPU_ONLY = '1'
+            $audio = (Resolve-Path -LiteralPath $LocalTranscriptionAudio).Path
+            $run = Invoke-Bundled "--local-transcription-self-test `"$audio`" --expect `"$LocalTranscriptionPhrase`"" 'local-transcription' 300
+            if (-not (Select-String -LiteralPath (Join-Path $evidenceDirectory 'bundle-local-transcription.log') -Pattern 'Local transcription self-test passed' -Quiet)) {
+                throw 'Bundled on-device transcription success marker missing.'
+            }
+            $runtimeModules = @('whisper.dll', 'ggml.dll', 'ggml-base.dll')
+            $absent = @($runtimeModules | Where-Object { $name = $_; -not @($run.modulesFromBundle | Where-Object { $_ -ieq $name }).Count })
+            if (-not @($run.modulesFromBundle | Where-Object { $_ -like 'ggml-cpu-*.dll' }).Count) { $absent += 'ggml-cpu-*.dll' }
+            if ($absent.Count) { throw "On-device transcription did not load $($absent -join ', ') from the bundle." }
+            Write-Host "On-device transcription loaded $($run.modulesFromBundle.Count) modules from the bundle."
+        } catch { $failures.Add($_.Exception.Message) }
+    }
 } catch {
     $failures.Add("$($_.Exception.Message) (script line $($_.InvocationInfo.ScriptLineNumber))")
 } finally {

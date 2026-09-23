@@ -19,6 +19,7 @@ typealias WindowsNativeError = DesktopHostError
 /// behind the shared desktop host.
 enum WindowsHostPlatform: DesktopHostPlatform {
     typealias VoiceOutputSettings = WindowsVoiceOutputSettings
+    typealias LocalModelsState = WindowsLocalModelsState
 
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
@@ -101,6 +102,20 @@ enum WindowsHostPlatform: DesktopHostPlatform {
     package static func stopReadAloud(_ state: inout WindowsReadAloudState) {
         state.task?.cancel()
         state.task = nil
+    }
+
+    package static func makeLocalModelsState() -> WindowsLocalModelsState { WindowsLocalModelsState() }
+
+    package static var localDeviceName: String { "this PC" }
+
+    package static func localReadiness(_ model: String, controller: isolated WindowsAppController) -> String? {
+        controller.localReadiness(model)
+    }
+
+    package static func transcribeLocally(
+        _ audio: URL, model: String, language: String?, controller: isolated WindowsAppController
+    ) async throws -> TranscriptionResult {
+        try await controller.transcribeLocally(audio, model: model, language: language)
     }
 
     package static var defaultHotKey: WindowsHotKeySettings { WindowsHotKeySettings() }

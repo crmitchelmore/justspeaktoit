@@ -65,8 +65,11 @@ extension DesktopHostController {
 
     var profileCapabilities: DesktopProfileCapabilities {
         DesktopProfileCapabilities(
-            batchModels: DesktopHostModels.visible.filter { !DesktopHostModels.isLive($0.id) },
+            batchModels: DesktopHostModels.visible.filter {
+                !DesktopHostModels.isLive($0.id) && !DesktopHostModels.isLocal($0.id)
+            },
             liveModels: DesktopHostModels.live, polishModels: DesktopPostProcessing.remoteModels,
+            localModels: DesktopHostModels.local,
             liveLanguageModelIDs: DesktopLiveTranscription.languageHintModelIDs
         )
     }

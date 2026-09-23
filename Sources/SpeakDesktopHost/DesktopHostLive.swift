@@ -72,5 +72,7 @@ extension DesktopHostController {
         )
     }
 
-    package func preferredModelIDs() -> (batch: String?, live: String?) { (settings.batchModel, settings.liveModel) }
+    package func preferredModelIDs() -> DesktopHostModelPreferences {
+        DesktopHostModelPreferences(batch: settings.batchModel, live: settings.liveModel, local: settings.localModel)
+    }
 }

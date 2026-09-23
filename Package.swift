@@ -230,6 +230,9 @@ if windowsTargetBuild {
     portablePackage.targets.append(contentsOf: [
         .target(
             name: "CWindowsSupport",
+            // Vendored whisper.cpp headers are compile-time declarations only;
+            // their licence and provenance travel with them.
+            exclude: ["whisper-cpp/LICENSE", "whisper-cpp/PROVENANCE.md"],
             publicHeadersPath: "include",
             linkerSettings: [
                 .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
@@ -242,7 +245,9 @@ if windowsTargetBuild {
                 // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
                 .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"),
                 // The Keyboard shortcut dialog's native hotkey control.
-                .linkedLibrary("comctl32")
+                .linkedLibrary("comctl32"),
+                // CNG SHA-256 for downloaded local models.
+                .linkedLibrary("bcrypt")
             ]
         ),
         // Same-user named pipes for `speak` and the app; kept apart so the CLI
@@ -265,7 +270,7 @@ if windowsTargetBuild {
         ),
         .target(
             name: "SpeakWindowsPlatform",
-            dependencies: ["SpeakCore", "SpeakSync", "CWindowsSupport", "CWindowsAutomation"]
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "CWindowsSupport", "CWindowsAutomation"]
         ),
         .executableTarget(
             name: "SpeakWindows", dependencies: [

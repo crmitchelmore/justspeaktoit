@@ -35,8 +35,10 @@ public enum DesktopHistorySearch {
 
     /// The friendly name shown for a record's model. Search matches this name
     /// rather than the raw identifier, so hosts must display the same string.
+    /// Downloaded Whisper models ran through whisper.cpp on this host, so they
+    /// use its runtime-neutral names rather than the Apple runtime's.
     public static func modelDisplayName(for identifier: String) -> String {
-        ModelCatalog.friendlyName(for: identifier)
+        DesktopLocalTranscription.displayName(for: identifier) ?? ModelCatalog.friendlyName(for: identifier)
     }
 
     /// Folded text a host can cache per record and reuse for every keystroke.

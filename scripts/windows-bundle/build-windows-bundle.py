@@ -35,12 +35,15 @@ import redistributables  # noqa: E402
 import windows_pe  # noqa: E402
 
 CROSS = HERE.parent / "windows-cross"
+LOCAL_RUNTIME_PINS = HERE.parent / "windows-local-runtime" / "dependencies.json"
 APPLICATION = "SpeakWindows.exe"
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {"com%d" % n for n in range(1, 10)} | {"lpt%d" % n for n in range(1, 10)}
 ALLOWED_DOWNLOAD_HOSTS = {"download.visualstudio.microsoft.com", "raw.githubusercontent.com"}
 SYSTEM_MODULE, SWIFT_RUNTIME, MICROSOFT_RUNTIME, TEST_MODULE, UNKNOWN_MODULE = (
     "system", "swift-runtime", "microsoft-runtime", "test", "unknown")
+# whisper.cpp DLLs the app loads at run time for on-device transcription.
+LOCAL_RUNTIME = "local-inference-runtime"
 
 
 class BundleError(Exception):
@@ -74,8 +77,9 @@ class Log:
 
 # --- policy ---------------------------------------------------------------------
 class Policy:
-    def __init__(self, data):
+    def __init__(self, data, local_runtime=()):
         self.data = data
+        self.local = {name.lower(): name for name in local_runtime}
         self.system = {name.lower() for name in data["windowsSystemModules"]}
         self.api_sets = [re.compile(pattern) for pattern in data["windowsApiSetPatterns"]]
         self.swift = {name.lower(): name for name in data["swiftRuntimeModules"]}
@@ -85,6 +89,7 @@ class Policy:
         self.forbidden = [pattern.lower() for pattern in data["forbiddenBundlePatterns"]]
         overlap = (self.system & set(self.swift)) | (self.system & set(self.microsoft)) | (set(self.swift) & set(self.microsoft))
         overlap |= self.tests & (self.system | set(self.swift) | set(self.microsoft))
+        overlap |= set(self.local) & (self.system | set(self.swift) | set(self.microsoft) | self.tests)
         if overlap:
             raise BundleError("runtime policy lists a module in more than one category: " + ", ".join(sorted(overlap)))
         for name in self.additional:
@@ -92,8 +97,8 @@ class Policy:
                 raise BundleError("additionalRuntimeModules must name a pinned runtime module: " + name)
 
     @classmethod
-    def load(cls, path=HERE / "runtime-policy.json"):
-        return cls(json.loads(path.read_text(encoding="utf-8")))
+    def load(cls, path=HERE / "runtime-policy.json", local_runtime=()):
+        return cls(json.loads(path.read_text(encoding="utf-8")), local_runtime)
 
     def classify(self, module):
         lower = module.lower()
@@ -105,11 +110,13 @@ class Policy:
             return SWIFT_RUNTIME
         if lower in self.microsoft:
             return MICROSOFT_RUNTIME
+        if lower in self.local:
+            return LOCAL_RUNTIME
         return UNKNOWN_MODULE
 
     def canonical(self, module):
         lower = module.lower()
-        return self.swift.get(lower) or self.microsoft.get(lower) or module
+        return self.swift.get(lower) or self.microsoft.get(lower) or self.local.get(lower) or module
 
     def forbids(self, path):
         lower = path.lower()
@@ -118,7 +125,7 @@ class Policy:
 
 
 # --- dependency closure -----------------------------------------------------------
-def resolve_closure(root, read_imports, policy):
+def resolve_closure(root, read_imports, policy, loaded_at_run_time=()):
     """Walk static and delay-load imports from ``root`` until only system modules remain.
 
     ``read_imports(name, category)`` returns ``(static, delayed)`` module name lists
@@ -126,19 +133,40 @@ def resolve_closure(root, read_imports, policy):
     result records each bundled runtime module with its importers, each system
     module with its importers, and raises ``BundleError`` for test libraries or
     modules that no pinned runtime source provides.
+
+    ``loaded_at_run_time`` names modules the application loads with
+    LoadLibrary (the whisper.cpp runtime). They are walked after the static
+    closure, and imports reached only through them are recorded as
+    ``runtime-static``/``runtime-delay`` so a run that never loads them is not
+    expected to show them.
     """
-    bundled, system, queue = {}, {}, [(root, "application")]
+    bundled, system, queue = {}, {}, [(root, "application", False)]
     seen = {root.lower()}
     for name in policy.additional:
         lower = name.lower()
         bundled[lower] = {"name": policy.canonical(name), "source": policy.classify(name),
                           "importedBy": [{"importer": "runtime-policy", "kind": "runtime-loaded"}]}
         seen.add(lower)
-        queue.append((policy.canonical(name), policy.classify(name)))
-    while queue:
-        importer, category = queue.pop(0)
+        queue.append((policy.canonical(name), policy.classify(name), False))
+    deferred = []
+    for name in loaded_at_run_time:
+        if policy.classify(name) != LOCAL_RUNTIME:
+            raise BundleError("run-time loaded module is not part of the local runtime: " + name)
+        deferred.append((policy.canonical(name), LOCAL_RUNTIME, True))
+    while queue or deferred:
+        if not queue:
+            importer, category, late = deferred.pop(0)
+            lower = importer.lower()
+            entry = bundled.setdefault(lower, {"name": importer, "source": LOCAL_RUNTIME, "importedBy": []})
+            entry["importedBy"].append({"importer": "SpeakWindows.exe", "kind": "runtime-loaded"})
+            if lower in seen:
+                continue
+            seen.add(lower)
+            queue.append((importer, category, late))
+        importer, category, late = queue.pop(0)
         static, delayed = read_imports(importer, category)
-        for kind, names in (("static", static), ("delay", delayed)):
+        for base_kind, names in (("static", static), ("delay", delayed)):
+            kind = ("runtime-" + base_kind) if late else base_kind
             for module in names:
                 lower = module.lower()
                 found = policy.classify(module)
@@ -147,7 +175,7 @@ def resolve_closure(root, read_imports, policy):
                                       "; only the production executable may be bundled")
                 if found == UNKNOWN_MODULE:
                     raise BundleError(importer + " imports " + module + ", which is neither a Windows system "
-                                      "module nor a module of the pinned Swift or Microsoft runtimes")
+                                      "module nor a module of the pinned Swift, Microsoft or local inference runtimes")
                 reference = {"importer": importer, "kind": kind}
                 if found == SYSTEM_MODULE:
                     system.setdefault(lower, {"name": module, "importedBy": []})["importedBy"].append(reference)
@@ -156,7 +184,7 @@ def resolve_closure(root, read_imports, policy):
                 entry["importedBy"].append(reference)
                 if lower not in seen:
                     seen.add(lower)
-                    queue.append((entry["name"], found))
+                    queue.append((entry["name"], found, late))
     return {"bundled": dict(sorted(bundled.items())), "system": dict(sorted(system.items()))}
 
 
@@ -383,6 +411,58 @@ def load_microsoft_runtime(bundle_path, lock, log):
             "productName": properties.get("ProductName")}
 
 
+# --- local inference runtime (whisper.cpp) -------------------------------------------------
+def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS):
+    """Authenticate a whisper.cpp runtime build against its manifest and the repository pins.
+
+    The DLLs are built on Windows by scripts/windows-local-runtime/build-whisper-runtime.py.
+    Every file must match the manifest's size and SHA-256, and the manifest must
+    name exactly the pinned commit, CMake arguments, Vulkan SDK and pin file.
+    """
+    directory = pathlib.Path(directory)
+    pins_bytes = pins_path.read_bytes()
+    pins = json.loads(pins_bytes)
+    try:
+        manifest = json.loads((directory / "runtime-manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise BundleError("cannot read the local runtime manifest: %s" % error)
+    whisper = pins["whisperCpp"]
+    expectations = {"runtime": "whisper.cpp", "version": whisper["version"], "commit": whisper["commit"],
+                    "cmakeArguments": pins["cmakeArguments"], "pinsSHA256": sha256(pins_bytes.replace(b"\r\n", b"\n")),
+                    "vulkanSdk": {key: pins["vulkanSdk"][key] for key in ("version", "sha256", "bytes")}}
+    for key, value in expectations.items():
+        if manifest.get(key) != value:
+            raise BundleError("local runtime manifest %s is %r; expected %r" % (key, manifest.get(key), value))
+    variant = re.compile(pins["cpuVariantPattern"])
+    modules = {}
+    for row in manifest.get("files") or []:
+        name = row.get("name")
+        if (not isinstance(name, str) or pathlib.PurePosixPath(name).name != name or
+                not (name in pins["requiredModules"] or variant.match(name))):
+            raise BundleError("unexpected local runtime file: %r" % (name,))
+        path = directory / "runtime" / name
+        if not path.is_file() or path.is_symlink():
+            raise BundleError("local runtime file is missing: " + name)
+        data = path.read_bytes()
+        if len(data) != row.get("bytes") or sha256(data) != row.get("sha256"):
+            raise BundleError("local runtime file does not match its manifest: " + name)
+        image = windows_pe.PEImage(data, name)
+        if not image.is_x64 or not image.is_dll:
+            raise BundleError(name + " is not an x64 DLL")
+        modules[name.lower()] = {"name": name, "bytes": data, "provenance": {
+            "runtime": "whisper.cpp", "version": manifest["version"], "commit": manifest["commit"],
+            "compiler": manifest.get("compiler"), "vulkanSdk": manifest["vulkanSdk"]["version"],
+            "builtBy": "scripts/windows-local-runtime/build-whisper-runtime.py"}}
+    missing = sorted(set(name.lower() for name in pins["requiredModules"]) - set(modules))
+    if missing or sum(1 for name in modules if variant.match(name)) < pins["minimumCpuVariants"]:
+        raise BundleError("the local runtime is incomplete: " + (", ".join(missing) or "too few CPU variants"))
+    licence = directory / "runtime" / "LICENSE-whisper.cpp.txt"
+    if not licence.is_file() or digest_file(licence) != whisper["licenseSHA256"]:
+        raise BundleError("the whisper.cpp licence is missing or differs from its pin")
+    return {"modules": modules, "license": licence.read_bytes(), "manifest": manifest,
+            "manifestSHA256": sha256((directory / "runtime-manifest.json").read_bytes())}
+
+
 # --- llvm-readobj cross-check ---------------------------------------------------------------
 def parse_llvm_readobj_imports(text):
     static, delayed, section = [], [], None
@@ -414,7 +494,7 @@ def cross_check_with_llvm(tool, name, data, image, log):
 
 
 # --- assembly ------------------------------------------------------------------------------
-def readme_text(metadata, closure_names, microsoft):
+def readme_text(metadata, closure_names, microsoft, local_runtime=None):
     commit = metadata.get("sourceCommit") or "main"
     return "\n".join([
         "Just Speak to It - Windows x64 developer runtime bundle",
@@ -432,6 +512,12 @@ def readme_text(metadata, closure_names, microsoft):
         "Bundled runtime: Swift 6.2.3 (" + ", ".join(name for name in closure_names if not name.lower().startswith(("msvcp", "vcruntime", "concrt", "vccorlib", "vcamp", "vcomp"))) + ")",
         "and " + microsoft["displayName"] + ".",
         "",
+    ] + ([
+        "On-device transcription: whisper.cpp " + local_runtime["manifest"]["version"] + " (whisper.dll and the",
+        "ggml DLLs). It uses a Vulkan GPU when the graphics driver provides vulkan-1.dll",
+        "and the CPU otherwise. Models are downloaded in the app (Settings > Local models).",
+        "",
+    ] if local_runtime else []) + [
         "bundle-manifest.json lists every file with its SHA-256 and origin;",
         "THIRD-PARTY-NOTICES.txt and the licenses folder hold the licence terms.",
         "",
@@ -441,7 +527,7 @@ def readme_text(metadata, closure_names, microsoft):
     ])
 
 
-def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock, licenses):
+def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock, licenses, local_runtime=None):
     lines = ["THIRD-PARTY NOTICES", "", "Just Speak to It is distributed under the MIT License (licenses/" + app_license_name + ").", ""]
     swift_license = next(entry for entry in licenses if entry["name"] == "LICENSE-swift.txt")
     lines += ["Swift 6.2.3 runtime (swift.org): " + ", ".join(swift_files),
@@ -460,6 +546,15 @@ def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock
               "  https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution",
               "  https://visualstudio.microsoft.com/license-terms/vs2022-ga-community/",
               "  Runtime licence terms: https://aka.ms/VCRedistLicense (licenses/NOTICE-microsoft-visual-cpp-runtime.txt)", ""]
+    if local_runtime:
+        manifest = local_runtime["manifest"]
+        lines += ["whisper.cpp " + manifest["version"] + " (commit " + manifest["commit"] + "), including ggml: "
+                  + ", ".join(sorted(module["name"] for module in local_runtime["modules"].values())),
+                  "  Licence: MIT (licenses/LICENSE-whisper.cpp.txt)",
+                  "  Built from source by scripts/windows-local-runtime/build-whisper-runtime.py with " +
+                  str(manifest.get("compiler")) + "; the Vulkan SDK " + manifest["vulkanSdk"]["version"] +
+                  " was used at build time only.",
+                  "  vulkan-1.dll is not redistributed: it comes from the graphics driver when present.", ""]
     lines += ["Windows operating-system modules (kernel32, user32, the Universal CRT and other API sets) are not redistributed.", ""]
     return "\n".join(lines)
 
@@ -481,10 +576,13 @@ def microsoft_notice_text(microsoft, lock, files):
     return "\n".join(lines)
 
 
-def assemble(application, swift, microsoft, licenses, app_license, policy, lock, cross_check, log):
+def assemble(application, swift, microsoft, licenses, app_license, policy, lock, cross_check, log, local_runtime=None):
     """Return ``(entries, manifest)``: bundle bytes keyed by path, and the manifest document."""
     executable = application["executable"]
     images = {}
+    local_modules = local_runtime["modules"] if local_runtime else {}
+    if local_modules and set(policy.local) != set(local_modules):
+        raise BundleError("the runtime policy was not loaded with the local runtime modules")
 
     def read_imports(name, category):
         if category == "application":
@@ -496,23 +594,29 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
             if module is None:
                 raise BundleError("the pinned Visual C++ redistributable does not provide " + name)
             image = windows_pe.PEImage(module["bytes"], name)
+        elif category == LOCAL_RUNTIME:
+            image = windows_pe.PEImage(local_modules[name.lower()]["bytes"], name)
         else:
             raise BundleError("cannot read imports for " + name)
         images[name] = image
         return image.imports(), image.delay_imports()
 
-    closure = resolve_closure(APPLICATION, read_imports, policy)
+    closure = resolve_closure(APPLICATION, read_imports, policy,
+                              sorted(module["name"] for module in local_modules.values()))
     entries = {APPLICATION: executable}
     files = [{"path": APPLICATION, "bytes": len(executable), "sha256": sha256(executable), "source": "application"}]
     for relative, data in sorted(application["resources"].items()):
         entries[relative] = data
         files.append({"path": relative, "bytes": len(data), "sha256": sha256(data), "source": "application-resources"})
-    swift_files, microsoft_files = [], []
+    swift_files, microsoft_files, local_files = [], [], []
     for lower, entry in closure["bundled"].items():
         name = entry["name"]
         if entry["source"] == SWIFT_RUNTIME:
             data, provenance = read_swift_module(swift, name)
             swift_files.append(name)
+        elif entry["source"] == LOCAL_RUNTIME:
+            data, provenance = local_modules[lower]["bytes"], local_modules[lower]["provenance"]
+            local_files.append(name)
         else:
             module = microsoft["modules"][lower]
             data, provenance = module["bytes"], module["provenance"]
@@ -525,7 +629,7 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         files.append({"path": name, "bytes": len(data), "sha256": sha256(data), "source": entry["source"],
                       "fileVersion": version.get("fileVersion"), "provenance": provenance})
     if cross_check is not None:
-        for name in [APPLICATION] + swift_files + microsoft_files:
+        for name in [APPLICATION] + swift_files + microsoft_files + local_files:
             cross_check_with_llvm(cross_check, name, entries[name], images.get(name) or windows_pe.PEImage(entries[name], name), log)
     license_names = []
     for entry in licenses:
@@ -534,13 +638,20 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         files.append({"path": path, "bytes": len(entry["data"]), "sha256": sha256(entry["data"]), "source": "license",
                       "provenance": {"url": entry["url"], "license": entry["license"], "covers": entry["covers"]}})
         license_names.append(entry["name"])
+    if local_runtime:
+        entries["licenses/LICENSE-whisper.cpp.txt"] = local_runtime["license"]
+        files.append({"path": "licenses/LICENSE-whisper.cpp.txt", "bytes": len(local_runtime["license"]),
+                      "sha256": sha256(local_runtime["license"]), "source": "license",
+                      "provenance": {"url": local_runtime["manifest"]["repository"], "license": "MIT",
+                                     "covers": "whisper.cpp and ggml runtime DLLs"}})
     app_license_name = "LICENSE-JustSpeakToIt.txt"
     generated = {
         "licenses/" + app_license_name: app_license,
         "licenses/NOTICE-microsoft-visual-cpp-runtime.txt": microsoft_notice_text(
             microsoft, lock, [(name, microsoft["modules"][name.lower()]) for name in microsoft_files]).encode(),
-        "THIRD-PARTY-NOTICES.txt": notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock, licenses).encode(),
-        "README.txt": readme_text(application["metadata"], swift_files + microsoft_files, microsoft).encode(),
+        "THIRD-PARTY-NOTICES.txt": notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock, licenses,
+                                                local_runtime).encode(),
+        "README.txt": readme_text(application["metadata"], swift_files + microsoft_files, microsoft, local_runtime).encode(),
     }
     for path, data in generated.items():
         entries[path] = data
@@ -567,6 +678,10 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
             "microsoftRuntime": {"download": {key: lock[key] for key in ("name", "url", "sha256", "bytes", "permalink", "version")},
                                  "displayName": microsoft["displayName"], "productName": microsoft["productName"]},
             "licenses": [{key: entry[key] for key in ("name", "url", "sha256", "bytes", "license", "covers")} for entry in licenses],
+            "localInferenceRuntime": None if not local_runtime else {
+                key: local_runtime["manifest"].get(key)
+                for key in ("runtime", "version", "commit", "repository", "cmakeArguments", "compiler", "vulkanSdk")
+            } | {"manifestSHA256": local_runtime["manifestSHA256"], "modules": sorted(local_files)},
         },
         "policy": policy.data,
         "verification": {"importReader": "windows_pe.py static and delay-load import directories",
@@ -591,12 +706,16 @@ def main():
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--source-root", type=pathlib.Path, default=HERE.parent.parent)
     parser.add_argument("--llvm-readobj", type=pathlib.Path, help="cross-check import tables with llvm-readobj")
+    parser.add_argument("--local-runtime", type=pathlib.Path,
+                        help="whisper.cpp runtime build (build-whisper-runtime.py output) to bundle for on-device transcription")
     args = parser.parse_args()
     app, cache, output = args.app.resolve(), args.cache.resolve(), args.output.resolve()
     check_output_separation(app, cache, output)
     output.mkdir(parents=True, exist_ok=True)
     log = Log(output / "bundle-build.log")
-    policy = Policy.load()
+    local_runtime = load_local_runtime(args.local_runtime.resolve()) if args.local_runtime else None
+    policy = Policy.load(local_runtime=[module["name"] for module in local_runtime["modules"].values()]
+                         if local_runtime else ())
     lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
     application = load_application(app, policy)
     swift = load_swift_runtime(cache)
@@ -614,7 +733,7 @@ def main():
     if cross_check is not None and not cross_check.is_file():
         raise BundleError("llvm-readobj not found at " + str(cross_check))
     entries, manifest = assemble(application, swift, microsoft, licenses, app_license, policy,
-                                 lock["microsoftRuntime"], cross_check, log)
+                                 lock["microsoftRuntime"], cross_check, log, local_runtime)
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
     entries["bundle-manifest.json"] = manifest_bytes
     commit = manifest["application"]["sourceCommit"]

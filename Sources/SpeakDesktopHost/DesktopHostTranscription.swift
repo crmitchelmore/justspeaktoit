@@ -16,17 +16,11 @@ extension DesktopHostController {
         )
         do {
             guard !closed else { throw CancellationError() }
-            let key = try effects.apiKey(name: credentialIdentifier(for: record.modelIdentifier))
+            let key = try transcriptionKey(for: record.modelIdentifier)
             let audio = try await store.audioURL(for: record)
             guard !closed else { throw CancellationError() }
-            let size = try audio.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= 25_000_000 else {
-                throw DesktopHostError(
-                    message: "Audio exceeds this \(Platform.displayName) preview’s 25 MB upload cap. "
-                        + "The recording is saved."
-                )
-            }
-            update("Transcribing… Your recording is saved locally.", state: 2)
+            try checkUploadSize(audio, model: record.modelIdentifier)
+            update(transcribingStatus(for: record.modelIdentifier), state: 2)
             let request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language
             )

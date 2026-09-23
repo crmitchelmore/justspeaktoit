@@ -18,6 +18,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package var voiceOutput: Platform.VoiceOutputSettings?
         // Settings menu; `speak` is refused until allowed.
         package var automationEnabled: Bool?
+        // The last on-device model chosen under Source: Local.
+        package var localModel: String?
+        // Local models dialog; absent lets whisper.cpp use a GPU when available.
+        package var localUseGPU: Bool?
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -44,11 +48,11 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
     }
 
-    package let directory: URL
+    package nonisolated let directory: URL
     package let effects: any DesktopHostEffects<Platform>
-    let store: DesktopRecordingStore
+    package nonisolated let store: DesktopRecordingStore
     let uploadStaging: SharedMultipartUploadStaging
-    let modelCatalog: OpenRouterAudioCatalogStore
+    package let modelCatalog: OpenRouterAudioCatalogStore
     var modelDiscoveryTask: Task<Void, Never>?
     var modelCatalogRevision: UInt64 = 0
     let profileStore: DesktopDictationProfileStore
@@ -63,16 +67,16 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var activeOperations = 0
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
-    var transcript = ""
+    package var transcript = ""
     package var hotKeySession = DesktopHostHotKeySessionState()
     package var readAloudState = Platform.makeReadAloudState()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.
-    var historySearchText: [UUID: String] = [:]
+    package var historySearchText: [UUID: String] = [:]
     var historyQuery = ""
     package var selectedHistoryID: UUID?
-    var transcriptVariant: DesktopTranscriptVariant = .processed
+    package var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
     package var microphoneWarning: String?
@@ -80,6 +84,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     package var outputSlot = DesktopHostOutputState<Platform>()
+    // Installed once iCloud sync is configured.
+    package var cloudSync = DesktopHostSyncHooks()
+    /// Downloads, progress and the on-device runtime for Local models.
+    package var localModels = Platform.makeLocalModelsState()
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
@@ -212,9 +220,7 @@ extension DesktopHostController {
         do {
             try await playback.stopAndWait()
             guard !closed else { return }
-            guard !(try effects.apiKey(name: credentialIdentifier(for: settings.model))).isEmpty else {
-                throw TranscriptionProviderError.apiKeyMissing
-            }
+            _ = try requireCredentialOrLocalModel(settings.model)
             let source = URL(fileURLWithPath: path)
             try DesktopHostImport.validate(source)
             let id = UUID()
@@ -281,7 +287,6 @@ extension DesktopHostController {
         shutdownWaiters.removeAll()
         waiters.forEach { $0.resume() }
     }
-
 }
 
 extension DesktopHostController {
@@ -289,6 +294,7 @@ extension DesktopHostController {
         try await store.save(record)
         indexHistory(record)
         refreshHistory()
+        cloudSync.historyChanged?()
     }
 
     func finishOperation() {
@@ -334,9 +340,7 @@ extension DesktopHostController {
             transcript = selectedHistoryID.flatMap { history[$0]?.displayText } ?? ""
             transcriptVariant = .processed
             refreshHistory(selectRecord: true)
-            let key = try Platform.apiKey(name: credentialIdentifier(for: settings.model))
-            var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
-                : "Ready. \(Platform.readyHint(hotKeySettings())) \(records.count) saved recordings."
+            var status = try readyStatus(savedRecordings: records.count)
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
@@ -350,9 +354,7 @@ extension DesktopHostController {
         guard !closed, !busy, recording == nil, DesktopHostModels.all.indices.contains(index) else { return }
         let changed = settings.model != DesktopHostModels.all[index].id
         settings.model = DesktopHostModels.all[index].id
-        if DesktopHostModels.isLive(settings.model) { settings.liveModel = settings.model } else {
-            settings.batchModel = settings.model
-        }
+        rememberModelSlot()
         do {
             try JSONEncoder().encode(settings).write(
                 to: directory.appendingPathComponent("settings.json"), options: .atomic

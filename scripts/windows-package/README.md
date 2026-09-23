@@ -12,6 +12,8 @@ failure and uninstall lifecycle on a disposable Windows machine.
 | `build-windows-package-layout.py` | Authenticates the bundle and writes the package layout |
 | `pack-windows-package.ps1` | MakeAppx pack and independent block-map verification |
 | `sign-windows-package.ps1` | Signs a copy with a certificate from a Windows store |
+| `sign-windows-package-artifact-signing.ps1` | Signs a copy through Azure Artifact Signing (pinned dlib, timestamped) |
+| `signing_configuration.py` | Decides from CI secrets and variables whether to sign, and writes the dlib metadata |
 | `test-windows-package-lifecycle.ps1` | Disposable-machine lifecycle test (Windows PowerShell 5.1, elevated) |
 | `LifecycleOwnership.ps1`, `test-lifecycle-ownership.ps1` | Admission and owned-state cleanup rules, verified against a fake machine |
 | `test-windows-package-admission.ps1` | Negative control: the lifecycle test must refuse, and leave untouched, an existing installation |

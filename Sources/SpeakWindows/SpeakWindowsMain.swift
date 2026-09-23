@@ -13,6 +13,7 @@ final class WindowsEventContext {
     let smokeTest: Bool
     var smokeTestFailure: Error?
     var microphoneMonitor: WindowsMicrophoneMonitor?
+    var cloudSync: WindowsCloudSync?
     let search: WindowsSearchCoalescer
     private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
@@ -120,7 +121,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
             await controller.importAudio(path: value, modelIndex: Int(index))
         }
     case 3, 6, 15, 16, 18, 19: transcriptEvent(event, value: value, holder: holder)
-    case 4: holder.enqueueSettings { await controller.saveKey(value, modelIndex: Int(index)) }
+    case 4: saveKeyEvent(value, index: Int(index), holder: holder)
     case 5: holder.enqueueSettings { await controller.selectModel(Int(index)) }
     case 7:
         ready(holder)
@@ -282,11 +283,13 @@ private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEven
 @main
 enum SpeakWindowsMain {
     static func main() async {
+        WindowsModels.configureForWindows()
         do {
             if CommandLine.arguments.contains("--bundle-self-test") {
                 try await WindowsBundleSelfTest.run()
                 return
             }
+            if try await WindowsLocalSelfTest.handle(CommandLine.arguments) { return }
             if CommandLine.arguments.contains("--self-test") {
                 try WindowsNative.checked { jsti_native_self_test($0, $1) }
                 try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
@@ -294,6 +297,7 @@ enum SpeakWindowsMain {
                 try await WindowsTextOutputSelfTest.run()
                 try await WindowsHotKeySelfTest.run()
                 try WindowsNative.storageMediaAndAutomationSelfTests()
+                try await WindowsLocalSelfTest.run()
                 guard !DesktopTranscription.batchModels.isEmpty else {
                     throw WindowsNativeError(message: "No canonical desktop models available.")
                 }
@@ -354,9 +358,8 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
-        if !smokeTest { await WindowsAutomationSwitch.restore(holder) }
-        let preferences = await controller.preferredModelIDs()
-        try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
+        await restoreServices(holder)
+        try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
         let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
         let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in
@@ -386,7 +389,7 @@ enum SpeakWindowsMain {
         // this context once the holder can be released.
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
-        jsti_window_clear_voice_output()
+        await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         await holder.hotKeys.drain()
         await controller.close()

@@ -29,8 +29,10 @@ on:
       - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
+      - scripts/windows-local-runtime/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
+      - .github/workflows/windows-local-runtime.yml
   push:
     branches: [main]
     paths:
@@ -58,8 +60,10 @@ on:
       - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
+      - scripts/windows-local-runtime/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
+      - .github/workflows/windows-local-runtime.yml
 
 permissions:
   contents: read
@@ -69,14 +73,24 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # The pinned whisper.cpp DLLs are built with MSVC on Windows (or restored
+  # from cache) and bundled beside the Mac-built executable.
+  local-runtime:
+    uses: ./.github/workflows/windows-local-runtime.yml
+
   compile:
     name: Cross-compile Swift app and tests on macOS
+    needs: local-runtime
     runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime
+          path: ${{ runner.temp }}/windows-local-runtime
       - name: Build Windows PE with private pinned prerequisites
         shell: bash
         run: |
@@ -86,6 +100,17 @@ jobs:
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --output "$RUNNER_TEMP/foundation-proof" 2>&1 |
             tee "$RUNNER_TEMP/foundation-proof/bootstrap.log"
+      - name: Check the CloudKit Web Services build-setting writer
+        shell: bash
+        run: python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py'
+      # The container's API token (CloudKit Console) is a build setting. Pull
+      # request builds never receive it and report iCloud sync as unavailable.
+      - name: Configure CloudKit Web Services for this build
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        env:
+          CLOUDKIT_WEB_API_TOKEN: ${{ secrets.CLOUDKIT_WEB_API_TOKEN }}
+        run: python3 -B scripts/windows-cloudkit/configure-cloudkit-web.py
       - name: Cross-build the Windows app and test suite
         shell: bash
         run: |
@@ -108,6 +133,7 @@ jobs:
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --downloads "$RUNNER_TEMP/private-windows-cross-sdk/bundle-downloads" \
             --output "$RUNNER_TEMP/windows-runtime-bundle" \
+            --local-runtime "$RUNNER_TEMP/windows-local-runtime" \
             --llvm-readobj "$RUNNER_TEMP/private-windows-cross-sdk/llvm-20/LLVM-20.1.8-macOS-ARM64/bin/llvm-readobj" 2>&1 |
             tee "$RUNNER_TEMP/windows-runtime-bundle/bootstrap.log"
       - name: Upload self-contained runtime bundle
@@ -269,9 +295,9 @@ jobs:
 
   bundle-execute:
     name: Run the self-contained bundle on Windows without Swift
-    needs: compile
+    needs: [local-runtime, compile]
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -280,6 +306,17 @@ jobs:
         with:
           name: windows-runtime-bundle
           path: bundle
+      # Only the JFK sample is used from the runtime artifact: the DLLs under
+      # test are the bundled copies.
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime
+          path: local-runtime
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
       # No Swift setup action runs in this job. The script additionally isolates
       # PATH to the Windows system directories, proves the executable cannot
       # start without the bundled DLLs, and records sampled loaded modules's path.
@@ -287,8 +324,12 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/windows-bundle/test-bundle-environment.ps1
+          $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
           ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
-            -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA
+            -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `
+            -LocalTranscriptionAudio local-runtime/fixtures/jfk.wav `
+            -LocalTranscriptionPhrase $pins.whisperCpp.fixture.expectedPhrase `
+            -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models')
       - name: Upload bundle execution evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1
@@ -391,4 +432,93 @@ jobs:
             ${{ runner.temp }}/package-admission-control/evidence/
             ${{ runner.temp }}/package-admission-control/refused-lifecycle/evidence/
           if-no-files-found: warn
+          retention-days: 14
+      - name: Report the signing route
+        shell: pwsh
+        env:
+          SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+        run: |
+          if ($env:SIGNING_ACCOUNT) {
+            Write-Host 'Azure Artifact Signing variables are set: the sign job signs a copy of this package on pushes to main and manual runs.'
+          } else {
+            Write-Host 'Azure Artifact Signing is not configured; this run publishes only the unsigned developer MSIX (windows-developer-msix-unsigned).'
+          }
+
+  # Signs a separately built layout whose publisher is the certificate subject
+  # from WINDOWS_MSIX_PUBLISHER. Runs only in the protected `windows-signing`
+  # environment, never for pull requests, and does nothing but log when the
+  # signing secrets and variables are absent. No key, certificate or client
+  # secret exists in the repository or on the runner: GitHub OIDC signs in to
+  # Entra ID and the key stays in Artifact Signing's HSMs.
+  sign:
+    name: Sign the developer MSIX with Azure Artifact Signing
+    needs: compile
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: windows-2022
+    timeout-minutes: 30
+    environment: windows-signing
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SIGNED_VERSION: 0.0.${{ github.run_number }}.3
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Read the signing configuration
+        id: config
+        shell: pwsh
+        env:
+          AZURE_ARTIFACT_SIGNING_CLIENT_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          AZURE_ARTIFACT_SIGNING_TENANT_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+          WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
+        run: |
+          python -B scripts/windows-package/signing_configuration.py --github-output $env:GITHUB_OUTPUT `
+            --metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Sign in to Azure with GitHub OIDC
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+      - uses: actions/download-artifact@v5
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        with:
+          name: windows-runtime-bundle
+          path: bundle
+      - name: Build, pack and sign a layout for the certificate subject
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        shell: pwsh
+        env:
+          WINDOWS_MSIX_PUBLISHER: ${{ steps.config.outputs.publisher }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'package-signed'
+          python -B scripts/windows-package/build-windows-package-layout.py --bundle bundle `
+            --expected-commit $env:GITHUB_SHA --version $env:SIGNED_VERSION --publisher $env:WINDOWS_MSIX_PUBLISHER `
+            --output $root
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $unsigned = Join-Path $root "JustSpeakToIt-Developer_$($env:SIGNED_VERSION)_x64_unsigned.msix"
+          ./scripts/windows-package/pack-windows-package.ps1 -Layout (Join-Path $root 'layout') -Output $unsigned `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+          ./scripts/windows-package/sign-windows-package-artifact-signing.ps1 -Package $unsigned `
+            -Output (Join-Path $root "JustSpeakToIt-Developer_$($env:SIGNED_VERSION)_x64.msix") `
+            -Layout (Join-Path $root 'layout') -Metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json') `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+      - name: Upload the signed developer package
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msix-signed
+          path: |
+            ${{ runner.temp }}/package-signed/*_x64.msix
+            ${{ runner.temp }}/package-signed/*.json
+            ${{ runner.temp }}/package-signed/*.log
+          if-no-files-found: error
           retention-days: 14

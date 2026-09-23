@@ -9,6 +9,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import urllib.parse
 import xml.etree.ElementTree as ET
 import zipfile
@@ -17,6 +18,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(HERE))
 import lifecycle_support  # noqa: E402
+import signing_configuration  # noqa: E402
 import windows_msix  # noqa: E402
 
 
@@ -638,6 +640,95 @@ class LifecycleSupportTests(unittest.TestCase):
             self.assertEqual(archive.read("Unchanged.bin"), bytes(range(256)) * 8)
         with self.assertRaises(SystemExit):
             lifecycle_support.tamper(base, self.root / "same.msix", base)
+
+
+
+SIGNING = {
+    "AZURE_ARTIFACT_SIGNING_CLIENT_ID": "00000000-0000-4000-8000-000000000001",
+    "AZURE_ARTIFACT_SIGNING_TENANT_ID": "00000000-0000-4000-8000-000000000002",
+    "AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID": "00000000-0000-4000-8000-000000000003",
+    "AZURE_ARTIFACT_SIGNING_ENDPOINT": "https://weu.codesigning.azure.net/",
+    "AZURE_ARTIFACT_SIGNING_ACCOUNT": "examplesigning",
+    "AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE": "example-public",
+    "WINDOWS_MSIX_PUBLISHER": "CN=Example Developer, O=Example Developer, L=Leeds, C=GB",
+}
+
+
+class SigningConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        self.root = pathlib.Path(self.scratch.name)
+
+    def test_no_settings_keeps_the_unsigned_developer_package(self):
+        decision = signing_configuration.plan({"UNRELATED": "1", "AZURE_ARTIFACT_SIGNING_ACCOUNT": "  "})
+        self.assertFalse(decision["enabled"])
+        self.assertIn("keeping the unsigned developer MSIX", decision["message"])
+        output = self.root / "output"
+        with unittest.mock.patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(signing_configuration.main(["--github-output", str(output),
+                                                         "--metadata", str(self.root / "metadata.json")]), 0)
+        self.assertEqual(output.read_text(encoding="utf-8"), "enabled=false\n")
+        self.assertFalse((self.root / "metadata.json").exists())
+
+    def test_complete_settings_sign_as_the_configured_publisher(self):
+        decision = signing_configuration.plan(SIGNING)
+        self.assertTrue(decision["enabled"])
+        self.assertEqual(decision["publisher"], SIGNING["WINDOWS_MSIX_PUBLISHER"])
+        self.assertEqual(decision["timestampUrl"], "http://timestamp.acs.microsoft.com")
+        self.assertEqual(decision["metadata"]["Endpoint"], "https://weu.codesigning.azure.net")
+        self.assertEqual(decision["metadata"]["CodeSigningAccountName"], "examplesigning")
+        self.assertEqual(decision["metadata"]["CertificateProfileName"], "example-public")
+        self.assertNotIn("AzureCliCredential", decision["metadata"]["ExcludeCredentials"])
+        output, metadata = self.root / "output", self.root / "metadata.json"
+        with unittest.mock.patch.dict("os.environ", SIGNING, clear=True):
+            self.assertEqual(signing_configuration.main(["--github-output", str(output),
+                                                         "--metadata", str(metadata)]), 0)
+        self.assertEqual(output.read_text(encoding="utf-8"),
+                         "enabled=true\npublisher=" + SIGNING["WINDOWS_MSIX_PUBLISHER"] + "\n")
+        self.assertEqual(json.loads(metadata.read_text(encoding="utf-8")), decision["metadata"])
+        for secret in signing_configuration.SECRETS:
+            self.assertNotIn(SIGNING[secret], metadata.read_text(encoding="utf-8") + output.read_text(encoding="utf-8"))
+
+    def test_partial_settings_fail_naming_only_the_missing_settings(self):
+        partial = dict(SIGNING)
+        del partial["WINDOWS_MSIX_PUBLISHER"], partial["AZURE_ARTIFACT_SIGNING_TENANT_ID"]
+        with self.assertRaises(signing_configuration.SigningConfigurationError) as caught:
+            signing_configuration.plan(partial)
+        message = str(caught.exception)
+        self.assertIn("AZURE_ARTIFACT_SIGNING_TENANT_ID, WINDOWS_MSIX_PUBLISHER", message)
+        self.assertNotIn(SIGNING["AZURE_ARTIFACT_SIGNING_CLIENT_ID"], message)
+        with unittest.mock.patch.dict("os.environ", partial, clear=True):
+            self.assertEqual(signing_configuration.main([]), 1)
+
+    def test_malformed_settings_are_refused(self):
+        for name, value in [("AZURE_ARTIFACT_SIGNING_CLIENT_ID", "not-a-guid"),
+                            ("AZURE_ARTIFACT_SIGNING_ENDPOINT", "https://example.com"),
+                            ("AZURE_ARTIFACT_SIGNING_ENDPOINT", "http://weu.codesigning.azure.net"),
+                            ("AZURE_ARTIFACT_SIGNING_ACCOUNT", "ab"),
+                            ("AZURE_ARTIFACT_SIGNING_ACCOUNT", "bad--name"),
+                            ("AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE", "1profile"),
+                            ("WINDOWS_MSIX_PUBLISHER", "Example Developer"),
+                            ("WINDOWS_MSIX_PUBLISHER", "CN=Just Speak to It Developer")]:
+            with self.subTest(name=name, value=value):
+                with self.assertRaisesRegex(signing_configuration.SigningConfigurationError, name):
+                    signing_configuration.plan(dict(SIGNING, **{name: value}))
+
+    def test_signed_and_unsigned_layouts_follow_the_plan(self):
+        bundle = make_bundle(self.root / "bundle")
+        unsigned = windows_msix.build_layout(bundle, self.root / "unsigned", "0.0.9.1")
+        self.assertEqual(unsigned["package"]["publisher"], "CN=Just Speak to It Developer")
+        decision = signing_configuration.plan(SIGNING)
+        signed = windows_msix.build_layout(bundle, self.root / "signed", "0.0.9.1", publisher=decision["publisher"])
+        self.assertEqual(signed["package"]["publisher"], SIGNING["WINDOWS_MSIX_PUBLISHER"])
+        self.assertNotEqual(signed["package"]["packageFamilyName"], unsigned["package"]["packageFamilyName"])
+        layout = self.root / "signed" / "layout"
+        reference = make_package(layout, self.root / "reference.msix")
+        windows_msix.verify_package(reference, layout, signed=False)
+        package = make_package(layout, self.root / "signed.msix", signed=True)
+        windows_msix.verify_package(package, layout, signed=True, unsigned_reference=reference)
+        with self.assertRaises(windows_msix.PackageError):
+            windows_msix.verify_package(package, self.root / "unsigned" / "layout", signed=True)
 
 
 if __name__ == "__main__":

@@ -91,6 +91,19 @@ package protocol DesktopHostPlatform: Sendable {
     /// Ends Read aloud: the current segment stops and no later one starts.
     static func stopReadAloud(_ state: inout ReadAloudState)
 
+    // On-device transcription. Hosts without a local runtime keep the defaults
+    // and configure no local models.
+    /// Controller-owned downloads, progress and runtime for on-device models.
+    associatedtype LocalModelsState = Void
+    static func makeLocalModelsState() -> LocalModelsState
+    /// How status lines name this computer, e.g. "this PC".
+    static var localDeviceName: String { get }
+    /// Why an on-device model cannot run now, or nil when it can.
+    static func localReadiness(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
+    static func transcribeLocally(
+        _ audio: URL, model: String, language: String?, controller: isolated DesktopHostController<Self>
+    ) async throws -> TranscriptionResult
+
     // Shortcut text for the status line.
     static var defaultHotKey: HotKeySettings { get }
     /// Appended to the Ready status line.

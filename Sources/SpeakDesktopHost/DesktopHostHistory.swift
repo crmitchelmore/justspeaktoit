@@ -2,7 +2,7 @@ import Foundation
 import SpeakDesktop
 
 extension DesktopHostController {
-    func indexHistory(_ record: DesktopRecordingStore.Record) {
+    package func indexHistory(_ record: DesktopRecordingStore.Record) {
         history[record.id] = record
         historySearchText[record.id] = DesktopHistorySearch.searchText(for: record)
     }
@@ -15,7 +15,7 @@ extension DesktopHostController {
         }
     }
 
-    func refreshHistory(selectRecord: Bool = false) {
+    package func refreshHistory(selectRecord: Bool = false) {
         guard !closed else { return }
         let visible = visibleHistory()
         if let selected = selectedHistoryID, !visible.contains(where: { $0.id == selected }) {
@@ -103,7 +103,7 @@ extension DesktopHostController {
 
     package func retryHistory(_ identifier: String) async {
         guard canUseHistory, let id = UUID(uuidString: identifier),
-              let record = history[id] else { return }
+              let record = history[id], !refuseSyncedAudio(record) else { return }
         guard DesktopTranscription.provider(for: record.modelIdentifier) != nil else {
             update("This used a live model. Open its audio, then choose Batch and import it to transcribe again.")
             return
@@ -130,7 +130,8 @@ extension DesktopHostController {
     }
 
     package func openHistoryAudio(_ identifier: String) async {
-        guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
+        guard !closed, let id = UUID(uuidString: identifier), let record = history[id],
+              !refuseSyncedAudio(record) else { return }
         activeOperations += 1
         defer { finishOperation() }
         do {

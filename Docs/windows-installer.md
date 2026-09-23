@@ -103,26 +103,141 @@ is a production build change in `Package.swift`, outside this slice.
 - **Unsigned developer package** (`windows-developer-msix-unsigned`). Windows
   installs only signed packages through Add-AppxPackage or App Installer. The
   Windows 11 unsigned-package route needs a special publisher OID that gives a
-  different identity, so it is not used.
-- **Externally supplied signing configuration.** The owner provides a code
-  signing certificate in a Windows certificate store (a hardware token or key
-  storage provider may hold its key). Rebuild the layout with
+  different identity, so it is not used. Every CI run still produces it.
+- **Azure Artifact Signing in CI** (`windows-developer-msix-signed`). When the
+  secrets and variables below exist, the `sign` job signs a separately built
+  copy; see [Setting up Azure Artifact Signing](#setting-up-azure-artifact-signing).
+  Without them the job logs "Azure Artifact Signing is not configured ...
+  keeping the unsigned developer MSIX" and succeeds; a partial setup fails and
+  names the missing settings.
+- **Certificate in a Windows certificate store.** For an OV certificate on a
+  token or cloud HSM, rebuild the layout with
   `--publisher "<certificate subject>"`, pack it, then run
   `sign-windows-package.ps1 -CertificateThumbprint <sha1> -TimestampUrl <RFC 3161 URL>`.
   The script checks that the subject equals the manifest publisher, the code
   signing EKU and validity, signs a copy with the pinned SignTool and proves the
-  payload and block map are unchanged. A new publisher is a new package family:
-  choose it once. A certificate from a CA in Windows' trusted roots installs
-  without extra trust steps; a self-signed one must be imported into each
-  machine's Trusted People store and is suitable only for testing. Choosing,
-  buying or enrolling a signing identity, and any timestamp service, are owner
-  decisions. No signing material, thumbprint or secret is in this repository.
+  payload and block map are unchanged. A self-signed certificate must be
+  imported into each machine's Trusted People store and is suitable only for
+  testing. No signing material, thumbprint or secret is in this repository.
 - **CI test certificate.** The lifecycle job creates a NonExportable,
   three-hour self-signed certificate in the runner's user store, trusts only
   its public part in `LocalMachine\TrustedPeople`, signs through the same
   script and removes certificate, key and trust before the job ends. A second
   untrusted certificate provides a negative control. Signed test packages are
   not uploaded.
+
+A new publisher is a new package family, so choose the signing identity once:
+changing it later means users uninstall and reinstall (or a
+[persistent identity](https://learn.microsoft.com/windows/msix/package/persistent-identity)
+migration).
+
+### Choosing a signing route (September 2026)
+
+| Route | Price | Who can use it | Notes |
+|---|---|---|---|
+| [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/overview) (formerly Trusted Signing) | Basic $9.99/month (5,000 signatures, one profile of each type); Premium $99.99/month (100,000, ten); $0.005 per extra signature ([pricing](https://azure.microsoft.com/pricing/details/artifact-signing/)) | Public Trust: organisations in the US, Canada, EU, UK, Australia, New Zealand, Japan, South Korea, Singapore, Switzerland, Norway and Israel; individual developers in the US and Canada only ([prerequisites](https://learn.microsoft.com/azure/artifact-signing/quickstart#prerequisites)). Needs a paid (not free or trial) Azure subscription | Keys in FIPS 140-3 Level 3 HSMs, short-lived certificates renewed automatically, no token, GitHub OIDC. Subject is the validated legal name; no custom CN or O. Not EV |
+| [Microsoft Store](https://learn.microsoft.com/windows/apps/package-and-deploy/code-signing-options) (Partner Center) | Free registration for individuals and companies | Worldwide | The Store re-signs the MSIX after certification. Store distribution only: it does not sign a package you host yourself |
+| OV certificate on a token or cloud HSM (for example [Certum](https://www.certum.eu/en/code-signing-certificates/) Open Source Code Signing, SSL.com eSigner, DigiCert KeyLocker) | Certum Open Source from about EUR 25 a year, plus about EUR 85 once for a card and reader if not using its cloud HSM; commercial OV about $150 to $300 a year | Worldwide; Certum's Open Source certificate is issued to individuals who maintain open-source projects | Private keys must live on hardware (CA/Browser Forum, June 2023). Signs through `sign-windows-package.ps1`; cloud HSMs that need interactive 2FA suit local signing better than CI |
+| EV certificate | $400+ a year | Worldwide | Since 2024 EV no longer bypasses SmartScreen reputation, so it offers nothing extra here |
+| [SignPath Foundation](https://signpath.org/) | Free for qualifying open-source projects | OSI-licensed, released, actively maintained projects | Signs through SignPath's pipeline with the Foundation's certificate, so the publisher is SignPath Foundation rather than the project owner |
+
+**Recommendation: Azure Artifact Signing, Basic tier.** For an open-source
+indie shipping an MSIX outside the Store it is the cheapest publicly trusted
+route (about $120 a year), keeps the key off every machine, works from
+GitHub Actions with no stored secret, and SmartScreen treats it like OV. It is
+available if the publisher is an organisation in one of the listed countries
+(a UK limited company qualifies) or an individual in the US or Canada. An
+individual elsewhere, for example a sole developer in the UK, cannot use it.
+
+**Fallback: an OV code signing certificate in a cloud HSM or on a token**,
+for example Certum's Open Source Code Signing certificate for an individual
+maintainer, signed locally through `sign-windows-package.ps1`. If the project
+prefers not to hold any certificate, SignPath Foundation is the free OSS
+alternative, at the cost of its name as publisher. The Store is the right
+choice only if Windows builds are to be distributed through the Store.
+
+SmartScreen may still warn on the first downloads of any newly signed build;
+reputation builds as consecutive releases are signed with the same identity.
+
+### Setting up Azure Artifact Signing
+
+Do these once, in this order. Only the portal can complete identity validation.
+
+1. **Azure subscription.** Sign in at <https://portal.azure.com> with the
+   account that will own the service and create a pay-as-you-go subscription
+   (free, trial and sponsored subscriptions are refused). For individual
+   validation, the subscription's billing account must be of type Individual
+   and its legal name and sold-to address must match your government ID.
+2. **Register the provider.** Subscriptions > your subscription > Resource
+   providers > `Microsoft.CodeSigning` > Register (or
+   `az provider register --namespace Microsoft.CodeSigning`).
+3. **Create the account.** Search for Artifact Signing Accounts > Create. Pick
+   a resource group, a globally unique account name (3 to 24 letters, digits or
+   hyphens), a region near you (for example West Europe, endpoint
+   `https://weu.codesigning.azure.net`) and the **Basic** pricing tier. The
+   account's Overview shows its **Account URI**: that is the endpoint.
+4. **Give yourself the verifier role.** On the account, Access control (IAM) >
+   Add role assignment > **Artifact Signing Identity Verifier** > your user.
+5. **Validate your identity.** Account > Objects > Identity validations > New
+   identity > **Public**, choosing **Organization** (legal name, website,
+   primary and secondary email on the organisation's domain, business
+   identifier, address, and the representative's name as on their ID) or
+   **Individual** (filled from the billing account). Confirm the verification
+   email within seven days; for Individual, and for the organisation's
+   representative, complete the Verified ID flow (AU10TIX document and face
+   check, then Microsoft Authenticator). Organisation validation takes 1 to 20
+   business days. Wait for **Completed**.
+6. **Create the certificate profile.** Account > Objects > Certificate
+   profiles > Create > **Public Trust**, a name of 5 to 100 letters, digits or
+   hyphens, and the completed validation under Verified CN and O. Copy the
+   **Certificate Subject Preview** exactly, for example
+   `CN=Example Ltd, O=Example Ltd, L=Leeds, S=West Yorkshire, C=GB`. That
+   string is `WINDOWS_MSIX_PUBLISHER`.
+7. **Create the Entra app for GitHub.** Microsoft Entra ID > App registrations >
+   New registration, for example `justspeaktoit-windows-signing`, single
+   tenant, no redirect URI. Note its **Application (client) ID** and
+   **Directory (tenant) ID**. Do not create a client secret.
+8. **Trust this repository's signing environment (OIDC).** In the app:
+   Certificates & secrets > Federated credentials > Add credential > GitHub
+   Actions deploying Azure resources: organisation `crmitchelmore`, repository
+   `justspeaktoit`, entity type **Environment**, environment `windows-signing`.
+   The subject becomes
+   `repo:crmitchelmore/justspeaktoit:environment:windows-signing` with audience
+   `api://AzureADTokenExchange`. Only jobs in that environment can sign in.
+9. **Let the app sign.** On the certificate profile (or the account), Access
+   control (IAM) > Add role assignment > **Artifact Signing Certificate
+   Profile Signer** > the app from step 7. Give it no other role.
+10. **Create the GitHub environment.** Repository Settings > Environments > New
+    environment `windows-signing`. Restrict deployment branches to `main`, and
+    add yourself as a required reviewer if every signature should wait for
+    approval.
+11. **Add the settings** to that environment (or to the repository):
+
+    | Kind | Name | Value |
+    |---|---|---|
+    | Secret | `AZURE_ARTIFACT_SIGNING_CLIENT_ID` | Application (client) ID from step 7 |
+    | Secret | `AZURE_ARTIFACT_SIGNING_TENANT_ID` | Directory (tenant) ID from step 7 |
+    | Secret | `AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID` | Subscription ID from step 1 |
+    | Variable | `AZURE_ARTIFACT_SIGNING_ENDPOINT` | Account URI from step 3, for example `https://weu.codesigning.azure.net` |
+    | Variable | `AZURE_ARTIFACT_SIGNING_ACCOUNT` | Account name from step 3 |
+    | Variable | `AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE` | Profile name from step 6 |
+    | Variable | `WINDOWS_MSIX_PUBLISHER` | Certificate subject from step 6, character for character |
+
+    The IDs are not credentials, but keeping them as secrets keeps them out of
+    logs. The CI never holds a password, client secret or private key.
+12. **Run it.** Actions > macOS to Windows Swift Proof > Run workflow on `main`
+    (or push to `main`). The `sign` job validates the settings, signs in with
+    OIDC, builds a layout whose publisher is `WINDOWS_MSIX_PUBLISHER`, packs it,
+    signs a copy with the pinned SignTool and the pinned
+    `Microsoft.ArtifactSigning.Client` dlib, timestamps it at
+    `http://timestamp.acs.microsoft.com`, checks that the signer subject equals
+    the publisher and that the package still equals the verified layout, and
+    uploads `windows-developer-msix-signed` with the `.sign.json` receipt.
+
+If signing fails with `0x8007000B`, `WINDOWS_MSIX_PUBLISHER` differs from the
+certificate subject; a 403 usually means the role in step 9 is missing or the
+identity validation is not Completed. To stop signing, delete the three
+secrets and four variables: CI returns to the unsigned package.
 
 ## Tooling and provenance
 

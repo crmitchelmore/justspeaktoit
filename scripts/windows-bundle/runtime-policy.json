@@ -8,7 +8,9 @@
     "microsoftRuntimeModules are the Visual C++ v14 runtime DLL names published in Microsoft's redistributable. Only the members reached from the import closure are bundled, and they are always taken from the pinned official download, never from the Swift installer copy.",
     "testModules indicate a test-enabled executable; a production bundle refuses to package anything that imports them.",
     "additionalRuntimeModules exist for modules that static import tables cannot see (LoadLibrary). Static and delay-load imports of the exe and every bundled DLL currently reach the whole runtime; the Windows job's loaded-module evidence fails if anything non-system is loaded from outside the bundle, so keep this list empty unless that evidence shows a gap.",
-    "forbiddenBundlePatterns are checked against every bundle path so compiler, SDK, header, import-library, symbol, installer and test files can never be shipped."
+    "forbiddenBundlePatterns are checked against every bundle path so compiler, SDK, header, import-library, symbol, installer and test files can never be shipped.",
+    "vulkan-1.dll is the Khronos Vulkan loader installed with a GPU driver. Only ggml-vulkan.dll of the whisper.cpp runtime imports it; that backend is loaded at run time and skipped when the loader is absent, so the loader is never bundled.",
+    "The whisper.cpp runtime (scripts/windows-local-runtime) is a separate, run-time loaded source: build-windows-bundle.py --local-runtime authenticates its DLLs against their build manifest and records imports reached only through them as runtime-static or runtime-delay."
   ],
   "windowsSystemModules": [
     "advapi32.dll",
@@ -32,6 +34,7 @@
     "ucrtbase.dll",
     "user32.dll",
     "userenv.dll",
+    "vulkan-1.dll",
     "winhttp.dll",
     "winmm.dll",
     "ws2_32.dll"

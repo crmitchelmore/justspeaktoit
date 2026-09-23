@@ -5,17 +5,18 @@ extension WindowsAudioPlaybackController {
     /// audible output for `recordID`, replacing any current playback exactly as
     /// `play` does, and returns the seconds rendered once its output is quiet
     /// and released. Stop, a replacement, recording or close end it with
-    /// `CancellationError`, as does cancelling the calling task. Pause and
-    /// resume act on it like any playback of that record.
+    /// `CancellationError`, as does cancelling the calling task. A caller
+    /// cancelled before admission replaces nothing and opens no file, so a
+    /// superseded request can never stop the playback that superseded it.
+    /// Pause and resume act on it like any playback of that record.
     public func playToCompletion(recordID: UUID, path: String) async throws -> TimeInterval {
         let pending = PendingRun()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 do {
-                    let id = try admit(recordID: recordID, path: path, knownDuration: nil) {
+                    _ = try admit(recordID: recordID, path: path, knownDuration: nil, awaiting: {
                         continuation.resume(with: $0)
-                    }
-                    if pending.admitted(id) { stop(runID: id) }
+                    }, claim: pending.claim)
                 } catch { continuation.resume(throwing: error) }
             }
         } onCancel: {
@@ -23,13 +24,22 @@ extension WindowsAudioPlaybackController {
         }
     }
 
+    /// Cancellation and admission meet under this lock, taken inside the
+    /// controller's: either the caller was cancelled first and nothing is
+    /// admitted, or the run is claimed first and cancellation stops it.
     fileprivate final class PendingRun: @unchecked Sendable {
         private let lock = NSLock()
         private var id: UUID?
         private var cancelled = false
 
-        /// Returns true when cancellation arrived before admission.
-        func admitted(_ id: UUID) -> Bool { lock.withLock { self.id = id; return cancelled } }
+        func claim(_ id: UUID) -> Bool {
+            lock.withLock {
+                guard !cancelled else { return false }
+                self.id = id
+                return true
+            }
+        }
+
         func cancel() -> UUID? { lock.withLock { cancelled = true; return id } }
     }
 

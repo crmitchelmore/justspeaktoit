@@ -93,18 +93,21 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         _ = try admit(recordID: recordID, path: path, knownDuration: knownDuration, awaiting: nil)
     }
 
+    /// `claim` runs under the state lock before anything is replaced; refusing
+    /// it leaves the current playback untouched and throws `CancellationError`.
     func admit(
         recordID: UUID, path: String, knownDuration: TimeInterval?,
-        awaiting: ((Result<TimeInterval, Error>) -> Void)?
+        awaiting: ((Result<TimeInterval, Error>) -> Void)?, claim: ((UUID) -> Bool)? = nil
     ) throws -> UUID {
         try lock.withLock {
             guard !closed else { throw WindowsAudioPlaybackError("The app is closing.") }
             guard live.count < 2 else {
                 throw WindowsAudioPlaybackError("Previous playback is still closing. Try again shortly.")
             }
+            let run = Run(recordID: recordID, path: path, duration: knownDuration)
+            guard claim?(run.id) ?? true else { throw CancellationError() }
             let previous = current
             if let previous { stopLocked(previous) }
-            let run = Run(recordID: recordID, path: path, duration: knownDuration)
             run.awaiting = awaiting
             live[run.id] = run
             current = run

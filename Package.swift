@@ -11,6 +11,11 @@ let windowsTargetBuild = true
 let windowsTargetBuild = ProcessInfo.processInfo.environment["SPEAK_WINDOWS_TARGET"] == "1"
 #endif
 
+// The Linux desktop app needs GTK 4, libadwaita, libpulse, libsecret, X11 and
+// GIO development packages, so it is opt-in: the portable Linux core job builds
+// and tests without them. See Docs/linux-development.md.
+let linuxTargetBuild = ProcessInfo.processInfo.environment["SPEAK_LINUX_TARGET"] == "1"
+
 // The native Apple app keeps its established dependency graph. Windows and
 // Linux compile the same canonical domain sources without resolving Apple-only
 // packages or xcframeworks. This is a portable kernel, not a claim that every
@@ -200,6 +205,39 @@ if windowsTargetBuild {
         )
     ])
     portablePackage.cxxLanguageStandard = .cxx17
+}
+
+if linuxTargetBuild {
+    // System libraries resolved with pkg-config. Only the C adapter includes
+    // their headers; Swift sees the narrow jsti_* ABI in CLinuxSupport.h.
+    func linuxSystemLibrary(_ name: String, _ pkgConfig: String, apt: [String]) -> Target {
+        .systemLibrary(name: name, path: "Sources/CLinuxSystem/\(name)", pkgConfig: pkgConfig, providers: [.apt(apt)])
+    }
+    portablePackage.products.append(.executable(name: "SpeakLinux", targets: ["SpeakLinux"]))
+    portablePackage.targets.append(contentsOf: [
+        linuxSystemLibrary("CLinuxAdwaita", "libadwaita-1", apt: ["libadwaita-1-dev", "libgtk-4-dev"]),
+        linuxSystemLibrary("CLinuxGio", "gio-unix-2.0", apt: ["libglib2.0-dev"]),
+        linuxSystemLibrary("CLinuxPulse", "libpulse", apt: ["libpulse-dev"]),
+        linuxSystemLibrary("CLinuxSecret", "libsecret-1", apt: ["libsecret-1-dev"]),
+        linuxSystemLibrary("CLinuxXTest", "xtst", apt: ["libx11-dev", "libxtst-dev"]),
+        .target(
+            name: "CLinuxSupport",
+            dependencies: ["CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest"],
+            publicHeadersPath: "include",
+            cSettings: [.define("_GNU_SOURCE")],
+            // xtst.pc links only libXtst; the core Xlib calls need libX11.
+            linkerSettings: [.linkedLibrary("X11")]
+        ),
+        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "CLinuxSupport"]),
+        .executableTarget(
+            name: "SpeakLinux",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "CLinuxSupport"]
+        ),
+        .testTarget(
+            name: "SpeakLinuxPlatformTests",
+            dependencies: ["SpeakCore", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
+        )
+    ])
 }
 
 let package = portableCoreBuild ? portablePackage : Package(

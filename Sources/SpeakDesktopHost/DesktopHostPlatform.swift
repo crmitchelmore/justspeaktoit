@@ -100,5 +100,5 @@ package protocol DesktopHostPlatform: Sendable {
 }
 
 package extension DesktopHostPlatform {
-    package static func update(_ status: String) { update(status, transcript: nil, state: -1) }
+    static func update(_ status: String) { update(status, transcript: nil, state: -1) }
 }

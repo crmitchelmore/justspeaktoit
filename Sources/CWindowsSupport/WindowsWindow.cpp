@@ -686,10 +686,13 @@ void applyUpdate(HWND window) {
         }
         // A different (or no) record is displayed: its version and playback
         // are unknown until the host reports them, so never keep the previous record's.
+        // Playback belongs to the record rather than to this refresh: an explicit
+        // re-selection of the same record (for example after Retry) keeps its last
+        // report, because the host never re-sends an unchanged state such as paused.
         if (selectionChanged || explicitHistorySelection) {
             invalidateHistoryPresentation(window, true);
             applyVariant(window, -1, false, recording);
-            applyPlayback(window, playbackIdle, L"", !nowSelected.empty(), recording);
+            if (selectionChanged) applyPlayback(window, playbackIdle, L"", !nowSelected.empty(), recording);
         }
         if (failed) showFailure(window, "Windows could not display the saved recording list.");
     }
@@ -1759,6 +1762,20 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             std::wstring(playbackTranscript) != L"Playback transcript sentinel") {
             failure = "Recording lockout or status preservation failed for playback controls."; return false;
         }
+        // Explicitly re-selecting the same record (a History refresh after Retry)
+        // keeps its playback report: a paused run is not re-sent while unchanged.
+        jsti_window_set_playback("one", playbackPaused, "00:00.50 / 00:01.50");
+        applyUpdate(window);
+        if (jsti_window_set_history(reordered, 2, "one") != 0) {
+            failure = "Explicit same-record history update failed."; return false;
+        }
+        applyUpdate(window);
+        if (selectedHistory(window) != "one" || state.displayedPlayback != playbackPaused || playbackLabel() != L"Play" ||
+            !IsWindowEnabled(GetDlgItem(window, stopPlaybackID)) || playbackTime() != L"00:00.50 / 00:01.50") {
+            failure = "Explicitly re-selecting a record discarded its active playback state."; return false;
+        }
+        jsti_window_set_history_presentation("one", 1, 0, "First original", "Saved first");
+        applyUpdate(window);
         // Selecting another row resets the display; a late report for the
         // previous record is ignored, and an empty record resets explicitly.
         jsti_window_set_playback("one", playbackPlaying, "00:01.00 / 00:01.00");

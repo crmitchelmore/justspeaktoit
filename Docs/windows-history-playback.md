@@ -82,7 +82,10 @@ plays the URL resolved by `DesktopRecordingStore.audioURL(for:)`.
 
 The native window keeps the controls record-bound: a playback report applies
 only while its record is still the selected row, selecting another row resets
-the display until the host reports again, Stop is enabled only while a
+the display until the host reports again, and a History refresh that
+re-selects the same record (after Retry, for example) keeps that record's last
+report because the sampler never re-sends an unchanged paused state. Stop is
+enabled only while a
 playback is active, and Play/Pause is enabled for a selected idle record or
 while a playback is active so it can always be paused. Playback reports never
 touch the status or transcript text. Controls use explicit identifiers 160 to

@@ -18,6 +18,7 @@ performance acceptance; those remain separate gates.
 | `SpeakApp_SpeakCore.resources/` | SwiftPM resource bundle from the same build | Loaded beside the executable at runtime; `*Tests.resources` are skipped |
 | 14 Swift runtime DLLs | Swift 6.2.3 runtime package `rtl.msi` from the pinned swift.org installer | Static import closure of the executable (see below) |
 | `msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | Microsoft's official `VC_redist.x64.exe` 14.51.36247.0, read as data | Static import closure; never taken from the Swift installer copy |
+| `whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-vulkan.dll`, `ggml-cpu-*.dll` | whisper.cpp 1.9.4 built from its pinned commit by `scripts/windows-local-runtime` (`--local-runtime`) | On-device transcription; loaded at run time, never imported by the executable |
 | `licenses/` | Swift, ICU, curl and zlib licences pinned to release-tag commits; the app's MIT licence; a Microsoft runtime notice | Redistribution terms and attribution |
 | `THIRD-PARTY-NOTICES.txt`, `README.txt` | Generated deterministically | Human-readable summary and usage |
 | `bundle-manifest.json` | Generated | Every file with size and SHA-256, the import graph, the sources and the policy used |
@@ -104,6 +105,46 @@ tools, and a difference fails the build.
 Downloads are limited to `download.visualstudio.microsoft.com` and
 `raw.githubusercontent.com`, capped at the pinned byte count and rejected on any
 hash mismatch.
+
+## On-device transcription runtime
+
+`scripts/windows-local-runtime/dependencies.json` pins whisper.cpp (tag, commit,
+MIT licence hash), the LunarG Vulkan SDK installer (URL, size, SHA-256) used
+only at build time, the CMake arguments, the required modules and the minimum
+number of CPU variants. `build-whisper-runtime.py` runs on a `windows-2022`
+runner through the reusable `.github/workflows/windows-local-runtime.yml`:
+
+- checks out the pinned commit with line-ending conversion off and verifies it
+  with `git rev-parse`, installs the pinned Vulkan SDK into a private folder,
+  and builds with MSVC: shared libraries, `GGML_BACKEND_DL` with every
+  `GGML_CPU_ALL_VARIANTS` variant plus `GGML_VULKAN`, OpenMP off, native tuning
+  off and the shared `/MD` runtime the bundle already carries;
+- collects `whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-vulkan.dll` and
+  each `ggml-cpu-<variant>.dll`, refusing any DLL whose imports fall outside
+  Windows, the Visual C++ runtime, `vulkan-1.dll` and the runtime itself (so
+  `vcomp140.dll` or a stray `libomp.dll` fails the build);
+- writes `runtime-manifest.json` with every file's size, SHA-256 and imports,
+  the compiler version and the pin file's digest, plus the JFK sample from the
+  same commit (a CI fixture, never bundled).
+
+The result is cached by the hash of the pins, the build script, the runtime
+policy and the PE reader, so an unchanged pin reuses the DLLs.
+`build-windows-bundle.py --local-runtime <dir>` then authenticates every DLL
+against the manifest and the repository pins (commit, CMake arguments, Vulkan
+SDK, pin digest), refuses extra or missing modules, and bundles them with
+`licenses/LICENSE-whisper.cpp.txt`, a notices entry and
+`sources.localInferenceRuntime` in `bundle-manifest.json`. Modules they import
+that the executable does not (for example `concrt140.dll`) are bundled from the
+pinned Microsoft redistributable and recorded as `runtime-static` or
+`runtime-delay` imports. `vulkan-1.dll` is part of the GPU driver and is never
+bundled: without it `ggml-vulkan.dll` does not load and the CPU backend runs.
+
+`verify-windows-bundle.ps1 -LocalTranscriptionAudio` runs the bundled
+executable's `--local-transcription-self-test` on the CPU against the JFK
+sample with the pinned tiny model (cached between runs, verified by SHA-256 on
+every run) and requires `whisper.dll`, `ggml.dll`, `ggml-base.dll` and a CPU
+variant to load from the bundle. The package layout carries the same files into
+the developer MSIX.
 
 ## Determinism
 
@@ -203,7 +244,8 @@ separate test-enabled executable, as before.
   install, upgrade, failure and uninstall checks, are described in
   [Docs/windows-installer.md](windows-installer.md).
 - Code signing and SmartScreen reputation: the executable and archive are
-  unsigned.
+  unsigned; the developer MSIX can be signed as described in
+  [Docs/windows-installer.md](windows-installer.md#signing).
 - ARM64 Windows: only x64 is built and verified.
 - Physical microphone, provider, insertion and performance acceptance, as
   recorded in [Docs/windows-development.md](windows-development.md).

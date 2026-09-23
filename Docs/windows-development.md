@@ -42,9 +42,9 @@ shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
 Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
-Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai and xAI's dedicated
-speech-to-text live models use shared Swift clients with the native WinHTTP
-transport. The xAI stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is
+Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live and xAI's
+dedicated speech-to-text live models use shared Swift clients with the native
+WinHTTP transport. The xAI stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is
 source-wired with fake-transport tests only and still needs a Windows provider
 receipt; the Grok Voice conversation route stays unavailable. Gladia
 (`gladia/solaria-1-streaming`) creates its single-use session with an HTTPS
@@ -65,7 +65,15 @@ service on 2026-09-23 through the Apple URLSession transport, by the opt-in
 the integrator with an existing key held in memory only). That probe streams
 one second of generated silence, so it is not a Windows receipt: the WinHTTP
 path against the real service and transcription accuracy remain unproven, and
-none of the three has a Windows provider receipt yet. A WinHTTP socket whose native
+none of the three has a Windows provider receipt yet. Azure Voice Live
+(`azure/azure-speech-streaming` and `azure/mai-transcribe-streaming`, 24 kHz PCM)
+connects only to the resource endpoint saved in Settings → Azure Speech
+resource…, with no regional fallback, and leaves the language to Azure's
+multilingual detection. A finish ends only once Azure acknowledges its commit
+and finalisation barrier and every turn has settled; any other server error,
+including one naming the barrier, is a failure. It has fake-transport tests and
+synthetic loopback tests over WinHTTP in the probe step, and no Windows provider
+receipt yet. A WinHTTP socket whose native
 destruction cannot yet complete keeps its handles and callback context owned by
 a release queue that retries with capped backoff; at four such sockets new live
 connections are refused with a retryable error rather than accumulating native
@@ -114,7 +122,8 @@ converter, retaining the original in History and removing private temporary WAV
 output afterwards. The converter uses installed Windows codecs; it does not
 promise support for every Ogg, Opus or WebM encoding. Native Windows decode/cancellation tests passed; run 35725040396 also decoded generated AAC/M4A and MP3 fixtures, checked their non-silent signal and retained originals.
 Other compressed formats and physical-device acceptance remain pending. Canonical recordings bypass decoding after a 44-byte header probe. Azure keys accept `key:region` (a raw key defaults to eastus);
-custom resource endpoint UI remains pending. Mistral, Soniox and Rev.ai stream multipart bodies
+Settings → Azure Speech resource… saves the resource endpoint (as `azureSpeechResourceEndpoint`,
+the Apple apps' key), which recorded audio uses when set. Mistral, Soniox and Rev.ai stream multipart bodies
 from temporary files, using a native protected ACL for the current Windows user
 and SYSTEM. Creation refuses existing files and reparse-point paths; completed,
 failed and cancelled uploads remove their staging files. Soniox removes accepted
@@ -373,7 +382,7 @@ but must not be presented as the identical Apple-only engine or service.
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
-| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia and Rev.ai streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet), and the remaining streaming providers: Azure, Google, Meta and Modulate |
+| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |
 | Global shortcut | Configurable Ctrl/Alt combination with conflict refusal, and all four activation styles: press-to-toggle natively; hold, double-tap and both through the shared SpeakCore gesture machine and session policy. Local Windows cross-compilation and portable gesture/policy tests pass; the native dialog, registration and release polling are covered by the window smoke test with fake registration and key state | Windows CI for this revision, physical keyboard acceptance of hold/double-tap timing, user-adjustable timing, the macOS host adopting the shared machine (it keeps its own `GestureDetector`), hands-free arming and Escape cancel |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
 | On-device transcription | Local batch recording and file import through a run-time loaded whisper.cpp 1.9.4 (best CPU variant, or Vulkan on any vendor's GPU when a driver is present). Four canonical Whisper entries (tiny, base, small, large-v3-turbo) are projected from the shared catalogue with pinned GGML files, sizes and SHA-256; the native Local models dialog downloads (resumable, atomic, verified), cancels, removes and sets the GPU choice. Source picker: Remote or Local, then Batch or Live; Local offers Batch only, so the Mode picker hides for it. Runtime DLLs are built from the pinned commit in CI and shipped in the bundle and MSIX with licence and provenance; the native job and the self-contained bundle transcribe the JFK sample with the tiny model | Windows CI receipt for this revision, local streaming, Hugging Face import, real Vulkan hardware (the runners have no GPU), CPU/GPU throughput and memory on physical PCs, and local post-processing |

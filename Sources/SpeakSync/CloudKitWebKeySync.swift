@@ -58,16 +58,18 @@ extension CloudKitWebKeySyncError: LocalizedError {
 public enum CloudKitWebKeySync {
     /// Derives and verifies the key-sync key for `passphrase` against the
     /// account's stored salt and verifier. Keep the result as a credential;
-    /// the passphrase itself is not needed again.
+    /// the passphrase itself is not needed again. Pass the session the key
+    /// will be stored and used in as `in:`, so it belongs to that account.
     public static func unlock(
         passphrase: String,
         client: CloudKitWebServicesClient,
         consent: CloudKitWebSyncConsent,
-        envelope: EncryptedSecretEnvelope
+        envelope: EncryptedSecretEnvelope,
+        in pinned: CloudKitWebSession? = nil
     ) async throws -> Data {
         try consent.require(.apiKeys)
         let normalized = try EncryptedSecretEnvelope.normalizedPassphrase(passphrase)
-        let session = await client.session()
+        let session = await client.session(or: pinned)
         let metadata = try await fetchMetadata(client: client, session: session)
         return try envelope.unlock(metadata, passphrase: normalized)
     }

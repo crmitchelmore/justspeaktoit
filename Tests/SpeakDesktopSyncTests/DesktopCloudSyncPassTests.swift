@@ -11,7 +11,8 @@ import XCTest
 /// cancellation at shutdown, each while the pass waits between two steps.
 final class DesktopCloudSyncPassTests: DesktopCloudSyncTestCase {
     func testASignInDuringAPassSendsNothingMoreInTheNewSession() async throws {
-        seedMacHistory(server, id: UUID(), raw: "from account a", updatedAt: fixtureDate(50))
+        let macID = UUID()
+        seedMacHistory(server, id: macID, raw: "from account a", updatedAt: fixtureDate(50))
         let local = try await localRecording(text: "recorded on this pc")
         let gate = ChangeGate()
         let recorder = RecordingServerTransport(server: server)
@@ -31,6 +32,15 @@ final class DesktopCloudSyncPassTests: DesktopCloudSyncTestCase {
         XCTAssertNotNil(report.error)
         let bound = await state.current.boundAccount
         XCTAssertEqual(bound, "_synthetic-user-a", "nothing is rebound before B is validated")
+        // The report, which is not fenced, ran after the session ended: it
+        // named only a record saved while A was current, and the cursor that
+        // would have followed it was refused.
+        let reported = await gate.reported
+        XCTAssertEqual(reported, [.saved(macID)])
+        let saved = await records.existingRecord(id: macID)
+        XCTAssertNotNil(saved)
+        let cursor = await state.current.historyCursor
+        XCTAssertNil(cursor)
 
         let next = await service.sync()
         XCTAssertNil(next.error)

@@ -8,6 +8,8 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakLinux/**
       - Sources/SpeakLinuxPlatform/**
       - Sources/CLinuxSupport/**
@@ -15,6 +17,9 @@ on:
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakTestSupport/**
       - Tests/SpeakLinuxPlatformTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
@@ -30,6 +35,8 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakLinux/**
       - Sources/SpeakLinuxPlatform/**
       - Sources/CLinuxSupport/**
@@ -37,6 +44,9 @@ on:
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakTestSupport/**
       - Tests/SpeakLinuxPlatformTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**

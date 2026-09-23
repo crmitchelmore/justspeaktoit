@@ -1,6 +1,7 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakWindowsPlatform
 
 /// Runs the post-processing Apply through the real controller and settings
 /// queue, with synthetic effects and a synthetic iCloud sync key hook: no

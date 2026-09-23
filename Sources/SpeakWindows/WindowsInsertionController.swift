@@ -113,5 +113,7 @@ extension WindowsAppController {
     func cancelOutput() {
         outputSlot.job?.cancel()
         outputSlot.task?.cancel()
+        // Speech is output too: recording, import and close end Read aloud.
+        stopReadAloud()
     }
 }

@@ -102,6 +102,13 @@ func hotKeyEvent(_ modifiers: UInt32, _ key: UInt32, _ style: Int32, _ context: 
     }
 }
 
+/// Shortcut gesture bookkeeping, in the monotonic clock of recognition.
+struct WindowsHotKeySessionState {
+    var lastDoubleTap: TimeInterval = -.infinity
+    /// Starts recognised before this ended while a shortcut stop was finishing.
+    var startsAfter: TimeInterval = 0
+}
+
 /// One recognised shortcut input with everything captured at its key press.
 struct WindowsHotKeyRequest: Sendable {
     let input: HotKeySessionPolicy.Input
@@ -219,17 +226,16 @@ extension WindowsAppController {
     func hotKey(_ request: WindowsHotKeyRequest) async {
         guard !closed else { return }
         if case .gesture(.doubleTap) = request.input {
-            guard request.recognisedAt - lastHotKeyDoubleTap >= HotKeyGestureTiming.doubleTapCommandInterval else {
-                return
-            }
-            lastHotKeyDoubleTap = request.recognisedAt
+            let interval = request.recognisedAt - hotKeySession.lastDoubleTap
+            guard interval >= HotKeyGestureTiming.doubleTapCommandInterval else { return }
+            hotKeySession.lastDoubleTap = request.recognisedAt
         }
         guard let command = HotKeySessionPolicy.command(
             for: request.input, style: request.style, active: recording?.trigger
         ) else { return }
         switch command {
         case .start(let trigger):
-            guard recording == nil, !busy, request.recognisedAt >= hotKeyStartsAfter else { return }
+            guard recording == nil, !busy, request.recognisedAt >= hotKeySession.startsAfter else { return }
             await toggle(
                 target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
                 targetExecutablePath: request.target?.executablePath, textOutput: await request.textOutput.value,
@@ -241,7 +247,7 @@ extension WindowsAppController {
                 target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
                 targetExecutablePath: request.target?.executablePath, textOutput: await request.textOutput.value
             )
-            hotKeyStartsAfter = ProcessInfo.processInfo.systemUptime
+            hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
         }
     }
 }

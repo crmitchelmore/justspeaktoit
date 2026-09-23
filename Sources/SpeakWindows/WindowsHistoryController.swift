@@ -26,6 +26,7 @@ extension WindowsAppController {
             transcript = ""
             transcriptVariant = .processed
             playback.stop()
+            stopReadAloud()
             WindowsNative.history(visible, selected: nil, selectRecord: selectRecord)
             WindowsNative.transcriptVariant(nil, for: nil, switchable: false)
             update(
@@ -54,6 +55,7 @@ extension WindowsAppController {
         // A different record is displayed: the previous record's playback ends
         // and its late progress reports are rejected by the record-bound window.
         playback.stop(unless: id)
+        if selectedHistoryID != id { stopReadAloud() }
         selectedHistoryID = id
         transcript = record.text(for: .processed) ?? ""
         let status = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }

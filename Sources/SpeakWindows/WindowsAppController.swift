@@ -16,6 +16,7 @@ actor WindowsAppController {
         var textOutput: WindowsTextOutputOptions?
         // Keyboard shortcut dialog; absent keeps Ctrl+Alt+Space, press-to-toggle.
         var hotKey: WindowsHotKeySettings?
+        var voiceOutput: WindowsVoiceOutputSettings? // The Voice dialog; absent uses the catalogue default.
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -62,9 +63,8 @@ actor WindowsAppController {
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     var transcript = ""
-    /// Shortcut gesture bookkeeping, in the monotonic clock of recognition.
-    var lastHotKeyDoubleTap: TimeInterval = -.infinity
-    var hotKeyStartsAfter: TimeInterval = 0
+    var hotKeySession = WindowsHotKeySessionState()
+    var readAloudState = WindowsReadAloudState()
     var history: [UUID: DesktopRecordingStore.Record] = [:]
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.

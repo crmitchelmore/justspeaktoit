@@ -21,6 +21,7 @@ import SpeakCore
 /// credential and directory; the engine owns no settings or credential lookup.
 public final class WindowsVoiceOutput: Sendable {
     private let staging: WindowsVoiceOutputStaging
+    private let session: URLSession
     private let output: DeepgramVoiceOutput
 
     /// - Parameters:
@@ -42,6 +43,7 @@ public final class WindowsVoiceOutput: Sendable {
 
     init(staging: WindowsVoiceOutputStaging, session: URLSession, backend: any WindowsAudioPlaybackBackend) {
         self.staging = staging
+        self.session = session
         output = DeepgramVoiceOutput(session: session, playback: DeepgramVoiceOutput.Playback(
             store: { try staging.store($0) },
             play: { try await WindowsAudioPlayback.play(input: $0, backend: backend).playedDuration },
@@ -58,6 +60,23 @@ public final class WindowsVoiceOutput: Sendable {
         credential: @Sendable () async throws -> String
     ) async throws -> DeepgramVoiceOutput.Outcome {
         try await output.speak(request, credential: credential)
+    }
+
+    /// Speaks one request through a host-owned player instead of this
+    /// instance's own, for example the app's shared playback controller, so
+    /// speech and other audio never overlap. Staging, validation and file
+    /// ownership are unchanged; `play` must stop when its task is cancelled and
+    /// return only after the native player has released the file.
+    public func speak(
+        _ request: DeepgramSpeechRequest,
+        credential: @Sendable () async throws -> String,
+        through play: @escaping @Sendable (URL) async throws -> TimeInterval
+    ) async throws -> DeepgramVoiceOutput.Outcome {
+        let staging = staging
+        let output = DeepgramVoiceOutput(session: session, playback: DeepgramVoiceOutput.Playback(
+            store: { try staging.store($0) }, play: play, discard: { try staging.discard($0) }
+        ))
+        return try await output.speak(request, credential: credential)
     }
 
     /// Files this instance created that Windows would not let it remove yet,

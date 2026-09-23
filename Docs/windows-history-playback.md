@@ -57,6 +57,12 @@ commands and joins stay off the host actor; a completion arriving inside
 `start` is handled only after `start` returns. At capacity, a new request is
 rejected with a retry message while the current playback stays unchanged.
 
+`playToCompletion` admits another source, such as a Read aloud segment, as an
+ordinary run for its History record and resumes its caller once the output is
+quiet and the native job released, with the rendered seconds or the failure;
+Stop, a replacement, recording, close or cancelling the caller end it with
+`CancellationError`. Such a run presents no terminal status of its own.
+
 Pause and resume are commands acknowledged through a 100 ms sampler that
 presents only changes. Stop requests cancellation and resets the display only
 after output acknowledges silence. Replacement playback and microphone capture

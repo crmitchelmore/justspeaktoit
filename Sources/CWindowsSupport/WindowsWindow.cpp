@@ -23,6 +23,9 @@ void jsti_hotkey_stop(HWND window);
 bool jsti_hotkey_message(HWND window, UINT message, WPARAM wparam);
 void jsti_show_hotkey_settings(HWND owner);
 bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, std::string &error);
+bool jsti_voice_output_available();
+void jsti_show_voice_settings(HWND owner);
+bool jsti_voice_settings_self_test(HWND owner, std::string &error);
 
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
@@ -48,6 +51,9 @@ constexpr int textOutputID = 170;
 // Opens the native Shortcut dialog directly; it emits no window event.
 constexpr int shortcutID = 171;
 constexpr int transcriptLabelID = 92;
+// Read aloud emits an event; Voice… opens the native Voice output dialog.
+constexpr int readAloudID = 172;
+constexpr int voiceSettingsID = 173;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 struct HistoryRow {
@@ -312,6 +318,9 @@ void updateHistoryControls(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, clearSearchID), recording == 0 && filtering);
     for (int id : {retryID, openAudioID}) EnableWindow(GetDlgItem(window, id), selected && recording == 0);
     EnableWindow(GetDlgItem(window, exportID), selected && recording == 0 && state.historyPresentationReady);
+    EnableWindow(GetDlgItem(window, readAloudID), selected && recording == 0 && state.historyPresentationReady &&
+        jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
     EnableWindow(GetDlgItem(window, copyID), state.historyPresentationReady && (!selected || recording == 0));
     if (!selected) applyVariant(window, -1, false, recording);
     else EnableWindow(GetDlgItem(window, variantID), state.variantSwitchable && recording == 0);
@@ -326,6 +335,7 @@ void invalidateHistoryPresentation(HWND window, bool resetVersion) {
         ? L"Select a saved recording." : L"Loading saved transcript…");
     EnableWindow(GetDlgItem(window, copyID), FALSE);
     EnableWindow(GetDlgItem(window, exportID), FALSE);
+    EnableWindow(GetDlgItem(window, readAloudID), FALSE);
 }
 
 void emitHistory(HWND window, int event) {
@@ -433,14 +443,17 @@ void layout(HWND window) {
     const int buttonWidth = (historyWidth - gap) / 2;
     move(retryID, margin, buttonsTop, buttonWidth, row);
     move(exportID, margin + buttonWidth + gap, buttonsTop, buttonWidth, row);
-    move(openAudioID, margin, buttonsTop + row + gap, historyWidth, row);
+    move(openAudioID, margin, buttonsTop + row + gap, buttonWidth, row);
+    move(readAloudID, margin + buttonWidth + gap, buttonsTop + row + gap, buttonWidth, row);
     const int playbackLabelTop = buttonsTop + 2 * (row + gap);
     const int playbackLabelWidth = scale(window, 84);
     move(playbackLabelID, margin, playbackLabelTop, playbackLabelWidth, scale(window, 22));
     move(playbackTimeID, margin + playbackLabelWidth, playbackLabelTop, historyWidth - playbackLabelWidth, scale(window, 22));
     const int playbackTop = playbackLabelTop + scale(window, 26);
-    move(playPauseID, margin, playbackTop, buttonWidth, row);
-    move(stopPlaybackID, margin + buttonWidth + gap, playbackTop, buttonWidth, row);
+    const int playbackWidth = (historyWidth - 2 * gap) / 3;
+    move(playPauseID, margin, playbackTop, playbackWidth, row);
+    move(stopPlaybackID, margin + playbackWidth + gap, playbackTop, playbackWidth, row);
+    move(voiceSettingsID, margin + 2 * (playbackWidth + gap), playbackTop, historyWidth - 2 * (playbackWidth + gap), row);
 }
 
 void refreshFont(HWND window) {
@@ -485,12 +498,14 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Retr&y", BS_PUSHBUTTON | WS_TABSTOP, retryID) &&
         add(L"BUTTON", L"&Export text", BS_PUSHBUTTON | WS_TABSTOP, exportID) &&
         add(L"BUTTON", L"&Open audio", BS_PUSHBUTTON | WS_TABSTOP, openAudioID) &&
+        add(L"BUTTON", L"Rea&d aloud", BS_PUSHBUTTON | WS_TABSTOP, readAloudID) &&
         // The label carries the mnemonic and precedes Play/Pause, so Alt+B
         // and assistive technology reach the playback controls.
         add(L"STATIC", L"Play&back", 0, playbackLabelID) &&
         add(L"STATIC", playbackIdleText, SS_RIGHT, playbackTimeID) &&
         add(L"BUTTON", L"Play", BS_PUSHBUTTON | WS_TABSTOP, playPauseID) &&
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
+        add(L"BUTTON", L"Voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
         add(L"BUTTON", L"App &profiles", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, modeID) &&
@@ -827,6 +842,16 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             if (IsWindowEnabled(GetDlgItem(window, exportID))) emitHistory(window, JSTI_EVENT_HISTORY_EXPORT);
             return 0;
         case openAudioID: emitHistory(window, JSTI_EVENT_HISTORY_OPEN_AUDIO); return 0;
+        case readAloudID:
+            if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, readAloudID))) {
+                emitHistory(window, JSTI_EVENT_HISTORY_READ_ALOUD);
+            }
+            return 0;
+        case voiceSettingsID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, voiceSettingsID) && IsWindowEnabled(window)) {
+                jsti_show_voice_settings(window);
+            }
+            return 0;
         case playPauseID:
             if (HIWORD(wparam) == BN_CLICKED && IsWindowEnabled(GetDlgItem(window, playPauseID))) {
                 emitHistory(window, JSTI_EVENT_HISTORY_PLAY_PAUSE);
@@ -2123,7 +2148,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
-            jsti_hotkey_self_test(window, observe, &observed, failure);
+            jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

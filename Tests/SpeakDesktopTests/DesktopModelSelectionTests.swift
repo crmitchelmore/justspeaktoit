@@ -91,12 +91,14 @@ final class DesktopModelSelectionTests: XCTestCase {
     }
 
     func testMigrationIsIdempotent() throws {
-        let inputs: [(String?, String?, String?)] = [
-            ("elevenlabs/scribe_v1", nil, "assemblyai/u3-rt-pro"), (nil, nil, nil),
-            (DesktopLiveTranscription.liveModels.first?.id, "assemblyai/universal-3-pro", nil)
+        let inputs: [DesktopModelSelection] = [
+            .init(model: "elevenlabs/scribe_v1", batchModel: nil, liveModel: "assemblyai/u3-rt-pro"),
+            .init(model: "", batchModel: nil, liveModel: nil),
+            .init(model: DesktopLiveTranscription.liveModels.first?.id ?? "", batchModel: "assemblyai/universal-3-pro",
+                  liveModel: nil)
         ]
-        for (model, batch, live) in inputs {
-            let once = migrate(model, batch: batch, live: live)
+        for input in inputs {
+            let once = migrate(input.model, batch: input.batchModel, live: input.liveModel)
             XCTAssertEqual(migrate(once.model, batch: once.batchModel, live: once.liveModel), once)
         }
     }

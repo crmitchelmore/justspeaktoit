@@ -39,6 +39,15 @@ public enum GladiaLive {
     /// `end_session` arrives; this is a deadline, never a delay.
     public static let finishBudget: TimeInterval =
         StreamingSessionReadiness.defaultBudget + drainAllowance + finalEventWindow
+
+    /// Gladia's code for a Speak language selection: the one mapping every
+    /// Gladia request uses, whether the live session (shared client or the
+    /// macOS controller) or the pre-recorded job. `en_GB` becomes `en`.
+    /// Automatic, no selection and a language Gladia does not list return
+    /// `nil`, so Gladia detects the language rather than refusing the request.
+    public static func languageCode(for selection: String?) -> String? {
+        GladiaLiveProtocol.languageCode(for: selection)
+    }
 }
 
 /// Failures the shared Gladia live client reports. None of them carries the

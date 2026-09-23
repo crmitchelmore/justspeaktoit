@@ -63,6 +63,32 @@ final class GladiaTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(messagesConfig["receive_final_transcripts"] as? Bool, true)
   }
 
+  /// The macOS controller maps languages through the canonical Gladia helper:
+  /// every catalogue choice still pins the code it always sent, while
+  /// Automatic, no selection and a language Gladia does not list detect.
+  func testInitRequest_usesTheCanonicalGladiaLanguageMapping() throws {
+    let automatic = TranscriptionLanguageCatalog.automaticIdentifier
+    for option in TranscriptionLanguageCatalog.options where option.id != automatic {
+      let config = try initLanguageConfig(option.id)
+      XCTAssertEqual(config["languages"] as? [String], [option.id.localeLanguageCode], option.id)
+      XCTAssertEqual(config["languages"] as? [String], GladiaLive.languageCode(for: option.id).map { [$0] })
+      XCTAssertEqual(config["code_switching"] as? Bool, false, option.id)
+    }
+    for language in [automatic, nil, "yue_HK", "iw_IL"] as [String?] {
+      let config = try initLanguageConfig(language)
+      XCTAssertEqual(config["languages"] as? [String], [], String(describing: language))
+      XCTAssertEqual(config["code_switching"] as? Bool, true, String(describing: language))
+    }
+  }
+
+  private func initLanguageConfig(_ language: String?) throws -> [String: Any] {
+    let request = try GladiaLiveTranscriber.makeInitRequest(
+      apiKey: "test-gladia-key", model: "gladia/solaria-1-streaming", language: language, sampleRate: 16_000
+    )
+    let payload = try JSONSerialization.jsonObject(with: try XCTUnwrap(request.httpBody)) as? [String: Any]
+    return try XCTUnwrap(payload?["language_config"] as? [String: Any])
+  }
+
   func testStopRecordingMessage_usesDocumentedShape() {
     XCTAssertEqual(GladiaLiveTranscriber.stopRecordingMessage(), #"{"type":"stop_recording"}"#)
   }

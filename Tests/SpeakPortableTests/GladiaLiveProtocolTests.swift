@@ -79,6 +79,25 @@ final class GladiaLiveProtocolTests: XCTestCase {
         }
     }
 
+    /// One mapping for every Gladia request: the public helper the macOS
+    /// controller uses, the shared live session and the pre-recorded job agree
+    /// for every catalogue choice, Automatic and a language Gladia does not list.
+    func testEveryGladiaRequestUsesTheOneLanguageMapping() throws {
+        let catalogue: [String?] = TranscriptionLanguageCatalog.options.map { $0.id }
+        for selection in catalogue + [nil, " ", "AUTO", "yue_HK", "iw_IL"] {
+            let label = String(describing: selection)
+            let code = GladiaLive.languageCode(for: selection)
+            XCTAssertEqual(code, GladiaLiveProtocol.languageCode(for: selection), label)
+            let live = GladiaLiveProtocol.languageConfig(for: selection)
+            let batch = try XCTUnwrap(
+                GladiaBatchClient.requestBody(audioURL: "u", language: selection)["language_config"] as? [String: Any]
+            )
+            XCTAssertEqual(live["languages"] as? [String], code.map { [$0] } ?? [], label)
+            XCTAssertEqual(batch["languages"] as? [String], live["languages"] as? [String], label)
+            XCTAssertEqual(batch["code_switching"] as? Bool, live["code_switching"] as? Bool, label)
+        }
+    }
+
     func testCatalogueAndAPIModelNamesResolveToTheLiveModel() {
         XCTAssertEqual(GladiaLiveProtocol.apiModelName(from: "gladia/solaria-1-streaming"), "solaria-1")
         XCTAssertEqual(GladiaLiveProtocol.apiModelName(from: "solaria-1"), "solaria-1")

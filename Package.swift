@@ -170,6 +170,7 @@ let portablePackage = Package(
 
 if windowsTargetBuild {
     portablePackage.products.append(.executable(name: "SpeakWindows", targets: ["SpeakWindows"]))
+    portablePackage.products.append(.executable(name: "speak", targets: ["SpeakCLI"]))
     portablePackage.targets.append(contentsOf: [
         .target(
             name: "CWindowsSupport",
@@ -185,13 +186,40 @@ if windowsTargetBuild {
                 .linkedLibrary("comctl32")
             ]
         ),
-        .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport"]),
+        // Same-user named pipes for `speak` and the app; kept apart so the CLI
+        // links only kernel32 and advapi32.
+        .target(
+            name: "CWindowsAutomation",
+            path: "Sources/CWindowsAutomation",
+            publicHeadersPath: "include",
+            linkerSettings: [.linkedLibrary("advapi32")]
+        ),
+        .target(
+            name: "SpeakAutomationKit",
+            dependencies: ["SpeakCore", "CWindowsAutomation"],
+            path: "Sources/SpeakAutomationKit"
+        ),
         .executableTarget(
-            name: "SpeakWindows", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport"]
+            name: "SpeakCLI",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            path: "Sources/SpeakCLI"
+        ),
+        .target(name: "SpeakWindowsPlatform", dependencies: ["SpeakCore", "CWindowsSupport", "CWindowsAutomation"]),
+        .executableTarget(
+            name: "SpeakWindows", dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation"
+            ]
+        ),
+        .testTarget(
+            name: "SpeakAutomationKitTests",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            path: "Tests/SpeakAutomationKitTests"
         ),
         .testTarget(
             name: "SpeakWindowsPlatformTests",
-            dependencies: ["SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport"],
+            dependencies: [
+                "SpeakCore", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport", "SpeakAutomationKit"
+            ],
             resources: [.copy("Fixtures")]
         )
     ])

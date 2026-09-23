@@ -39,7 +39,10 @@ enum JSTIWindowEvent {
     JSTI_EVENT_HOTKEY_DEADLINE = 23,
     /* Carries the selected record ID; read the displayed transcript with
      * jsti_window_transcript_snapshot synchronously in the callback, as for Copy. */
-    JSTI_EVENT_HISTORY_READ_ALOUD = 24
+    JSTI_EVENT_HISTORY_READ_ALOUD = 24,
+    /* The Settings menu's automation item: text is "1" to allow automation and
+     * "0" to stop it. Report the state reached with jsti_window_set_automation. */
+    JSTI_EVENT_AUTOMATION_TOGGLED = 25
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -255,6 +258,8 @@ typedef void (*JSTIVoiceOutputCallback)(int voice, void *context);
 int jsti_window_set_voice_output(const char *const *voice_names, size_t voice_count, int selected,
                                  JSTIVoiceOutputCallback callback, void *context);
 void jsti_window_clear_voice_output(void);
+/* Thread safe: checks or clears the Settings menu's automation item. */
+int jsti_window_set_automation(int enabled);
 /* The localised key name, for example "Ctrl+Alt+Space". */
 int jsti_hotkey_name(unsigned modifiers, unsigned virtual_key, char *name, size_t capacity);
 

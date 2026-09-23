@@ -14,9 +14,9 @@ actor WindowsAppController {
         // Edited in the Text output dialog. Absent or unknown keys keep the
         // smart insert-at-cursor default with clipboard restoration.
         var textOutput: WindowsTextOutputOptions?
-        // Keyboard shortcut dialog; absent keeps Ctrl+Alt+Space, press-to-toggle.
-        var hotKey: WindowsHotKeySettings?
+        var hotKey: WindowsHotKeySettings? // Absent keeps Ctrl+Alt+Space with press-to-toggle.
         var voiceOutput: WindowsVoiceOutputSettings? // The Voice dialog; absent uses the catalogue default.
+        var automationEnabled: Bool? // Settings menu; `speak` is refused until allowed.
     }
 
     /// Target, profile and text output are fixed when recording starts; a

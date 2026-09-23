@@ -26,6 +26,7 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
+int jsti_window_recording_state();
 
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
@@ -54,6 +55,10 @@ constexpr int transcriptLabelID = 92;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
+// Settings menu commands. They open the same dialogs as their buttons; the
+// automation item emits AUTOMATION_TOGGLED with the requested state.
+constexpr int menuShortcutID = 180, menuTextOutputID = 181, menuVoiceID = 182, menuPostProcessingID = 183,
+    menuAutomationID = 184;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 struct HistoryRow {
@@ -74,6 +79,7 @@ struct WindowState {
     std::mutex mutex;
     HWND window = nullptr;
     bool running = false;
+    bool automationEnabled = false, automationChanged = false;
     bool posted = false;
     bool statusChanged = false;
     bool transcriptChanged = false;
@@ -374,6 +380,44 @@ void clearSearch(HWND window) {
 
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
 
+// The client layout needs 684 DIPs of window height below the Settings menu bar.
+int minimumWindowHeight(HWND window) {
+    const int menu = GetMenu(window) ? GetSystemMetricsForDpi(SM_CYMENU, GetDpiForWindow(window)) : 0;
+    return scale(window, 684) + menu;
+}
+
+// Dialog commands follow their buttons' idle rules; automation can change at any time.
+void updateSettingsMenu(HWND window, int recording) {
+    const HMENU menu = GetMenu(window);
+    if (!menu) return;
+    auto enable = [&](int id, bool enabled) { EnableMenuItem(menu, id, MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED)); };
+    enable(menuShortcutID, recording == 0 && jsti_hotkey_available());
+    enable(menuTextOutputID, recording == 0 && jsti_text_output_available());
+    enable(menuVoiceID, recording == 0 && jsti_voice_output_available());
+    enable(menuPostProcessingID, recording == 0 && jsti_postprocessing_available());
+    bool automation;
+    { std::lock_guard<std::mutex> lock(state.mutex); automation = state.automationEnabled; }
+    CheckMenuItem(menu, menuAutomationID, MF_BYCOMMAND | (automation ? MF_CHECKED : MF_UNCHECKED));
+}
+
+HMENU createSettingsMenu() {
+    HMENU bar = CreateMenu();
+    HMENU settings = CreatePopupMenu();
+    if (!bar || !settings ||
+        !AppendMenuW(settings, MF_STRING, menuShortcutID, L"&Keyboard shortcut\u2026") ||
+        !AppendMenuW(settings, MF_STRING, menuTextOutputID, L"&Text output\u2026") ||
+        !AppendMenuW(settings, MF_STRING, menuVoiceID, L"&Voice\u2026") ||
+        !AppendMenuW(settings, MF_STRING, menuPostProcessingID, L"&Post-processing\u2026") ||
+        !AppendMenuW(settings, MF_SEPARATOR, 0, nullptr) ||
+        !AppendMenuW(settings, MF_STRING, menuAutomationID, L"Allow &automation (speak command)") ||
+        !AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(settings), L"Setti&ngs")) {
+        if (settings) DestroyMenu(settings);
+        if (bar) DestroyMenu(bar);
+        return nullptr;
+    }
+    return bar;
+}
+
 void layout(HWND window) {
     RECT bounds{};
     GetClientRect(window, &bounds);
@@ -469,7 +513,7 @@ void refreshFont(HWND window) {
 void updateModelLayout(HWND window) {
     RECT bounds{};
     GetWindowRect(window, &bounds);
-    const int minimumHeight = scale(window, 684);
+    const int minimumHeight = minimumWindowHeight(window);
     if (bounds.bottom - bounds.top < minimumHeight) {
         SetWindowPos(window, nullptr, 0, 0, bounds.right - bounds.left, minimumHeight,
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
@@ -682,6 +726,7 @@ void applyUpdate(HWND window) {
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
     EnableWindow(GetDlgItem(window, textOutputID), recording == 0 && jsti_text_output_available());
     EnableWindow(GetDlgItem(window, shortcutID), recording == 0 && jsti_hotkey_available());
+    updateSettingsMenu(window, recording);
     {
         // The shortcut can change through its dialog; avoid repainting an unchanged label.
         const std::wstring label = jsti_hotkey_label();
@@ -786,7 +831,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return createControls(window) ? 0 : -1;
     case WM_GETMINMAXINFO: {
         auto info = reinterpret_cast<MINMAXINFO *>(lparam);
-        info->ptMinTrackSize = {scale(window, 820), scale(window, 684)};
+        info->ptMinTrackSize = {scale(window, 820), minimumWindowHeight(window)};
         return 0;
     }
     case WM_SIZE:
@@ -825,6 +870,29 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         case processingID: jsti_show_postprocessing(window); return 0;
+        case menuShortcutID: case menuTextOutputID: case menuVoiceID: case menuPostProcessingID: {
+            const int recording = jsti_window_recording_state();
+            const HMENU menu = GetMenu(window);
+            if (!menu || recording != 0 || !IsWindowEnabled(window) ||
+                (GetMenuState(menu, LOWORD(wparam), MF_BYCOMMAND) & MF_GRAYED)) return 0;
+            if (LOWORD(wparam) == menuShortcutID) {
+                jsti_show_hotkey_settings(window);
+                SetDlgItemTextW(window, transcriptLabelID, jsti_hotkey_label().c_str());
+            } else if (LOWORD(wparam) == menuTextOutputID) {
+                jsti_show_text_output(window);
+            } else if (LOWORD(wparam) == menuVoiceID) {
+                jsti_show_voice_settings(window);
+            } else {
+                jsti_show_postprocessing(window);
+            }
+            return 0;
+        }
+        case menuAutomationID: {
+            bool enabled;
+            { std::lock_guard<std::mutex> lock(state.mutex); enabled = state.automationEnabled; }
+            emit(window, JSTI_EVENT_AUTOMATION_TOGGLED, enabled ? "0" : "1");
+            return 0;
+        }
         case textOutputID:
             // Only while idle and not already behind another modal editor.
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, textOutputID) && IsWindowEnabled(window)) {
@@ -994,6 +1062,14 @@ void jsti_window_hotkey_event(HWND window, int event) {
     }
 }
 
+int jsti_window_set_automation(int enabled) {
+    if (enabled != 0 && enabled != 1) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.automationEnabled = enabled == 1;
+    if (state.window && !state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+    return 0;
+}
+
 int jsti_window_recording_state() {
     std::lock_guard<std::mutex> lock(state.mutex);
     return state.recording;
@@ -1086,7 +1162,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
         L"Just Speak to It — Windows Preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        1100, 804, nullptr, nullptr, instance, nullptr) : nullptr;
+        1100, 804, nullptr, createSettingsMenu(), instance, nullptr) : nullptr;
     int outcome = 0;
     if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     else {
@@ -1491,7 +1567,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     state.context = &observed;
     std::string failure;
     auto checkBounds = [&]() -> bool {
-        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), scale(window, 684),
+        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), minimumWindowHeight(window),
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         layout(window);
         RECT client{};
@@ -2131,7 +2207,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         GetWindowRect(window, &windowBounds);
         if (!hasModeChoice() || !IsWindowVisible(GetDlgItem(window, modeID)) || selection(window) != 2 ||
             observed.event != eventBeforeFirstLive || modeBounds.bottom > labelBounds.top ||
-            windowBounds.bottom - windowBounds.top < scale(window, 684) || !checkBounds() || !changeMode(1, 4)) {
+            windowBounds.bottom - windowBounds.top < minimumWindowHeight(window) || !checkBounds() ||
+            !changeMode(1, 4)) {
             failure = "Adding the first live mode lost its preference or overlapped the model controls."; return false;
         }
         // The Text output modal must block both background recording paths.

@@ -1,14 +1,15 @@
-#if os(macOS)
 import Foundation
-import SpeakCore
 import XCTest
-@testable import SpeakApp
+@testable import SpeakCore
 
 /// The race between a running command and the caller's deadline (issue #793):
 /// `AutomationServerTests.testRequest_isAnsweredOverTheSocket` failed on CI in
 /// under a second with a well-formed `timed_out` reply for a command that had
 /// already finished. The work task cancelled the timer before settling the
 /// gate, so on a starved runner the woken timer could reach the gate first.
+///
+/// The race is shared by every local transport, so it runs on every platform
+/// the automation surface supports rather than only beside the macOS socket.
 final class AutomationDeadlineTests: XCTestCase {
     func testCancelledTimerThatRunsToCompletionFirst_doesNotSettleTheGate() async {
         let work = Task<AutomationResponse, Never> {
@@ -76,4 +77,3 @@ final class AutomationDeadlineTests: XCTestCase {
         XCTAssertEqual(late.result?.text, "late")
     }
 }
-#endif

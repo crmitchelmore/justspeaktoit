@@ -58,7 +58,18 @@ Hold & Double Tap). A combination another app or Windows already owns is refused
 before the working one is released. Gesture styles report the native press and
 the release, observed by polling the key only while it is held, to the shared
 SpeakCore gesture machine and session policy that state the macOS rules; a
-gesture stops only the kind of session it started. Save the
+gesture stops only the kind of session it started.
+Automation is off by default. Settings → Allow automation starts a named-pipe
+server, `\\.\pipe\JustSpeakToIt-SpeakApp-automation-<user SID>`. It rejects
+remote clients, its DACL grants only the current user, and each client is
+checked after its first bytes by impersonation: same user, not a network logon,
+not below the app's integrity level. The `speak` CLI (`speak.exe`) uses the
+same wire protocol, framing, command dispatch and replay coordinator as the Mac
+UNIX-socket transport. It offers `status`, `history`, `transcribe`, `listen`,
+`stop` and `mcp`. Automation transcription uses the remembered batch model and
+never adds a History entry. Automation dictation runs the Record pipeline with
+no captured field. `SPEAK_AUTOMATION_PIPE` overrides the pipe name for both
+sides. Save the
 selected provider's key through the application; each provider uses its canonical
 credential identifier in Windows Credential Manager. The app stores settings and
 durable recording records under
@@ -339,7 +350,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
 | Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
-| Automation and integrations | Shared protocol data available in source | Windows CLI/IPC, OpenClaw, deep links and applicable automation surface parity |
+| Automation and integrations | Opt-in `speak` CLI and MCP server over an owner-only local named pipe: status, history, file transcription, and start/stop dictation. It shares the protocol, framing, dispatch and replay with the Mac socket transport. Loopback client/server, CLI path resolution and MCP tests pass under a local Windows ABI runner. The native pipe self-test (runs in `--self-test` and CI) needs real Windows, because the local runner does not enforce first-instance ownership | Windows CI for this revision, a physical check of the Settings menu toggle and of `speak` against a running app, packaging `speak.exe` onto PATH in the MSIX, OpenClaw, deep links, AppleScript/Shortcuts-equivalent surfaces |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
 | Distribution and updates | Unsigned developer executable, self-contained runtime bundle, and an unsigned x64 developer MSIX with a CI install/upgrade/uninstall lifecycle job that keeps user data in the portable data directory | First Windows receipt for that job, externally supplied signing identity, clean physical Windows 10/11 installs, ARM64, update channel and Alpha/Stable Windows identities |
 

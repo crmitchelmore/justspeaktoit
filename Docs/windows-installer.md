@@ -206,7 +206,10 @@ the unsigned upgrade package, and then, under Windows PowerShell:
    `ERROR_PACKAGES_IN_USE`) each leave the previous registration, its
    installed files and all user data unchanged; the base still launches with
    its History. The same upgrade package then installs, so each refusal is
-   attributable to its injected fault.
+   attributable to its injected fault. The tampered byte is in a file the
+   upgrade changes (the versioned package manifest). Windows reuses installed
+   files whose block hashes match, so CI installed an upgrade whose tampered
+   byte sat in an unchanged file: that byte was never read.
 8. The upgrade installs in the same family at a new location, passes its
    bundle self-test and launch, and keeps all data.
 9. Uninstall removes the registration, Start menu entry, alias and package

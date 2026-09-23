@@ -159,17 +159,29 @@ def check_data(directory, expectations, state):
             "files": current}
 
 
-def tamper(source, destination):
+def tamper(source, destination, reference=None):
     """Flip one payload byte of a package while keeping the archive readable.
 
     Prefers a stored entry, so the change is a pure content change that only
-    the CRC, block hashes and signature can detect.
+    the CRC, block hashes and signature can detect. With a reference package
+    (the version already installed), only entries whose content differs from
+    the reference are candidates: an upgrade reuses installed files whose
+    block hashes match, so a flipped byte in an unchanged file is never read
+    and would not exercise the upgrade's integrity check.
     """
     data = bytearray(pathlib.Path(source).read_bytes())
+    installed = {}
+    if reference is not None:
+        with zipfile.ZipFile(reference) as archive:
+            installed = {info.filename: (info.CRC, info.file_size) for info in archive.infolist()}
     with zipfile.ZipFile(source) as archive:
         infos = [info for info in archive.infolist() if info.filename not in (
-            "AppxBlockMap.xml", "[Content_Types].xml", "AppxSignature.p7x", "AppxManifest.xml")
-            and info.compress_size > 64]
+            "AppxBlockMap.xml", "[Content_Types].xml", "AppxSignature.p7x", "AppxManifest.xml",
+            "AppxMetadata/CodeIntegrity.cat")
+            and info.compress_size > 64
+            and installed.get(info.filename) != (info.CRC, info.file_size)]
+        if not infos:
+            raise SystemExit("no payload entry differs from the reference package")
         stored = [info for info in infos if info.compress_type == zipfile.ZIP_STORED]
         chosen = max(stored or infos, key=lambda info: (info.compress_size, info.filename))
     header = chosen.header_offset
@@ -201,6 +213,8 @@ def main():
     corrupt = commands.add_parser("tamper")
     corrupt.add_argument("--package", required=True, type=pathlib.Path)
     corrupt.add_argument("--output", required=True, type=pathlib.Path)
+    corrupt.add_argument("--reference", type=pathlib.Path,
+                         help="installed package; only entries that differ from it are tampered")
     args = parser.parse_args()
     if args.command == "fixture":
         write_fixture(args.directory, args.expectations)
@@ -217,7 +231,7 @@ def main():
     else:
         if args.output.exists():
             raise SystemExit("output exists: " + str(args.output))
-        print(json.dumps(tamper(args.package, args.output), sort_keys=True))
+        print(json.dumps(tamper(args.package, args.output, args.reference), sort_keys=True))
 
 
 if __name__ == "__main__":

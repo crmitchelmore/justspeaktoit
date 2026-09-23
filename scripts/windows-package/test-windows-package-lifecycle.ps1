@@ -649,7 +649,9 @@ try {
     & $signer -Package $basePackage -Output $signedBase -ToolCache $ToolCache -CertificateThumbprint $trusted.Thumbprint -Layout $baseLayout -Python $Python
     & $signer -Package $upgradePackage -Output $signedUpgrade -ToolCache $ToolCache -CertificateThumbprint $trusted.Thumbprint -Layout $upgradeLayout -Python $Python
     & $signer -Package $upgradePackage -Output $untrustedUpgrade -ToolCache $ToolCache -CertificateThumbprint $untrusted.Thumbprint -Layout $upgradeLayout -Python $Python
-    $tamper = Invoke-JstiTool -FilePath $pythonPath -Arguments @('-B', $support, 'tamper', '--package', $signedUpgrade, '--output', $tamperedUpgrade)
+    # Only a file the upgrade changes is read during the upgrade; unchanged files are reused from the installed base.
+    $tamper = Invoke-JstiTool -FilePath $pythonPath -Arguments @('-B', $support, 'tamper', '--package', $signedUpgrade,
+        '--output', $tamperedUpgrade, '--reference', $signedBase)
     Assert-Check 'A signed upgrade with one changed payload byte is prepared' ($tamper.ExitCode -eq 0) $tamper.StandardOutput.Trim()
     $report.tools = (Read-JstiJson (Join-Path $packagesDirectory 'base-signed.sign.json')).signTool
 

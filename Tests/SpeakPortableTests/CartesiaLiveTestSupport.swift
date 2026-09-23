@@ -113,12 +113,15 @@ final class CartesiaTestSocket: StreamingWebSocketConnection, @unchecked Sendabl
     private var maximumReceiveDepthValue = 0
     private var modeValue = SendMode.held
     private var releasesOnCancel = true
+    private var resumesValue = 0
+    private var cancelHold: (entered: @Sendable () -> Void, release: DispatchSemaphore)?
     private var onSendValue: (@Sendable (StreamingWebSocketMessage) -> Void)?
 
     var sent: [StreamingWebSocketMessage] { lock.withLock { sentValue } }
     var binary: [Data] { sent.compactMap { if case .binary(let data) = $0 { data } else { nil } } }
     var texts: [String] { sent.compactMap { if case .text(let text) = $0 { text } else { nil } } }
     var cancels: Int { lock.withLock { cancelValue } }
+    var resumes: Int { lock.withLock { resumesValue } }
     var pendingCompletions: Int { lock.withLock { completions.count } }
     var maximumSendDepth: Int { lock.withLock { maximumSendDepthValue } }
     var maximumReceiveDepth: Int { lock.withLock { maximumReceiveDepthValue } }
@@ -130,6 +133,13 @@ final class CartesiaTestSocket: StreamingWebSocketConnection, @unchecked Sendabl
     /// Keeps pending callbacks after cancellation so a test can deliver them late.
     func keepCallbacksAfterCancel() { lock.withLock { releasesOnCancel = false } }
 
+    /// Holds `cancel()` on whichever thread calls it until `release` is
+    /// signalled, after reporting that it was entered: a failure is then
+    /// demonstrably retired but not yet delivered.
+    func holdCancel(until release: DispatchSemaphore, entered: @escaping @Sendable () -> Void) {
+        lock.withLock { cancelHold = (entered, release) }
+    }
+
     func onSend(_ body: @escaping @Sendable (StreamingWebSocketMessage) -> Void) {
         lock.withLock { onSendValue = body }
     }
@@ -137,7 +147,12 @@ final class CartesiaTestSocket: StreamingWebSocketConnection, @unchecked Sendabl
     /// Queues frames that the next receives return synchronously.
     func preload(_ frames: [String]) { lock.withLock { buffered += frames.map { .success(.text($0)) } } }
 
-    func resume(onOpen: @escaping @Sendable () -> Void) { lock.withLock { opener = onOpen } }
+    func resume(onOpen: @escaping @Sendable () -> Void) {
+        lock.withLock {
+            opener = onOpen
+            resumesValue += 1
+        }
+    }
 
     /// Reports the handshake. Calling it on a retired socket models a late open.
     func open() { lock.withLock { opener }?() }
@@ -176,8 +191,14 @@ final class CartesiaTestSocket: StreamingWebSocketConnection, @unchecked Sendabl
     func emit(_ text: String) { deliver(.success(.text(text))) }
     func emitBinary(_ data: Data) { deliver(.success(.binary(data))) }
 
-    /// The server closing the stream, or the transport breaking.
+    /// The transport breaking, by default with no close frame at all.
     func closeByPeer(_ error: Error = URLError(.networkConnectionLost)) { deliver(.failure(error)) }
+
+    /// The server's close frame with this status, as a transport reports it.
+    func closeByPeer(code: Int) { closeByPeer(CartesiaTestPeerClose(webSocketCloseCode: code)) }
+
+    /// The server's normal closure (1000): the documented end of the stream.
+    func closeNormally() { closeByPeer(code: 1_000) }
 
     func cancel() {
         let (pendingReceiver, pendingSends) = lock.withLock { () -> (Receiver?, [@Sendable (Error?) -> Void]) in
@@ -185,6 +206,10 @@ final class CartesiaTestSocket: StreamingWebSocketConnection, @unchecked Sendabl
             guard releasesOnCancel else { return (nil, []) }
             defer { receiver = nil; completions = [] }
             return (receiver, completions)
+        }
+        if let hold = lock.withLock({ cancelHold }) {
+            hold.entered()
+            XCTAssertEqual(hold.release.wait(timeout: .now() + 5), .success, "A held cancel was never released")
         }
         pendingReceiver?(.failure(CancellationError()))
         pendingSends.forEach { $0(CancellationError()) }
@@ -284,6 +309,11 @@ final class CartesiaTestClock: @unchecked Sendable {
     }
 
     func pending(_ seconds: TimeInterval) -> Int { lock.withLock { entries.filter { $0.seconds == seconds }.count } }
+}
+
+/// A receive failure carrying a peer close status through the shared seam.
+struct CartesiaTestPeerClose: StreamingWebSocketCloseReporting {
+    let webSocketCloseCode: Int?
 }
 
 final class CartesiaFlag: @unchecked Sendable {

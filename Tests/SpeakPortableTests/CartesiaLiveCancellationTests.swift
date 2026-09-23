@@ -98,7 +98,7 @@ final class CartesiaLiveCancellationTests: XCTestCase {
         old.open()
         old.completeSend()
         old.turnEnd("Stale.")
-        old.closeByPeer()
+        old.closeNormally()
         fixture.clock.fireAll()
 
         XCTAssertEqual(replacement.cancels, 0)

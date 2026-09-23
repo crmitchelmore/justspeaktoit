@@ -88,7 +88,7 @@ extension CartesiaLiveClient {
             }
             if active.closeSent, !active.closeDelivered {
                 active.closeDelivered = true
-                if active.peerClosed { completeStream(active, &effects) }
+                if let closure = active.peerClosure { settle(closure: closure, active, &effects) }
                 return nil
             }
             return claim(active, &effects)

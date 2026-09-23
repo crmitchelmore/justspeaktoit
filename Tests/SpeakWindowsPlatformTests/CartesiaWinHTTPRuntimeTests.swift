@@ -56,6 +56,35 @@ final class CartesiaWinHTTPRuntimeTests: XCTestCase {
         ])
     }
 
+    func testDroppedConnectionAfterAValidFlushIsAFailure() async throws {
+        let harness = try CartesiaWinHTTPHarness(scenario: "abrupt")
+        harness.start()
+        CartesiaLoopback.frames.forEach(harness.client.sendAudio)
+        let transcript = await harness.finish()
+        XCTAssertEqual(transcript, "naïve café 👩🏽‍💻", "Confirmed words are still returned")
+        let entries = harness.entries
+        XCTAssertEqual(entries.first, .transcript(" naïve café 👩🏽‍💻", final: true))
+        XCTAssertEqual(entries.last, .finished("naïve café 👩🏽‍💻"))
+        // Without a close frame the native bridge reports a failure; it must
+        // never be the normal closure that completes a stream.
+        guard entries.count == 3 else { return XCTFail("Unexpected outcome for a dropped connection: \(entries)") }
+        XCTAssertTrue(
+            [LoopbackEntry.error("transport"), .error("closed(code: 1006)")].contains(entries[1]),
+            "Unexpected outcome for a dropped connection: \(entries)"
+        )
+    }
+
+    func testAbnormalCloseAfterAValidFlushIsAFailure() async throws {
+        let harness = try CartesiaWinHTTPHarness(scenario: "abnormal")
+        harness.start()
+        CartesiaLoopback.frames.forEach(harness.client.sendAudio)
+        let transcript = await harness.finish()
+        XCTAssertEqual(transcript, "naïve café 👩🏽‍💻")
+        XCTAssertEqual(harness.entries, [
+            .transcript(" naïve café 👩🏽‍💻", final: true), .error("closed(code: 1011)"), .finished("naïve café 👩🏽‍💻")
+        ], "The status reaches the client through the adapter's close-reporting conformance")
+    }
+
     func testCancellingAHeldFinishReleasesItPromptly() async throws {
         let harness = try CartesiaWinHTTPHarness(scenario: "hold")
         let closeDelivered = expectation(description: "Close command completed by the native socket")
@@ -148,10 +177,11 @@ private final class CartesiaWinHTTPHarness: @unchecked Sendable {
         return local
     }
 
+    /// Transport errors differ by platform; the stream outcome does not.
     private static func describe(_ error: Error) -> String {
         if let streaming = error as? CartesiaStreamingError { return "\(streaming)" }
         if let shared = error as? StreamingClientError { return "\(shared)" }
-        return "\(type(of: error)): \(error.localizedDescription)"
+        return "transport"
     }
 }
 

@@ -5,9 +5,9 @@ import FoundationNetworking
 import XCTest
 @testable import SpeakCore
 
-/// Graceful finalisation: drain, `{"type":"close"}`, then the server's closure,
-/// inside one bounded budget, with every failure published before the finish
-/// returns its confirmed text.
+/// Graceful finalisation: drain, `{"type":"close"}`, then the server's normal
+/// closure, inside one bounded budget, with every failure published before the
+/// finish returns its confirmed text.
 final class CartesiaLiveFinishTests: XCTestCase {
     private typealias Entry = CartesiaEventLog.Entry
     private let stalled = Entry.error("transportStalled(provider: \"Cartesia\")")
@@ -28,7 +28,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         XCTAssertEqual(fixture.socket.sent, expected)
         fixture.socket.completeSend()
         fixture.socket.turn("After stop.")
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
 
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Before stop. After stop.")
@@ -50,7 +50,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         await fulfillment(of: [closeSent], timeout: 2)
         fixture.socket.completeSend()
         fixture.socket.connected()
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
         let transcript = await finish.value
         XCTAssertNil(transcript)
         XCTAssertEqual(fixture.log.entries, [.finished(nil)])
@@ -84,7 +84,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         XCTAssertEqual(fixture.socket.binary, frames)
         fixture.socket.completeSend()
         fixture.socket.turn("Held words.")
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Held words.")
         XCTAssertTrue(fixture.log.errors.isEmpty)
@@ -113,7 +113,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         await fixture.waitForFinishes(2)
         await fulfillment(of: [closeSent], timeout: 2)
         fixture.socket.completeSend()
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
         let results = await [first.value, second.value]
         XCTAssertEqual(results, ["Shared.", "Shared."])
         XCTAssertEqual(fixture.socket.closeCommands, 1)
@@ -129,7 +129,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         let finish = fixture.finish()
         await fulfillment(of: [closeSent], timeout: 2)
         fixture.socket.turn("Flushed.")
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
         XCTAssertEqual(fixture.client.pendingFinishes, 1, "The close command's own completion decides")
         fixture.socket.completeSend()
         let transcript = await finish.value
@@ -144,7 +144,8 @@ final class CartesiaLiveFinishTests: XCTestCase {
         let closeSent = fixture.expectClose(self)
         let finish = fixture.finish()
         await fulfillment(of: [closeSent], timeout: 2)
-        fixture.socket.closeByPeer()
+        // Even a normal closure cannot complete a finish whose close command failed.
+        fixture.socket.closeNormally()
         fixture.socket.completeSend(URLError(.notConnectedToInternet))
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Confirmed.")
@@ -181,7 +182,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         fixture.socket.completeSend()
         fixture.socket.turnStart()
         fixture.socket.turnUpdate("Unfinished thought")
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Confirmed.", "Unconfirmed words are never returned as confirmed")
         XCTAssertEqual(Array(fixture.log.entries.suffix(3)), [
@@ -199,7 +200,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         fixture.socket.completeSend()
         fixture.socket.turnStart()
         fixture.socket.turnUpdate("  ")
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Confirmed.")
         XCTAssertTrue(fixture.log.errors.isEmpty, "A started turn that produced no words loses nothing")
@@ -214,7 +215,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         let finish = fixture.finish()
         await fulfillment(of: [closeSent], timeout: 2)
         fixture.socket.completeSend()
-        fixture.socket.closeByPeer()
+        fixture.socket.closeNormally()
         let transcript = await finish.value
         XCTAssertNil(transcript)
         XCTAssertEqual(fixture.log.entries, [

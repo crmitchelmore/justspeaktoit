@@ -36,8 +36,9 @@ final class CartesiaLiveRun: @unchecked Sendable {
     /// `{"type":"close"}` was handed to the transport, and later completed.
     var closeSent = false
     var closeDelivered = false
-    /// The server closed while the close command was still in flight.
-    var peerClosed = false
+    /// How the server ended the stream while the close command was still in
+    /// flight; that command's completion settles it.
+    var peerClosure: Error?
 
     // MARK: Inbound events
 
@@ -60,6 +61,14 @@ final class CartesiaLiveRun: @unchecked Sendable {
     var waiters: [CheckedContinuation<String?, Never>] = []
     var onTranscript: ((String, Bool) -> Void)?
     var onError: ((Error) -> Void)?
+
+    // MARK: Terminal delivery
+
+    /// A failure is being published outside the lock: withheld words, then the
+    /// error. Finish callers that join meanwhile wait in `lateWaiters`, so no
+    /// caller can return before the error has been delivered.
+    var deliveringFailure = false
+    var lateWaiters: [CheckedContinuation<String?, Never>] = []
 
     init(sampleRate: Int) {
         maximumBytes = max(Int(Double(max(sampleRate, 1) * 2) * CartesiaLiveClient.bufferedAudioSeconds), 1)

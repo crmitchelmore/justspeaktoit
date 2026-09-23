@@ -57,6 +57,30 @@ final class CartesiaLoopbackRuntimeTests: XCTestCase {
         ])
     }
 
+    func testDroppedConnectionAfterAValidFlushIsAFailure() async throws {
+        let harness = try CartesiaLoopbackHarness(scenario: "abrupt")
+        defer { harness.invalidate() }
+        harness.start()
+        CartesiaLoopbackHarness.frames.forEach(harness.client.sendAudio)
+        let transcript = await harness.finish()
+        XCTAssertEqual(transcript, "naïve café 👩🏽‍💻", "Confirmed words are still returned")
+        XCTAssertEqual(harness.entries, [
+            .transcript(" naïve café 👩🏽‍💻", final: true), .error("transport"), .finished("naïve café 👩🏽‍💻")
+        ], "A connection that drops without a close frame never completes the stream")
+    }
+
+    func testAbnormalCloseAfterAValidFlushIsAFailure() async throws {
+        let harness = try CartesiaLoopbackHarness(scenario: "abnormal")
+        defer { harness.invalidate() }
+        harness.start()
+        CartesiaLoopbackHarness.frames.forEach(harness.client.sendAudio)
+        let transcript = await harness.finish()
+        XCTAssertEqual(transcript, "naïve café 👩🏽‍💻")
+        XCTAssertEqual(harness.entries, [
+            .transcript(" naïve café 👩🏽‍💻", final: true), .error("closed(code: 1011)"), .finished("naïve café 👩🏽‍💻")
+        ], "The status comes from the failing task's own close frame")
+    }
+
     func testCancellingAHeldFinishReleasesItPromptly() async throws {
         let harness = try CartesiaLoopbackHarness(scenario: "hold")
         defer { harness.invalidate() }
@@ -146,12 +170,8 @@ private final class CartesiaLoopbackHarness: @unchecked Sendable {
             self.record(.transcript(text, final: isFinal))
             if isFinal { self.lock.withLock { self.finalObserver }?(text) }
         }, onError: { [weak self] error in
-            let description: String
-            if let streaming = error as? CartesiaStreamingError {
-                description = "\(streaming)"
-            } else {
-                description = "\(type(of: error)): \(error.localizedDescription)"
-            }
+            // Transport errors differ by platform; the stream outcome does not.
+            let description = (error as? CartesiaStreamingError).map { "\($0)" } ?? "transport"
             self?.record(.error(description))
         })
     }

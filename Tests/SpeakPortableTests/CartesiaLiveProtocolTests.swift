@@ -65,11 +65,40 @@ final class CartesiaLiveProtocolTests: XCTestCase {
         XCTAssertEqual(decode(["type": "turn.resume"]), .turnResume)
         XCTAssertEqual(decode(["type": "turn.end", "transcript": " Grüße 👋🏽"]), .turnEnd(" Grüße 👋🏽"))
         XCTAssertEqual(decode(["type": "turn.end"]), .turnEnd(""), "A turn boundary without text still ends it")
-        // The older `results[]` shape is not part of the automatic-turns schema.
-        XCTAssertEqual(decode(["type": "turn.end", "results": [["transcript": "legacy"]]]), .turnEnd(""))
+        // Frames shaped like the earlier integration's are still read; the
+        // documented top-level field wins when both are present.
+        XCTAssertEqual(
+            decode(["type": "turn.update", "results": [["transcript": ""], ["transcript": "book a table"]]]),
+            .turnUpdate("book a table")
+        )
+        XCTAssertEqual(
+            decode(["type": "turn.end", "transcript": "Documented.", "results": [["transcript": "legacy"]]]),
+            .turnEnd("Documented.")
+        )
         XCTAssertNil(decode(["type": "turn.future_event"]))
         XCTAssertNil(CartesiaTurnEvent(data: Data("not json".utf8)))
         XCTAssertNil(CartesiaTurnEvent(data: Data(#"{"transcript":"no type"}"#.utf8)))
+    }
+
+    func testEarlierSeamsStaySourceCompatible() {
+        XCTAssertEqual(
+            CartesiaLiveClient.webSocketURL(model: "ink-2", sampleRate: 16_000),
+            CartesiaLiveProtocol.webSocketURL(model: "ink-2", sampleRate: 16_000)
+        )
+        let update = CartesiaLiveClient.transcriptEvent(
+            from: #"{"type":"turn.update","results":[{"transcript":"book a table"}]}"#
+        )
+        XCTAssertEqual(update?.text, "book a table")
+        XCTAssertEqual(update?.isFinal, false)
+        let end = CartesiaLiveClient.transcriptEvent(
+            from: #"{"type":"turn.end","results":[{"transcript":"book a table for two"}]}"#
+        )
+        XCTAssertEqual(end?.text, "book a table for two")
+        XCTAssertEqual(end?.isFinal, true)
+        let documented = CartesiaLiveClient.transcriptEvent(from: #"{"type":"turn.end","transcript":"Done."}"#)
+        XCTAssertEqual(documented?.text, "Done.")
+        XCTAssertNil(CartesiaLiveClient.transcriptEvent(from: #"{"type":"turn.update","results":[{"transcript":""}]}"#))
+        XCTAssertNil(CartesiaLiveClient.transcriptEvent(from: #"{"type":"turn.start"}"#))
     }
 
     func testErrorFramesMapToTypedFailures() {

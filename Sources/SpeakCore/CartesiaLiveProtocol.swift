@@ -22,8 +22,9 @@ import FoundationNetworking
 /// transcript of the completed turn. `request_id` names the connection, not a
 /// turn, so turns are delimited only by the order of events. `{"type":"close"}`
 /// has every buffered sample processed into events "before the connection
-/// closes"; there is no acknowledgement frame, so the server's closure is the
-/// end of the stream.
+/// closes"; there is no acknowledgement frame, so the server's normal WebSocket
+/// closure (1000), reported by the transport through
+/// `StreamingWebSocketCloseReporting`, is the end of the stream.
 enum CartesiaLiveProtocol {
     static let host = "api.cartesia.ai"
     static let path = "/stt/turns/websocket"
@@ -72,9 +73,22 @@ enum CartesiaLiveProtocol {
         )
     }
 
-    /// A transport failure. The handshake status only reaches the transport's
-    /// description, so a rejected key is recognised from it.
+    /// RFC 6455 normal closure: the only close that ends the stream successfully.
+    static let normalClosureCode = 1_000
+
+    /// Whether a receive failure is the peer's normal closure, as the transport
+    /// reports it. A failure without a close code, or with any other code, is not.
+    static func isNormalClosure(_ error: Error) -> Bool {
+        (error as? StreamingWebSocketCloseReporting)?.webSocketCloseCode == normalClosureCode
+    }
+
+    /// A transport failure. A close frame that did not complete a finish is
+    /// reported with its code; otherwise the handshake status only reaches the
+    /// transport's description, so a rejected key is recognised from it.
     static func connectionError(_ error: Error) -> Error {
+        if let code = (error as? StreamingWebSocketCloseReporting)?.webSocketCloseCode {
+            return CartesiaStreamingError.closed(code: code)
+        }
         let nsError = error as NSError
         let description = nsError.localizedDescription.lowercased()
         if nsError.code == 401 || nsError.code == 403
@@ -116,7 +130,7 @@ enum CartesiaTurnEvent: Equatable {
     init?(data: Data) {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String else { return nil }
-        let transcript = object["transcript"] as? String ?? ""
+        let transcript = Self.transcript(in: object)
         switch type {
         case "connected": self = .connected
         case "turn.start": self = .turnStart
@@ -127,6 +141,15 @@ enum CartesiaTurnEvent: Equatable {
         case "error": self = .failure(Self.serverFailure(from: object))
         default: return nil
         }
+    }
+
+    /// The documented top-level `transcript`. Frames shaped like the earlier
+    /// integration's, with the text in `results[].transcript`, are still read
+    /// (the first non-empty one), as the shipping macOS parser also reads them.
+    private static func transcript(in object: [String: Any]) -> String {
+        if let transcript = object["transcript"] as? String { return transcript }
+        let results = object["results"] as? [[String: Any]] ?? []
+        return results.lazy.compactMap { $0["transcript"] as? String }.first { !$0.isEmpty } ?? ""
     }
 
     private static func serverFailure(from object: [String: Any]) -> ServerFailure {
@@ -151,6 +174,9 @@ public enum CartesiaStreamingError: LocalizedError, Equatable, Sendable {
     case incompleteTurn
     /// The finish budget elapsed after `close` without the server closing the stream.
     case missingCompletion
+    /// The server closed the socket with this status other than as the normal
+    /// end of a finished stream, so the transcript may be incomplete.
+    case closed(code: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -165,6 +191,23 @@ public enum CartesiaStreamingError: LocalizedError, Equatable, Sendable {
             return "Cartesia closed the stream before confirming the last words. The recording is available to retry."
         case .missingCompletion:
             return "Cartesia did not complete the transcription in time. The recording is available to retry."
+        case .closed(let code):
+            return "Cartesia closed the stream unexpectedly (code \(code)). The recording is available to retry."
+        }
+    }
+}
+
+extension CartesiaLiveClient {
+    /// The client's earlier internal seams, kept source-compatible.
+    static func webSocketURL(model: String, sampleRate: Int) -> URL? {
+        CartesiaLiveProtocol.webSocketURL(model: model, sampleRate: sampleRate)
+    }
+
+    static func transcriptEvent(from json: String) -> (text: String, isFinal: Bool)? {
+        switch CartesiaTurnEvent(data: Data(json.utf8)) {
+        case .turnUpdate(let text)?, .turnEagerEnd(let text)?: return text.isEmpty ? nil : (text, false)
+        case .turnEnd(let text)?: return text.isEmpty ? nil : (text, true)
+        default: return nil
         }
     }
 }

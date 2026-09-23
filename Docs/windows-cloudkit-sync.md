@@ -115,7 +115,7 @@ From Apple's
   nothing more once the session ends, a feature is turned off or the pass is
   cancelled; earlier writes stay. Turning key import on or off takes a
   revision, so an earlier turn-on still in progress stores nothing once a later
-  change begins, and a key saved by hand is written together with its mark;
+  change begins, and a key saved by hand is written once its mark is saved;
   `DesktopCloudSyncWork` owns a host's sync tasks so shutdown stops new work
   and drains what runs within a bound; `DesktopCloudSyncConfiguration`
   resolves the build-time token.
@@ -140,8 +140,9 @@ From Apple's
   Held fixtures interrupt a pass between pages, batches and steps with a
   sign-in, sign-out, History or key import turned off or cancellation
   (including a transport that returns regardless), interrupt turning key import
-  on, and interleave account validations. Host shutdown ownership is tested
-  through `DesktopCloudSyncWork`.
+  on, and interleave account validations. A sync state file that cannot be
+  written shows that a typed key is not saved without its mark. Host shutdown
+  ownership is tested through `DesktopCloudSyncWork`.
 - `Tests/SpeakWindowsPlatformTests/WindowsCloudKitNativeTests.swift` serves the
   fake over a real loopback socket through WinHTTP, checks the sign-in callback
   and cancellation, and holds CNG to the independent PBKDF2 and AES-GCM vectors
@@ -188,4 +189,5 @@ review. Current behaviour, by kind of record:
 | Expired cursor | No documented error code identifies an expired `syncToken`; it surfaces as a sync error. |
 | Loopback callback | Unverified until the API token is created. If CloudKit Console refuses `http://127.0.0.1:47823/cloudkit-sign-in`, a custom URI scheme through the MSIX manifest is needed instead. |
 | Token size | Credential Manager holds up to 2,560 bytes per credential. A longer web auth token would fail to save and ask for sign-in again. |
+| Keys typed by hand | The "saved by hand" mark is saved before the key. If the sync state cannot be saved, the key is not saved and the error is shown. If Credential Manager then refuses the key, or the app stops between the two, the key saved before stays and counts as typed: a deletion on the Mac no longer removes it, though a newer key from the Mac still replaces it. |
 | Compare Models, iPhone History, settings, Handoff | Not wired on Windows. |

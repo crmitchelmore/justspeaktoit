@@ -51,12 +51,11 @@ extension DesktopCloudSyncService {
     /// Saves a key the user typed, or removes it when `value` is empty, and
     /// marks it saved by hand, in one step, so no import step falls between
     /// the two: a remote deletion never removes it, and a newer remote value
-    /// still replaces it, as it replaces any saved key.
+    /// still replaces it, as it replaces any saved key. The mark is saved
+    /// first; if the sync state cannot be saved, this throws and the key is
+    /// left as it was.
     public func saveKeyByHand(_ value: String, identifier: String) async throws {
-        let vault = self.vault
-        try await state.update { state in
-            try DesktopKeyImport.saveByHand(value, identifier: identifier, in: &state, vault: vault)
-        }
+        try await DesktopKeyImport.saveByHand(value, identifier: identifier, in: state, vault: vault)
     }
 
     /// Records that the user saved a key by hand, so a later remote deletion

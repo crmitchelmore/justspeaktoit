@@ -114,11 +114,15 @@ class DesktopCloudSyncTestCase: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    /// The sync state file every service made here reads and writes, so a
+    /// second service over it is a relaunch.
+    var stateURL: URL { directory.appendingPathComponent("cloud-sync.json") }
+
     func makeService(
         transport: (any CloudKitWebServicesHTTPTransport)? = nil,
         onChanges: @escaping @Sendable ([DesktopHistorySyncChange]) async -> Void = { _ in }
     ) throws -> (DesktopCloudSyncService, DesktopCloudSyncStateStore) {
-        let state = try DesktopCloudSyncStateStore(url: directory.appendingPathComponent("cloud-sync.json"))
+        let state = try DesktopCloudSyncStateStore(url: stateURL)
         let clockValue = clock
         let history = DesktopHistorySyncStore(records: records, state: state, now: { clockValue }, onChanges: onChanges)
         let resolution = DesktopCloudSyncConfiguration.resolve(

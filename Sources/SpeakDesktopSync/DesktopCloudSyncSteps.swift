@@ -28,10 +28,14 @@ final class DesktopHistoryPassFence: HistorySyncPassFence {
     }
 }
 
-/// The account-bound steps of API-key import. Run each inside one update of
-/// the sync state, admitted by the pass's session fence: it is then decided
-/// against the bookkeeping as it is at that moment, cannot interleave with
-/// turning import off or with a key saved by hand, and is never half applied.
+/// The account-bound steps of API-key import, and saving a key by hand. Each
+/// runs on the sync state's actor, so none interleaves with another or with
+/// turning import off. An import step runs inside one update of the state,
+/// admitted by the pass's session fence, and is decided against the
+/// bookkeeping as it is at that moment. It changes the credential before the
+/// state is saved; if the state cannot be saved, the step throws and the
+/// credential change stays. Saving by hand saves its mark first instead, so
+/// a remote deletion never finds a typed key marked as imported.
 /// Key values pass only between the call and the credential vault; nothing
 /// here logs, reports or stores them anywhere else.
 enum DesktopKeyImport {
@@ -90,18 +94,24 @@ enum DesktopKeyImport {
 
     /// Saves a key typed on this device, or removes it when `value` is empty,
     /// and marks it saved by hand, so a later remote deletion leaves it alone.
+    /// The mark is saved first and the credential changes only then, on the
+    /// state's actor with nothing in between. So when the state cannot be
+    /// saved, the credential is left as it was. When the credential then
+    /// cannot be changed, the value already saved keeps the new mark: a remote
+    /// deletion no longer removes it, though a newer remote value still
+    /// replaces it.
     static func saveByHand(
         _ value: String,
         identifier: String,
-        in state: inout DesktopCloudSyncState,
+        in store: isolated DesktopCloudSyncStateStore,
         vault: any DesktopCredentialVault
     ) throws {
+        try store.update { $0.importedKeys[identifier]?.isImportedValue = false }
         if value.isEmpty {
             try vault.deleteCredential(identifier)
         } else {
             try vault.writeCredential(value, name: identifier)
         }
-        state.importedKeys[identifier]?.isImportedValue = false
     }
 
     /// Import stops as soon as it is turned off.

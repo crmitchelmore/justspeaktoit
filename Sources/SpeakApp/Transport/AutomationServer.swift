@@ -19,12 +19,16 @@ protocol AutomationCommandHandling: AnyObject {
 /// processes, so pairing codes and network discovery would add ceremony without
 /// adding safety. Access control is filesystem permissions — the socket lives in
 /// the user's Application Support directory and is created with mode 0600.
+///
+/// Replay, in-flight joining, validation and deadlines are the shared
+/// `AutomationRequestCoordinator` policy the Windows named-pipe server uses too;
+/// this type owns only the socket and its lifetime.
 @MainActor
 final class AutomationServer {
     private let socketPath: String
-    /// Held strongly: the handler exists to serve this socket, so its lifetime is
-    /// the socket's lifetime and `stop()` is what releases it.
-    private var handler: (any AutomationCommandHandling)?
+    /// Holds the handler while running: the handler exists to serve this socket,
+    /// so its lifetime is the socket's lifetime and `stop()` is what releases it.
+    private let coordinator = AutomationRequestCoordinator()
     private var listeningSource: DispatchSourceRead?
     /// Closes the socket when the app quits, so no stale socket file is left for
     /// a client to connect to and fail against confusingly.
@@ -34,21 +38,6 @@ final class AutomationServer {
         qos: .userInitiated,
         attributes: .concurrent
     )
-    /// Replayed responses keyed by request id *and* command, so a client that
-    /// retries after a timeout re-reads its result instead of starting a second
-    /// dictation session — and a client that reuses an id for a different command
-    /// never receives the earlier command's answer.
-    private var completedRequests: [CompletedKey: AutomationResponse] = [:]
-    private var completionOrder: [CompletedKey] = []
-    /// Commands still running, so a retry joins the original run instead of
-    /// starting a second one.
-    private var inFlight: [CompletedKey: Task<AutomationResponse, Never>] = [:]
-    private static let maxRememberedRequests = 64
-
-    private struct CompletedKey: Hashable {
-        let id: String
-        let command: AutomationCommand
-    }
 
     private(set) var isRunning = false
 
@@ -62,7 +51,9 @@ final class AutomationServer {
         // After the socket exists, so a start that fails to bind leaves nothing
         // retained behind a server that is not running.
         let descriptor = try Self.makeListeningSocket(at: self.socketPath)
-        self.handler = handler
+        self.coordinator.activate { request in
+            await handler.handle(request)
+        }
         let source = DispatchSource.makeReadSource(fileDescriptor: descriptor, queue: self.queue)
         source.setEventHandler { [weak self] in
             guard let self else { return }
@@ -183,17 +174,11 @@ final class AutomationServer {
             NotificationCenter.default.removeObserver(terminationObserver)
             self.terminationObserver = nil
         }
-        self.handler = nil
         try? FileManager.default.removeItem(atPath: self.socketPath)
         // In-flight work outlives the listener otherwise: its tasks hold a
         // reference to the handler and would keep answering — and mutating the
         // caches — after automation was turned off.
-        for work in self.inFlight.values {
-            work.cancel()
-        }
-        self.inFlight.removeAll()
-        self.completedRequests.removeAll()
-        self.completionOrder.removeAll()
+        self.coordinator.deactivate()
         self.isRunning = false
         SpeakLogger.transport.info("Automation socket stopped")
     }
@@ -216,20 +201,11 @@ final class AutomationServer {
         self.queue.async {
             let request: AutomationRequest
             do {
-                let prefix = try Self.readExactly(descriptor: client, count: AutomationFraming.prefixLength)
-                let length = try AutomationFraming.payloadLength(from: prefix)
-                let body = try Self.readExactly(descriptor: client, count: length)
-                request = try AutomationCoding.decoder().decode(AutomationRequest.self, from: body)
+                request = try AutomationWireExchange.readRequest(from: AcceptedSocketStream(descriptor: client))
             } catch {
                 // Decode failures and short reads are client bugs; reply with a bounded,
                 // non-echoing error rather than dropping the connection silently.
-                let failure = AutomationResponse.failure(
-                    id: "unknown",
-                    command: .status,
-                    error: error as? AutomationError
-                        ?? AutomationError(code: .invalidArgument, message: "Malformed automation request.")
-                )
-                Self.send(failure, to: client)
+                Self.send(AutomationWireExchange.malformedRequestResponse(for: error), to: client)
                 close(client)
                 return
             }
@@ -247,7 +223,7 @@ final class AutomationServer {
                     close(client)
                     return
                 }
-                let response = await self.respond(to: request)
+                let response = await self.coordinator.respond(to: request)
                 self.queue.async {
                     Self.send(response, to: client)
                     close(client)
@@ -255,68 +231,6 @@ final class AutomationServer {
             }
         }
     }
-
-    private func respond(to request: AutomationRequest) async -> AutomationResponse {
-        let key = CompletedKey(id: request.id, command: request.command)
-        if let cached = self.completedRequests[key] {
-            return cached
-        }
-
-        let work: Task<AutomationResponse, Never>
-        if let existing = self.inFlight[key] {
-            // A retry of a command that is still running joins the original run
-            // rather than starting a second dictation session.
-            work = existing
-        } else {
-            let validated: AutomationRequest
-            do {
-                validated = try request.validated()
-            } catch let error as AutomationError {
-                return .failure(id: request.id, command: request.command, error: error)
-            } catch {
-                return .failure(
-                    id: request.id,
-                    command: request.command,
-                    error: AutomationError(code: .invalidArgument, message: "Automation request was rejected.")
-                )
-            }
-            guard let handler = self.handler else {
-                return .failure(
-                    id: request.id,
-                    command: request.command,
-                    error: AutomationError(code: .internalError, message: "Automation is not wired up in this build.")
-                )
-            }
-            work = Task { @MainActor [weak self] in
-                let response = await handler.handle(validated)
-                self?.finish(key: key, response: response)
-                return response
-            }
-            self.inFlight[key] = work
-        }
-
-        return await AutomationDeadline.value(
-            of: work,
-            within: request.resolvedTimeout,
-            id: request.id,
-            command: request.command
-        )
-    }
-
-    private func finish(key: CompletedKey, response: AutomationResponse) {
-        // A command orphaned by `stop()` outlives the caches it was cleared from,
-        // so without this a response from before an off/on toggle could be
-        // replayed to a client that connected after it.
-        guard self.isRunning else { return }
-        self.inFlight.removeValue(forKey: key)
-        self.completedRequests[key] = response
-        self.completionOrder.append(key)
-        while self.completionOrder.count > Self.maxRememberedRequests {
-            let evicted = self.completionOrder.removeFirst()
-            self.completedRequests.removeValue(forKey: evicted)
-        }
-    }
-
 }
 
 // Socket IO helpers (`send`, `configureAcceptedSocket`, `readExactly`, `write`)

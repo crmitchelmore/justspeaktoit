@@ -4,11 +4,11 @@ import SpeakDesktop
 
 package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package struct Settings: Codable {
-        var model = ModelCatalog.defaultBatchTranscriptionModel
-        var postProcessing: DesktopPostProcessing.Options?
-        var microphoneDeviceID: String?
-        var batchModel: String?
-        var liveModel: String?
+        package var model = ModelCatalog.defaultBatchTranscriptionModel
+        package var postProcessing: DesktopPostProcessing.Options?
+        package var microphoneDeviceID: String?
+        package var batchModel: String?
+        package var liveModel: String?
         // Edited in the Text output dialog. Absent or unknown keys keep the
         // smart insert-at-cursor default with clipboard restoration.
         package var textOutput: Platform.TextOutputOptions?
@@ -16,30 +16,32 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package var hotKey: Platform.HotKeySettings?
         // The Voice dialog; absent uses the catalogue default.
         package var voiceOutput: Platform.VoiceOutputSettings?
+        // Settings menu; `speak` is refused until allowed.
+        package var automationEnabled: Bool?
     }
 
     /// Target, profile and text output are fixed when recording starts; a
     /// later settings change applies only to later recordings.
     package struct Recording {
-        let capture: any DesktopRecordingCapture
-        let context: DesktopCaptureContext
-        var record: DesktopRecordingStore.Record
-        let target: Platform.InsertionTarget?
-        let live: DesktopLiveSession?
-        let profile: DesktopProfileSession
-        let textOutput: Platform.TextOutputOptions
+        package let capture: any DesktopRecordingCapture
+        package let context: DesktopCaptureContext
+        package var record: DesktopRecordingStore.Record
+        package let target: Platform.InsertionTarget?
+        package let live: DesktopLiveSession?
+        package let profile: DesktopProfileSession
+        package let textOutput: Platform.TextOutputOptions
         /// What started this session; a shortcut gesture stops only its own kind.
         package let trigger: HotKeySessionTrigger
     }
 
     package struct StoppedRecording {
-        let record: DesktopRecordingStore.Record
-        let duration: TimeInterval
-        let target: Platform.InsertionTarget?
-        let live: DesktopLiveSession?
-        let profile: DesktopProfileSession
-        let textOutput: Platform.TextOutputOptions
-        var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
+        package let record: DesktopRecordingStore.Record
+        package let duration: TimeInterval
+        package let target: Platform.InsertionTarget?
+        package let live: DesktopLiveSession?
+        package let profile: DesktopProfileSession
+        package let textOutput: Platform.TextOutputOptions
+        package var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
     }
 
     package let directory: URL
@@ -73,7 +75,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
-    var microphoneWarning: String?
+    package var microphoneWarning: String?
     var cancellationRequested = false
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
@@ -302,7 +304,7 @@ extension DesktopHostController {
         Platform.update(status, transcript: transcript, state: state)
     }
 
-    func credentialIdentifier(for model: String) throws -> String {
+    package func credentialIdentifier(for model: String) throws -> String {
         guard let provider = DesktopHostModels.provider(for: model) else {
             throw DesktopTranscriptionError.unsupportedModel
         }

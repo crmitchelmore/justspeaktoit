@@ -11,10 +11,14 @@ on:
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakDesktopHostTests/**
       - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
       - scripts/websocket-loopback-probe.py
@@ -30,10 +34,14 @@ on:
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakDesktopHostTests/**
       - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
       - scripts/websocket-loopback-probe.py

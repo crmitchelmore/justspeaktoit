@@ -18,6 +18,14 @@ package struct DesktopHostTranscriptionRequest: Sendable {
     package let key: String
     package let duration: TimeInterval
     package let language: String?
+
+    package init(audio: URL, model: String, key: String, duration: TimeInterval, language: String?) {
+        self.audio = audio
+        self.model = model
+        self.key = key
+        self.duration = duration
+        self.language = language
+    }
 }
 
 /// Native, provider and file effects at the edge of the controller's recording,

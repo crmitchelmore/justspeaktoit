@@ -18,6 +18,7 @@ final class WindowsEventContext {
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
+    lazy var automation = WindowsAutomationSwitch(controller: controller)
     lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
         guard let self else { return }
         self.enqueueSettings { await self.controller.saveProfiles(profiles) }
@@ -250,6 +251,7 @@ func postProcessingEvent(
 private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
     if event == 24 { return readAloudEvent(value, holder: holder) }
+    if event == 25 { return automationEvent(requested: value == "1", holder: holder) }
     otherWindowEvent(event, value: value, holder: holder)
 }
 
@@ -291,11 +293,7 @@ enum SpeakWindowsMain {
                 try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
                 try await WindowsTextOutputSelfTest.run()
                 try await WindowsHotKeySelfTest.run()
-                try WindowsNative.checked { jsti_private_storage_self_test($0, $1) }
-                try WindowsNative.stagingSelfTest()
-                try WindowsNative.checked { jsti_websocket_self_test($0, $1) }
-                try WindowsNative.checked { jsti_audio_conversion_self_test($0, $1) }
-                try WindowsNative.checked { jsti_audio_playback_self_test($0, $1) }
+                try WindowsNative.storageMediaAndAutomationSelfTests()
                 guard !DesktopTranscription.batchModels.isEmpty else {
                     throw WindowsNativeError(message: "No canonical desktop models available.")
                 }
@@ -356,6 +354,7 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
+        if !smokeTest { await WindowsAutomationSwitch.restore(holder) }
         let preferences = await controller.preferredModelIDs()
         try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
         try await controller.configureModelCatalog()
@@ -388,6 +387,7 @@ enum SpeakWindowsMain {
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
         jsti_window_clear_voice_output()
+        await WindowsAutomationSwitch.shutDown(holder)
         await holder.hotKeys.drain()
         await controller.close()
         withExtendedLifetime(holder) {}

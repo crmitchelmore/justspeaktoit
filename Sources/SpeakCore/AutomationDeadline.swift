@@ -1,13 +1,12 @@
-#if os(macOS)
 import Foundation
-import SpeakCore
 
 /// Bounds how long an automation client waits, without abandoning the command it
 /// is waiting on.
 ///
-/// Separate from `AutomationServer` because the two answer different questions:
-/// the server owns the socket and the idempotency caches, this owns the race
-/// between a running command and the caller's patience.
+/// Separate from `AutomationRequestCoordinator` because the two answer different
+/// questions: the coordinator owns the idempotency caches, this owns the race
+/// between a running command and the caller's patience. Shared by every local
+/// transport (the macOS UNIX socket and the Windows named pipe).
 enum AutomationDeadline {
     /// Answers with whichever lands first: the command's own result, or the
     /// caller's deadline expiring.
@@ -16,19 +15,19 @@ enum AutomationDeadline {
     /// before returning and `cancelAll()` is inert against a `Task<_, Never>`,
     /// which ignores cancellation — so racing there would still wait for the
     /// command, and the timeout reply would be written long after the client
-    /// (whose socket read deadline is this same timeout) had hung up. A one-shot
-    /// gate settles the race instead, and nothing waits on the loser.
+    /// (whose read deadline is this same timeout) had hung up. A one-shot gate
+    /// settles the race instead, and nothing waits on the loser.
     ///
     /// The command is left running on timeout: it owns app state that cannot be
-    /// abandoned mid-flight, and its own completion still populates the server's
-    /// replay cache, so a retry with the same request id collects the real result.
+    /// abandoned mid-flight, and its own completion still populates the replay
+    /// cache, so a retry with the same request id collects the real result.
     static func value(
         of work: Task<AutomationResponse, Never>,
         within seconds: TimeInterval,
         id: String,
         command: AutomationCommand
     ) async -> AutomationResponse {
-        await value(of: work, within: seconds, id: id, command: command, beforeSettling: nil)
+        await self.value(of: work, within: seconds, id: id, command: command, beforeSettling: nil)
     }
 
     /// Test seam: `beforeSettling` runs once the command has completed and before
@@ -95,4 +94,3 @@ enum AutomationDeadline {
         }
     }
 }
-#endif

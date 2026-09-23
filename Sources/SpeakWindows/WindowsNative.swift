@@ -1,4 +1,5 @@
 import Foundation
+import CWindowsAutomation
 import CWindowsSupport
 import SpeakDesktop
 import SpeakCore
@@ -9,6 +10,16 @@ enum WindowsNative {
         var buffer = [CChar](repeating: 0, count: 1024)
         let result = action(&buffer, buffer.count)
         guard result == 0 else { throw WindowsNativeError(message: String(cString: buffer)) }
+    }
+
+    /// The `--self-test` checks for storage, staging, streaming, audio and the automation pipe.
+    static func storageMediaAndAutomationSelfTests() throws {
+        try checked { jsti_private_storage_self_test($0, $1) }
+        try stagingSelfTest()
+        try checked { jsti_websocket_self_test($0, $1) }
+        try checked { jsti_audio_conversion_self_test($0, $1) }
+        try checked { jsti_audio_playback_self_test($0, $1) }
+        try checked { jsti_automation_pipe_self_test($0, $1) }
     }
 
     static func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {

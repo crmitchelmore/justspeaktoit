@@ -135,6 +135,9 @@ extension WindowsAudioPlaybackController: DesktopHostPlayback {
 }
 
 extension WindowsNative {
+    /// Import validation now lives in the shared host.
+    static func validateImport(_ source: URL) throws { try DesktopHostImport.validate(source) }
+
     /// Record-bound playback display into the native latest-only mailbox. Safe
     /// from any thread; the window ignores reports for an unselected record.
     static func playback(_ display: WindowsAudioPlaybackDisplay) {

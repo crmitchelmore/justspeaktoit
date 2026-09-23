@@ -37,3 +37,15 @@ final class StubAutomationClient: AutomationRequesting {
 extension StubAutomationClient {
     static let unavailable = AutomationError.appUnavailable(socketPath: "/tmp/speak-test.sock")
 }
+
+/// Absolute sample paths in the form this platform's `speak` resolves to, so
+/// path-carrying requests round-trip unchanged.
+enum AutomationTestPaths {
+    #if os(Windows)
+    static let audio = #"C:\tmp\a.m4a"#
+    static let clip = #"C:\tmp\clip.m4a"#
+    #else
+    static let audio = "/tmp/a.m4a"
+    static let clip = "/tmp/clip.m4a"
+    #endif
+}

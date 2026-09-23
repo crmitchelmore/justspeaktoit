@@ -11,9 +11,13 @@ on:
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - scripts/windows-bundle/**
@@ -29,9 +33,13 @@ on:
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
       - scripts/windows-bundle/**

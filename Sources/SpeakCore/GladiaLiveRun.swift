@@ -15,11 +15,13 @@ final class GladiaLiveRun: @unchecked Sendable {
         case stopRecording
     }
 
-    /// One send handed to the transport outside the lock.
+    /// One send claimed under the lock and handed to the transport outside it.
     struct PendingSend {
         let connection: any StreamingWebSocketConnection
         let message: StreamingWebSocketMessage
         let generation: UInt64
+        /// `stop_recording`: counts as handed off only when `send` is invoked.
+        let stopsRecording: Bool
     }
 
     var stage = Stage.idle
@@ -42,8 +44,11 @@ final class GladiaLiveRun: @unchecked Sendable {
     var earlySendOutcome: Result<Void, Error>?
     var inFlightAudioBytes = 0
     var sendGeneration: UInt64 = 0
-    /// `stop_recording` was handed to the socket. From then `end_session` is
-    /// the authoritative answer, even ahead of the send's completion.
+    /// `stop_recording` was handed to the socket: its send is being invoked,
+    /// not merely claimed under the lock. From then `end_session` is the
+    /// authoritative answer, even ahead of the send's completion; before it,
+    /// an `end_session` means Gladia ended the session with the recording
+    /// still unflushed.
     var stopHandedOff = false
 
     var receiveGeneration: UInt64 = 0

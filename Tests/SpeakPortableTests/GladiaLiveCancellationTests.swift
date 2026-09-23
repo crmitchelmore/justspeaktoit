@@ -187,7 +187,7 @@ final class GladiaLiveCancellationTests: XCTestCase {
         XCTAssertEqual(socket.maximumReceiveDepth, 1, "A synchronous receive never re-enters receive")
         socket.final("Done.", id: "00-final")
         let finish = await beginFinish(harness)
-        XCTAssertTrue(socket.stopRecordingSent)
+        await waitUntil("stop_recording to reach the socket") { socket.stopRecordingSent }
         socket.endSession()
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Done.")

@@ -104,6 +104,7 @@ final class GladiaLiveFailureTests: XCTestCase {
         socket.completeSend()
         socket.final("Confirmed.", id: "00-01")
         let waiting = await beginFinish(unanswered)
+        await waitUntil("stop_recording to reach the socket") { socket.stopRecordingSent }
         socket.completeSend()
         socket.partial("Unconfirmed dra", id: "00-02")
         unanswered.clock.advance(by: GladiaLive.finishBudget - 0.1)
@@ -138,6 +139,7 @@ final class GladiaLiveFailureTests: XCTestCase {
         closing.client.sendAudio(GladiaHarness.pcm(0))
         closingSocket.completeSend()
         let finish = await beginFinish(closing)
+        await waitUntil("stop_recording to reach the socket") { closingSocket.stopRecordingSent }
         closingSocket.completeSend()
         closingSocket.final("Almost.", id: "00-01")
         closingSocket.failReceive()

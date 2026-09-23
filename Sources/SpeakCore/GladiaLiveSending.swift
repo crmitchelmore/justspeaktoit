@@ -39,26 +39,43 @@ extension GladiaLiveClient {
     }
 
     /// Caller holds the lock. Exactly one send is in flight, and only once the
-    /// socket's handshake completed.
+    /// socket's handshake completed. This only claims the next message; the
+    /// send loop hands it to the socket after the lock is released.
     private func nextSend(_ active: GladiaLiveRun) -> GladiaLiveRun.PendingSend? {
         guard active.stage == .open, !active.sending, let connection = active.connection,
               let next = active.outgoing.first else { return nil }
         active.outgoing.removeFirst()
         let message: StreamingWebSocketMessage
+        let stopsRecording: Bool
         switch next {
         case .audio(let pcm):
             message = .binary(pcm)
             active.inFlightAudioBytes = pcm.count
+            stopsRecording = false
         case .stopRecording:
             message = .text(GladiaLiveProtocol.stopRecordingJSON)
             active.inFlightAudioBytes = 0
-            active.stopHandedOff = true
-            log("Gladia stop_recording sent")
+            stopsRecording = true
         }
         active.sending = true
         active.sendCallActive = true
         active.sendGeneration &+= 1
-        return GladiaLiveRun.PendingSend(connection: connection, message: message, generation: active.sendGeneration)
+        return GladiaLiveRun.PendingSend(
+            connection: connection, message: message, generation: active.sendGeneration,
+            stopsRecording: stopsRecording
+        )
+    }
+
+    /// Caller holds the lock. Confirms the claimed send is still its run's,
+    /// immediately before `send` is invoked: `stop_recording` counts as handed
+    /// off from here, and not while it only waited behind another effect.
+    private func handOff(_ send: GladiaLiveRun.PendingSend, _ active: GladiaLiveRun) -> Bool {
+        guard isCurrent(active), active.sending, active.sendGeneration == send.generation else { return false }
+        if send.stopsRecording {
+            active.stopHandedOff = true
+            log("Gladia stop_recording handed to the socket")
+        }
+        return true
     }
 
     /// Outside the lock. A completion that arrives before `send` returns is
@@ -69,9 +86,7 @@ extension GladiaLiveClient {
         var next: GladiaLiveRun.PendingSend? = first
         while let send = next {
             let generation = send.generation
-            guard perform({ _ in isCurrent(active) && active.sending && active.sendGeneration == generation }) else {
-                return
-            }
+            guard perform({ _ in handOff(send, active) }) else { return }
             send.connection.send(send.message) { [weak self, weak active] error in
                 guard let self, let active else { return }
                 self.sendCompleted(error, generation: generation, active)

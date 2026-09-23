@@ -112,10 +112,12 @@ final class GladiaLiveLifecycleTests: XCTestCase {
         XCTAssertEqual(harness.log.partials, ["Yes"], "A partial for a final utterance is not a new draft")
 
         let finish = await beginFinish(harness)
+        await waitUntil("stop_recording to reach the socket") { socket.stopRecordingSent }
         socket.completeSend()
         socket.endSession()
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Yes. Yes. Yes, and more Unidentified.")
+        XCTAssertTrue(harness.log.errors.isEmpty, "end_session after the handoff completes the finish")
     }
 
     func testUnicodeTranscriptsArriveIntactFromTextAndBinaryFrames() {
@@ -152,6 +154,7 @@ final class GladiaLiveLifecycleTests: XCTestCase {
         draftSocket.completeSend()
         draftSocket.partial("um", id: "00-01")
         let finish = await beginFinish(draftsOnly)
+        await waitUntil("stop_recording to reach the socket") { draftSocket.stopRecordingSent }
         draftSocket.completeSend()
         draftSocket.endSession()
         let empty = await finish.value
@@ -170,7 +173,7 @@ final class GladiaLiveLifecycleTests: XCTestCase {
         let client = harness.client
         let second = Task { await client.finishAndWait() }
         await waitUntil("the second finish to join") { client.finishWaiterCount == 2 }
-        XCTAssertTrue(socket.stopRecordingSent)
+        await waitUntil("stop_recording to reach the socket") { socket.stopRecordingSent }
         socket.completeSend()
         socket.endSession()
         let firstResult = await first.value

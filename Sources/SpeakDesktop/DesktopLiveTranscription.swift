@@ -15,7 +15,8 @@ public enum DesktopLiveTranscription {
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia:
+        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia,
+             .google:
             return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
@@ -116,6 +117,14 @@ public enum DesktopLiveTranscription {
             // Ink-2's canonical capability takes no language hint, so none is sent.
             return CartesiaLiveClient(
                 apiKey: apiKey, model: route.apiModelName, sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .google:
+            // Gemini 3.5 Transcribe Live pins the hint to one of the Live model's
+            // documented BCP-47 codes and detects the language when there is
+            // none. Desktop hosts keep no keyword list, so no vocabulary is sent.
+            return GeminiLiveClient(
+                apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
+                makeConnection: makeConnection
             )
         default: return nil
         }

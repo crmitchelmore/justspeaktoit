@@ -54,8 +54,6 @@ let appleCoreSources: [String] = [
     "DeviceIdentityStore.swift",
     "ElevenLabsBalanceClient.swift",
     "FileProductAnalyticsStateStore.swift",
-    "GeminiLiveClient.swift",
-    "GeminiLiveProtocol.swift",
     "GeminiTTSAPI.swift",
     "GroqTTSAPI.swift",
     "HandsFreeAudioPreRollBuffer.swift",

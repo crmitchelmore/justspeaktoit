@@ -99,6 +99,42 @@ public enum GeminiTranscribeModels {
         return [code]
     }
 
+    /// The BCP-47 codes Gemini 3.5 Transcribe Live lists for
+    /// `inputAudioTranscription.languageCodes`
+    /// (ai.google.dev/gemini-api/docs/live-api/live-transcribe, read
+    /// 2026-09-23). The Live model takes these region-qualified tags, not bare
+    /// language codes; an empty list detects the language.
+    public static let liveLanguageCodes: Set<String> = [
+        "af-ZA", "am-ET", "ar-EG", "hy-AM", "as-IN", "az-AZ", "be-BY", "bn-BD", "bn-IN", "bs-BA", "bg-BG",
+        "rup-BG", "my-MM", "yue-Hant-HK", "ca-ES", "ceb", "km-KH", "hr-HR", "cs-CZ", "da-DK", "nl-NL",
+        "en-GB", "en-IN", "en-US", "et-EE", "fa-IR", "fil-PH", "fi-FI", "fr-FR", "gl-ES", "ka-GE", "de-DE",
+        "el-GR", "gu-IN", "ha-NG", "he-IL", "hi-IN", "hu-HU", "is-IS", "id-ID", "it-IT", "ja-JP", "jv-ID",
+        "kea-CV", "kn-IN", "kk-KZ", "ko-KR", "ky-KG", "lv-LV", "ln-CD", "lt-LT", "mk-MK", "ms-MY", "ml-IN",
+        "mt-MT", "cmn-Hans-CN", "mr-IN", "mn-MN", "ne-NP", "nb-NO", "or-IN", "pl-PL", "pt-BR", "pt-PT",
+        "pa-IN", "pa-Guru-IN", "ro-RO", "ru-RU", "sr-RS", "sd-Arab-IN", "sk-SK", "sl-SI", "es-419", "es-US",
+        "sw-KE", "sv-SE", "tg-TJ", "te-IN", "th-TH", "tr-TR", "uk-UA", "uz-UZ", "vi-VN"
+    ]
+
+    /// Selections the Live list spells differently: Simplified Chinese in
+    /// China is Mandarin (`cmn-Hans-CN`), and Mexico is in the Latin American
+    /// region (`es-419`). Keys are lowercased tags.
+    private static let liveLanguageAliases: [String: String] = [
+        "zh-cn": "cmn-Hans-CN", "zh-hans-cn": "cmn-Hans-CN", "zh-hans": "cmn-Hans-CN", "es-mx": "es-419"
+    ]
+
+    /// Gemini 3.5 Transcribe Live's code for a Speak language selection
+    /// (`en_GB` becomes `en-GB`), or `nil` for Automatic and for a language the
+    /// Live model does not list, such as `en_AU` or `zh_TW`, which it then
+    /// detects instead. The one mapping every platform's Live request uses.
+    public static func liveLanguageCode(for selection: String?) -> String? {
+        guard let language = TranscriptionLanguageCatalog.providerLanguage(for: selection ?? "") else { return nil }
+        // Locale identifiers may carry keywords (`en_GB@calendar=gregorian`).
+        let base = language.split(separator: "@", maxSplits: 1).first.map(String.init) ?? language
+        let tag = base.replacingOccurrences(of: "_", with: "-")
+        if let alias = liveLanguageAliases[tag.lowercased()] { return alias }
+        return liveLanguageCodes.first { $0.caseInsensitiveCompare(tag) == .orderedSame }
+    }
+
     /// Trims a custom-vocabulary list to the documented bounds. Blank phrases
     /// are dropped so an empty lexicon never reaches the wire as `[""]`.
     public static func boundedCustomVocabulary(_ terms: [String]) -> [String] {

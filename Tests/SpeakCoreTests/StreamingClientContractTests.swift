@@ -346,22 +346,26 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
     /// last utterance. Deepgram has always behaved this way (see
     /// `parseTranscriptResponse`); Gemini and Meta now match it.
     func testGemini_trailingFinalConsumedByFinishIsNotAlsoDelivered() async {
-        let client = GeminiLiveClient(apiKey: "k")
+        let socket = GeminiContractSocket()
+        let client = GeminiLiveClient(apiKey: "k", makeConnection: { _ in socket }, schedule: { _, _ in })
         let observer = TranscriptObserver()
-        client.beginSession(
+        client.start(
             onTranscript: { text, isFinal in observer.record(text: text, isFinal: isFinal) },
             onError: { _ in }
         )
-        client.ingest(Self.geminiInterim("Hello th"))
+        socket.open()
+        socket.emit(#"{"setupComplete":{}}"#)
+        socket.emit(Self.geminiInterim("Hello th"))
 
-        // The client is not connected, so drive the same waiter the socket path
-        // arms and deliver the trailing final into it.
-        let transcript = await client.waitForTrailingFinal(
-            deadline: Date().addingTimeInterval(2)
-        ) {
-            client.ingest(Self.geminiFinal("Hello there."))
-        }
+        // The final that answers the end of the audio arrives once the finish
+        // has sent it, over the injected transport.
+        let streamEnd = expectation(description: "audioStreamEnd sent")
+        socket.onStreamEnd { streamEnd.fulfill() }
+        let finish = Task { await client.finishAndWait() }
+        await fulfillment(of: [streamEnd], timeout: 2)
+        socket.emit(Self.geminiFinal("Hello there."))
 
+        let transcript = await finish.value
         XCTAssertEqual(transcript, "Hello there.")
         XCTAssertEqual(observer.finals, [], "the trailing final must not be doubled")
     }
@@ -474,6 +478,39 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
                 return completion
             }()
             held?(error)
+        }
+    }
+
+    /// A transport for the Gemini case: sends complete at once, and emitted
+    /// frames reach the receive the client has armed.
+    private final class GeminiContractSocket: StreamingWebSocketConnection, @unchecked Sendable {
+        private let lock = NSLock()
+        private var opener: (@Sendable () -> Void)?
+        private var receiver: (@Sendable (Result<StreamingWebSocketMessage, Error>) -> Void)?
+        private var streamEndObserver: (@Sendable () -> Void)?
+
+        func resume(onOpen: @escaping @Sendable () -> Void) { lock.withLock { opener = onOpen } }
+        func open() { lock.withLock { opener }?() }
+        func onStreamEnd(_ observer: @escaping @Sendable () -> Void) { lock.withLock { streamEndObserver = observer } }
+        func cancel() {}
+
+        func send(_ message: StreamingWebSocketMessage, completion: @escaping @Sendable (Error?) -> Void) {
+            if case .text(let text) = message, text.contains("audioStreamEnd") {
+                lock.withLock { streamEndObserver }?()
+            }
+            completion(nil)
+        }
+
+        func receive(completion: @escaping @Sendable (Result<StreamingWebSocketMessage, Error>) -> Void) {
+            lock.withLock { receiver = completion }
+        }
+
+        func emit(_ text: String) {
+            let armed = lock.withLock { () -> (@Sendable (Result<StreamingWebSocketMessage, Error>) -> Void)? in
+                defer { receiver = nil }
+                return receiver
+            }
+            armed?(.success(.text(text)))
         }
     }
 

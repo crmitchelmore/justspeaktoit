@@ -128,10 +128,13 @@ extension ModelCatalog {
         ),
         // Gemini finalises a turn after server-side VAD detects the pause; the
         // client audioStreamEnd flush needs a moment to bring the trailing
-        // utterance back before teardown.
+        // utterance back before teardown. `inputAudioTranscription.languageCodes`
+        // takes the selection as one of the Live model's documented BCP-47
+        // codes, and detects the language for Automatic or an unlisted one.
         GeminiTranscribeModels.liveCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 2.0
+            postStopFinalizeBudget: 2.0,
+            supportsLanguageHint: true
         ),
         // Meta Muse Voice emits one `speechComplete` per endpointed turn, which
         // the incremental tail rewrite can polish like any other segment final.

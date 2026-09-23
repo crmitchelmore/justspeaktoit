@@ -22,8 +22,8 @@ final class DesktopLiveLanguageParityTests: XCTestCase {
     }()
 
     func testSelectedLanguageReachesExactlyTheRoutesWhoseCapabilityAcceptsIt() throws {
-        let code = selection.localeLanguageCode
         for model in DesktopLiveTranscription.liveModels {
+            let code = providerCode(model.id)
             let sent = try upstream(model.id, language: selection)
             if ModelCatalog.liveCapabilities(for: model.id).supportsLanguageHint {
                 XCTAssertTrue(sent.contains(code), "\(model.id) dropped the selection: \(sent.sorted())")
@@ -31,18 +31,18 @@ final class DesktopLiveLanguageParityTests: XCTestCase {
                 let baseline = try upstream(model.id, language: nil)
                 XCTAssertEqual(sent, baseline, "\(model.id) has no language field to change")
             }
-            for stored in [selection, selection.replacingOccurrences(of: "_", with: "-")] {
+            for stored in [selection, selection.replacingOccurrences(of: "_", with: "-")] where stored != code {
                 XCTAssertFalse(sent.contains(stored), "\(model.id) sent the stored locale \(stored)")
             }
         }
     }
 
     func testAutomaticSendsNoLanguageAndNoMarker() throws {
-        let code = selection.localeLanguageCode
         for model in DesktopLiveTranscription.liveModels {
+            let codes = [selection.localeLanguageCode, providerCode(model.id)]
             for automatic in [TranscriptionLanguageCatalog.automaticIdentifier, "Automatic", "auto", " "] {
                 let sent = try upstream(model.id, language: automatic)
-                XCTAssertFalse(sent.contains(code), "\(model.id) with \(automatic)")
+                XCTAssertFalse(codes.contains { sent.contains($0) }, "\(model.id) with \(automatic)")
                 XCTAssertFalse(sent.contains { $0.lowercased() == "automatic" }, "\(model.id) sent the marker")
             }
         }
@@ -72,11 +72,24 @@ final class DesktopLiveLanguageParityTests: XCTestCase {
             DesktopLiveTranscription.route(forID: $0)?.provider
         })
         XCTAssertTrue(accepted.contains(.gladia), "Gladia's session request pins the language")
+        XCTAssertTrue(accepted.contains(.google), "Gemini's setup pins one of its documented codes")
         XCTAssertFalse(accepted.contains(.cartesia), "Cartesia Ink-2 is English only, with no language field")
     }
 }
 
 private extension DesktopLiveLanguageParityTests {
+    /// The code a route's documented protocol uses for the selection. Gemini's
+    /// Live model lists region-qualified BCP-47 tags (`ja-JP`), which are its
+    /// own codes rather than a stored locale; every other route here takes the
+    /// bare language code (`ja`).
+    func providerCode(_ model: String) -> String {
+        if DesktopLiveTranscription.route(forID: model)?.provider == .google,
+           let code = GeminiTranscribeModels.liveLanguageCode(for: selection) {
+            return code
+        }
+        return selection.localeLanguageCode
+    }
+
     /// Every string the route's client sends before any audio: its socket
     /// query values, the JSON of frames sent once the socket opens and the
     /// JSON of Gladia's session request, which is held unanswered.

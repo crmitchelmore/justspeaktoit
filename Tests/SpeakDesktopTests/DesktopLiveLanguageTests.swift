@@ -23,7 +23,7 @@ final class DesktopLiveLanguageTests: XCTestCase {
             "elevenlabs/scribe-v2-streaming", "soniox/stt-rt-v5-streaming", XAISpeechToText.liveCatalogID,
             "openai/gpt-realtime-whisper-streaming", "openai/gpt-4o-mini-transcribe-streaming",
             "openai/gpt-4o-transcribe-streaming", OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
-            "gladia/solaria-1-streaming"
+            "gladia/solaria-1-streaming", GeminiTranscribeModels.liveCatalogID
         ]
         for identifier in supportedIDs {
             XCTAssertTrue(ModelCatalog.liveCapabilities(for: identifier).supportsLanguageHint, identifier)

@@ -168,6 +168,7 @@ let portablePackage = Package(
         .target(name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop"]),
         .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .testTarget(name: "SpeakDesktopHostTests", dependencies: ["SpeakDesktopHost", "SpeakDesktop", "SpeakCore"]),
         .testTarget(
             name: "SpeakPortableTests",
             dependencies: ["SpeakCore", "SpeakTestSupport"],

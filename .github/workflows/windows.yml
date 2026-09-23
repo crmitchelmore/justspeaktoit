@@ -13,6 +13,7 @@ on:
       - Sources/CWindowsSupport/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopHostTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
@@ -31,6 +32,7 @@ on:
       - Sources/CWindowsSupport/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopHostTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py

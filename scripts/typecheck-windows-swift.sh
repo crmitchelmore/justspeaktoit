@@ -31,7 +31,7 @@ cd "$work"
 # Building individual targets compiles modules without linking, so the Win32
 # import libraries named in the manifest are never needed.
 export SPEAK_WINDOWS_TARGET=1
-for target in SpeakWindowsPlatform SpeakDesktopHost SpeakWindows SpeakWindowsPlatformTests; do
+for target in SpeakWindowsPlatform SpeakDesktopHost SpeakWindows SpeakWindowsPlatformTests SpeakDesktopHostTests; do
     if grep -q "name: \"$target\"" Package.swift; then
         echo "== type-checking $target"
         swift build --target "$target" "$@"

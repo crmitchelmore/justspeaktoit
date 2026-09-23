@@ -324,8 +324,9 @@ extension CloudKitWebServicesClient {
     /// sign-out or rejected session takes effect while it runs, and none that
     /// already has is ever followed by it: it fails with `sessionChanged`, or
     /// `CancellationError` once its task is cancelled, and does not run. The
-    /// work must not send requests through this client.
-    nonisolated func whileCurrent<Value>(
+    /// work must not send requests through this client. The `isolation`
+    /// parameter, not the client, isolates it.
+    func whileCurrent<Value>(
         _ session: CloudKitWebSession,
         isolation: isolated (any Actor)? = #isolation,
         _ work: () async throws -> Value

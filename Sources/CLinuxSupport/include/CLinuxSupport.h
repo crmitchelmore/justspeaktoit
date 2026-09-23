@@ -42,7 +42,10 @@ enum {
     JSTI_EVENT_SHORTCUT_RELEASED = 22,
     JSTI_EVENT_TEXT_OUTPUT = 30,       /* index: method, text: "restore" or "" */
     JSTI_EVENT_COMMAND_TOGGLE = 31,    /* --toggle from another process or action */
-    JSTI_EVENT_SHORTCUT_STYLE = 32     /* index: 0 press, 1 hold, 2 double-tap, 3 hold and double-tap */
+    JSTI_EVENT_SHORTCUT_STYLE = 32,    /* index: 0 press, 1 hold, 2 double-tap, 3 hold and double-tap */
+    /* Apply in Post-processing. index: model index, or -1 - index when
+     * disabled; text: prompt, U+001F, then a new OpenRouter key or nothing. */
+    JSTI_EVENT_POST_PROCESSING = 33
 };
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
@@ -88,6 +91,9 @@ int32_t jsti_window_set_history_presentation(
 int32_t jsti_window_set_transcript_variant(const char *record_id, int32_t variant, int32_t switchable);
 /* method: 0 paste into the focused app, 1 clipboard only. */
 int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, const char *shortcut_hint);
+/* The Post-processing group: shared remote model names and saved choices. */
+int32_t jsti_window_set_post_processing(
+    const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt);
 /* The shortcut behaviour picker, indexed as JSTI_EVENT_SHORTCUT_STYLE. */
 int32_t jsti_window_set_shortcut_style(int32_t index);
 /* Main thread only: the transcript and version the window displays now. */

@@ -125,6 +125,20 @@ enum LinuxWindow {
         }
     }
 
+    static func postProcessing(_ options: DesktopPostProcessing.Options) {
+        let models = DesktopPostProcessing.remoteModels
+        let strings = Strings()
+        let names: [UnsafePointer<CChar>?] = models.map { strings.add(DesktopHostModels.uiText($0.displayName)) }
+        let selected = models.firstIndex { $0.id == options.modelIdentifier } ?? 0
+        withExtendedLifetime(strings) {
+            names.withUnsafeBufferPointer {
+                _ = jsti_window_set_post_processing(
+                    $0.baseAddress, $0.count, options.mode == .remote ? 1 : 0, Int32(selected), options.customPrompt ?? ""
+                )
+            }
+        }
+    }
+
     static func textOutput(_ options: LinuxTextOutputOptions, hint: String) {
         _ = jsti_window_set_text_output(options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0, hint)
     }

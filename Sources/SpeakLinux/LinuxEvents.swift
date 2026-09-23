@@ -205,6 +205,16 @@ func linuxWindowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: In
             await controller.saveTextOutput(options)
             LinuxWindow.textOutput(await controller.textOutputOptions(), hint: holder.shortcuts.hint)
         }
+    case Int(JSTI_EVENT_POST_PROCESSING):
+        let enabled = slot >= 0
+        let model = enabled ? slot : -1 - slot
+        let parts = value.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false)
+        let prompt = parts.first.map(String.init) ?? ""
+        let key = parts.count > 1 ? String(parts[1]) : ""
+        holder.enqueueSettings {
+            await controller.savePostProcessing(enabled: enabled, modelIndex: model, prompt: prompt, key: key)
+            LinuxWindow.postProcessing(await controller.postProcessingOptions())
+        }
     case Int(JSTI_EVENT_SHORTCUT_STYLE):
         guard LinuxHotKeySettings.styles.indices.contains(slot) else { break }
         let hotKey = LinuxHotKeySettings(style: LinuxHotKeySettings.styles[slot].rawValue)

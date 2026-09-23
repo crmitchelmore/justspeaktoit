@@ -40,6 +40,12 @@ typedef struct UI {
     AdwSwitchRow *restore_row;
     AdwActionRow *shortcut_row;
     AdwComboRow *style_row;
+    /* Post-processing */
+    AdwSwitchRow *polish_row;
+    AdwComboRow *polish_model_row;
+    GtkStringList *polish_models;
+    AdwEntryRow *polish_prompt_row;
+    AdwPasswordEntryRow *polish_key_row;
     /* Recording */
     GtkButton *record;
     GtkButton *cancel;
@@ -179,6 +185,17 @@ static void on_text_output(GObject *object, GParamSpec *spec, gpointer data) {
 static void on_style(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
     emit(JSTI_EVENT_SHORTCUT_STYLE, "", (gint32)adw_combo_row_get_selected(ui.style_row));
+}
+
+static void on_polish_apply(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    gint32 model = (gint32)adw_combo_row_get_selected(ui.polish_model_row);
+    gint32 index = adw_switch_row_get_active(ui.polish_row) ? model : -1 - model;
+    gchar *text = g_strdup_printf("%s\x1f%s", gtk_editable_get_text(GTK_EDITABLE(ui.polish_prompt_row)),
+                                  gtk_editable_get_text(GTK_EDITABLE(ui.polish_key_row)));
+    emit(JSTI_EVENT_POST_PROCESSING, text, index);
+    g_free(text);
+    gtk_editable_set_text(GTK_EDITABLE(ui.polish_key_row), "");
 }
 
 static void on_refresh(GtkButton *button, gpointer data) {
@@ -434,6 +451,32 @@ static void build_window(void) {
     gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(ui.catalog_refresh));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(settings), catalog);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(settings));
+
+    /* Post-processing */
+    GtkWidget *polish = group("Post-processing");
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(polish),
+        "Optionally polish transcripts with an OpenRouter model. The original is always kept in History.");
+    ui.polish_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_row), "Send transcripts to OpenRouter for polishing");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_row));
+    ui.polish_models = gtk_string_list_new(NULL);
+    ui.polish_model_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_model_row), "Polishing model");
+    adw_combo_row_set_model(ui.polish_model_row, G_LIST_MODEL(ui.polish_models));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_model_row));
+    ui.polish_prompt_row = ADW_ENTRY_ROW(adw_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_prompt_row), "Custom instructions (optional)");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_prompt_row));
+    ui.polish_key_row = ADW_PASSWORD_ENTRY_ROW(adw_password_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.polish_key_row), "New OpenRouter key (leave empty to keep)");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), GTK_WIDGET(ui.polish_key_row));
+    GtkWidget *polish_apply = gtk_button_new_with_label("Apply");
+    gtk_widget_set_halign(polish_apply, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(polish_apply, 6);
+    g_signal_connect(polish_apply, "clicked", G_CALLBACK(on_polish_apply), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), polish_apply);
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(polish));
 
     /* History */
     GtkWidget *history = group("History");
@@ -1010,6 +1053,41 @@ int32_t jsti_window_set_playback(const char *record_id, int32_t state, const cha
     playback->state = state;
     playback->text = g_strdup(text);
     return post(playback_apply, playback, playback_free);
+}
+
+typedef struct Polish {
+    GPtrArray *models;
+    gboolean enabled;
+    gint32 selected;
+    gchar *prompt;
+} Polish;
+
+static void polish_free(gpointer pointer) {
+    Polish *polish = pointer;
+    g_ptr_array_unref(polish->models);
+    g_free(polish->prompt);
+    g_free(polish);
+}
+
+static void polish_apply(gpointer pointer) {
+    Polish *polish = pointer;
+    guint existing = g_list_model_get_n_items(G_LIST_MODEL(ui.polish_models));
+    g_ptr_array_add(polish->models, NULL);
+    gtk_string_list_splice(ui.polish_models, 0, existing, (const char *const *)polish->models->pdata);
+    if (polish->selected >= 0) adw_combo_row_set_selected(ui.polish_model_row, (guint)polish->selected);
+    adw_switch_row_set_active(ui.polish_row, polish->enabled);
+    gtk_editable_set_text(GTK_EDITABLE(ui.polish_prompt_row), polish->prompt != NULL ? polish->prompt : "");
+}
+
+int32_t jsti_window_set_post_processing(
+    const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt) {
+    Polish *polish = g_new0(Polish, 1);
+    polish->models = g_ptr_array_new_with_free_func(g_free);
+    for (size_t index = 0; index < count; index++) g_ptr_array_add(polish->models, g_strdup(models[index]));
+    polish->enabled = enabled != 0;
+    polish->selected = selected;
+    polish->prompt = g_strdup(prompt);
+    return post(polish_apply, polish, polish_free);
 }
 
 static void style_apply(gpointer data) {

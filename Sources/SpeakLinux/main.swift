@@ -48,6 +48,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         await controller.setMicrophoneWarning(warning)
         try await controller.configureModelCatalog()
         holder.applyShortcutStyle(await controller.hotKeySettings())
+        LinuxWindow.postProcessing(await controller.postProcessingOptions())
         return await controller.selectedIndex()
     }
     let strings = LinuxWindow.Strings()

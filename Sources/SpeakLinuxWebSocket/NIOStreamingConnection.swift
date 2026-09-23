@@ -17,7 +17,7 @@ public struct NIOWebSocketTransportError: LocalizedError, Sendable {
     public let closeReason: String?
     public var errorDescription: String? { message }
 
-    init(_ message: String, closeCode: Int? = nil, closeReason: String? = nil) {
+    package init(_ message: String, closeCode: Int? = nil, closeReason: String? = nil) {
         self.message = message
         self.closeCode = closeCode
         self.closeReason = closeReason

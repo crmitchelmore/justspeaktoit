@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 import SpeakCore
-@testable import SpeakLinuxPlatform
+import SpeakLinuxPlatform
 
 /// GStreamer import conversion on real files: a 44.1 kHz stereo WAV becomes
 /// canonical 16 kHz mono PCM16 with the same duration and a live signal.

@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 import XCTest
 import SpeakCore
-@testable import SpeakLinuxWebSocket
+import SpeakLinuxWebSocket
 
 /// The shared Mistral Voxtral client over the NIO transport against the
 /// probe's Voxtral peer, the same scenarios the Windows WinHTTP adapter passes.

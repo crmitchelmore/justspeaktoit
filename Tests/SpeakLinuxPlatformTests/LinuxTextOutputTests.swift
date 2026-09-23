@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import SpeakLinuxPlatform
+import SpeakLinuxPlatform
 
 final class LinuxTextOutputOptionsTests: XCTestCase {
     func testDefaultsPasteAndRestore() {

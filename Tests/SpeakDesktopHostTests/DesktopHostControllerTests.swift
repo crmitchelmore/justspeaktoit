@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 import SpeakCore
 import SpeakDesktop
-@testable import SpeakDesktopHost
+import SpeakDesktopHost
 
 // The shared controller driven through a fake platform and synthetic
 // effects: no window, microphone, keyring, network or clipboard. These run on

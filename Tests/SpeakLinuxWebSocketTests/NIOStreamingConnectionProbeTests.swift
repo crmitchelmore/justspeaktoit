@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 import XCTest
 import SpeakCore
-@testable import SpeakLinuxWebSocket
+import SpeakLinuxWebSocket
 
 /// The Linux WebSocket transport against scripts/websocket-loopback-probe.py,
 /// the same bounded RFC 6455 peer the Windows WinHTTP adapter is qualified

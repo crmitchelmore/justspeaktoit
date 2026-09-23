@@ -256,9 +256,14 @@ if linuxTargetBuild {
         linuxSystemLibrary("CLinuxPulse", "libpulse", apt: ["libpulse-dev"]),
         linuxSystemLibrary("CLinuxSecret", "libsecret-1", apt: ["libsecret-1-dev"]),
         linuxSystemLibrary("CLinuxXTest", "xtst", apt: ["libx11-dev", "libxtst-dev"]),
+        linuxSystemLibrary(
+            "CLinuxGStreamer", "gstreamer-app-1.0", apt: ["libgstreamer1.0-dev", "libgstreamer-plugins-base1.0-dev"]
+        ),
         .target(
             name: "CLinuxSupport",
-            dependencies: ["CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest"],
+            dependencies: [
+                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer"
+            ],
             publicHeadersPath: "include",
             cSettings: [.define("_GNU_SOURCE")],
             // xtst.pc links only libXtst; the core Xlib calls need libX11.

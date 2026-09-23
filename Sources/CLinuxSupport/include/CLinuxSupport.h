@@ -150,6 +150,15 @@ int32_t jsti_audio_device_monitor_start(
 /* No callback runs after this returns. */
 void jsti_audio_device_monitor_stop(void);
 
+/* ------------------------------------------------------------------ decode */
+
+/* Decodes any audio GStreamer's installed plugins understand to mono PCM16
+ * at `sample_rate`, delivered in chunks on the calling thread. Stops early
+ * (returning 1) once `*cancelled` becomes nonzero. */
+int32_t jsti_audio_decode(
+    const char *path, uint32_t sample_rate, jsti_capture_audio_fn chunk, void *context, const volatile int32_t *cancelled,
+    char *error, size_t error_capacity);
+
 /* ---------------------------------------------------------------- playback */
 
 /* Plays mono PCM16 through the sound server. The samples are copied. */

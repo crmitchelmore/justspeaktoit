@@ -27,7 +27,8 @@ Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2
 
 ```sh
 sudo apt install libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev \
-  libx11-dev libxtst-dev pkg-config
+  libx11-dev libxtst-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  gstreamer1.0-plugins-good pkg-config
 export SPEAK_LINUX_TARGET=1
 swift build --product SpeakLinux
 swift test                                  # portable, host and Linux tests
@@ -102,18 +103,18 @@ proven on a physical desktop.
 | All 31 batch models, OpenRouter discovery, post-processing | Shared code, verified by the portable tests | `swift test` (portable suite) |
 | GTK window, events, record-bound History presentation | Verified headless | `--ui-smoke-test` under Xvfb, window self-test, snapshot |
 | Microphone capture (libpulse via PipeWire) | Verified with a virtual source | integration check: exact 100 ms frames, non-silent test tone; physical USB/Bluetooth microphones **unverified** |
-| Microphone list | Verified (monitors excluded) | integration check; hotplug refresh **not implemented** |
+| Microphone list and hotplug | Verified (monitors excluded; a new source triggers a refresh) | integration check; the saved choice keeps an "unavailable" row; physical hotplug **unverified** |
 | Secret Service keys | Verified with GNOME Keyring | integration check; KWallet and the Flatpak Secret portal **unverified** |
 | X11 paste, focus re-verification, clipboard restore | Verified under Xvfb + Openbox into a GTK (Zenity) field | integration check; real X11 desktops, terminals, Electron, LibreOffice **unverified** |
 | X11 Ctrl+Alt+Space grab | Built; grab errors handled | **Unverified** by an automated key press |
 | GlobalShortcuts portal | Protocol verified against a fake portal | GNOME 48 / KDE dialogs and real key presses **unverified** |
 | Wayland paste (RemoteDesktop + Clipboard portals) | Protocol verified against a fake portal (sessions, persist mode, restore token reuse, SelectionWrite, keysyms) | **Unverified on a real compositor** (see risks below) |
 | `--toggle` / app action | Built on GApplication | Forwarding **unverified** by an automated check |
-| Import | WAV and formats the provider accepts | Converting other formats for 16 kHz-WAV-only models (Meta, Azure) **not implemented** (GStreamer planned) |
+| Import and conversion | Verified for WAV (44.1 kHz stereo to 16 kHz mono) | `LinuxAudioConversionTests` through GStreamer; MP3, M4A and Opus depend on installed plugins and are **unverified**; conversion runs only for 16 kHz-WAV-only models (Meta, Azure) |
 | Live transcription transport (SwiftNIO, `SpeakLinuxWebSocket`) | Verified against the loopback probe | `SpeakLinuxWebSocketTests`: echo, PCM frames, ping/pong payload, peer close code and reason with acknowledgement, 2 × 2 MiB through a slow peer, fragmented Unicode and binary, cancellation of pending receive and pre-handshake send, abrupt disconnect, oversize, refused upgrade, and the shared Mistral client's four Voxtral scenarios. TLS (`wss`) to real providers, and live providers other than Mistral's protocol peer, **unverified**; HTTP(S) proxies are **not** honoured by this transport |
 | Live transcription in the app | Wired to the shared live clients (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI, Mistral) | No provider receipt yet: **unverified** with real keys |
-| Push-to-talk, hold, double-tap | **Not implemented** | Press-to-toggle only |
-| History playback in the app | **Not implemented** | Open audio uses the default player |
+| Shortcut styles (press, hold, double-tap, both) | Session rules verified in the shared host | `SpeakDesktopHostTests`; the X11 grab reports press and release (integration check); portal Deactivated on real desktops **unverified** |
+| History playback in the app | Verified player (a tone plays to the end through PipeWire) | App WAV recordings only; other imports use Open audio; audible hardware output **unverified** |
 | App profiles | Controller support shared; **no Linux editor** | The X11 target's `/proc/<pid>/exe` path reaches the shared resolver, whose matcher is written for Windows paths: **unverified** |
 | Read aloud, local models, IBus insertion, tray, autostart | **Not implemented** | Later phases |
 | Flatpak | Manifest, desktop file, metainfo | `flatpak-builder` **not run**; Swift version of the extension unverified |

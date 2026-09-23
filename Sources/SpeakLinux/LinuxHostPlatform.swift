@@ -112,10 +112,7 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     }
 
     package static func convertAudio(input: URL, output: URL) async throws -> TimeInterval {
-        throw DesktopHostError(
-            message: "This model needs 16 kHz WAV audio, and converting other imported formats is not available on "
-                + "Linux yet. Import a 16 kHz mono WAV file or choose another model."
-        )
+        try await LinuxAudioConversion.convert(input: input, output: output)
     }
 
     package static func openFile(_ url: URL) throws { try LinuxFiles.open(url) }

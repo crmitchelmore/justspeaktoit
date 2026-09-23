@@ -434,14 +434,16 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         }
     }
 
-    /// The providers added alongside the shared Speechmatics client all commit
-    /// their tail on stop, so none of them can truncate a recording.
+    /// The providers added alongside the shared Speechmatics client, and those
+    /// ported onto shared finalising clients since, all commit their tail on
+    /// stop, so none of them can truncate a recording.
     func testTheNewlySharedProvidersAllFinaliseGracefully() {
         let clients: [StreamingTranscriptionClient] = [
             SpeechmaticsLiveClient(apiKey: "k"),
             RevAILiveClient(accessToken: "k"),
             MistralVoxtralLiveClient(apiKey: "k"),
-            GladiaLiveClient(apiKey: "k")
+            GladiaLiveClient(apiKey: "k"),
+            CartesiaLiveClient(apiKey: "k")
         ]
         for client in clients {
             guard let finalizing = client as? FinalizingStreamingTranscriptionClient else {

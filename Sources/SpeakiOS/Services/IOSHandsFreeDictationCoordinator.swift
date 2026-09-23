@@ -30,8 +30,10 @@ final class IOSHandsFreeDictationCoordinator: ObservableObject {
     private let preRoll = HandsFreeAudioPreRollBuffer()
     private var audioEngine: AVAudioEngine?
     private var detectorSession: Any?
-    private var armTask: Task<Void, Never>?
-    private var finalisationTask: Task<Void, Never>?
+    // Readable so lifecycle tests can join a start or finalisation after this
+    // coordinator retires it; retirement drops the reference, not the work.
+    private(set) var armTask: Task<Void, Never>?
+    private(set) var finalisationTask: Task<Void, Never>?
     private var sessionID: UUID?
     private var armGeneration = 0
     private let captureInterruptionObserver = CaptureDisruptionObserver()

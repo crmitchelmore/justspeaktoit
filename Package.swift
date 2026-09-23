@@ -104,7 +104,6 @@ let appleCoreSources: [String] = [
     "ReleaseNotesContentView.swift",
     "ReleaseTrainCompatibility.swift",
     "RevAIBalanceClient.swift",
-    "RevAILiveClient.swift",
     "SecureStorage.swift",
     "SettingsSync.swift",
     "SharedAudioImport.swift",

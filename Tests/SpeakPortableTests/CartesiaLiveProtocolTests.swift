@@ -28,6 +28,32 @@ final class CartesiaLiveProtocolTests: XCTestCase {
         XCTAssertFalse(ModelCatalog.liveCapabilities(for: "cartesia/ink-2-streaming").supportsLanguageHint)
     }
 
+    /// One request for every client of the stream: the handshake the shared
+    /// client opens is the public builder the macOS controller uses, with the
+    /// trimmed key as a bearer token (the documented server scheme and the
+    /// official SDKs' header) and the pinned version in the header and query.
+    func testEveryClientOpensTheOneCanonicalRequest() throws {
+        let fixture = CartesiaLiveFixture(key: "synthetic-key")
+        fixture.start()
+        defer { fixture.client.cancel() }
+        let opened = try XCTUnwrap(fixture.factory.requests.first)
+        let canonical = try XCTUnwrap(CartesiaLiveClient.webSocketRequest(
+            apiKey: " synthetic-key \n", model: "ink-2", sampleRate: 16_000
+        ))
+        XCTAssertEqual(canonical.url, opened.url)
+        XCTAssertEqual(canonical.url, CartesiaLiveClient.webSocketURL(model: "ink-2", sampleRate: 16_000))
+        XCTAssertEqual(canonical.allHTTPHeaderFields?.count, 2)
+        for field in ["Authorization", "Cartesia-Version"] {
+            XCTAssertEqual(canonical.value(forHTTPHeaderField: field), opened.value(forHTTPHeaderField: field), field)
+        }
+        XCTAssertEqual(canonical.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic-key")
+        XCTAssertNil(canonical.value(forHTTPHeaderField: "X-API-Key"))
+        XCTAssertEqual(CartesiaLiveClient.apiVersion, "2026-03-01", "Cartesia keeps a pinned version's contract")
+        XCTAssertEqual(canonical.value(forHTTPHeaderField: "Cartesia-Version"), CartesiaLiveClient.apiVersion)
+        let query = URLComponents(url: try XCTUnwrap(canonical.url), resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(query?.first { $0.name == "cartesia_version" }?.value, CartesiaLiveClient.apiVersion)
+    }
+
     func testRouteModelAndRateReachTheQuery() throws {
         let route = try XCTUnwrap(LiveTranscriptionRouting.route(for: "cartesia/ink-2-streaming"))
         XCTAssertEqual(route.apiModelName, "ink-2")

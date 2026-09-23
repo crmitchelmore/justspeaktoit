@@ -28,9 +28,16 @@ import FoundationNetworking
 enum CartesiaLiveProtocol {
     static let host = "api.cartesia.ai"
     static let path = "/stt/turns/websocket"
-    /// The version the app already ships. It is still a valid version date; the
-    /// current reference and SDK default to `2026-08-14`, which has not been
-    /// verified against the live service yet.
+    /// The stream's pinned `Cartesia-Version`, sent by every client that opens
+    /// it (the shared client and the macOS controller). Cartesia keeps a pinned
+    /// version's contract: "Existing integrations keep running unchanged on
+    /// their pinned version" (changelog entry for `2026-08-14`, read
+    /// 2026-09-23). The official Python SDK sent `2026-03-01` from 3.1.0 until
+    /// 4.0.0, including 3.4.0 (2026-07-21), which added this stream's turn
+    /// configuration and keyterms; 4.0.0 moved every request to `2026-08-14`,
+    /// whose documented changes concern multilingual voices and
+    /// already-deprecated fields. Moving this stream awaits a live receipt of
+    /// its handshake and normal closure.
     static let apiVersion = "2026-03-01"
     static let encoding = "pcm_s16le"
     /// The only control frame: end of audio.
@@ -52,12 +59,16 @@ enum CartesiaLiveProtocol {
         return components.url
     }
 
-    /// The handshake request. The key travels only in the bearer header, never
-    /// in the query.
+    /// The handshake request. The trimmed key travels only as a bearer token,
+    /// never in the query: `Authorization: Bearer` is Cartesia's documented
+    /// server authentication (docs.cartesia.ai/use-the-api/api-conventions) and
+    /// what both official SDKs send on this handshake. The stream reference
+    /// also lists `X-API-Key` and a browser `access_token` query parameter.
     static func webSocketRequest(apiKey: String, model: String, sampleRate: Int) -> URLRequest? {
         guard let url = webSocketURL(model: model, sampleRate: sampleRate) else { return nil }
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue(apiVersion, forHTTPHeaderField: "Cartesia-Version")
         return request
     }
@@ -198,11 +209,23 @@ public enum CartesiaStreamingError: LocalizedError, Equatable, Sendable {
 }
 
 extension CartesiaLiveClient {
-    /// The client's earlier internal seams, kept source-compatible.
-    static func webSocketURL(model: String, sampleRate: Int) -> URL? {
+    /// The stream's pinned `Cartesia-Version`; see `CartesiaLiveProtocol.apiVersion`.
+    public static let apiVersion = CartesiaLiveProtocol.apiVersion
+
+    /// The one handshake request every client of the stream opens, the macOS
+    /// controller included: the documented path and query, the trimmed key as
+    /// a bearer token and the pinned version in both the header and the query.
+    public static func webSocketRequest(apiKey: String, model: String, sampleRate: Int) -> URLRequest? {
+        CartesiaLiveProtocol.webSocketRequest(apiKey: apiKey, model: model, sampleRate: sampleRate)
+    }
+
+    /// The stream's URL, documented path and query; also the client's earlier
+    /// internal seam, kept source-compatible.
+    public static func webSocketURL(model: String, sampleRate: Int) -> URL? {
         CartesiaLiveProtocol.webSocketURL(model: model, sampleRate: sampleRate)
     }
 
+    /// The client's earlier internal seam, kept source-compatible.
     static func transcriptEvent(from json: String) -> (text: String, isFinal: Bool)? {
         switch CartesiaTurnEvent(data: Data(json.utf8)) {
         case .turnUpdate(let text)?, .turnEagerEnd(let text)?: return text.isEmpty ? nil : (text, false)

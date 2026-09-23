@@ -649,7 +649,9 @@ try {
     & $signer -Package $basePackage -Output $signedBase -ToolCache $ToolCache -CertificateThumbprint $trusted.Thumbprint -Layout $baseLayout -Python $Python
     & $signer -Package $upgradePackage -Output $signedUpgrade -ToolCache $ToolCache -CertificateThumbprint $trusted.Thumbprint -Layout $upgradeLayout -Python $Python
     & $signer -Package $upgradePackage -Output $untrustedUpgrade -ToolCache $ToolCache -CertificateThumbprint $untrusted.Thumbprint -Layout $upgradeLayout -Python $Python
-    $tamper = Invoke-JstiTool -FilePath $pythonPath -Arguments @('-B', $support, 'tamper', '--package', $signedUpgrade, '--output', $tamperedUpgrade)
+    # Only a file the upgrade changes is read during the upgrade; unchanged files are reused from the installed base.
+    $tamper = Invoke-JstiTool -FilePath $pythonPath -Arguments @('-B', $support, 'tamper', '--package', $signedUpgrade,
+        '--output', $tamperedUpgrade, '--reference', $signedBase)
     Assert-Check 'A signed upgrade with one changed payload byte is prepared' ($tamper.ExitCode -eq 0) $tamper.StandardOutput.Trim()
     $report.tools = (Read-JstiJson (Join-Path $packagesDirectory 'base-signed.sign.json')).signTool
 
@@ -706,6 +708,15 @@ try {
     Assert-UserData 'The first packaged launch' 'recovered'
 
     # --- phase 3: failed and cancelled upgrades ----------------------------------------------------
+    # Cancellation runs first, before any refused attempt could leave the
+    # upgrade staged and make its registration finish too quickly to cancel.
+    $attempt = Invoke-WinRtAdd 'Cancel an upgrade' $signedUpgrade -Registers $upgrade.packageFullName -CancelImmediately
+    # The task is Canceled, or the service reports ERROR_INSTALL_CANCEL / ERROR_CANCELLED.
+    Assert-Check 'A cancelled upgrade does not complete' ($attempt.status -eq 'Canceled' -or (
+        $attempt.status -eq 'Faulted' -and @('0x80073CF8', '0x800704C7') -contains $attempt.hresult)) $attempt
+    Start-Sleep -Seconds 5
+    Assert-PreviousIntact 'The cancelled upgrade' $base $baseLayout 'recovered'
+
     $attempt = Invoke-Deployment 'Upgrade with a tampered package' {
         Add-AppxPackage -Path $tamperedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'A tampered upgrade is refused' (-not $attempt.succeeded) $attempt
@@ -715,18 +726,6 @@ try {
         Add-AppxPackage -Path $untrustedUpgrade } -Registers $upgrade.packageFullName
     Assert-Check 'An upgrade signed by an untrusted certificate is refused' (-not $attempt.succeeded) $attempt
     Assert-PreviousIntact 'The refused untrusted upgrade' $base $baseLayout 'recovered'
-
-    # The refused attempts run before cancellation. A cancelled registration
-    # leaves the genuine upgrade staged under the same full name, and Windows
-    # then registered the tampered package from that staged copy instead of
-    # verifying its own bytes (observed in CI), so a refusal after a
-    # cancellation proves nothing about the refused package.
-    $attempt = Invoke-WinRtAdd 'Cancel an upgrade' $signedUpgrade -Registers $upgrade.packageFullName -CancelImmediately
-    # The task is Canceled, or the service reports ERROR_INSTALL_CANCEL / ERROR_CANCELLED.
-    Assert-Check 'A cancelled upgrade does not complete' ($attempt.status -eq 'Canceled' -or (
-        $attempt.status -eq 'Faulted' -and @('0x80073CF8', '0x800704C7') -contains $attempt.hresult)) $attempt
-    Start-Sleep -Seconds 5
-    Assert-PreviousIntact 'The cancelled upgrade' $base $baseLayout 'recovered'
 
     $running = Invoke-StartMenuLaunch 'The base version during an upgrade attempt' $installed $rows $transcript -LeaveRunning
     try {

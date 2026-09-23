@@ -201,15 +201,15 @@ the unsigned upgrade package, and then, under Windows PowerShell:
    version installs, shows both records and the fixture transcript, and
    recovers the interrupted record in the real directory without changing any
    audio sample or other file.
-7. With the base installed, a tampered upgrade, an untrusted upgrade, a
-   cancelled upgrade and an upgrade while the app runs (expected
-   `ERROR_PACKAGES_IN_USE`), in that order, each leave the previous registration, its
+7. With the base installed, a cancelled upgrade, a tampered upgrade, an
+   untrusted upgrade and an upgrade while the app runs (expected
+   `ERROR_PACKAGES_IN_USE`) each leave the previous registration, its
    installed files and all user data unchanged; the base still launches with
    its History. The same upgrade package then installs, so each refusal is
-   attributable to its injected fault. The refusals run before the
-   cancellation because a cancelled registration leaves the genuine upgrade
-   staged under the same full name, and Windows then registered the tampered
-   package from that staged copy.
+   attributable to its injected fault. The tampered byte is in a file the
+   upgrade changes (the versioned package manifest). Windows reuses installed
+   files whose block hashes match, so CI installed an upgrade whose tampered
+   byte sat in an unchanged file: that byte was never read.
 8. The upgrade installs in the same family at a new location, passes its
    bundle self-test and launch, and keeps all data.
 9. Uninstall removes the registration, Start menu entry, alias and package

@@ -623,6 +623,22 @@ class LifecycleSupportTests(unittest.TestCase):
             with self.assertRaises(zipfile.BadZipFile):
                 archive.read("Stored.bin")
 
+    def test_tampering_against_a_reference_changes_only_an_updated_entry(self):
+        base = self.root / "base.msix"
+        upgrade = self.root / "upgrade.msix"
+        for path, version in ((base, b"1"), (upgrade, b"2")):
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("AppxManifest.xml", b"<Package/>")
+                archive.writestr(zipfile.ZipInfo("Unchanged.bin"), bytes(range(256)) * 8)
+                archive.writestr(zipfile.ZipInfo("package-manifest.json"), (b'{"version": "' + version + b'"}') * 8)
+        output = self.root / "tampered.msix"
+        result = lifecycle_support.tamper(upgrade, output, base)
+        self.assertEqual(result["entry"], "package-manifest.json")
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(archive.read("Unchanged.bin"), bytes(range(256)) * 8)
+        with self.assertRaises(SystemExit):
+            lifecycle_support.tamper(base, self.root / "same.msix", base)
+
 
 if __name__ == "__main__":
     unittest.main()

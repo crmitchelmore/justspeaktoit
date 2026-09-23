@@ -282,7 +282,9 @@ flowchart TB
 | Desktop behaviour | Implemented-model projection, durable recording records, recovery, export and streaming WAV writes | `Sources/SpeakDesktop/` |
 | Windows host | Native-event handling, recording orchestration, settings and credential access | `Sources/SpeakWindows/` |
 | Windows services | Event-driven WASAPI capture with a bounded writer queue, native History playback through Media Foundation decoding and event-driven WASAPI rendering, native history/settings UI, hotkey, Credential Manager, clipboard, and captured-field insertion through native controls, UI Automation and a guarded paste | `Sources/CWindowsSupport/` |
-| Apple services | Existing SwiftUI, AVFoundation, Speech, Core ML, Keychain, CloudKit and Sparkle integrations | `Sources/SpeakApp/`, `Sources/SpeakiOS/`, `Sources/SpeakSync/` |
+| Shared sync | CloudKit record schema and codecs, History and Compare Models reconciliation, the CloudKit Web Services client and a read-only reader for the Mac's encrypted API keys | `Sources/SpeakSync/` except `appleSyncSources` |
+| Desktop sync | History projection, synced copies, per-account cursors and acknowledgements, opt-in key import, build-time token resolution | `Sources/SpeakDesktopSync/` |
+| Apple services | Existing SwiftUI, AVFoundation, Speech, Core ML, Keychain, CloudKit and Sparkle integrations | `Sources/SpeakApp/`, `Sources/SpeakiOS/`, native adapters in `Sources/SpeakSync/` |
 
 `Package.swift` selects the portable graph on Windows/Linux and when explicitly
 requested on macOS. New `SpeakCore` source files enter the portable build by
@@ -349,7 +351,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Voice output | Read aloud speaks the displayed History transcript (the version shown) with a canonical Deepgram Aura or Flux voice chosen in a native Voice dialog. Transcripts longer than Deepgram's 2,000-character request limit are spoken as consecutive sentence-bounded segments (shared `SpeechTextSegmenter`). Speech plays through the same `WindowsAudioPlaybackController` as History playback, so only one is ever audible; Play/Pause and Stop act on it, and recording, import, selecting another row, History playback and close stop it, including a segment still being synthesized. The shared Deepgram engine keeps its bounded WAV validation, exclusive private staging and owned-file cleanup. Normal speed only. Cross-compiled locally; awaited-playback controller tests pass under a local Windows ABI runner | Windows CI for this revision, a real Deepgram receipt (including Flux linear16/WAV), physical speaker acceptance, speed control, system voices, other providers, pronunciation editing, clipboard and selected-text sources, and removal of staged files left by an earlier launch |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
-| Sync and Apple companion flows | No Windows sync implementation | Explicit interoperable protocol and consent design; CloudKit/Handoff equivalence is unresolved |
+| Sync and Apple companion flows | History syncs with the Mac App Store build's CloudKit container (`iCloud.com.justspeaktoit`) through CloudKit Web Services: Settings, iCloud sync signs in with an Apple ID in the browser (loopback callback), shows Mac History as audio-less synced copies and uploads Windows History in the Mac's record format. Opt-in, read-only import of the API keys the Mac syncs, unlocked with the Mac's key-sync passphrase. Native WinHTTP transport, CNG envelope, Credential Manager for the rotating token. Portable tests and Windows loopback tests run against a fake CloudKit server; see [iCloud sync](#icloud-sync) | The CloudKit Console steps below, then a live receipt: Mac to Windows and Windows to Mac History create, edit and delete, key import, account switch and token expiry. Settings do not sync (the Mac uses the iCloud key-value store, which has no web API); Compare Models rounds, iPhone History (a separate container) and Handoff are not wired |
 | Automation and integrations | Opt-in `speak` CLI and MCP server over an owner-only local named pipe: status, history, file transcription, and start/stop dictation. It shares the protocol, framing, dispatch and replay with the Mac socket transport. Loopback client/server, CLI path resolution and MCP tests pass under a local Windows ABI runner. The native pipe self-test (runs in `--self-test` and CI) needs real Windows, because the local runner does not enforce first-instance ownership | Windows CI for this revision, a physical check of the Settings menu toggle and of `speak` against a running app, packaging `speak.exe` onto PATH in the MSIX, OpenClaw, deep links, AppleScript/Shortcuts-equivalent surfaces |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
 | Distribution and updates | Unsigned developer executable, self-contained runtime bundle, and an unsigned x64 developer MSIX with a CI install/upgrade/uninstall lifecycle job that keeps user data in the portable data directory | First Windows receipt for that job, externally supplied signing identity, clean physical Windows 10/11 installs, ARM64, update channel and Alpha/Stable Windows identities |
@@ -359,6 +361,85 @@ Apple Watch are not Windows operating-system APIs. Their relevant user journeys
 must be enumerated and either supported through companion protocols or recorded
 as explicit product decisions before claiming parity. They are not silently
 waived by a successful Swift build.
+
+## iCloud sync
+
+Windows joins the **Mac** CloudKit container, so a user's Mac History appears
+on Windows. Only the Mac App Store build writes to that container; the direct
+(Developer ID) Mac build ships without CloudKit entitlements, so its History is
+not in iCloud. iPhone History lives in `iCloud.com.justspeaktoit.ios` and is a
+separate container. The formats, protocol evidence and limits are in
+[Windows CloudKit sync](windows-cloudkit-sync.md).
+
+What the Windows app does:
+
+- **Settings > iCloud sync** opens the dialog. **Sign in** asks CloudKit for
+  Apple's sign-in page, opens it in the default browser (only `https` pages on
+  `apple.com` or `icloud.com`), and listens on
+  `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
+  `ckWebAuthToken`. The listener runs only during sign-in, for at most ten
+  minutes. The token rotates on every response and is kept in Credential
+  Manager as `com.justspeaktoit/cloudkit.webAuthToken`.
+- **Sync History with my Mac** turns on History sync. The app syncs at launch,
+  every five minutes, after each saved transcript, and on **Sync now**.
+  Transcripts from the Mac appear with "from your Mac" and refuse playback,
+  opening audio and retry, because their audio stays on the Mac. When the Mac
+  deletes one of them, it is removed here. When the Mac deletes a recording
+  that was made on this PC, this PC keeps its own copy and audio and never
+  uploads it again.
+- **Import API keys my Mac syncs** is off by default. It needs the key-sync
+  passphrase that was set on the Mac. Only the derived key is stored in
+  Credential Manager, as `com.justspeaktoit/cloudkit.apiKeySyncKey`; the
+  passphrase is not. The app imports keys only from the canonical list in
+  `SyncSchema.EncryptedSecret.syncableIdentifiers`. It never writes keys to
+  iCloud. A key you save by hand is never removed by a later deletion on the
+  Mac.
+- Sync state (the cursor, the bound iCloud user and acknowledgements) is in
+  `%LOCALAPPDATA%\JustSpeakToIt\CloudSync\state.json`. If another Apple ID
+  signs in, that state is reset, and this PC's History uploads to the new
+  account.
+
+The CloudKit API token is not a Mac credential. Apple apps use the operating
+system's CloudKit session, and no token from them can be reused here. The API
+token is created per container in CloudKit Console and compiled into Windows
+builds as a build setting. A build without one shows "iCloud sync is not
+available in this build" and works normally otherwise. For local development,
+set `JSTI_CLOUDKIT_WEB_API_TOKEN` (and `JSTI_CLOUDKIT_WEB_ENVIRONMENT=development`
+to use the Development environment) before starting the app.
+
+### One-time setup the container owner must do
+
+1. **Deploy the schema to Production.** In
+   [CloudKit Console](https://icloud.developer.apple.com/), select the
+   `iCloud.com.justspeaktoit` container, open **Schema**, and check that
+   **Production** lists the record types `TranscriptionHistory`,
+   `EncryptedSecret`, `EncryptedSecretMetadata` and `ModelComparisonRound`.
+   If any is missing, deploy from Development with **Deploy Schema Changes…**
+   and confirm. CloudKit Web Services can only see what is deployed to
+   Production. The repository has no record of a Production deployment; the
+   Alpha rollout checklist lists "deploy the matching CloudKit schemas" as
+   outstanding evidence. Repeat for `iCloud.com.justspeaktoit.alpha` if Alpha
+   builds should sync.
+2. **Create the API token.** In the same container, open **Settings** (or
+   **API Access** in older Console layouts), then **Tokens & Keys**, and add a
+   new **API Token**:
+   - Name: `Just Speak to It for Windows`.
+   - **Sign in Callback**: choose **URL Redirect** and enter exactly
+     `http://127.0.0.1:47823/cloudkit-sign-in`.
+   - Allowed origins: leave the default. The Windows client is not a browser
+     and sends no `Origin` header.
+   - Save it and copy the token value.
+3. **Add the CI secret.** In GitHub, open **crmitchelmore/justspeaktoit >
+   Settings > Secrets and variables > Actions > New repository secret**, name
+   it `CLOUDKIT_WEB_API_TOKEN`, and paste the token. The macOS to Windows Swift
+   Proof workflow writes it into the build with
+   `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to `main` and
+   manual runs. Pull request builds never receive it.
+4. **Check the callback once.** Install a build made with the secret, sign in
+   from Settings > iCloud sync, and confirm the browser lands on "Signed in".
+   If Console refuses a plain `http://127.0.0.1` callback, record that in issue
+   #1157: the client would then need a custom URI scheme activation through
+   the MSIX manifest, which is not implemented.
 
 ## Verification and performance thresholds
 

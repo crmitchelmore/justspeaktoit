@@ -712,13 +712,52 @@ DWORD WINAPI lowIntegrityClient(void *context) {
     return outcome;
 }
 
-size_t occurrences(const std::string &text, const std::string &needle) {
-    size_t count = 0;
-    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) ++count;
-    return count;
+// Compares SIDs rather than SDDL text, which abbreviates well-known accounts
+// (SYSTEM is "SY") and may render access masks differently.
+bool ownedByUserAlone(const std::string &sddl) {
+    DWORD code = 0;
+    const std::vector<BYTE> user = processUser(code);
+    const std::wstring wide(sddl.begin(), sddl.end());
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (user.empty() || !ConvertStringSecurityDescriptorToSecurityDescriptorW(wide.c_str(), SDDL_REVISION_1,
+                                                                               &descriptor, nullptr)) {
+        return false;
+    }
+    std::unique_ptr<void, decltype(&LocalFree)> owned(descriptor, &LocalFree);
+    PSID userSid = const_cast<BYTE *>(user.data());
+    PSID owner = nullptr;
+    BOOL defaulted = FALSE, present = FALSE;
+    PACL dacl = nullptr;
+    SECURITY_DESCRIPTOR_CONTROL control = 0;
+    DWORD revision = 0;
+    if (!GetSecurityDescriptorOwner(descriptor, &owner, &defaulted) || !owner || !EqualSid(owner, userSid) ||
+        !GetSecurityDescriptorDacl(descriptor, &present, &dacl, &defaulted) || !present || !dacl ||
+        !GetSecurityDescriptorControl(descriptor, &control, &revision) || !(control & SE_DACL_PROTECTED) ||
+        dacl->AceCount != 2) {
+        return false;
+    }
+    BYTE networkBuffer[SECURITY_MAX_SID_SIZE] = {};
+    DWORD networkSize = sizeof(networkBuffer);
+    if (!CreateWellKnownSid(WinNetworkSid, nullptr, networkBuffer, &networkSize)) return false;
+    bool deniesNetwork = false, allowsUser = false;
+    for (DWORD index = 0; index < dacl->AceCount; ++index) {
+        void *raw = nullptr;
+        if (!GetAce(dacl, index, &raw)) return false;
+        const auto *header = static_cast<ACE_HEADER *>(raw);
+        if (header->AceType == ACCESS_DENIED_ACE_TYPE) {
+            auto *ace = static_cast<ACCESS_DENIED_ACE *>(raw);
+            deniesNetwork = deniesNetwork || EqualSid(reinterpret_cast<PSID>(&ace->SidStart), networkBuffer);
+        } else if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+            auto *ace = static_cast<ACCESS_ALLOWED_ACE *>(raw);
+            allowsUser = allowsUser || EqualSid(reinterpret_cast<PSID>(&ace->SidStart), userSid);
+        } else {
+            return false;
+        }
+    }
+    return deniesNetwork && allowsUser;
 }
 
-std::string exchangeFailure(const std::string &name, const std::string &sid, ServerProbe &probe) {
+std::string exchangeFailure(const std::string &name, ServerProbe &probe) {
     HANDLE server = CreateThread(nullptr, 0, serveOnce, &probe, 0, nullptr);
     if (!server) return "Could not start the automation self-test server.";
     JSTIAutomationPipeConnection *client = nullptr;
@@ -739,10 +778,8 @@ std::string exchangeFailure(const std::string &name, const std::string &sid, Ser
         probe.write != JSTI_AUTOMATION_PIPE_OK || probe.drain != JSTI_AUTOMATION_PIPE_OK) {
         return "The automation server did not read, answer and drain one client.";
     }
-    if (probe.sddl.rfind("O:" + sid, 0) != 0 || probe.sddl.find("D:P") == std::string::npos ||
-        occurrences(probe.sddl, ";;;NU)") != 1 || occurrences(probe.sddl, "(A;") != 1 ||
-        probe.sddl.find(";;;" + sid + ")") == std::string::npos) {
-        return "The automation pipe's owner or access list is not this user alone.";
+    if (!ownedByUserAlone(probe.sddl)) {
+        return "The automation pipe's owner or access list is not this user alone: " + probe.sddl;
     }
     return {};
 }
@@ -783,7 +820,7 @@ int jsti_automation_pipe_self_test(char *error, size_t capacity) {
     if (second) jsti_automation_pipe_listener_release(second);
     ServerProbe probe;
     probe.listener = listener;
-    if (failure.empty()) failure = exchangeFailure(name, sid, probe);
+    if (failure.empty()) failure = exchangeFailure(name, probe);
     if (failure.empty()) {
         const std::wstring redirected = L"\\\\localhost\\pipe\\" + std::wstring(leaf.begin(), leaf.end());
         HANDLE through = CreateFileW(redirected.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,

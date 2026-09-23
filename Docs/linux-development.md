@@ -56,9 +56,10 @@ under the same canonical identifiers as Windows Credential Manager.
 
 ### Flatpak
 
-`packaging/linux/com.justspeaktoit.JustSpeakToIt.yml` builds with the GNOME 48
-runtime and the Flathub `org.freedesktop.Sdk.Extension.swift6` extension, with
-`--static-swift-stdlib` (checked locally: the release binary links no Swift
+`packaging/linux/com.justspeaktoit.JustSpeakToIt.yml` builds with the GNOME 50
+runtime (GNOME 48 reached end of life in March 2026) and the Flathub
+`org.freedesktop.Sdk.Extension.swift6` extension, currently Swift 6.3.3 on the
+25.08 branch, with `--static-swift-stdlib` (checked locally: the release binary links no Swift
 libraries and passes `--self-test`; static FoundationNetworking needs libcurl
 headers, which the GNOME SDK has). The desktop file and metainfo pass
 `desktop-file-validate` and `appstreamcli validate`.
@@ -70,8 +71,14 @@ flatpak run com.justspeaktoit.JustSpeakToIt
 flatpak run com.justspeaktoit.JustSpeakToIt --toggle
 ```
 
-The Flatpak build itself has **not been run** yet: the swift6 extension must
-ship Swift 6.2 or newer for this package.
+`flatpak-builder` has built this manifest on GNOME 48 (Swift 6.2) and GNOME 50
+(Swift 6.3.3); inside the resulting build environment `--self-test` and the
+Xvfb `--ui-smoke-test` passed. Not yet done: an installed `flatpak run` on a
+desktop, a `.flatpak` bundle in CI, and Flathub readiness. The build fetches
+SwiftNIO with network access (`build-args: --share=network`); Flathub builds
+offline, so a submission must list those packages as git sources. SwiftPM
+also reads the repository's Apple-graph `Package.resolved`, which the Linux
+graph does not match; a Linux submission should carry its own resolved file.
 
 ## Desktop support
 
@@ -117,7 +124,7 @@ proven on a physical desktop.
 | History playback in the app | Verified player (a tone plays to the end through PipeWire) | App WAV recordings only; other imports use Open audio; audible hardware output **unverified** |
 | App profiles | Controller support shared; **no Linux editor** | The X11 target's `/proc/<pid>/exe` path reaches the shared resolver, whose matcher is written for Windows paths: **unverified** |
 | Read aloud, local models, IBus insertion, tray, autostart | **Not implemented** | Later phases |
-| Flatpak | Manifest, desktop file, metainfo | `flatpak-builder` **not run**; Swift version of the extension unverified |
+| Flatpak | Built with `flatpak-builder` (GNOME 50, Swift 6.3.3); self-test and window smoke test pass in its environment | Installed `flatpak run`, portals from inside the sandbox and Flathub offline build **unverified** |
 
 ### Needs a physical desktop
 

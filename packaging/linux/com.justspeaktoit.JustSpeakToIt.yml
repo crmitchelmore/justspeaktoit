@@ -1,4 +1,5 @@
-# Flatpak manifest for the Linux developer preview. Build from the
+# Flatpak manifest for the Linux developer preview (GNOME 50 runtime,
+# freedesktop 25.08, Swift from the swift6 extension). Build from the
 # repository root:
 #
 #   flatpak-builder --user --install --force-clean build-dir \
@@ -9,7 +10,7 @@
 # provide Swift 6.2 or newer (see Docs/linux-development.md).
 app-id: com.justspeaktoit.JustSpeakToIt
 runtime: org.gnome.Platform
-runtime-version: "48"
+runtime-version: "50"
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.swift6

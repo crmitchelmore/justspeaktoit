@@ -9,6 +9,8 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -17,11 +19,14 @@ on:
       - Sources/SpeakCLI/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
+      - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
       - Resources/AppIcon.iconset/**
@@ -33,6 +38,8 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -41,11 +48,14 @@ on:
       - Sources/SpeakCLI/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/windows-cross/**
+      - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
       - Resources/AppIcon.iconset/**

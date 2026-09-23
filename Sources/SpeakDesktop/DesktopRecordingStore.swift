@@ -21,6 +21,13 @@ public actor DesktopRecordingStore {
         /// retries and imports never resolve a profile again.
         public var profileName: String?
         public var profileNotes: [String]?
+        /// The platform that recorded a transcript synced in from iCloud, such
+        /// as `macos`. `nil` for a recording made on this device. A synced copy
+        /// has no audio here: its audio never leaves the device that recorded it.
+        public var originPlatform: String?
+
+        /// True for a transcript that arrived through History sync.
+        public var isSyncedCopy: Bool { originPlatform != nil }
 
         public var displayText: String? { processedText ?? result?.text }
 
@@ -46,6 +53,16 @@ public actor DesktopRecordingStore {
             self.audioFilename = audioFilename
             self.modelIdentifier = modelIdentifier
         }
+
+        /// A transcript synced from another device. It keeps that device's
+        /// identity and creation time, and has no audio file.
+        public init(syncedID id: UUID, createdAt: Date, modelIdentifier: String, originPlatform: String) {
+            self.id = id
+            self.createdAt = createdAt
+            self.audioFilename = ""
+            self.modelIdentifier = modelIdentifier
+            self.originPlatform = originPlatform
+        }
     }
 
     public let directory: URL
@@ -69,6 +86,34 @@ public actor DesktopRecordingStore {
 
     public func record(id: UUID) throws -> Record {
         try loadRecord(at: directory.appendingPathComponent(id.uuidString + ".json"))
+    }
+
+    /// Every record that reads cleanly, newest first. Sync uses this so one
+    /// corrupt file cannot stop other History from syncing; the corrupt file
+    /// itself is still reported by `records()` and recovery, never touched.
+    public func readableRecords() throws -> [Record] {
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        return files.compactMap { try? loadRecord(at: $0) }.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// The record with this identity if it exists and reads cleanly.
+    public func existingRecord(id: UUID) -> Record? {
+        try? record(id: id)
+    }
+
+    /// Removes a transcript that was synced in from another device after it
+    /// was deleted there. A recording made on this device, or anything with
+    /// an audio file, is never removed this way: `false` means it was kept.
+    @discardableResult
+    public func removeSyncedCopy(id: UUID) throws -> Bool {
+        let url = directory.appendingPathComponent(id.uuidString + ".json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
+        let record = try loadRecord(at: url)
+        guard record.isSyncedCopy, record.audioFilename.isEmpty else { return false }
+        try FileManager.default.removeItem(at: url)
+        return true
     }
 
     /// Resolves only a regular, non-symlinked audio file inside this store.
@@ -164,7 +209,8 @@ public actor DesktopRecordingStore {
         for file in files {
             do {
                 var record = try loadRecord(at: file)
-                if record.result == nil, record.failure == nil {
+                // A synced copy is complete as received; it has no audio to recover.
+                if record.result == nil, record.failure == nil, !record.isSyncedCopy {
                     record.failure = recoverAudio(for: record)
                     // Rewrite the validated file itself, so an unusual basename
                     // spelling never gains a second copy under another name.

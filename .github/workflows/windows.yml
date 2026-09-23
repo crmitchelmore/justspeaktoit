@@ -8,6 +8,8 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -17,10 +19,13 @@ on:
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
+      - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
       - Docs/windows-development.md
       - .github/workflows/windows.yml
@@ -31,6 +36,8 @@ on:
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
       - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -40,10 +47,13 @@ on:
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
       - scripts/verify-portable-core-boundary.py
+      - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
       - Docs/windows-development.md
       - .github/workflows/windows.yml

@@ -34,12 +34,25 @@ public enum DesktopLiveTranscription {
     /// `language` is the Speak selection as stored (`en_GB`, `Automatic`, nil);
     /// a route that takes a language hint maps it to its own code and omits
     /// it when the service cannot serve it, so a host never sends a raw locale.
+    public static func makeClient(
+        model: String, apiKey: String, language: String? = nil,
+        makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeClient(
+            model: model, apiKey: apiKey, language: language, initiateGladiaSession: nil,
+            makeConnection: makeConnection
+        )
+    }
+
+    /// The same mapping with Gladia's HTTPS session request injectable, so its
+    /// request can be observed without a network; `nil` uses `URLSession.shared`.
     ///
     /// One case per implemented route is the point of this switch: the
     /// route-to-client mapping stays auditable in one place, so its length and
     /// branch count grow with the provider list rather than with any logic.
-    public static func makeClient( // swiftlint:disable:this cyclomatic_complexity function_body_length
-        model: String, apiKey: String, language: String? = nil,
+    static func makeClient( // swiftlint:disable:this cyclomatic_complexity function_body_length
+        model: String, apiKey: String, language: String?,
+        initiateGladiaSession: GladiaLiveClient.SessionInitiator?,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         guard let route = route(forID: model) else { return nil }
@@ -92,11 +105,12 @@ public enum DesktopLiveTranscription {
         case .gladia:
             // The session request is plain HTTPS; only the single-use socket
             // it returns uses the host's native WebSocket transport. The
-            // route's canonical capability accepts no language hint yet, so
-            // `hint` is nil here and Gladia detects the language itself.
+            // request pins the hint to one of Gladia's documented codes, and
+            // Gladia detects the language when there is none.
             return GladiaLiveClient(
                 apiKey: apiKey, model: route.apiModelName, language: hint, sampleRate: route.sampleRate,
-                initiateSession: GladiaLiveClient.sessionInitiator(session: .shared), makeConnection: makeConnection
+                initiateSession: initiateGladiaSession ?? GladiaLiveClient.sessionInitiator(session: .shared),
+                makeConnection: makeConnection
             )
         case .cartesia:
             // Ink-2's canonical capability takes no language hint, so none is sent.

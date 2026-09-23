@@ -109,16 +109,22 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish],
             supportsLanguageHint: true
         ),
+        // Ink-2's turns stream is English only and has no language field in
+        // its query or `config` message, so a selected language is reported as
+        // unavailable rather than sent.
         "cartesia/ink-2-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
         // Gladia's trailing finals and `end_session` follow `stop_recording`.
         // The macOS Gladia controller waits this window after its own
         // `stop_recording`; the shared client used on iOS and Windows builds
-        // its whole finish bound from the same window.
+        // its whole finish bound from the same window. Its session request
+        // pins a selected language in `language_config.languages`, as the
+        // macOS controller and the iOS route already send it.
         "gladia/solaria-1-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: GladiaLive.finalEventWindow
+            postStopFinalizeBudget: GladiaLive.finalEventWindow,
+            supportsLanguageHint: true
         ),
         // Gemini finalises a turn after server-side VAD detects the pause; the
         // client audioStreamEnd flush needs a moment to bring the trailing

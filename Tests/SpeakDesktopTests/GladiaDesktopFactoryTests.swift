@@ -4,7 +4,7 @@ import FoundationNetworking
 #endif
 import XCTest
 @testable import SpeakCore
-import SpeakDesktop
+@testable import SpeakDesktop
 
 /// The desktop projection admits Gladia's canonical live route, and the shared
 /// client drives a `DesktopLiveSession` through its whole-session finish.
@@ -24,8 +24,8 @@ final class GladiaDesktopFactoryTests: XCTestCase {
             let provider = try XCTUnwrap(DesktopLiveTranscription.provider(forID: option.id))
             XCTAssertEqual(provider.apiKeyIdentifier, "gladia.apiKey")
             XCTAssertEqual(provider.displayName, "Gladia")
-            XCTAssertFalse(DesktopLiveTranscription.languageHintModelIDs.contains(option.id),
-                           "The canonical language capability is unchanged")
+            XCTAssertTrue(DesktopLiveTranscription.languageHintModelIDs.contains(option.id),
+                          "Gladia's session request carries a selected language")
             let made = DesktopLiveTranscription.makeClient(
                 model: option.id, apiKey: "k", language: "fr_FR",
                 makeConnection: { _ in fatalError("Constructing a client must not open a socket") }
@@ -33,12 +33,39 @@ final class GladiaDesktopFactoryTests: XCTestCase {
             let client = try XCTUnwrap(made as? GladiaLiveClient)
             XCTAssertEqual(client.model, "solaria-1")
             XCTAssertEqual(client.sampleRate, 16_000)
-            XCTAssertNil(client.language, "A route without the language capability forwards no hint")
+            XCTAssertEqual(client.language, "fr_FR", "The selection reaches the shared client, as on iOS")
             XCTAssertEqual(client.endpoint.absoluteString, "https://api.gladia.io/v2/live")
             XCTAssertEqual(client.finalisationBudget, GladiaLive.finishBudget)
             XCTAssertEqual(client.currentStage, .idle)
         }
         XCTAssertNil(DesktopLiveTranscription.route(forID: "gladia/solaria-1"), "The batch model is not live")
+    }
+
+    /// The desktop route's own session request pins the selection as Gladia's
+    /// code. Automatic, no selection and a language Gladia does not list let
+    /// Gladia detect it, so the session is never refused for its language.
+    func testDesktopSessionRequestCarriesTheSelectedLanguage() throws {
+        let identifier = try XCTUnwrap(DesktopLiveTranscription.liveModels.first {
+            DesktopLiveTranscription.route(forID: $0.id)?.provider == .gladia
+        }?.id)
+        let cases: [(String?, [String])] = [
+            ("fr_FR", ["fr"]), ("pt_BR", ["pt"]), ("automatic", []), (nil, []), ("yue_HK", [])
+        ]
+        for (selection, languages) in cases {
+            let label = String(describing: selection)
+            let sessions = GladiaHeldSessions()
+            let client = try XCTUnwrap(DesktopLiveTranscription.makeClient(
+                model: identifier, apiKey: "synthetic", language: selection,
+                initiateGladiaSession: sessions.initiator,
+                makeConnection: { _ in fatalError("A held session request opens no socket") }
+            ))
+            client.start(onTranscript: { _, _ in }, onError: { XCTFail("\(label): \($0)") })
+            let body = try XCTUnwrap(sessions.bodies.first, label)
+            client.cancel()
+            let config = try XCTUnwrap(body["language_config"] as? [String: Any], label)
+            XCTAssertEqual(config["languages"] as? [String], languages, label)
+            XCTAssertEqual(config["code_switching"] as? Bool, languages.isEmpty, "Detection switches per utterance")
+        }
     }
 
     func testDesktopSessionReplacesTextWithGladiasWholeTranscript() async throws {
@@ -144,6 +171,25 @@ final class GladiaDesktopFactoryTests: XCTestCase {
 
 private final class GladiaNoRequest: GladiaLiveSessionRequest {
     func cancel() {}
+}
+
+/// Records every session request the client makes and never answers one.
+private final class GladiaHeldSessions: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requests: [URLRequest] = []
+
+    var bodies: [[String: Any]] {
+        lock.withLock { requests }.compactMap { request in
+            request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        }
+    }
+
+    var initiator: GladiaLiveClient.SessionInitiator {
+        { [self] request, _ in
+            lock.withLock { requests.append(request) }
+            return GladiaNoRequest()
+        }
+    }
 }
 
 /// One socket whose next `cancel()` can be held on the thread that calls it.

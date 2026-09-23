@@ -22,12 +22,18 @@ final class DesktopLiveLanguageTests: XCTestCase {
             supported, "deepgram/flux-general-multi-streaming", SpeechmaticsRealtime.liveCatalogID,
             "elevenlabs/scribe-v2-streaming", "soniox/stt-rt-v5-streaming", XAISpeechToText.liveCatalogID,
             "openai/gpt-realtime-whisper-streaming", "openai/gpt-4o-mini-transcribe-streaming",
-            "openai/gpt-4o-transcribe-streaming", OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID
+            "openai/gpt-4o-transcribe-streaming", OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID,
+            "gladia/solaria-1-streaming"
         ]
         for identifier in supportedIDs {
             XCTAssertTrue(ModelCatalog.liveCapabilities(for: identifier).supportsLanguageHint, identifier)
         }
-        for identifier in [unsupported, "deepgram/flux-general-en-streaming", "future/unknown-streaming"] {
+        // English-only or detect-only wire contracts: Flux English, AssemblyAI,
+        // Cartesia Ink-2 and Voxtral carry no language field.
+        for identifier in [
+            unsupported, "deepgram/flux-general-en-streaming", "cartesia/ink-2-streaming",
+            MistralVoxtralRealtime.liveCatalogID, "future/unknown-streaming"
+        ] {
             XCTAssertFalse(ModelCatalog.liveCapabilities(for: identifier).supportsLanguageHint, identifier)
         }
         XCTAssertFalse(LiveModelCapabilities(supportedSpeedModes: [.instant]).supportsLanguageHint)

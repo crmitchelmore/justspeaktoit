@@ -141,11 +141,32 @@ enum GladiaLiveProtocol {
         return name.isEmpty ? GladiaLive.defaultModel : name
     }
 
-    /// An empty `languages` list is Gladia's documented automatic detection;
-    /// one language pins the transcription to it. `en_GB` becomes `en`.
+    /// The `TranscriptionLanguageCodeEnum` values `language_config.languages`
+    /// accepts, as the init reference and Gladia's OpenAPI schema list them
+    /// (read 2026-09-23). Gladia uses `jw` for Javanese and `haw` for Hawaiian.
+    static let supportedLanguageCodes: Set<String> = [
+        "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs", "cy", "da", "de",
+        "el", "en", "es", "et", "eu", "fa", "fi", "fo", "fr", "gl", "gu", "ha", "haw", "he", "hi", "hr", "ht",
+        "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko", "la", "lb", "ln", "lo", "lt",
+        "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "nn", "no", "oc", "pa", "pl",
+        "ps", "pt", "ro", "ru", "sa", "sd", "si", "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta",
+        "te", "tg", "th", "tk", "tl", "tr", "tt", "uk", "ur", "uz", "vi", "yi", "yo", "zh"
+    ]
+
+    /// Gladia's code for a Speak language selection (`en_GB` becomes `en`), or
+    /// `nil` for Automatic and for a language Gladia does not list.
+    static func languageCode(for selection: String?) -> String? {
+        guard let code = TranscriptionLanguageCatalog.providerLanguage(for: selection ?? "")?.localeLanguageCode,
+              supportedLanguageCodes.contains(code) else { return nil }
+        return code
+    }
+
+    /// One language pins the transcription to it; an empty `languages` list is
+    /// Gladia's documented automatic detection, here detected per utterance. A
+    /// selection outside the documented codes is not sent, so it detects the
+    /// language instead of refusing the session.
     static func languageConfig(for language: String?) -> [String: Any] {
-        let code = TranscriptionLanguageCatalog.providerLanguage(for: language ?? "")?.localeLanguageCode ?? ""
-        guard !code.isEmpty else { return ["languages": [String](), "code_switching": true] }
+        guard let code = languageCode(for: language) else { return ["languages": [String](), "code_switching": true] }
         return ["languages": [code], "code_switching": false]
     }
 

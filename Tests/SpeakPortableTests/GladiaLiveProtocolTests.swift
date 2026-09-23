@@ -49,12 +49,34 @@ final class GladiaLiveProtocolTests: XCTestCase {
             XCTAssertEqual(config["languages"] as? [String], [code], selection)
             XCTAssertEqual(config["code_switching"] as? Bool, false)
         }
+        // Cantonese, the retired Hebrew code and an unknown tag are not codes
+        // Gladia lists: the session detects the language instead of failing.
+        for unlisted in ["yue_HK", "iw_IL", "xx"] {
+            XCTAssertNil(GladiaLiveProtocol.languageCode(for: unlisted), unlisted)
+            let config = GladiaLiveProtocol.languageConfig(for: unlisted)
+            XCTAssertEqual(config["languages"] as? [String], [], unlisted)
+            XCTAssertEqual(config["code_switching"] as? Bool, true, unlisted)
+        }
         let harness = GladiaHarness(model: "gladia/solaria-1-streaming", language: "en_GB")
         harness.start()
         let body = harness.sessions.requests.first?.jsonBody ?? [:]
         XCTAssertEqual(body["model"] as? String, "solaria-1")
         XCTAssertEqual((body["language_config"] as? [String: Any])?["languages"] as? [String], ["en"])
         harness.client.cancel()
+    }
+
+    /// Pins Gladia's documented `TranscriptionLanguageCodeEnum`, and that every
+    /// language the app offers is one of its codes, so no catalogue choice is
+    /// quietly widened to detection.
+    func testEveryCatalogueLanguageReachesGladiaAsItsDocumentedCode() {
+        XCTAssertEqual(GladiaLiveProtocol.supportedLanguageCodes.count, 99)
+        XCTAssertTrue(GladiaLiveProtocol.supportedLanguageCodes.isSuperset(of: ["haw", "jw", "zh", "he", "no"]))
+        let automatic = TranscriptionLanguageCatalog.automaticIdentifier
+        for option in TranscriptionLanguageCatalog.options where option.id != automatic {
+            let code = option.id.localeLanguageCode
+            XCTAssertEqual(GladiaLiveProtocol.languageCode(for: option.id), code, option.id)
+            XCTAssertEqual(GladiaLiveProtocol.languageConfig(for: option.id)["languages"] as? [String], [code])
+        }
     }
 
     func testCatalogueAndAPIModelNamesResolveToTheLiveModel() {
@@ -179,7 +201,7 @@ final class GladiaLiveProtocolTests: XCTestCase {
         let capabilities = ModelCatalog.liveCapabilities(for: "gladia/solaria-1-streaming")
         XCTAssertEqual(capabilities.postStopFinalizeBudget, GladiaLive.finalEventWindow)
         XCTAssertEqual(capabilities.postStopFinalizeBudget, 1.5)
-        XCTAssertFalse(capabilities.supportsLanguageHint, "The canonical capability is unchanged")
+        XCTAssertTrue(capabilities.supportsLanguageHint, "The session request pins a selected language")
         XCTAssertEqual(capabilities.supportedSpeedModes, [.instant, .livePolish])
     }
 

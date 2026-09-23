@@ -33,16 +33,17 @@ extension WindowsAppController {
         update(status.message)
     }
 
-    /// Play/Pause for the selected record: pauses or resumes an active run for
-    /// that record, otherwise starts a new run from the canonical audio file.
-    /// Whatever ends playback while the file is resolved (Stop, another row,
-    /// recording, import, closing) ends this request, so it never starts
-    /// audio after them, even when the row is still selected.
+    /// Play/Pause for the selected record: pauses or resumes its active run,
+    /// or its Read aloud while a segment is synthesised, otherwise starts a
+    /// new run from the canonical audio file. Whatever ends playback while
+    /// the file is resolved (Stop, another row, recording, import, closing)
+    /// ends this request, so it never starts audio after them, even when the
+    /// row is still selected.
     func playbackToggle(_ identifier: String) async {
         guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
         if playback.togglePause(recordID: id) { return }
         guard canUseHistory, selectedHistoryID == id, isVisible(id), !refuseSyncedAudio(record) else { return }
-        // History playback replaces Read aloud, including a segment still being synthesized.
+        // A new History playback supersedes every earlier request, Read aloud included.
         stopReadAloud()
         let ticket = playbackRequests.begin()
         activeOperations += 1

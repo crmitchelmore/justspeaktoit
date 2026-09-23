@@ -60,6 +60,8 @@ extension WindowsAudioPlaybackController {
                 return true
             }
             guard start else { release(run); return }
+            // A pause requested before start is honoured before any sound.
+            applyPause(run)
             try handle.start()
             if lock.withLock({ run.stopped }) { release(run); return }
             applyPause(run)
@@ -153,12 +155,17 @@ extension WindowsAudioPlaybackController {
                 run.outputQuiet = true
                 if current === run {
                     current = nil
-                    let display = WindowsAudioPlaybackDisplay(
-                        recordID: run.recordID, state: .idle,
-                        text: WindowsAudioPlaybackDisplay.text(position: 0, duration: run.knownDuration)
-                    )
-                    let status = Self.terminalMessage(run.terminal, stopAnnounced: run.stopAnnounced)
-                    publishLocked(display, status: run.awaiting == nil ? status : nil)
+                    if let speech = speechState {
+                        // Between segments the speech stays the active owner.
+                        publishLocked(speech.display)
+                    } else {
+                        let display = WindowsAudioPlaybackDisplay(
+                            recordID: run.recordID, state: .idle,
+                            text: WindowsAudioPlaybackDisplay.text(position: 0, duration: run.knownDuration)
+                        )
+                        let status = Self.terminalMessage(run.terminal, stopAnnounced: run.stopAnnounced)
+                        publishLocked(display, status: run.awaiting == nil ? status : nil)
+                    }
                     acknowledgedRevision = revision
                 }
             }
@@ -173,7 +180,8 @@ extension WindowsAudioPlaybackController {
                         recordID: run.recordID, state: run.outputQuiet ? .idle : run.display.state,
                         text: run.display.text
                     )
-                    publishLocked(display, status: "Playback could not close: \(error.localizedDescription)")
+                    let shown = run.outputQuiet ? speechState?.display ?? display : display
+                    publishLocked(shown, status: "Playback could not close: \(error.localizedDescription)")
                 }
             }
         }

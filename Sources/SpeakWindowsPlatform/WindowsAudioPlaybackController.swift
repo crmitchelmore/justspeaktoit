@@ -25,6 +25,8 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
     var revision: UInt64 = 0
     var pendingPresentation: Presentation?
     var deliveryScheduled = false
+    /// Read aloud in progress; see WindowsAudioPlaybackController+Speech.
+    var speechState: SpeechState?
 
     public init(
         backend: any WindowsAudioPlaybackBackend, presenter: WindowsAudioPlaybackPresenter,
@@ -41,8 +43,14 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         lock.withLock { self.presenter = presenter }
     }
 
+    /// An audible run, else speech between its segments, else a run still stopping.
     public var activity: Activity? {
-        lock.withLock { current.map { Activity(recordID: $0.recordID, state: $0.display.state) } }
+        lock.withLock {
+            if let run = current, !run.stopped || speechState == nil {
+                return Activity(recordID: run.recordID, state: run.display.state)
+            }
+            return speechState.map { Activity(recordID: $0.speech.recordID, state: $0.display.state) }
+        }
     }
 
     public var pendingReleaseCount: Int { lock.withLock { live.count } }
@@ -59,17 +67,25 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
 
     /// `claim` runs under the state lock before anything is replaced; refusing
     /// it leaves the current playback untouched and throws `CancellationError`.
+    /// A segment of `speech` continues it, and is refused once it has ended;
+    /// any other playback ends the speech.
     func admit(
         recordID: UUID, path: String, knownDuration: TimeInterval?,
-        awaiting: ((Result<TimeInterval, Error>) -> Void)?, claim: ((UUID) -> Bool)? = nil
+        awaiting: ((Result<TimeInterval, Error>) -> Void)?, claim: ((UUID) -> Bool)? = nil, speech: Speech? = nil
     ) throws -> UUID {
         try lock.withLock {
             guard !closed else { throw WindowsAudioPlaybackError("The app is closing.") }
             guard live.count < 2 else {
                 throw WindowsAudioPlaybackError("Previous playback is still closing. Try again shortly.")
             }
+            if let speech, speechState?.speech != speech { throw CancellationError() }
             let run = Run(recordID: recordID, path: path, duration: knownDuration)
             guard claim?(run.id) ?? true else { throw CancellationError() }
+            if let state = speechState, speech != nil {
+                run.continueSpeech(state)
+            } else {
+                endSpeechLocked(presenting: false)
+            }
             let previous = current
             if let previous { stopLocked(previous) }
             run.awaiting = awaiting
@@ -88,11 +104,17 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         }
     }
 
+    /// Pauses or resumes the record's audible run. Between segments of its
+    /// speech, pauses or resumes the speech itself, which its next segment
+    /// follows.
     @discardableResult
     public func togglePause(recordID: UUID) -> Bool {
         lock.withLock {
-            guard let run = current, run.recordID == recordID, !run.stopped else { return false }
+            guard let run = current, run.recordID == recordID, !run.stopped else {
+                return toggleSpeechPauseLocked(recordID: recordID)
+            }
             run.pauseRequested.toggle()
+            if speechState?.speech.recordID == recordID { speechState?.paused = run.pauseRequested }
             if !run.pauseCommandQueued {
                 run.pauseCommandQueued = true
                 run.worker.async {
@@ -104,19 +126,21 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         }
     }
 
-    /// Requests cancellation. The display resets only after output is quiet.
-    /// Call stopAndWait before starting a microphone or another audio owner.
-    /// Only the user's Stop is `announcing` and reports "Playback stopped.";
-    /// stopping to make way for another row, a search, recording or import
-    /// leaves the status line to that work.
+    /// Requests cancellation and ends speech. The display resets only after
+    /// output is quiet. Call stopAndWait before starting a microphone or
+    /// another audio owner. Only the user's Stop is `announcing` and reports
+    /// "Playback stopped."; stopping to make way for another row, a search,
+    /// recording or import leaves the status line to that work.
     public func stop(announcing: Bool = false) {
         lock.withLock {
+            endSpeechLocked()
             for run in live.values where !run.stopped { stopLocked(run, announcing: announcing) }
         }
     }
 
     public func stop(unless recordID: UUID) {
         lock.withLock {
+            if let state = speechState, state.speech.recordID != recordID { endSpeechLocked() }
             if let run = current, run.recordID != recordID { stopLocked(run) }
         }
     }
@@ -139,6 +163,7 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
     public func close() async throws {
         lock.withLock {
             closed = true
+            speechState = nil
             for run in live.values {
                 if run.releaseError != nil {
                     run.releaseError = nil
@@ -166,7 +191,7 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         }
     }
 
-    private func stopLocked(_ run: Run, announcing: Bool = false) {
+    func stopLocked(_ run: Run, announcing: Bool = false) {
         guard !run.stopped else { return }
         run.stopped = true
         run.stopAnnounced = announcing

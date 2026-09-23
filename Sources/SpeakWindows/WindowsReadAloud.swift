@@ -68,6 +68,9 @@ func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
 /// is decided by the controller's shared `playbackRequests`.
 struct WindowsReadAloudState {
     var task: Task<Void, Never>?
+    /// Keeps the record's playback controls active, so Pause and Stop work
+    /// while segments are synthesised and between them.
+    var speech: WindowsAudioPlaybackController.Speech?
     private(set) var engine: WindowsVoiceOutput?
 
     mutating func output(directory: URL) -> WindowsVoiceOutput? {
@@ -110,10 +113,19 @@ extension WindowsAppController {
             return
         }
         stopReadAloud()
+        let speech: WindowsAudioPlaybackController.Speech
+        do {
+            // Playback stops now, and the record's controls stay active until the speech ends.
+            speech = try playback.beginSpeech(recordID: id)
+        } catch {
+            update("Read aloud failed: \(error.localizedDescription)")
+            return
+        }
         let voice = voiceOutputSettings().voice
         let effects = effects
         let playback = playback
         let ticket = playbackRequests.begin()
+        readAloudState.speech = speech
         update("Reading aloud with \(voice.name)…")
         readAloudState.task = Task {
             var outcome: String?
@@ -124,7 +136,7 @@ extension WindowsAppController {
                     _ = try await voiceOutput.speak(request, credential: {
                         try effects.apiKey(name: VoiceOutputProvider.deepgram.apiKeyIdentifier)
                     }, through: { file in
-                        try await playback.playToCompletion(recordID: id, path: file.path)
+                        try await playback.playToCompletion(speech, path: file.path)
                     })
                 }
                 outcome = "Finished reading aloud."
@@ -140,19 +152,28 @@ extension WindowsAppController {
     }
 
     /// Ends Read aloud and every other playback request: the current segment
-    /// stops through the shared controller, no later segment is synthesized,
-    /// and a History start still resolving its audio never starts. The ended
-    /// request reports nothing, because whatever ended it owns the status.
+    /// stops through the shared controller, the segment being synthesized is
+    /// cancelled and no later one is admitted, and a History start still
+    /// resolving its audio never starts. The ended request reports nothing,
+    /// because whatever ended it owns the status.
     func stopReadAloud() {
         playbackRequests.end()
         readAloudState.task?.cancel()
         readAloudState.task = nil
+        endSpeech()
     }
 
     private func finishReadAloud(_ ticket: DesktopPlaybackRequests.Ticket, status: String?) {
         guard playbackRequests.isCurrent(ticket) else { return }
         readAloudState.task = nil
+        endSpeech()
         guard !closed, !busy, recording == nil, let status else { return }
         update(status)
+    }
+
+    /// Returns the record's controls to idle once nothing more will be spoken.
+    private func endSpeech() {
+        if let speech = readAloudState.speech { playback.endSpeech(speech) }
+        readAloudState.speech = nil
     }
 }

@@ -10,13 +10,26 @@ extension WindowsAudioPlaybackController {
     /// superseded request can never stop the playback that superseded it.
     /// Pause and resume act on it like any playback of that record.
     public func playToCompletion(recordID: UUID, path: String) async throws -> TimeInterval {
+        try await awaitRun(recordID: recordID, path: path, speech: nil)
+    }
+
+    /// Plays one segment of `speech` in the same way, keeping the speech's
+    /// record the active owner once the segment ends. A segment of a speech
+    /// that has ended, for example by Stop, is refused with
+    /// `CancellationError` before anything opens, so no queued segment plays
+    /// after it. A segment of paused speech starts paused, without sound.
+    public func playToCompletion(_ speech: Speech, path: String) async throws -> TimeInterval {
+        try await awaitRun(recordID: speech.recordID, path: path, speech: speech)
+    }
+
+    private func awaitRun(recordID: UUID, path: String, speech: Speech?) async throws -> TimeInterval {
         let pending = PendingRun()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 do {
                     _ = try admit(recordID: recordID, path: path, knownDuration: nil, awaiting: {
                         continuation.resume(with: $0)
-                    }, claim: pending.claim)
+                    }, claim: pending.claim, speech: speech)
                 } catch { continuation.resume(throwing: error) }
             }
         } onCancel: {

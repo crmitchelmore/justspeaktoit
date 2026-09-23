@@ -288,13 +288,15 @@ extension CartesiaLiveClient {
         return true
     }
 
-    /// Retires the run, then, outside the lock, publishes the failure before any
-    /// finish caller of this run returns: those already waiting and those that
-    /// join while it is being delivered. Words a finish had withheld are
-    /// delivered first, so the host's visible draft keeps everything the server
-    /// sent, while finish callers receive confirmed text only. A callback that
-    /// starts a new session cannot be touched by this cleanup: the run is
-    /// already detached, and only its own late callers are released after it.
+    /// Retires the run at once, then, outside the lock, publishes the failure
+    /// before any finish caller of this run returns: those already waiting and
+    /// those that join while it is being delivered. Transcripts already on their
+    /// way to the host arrive first: the report waits for them and is released
+    /// by the last one to return, on its thread, so no caller blocks on a host
+    /// callback. Words a finish had withheld follow, so the host's visible draft
+    /// keeps everything the server sent, while finish callers receive confirmed
+    /// text only. A callback that starts a new session cannot be touched by
+    /// this cleanup: the run is detached, and only its own callers are released.
     func fail(_ active: CartesiaLiveRun, _ error: Error, _ effects: inout CartesiaLiveEffects) {
         guard isCurrent(active) else { return }
         let onTranscript = active.onTranscript
@@ -307,7 +309,7 @@ extension CartesiaLiveClient {
         active.deliveringFailure = true
         retire(active, &effects)
         log("Session failed")
-        effects.add {
+        let report = {
             if let onTranscript {
                 finals.forEach { onTranscript($0, true) }
                 if let draft { onTranscript(draft, false) }
@@ -316,6 +318,20 @@ extension CartesiaLiveClient {
             waiters.forEach { $0.resume(returning: transcript) }
             self.withState { effects in self.endFailureDelivery(active, &effects) }
         }
+        if active.transcriptsInFlight > 0 {
+            active.deferredFailureReport = report
+        } else {
+            effects.add(report)
+        }
+    }
+
+    /// A transcript callback returned. The last one out releases a failure
+    /// report that was waiting behind it, on this thread and outside the lock.
+    func transcriptReturned(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+        active.transcriptsInFlight -= 1
+        guard active.transcriptsInFlight == 0, let report = active.deferredFailureReport else { return }
+        active.deferredFailureReport = nil
+        effects.add(report)
     }
 
     /// The error is out: callers that joined while it was being delivered return.

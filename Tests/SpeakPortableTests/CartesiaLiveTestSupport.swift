@@ -265,11 +265,36 @@ extension CartesiaTestSocket {
 
 /// A scheduler whose deadlines fire only when a test fires them.
 final class CartesiaTestClock: @unchecked Sendable {
+    private struct ScheduleHold {
+        let seconds: TimeInterval
+        let entered: @Sendable () -> Void
+        let release: DispatchSemaphore
+    }
+
     private let lock = NSLock()
     private var entries: [(seconds: TimeInterval, action: @Sendable () -> Void)] = []
     private var watchers: [(seconds: TimeInterval, expectation: XCTestExpectation)] = []
+    private var hold: ScheduleHold?
+
+    /// Holds the next request to arm a deadline of exactly `seconds` on its
+    /// calling thread until `release` is signalled, after reporting that it was
+    /// entered. One-shot: later requests are armed at once.
+    func holdNextSchedule(
+        of seconds: TimeInterval, until release: DispatchSemaphore, entered: @escaping @Sendable () -> Void
+    ) {
+        lock.withLock { hold = ScheduleHold(seconds: seconds, entered: entered, release: release) }
+    }
 
     func schedule(_ seconds: TimeInterval, action: @escaping @Sendable () -> Void) {
+        let held = lock.withLock { () -> ScheduleHold? in
+            guard let hold, hold.seconds == seconds else { return nil }
+            self.hold = nil
+            return hold
+        }
+        if let held {
+            held.entered()
+            XCTAssertEqual(held.release.wait(timeout: .now() + 5), .success, "A held schedule was never released")
+        }
         let matched = lock.withLock { () -> [XCTestExpectation] in
             entries.append((seconds, action))
             let matched = watchers.filter { $0.seconds == seconds }.map(\.expectation)

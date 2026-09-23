@@ -82,8 +82,7 @@ extension CartesiaLiveClient {
             active.withheldDraft = text
             return
         }
-        guard let callback = active.onTranscript else { return }
-        effects.add { callback(text, false) }
+        deliver(text, isFinal: false, active, &effects)
     }
 
     /// A completed turn is confirmed once, by order: `request_id` names the
@@ -98,8 +97,20 @@ extension CartesiaLiveClient {
             active.withheldFinals.append(text)
             return
         }
+        deliver(text, isFinal: true, active, &effects)
+    }
+
+    /// Hands a transcript to the host outside the lock and counts it until the
+    /// callback returns, so a failure decided meanwhile is reported after it.
+    private func deliver(
+        _ text: String, isFinal: Bool, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects
+    ) {
         guard let callback = active.onTranscript else { return }
-        effects.add { callback(text, true) }
+        active.transcriptsInFlight += 1
+        effects.add {
+            callback(text, isFinal)
+            self.withState { effects in self.transcriptReturned(active, &effects) }
+        }
     }
 
     /// The receive failed: the server closed the stream or the transport

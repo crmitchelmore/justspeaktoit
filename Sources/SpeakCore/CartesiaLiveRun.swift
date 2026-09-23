@@ -64,9 +64,15 @@ final class CartesiaLiveRun: @unchecked Sendable {
 
     // MARK: Terminal delivery
 
-    /// A failure is being published outside the lock: withheld words, then the
-    /// error. Finish callers that join meanwhile wait in `lateWaiters`, so no
-    /// caller can return before the error has been delivered.
+    /// Transcript callbacks decided under the lock that have not returned yet.
+    /// A failure report waits for them, so the host has every word the run
+    /// handed over before it learns that the run failed.
+    var transcriptsInFlight = 0
+    /// The failure report, held until the last in-flight transcript returns.
+    var deferredFailureReport: (() -> Void)?
+    /// A failure is being published outside the lock: in-flight transcripts,
+    /// withheld words, then the error. Finish callers that join meanwhile wait
+    /// in `lateWaiters`, so no caller can return before the error is delivered.
     var deliveringFailure = false
     var lateWaiters: [CheckedContinuation<String?, Never>] = []
 

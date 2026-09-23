@@ -127,6 +127,50 @@ final class CartesiaDesktopSessionTests: XCTestCase {
         XCTAssertEqual(snapshot.text, "Confirmed.")
     }
 
+    /// The receive worker is handing a final to the session when the capture
+    /// thread sends a partial sample. The capture call must not wait for the
+    /// host, and the error must reach the session only after that final, or
+    /// the session fails with the confirmed words missing from its text.
+    func testCaptureFailureCannotOvertakeAFinalTheSessionIsReceiving() async throws {
+        let option = try XCTUnwrap(
+            ModelCatalog.liveTranscription.first { LiveTranscriptionRouting.route(for: $0.id)?.provider == .cartesia }
+        )
+        let socket = CartesiaDesktopSocket()
+        let client = try XCTUnwrap(DesktopLiveTranscription.makeClient(
+            model: option.id, apiKey: "synthetic", makeConnection: { _ in socket }
+        ) as? CartesiaLiveClient)
+        let release = DispatchSemaphore(value: 0)
+        let receiving = expectation(description: "The final is on its way to the session")
+        let held = HeldFinalClient(inner: client, heldText: "Final words.", release: release) { receiving.fulfill() }
+        let session = DesktopLiveSession(client: held)
+        session.start()
+        socket.open()
+        DispatchQueue.global().async {
+            socket.event("turn.start")
+            socket.event("turn.update", "Final")
+            socket.event("turn.end", "Final words.")
+        }
+        await fulfillment(of: [receiving], timeout: 2)
+        XCTAssertEqual(session.snapshot().text, "Final")
+
+        let returned = expectation(description: "The capture call returned without waiting for the host")
+        DispatchQueue.global().async {
+            session.sendAudio(Data([1, 2, 3]))
+            returned.fulfill()
+        }
+        await fulfillment(of: [returned], timeout: 2)
+        XCTAssertEqual(session.snapshot().phase, .recording, "The error waits behind the final being delivered")
+        release.signal()
+
+        try await waitUntil { session.snapshot().phase == .failed }
+        let snapshot = session.snapshot()
+        XCTAssertEqual(snapshot.text, "Final words.", "The confirmed words stay visible as recovery text")
+        XCTAssertEqual(snapshot.error, CartesiaStreamingError.invalidPCM.localizedDescription)
+        let finished = await session.finish()
+        XCTAssertEqual(finished.phase, .failed, "The failed session is never reported as finished")
+        XCTAssertEqual(finished.text, "Final words.")
+    }
+
     private struct Fixture {
         let session: DesktopLiveSession
         let socket: CartesiaDesktopSocket
@@ -256,4 +300,43 @@ final class CartesiaDesktopSocket: StreamingWebSocketConnection, @unchecked Send
         }
         callback?(result)
     }
+}
+
+/// Forwards every call to the real client unchanged, and only holds one final
+/// on the thread delivering it before the session's own handler sees it.
+private final class HeldFinalClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    private let inner: CartesiaLiveClient
+    private let heldText: String
+    private let release: DispatchSemaphore
+    private let entered: @Sendable () -> Void
+
+    init(
+        inner: CartesiaLiveClient, heldText: String, release: DispatchSemaphore,
+        entered: @escaping @Sendable () -> Void
+    ) {
+        self.inner = inner
+        self.heldText = heldText
+        self.release = release
+        self.entered = entered
+    }
+
+    var finalShape: TranscriptFinalShape { inner.finalShape }
+    var finalisationBudget: TimeInterval? { inner.finalisationBudget }
+    var finishFlushesBufferedAudio: Bool { inner.finishFlushesBufferedAudio }
+
+    func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        let heldText = heldText, release = release, entered = entered
+        inner.start(onTranscript: { text, isFinal in
+            if isFinal, text == heldText {
+                entered()
+                XCTAssertEqual(release.wait(timeout: .now() + 5), .success, "The held final was never released")
+            }
+            onTranscript(text, isFinal)
+        }, onError: onError)
+    }
+
+    func sendAudio(_ audioData: Data) { inner.sendAudio(audioData) }
+    func stop() { inner.stop() }
+    func cancel() { inner.cancel() }
+    func finishAndWait() async -> String? { await inner.finishAndWait() }
 }

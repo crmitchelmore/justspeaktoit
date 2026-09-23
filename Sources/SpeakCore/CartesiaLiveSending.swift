@@ -33,6 +33,10 @@ extension CartesiaLiveClient {
         let active = first.run
         var next: CartesiaOutbound? = first
         while let outbound = next {
+            // Deferred work runs between claiming a frame and handing it over,
+            // and may have cancelled or replaced the run meanwhile: a frame its
+            // run no longer owns is never given to a socket.
+            guard withState({ _ in owns(outbound) }) else { return }
             outbound.connection.send(outbound.message) { [weak self, weak active] error in
                 guard let self, let active else { return }
                 self.completeSend(error, generation: outbound.generation, active)
@@ -45,6 +49,15 @@ extension CartesiaLiveClient {
                 return following
             }
         }
+    }
+
+    /// The claimed frame is still the current run's one send, on its socket.
+    /// Only the pump owner advances the generation, so a frame fails this only
+    /// once its run has been retired.
+    private func owns(_ outbound: CartesiaOutbound) -> Bool {
+        let active = outbound.run
+        return isCurrent(active) && active.sending && active.sendGeneration == outbound.generation
+            && active.connection === outbound.connection
     }
 
     /// Admitted audio first, in capture order; then, once a finish has seen

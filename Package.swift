@@ -243,6 +243,13 @@ if linuxTargetBuild {
         .systemLibrary(name: name, path: "Sources/CLinuxSystem/\(name)", pkgConfig: pkgConfig, providers: [.apt(apt)])
     }
     portablePackage.products.append(.executable(name: "SpeakLinux", targets: ["SpeakLinux"]))
+    // Live transcription: FoundationNetworking's WebSocket shares the corelibs
+    // defects found on Windows, so Linux uses SwiftNIO behind the same
+    // StreamingWebSocketConnection seam. Batch HTTP stays on URLSession.
+    portablePackage.dependencies.append(contentsOf: [
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.27.0")
+    ])
     portablePackage.targets.append(contentsOf: [
         linuxSystemLibrary("CLinuxAdwaita", "libadwaita-1", apt: ["libadwaita-1-dev", "libgtk-4-dev"]),
         linuxSystemLibrary("CLinuxGio", "gio-unix-2.0", apt: ["libglib2.0-dev"]),
@@ -258,13 +265,31 @@ if linuxTargetBuild {
             linkerSettings: [.linkedLibrary("X11")]
         ),
         .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "CLinuxSupport"]),
+        .target(
+            name: "SpeakLinuxWebSocket",
+            dependencies: [
+                "SpeakCore",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOWebSocket", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl")
+            ]
+        ),
         .executableTarget(
             name: "SpeakLinux",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "CLinuxSupport"]
+            dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
+                "CLinuxSupport"
+            ]
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
             dependencies: ["SpeakCore", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
+        ),
+        .testTarget(
+            name: "SpeakLinuxWebSocketTests",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket"]
         )
     ])
 }

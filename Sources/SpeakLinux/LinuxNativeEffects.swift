@@ -3,6 +3,7 @@ import SpeakCore
 import SpeakDesktop
 import SpeakDesktopHost
 import SpeakLinuxPlatform
+import SpeakLinuxWebSocket
 
 /// The production effects: keyring credentials, libpulse capture, shared
 /// provider clients and the native output job.
@@ -62,12 +63,17 @@ final class LinuxNativeCapture: DesktopRecordingCapture {
     func destroy() { withExtendedLifetime(context) { capture.destroy() } }
 }
 
-/// Live transcription needs a WebSocket transport that passes the loopback
-/// probe; until then Linux offers batch models only.
+/// Live transcription over SwiftNIO. The transport passes the same loopback
+/// probe (echo, ping/pong, fragments, 2 MiB backpressure, cancellation,
+/// oversize, Mistral scenarios) that qualified WinHTTP on Windows.
 enum LinuxLiveTransport {
-    static let qualified = false
+    static let qualified = true
 
     static func makeClient(
         model: String, key: String, language: String?
-    ) -> (any FinalizingStreamingTranscriptionClient)? { nil }
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
+        DesktopLiveTranscription.makeClient(
+            model: model, apiKey: key, language: language, makeConnection: { NIOStreamingConnection(request: $0) }
+        )
+    }
 }

@@ -36,6 +36,10 @@ modules:
     build-options:
       env:
         SPEAK_LINUX_TARGET: "1"
+      # SwiftPM fetches SwiftNIO and NIOSSL. Flathub builds offline, so a
+      # Flathub submission must vendor them as git sources instead.
+      build-args:
+        - --share=network
     build-commands:
       - swift build --configuration release --product SpeakLinux --static-swift-stdlib --disable-sandbox
       - install -Dm755 .build/release/SpeakLinux /app/bin/justspeaktoit

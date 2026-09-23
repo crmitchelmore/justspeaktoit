@@ -110,7 +110,8 @@ proven on a physical desktop.
 | Wayland paste (RemoteDesktop + Clipboard portals) | Protocol verified against a fake portal (sessions, persist mode, restore token reuse, SelectionWrite, keysyms) | **Unverified on a real compositor** (see risks below) |
 | `--toggle` / app action | Built on GApplication | Forwarding **unverified** by an automated check |
 | Import | WAV and formats the provider accepts | Converting other formats for 16 kHz-WAV-only models (Meta, Azure) **not implemented** (GStreamer planned) |
-| Live transcription | **Not implemented** | Needs a WebSocket transport that passes `scripts/websocket-loopback-probe.py`; batch models only |
+| Live transcription transport (SwiftNIO, `SpeakLinuxWebSocket`) | Verified against the loopback probe | `SpeakLinuxWebSocketTests`: echo, PCM frames, ping/pong payload, peer close code and reason with acknowledgement, 2 × 2 MiB through a slow peer, fragmented Unicode and binary, cancellation of pending receive and pre-handshake send, abrupt disconnect, oversize, refused upgrade, and the shared Mistral client's four Voxtral scenarios. TLS (`wss`) to real providers, and live providers other than Mistral's protocol peer, **unverified**; HTTP(S) proxies are **not** honoured by this transport |
+| Live transcription in the app | Wired to the shared live clients (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI, Mistral) | No provider receipt yet: **unverified** with real keys |
 | Push-to-talk, hold, double-tap | **Not implemented** | Press-to-toggle only |
 | History playback in the app | **Not implemented** | Open audio uses the default player |
 | App profiles | Controller support shared; **no Linux editor** | The X11 target's `/proc/<pid>/exe` path reaches the shared resolver, whose matcher is written for Windows paths: **unverified** |

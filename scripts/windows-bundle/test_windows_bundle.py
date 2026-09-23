@@ -792,6 +792,17 @@ class ReadobjParsingTests(unittest.TestCase):
                           "  Attributes: 0x1", "}", "Import {", "  Name: USER32.dll", "}"])
         self.assertEqual(BUILD.parse_llvm_readobj_imports(text), (["KERNEL32.dll", "USER32.dll"], ["Foundation.dll"]))
 
+    def test_only_the_native_view_of_an_arm64x_image_is_read(self):
+        # Shape of llvm-readobj 20 output for Microsoft's ARM64X msvcp140.dll:
+        # the ARM64EC view follows under HybridObject and is not what a native
+        # ARM64 process loads.
+        text = "\n".join(["File: msvcp140.dll", "Format: COFF-ARM64X", "Arch: aarch64", "Import {",
+                          "  Name: VCRUNTIME140.dll", "}", "Import {", "  Name: KERNEL32.dll", "}",
+                          "HybridObject {", "  Format: COFF-ARM64EC", "  Import {", "    Name: VCRUNTIME140.dll", "  }",
+                          "  Import {", "    Name: VCRUNTIME140_1.dll", "  }", "  DelayImport {",
+                          "    Name: ADVAPI32.dll", "  }", "}"])
+        self.assertEqual(BUILD.parse_llvm_readobj_imports(text), (["VCRUNTIME140.dll", "KERNEL32.dll"], []))
+
 
 class AssemblyTests(unittest.TestCase):
     def setUp(self, architecture="x64"):

@@ -165,7 +165,9 @@ Reviewed independently from the extracted runtime:
   a synthetic ARM64 executable with the real x64 app's imports, less
   `vcruntime140_1.dll`. It assembled 29 files with 16 runtime DLLs: 14 Swift
   DLLs, ARM64X `msvcp140.dll` and `vcruntime140.dll`. Every image was
-  recorded as native ARM64. The real ARM64 executable is built only in CI.
+  recorded as native ARM64. The pinned `llvm-readobj` 20.1.8 confirmed all 17
+  import tables, including both ARM64X ones. The real ARM64 executable is
+  built only in CI.
 
 This authenticates the pinned inputs; it is not evidence that anything ran on
 ARM64.
@@ -173,7 +175,7 @@ ARM64.
 ## Verification in this change
 
 - Python suites on macOS (Python 3.14.4), each also run on the tree of each
-  commit: bundle tooling 80 tests (the ARM64 assembly class skips its two
+  commit: bundle tooling 81 tests (the ARM64 assembly class skips its two
   x64-only cases), whisper.cpp runtime 11, developer MSIX 38, cross-build 14,
   all passing with encoding warnings as errors. They include native execution,
   staging, ARM64 runtime, ARM64 assembly and PE architecture cases. Two of the
@@ -181,7 +183,8 @@ ARM64.
   pinned installer exactly and load only for its own architecture, and must
   list only well-formed runtime DLLs the policy classifies. Changing the pinned
   size or SHA-256, restoring `maximumBytes`, or altering the lock's installer,
-  architecture, file names or payload digests each fails them.
+  architecture, file names or payload digests each fails them. Another checks
+  that the `llvm-readobj` cross-check reads only an ARM64X image's native view.
 - The generalised extractor regenerated the committed x64
   `swift-runtime-lock.json` from the pinned x64 installer and pinned 7-Zip.
   Every field was byte-identical; the one addition is `"architecture": "x64"`.
@@ -203,8 +206,13 @@ ARM64.
 - **First CI receipt** of `windows-arm64.yml` for an exact revision: test and
   skip counts, WinHTTP probes, native-execution evidence, bundle and MSIX
   hashes, and the regenerated ARM64 runtime lock equal to the committed one.
-- **Import cross-check.** ARM64 bundle imports are read by `windows_pe.py`
-  only. The `llvm-readobj` cross-check still runs for x64.
+- **Import cross-check in ARM64 CI.** For an ARM64X image, `llvm-readobj`
+  also prints the ARM64EC view under `HybridObject`. The cross-check now reads
+  only the native view, which a native ARM64 process loads and `windows_pe.py`
+  reads; before, it rejected Microsoft's ARM64X runtime. It passed the local
+  ARM64 dry run above and still runs for x64. CI's ARM64 bundle job does not
+  run it: that job has no pinned LLVM, and adding one waits for the first
+  ARM64 receipt.
 - **GPU inference on ARM64** (Vulkan or OpenCL Adreno), and CPU feature
   levels above ARMv8-A. These need a verified dispatch and physical-device
   measurements.

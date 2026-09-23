@@ -507,9 +507,17 @@ def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS, architecture="x6
 
 # --- llvm-readobj cross-check ---------------------------------------------------------------
 def parse_llvm_readobj_imports(text):
+    """Static and delay-load imports of the native view in ``llvm-readobj --coff-imports`` output.
+
+    For an ARM64X image llvm-readobj then prints its ARM64EC view under
+    ``HybridObject``. A native ARM64 process loads only the native view, which
+    is also the view windows_pe.py reads, so the hybrid section is not read.
+    """
     static, delayed, section = [], [], None
     for line in text.splitlines():
         stripped = line.strip()
+        if stripped == "HybridObject {":
+            break
         if stripped == "Import {":
             section = static
         elif stripped == "DelayImport {":

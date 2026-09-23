@@ -34,7 +34,8 @@ public struct LinuxTextOutputOptions: Codable, Equatable, Sendable {
         switch method {
         case .paste:
             return restoreClipboard
-                ? "Text output saved: finished dictation is pasted into the app you were using, then the clipboard is restored."
+                ? "Text output saved: finished dictation is pasted into the app you were using, "
+                    + "then the clipboard is restored."
                 : "Text output saved: finished dictation is pasted into the app you were using."
         case .clipboardOnly:
             return "Text output saved: finished recordings are copied to the clipboard."
@@ -111,7 +112,9 @@ public enum LinuxOutputPlan: Equatable, Sendable {
             guard session.canUseX11Injection else {
                 return .copy(reason: "This session does not allow pasting into other apps.")
             }
-            return .x11Paste(window: window, shift: target.prefersShiftPaste, restoreClipboard: options.restoreClipboard)
+            return .x11Paste(
+                window: window, shift: target.prefersShiftPaste, restoreClipboard: options.restoreClipboard
+            )
         case .focusedApplication:
             guard portalAvailable else {
                 return .copy(reason: "This desktop has no remote-input portal for pasting.")
@@ -182,7 +185,7 @@ public final class LinuxOutputJob: @unchecked Sendable {
     }
 
     private func x11Paste(_ text: String, window: UInt64, shift: Bool, restore: Bool) -> String {
-        let previous = restore ? (try? native.readClipboard()) ?? nil : nil
+        let previous = restore ? (try? native.readClipboard()) : nil
         do {
             try native.writeClipboard(text)
             guard !isCancelled else { return "Output cancelled. The transcript is on the clipboard." }
@@ -196,7 +199,7 @@ public final class LinuxOutputJob: @unchecked Sendable {
         guard restore, let previous else { return "Transcript pasted and saved to History." }
         native.sleep(milliseconds: Self.restoreDelayMilliseconds)
         // Never overwrite something the user copied in the meantime.
-        guard ((try? native.readClipboard()) ?? nil) == text else {
+        guard (try? native.readClipboard()) == text else {
             return "Transcript pasted and saved to History."
         }
         do { try native.writeClipboard(previous) } catch {

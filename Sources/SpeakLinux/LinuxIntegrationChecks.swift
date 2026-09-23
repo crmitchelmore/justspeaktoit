@@ -66,8 +66,12 @@ enum LinuxIntegrationChecks {
         try require(frames.dropLast().allSatisfy { $0 == 1_600 }, "frames were not exactly 100 ms: \(frames)")
         try require(peak > 1_000, "the captured audio was silent (peak \(peak))")
         print("Capture: \(total) samples in \(frames.count) frames from \(source), peak \(peak).")
+        try deviceMonitor()
+        try playback()
+    }
 
-        // Hotplug: adding a sink adds its monitor source, a source event.
+    /// Hotplug: adding a sink adds its monitor source, a source event.
+    private static func deviceMonitor() throws {
         final class Changes: @unchecked Sendable {
             let lock = NSLock()
             var count = 0
@@ -91,8 +95,10 @@ enum LinuxIntegrationChecks {
         }
         try require(changes.lock.withLock { changes.count } > 0, "no device change was reported for a new source")
         print("Device monitor: a new source was reported.")
+    }
 
-        // Playback: half a second of tone through the default output drains.
+    /// Playback: half a second of tone through the default output drains.
+    private static func playback() throws {
         let tone = (0..<8_000).map { Int16(8_000 * sin(Double($0) * 2 * .pi * 440 / 16_000)) }
         var error = [CChar](repeating: 0, count: 256)
         guard let player = tone.withUnsafeBufferPointer({
@@ -188,7 +194,8 @@ enum LinuxIntegrationChecks {
                     }, Unmanaged.passUnretained(presses).toOpaque(), &trigger, trigger.count, $0, $1
                 )
             }
-            try require(String(cString: trigger) == "Ctrl+Alt+Space", "the bound trigger was \(String(cString: trigger))")
+            let bound = String(cString: trigger)
+            try require(bound == "Ctrl+Alt+Space", "the bound trigger was \(bound)")
             // The fake portal presses and releases the shortcut after binding.
             for _ in 0..<200 where presses.lock.withLock({ presses.events.count }) < 2 {
                 Thread.sleep(forTimeInterval: 0.01)

@@ -89,7 +89,11 @@ final class LinuxEventContext: @unchecked Sendable {
                 await previous?.value
                 await ready?.value
                 let index: Int
-                if let modelIndex, modelIndex >= 0 { index = modelIndex } else { index = await controller.selectedIndex() }
+                if let modelIndex, modelIndex >= 0 {
+                    index = modelIndex
+                } else {
+                    index = await controller.selectedIndex()
+                }
                 let device: String
                 if let deviceID { device = deviceID } else { device = await controller.selectedMicrophone() }
                 await controller.toggle(
@@ -149,13 +153,23 @@ final class LinuxEventContext: @unchecked Sendable {
 }
 
 /// The GTK window's event callback, on the GTK main thread.
-func linuxWindowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
+func linuxWindowEvent(
+    _ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?
+) {
     guard let context else { return }
     let holder = Unmanaged<LinuxEventContext>.fromOpaque(context).takeUnretainedValue()
-    let controller = holder.controller
     let value = text.map(String.init(cString:)) ?? ""
     let slot = Int(index)
-    switch Int(event) {
+    let event = Int(event)
+    if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
+    _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
+}
+
+/// Recording, import, copy and lifecycle events. Returns false for others.
+private func linuxSessionEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    let controller = holder.controller
+    switch event {
     case Int(JSTI_EVENT_TOGGLE_RECORDING):
         // Record in this window: its own window is focused, so there is no
         // field to paste into. The transcript is saved and offered for Copy.
@@ -175,9 +189,18 @@ func linuxWindowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: In
             await controller.importAudio(path: value, modelIndex: slot)
         }
     case Int(JSTI_EVENT_COPY): holder.copyDisplayed()
-    case Int(JSTI_EVENT_SAVE_KEY): holder.enqueueSettings { await controller.saveKey(value, modelIndex: slot) }
-    case Int(JSTI_EVENT_SELECT_MODEL): holder.enqueueSettings { await controller.selectModel(slot) }
     case Int(JSTI_EVENT_READY): linuxReady(holder)
+    case Int(JSTI_EVENT_CANCEL): Task { await controller.cancelTranscription() }
+    case Int(JSTI_EVENT_REFRESH_MODELS): Task { await controller.refreshModels(force: true) }
+    default: return false
+    }
+    return true
+}
+
+/// History list, export and playback events. Returns false for others.
+private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    let controller = holder.controller
+    switch event {
     case Int(JSTI_EVENT_SELECT_HISTORY): holder.selectHistory(value)
     case Int(JSTI_EVENT_RETRY_HISTORY): Task { await controller.retryHistory(value) }
     case Int(JSTI_EVENT_EXPORT_HISTORY):
@@ -189,14 +212,23 @@ func linuxWindowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: In
             Task { await controller.exportHistory(text: text, variant: variant, path: value) }
         } catch { LinuxHostPlatform.update(error.localizedDescription) }
     case Int(JSTI_EVENT_OPEN_AUDIO): Task { await controller.openHistoryAudio(value) }
-    case Int(JSTI_EVENT_SELECT_MICROPHONE): holder.enqueueSettings { await controller.selectMicrophone(value) }
-    case Int(JSTI_EVENT_CANCEL): Task { await controller.cancelTranscription() }
     case Int(JSTI_EVENT_SEARCH_HISTORY): holder.search(value)
     case Int(JSTI_EVENT_TRANSCRIPT_VERSION):
         holder.selectVersion(slot == 1 ? .original : .processed, identifier: value)
     case Int(JSTI_EVENT_PLAYBACK_TOGGLE): Task { await controller.playbackToggle(value) }
     case Int(JSTI_EVENT_PLAYBACK_STOP): Task { await controller.playbackStop() }
-    case Int(JSTI_EVENT_REFRESH_MODELS): Task { await controller.refreshModels(force: true) }
+    default: return false
+    }
+    return true
+}
+
+/// Settings events, applied in order. Returns false for unknown events.
+private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
+    let controller = holder.controller
+    switch event {
+    case Int(JSTI_EVENT_SAVE_KEY): holder.enqueueSettings { await controller.saveKey(value, modelIndex: slot) }
+    case Int(JSTI_EVENT_SELECT_MODEL): holder.enqueueSettings { await controller.selectModel(slot) }
+    case Int(JSTI_EVENT_SELECT_MICROPHONE): holder.enqueueSettings { await controller.selectMicrophone(value) }
     case Int(JSTI_EVENT_TEXT_OUTPUT):
         let options = LinuxTextOutputOptions(
             method: slot == 1 ? .clipboardOnly : .paste, restoreClipboard: value == "restore"
@@ -220,8 +252,9 @@ func linuxWindowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: In
         let hotKey = LinuxHotKeySettings(style: LinuxHotKeySettings.styles[slot].rawValue)
         holder.gestures.configure(style: hotKey.activation)
         holder.enqueueSettings { await controller.saveHotKey(hotKey) }
-    default: break
+    default: return false
     }
+    return true
 }
 
 private func linuxReady(_ holder: LinuxEventContext) {

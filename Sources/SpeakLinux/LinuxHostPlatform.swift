@@ -92,7 +92,9 @@ enum LinuxHostPlatform: DesktopHostPlatform {
 
     package static func apiKey(name: String) throws -> String { try LinuxCredentialStore.read(name: name) }
 
-    package static func saveAPIKey(_ key: String, name: String) throws { try LinuxCredentialStore.save(key, name: name) }
+    package static func saveAPIKey(_ key: String, name: String) throws {
+        try LinuxCredentialStore.save(key, name: name)
+    }
 
     package static func uploadStaging(directory: URL) -> SharedMultipartUploadStaging {
         SharedMultipartUploadStaging(

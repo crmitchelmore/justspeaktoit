@@ -39,7 +39,9 @@ enum LinuxWindow {
         let result = withExtendedLifetime(strings) {
             rows.withUnsafeBufferPointer { rows in
                 selectRecord
-                    ? (selected?.uuidString ?? "").withCString { jsti_window_set_history(rows.baseAddress, rows.count, $0) }
+                    ? (selected?.uuidString ?? "").withCString {
+                        jsti_window_set_history(rows.baseAddress, rows.count, $0)
+                    }
                     : jsti_window_set_history(rows.baseAddress, rows.count, nil)
             }
         }
@@ -108,7 +110,9 @@ enum LinuxWindow {
         var required = 0
         _ = jsti_window_transcript_snapshot(nil, 0, &required)
         guard required > 0, required <= 8_388_609 else {
-            throw DesktopHostError(message: "The displayed transcript is unavailable or exceeds the 8 MiB action limit.")
+            throw DesktopHostError(
+                message: "The displayed transcript is unavailable or exceeds the 8 MiB action limit."
+            )
         }
         var bytes = [CChar](repeating: 0, count: required)
         guard jsti_window_transcript_snapshot(&bytes, bytes.count, &required) == 0 else {
@@ -133,13 +137,16 @@ enum LinuxWindow {
         withExtendedLifetime(strings) {
             names.withUnsafeBufferPointer {
                 _ = jsti_window_set_post_processing(
-                    $0.baseAddress, $0.count, options.mode == .remote ? 1 : 0, Int32(selected), options.customPrompt ?? ""
+                    $0.baseAddress, $0.count, options.mode == .remote ? 1 : 0, Int32(selected),
+                    options.customPrompt ?? ""
                 )
             }
         }
     }
 
     static func textOutput(_ options: LinuxTextOutputOptions, hint: String) {
-        _ = jsti_window_set_text_output(options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0, hint)
+        _ = jsti_window_set_text_output(
+            options.method == .clipboardOnly ? 1 : 0, options.restoreClipboard ? 1 : 0, hint
+        )
     }
 }

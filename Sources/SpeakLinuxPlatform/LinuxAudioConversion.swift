@@ -44,7 +44,10 @@ public enum LinuxAudioConversion {
             jsti_audio_decode(input.path, UInt32(sampleRate), { samples, count, context in
                 guard let samples, let context else { return }
                 let collector = Unmanaged<Collector>.fromOpaque(context).takeUnretainedValue()
-                guard collector.pcm.count + count * 2 <= LinuxAudioConversion.maximumBytes else { collector.overflow = true; return }
+                guard collector.pcm.count + count * 2 <= LinuxAudioConversion.maximumBytes else {
+                    collector.overflow = true
+                    return
+                }
                 collector.pcm.append(UnsafeBufferPointer(start: samples, count: count))
             }, Unmanaged.passUnretained(collector).toOpaque(), cancel.pointer, &error, error.count)
         }
@@ -53,7 +56,8 @@ public enum LinuxAudioConversion {
         guard !collector.overflow else {
             throw LinuxNativeError(message: "The converted audio exceeds the 25 MB upload cap.")
         }
-        guard !collector.pcm.isEmpty, let wave = PCMWaveWriter.wavData(pcm: collector.pcm, sampleRate: sampleRate) else {
+        guard !collector.pcm.isEmpty,
+              let wave = PCMWaveWriter.wavData(pcm: collector.pcm, sampleRate: sampleRate) else {
             throw LinuxNativeError(message: "This audio file contains no decodable audio.")
         }
         try LinuxFiles.createPrivateFile(output)

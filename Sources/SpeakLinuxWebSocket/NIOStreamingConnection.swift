@@ -37,15 +37,25 @@ public final class NIOStreamingConnection: StreamingWebSocketConnection, @unchec
     private static let group = MultiThreadedEventLoopGroup.singleton
 
     private enum Phase { case idle, connecting, open, finished }
+    private typealias SendCompletion = @Sendable (Error?) -> Void
+    private typealias PendingSend = (StreamingWebSocketMessage, SendCompletion)
+    private typealias Receiver = @Sendable (Result<StreamingWebSocketMessage, Error>) -> Void
+
+    /// What `finish` releases outside the lock.
+    private struct Termination {
+        var channel: Channel?
+        var sends: [PendingSend] = []
+        var waiting: [Receiver] = []
+    }
 
     private let request: URLRequest
     private let lock = NSLock()
     private var phase = Phase.idle
     private var channel: Channel?
     private var onOpen: (@Sendable () -> Void)?
-    private var pendingSends: [(StreamingWebSocketMessage, @Sendable (Error?) -> Void)] = []
+    private var pendingSends: [PendingSend] = []
     private var inbox: [StreamingWebSocketMessage] = []
-    private var receivers: [@Sendable (Result<StreamingWebSocketMessage, Error>) -> Void] = []
+    private var receivers: [Receiver] = []
     private var terminal: Error?
 
     public init(request: URLRequest) { self.request = request }
@@ -101,26 +111,9 @@ public final class NIOStreamingConnection: StreamingWebSocketConnection, @unchec
         let port = url.port ?? (secure ? 443 : 80)
         var target = url.path.isEmpty ? "/" : url.path
         if let query = url.query, !query.isEmpty { target += "?" + query }
-        var headers = HTTPHeaders()
-        headers.add(name: "Host", value: url.port.map { "\(host):\($0)" } ?? host)
-        for (name, value) in request.allHTTPHeaderFields ?? [:] where !Self.managedHeaders.contains(name.lowercased()) {
-            headers.add(name: name, value: value)
-        }
         let tls = secure ? try NIOSSLContext(configuration: .makeClientConfiguration()) : nil
-        let key = Data((0..<16).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
-        let upgrader = NIOWebSocketClientUpgrader(
-            requestKey: key, maxFrameSize: Self.maximumMessageBytes, automaticErrorHandling: false,
-            upgradePipelineHandler: { [weak self] channel, _ in
-                channel.pipeline.addHandlers([
-                    NIOWebSocketFrameAggregator(
-                        minNonFinalFragmentSize: 0, maxAccumulatedFrameCount: 100_000,
-                        maxAccumulatedFrameSize: Self.maximumMessageBytes
-                    ),
-                    FrameHandler(owner: self)
-                ]).map { self?.opened(channel) }
-            }
-        )
-        let initial = HandshakeHandler(target: target, headers: headers, owner: self)
+        let upgrader = makeUpgrader()
+        let initial = HandshakeHandler(target: target, headers: requestHeaders(url: url, host: host), owner: self)
         let bootstrap = ClientBootstrap(group: Self.group)
             // ClientBootstrap already enables TCP_NODELAY at the TCP level.
             .connectTimeout(.seconds(15))
@@ -132,7 +125,8 @@ public final class NIOStreamingConnection: StreamingWebSocketConnection, @unchec
                     }
                 } catch { return channel.eventLoop.makeFailedFuture(error) }
                 let upgrade: NIOHTTPClientUpgradeConfiguration = (
-                    upgraders: [upgrader], completionHandler: { context in context.pipeline.removeHandler(initial, promise: nil) }
+                    upgraders: [upgrader],
+                    completionHandler: { context in context.pipeline.removeHandler(initial, promise: nil) }
                 )
                 return channel.pipeline.addHTTPClientHandlers(withClientUpgrade: upgrade).flatMap {
                     channel.pipeline.addHandler(initial)
@@ -158,8 +152,34 @@ public final class NIOStreamingConnection: StreamingWebSocketConnection, @unchec
         "host", "connection", "upgrade", "sec-websocket-key", "sec-websocket-version", "content-length"
     ]
 
+    /// The client's own headers; the upgrader adds the WebSocket ones.
+    private func requestHeaders(url: URL, host: String) -> HTTPHeaders {
+        var headers = HTTPHeaders()
+        headers.add(name: "Host", value: url.port.map { "\(host):\($0)" } ?? host)
+        for (name, value) in request.allHTTPHeaderFields ?? [:] where !Self.managedHeaders.contains(name.lowercased()) {
+            headers.add(name: name, value: value)
+        }
+        return headers
+    }
+
+    private func makeUpgrader() -> NIOWebSocketClientUpgrader {
+        let key = Data((0..<16).map { _ in UInt8.random(in: 0...255) }).base64EncodedString()
+        return NIOWebSocketClientUpgrader(
+            requestKey: key, maxFrameSize: Self.maximumMessageBytes, automaticErrorHandling: false,
+            upgradePipelineHandler: { [weak self] channel, _ in
+                channel.pipeline.addHandlers([
+                    NIOWebSocketFrameAggregator(
+                        minNonFinalFragmentSize: 0, maxAccumulatedFrameCount: 100_000,
+                        maxAccumulatedFrameSize: Self.maximumMessageBytes
+                    ),
+                    FrameHandler(owner: self)
+                ]).map { self?.opened(channel) }
+            }
+        )
+    }
+
     fileprivate func opened(_ channel: Channel) {
-        let (callback, sends) = lock.withLock { () -> ((@Sendable () -> Void)?, [(StreamingWebSocketMessage, @Sendable (Error?) -> Void)]) in
+        let (callback, sends) = lock.withLock { () -> ((@Sendable () -> Void)?, [PendingSend]) in
             guard terminal == nil, phase == .connecting else { return (nil, []) }
             phase = .open
             self.channel = channel
@@ -170,7 +190,9 @@ public final class NIOStreamingConnection: StreamingWebSocketConnection, @unchec
         for (message, completion) in sends { write(message, on: channel, completion: completion) }
     }
 
-    private func write(_ message: StreamingWebSocketMessage, on channel: Channel, completion: @escaping @Sendable (Error?) -> Void) {
+    private func write(
+        _ message: StreamingWebSocketMessage, on channel: Channel, completion: @escaping SendCompletion
+    ) {
         var buffer = channel.allocator.buffer(capacity: 0)
         let opcode: WebSocketOpcode
         switch message {
@@ -202,18 +224,18 @@ public final class NIOStreamingConnection: StreamingWebSocketConnection, @unchec
     /// Ends the connection once: pending sends and receives fail with `error`;
     /// messages already received stay readable before it.
     fileprivate func finish(_ error: Error) {
-        let (channel, sends, waiting) = lock.withLock { () -> (Channel?, [(StreamingWebSocketMessage, @Sendable (Error?) -> Void)], [@Sendable (Result<StreamingWebSocketMessage, Error>) -> Void]) in
-            guard terminal == nil else { return (nil, [], []) }
+        let termination = lock.withLock { () -> Termination in
+            guard terminal == nil else { return Termination() }
             terminal = error
             phase = .finished
             onOpen = nil
             defer { pendingSends = []; receivers = [] }
             let failWaiting = inbox.isEmpty ? receivers : []
-            return (self.channel, pendingSends, failWaiting)
+            return Termination(channel: self.channel, sends: pendingSends, waiting: failWaiting)
         }
-        channel?.close(promise: nil)
-        for (_, completion) in sends { completion(error) }
-        for receiver in waiting { receiver(.failure(error)) }
+        termination.channel?.close(promise: nil)
+        for (_, completion) in termination.sends { completion(error) }
+        for receiver in termination.waiting { receiver(.failure(error)) }
     }
 }
 

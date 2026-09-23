@@ -185,7 +185,8 @@ final class LoopbackProbe {
     private let directory: URL
 
     static var repository: URL {
-        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     }
 
     init() throws {
@@ -225,7 +226,7 @@ final class LoopbackProbe {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
             output.append(log.fileHandleForReading.availableDataNonBlocking())
-            if String(decoding: output, as: UTF8.self).contains("\"\(event)\"") { return }
+            if String(bytes: output, encoding: .utf8)?.contains("\"\(event)\"") == true { return }
             Thread.sleep(forTimeInterval: 0.02)
         }
         throw NIOWebSocketTransportError("The probe never logged \(event).")

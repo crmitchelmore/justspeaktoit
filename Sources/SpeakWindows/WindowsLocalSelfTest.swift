@@ -10,15 +10,7 @@ enum WindowsLocalSelfTest {
     /// the real installer on NTFS with a synthetic transport, then the
     /// controller's ownership of models it removes.
     static func run() async throws {
-        let vectors = [
-            ("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
-            ("abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
-        ]
-        for (input, expected) in vectors {
-            guard try WindowsSHA256Hasher.provider.sha256(of: Data(input.utf8)) == expected else {
-                throw WindowsNativeError(message: "Windows CNG SHA-256 returned a wrong digest.")
-            }
-        }
+        try checkDigestVectors()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("jsti-local-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -61,6 +53,19 @@ enum WindowsLocalSelfTest {
         }
         print("Local model download, resume, verification and removal self-test passed.")
         try await WindowsLocalRemovalSelfTest.run()
+    }
+
+    /// Windows CNG SHA-256 against the published test vectors.
+    private static func checkDigestVectors() throws {
+        let vectors = [
+            ("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+            ("abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        ]
+        for (input, expected) in vectors {
+            guard try WindowsSHA256Hasher.provider.sha256(of: Data(input.utf8)) == expected else {
+                throw WindowsNativeError(message: "Windows CNG SHA-256 returned a wrong digest.")
+            }
+        }
     }
 
     /// Runs `--local-transcription-self-test` when requested; false otherwise.

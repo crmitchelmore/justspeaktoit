@@ -17,8 +17,9 @@ Apple capture path.
 Windows CI uses **Swift 6.2.3, Windows Server 2022, x86_64**. Follow the official
 [Swift Windows installation guide](https://www.swift.org/install/windows/) for
 Visual Studio C++ tools, Windows SDK and Swift prerequisites. That page includes
-previous Swift releases; select 6.2.3 to reproduce CI. Windows arm64 is not part
-of this target's verified matrix yet.
+previous Swift releases; select 6.2.3 to reproduce CI. Windows ARM64 has a
+separate native workflow with native-execution evidence, described in
+[Windows ARM64](windows-arm64.md); it has no CI receipt yet.
 
 In PowerShell from the repository root:
 

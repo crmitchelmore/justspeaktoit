@@ -5,9 +5,10 @@ import SpeakWindowsPlatform
 
 /// Local model checks for `--self-test` and `--local-transcription-self-test`.
 enum WindowsLocalSelfTest {
-    /// Native pieces that need no network or model: CNG SHA-256 vectors and a
+    /// Native pieces that need no network or model: CNG SHA-256 vectors, a
     /// complete download, resume, verification, tamper and removal cycle of
-    /// the real installer on NTFS with a synthetic transport.
+    /// the real installer on NTFS with a synthetic transport, then the
+    /// controller's ownership of models it removes.
     static func run() async throws {
         let vectors = [
             ("", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
@@ -59,6 +60,7 @@ enum WindowsLocalSelfTest {
             throw WindowsNativeError(message: "Removing a model left files behind.")
         }
         print("Local model download, resume, verification and removal self-test passed.")
+        try await WindowsLocalRemovalSelfTest.run()
     }
 
     /// Runs `--local-transcription-self-test` when requested; false otherwise.

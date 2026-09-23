@@ -12,6 +12,9 @@ extension WindowsAppController {
     ) async {
         var record = original
         cancellationRequested = false
+        // The record's on-device model, a profile's or the app's, stays in use until this finishes.
+        let localModel = beginLocalUse(record.modelIdentifier)
+        defer { endLocalUse(localModel) }
         let session = profile ?? .defaults(
             modelIdentifier: record.modelIdentifier, postProcessing: settings.postProcessing ?? .init(),
             language: record.languageIdentifier

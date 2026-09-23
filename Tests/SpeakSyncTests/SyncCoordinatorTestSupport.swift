@@ -11,14 +11,16 @@ actor HistoryHost {
         transport: any HistorySyncTransport,
         tokens: any SyncChangeTokenStore,
         cloudAvailable: Bool = true,
-        observer: (any HistorySyncStatusObserver)? = nil
+        observer: (any HistorySyncStatusObserver)? = nil,
+        fence: (any HistorySyncPassFence)? = nil
     ) {
         coordinator = HistorySyncCoordinator(
             transport: transport,
             tokenStore: tokens,
             cloudAvailable: cloudAvailable,
             observer: observer,
-            now: { Date(timeIntervalSince1970: 42) }
+            now: { Date(timeIntervalSince1970: 42) },
+            fence: fence
         )
     }
 
@@ -142,6 +144,31 @@ actor StatusRecorder: HistorySyncStatusObserver {
 
     func historySync(_ status: HistorySyncStatus, didChange field: HistorySyncStatus.Field) async {
         fields.append(field)
+    }
+}
+
+/// Holds the pass inside the first status assignment that matches, as a slow
+/// window would, so a test can change the session between pages or batches.
+actor HeldStatusObserver: HistorySyncStatusObserver {
+    private let predicate: @Sendable (HistorySyncStatus, HistorySyncStatus.Field) -> Bool
+    private var hasHeld = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    init(holdWhen predicate: @escaping @Sendable (HistorySyncStatus, HistorySyncStatus.Field) -> Bool) {
+        self.predicate = predicate
+    }
+
+    var isHolding: Bool { waiter != nil }
+
+    func historySync(_ status: HistorySyncStatus, didChange field: HistorySyncStatus.Field) async {
+        guard !hasHeld, predicate(status, field) else { return }
+        hasHeld = true
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func release() {
+        waiter?.resume()
+        waiter = nil
     }
 }
 

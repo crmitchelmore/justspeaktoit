@@ -75,15 +75,18 @@ public enum CloudKitWebKeySync {
     /// Reads and opens every syncable key with a key from `unlock`. A key that
     /// no longer matches the account's verifier (the passphrase was reset on
     /// another device) fails with `CloudKitKeySyncError.incorrectPassphrase`,
-    /// so the host asks for the passphrase again.
+    /// so the host asks for the passphrase again. Within a sync pass, pass its
+    /// validated session as `in:`, so a sign-in partway through never reads
+    /// another user's keys with this one's key.
     public static func read(
         key: Data,
         client: CloudKitWebServicesClient,
         consent: CloudKitWebSyncConsent,
-        envelope: EncryptedSecretEnvelope
+        envelope: EncryptedSecretEnvelope,
+        in pinned: CloudKitWebSession? = nil
     ) async throws -> CloudKitWebKeySyncSnapshot {
         try consent.require(.apiKeys)
-        let session = await client.session()
+        let session = await client.session(or: pinned)
         let identifiers = SyncSchema.EncryptedSecret.syncableIdentifiers.sorted()
         let names = [SyncSchema.KeySyncMetadata.recordName]
             + identifiers.map(SyncSchema.EncryptedSecret.recordName(for:))

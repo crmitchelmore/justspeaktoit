@@ -9,13 +9,14 @@ import Foundation
 /// `X-Apple-CloudKit-Session` — the headers Apple's CloudKit JS reads; the
 /// reference itself does not name one.
 ///
-/// Ordering: one FIFO gate admits a single request or session change at a
-/// time. The first read of the stored token, every rotation, sign-in, sign-out
-/// and rejected session happen only while holding it, so a slow read can never
-/// land after a later change. Backoff waits happen outside the gate, and each
-/// attempt re-checks the operation's `CloudKitWebSession` under the gate, so a
-/// retry never crosses a sign-out or sign-in. Transient failures are retried
-/// with bounded backoff; authentication failures are never retried.
+/// Ordering: one FIFO gate admits a single request, session change or piece of
+/// account-bound local work at a time. The first read of the stored token,
+/// every rotation, sign-in, sign-out and rejected session happen only while
+/// holding it, so a slow read can never land after a later change. Backoff
+/// waits happen outside the gate, and each attempt re-checks the operation's
+/// `CloudKitWebSession` under the gate, so a retry never crosses a sign-out or
+/// sign-in. Transient failures are retried with bounded backoff;
+/// authentication failures are never retried.
 public actor CloudKitWebServicesClient {
     public static let defaultResponseLimit = 16 * 1024 * 1024
     static let webAuthTokenHeader = "X-Apple-CloudKit-Web-Auth-Token"
@@ -310,6 +311,46 @@ extension CloudKitWebServicesClient {
     private func rejectSession() async {
         beginSession(token: nil)
         try? await tokenStore.clearWebAuthToken()
+    }
+}
+
+// MARK: - Account-bound local work
+
+extension CloudKitWebServicesClient {
+    /// Runs local work that belongs to `session`'s iCloud user — reading or
+    /// rebinding the account, clearing or saving a cursor, applying changes or
+    /// acknowledgements — only while that session is current. The work holds
+    /// the gate that requests and session changes take, so no sign-in,
+    /// sign-out or rejected session takes effect while it runs, and none that
+    /// already has is ever followed by it: it fails with `sessionChanged`, or
+    /// `CancellationError` once its task is cancelled, and does not run. The
+    /// work must not send requests through this client.
+    nonisolated func whileCurrent<Value>(
+        _ session: CloudKitWebSession,
+        isolation: isolated (any Actor)? = #isolation,
+        _ work: () async throws -> Value
+    ) async throws -> Value {
+        try await admit(session)
+        do {
+            let value = try await work()
+            await release()
+            return value
+        } catch {
+            await release()
+            throw error
+        }
+    }
+
+    /// Takes the gate for `session`'s work; the caller releases it.
+    private func admit(_ session: CloudKitWebSession) async throws {
+        try await acquire()
+        do {
+            try Task.checkCancellation()
+            guard session.generation == sessionGeneration else { throw CloudKitWebServicesError.sessionChanged }
+        } catch {
+            release()
+            throw error
+        }
     }
 }
 

@@ -69,9 +69,14 @@ enum CloudKitWebRecordBatch {
     }
 
     /// Deletes one record; an already absent record is a successful deletion.
-    static func forceDelete(recordName: String, zoneName: String, client: CloudKitWebServicesClient) async throws {
+    static func forceDelete(
+        recordName: String,
+        zoneName: String,
+        client: CloudKitWebServicesClient,
+        session: CloudKitWebSession?
+    ) async throws {
         let operation = CloudKitWebRecordWrite.forceDelete(recordName: recordName)
-        let results = try await client.modifyRecords(zoneName: zoneName, operations: [operation], in: nil)
+        let results = try await client.modifyRecords(zoneName: zoneName, operations: [operation], in: session)
         guard let result = attribute(results, to: [recordName])[recordName] else { throw missingResult }
         if case .failure(let error) = result, error.code != .notFound {
             throw CloudKitWebServicesError.server(error)
@@ -145,23 +150,32 @@ public enum CloudKitWebSyncAccount {
     /// Confirms the signed-in iCloud user before a sync, as `CloudKitKeySync`
     /// does natively. Cursors recorded for another user are cleared before the
     /// new user is bound, so an interruption repeats the reset.
+    ///
+    /// Validates in the session given as `in:` (by default the current one);
+    /// run the sync in that same session. Reading the bound account, clearing
+    /// cursors and rebinding hold the client's gate and happen only while the
+    /// session is current: a sign-in or sign-out waits for them, one that came
+    /// first fails validation with `sessionChanged`, and a validation for an
+    /// earlier session can never reset cursors after a later one bound its
+    /// account.
     public static func validate(
         client: CloudKitWebServicesClient,
         store: any CloudKitWebSyncAccountStore,
-        accountBoundCursors: [any SyncChangeTokenStore]
+        accountBoundCursors: [any SyncChangeTokenStore],
+        in pinned: CloudKitWebSession? = nil,
+        isolation: isolated (any Actor)? = #isolation
     ) async throws -> CloudKitWebSyncAccountBinding {
-        let session = await client.session()
+        let session = await client.session(or: pinned)
         let current = try await client.currentUserRecordName(in: session)
-        let previous = try await store.boundAccountRecordName()
-        // The identity must still be the signed-in one when cursors are reset
-        // and rebound; a sign-in in between restarts the check next time.
-        guard await client.session() == session else { throw CloudKitWebServicesError.sessionChanged }
-        guard previous != current else { return .unchanged }
-        for cursor in accountBoundCursors {
-            try await cursor.clearChangeToken()
+        return try await client.whileCurrent(session) {
+            let previous = try await store.boundAccountRecordName()
+            guard previous != current else { return .unchanged }
+            for cursor in accountBoundCursors {
+                try await cursor.clearChangeToken()
+            }
+            try await store.bindAccount(recordName: current)
+            return previous == nil ? .firstUse : .changed
         }
-        try await store.bindAccount(recordName: current)
-        return previous == nil ? .firstUse : .changed
     }
 
     /// Creates the shared zone when the account has none, the same idempotent
@@ -170,9 +184,31 @@ public enum CloudKitWebSyncAccount {
     public static func ensureSyncZone(
         for feature: CloudKitWebSyncFeature,
         client: CloudKitWebServicesClient,
-        consent: CloudKitWebSyncConsent
+        consent: CloudKitWebSyncConsent,
+        in session: CloudKitWebSession? = nil
     ) async throws {
         try consent.require(feature)
-        try await client.createZone(zoneName: SyncSchema.zoneName, in: nil)
+        try await client.createZone(zoneName: SyncSchema.zoneName, in: session)
+    }
+}
+
+/// Admits a History pass's account-bound work only while the web session its
+/// account was validated in is current, holding the client's gate so no
+/// sign-in or sign-out takes effect partway. It stops the pass once its task
+/// is cancelled, including when a transport returned regardless.
+public final class CloudKitWebSessionFence: HistorySyncPassFence, Sendable {
+    public let session: CloudKitWebSession
+    private let client: CloudKitWebServicesClient
+
+    public init(client: CloudKitWebServicesClient, session: CloudKitWebSession) {
+        self.client = client
+        self.session = session
+    }
+
+    public func admit<Value>(
+        isolation: isolated (any Actor)?,
+        _ work: () async throws -> Value
+    ) async throws -> Value {
+        try await client.whileCurrent(session, isolation: isolation, work)
     }
 }

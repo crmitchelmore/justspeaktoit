@@ -37,7 +37,6 @@ let appleCoreSources: [String] = [
     "AutoCorrectionStore.swift",
     "AutomationIntentSupport.swift",
     "AzureSpeechEndpointField.swift",
-    "AzureVoiceLiveClient.swift",
     "BrandColors.swift",
     "CaptureDisruptionObserver.swift",
     "CaptureEndPointing.swift",

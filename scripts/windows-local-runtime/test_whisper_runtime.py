@@ -49,7 +49,9 @@ class PinTests(unittest.TestCase):
 
     def test_build_keeps_vulkan_optional_and_avoids_extra_runtimes(self):
         arguments = self.pins["cmakeArguments"]
-        for required in ["-DBUILD_SHARED_LIBS=ON", "-DGGML_BACKEND_DL=ON", "-DGGML_CPU_ALL_VARIANTS=ON",
+        # A tagged release build: whisper_version() is then "1.9.4", not "1.9.4-dev",
+        # which the adapter's exact version check requires.
+        for required in ["-DWHISPER_BUILD_IS_DEV=OFF", "-DBUILD_SHARED_LIBS=ON", "-DGGML_BACKEND_DL=ON", "-DGGML_CPU_ALL_VARIANTS=ON",
                          "-DGGML_VULKAN=ON", "-DGGML_OPENMP=OFF", "-DGGML_NATIVE=OFF",
                          "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL"]:
             self.assertIn(required, arguments)

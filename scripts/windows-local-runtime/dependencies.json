@@ -26,6 +26,7 @@
   "cmakeArguments": [
     "-G", "Visual Studio 17 2022", "-A", "x64",
     "-DCMAKE_BUILD_TYPE=Release",
+    "-DWHISPER_BUILD_IS_DEV=OFF",
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
     "-DBUILD_SHARED_LIBS=ON",
     "-DGGML_NATIVE=OFF",

@@ -65,7 +65,7 @@ final class SyntheticEffects: WindowsControllerEffects, @unchecked Sendable {
     ) throws -> any WindowsRecordingCapture { SyntheticCapture(context: context) }
 
     func makeLiveClient(
-        model: String, key: String, language: String?
+        model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? { SyntheticLiveClient(finish: liveFinish) }
 
     func transcribe(

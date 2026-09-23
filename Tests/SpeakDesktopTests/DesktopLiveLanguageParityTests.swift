@@ -84,8 +84,10 @@ private extension DesktopLiveLanguageParityTests {
     func upstream(_ model: String, language: String?) throws -> Set<String> {
         let sockets = AssemblyAISocketFactory()
         let sessions = LanguageParitySessions()
+        // A host supplies its saved Azure resource; every other route ignores it.
         let client = try XCTUnwrap(DesktopLiveTranscription.makeClient(
-            model: model, apiKey: "synthetic", language: language, initiateGladiaSession: sessions.initiator,
+            model: model, apiKey: "synthetic", language: language,
+            azureEndpoint: "https://synthetic.services.ai.azure.com", initiateGladiaSession: sessions.initiator,
             makeConnection: { sockets.make($0) }
         ), model)
         client.start(onTranscript: { _, _ in }, onError: { XCTFail("\(model) reported \($0)") })
@@ -104,11 +106,13 @@ private extension DesktopLiveLanguageParityTests {
         return sent
     }
 
+    /// Client event identities are generated per session and carry no language.
     static func strings(in object: Any) -> [String] {
         switch object {
         case let text as String: return [text]
         case let array as [Any]: return array.flatMap { strings(in: $0) }
-        case let dictionary as [String: Any]: return dictionary.values.flatMap { strings(in: $0) }
+        case let dictionary as [String: Any]:
+            return dictionary.filter { $0.key != "event_id" }.values.flatMap { strings(in: $0) }
         default: return []
         }
     }

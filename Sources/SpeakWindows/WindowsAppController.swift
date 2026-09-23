@@ -359,9 +359,9 @@ extension WindowsAppController {
             try JSONEncoder().encode(settings).write(
                 to: directory.appendingPathComponent("settings.json"), options: .atomic
             )
-            let hint = DesktopTranscription.provider(for: settings.model)?.apiKeyIdentifier
+            let hint = WindowsModels.provider(for: settings.model)?.apiKeyIdentifier
                 == AzureSpeechConfiguration.credentialIdentifier
-                ? " Enter Azure credentials as key:region (for example, your key followed by :uksouth)." : ""
+                ? WindowsAzureResource.selectionHint(for: settings.model) : ""
             if changed { publishModelCatalog(modelCatalog.snapshot) }
             update("Selected \(WindowsModels.all[index].displayName).\(hint)")
         } catch { update("Could not save settings: \(error.localizedDescription)") }

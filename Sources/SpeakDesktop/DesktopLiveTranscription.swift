@@ -11,11 +11,14 @@ public enum DesktopLiveTranscription {
     /// The live routes the shared desktop session implements. xAI serves two
     /// live products under one provider and only the dedicated speech-to-text
     /// stream has a shared client, so that route is admitted by identifier;
-    /// the Grok Voice session stays unavailable on desktop hosts.
+    /// the Grok Voice session stays unavailable on desktop hosts. Azure Voice
+    /// Live connects only to the user's own resource, whose endpoint the host
+    /// stores and passes to `makeClient(model:apiKey:language:azureEndpoint:makeConnection:)`.
     public static let liveModels: [ModelCatalog.Option] = ModelCatalog.liveTranscription.filter {
         guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
         switch route.provider {
-        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia, .revai:
+        case .deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia,
+             .revai, .azure:
             return true
         case .xai: return route.modelID == XAISpeechToText.liveCatalogID
         default: return false
@@ -38,9 +41,20 @@ public enum DesktopLiveTranscription {
         model: String, apiKey: String, language: String? = nil,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) -> (any FinalizingStreamingTranscriptionClient)? {
+        makeClient(model: model, apiKey: apiKey, language: language, azureEndpoint: "", makeConnection: makeConnection)
+    }
+
+    /// The same mapping for hosts that store the Azure Speech resource
+    /// endpoint. The Azure routes connect only to it, and report a missing or
+    /// untrusted endpoint when they start, before any connection; every other
+    /// route ignores it.
+    public static func makeClient(
+        model: String, apiKey: String, language: String? = nil, azureEndpoint: String,
+        makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    ) -> (any FinalizingStreamingTranscriptionClient)? {
         makeClient(
-            model: model, apiKey: apiKey, language: language, initiateGladiaSession: nil,
-            makeConnection: makeConnection
+            model: model, apiKey: apiKey, language: language, azureEndpoint: azureEndpoint,
+            initiateGladiaSession: nil, makeConnection: makeConnection
         )
     }
 
@@ -51,7 +65,7 @@ public enum DesktopLiveTranscription {
     /// route-to-client mapping stays auditable in one place, so its length and
     /// branch count grow with the provider list rather than with any logic.
     static func makeClient( // swiftlint:disable:this cyclomatic_complexity function_body_length
-        model: String, apiKey: String, language: String?,
+        model: String, apiKey: String, language: String?, azureEndpoint: String = "",
         initiateGladiaSession: GladiaLiveClient.SessionInitiator?,
         makeConnection: @escaping @Sendable (URLRequest) -> any StreamingWebSocketConnection
     ) -> (any FinalizingStreamingTranscriptionClient)? {
@@ -123,6 +137,13 @@ public enum DesktopLiveTranscription {
             // Apple platforms, because Rev.ai reads a missing code as English.
             return RevAILiveClient(
                 accessToken: apiKey, language: hint, sampleRate: route.sampleRate, makeConnection: makeConnection
+            )
+        case .azure:
+            // The canonical capability takes no hint, so Azure's multilingual
+            // detection, its documented default, serves every selection.
+            return AzureVoiceLiveClient(
+                credentials: apiKey, endpoint: azureEndpoint, model: route.apiModelName, language: hint,
+                sampleRate: route.sampleRate, makeConnection: makeConnection
             )
         default: return nil
         }

@@ -10,6 +10,7 @@ extension WindowsAppController {
         textOutput: WindowsTextOutputOptions, trigger: HotKeySessionTrigger = .other
     ) async throws {
         let key = try requireCredentialOrLocalModel(profile.modelIdentifier)
+        try requireAzureResource(forLive: profile.modelIdentifier)
         // Holds a profile's or the app's on-device model while startup suspends;
         // the recording holds it once capture starts.
         let localModel = beginLocalUse(profile.modelIdentifier)

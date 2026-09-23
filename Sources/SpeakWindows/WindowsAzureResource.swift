@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import CWindowsSupport
 
 /// The Azure Speech resource endpoint Windows keeps with its other device
@@ -10,6 +11,16 @@ import CWindowsSupport
 enum WindowsAzureResource {
     static let invalidEndpoint = "Use the HTTPS endpoint from your resource\u{2019}s Keys and Endpoint page, "
         + "ending in cognitiveservices.azure.com or services.ai.azure.com, with no path."
+    static let missingForLive = "Azure live transcription needs your Azure Speech resource endpoint. "
+        + "Add it in Settings \u{2192} Azure Speech resource\u{2026}, or choose another model."
+
+    /// Shown when an Azure model is selected: the credential format, and for
+    /// the live routes, which have no regional fallback, where the endpoint goes.
+    static func selectionHint(for model: String) -> String {
+        let credential = " Enter Azure credentials as key:region (for example, your key followed by :uksouth)."
+        guard DesktopLiveTranscription.route(forID: model)?.provider == .azure else { return credential }
+        return credential + " Live transcription also needs Settings \u{2192} Azure Speech resource\u{2026}."
+    }
 
     /// The entry as it is saved: trimmed, with an empty entry clearing the
     /// endpoint. Anything else must be a resource origin the shared clients
@@ -26,6 +37,15 @@ enum WindowsAzureResource {
 extension WindowsAppController {
     /// The saved resource endpoint, or empty when none is set.
     func azureResourceEndpoint() -> String { settings.azureSpeechResourceEndpoint ?? "" }
+
+    /// Azure live transcription has no regional fallback, so without a saved
+    /// endpoint the recording is refused before its audio file, History record
+    /// or socket exists.
+    func requireAzureResource(forLive model: String) throws {
+        guard DesktopLiveTranscription.route(forID: model)?.provider == .azure,
+              azureResourceEndpoint().isEmpty else { return }
+        throw WindowsNativeError(message: WindowsAzureResource.missingForLive)
+    }
 
     /// Saves an entry `WindowsAzureResource.normalized` accepted.
     func saveAzureResourceEndpoint(_ endpoint: String) {

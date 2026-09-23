@@ -31,7 +31,10 @@ protocol WindowsControllerEffects: Sendable {
     func makeCapture(
         context: WindowsCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any WindowsRecordingCapture
-    func makeLiveClient(model: String, key: String, language: String?) -> (any FinalizingStreamingTranscriptionClient)?
+    /// `azureEndpoint` is the saved Azure Speech resource; other routes ignore it.
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String
+    ) -> (any FinalizingStreamingTranscriptionClient)?
     func transcribe(
         _ request: WindowsTranscriptionRequest, with controller: WindowsAppController
     ) async throws -> TranscriptionResult
@@ -53,10 +56,11 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     }
 
     func makeLiveClient(
-        model: String, key: String, language: String?
+        model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, makeConnection: { WinHTTPStreamingConnection(request: $0) }
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            makeConnection: { WinHTTPStreamingConnection(request: $0) }
         )
     }
 

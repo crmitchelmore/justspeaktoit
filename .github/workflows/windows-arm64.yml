@@ -206,7 +206,7 @@ jobs:
             $probe = Start-Process -FilePath (Get-Command swift).Source -PassThru -NoNewWindow `
               -ArgumentList @('test', '--configuration', 'release', '--skip-build', '--filter', 'WinHTTPRuntimeProbeTests', `
                 '--filter', 'GladiaWinHTTPRuntimeTests', '--filter', 'CartesiaWinHTTPRuntimeTests', `
-                '--xunit-output', 'windows-arm64-websocket-tests.xml') `
+                '--filter', 'RevAIWinHTTPRuntimeTests', '--xunit-output', 'windows-arm64-websocket-tests.xml') `
               -RedirectStandardOutput windows-arm64-websocket-probe.log -RedirectStandardError windows-arm64-websocket-probe-errors.log
             if (-not $probe.WaitForExit(150000)) {
               $probe.Kill($true)

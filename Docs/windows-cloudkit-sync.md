@@ -111,8 +111,11 @@ From Apple's
   holds cursors, the bound account, acknowledgements and imported-key
   bookkeeping; `DesktopCloudSyncService` runs sign-in, one pass at a time and
   key import, with every History write, key change, key-sync key and success
-  time admitted in the validated session (`DesktopCloudSyncSteps`), stopping
-  when the session ends, a feature is turned off or the pass is cancelled;
+  time admitted in the validated session (`DesktopCloudSyncSteps`). It writes
+  nothing more once the session ends, a feature is turned off or the pass is
+  cancelled; earlier writes stay. Turning key import on or off takes a
+  revision, so an earlier turn-on still in progress stores nothing once a later
+  change begins, and a key saved by hand is written together with its mark;
   `DesktopCloudSyncWork` owns a host's sync tasks so shutdown stops new work
   and drains what runs within a bound; `DesktopCloudSyncConfiguration`
   resolves the build-time token.

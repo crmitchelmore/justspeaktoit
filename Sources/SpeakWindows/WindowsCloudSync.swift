@@ -309,16 +309,11 @@ func cloudSyncEvent(
     holder.cloudSync?.handle(action: action, history: history == 1, keys: keys == 1, passphrase: typed)
 }
 
-/// Saving a key by hand keeps it from being removed by a later remote deletion.
+/// Saving a key by hand keeps it from being removed by a later remote deletion;
+/// with sync configured the controller saves and marks it in one step.
 func saveKeyEvent(_ value: String, index: Int, holder: WindowsEventContext) {
     let controller = holder.controller
-    let sync = holder.cloudSync
-    holder.enqueueSettings {
-        await controller.saveKey(value, modelIndex: index)
-        guard WindowsModels.all.indices.contains(index),
-              let provider = WindowsModels.provider(for: WindowsModels.all[index].id) else { return }
-        await sync?.service.noteManualKeySave(identifier: provider.apiKeyIdentifier)
-    }
+    holder.enqueueSettings { await controller.saveKey(value, modelIndex: index) }
 }
 
 extension WindowsAppController {

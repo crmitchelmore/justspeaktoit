@@ -477,8 +477,11 @@ What the Windows app does:
   Credential Manager, as `com.justspeaktoit/cloudkit.apiKeySyncKey`; the
   passphrase is not. The app imports keys only from the canonical list in
   `SyncSchema.EncryptedSecret.syncableIdentifiers`. It never writes keys to
-  iCloud. A key you save by hand is never removed by a later deletion on the
-  Mac.
+  iCloud. A provider key you save in Settings is never removed by a later
+  deletion on the Mac, even one that arrives as you save it; the OpenRouter key
+  saved from the post-processing dialog is not yet protected this way. The
+  latest choice wins: turning import off, or on again with another passphrase,
+  overrides a turn-on that is still in progress.
 - Sync state (the cursor, the bound iCloud user, acknowledgements and which
   keys were imported) is in `%LOCALAPPDATA%\JustSpeakToIt\CloudSync\state.json`.
   Signing out keeps it. If another Apple ID signs in, that state is reset and

@@ -47,15 +47,15 @@ final class WindowsAudioPlaybackControllerTests: XCTestCase {
     }
 
     func testStop_AcknowledgesSilenceBeforeWaitingForCodecRelease() async throws {
-        let gate = PlaybackTestGate()
+        let gate = PlaybackTestGate(), id = UUID()
         backend.enqueue(PlaybackTestPlan(destroyGate: gate))
-        let handle = try await play()
+        let handle = try await play(id)
         try await controller.stopAndWait()
         await playbackEventually { gate.entered }
         XCTAssertTrue(handle.snapshot().outputIsQuiet)
         XCTAssertEqual(handle.counts.destroyed, 0)
         XCTAssertEqual(controller.pendingReleaseCount, 1)
-        await playbackEventually { self.recorder.statuses.last == "Playback stopped." }
+        await playbackEventually { self.idle(id) != nil }
         XCTAssertNil(controller.activity)
         gate.open()
         await playbackEventually { self.controller.pendingReleaseCount == 0 }
@@ -184,6 +184,30 @@ final class WindowsAudioPlaybackControllerTests: XCTestCase {
         await playbackEventually { self.controller.pendingReleaseCount == 0 }
         XCTAssertNil(controller.activity)
         recorder.onShow { _ in }
+    }
+
+    /// Only the user's Stop reports "Playback stopped.". Stopping to make way
+    /// for another row, a search or deletion, recording or import must not
+    /// overwrite the status that work has already set.
+    func testOnlyAnAnnouncedStop_ReportsPlaybackStopped() async throws {
+        let makingWay: [@Sendable (WindowsAudioPlaybackController) async throws -> Void] = [
+            { $0.stop(unless: UUID()) }, { $0.stop() }, { try await $0.stopAndWait() }
+        ]
+        for makeWay in makingWay {
+            let id = UUID()
+            _ = try await play(id)
+            try await makeWay(try XCTUnwrap(controller))
+            await playbackEventually { self.recorder.displays.last == self.idle(id) }
+        }
+        _ = try await play()
+        controller.stop(announcing: true)
+        // Statuses are delivered in order: an earlier one would precede this.
+        await playbackEventually { !self.recorder.statuses.isEmpty }
+        XCTAssertEqual(recorder.statuses, ["Playback stopped."])
+    }
+
+    private func idle(_ id: UUID) -> WindowsAudioPlaybackDisplay? {
+        recorder.displays.last { $0.recordID == id && $0.state == .idle }
     }
 
     func testStaleStatusRevision_IsRejectedAfterNewRun() async throws {

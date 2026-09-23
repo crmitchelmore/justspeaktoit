@@ -24,6 +24,8 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         var display: WindowsAudioPlaybackDisplay
         var startReserved = false
         var stopped = false
+        /// Stopped by the user's Stop, the only stop that reports a status.
+        var stopAnnounced = false
         var outputQuiet = false
         var pauseRequested = false
         var pauseCommandQueued = false
@@ -142,9 +144,12 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
 
     /// Requests cancellation. The display resets only after output is quiet.
     /// Call stopAndWait before starting a microphone or another audio owner.
-    public func stop() {
+    /// Only the user's Stop is `announcing` and reports "Playback stopped.";
+    /// stopping to make way for another row, a search, recording or import
+    /// leaves the status line to that work.
+    public func stop(announcing: Bool = false) {
         lock.withLock {
-            for run in live.values where !run.stopped { stopLocked(run) }
+            for run in live.values where !run.stopped { stopLocked(run, announcing: announcing) }
         }
     }
 
@@ -199,9 +204,10 @@ public final class WindowsAudioPlaybackController: @unchecked Sendable {
         }
     }
 
-    private func stopLocked(_ run: Run) {
+    private func stopLocked(_ run: Run, announcing: Bool = false) {
         guard !run.stopped else { return }
         run.stopped = true
+        run.stopAnnounced = announcing
         // Reserving start and observing cancellation use the same lock. If
         // open is still blocked, cancellation forbids every future start.
         if !run.startReserved { run.outputQuiet = true }
@@ -323,7 +329,8 @@ private extension WindowsAudioPlaybackController {
                         recordID: run.recordID, state: .idle,
                         text: WindowsAudioPlaybackDisplay.text(position: 0, duration: run.knownDuration)
                     )
-                    publishLocked(display, status: run.awaiting == nil ? Self.terminalMessage(run.terminal) : nil)
+                    let status = Self.terminalMessage(run.terminal, stopAnnounced: run.stopAnnounced)
+                    publishLocked(display, status: run.awaiting == nil ? status : nil)
                     acknowledgedRevision = revision
                 }
             }

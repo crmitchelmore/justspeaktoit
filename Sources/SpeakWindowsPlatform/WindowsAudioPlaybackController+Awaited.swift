@@ -51,11 +51,13 @@ extension WindowsAudioPlaybackController {
         }
     }
 
-    static func terminalMessage(_ completion: WindowsAudioPlaybackCompletion?) -> String {
+    /// A finished or failed run always reports; a stopped one only when the
+    /// user's Stop ended it.
+    static func terminalMessage(_ completion: WindowsAudioPlaybackCompletion?, stopAnnounced: Bool) -> String? {
         switch completion?.status {
         case .finished: return "Playback finished."
         case .failed(let message): return "Playback failed: \(message)"
-        case .cancelled, .none: return "Playback stopped."
+        case .cancelled, .none: return stopAnnounced ? "Playback stopped." : nil
         }
     }
 }

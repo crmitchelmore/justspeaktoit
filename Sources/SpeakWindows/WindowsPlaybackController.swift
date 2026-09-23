@@ -59,14 +59,15 @@ extension WindowsAppController {
         }
     }
 
-    /// Ends History playback and Read aloud, including a start still resolving
-    /// its audio and a segment still being synthesized. The ended Read aloud
-    /// can no longer report, so its stop is reported here.
+    /// The user's Stop: ends History playback and Read aloud, including a
+    /// start still resolving its audio and a segment still being synthesized.
+    /// Only this stop reports "Playback stopped."; the ended Read aloud can no
+    /// longer report, so its stop is reported here.
     func playbackStop() {
         guard !closed else { return }
         let reading = readAloudState.task != nil
         stopReadAloud()
-        playback.stop()
+        playback.stop(announcing: true)
         guard reading, !busy, recording == nil else { return }
         update("Reading aloud stopped.")
     }

@@ -117,6 +117,25 @@ final class DesktopPostProcessingTests: XCTestCase {
         XCTAssertFalse(TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript("[BLANK_AUDIO] speech"))
     }
 
+    func testPersistedOptionsMigrateLikeAppleAndNeverSubstituteALocalModel() throws {
+        let remote = try XCTUnwrap(DesktopPostProcessing.remoteModels.last?.id)
+        let valid = DesktopPostProcessing.Options(mode: .remote, modelIdentifier: remote, customPrompt: "Keep")
+        XCTAssertEqual(DesktopPostProcessing.migrated(valid), valid)
+
+        let retired = DesktopPostProcessing.Options(mode: .remote, modelIdentifier: "vendor/retired-cleanup-model")
+        let successor = ModelCatalog.normalizedPostProcessingModel(retired.modelIdentifier)
+        XCTAssertEqual(DesktopPostProcessing.migrated(retired),
+                       DesktopPostProcessing.Options(mode: .remote, modelIdentifier: successor))
+
+        let local = DesktopPostProcessing.Options(mode: .remote, modelIdentifier: "local/post-processing/rules")
+        XCTAssertEqual(DesktopPostProcessing.migrated(local), DesktopPostProcessing.Options(
+            mode: .disabled, modelIdentifier: ModelCatalog.defaultPostProcessingModel
+        ))
+        let disabled = DesktopPostProcessing.Options(mode: .disabled, modelIdentifier: " \(remote) ")
+        XCTAssertEqual(DesktopPostProcessing.migrated(disabled).modelIdentifier, remote)
+        XCTAssertEqual(DesktopPostProcessing.migrated(disabled).mode, .disabled)
+    }
+
     private func process(
         _ raw: String, options: DesktopPostProcessing.Options, apiKey: String = "test-key"
     ) async throws -> DesktopPostProcessing.Outcome {

@@ -4,9 +4,13 @@ import SpeakDesktop
 
 extension WindowsAppController {
     static func prepareModelCatalog(directory: URL, settings: inout Settings) throws -> OpenRouterAudioCatalogStore {
-        if WindowsModels.provider(for: settings.model) == nil {
-            settings.model = ModelCatalog.defaultBatchTranscriptionModel
-        }
+        let selection = DesktopModelSelection.migrated(
+            model: settings.model, batchModel: settings.batchModel, liveModel: settings.liveModel,
+            isLive: WindowsModels.isLive, isBatch: { DesktopTranscription.provider(for: $0) != nil }
+        )
+        settings.model = selection.model
+        settings.batchModel = selection.batchModel
+        settings.liveModel = selection.liveModel
         let credential = DesktopTranscription.batchModels.lazy.compactMap { WindowsModels.provider(for: $0.id) }
             .first { $0.id == OpenRouterService.providerID }?.apiKeyIdentifier
         let catalog = OpenRouterAudioCatalogStore(

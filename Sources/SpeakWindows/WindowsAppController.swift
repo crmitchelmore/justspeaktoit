@@ -97,11 +97,8 @@ actor WindowsAppController {
             loadedSettings = Settings()
         }
         modelCatalog = try Self.prepareModelCatalog(directory: directory, settings: &loadedSettings)
-        if var processing = loadedSettings.postProcessing,
-           !DesktopPostProcessing.remoteModels.contains(where: { $0.id == processing.modelIdentifier }) {
-            processing.mode = .disabled
-            processing.modelIdentifier = ModelCatalog.defaultPostProcessingModel
-            loadedSettings.postProcessing = processing
+        if let processing = loadedSettings.postProcessing {
+            loadedSettings.postProcessing = DesktopPostProcessing.migrated(processing)
         }
         self.settings = loadedSettings
     }

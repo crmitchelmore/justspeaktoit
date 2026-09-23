@@ -45,6 +45,24 @@ public enum DesktopPostProcessing {
 
     public static var remoteModels: [ModelCatalog.Option] { ModelCatalog.cloudPostProcessing }
 
+    /// Applies the Apple settings' retired-model migration
+    /// (`ModelCatalog.normalizedPostProcessingModel`) to persisted options. A
+    /// retired cloud model moves to its successor and keeps the user's choice to
+    /// send transcripts to the same remote service; a model this host cannot run
+    /// (for example a local cleanup model) disables post-processing instead of
+    /// substituting a remote one.
+    public static func migrated(_ options: Options) -> Options {
+        var result = options
+        let model = ModelCatalog.normalizedPostProcessingModel(options.modelIdentifier)
+        if remoteModels.contains(where: { $0.id == model }) {
+            result.modelIdentifier = model
+        } else {
+            result.mode = .disabled
+            result.modelIdentifier = ModelCatalog.defaultPostProcessingModel
+        }
+        return result
+    }
+
     public static func process(
         rawText: String,
         options: Options,

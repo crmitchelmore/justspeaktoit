@@ -104,7 +104,7 @@ extension WindowsAppController {
 
     func retryHistory(_ identifier: String) async {
         guard canUseHistory, let id = UUID(uuidString: identifier),
-              let record = history[id] else { return }
+              let record = history[id], !refuseSyncedAudio(record) else { return }
         guard DesktopTranscription.provider(for: record.modelIdentifier) != nil else {
             update("This used a live model. Open its audio, then choose Batch and import it to transcribe again.")
             return
@@ -131,7 +131,8 @@ extension WindowsAppController {
     }
 
     func openHistoryAudio(_ identifier: String) async {
-        guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
+        guard !closed, let id = UUID(uuidString: identifier), let record = history[id],
+              !refuseSyncedAudio(record) else { return }
         activeOperations += 1
         defer { finishOperation() }
         do {

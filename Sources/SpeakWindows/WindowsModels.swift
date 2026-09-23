@@ -82,3 +82,12 @@ enum WindowsModels {
         guard result == 0 else { throw WindowsNativeError(message: "Could not display the updated model catalogue.") }
     }
 }
+
+extension WindowsAppController {
+    func credentialIdentifier(for model: String) throws -> String {
+        guard let provider = WindowsModels.provider(for: model) else {
+            throw DesktopTranscriptionError.unsupportedModel
+        }
+        return provider.apiKeyIdentifier
+    }
+}

@@ -13,6 +13,7 @@ final class WindowsEventContext {
     let smokeTest: Bool
     var smokeTestFailure: Error?
     var microphoneMonitor: WindowsMicrophoneMonitor?
+    var cloudSync: WindowsCloudSync?
     let search: WindowsSearchCoalescer
     private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
@@ -120,7 +121,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
             await controller.importAudio(path: value, modelIndex: Int(index))
         }
     case 3, 6, 15, 16, 18, 19: transcriptEvent(event, value: value, holder: holder)
-    case 4: holder.enqueueSettings { await controller.saveKey(value, modelIndex: Int(index)) }
+    case 4: saveKeyEvent(value, index: Int(index), holder: holder)
     case 5: holder.enqueueSettings { await controller.selectModel(Int(index)) }
     case 7:
         ready(holder)
@@ -354,7 +355,7 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
-        if !smokeTest { await WindowsAutomationSwitch.restore(holder) }
+        await restoreServices(holder)
         let preferences = await controller.preferredModelIDs()
         try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live)
         try await controller.configureModelCatalog()
@@ -386,7 +387,7 @@ enum SpeakWindowsMain {
         // this context once the holder can be released.
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
-        jsti_window_clear_voice_output()
+        await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         await holder.hotKeys.drain()
         await controller.close()

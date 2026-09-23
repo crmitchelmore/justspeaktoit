@@ -38,7 +38,7 @@ extension WindowsAppController {
     func playbackToggle(_ identifier: String) async {
         guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
         if playback.togglePause(recordID: id) { return }
-        guard canUseHistory, selectedHistoryID == id, isVisible(id) else { return }
+        guard canUseHistory, selectedHistoryID == id, isVisible(id), !refuseSyncedAudio(record) else { return }
         // History playback replaces Read aloud, including a segment still being synthesized.
         stopReadAloud()
         activeOperations += 1

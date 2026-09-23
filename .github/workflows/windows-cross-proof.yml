@@ -82,6 +82,17 @@ jobs:
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --output "$RUNNER_TEMP/foundation-proof" 2>&1 |
             tee "$RUNNER_TEMP/foundation-proof/bootstrap.log"
+      - name: Check the CloudKit Web Services build-setting writer
+        shell: bash
+        run: python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py'
+      # The container's API token (CloudKit Console) is a build setting. Pull
+      # request builds never receive it and report iCloud sync as unavailable.
+      - name: Configure CloudKit Web Services for this build
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        env:
+          CLOUDKIT_WEB_API_TOKEN: ${{ secrets.CLOUDKIT_WEB_API_TOKEN }}
+        run: python3 -B scripts/windows-cloudkit/configure-cloudkit-web.py
       - name: Cross-build the Windows app and test suite
         shell: bash
         run: |

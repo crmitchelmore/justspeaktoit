@@ -61,6 +61,16 @@ enum WindowsNative {
         }
     }
 
+    /// A friendly name for the device a synced transcript came from.
+    static func originName(_ platform: String?) -> String {
+        switch platform {
+        case "macos": return "your Mac"
+        case "ios": return "your iPhone"
+        case "windows": return "another PC"
+        default: return "another device"
+        }
+    }
+
     static func chooseExportPath(identifier: String) throws -> String? {
         var path = [CChar](repeating: 0, count: 131_072)
         var error = [CChar](repeating: 0, count: 1024)
@@ -88,6 +98,7 @@ enum WindowsNative {
         let rows = records.map { record in
             // The same canonical friendly name that search matches against.
             let model = DesktopHistorySearch.modelDisplayName(for: record.modelIdentifier)
+                + (record.isSyncedCopy ? " · from \(originName(record.originPlatform))" : "")
             let detail = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
                 ?? record.displayText ?? "Recording saved; awaiting transcription."
             return JSTIHistoryRow(

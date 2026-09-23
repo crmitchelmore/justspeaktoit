@@ -79,6 +79,7 @@ actor WindowsAppController {
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
     var outputSlot = WindowsOutputState()
+    var cloudSync = WindowsCloudSyncHooks() // Installed once iCloud sync is configured.
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
     let playback = WindowsAudioPlaybackController(
@@ -283,7 +284,6 @@ extension WindowsAppController {
         shutdownWaiters.removeAll()
         waiters.forEach { $0.resume() }
     }
-
 }
 
 extension WindowsAppController {
@@ -291,6 +291,7 @@ extension WindowsAppController {
         try await store.save(record)
         indexHistory(record)
         refreshHistory()
+        cloudSync.historyChanged?()
     }
 
     func finishOperation() {
@@ -306,12 +307,6 @@ extension WindowsAppController {
         WindowsNative.update(status, transcript: transcript, state: state)
     }
 
-    func credentialIdentifier(for model: String) throws -> String {
-        guard let provider = WindowsModels.provider(for: model) else {
-            throw DesktopTranscriptionError.unsupportedModel
-        }
-        return provider.apiKeyIdentifier
-    }
     var canUseHistory: Bool { isReady && !closed && !busy && recording == nil }
 
     func selectedIndex() -> Int {

@@ -26,6 +26,9 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
+bool jsti_cloud_sync_available();
+void jsti_show_cloud_sync_settings(HWND owner);
+bool jsti_cloud_sync_settings_self_test(HWND owner, std::string &error);
 int jsti_window_recording_state();
 
 namespace {
@@ -58,7 +61,7 @@ constexpr int voiceSettingsID = 173;
 // Settings menu commands. They open the same dialogs as their buttons; the
 // automation item emits AUTOMATION_TOGGLED with the requested state.
 constexpr int menuShortcutID = 180, menuTextOutputID = 181, menuVoiceID = 182, menuPostProcessingID = 183,
-    menuAutomationID = 184;
+    menuAutomationID = 184, menuCloudSyncID = 185;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
 struct HistoryRow {
@@ -395,6 +398,7 @@ void updateSettingsMenu(HWND window, int recording) {
     enable(menuTextOutputID, recording == 0 && jsti_text_output_available());
     enable(menuVoiceID, recording == 0 && jsti_voice_output_available());
     enable(menuPostProcessingID, recording == 0 && jsti_postprocessing_available());
+    enable(menuCloudSyncID, recording == 0 && jsti_cloud_sync_available());
     bool automation;
     { std::lock_guard<std::mutex> lock(state.mutex); automation = state.automationEnabled; }
     CheckMenuItem(menu, menuAutomationID, MF_BYCOMMAND | (automation ? MF_CHECKED : MF_UNCHECKED));
@@ -408,6 +412,7 @@ HMENU createSettingsMenu() {
         !AppendMenuW(settings, MF_STRING, menuTextOutputID, L"&Text output\u2026") ||
         !AppendMenuW(settings, MF_STRING, menuVoiceID, L"&Voice\u2026") ||
         !AppendMenuW(settings, MF_STRING, menuPostProcessingID, L"&Post-processing\u2026") ||
+        !AppendMenuW(settings, MF_STRING, menuCloudSyncID, L"i&Cloud sync\u2026") ||
         !AppendMenuW(settings, MF_SEPARATOR, 0, nullptr) ||
         !AppendMenuW(settings, MF_STRING, menuAutomationID, L"Allow &automation (speak command)") ||
         !AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(settings), L"Setti&ngs")) {
@@ -874,7 +879,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         case processingID: jsti_show_postprocessing(window); return 0;
-        case menuShortcutID: case menuTextOutputID: case menuVoiceID: case menuPostProcessingID: {
+        case menuShortcutID: case menuTextOutputID: case menuVoiceID: case menuPostProcessingID:
+        case menuCloudSyncID: {
             const int recording = jsti_window_recording_state();
             const HMENU menu = GetMenu(window);
             if (!menu || recording != 0 || !IsWindowEnabled(window) ||
@@ -886,6 +892,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_text_output(window);
             } else if (LOWORD(wparam) == menuVoiceID) {
                 jsti_show_voice_settings(window);
+            } else if (LOWORD(wparam) == menuCloudSyncID) {
+                jsti_show_cloud_sync_settings(window);
             } else {
                 jsti_show_postprocessing(window);
             }
@@ -2240,7 +2248,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         auto observe = [](void *context) { return static_cast<Event *>(context)->event; };
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
-            jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure);
+            jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
+            jsti_cloud_sync_settings_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

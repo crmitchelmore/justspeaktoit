@@ -25,6 +25,13 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   private let logger = SpeakLogger.logger(category: "ElevenLabsLiveController")
   private let audioProcessor = ElevenLabsAudioProcessor()
   private var hasFinished: Bool = false
+  private var isStarting = false
+  private var isStopping = false
+  private var stopGrace: TimeInterval = 0
+
+  var stopCompletionTimeout: TimeInterval {
+    ElevenLabsStopPolicy.completionTimeout(grace: stopGrace)
+  }
 
   private let targetSampleRate: Double = 16000
   private var targetFormat: AVAudioFormat?
@@ -32,6 +39,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   private var finalSegments: [TranscriptionSegment] = []
   private var currentInterim: String = ""
   private var fullTranscript: String = ""
+  private var finalizedText: String?
 
   init(
     appSettings: AppSettings,
@@ -51,18 +59,27 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     logger.info("Configured ElevenLabs with model: \(model)")
   }
 
-  // swiftlint:disable:next function_body_length
+  // swiftlint:disable:next cyclomatic_complexity function_body_length
   func start() async throws {
+    guard !isStarting, !isStopping, transcriber == nil else {
+      throw TranscriptionManagerError.liveSessionAlreadyRunning
+    }
+    isStarting = true
+    defer { isStarting = false }
+    resetStartState()
+    stopGrace = ElevenLabsStopPolicy.boundedGrace(appSettings.liveStopGracePeriod)
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.microphonePermissionMissing
     }
 
+    guard !hasFinished, !Task.isCancelled else { throw CancellationError() }
     let apiKey = try await elevenLabsAPIKey()
+    guard !hasFinished, !Task.isCancelled else { throw CancellationError() }
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
     audioEngine = AVAudioEngine()
-    resetStartState()
 
     do {
+      guard !hasFinished, !Task.isCancelled else { throw CancellationError() }
       let inputNode = audioEngine.inputNode
       inputNode.removeTap(onBus: 0)
       let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -86,7 +103,8 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       let newTranscriber = ElevenLabsLiveTranscriber(
         apiKey: apiKey,
         modelID: modelID,
-        sampleRate: 16000
+        sampleRate: 16000,
+        language: currentLanguage
       )
       transcriber = newTranscriber
 
@@ -97,15 +115,15 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
             // Drop callbacks queued by a previous recording's stream: this
             // controller instance is reused between recordings (issue #643).
             guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
+            guard !self.hasFinished else { return }
             self.handleTranscript(text: text, isFinal: isFinal)
           }
         },
-        onError: { [weak self, weak newTranscriber] error in
+        onError: { [weak self, weak newTranscriber] _ in
           Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
             guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
-            if !self.isRunning { return }
-            self.delegate?.liveTranscriber(self, didFail: error)
+            self.reportActiveFailure(from: newTranscriber)
           }
         }
       )
@@ -124,6 +142,10 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       }
 
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      guard !hasFinished, !Task.isCancelled, transcriber === newTranscriber else {
+        throw CancellationError()
+      }
+      if let failure = newTranscriber.snapshot.error { throw failure }
       isRunning = true
       streamingStartTime = Date()
     } catch {
@@ -149,38 +171,60 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
   }
 
   func stop() async {
+    if isStarting, !isRunning {
+      hasFinished = true
+      audioProcessor.setRunning(false)
+      audioEngine.stop()
+      transcriber?.stop()
+      return
+    }
     guard isRunning else { return }
     guard !hasFinished else { return }
     hasFinished = true
+    isStopping = true
+    defer { isStopping = false }
 
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
 
-    if let transcriber {
+    let active = transcriber
+    var snapshot: ElevenLabsControllerRun.Snapshot?
+    if let active {
       audioProcessor.drainConverterTail()
-      audioProcessor.flushPendingAudio(to: transcriber)
-      await transcriber.waitForPendingSends()
+      audioProcessor.flushPendingAudio(to: active)
       audioProcessor.setRunning(false)
-      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
-      // Manual commit flushes any VAD-buffered audio so the server emits
-      // a final committed_transcript for the trailing words. Await that
-      // event-driven (with timeout) instead of a fixed sleep so the HUD
-      // doesn't sit on "Finalising transcript".
-      transcriber.sendCommit()
-      await transcriber.awaitCommitFinal(timeout: 1.5)
-      transcriber.stop()
+      await applyLiveStopGrace(stopGrace)
+      guard transcriber === active else { return }
+      // The shared client owns drain/commit ordering. It can already have a
+      // periodic commit pending, so a separate Mac commit must never be sent.
+      snapshot = await active.finishAndWait()
+      guard transcriber === active else { return }
     } else {
       audioProcessor.setRunning(false)
     }
 
-    let result = buildFinalResult()
-    await MainActor.run {
-      delegate?.liveTranscriber(self, didFinishWith: result)
+    if let snapshot {
+      // This is the full session text, including a retained draft on failure.
+      // Replace once; appending it would duplicate earlier streamed segments.
+      fullTranscript = snapshot.confirmedText
+      finalizedText = snapshot.text
+      currentInterim = ""
+      finalSegments = snapshot.confirmedText.isEmpty ? [] : [
+        TranscriptionSegment(startTime: 0, endTime: 0, text: snapshot.confirmedText)
+      ]
+      delegate?.liveTranscriber(self, didUpdatePartial: snapshot.text)
+    }
+    if snapshot?.error != nil {
+      if let failure = active?.takeFailureForReporting() {
+        delegate?.liveTranscriber(self, didFail: failure)
+      }
+    } else {
+      delegate?.liveTranscriber(self, didFinishWith: buildFinalResult())
     }
 
     await endActiveInputSession()
-    transcriber = nil
+    if transcriber === active { transcriber = nil }
   }
 
   private final class ElevenLabsAudioProcessor: @unchecked Sendable {
@@ -343,6 +387,11 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
 // swiftlint:enable type_body_length
 
 private extension ElevenLabsLiveController {
+  func reportActiveFailure(from transcriber: ElevenLabsLiveTranscriber?) {
+    guard isRunning, !hasFinished, let failure = transcriber?.takeFailureForReporting() else { return }
+    delegate?.liveTranscriber(self, didFail: failure)
+  }
+
   func ensurePermissions() async -> Bool {
     // Remote streaming providers only need microphone access; speech recognition
     // permission is exclusive to the on-device Apple transcriber.
@@ -373,6 +422,7 @@ private extension ElevenLabsLiveController {
     finalSegments = []
     currentInterim = ""
     fullTranscript = ""
+    finalizedText = nil
     streamingStartTime = nil
     hasFinished = false
     isRunning = false
@@ -390,6 +440,7 @@ private extension ElevenLabsLiveController {
     currentInterim = ""
     finalSegments = []
     fullTranscript = ""
+    finalizedText = nil
     await endActiveInputSession()
   }
 
@@ -409,7 +460,7 @@ private extension ElevenLabsLiveController {
     }
 
     return TranscriptionResult(
-      text: text,
+      text: finalizedText ?? text,
       segments: finalSegments,
       confidence: nil,
       duration: streamingDuration,

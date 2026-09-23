@@ -131,7 +131,9 @@ final class CoreJourneyLaunchProfile {
             permissionsOverride: runsBatchJourney
                 ? PermissionsManager() : PermissionsManager(statusProvider: { _ in .denied }),
             keychainServiceOverride: suiteName,
-            sweepsStagedLeftovers: false
+            sweepsStagedLeftovers: false,
+            fileManager: fileManager,
+            defaults: defaults
         )
     }
 }

@@ -1,309 +1,330 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
 import os.log
+#endif
 
-// MARK: - Soniox Live Client (Cross-platform WebSocket)
+// MARK: - Soniox Live Client (portable, injected transport)
 
-/// Cross-platform Soniox real-time speech-to-text client.
+/// Shared Soniox real-time speech-to-text client used by macOS, iOS and Windows.
 ///
-/// Shared by macOS and iOS. Soniox streams token batches; final tokens are
-/// accumulated so the live transcript grows monotonically, and the cumulative
-/// final is committed on the `finished`/finalize markers. Conforms to
-/// ``StreamingTranscriptionClient``.
-public final class SonioxLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
-    /// Final shape: the final emit is the accumulated final-token text for the session.
+/// One `transcribe-websocket` session per run. The configuration frame goes out
+/// after the real handshake; PCM16 mono frames are admitted synchronously into a
+/// bounded queue and sent one at a time behind the configuration. Soniox streams
+/// token batches — `is_final` tokens are confirmed once and accumulated, and the
+/// non-final tail is redisplayed on top of them, so the live transcript grows
+/// monotonically. Finalisation drains the queue, sends the empty end-of-stream
+/// frame (which flushes buffered audio and finalises pending tokens), and waits
+/// for the `finished` response within a bounded budget. The transport is
+/// injectable; framing, admission and lifecycle stay here so the platforms
+/// cannot drift.
+///
+/// Conforms to ``FinalizingStreamingTranscriptionClient``. `finalShape` is
+/// `.cumulativeTranscript`: every `onTranscript` delivery restates the whole
+/// transcript so far, so finals replace rather than append.
+public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-    private static let websocketHost = "stt-rt.soniox.com"
-    private static let websocketPath = "/transcribe-websocket"
+    /// The handshake must complete within this bound or the run fails visibly.
+    static let readyDeadline: TimeInterval = 10
+    /// A single send that has not completed by then means the transport stalled.
+    static let sendDeadline: TimeInterval = 5
+    /// Drain, end-of-stream and the `finished` response are bounded together.
+    static let finishDeadline: TimeInterval = 8
+    /// Queued frames are bounded by count as well as by the byte budget.
+    static let maximumQueuedFrames = 256
 
     private let apiKey: String
     private let model: String
     private let language: String?
     private let sampleRate: Int
-    private let session: URLSession
-    private let logger = SpeakLogger.logger(category: "SonioxLiveClient")
-    private let stateLock = NSLock()
-    private let pendingSendGroup = DispatchGroup()
-    /// Upper bound on how long a close waits for queued frames to reach the
-    /// transport; a wedged send must never leave the socket open forever.
-    private static let stopFlushBudget: DispatchTimeInterval = .milliseconds(750)
+    let makeConnection: ConnectionFactory
+    private let schedule: Scheduler
+    private var finishTimeout: TimeInterval = SonioxLiveClient.finishDeadline
+    private let queue = DispatchQueue(label: "SonioxLiveClient.state")
+    private let queueKey = DispatchSpecificKey<Bool>()
+    private let ownedSession: URLSession?
+    private var run: SonioxLiveRun
 
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isStopping = false
-    private var accumulatedFinalText = ""
-
-    /// Holds audio captured between the recording cue and the socket reaching
-    /// `.running`, then replays it in order (issue #641).
+    /// Holds audio captured before `start()` opens a run, then replays it, in
+    /// capture order, ahead of the live frames once a run exists (issue #641).
     let preroll: StreamingAudioPreroll
 
-    public init(
+    public convenience init(
         apiKey: String,
         model: String = "stt-rt-v5",
         language: String? = nil,
         sampleRate: Int = 16_000,
         session: URLSession = .shared
     ) {
-        self.apiKey = apiKey
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) },
+            ownedSession: nil
+        )
+    }
+
+    public init(
+        apiKey: String,
+        model: String = "stt-rt-v5",
+        language: String? = nil,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        },
+        ownedSession: URLSession? = nil
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.model = model
         self.language = language
         self.sampleRate = sampleRate
-        self.session = session
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.ownedSession = ownedSession
+        self.run = SonioxLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
     }
 
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
+    /// An explicit caller budget for drain plus provider completion. The
+    /// original initializers remain intact; every existing caller keeps 8 s.
+    /// This is a deadline, not a delay on a healthy stream.
+    public convenience init(
+        apiKey: String, model: String = "stt-rt-v5", language: String? = nil,
+        sampleRate: Int = 16_000, session: URLSession = .shared, finishTimeout: TimeInterval
     ) {
-        withStateLock {
-            isStopping = false
-            accumulatedFinalText = ""
-            self.onTranscript = onTranscript
-            self.onError = onError
-        }
-        preroll.reset()
-        connectWebSocket()
-    }
-
-    /// Sends raw PCM Int16 audio data to Soniox.
-    ///
-    /// Audio captured before the socket is running is parked in the pre-roll
-    /// buffer and replayed, in order, on the first send that finds a live
-    /// transport — so speech that starts with the cue is never dropped.
-    public func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else {
-            guard !isStoppingState() else { return }
-            preroll.append(audioData)
-            return
-        }
-        for chunk in drainPreroll() {
-            transmit(chunk, on: task)
-        }
-        transmit(audioData, on: task)
-    }
-
-    private func drainPreroll() -> [Data] {
-        let held = preroll.drain()
-        guard !held.isEmpty else { return held }
-        let bytes = held.reduce(0) { $0 + $1.count }
-        let leadingMilliseconds = Int((Double(bytes) / 2.0 / Double(max(sampleRate, 1))) * 1000)
-        logger.info(
-            "Soniox: replaying \(held.count) pre-roll chunks (\(leadingMilliseconds) ms of leading audio)"
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) },
+            finishTimeout: finishTimeout
         )
-        return held
     }
 
-    private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
-        transmit(.data(audioData), on: task)
+    public convenience init(
+        apiKey: String, model: String = "stt-rt-v5", language: String? = nil,
+        sampleRate: Int = 16_000, makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        },
+        ownedSession: URLSession? = nil, finishTimeout: TimeInterval
+    ) {
+        self.init(
+            apiKey: apiKey, model: model, language: language, sampleRate: sampleRate,
+            makeConnection: makeConnection, schedule: schedule, ownedSession: ownedSession
+        )
+        self.finishTimeout = finishTimeout.isFinite && finishTimeout > 0 ? finishTimeout : Self.finishDeadline
     }
 
-    /// Every frame — audio, replayed pre-roll and the finalize handshake — goes
-    /// through here so `stop()` can wait for the transport to take them before
-    /// cancelling the socket.
-    private func transmit(_ message: URLSessionWebSocketTask.Message, on task: URLSessionWebSocketTask) {
-        let sendGroup = pendingSendGroup
-        sendGroup.enter()
-        task.send(message) { [weak self] error in
-            defer { sendGroup.leave() }
-            guard let self, let error else { return }
-            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-            self.currentOnError()?(error)
-        }
+    deinit {
+        run.connection?.cancel()
+        ownedSession?.invalidateAndCancel()
     }
 
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            return webSocketTask
-        }
-        guard let task else {
-            preroll.reset()
-            return
-        }
+    // MARK: - StreamingTranscriptionClient
 
-        // Best-effort finalize: ask Soniox to commit in-flight tokens and flush
-        // before closing so trailing words aren't lost.
-        if task.state == .running {
-            for chunk in drainPreroll() {
-                transmit(chunk, on: task)
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        synchronized {
+            // Capture the pre-start audio before `close` resets the pre-roll for
+            // the previous run.
+            let carried = preroll.drain()
+            close(run)
+            let active = SonioxLiveRun(sampleRate: sampleRate)
+            run = active
+            active.onTranscript = onTranscript
+            active.onError = onError
+            guard !apiKey.isEmpty else {
+                fail(StreamingClientError.missingAPIKey(provider: "Soniox"), active); return
             }
-            transmit(.string(#"{"type":"finalize"}"#), on: task)
-            transmit(.data(Data()), on: task)
-        }
-
-        let unsentPreroll = preroll.snapshot
-        if unsentPreroll.byteCount > 0 {
-            logger.warning(
-                "Soniox: discarding \(unsentPreroll.chunkCount) pre-roll chunks — transport never became ready"
-            )
-        }
-        preroll.reset()
-        closeAfterPendingSends(task)
-    }
-
-    /// `cancel(with:reason:)` fails whatever URLSession has not yet handed to
-    /// the network, so the close waits (bounded) for the replayed pre-roll and
-    /// the finalize frames to land before the socket goes away.
-    private func closeAfterPendingSends(_ task: URLSessionWebSocketTask) {
-        let sendGroup = pendingSendGroup
-        let logger = self.logger
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            if sendGroup.wait(timeout: .now() + Self.stopFlushBudget) == .timedOut {
-                logger.warning("Soniox: closing with sends still in flight after the stop flush budget")
+            guard sampleRate > 0 else { fail(SonioxStreamingError.invalidSampleRate(sampleRate), active); return }
+            guard let config = Self.configJSON(
+                apiKey: apiKey, model: model, language: language, sampleRate: sampleRate
+            ), let request = Self.webSocketRequest() else {
+                fail(StreamingClientError.invalidURL, active); return
             }
-            if task.state == .running {
-                task.cancel(with: .normalClosure, reason: nil)
+            active.outgoing.append(.config(config))
+            // Replay audio captured before this run existed, in capture order,
+            // ahead of the live frames. Best-effort: the leading buffer is
+            // bounded, so an overflow here caps the replay rather than failing.
+            for chunk in carried where !admitAudio(chunk, into: active) { break }
+            active.phase = .connecting
+            connect(active, request: request)
+        }
+    }
+
+    /// Admission is synchronous and bounded: at most the send budget of PCM may
+    /// be queued or in flight, and at most `maximumQueuedFrames` frames may wait.
+    /// Exceeding either is a stalled transport, reported once — the queued audio
+    /// cannot be sent, and holding the rest would only grow the failure.
+    public func sendAudio(_ audioData: Data) {
+        guard !audioData.isEmpty else { return }
+        synchronized {
+            let active = run
+            if active.phase == .idle { preroll.append(audioData); return }
+            guard active.phase == .connecting || active.phase == .active else { return }
+            guard audioData.count.isMultiple(of: 2) else { fail(SonioxStreamingError.invalidPCM, active); return }
+            guard !active.overflowReported else { return }
+            guard admitAudio(audioData, into: active) else {
+                active.overflowReported = true
+                fail(StreamingClientError.transportStalled(provider: "Soniox"), active)
+                return
             }
-            self?.clearWebSocketTask(task)
+            pump(active)
         }
     }
 
-    /// Only the task this stop owns may be cleared: a newer session may already
-    /// have published its own socket.
-    private func clearWebSocketTask(_ task: URLSessionWebSocketTask) {
-        withStateLock {
-            if webSocketTask === task { webSocketTask = nil }
-        }
-    }
-}
+    /// Graceful finalisation: commits admitted audio, flushes with the
+    /// end-of-stream frame and delivers callbacks during the short drain.
+    public func stop() { synchronized { beginFinish(run, deliverCallbacks: true) } }
 
-// MARK: - Private
+    /// Immediate abort. Text received so far stays available to `finishAndWait`.
+    public func cancel() { synchronized { close(run) } }
 
-private extension SonioxLiveClient {
-    func connectWebSocket() {
-        var components = URLComponents()
-        components.scheme = "wss"
-        components.host = Self.websocketHost
-        components.path = Self.websocketPath
-        guard let url = components.url else {
-            currentOnError()?(StreamingClientError.invalidURL)
-            return
-        }
-
-        let task = session.webSocketTask(with: url)
-        let proceed = withStateLock { () -> Bool in
-            guard !isStopping else { return false }
-            webSocketTask = task
-            task.resume()
-            return true
-        }
-        guard proceed else {
-            task.cancel(with: .goingAway, reason: nil)
-            return
-        }
-
-        sendInitialConfig()
-        logger.info("Soniox WebSocket connecting (model=\(self.model, privacy: .public))")
-        receiveMessages()
-    }
-
-    func sendInitialConfig() {
-        guard let task = currentWebSocketTask() else { return }
-        var payload: [String: Any] = [
-            "api_key": apiKey,
-            "model": model,
-            "audio_format": "pcm_s16le",
-            "sample_rate": sampleRate,
-            "num_channels": 1
-        ]
-        if let language {
-            payload["language_hints"] = [language.localeLanguageCode]
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else { return }
-        let sendGroup = pendingSendGroup
-        sendGroup.enter()
-        task.send(.string(json)) { [weak self] error in
-            defer { sendGroup.leave() }
-            guard let self, let error, !self.isStoppingState() else { return }
-            self.currentOnError()?(error)
-        }
-    }
-
-    func receiveMessages() {
-        guard let task = currentWebSocketTask() else { return }
-        task.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let message):
-                self.handleMessage(message)
-                self.receiveMessages()
-            case .failure(let error):
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-                self.currentOnError()?(self.mapConnectionError(error))
-            }
-        }
-    }
-
-    func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-        switch message {
-        case .string(let text):
-            parseResponse(text)
-        case .data(let data):
-            if let text = String(data: data, encoding: .utf8) { parseResponse(text) }
-        @unknown default:
-            break
-        }
-    }
-
-    func parseResponse(_ json: String) {
-        guard let data = json.data(using: .utf8),
-              let response = try? JSONDecoder().decode(SonioxStreamResponse.self, from: data) else {
-            return
-        }
-
-        if let code = response.errorCode {
-            let message = response.errorMessage ?? "Soniox error \(code)"
-            currentOnError()?(NSError(domain: "Soniox", code: code,
-                                      userInfo: [NSLocalizedDescriptionKey: message]))
-            return
-        }
-
-        let tokens = response.tokens ?? []
-        if !tokens.isEmpty {
-            var newFinals = ""
-            var nonFinals = ""
-            var sawFinalizationMarker = false
-            for token in tokens {
-                // `<fin>` acknowledges a manual finalize; `<end>` marks session end.
-                if token.text == "<fin>" || token.text == "<end>" {
-                    sawFinalizationMarker = true
-                    continue
-                }
-                if token.isFinal == true {
-                    newFinals.append(token.text)
-                } else {
-                    nonFinals.append(token.text)
+    public func finishAndWait() async -> String? {
+        let active = synchronized { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                synchronized {
+                    guard isCurrent(active), active.connection != nil else {
+                        if active === run { close(active) }
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    if Task.isCancelled {
+                        close(active)
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    active.waiters.append(continuation)
+                    beginFinish(active, deliverCallbacks: false)
                 }
             }
-
-            let display: String = withStateLock {
-                accumulatedFinalText.append(newFinals)
-                return accumulatedFinalText + nonFinals
-            }
-            let trimmed = display.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                currentOnTranscript()?(trimmed, false)
-            }
-
-            if sawFinalizationMarker { flushFinal() }
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { self.close(active) } }
         }
-
-        if response.finished == true { flushFinal() }
     }
 
-    func flushFinal() {
-        let text: String? = withStateLock {
-            let snapshot = accumulatedFinalText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return snapshot.isEmpty ? nil : snapshot
-        }
-        if let text { currentOnTranscript()?(text, true) }
+    public var isConnected: Bool { synchronized { isCurrent(run) && run.didOpen && run.configSent } }
+
+    /// Offline parse seam used by contract-style tests: folds a provider frame
+    /// into the current run without a socket, exactly as the receive path does.
+    func ingest(_ json: String) { synchronized { if let frame = Self.parse(json) { handle(frame, run) } } }
+
+    // MARK: - Admission
+
+    /// Appends one PCM frame to the run's bounded queue, or returns `false` when
+    /// the frame count or send budget is already at its bound.
+    private func admitAudio(_ audioData: Data, into active: SonioxLiveRun) -> Bool {
+        guard active.queuedAudioFrames + (active.sending ? 1 : 0) < Self.maximumQueuedFrames,
+              active.budget.admit(audioData.count) else { return false }
+        active.outgoing.append(.audio(audioData))
+        active.queuedAudioBytes += audioData.count
+        active.queuedAudioFrames += 1
+        return true
     }
 
-    func mapConnectionError(_ error: Error) -> Error {
+    // MARK: - Finalisation
+
+    /// Drains admitted PCM, then sends the empty end-of-stream frame that
+    /// flushes buffered audio and finalises pending tokens. Only `finished`
+    /// completes a run successfully; disconnects and deadlines fail visibly.
+    private func beginFinish(_ active: SonioxLiveRun, deliverCallbacks: Bool) {
+        guard isCurrent(active), active.connection != nil else { close(active); return }
+        if !deliverCallbacks { active.deliverWhileFinishing = false }
+        guard active.phase != .finishing else { return }
+        active.phase = .finishing
+        active.deliverWhileFinishing = deliverCallbacks
+        if !active.endOfStreamSent,
+           !active.outgoing.contains(where: { if case .endOfStream = $0 { return true }; return false }) {
+            active.outgoing.append(.endOfStream)
+        }
+        pump(active)
+        after(finishTimeout, active) { client, active in
+            let error = active.endOfStreamSent && !active.sending
+                ? SonioxStreamingError.missingCompletion : client.stalledError
+            client.fail(error, active)
+        }
+    }
+
+    /// Ends a finishing run: delivers the whole transcript as a final when the
+    /// graceful `stop()` asked for callbacks, then closes. `close` resolves the
+    /// `finishAndWait` waiters with the same transcript.
+    func settleFinish(_ active: SonioxLiveRun) {
+        guard isCurrent(active), active.phase == .finishing else { return }
+        if active.deliverWhileFinishing, let whole = active.transcript {
+            active.onTranscript?(whole, true)
+        }
+        close(active)
+    }
+
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "Soniox") }
+
+    func fail(_ error: Error, _ active: SonioxLiveRun) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        close(active)
+        log("WebSocket session failed")
+        // Publish the failure before finish returns. The run is already
+        // detached, so the callback may safely start a replacement session.
+        callback?(error)
+        waiters.forEach { $0.resume(returning: transcript) }
+    }
+
+    func close(_ active: SonioxLiveRun) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        let connection = active.connection
+        active.connection = nil
+        active.outgoing.removeAll()
+        active.queuedAudioBytes = 0
+        active.queuedAudioFrames = 0
+        active.budget.reset()
+        active.sending = false
+        if active === run { preroll.reset() }
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        connection?.cancel()
+        waiters.forEach { $0.resume(returning: transcript) }
+        active.onTranscript = nil
+        active.onError = nil
+    }
+
+    func isCurrent(_ active: SonioxLiveRun) -> Bool { active === run && active.phase != .closed }
+
+    func after(
+        _ seconds: TimeInterval, _ active: SonioxLiveRun,
+        action: @escaping @Sendable (SonioxLiveClient, SonioxLiveRun) -> Void
+    ) {
+        schedule(seconds) { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { action(self, active) } }
+        }
+    }
+
+    func synchronized<Value>(_ action: () -> Value) -> Value {
+        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
+        return queue.sync(execute: action)
+    }
+
+    /// 401/403 error frames are an invalid key; everything else is a typed
+    /// server error. Nothing here logs the key, transcript or audio.
+    func mapServerError(_ error: (code: Int, message: String)) -> Error {
+        if error.code == 401 || error.code == 403 {
+            return StreamingClientError.invalidAPIKey(provider: "Soniox")
+        }
+        return SonioxStreamingError.server(code: error.code, message: error.message)
+    }
+
+    func mapReceiveError(_ error: Error) -> Error {
         let nsError = error as NSError
         let description = nsError.localizedDescription.lowercased()
         if nsError.code == 401 || nsError.code == 403
@@ -314,38 +335,9 @@ private extension SonioxLiveClient {
         return error
     }
 
-    func withStateLock<T>(_ block: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return block()
-    }
-
-    func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    func isStoppingState() -> Bool { withStateLock { isStopping } }
-    func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-}
-
-private struct SonioxStreamResponse: Decodable {
-    let tokens: [SonioxToken]?
-    let finished: Bool?
-    let errorCode: Int?
-    let errorMessage: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case tokens
-        case finished
-        case errorCode = "error_code"
-        case errorMessage = "error_message"
-    }
-}
-
-private struct SonioxToken: Decodable {
-    let text: String
-    let isFinal: Bool?
-
-    private enum CodingKeys: String, CodingKey {
-        case text
-        case isFinal = "is_final"
+    func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "SonioxLiveClient").info("\(event, privacy: .public)")
+        #endif
     }
 }

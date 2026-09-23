@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "channel": "developer",
+  "releaseTrain": null,
+  "notes": [
+    "This is the only Windows package identity in the repository. It is a developer identity outside the Alpha and Stable release trains (Docs/alpha-stable-release-trains.md); Sources/SpeakCore/Resources/ReleaseTrains.json defines no Windows surface, so no Alpha or Stable Windows identity, version or feed exists yet.",
+    "Callers must supply an explicit four-part version. The builder never derives one from VERSION, BUILD_NUMBER, tags or the release-train manifest.",
+    "The package family name is derived from name and publisher. The default publisher is a placeholder for the unsigned developer package; an externally supplied signing certificate requires rebuilding with its exact subject as the publisher, which creates a different package family.",
+    "The application keeps settings, history and recordings in the real %LOCALAPPDATA%\\JustSpeakToIt directory used by the portable bundle. File-system write virtualisation is disabled so packaged writes are neither redirected into package-private storage nor deleted on uninstall. This needs the unvirtualizedResources restricted capability, which sideloading permits without Store approval.",
+    "maxVersionTested is the Windows build on which the lifecycle job actually executes (Windows Server 2022, build 20348). Raise it only with a receipt from a newer build.",
+    "Each package carries one processor architecture, taken from the verified runtime bundle it is built from: x64 or arm64. Both are the same developer identity; Windows installs only the package matching the PC, and a family may later move to an .msixbundle holding both but not back."
+  ],
+  "identity": {
+    "name": "com.justspeaktoit.windows.developer",
+    "developerPublisher": "CN=Just Speak to It Developer",
+    "processorArchitectures": ["x64", "arm64"]
+  },
+  "presentation": {
+    "displayName": "Just Speak to It Developer",
+    "publisherDisplayName": "Just Speak to It developer build",
+    "description": "Unsigned developer build of Just Speak to It for Windows. Not an Alpha or Stable release.",
+    "language": "en-GB"
+  },
+  "application": {
+    "id": "JustSpeakToIt",
+    "executable": "SpeakWindows.exe",
+    "executionAlias": "JustSpeakToItDeveloper.exe",
+    "windowClass": "JustSpeakToItWindows"
+  },
+  "targetDeviceFamily": {
+    "name": "Windows.Desktop",
+    "minVersion": "10.0.19041.0",
+    "maxVersionTested": "10.0.20348.0"
+  },
+  "capabilities": {
+    "restricted": ["runFullTrust", "unvirtualizedResources"],
+    "device": ["microphone"]
+  },
+  "fileSystem": {
+    "writeVirtualization": "disabled",
+    "dataDirectory": "%LOCALAPPDATA%\\JustSpeakToIt",
+    "dataDirectoryName": "JustSpeakToIt"
+  },
+  "assets": {
+    "source": "Resources/AppIcon.iconset/icon_256x256.png",
+    "images": {
+      "Assets/StoreLogo.png": 50,
+      "Assets/Square44x44Logo.png": 44,
+      "Assets/Square150x150Logo.png": 150
+    }
+  }
+}

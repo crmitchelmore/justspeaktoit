@@ -1,10 +1,13 @@
-// The client owns connection, session configuration, base64 audio framing
-// and bounded finalisation; the constants, errors and event decoding live
-// in MistralVoxtralRealtime.swift.
-// swiftlint:disable file_length
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
+import os.log
+#endif
 
-/// Cross-platform client for Mistral's Voxtral Realtime transcription socket.
+/// Shared client for Mistral's Voxtral Realtime transcription socket, used by
+/// macOS, iOS and Windows.
 ///
 /// Unlike every other provider here, audio is **base64 inside JSON text
 /// frames** (`input_audio.append`), not binary frames. The service streams
@@ -14,477 +17,359 @@ import Foundation
 /// deltas itself and reports cumulative interim text, so consumers see the same
 /// shape they get from every other provider.
 ///
-/// Audio captured before `session.created` is held in `StreamingAudioPreroll`
-/// and replayed, because the session must be configured before any audio
-/// (issue #641).
-public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable { // swiftlint:disable:this type_body_length line_length
+/// The transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP
+/// on Windows). `session.update` leaves only after the real handshake and
+/// `session.created`, and PCM only after that update's send has completed, the
+/// order Mistral's SDK uses. Audio captured earlier waits in the run's bounded
+/// queue rather than being dropped (issue #641). One frame is in flight at a
+/// time and each completion releases the next, so a transport that completes
+/// synchronously never nests sends. Transport calls, callbacks and waiter
+/// resumptions happen outside the state lock, so any of them may re-enter.
+/// Frame shapes and limits live in `MistralVoxtralRealtime`.
+public final class MistralVoxtralLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     /// `transcription.done` restates the whole session, and it is the only
     /// final this service emits.
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
     /// `input_audio.flush` commits audio Voxtral has received but not yet
     /// transcribed, so a caller must always finish gracefully.
     public let finishFlushesBufferedAudio = true
+    /// The whole finish deadline, from the constant the catalogue declares as
+    /// this model's `postStopFinalizeBudget`, so platform watchdogs agree.
+    public var finalisationBudget: TimeInterval? { MistralVoxtralRealtime.finishBudget }
 
-    private static let sendDrainBudget: TimeInterval = 1
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+
+    /// The handshake and `session.update` must complete within this bound.
+    static let readyDeadline: TimeInterval = 10
+    /// A single send that has not completed by then means the transport stalled.
+    static let sendDeadline: TimeInterval = 5
+    /// Append frames queued or in flight, including audio held before readiness.
+    static let maximumBufferedFrames = 256
+    /// Seconds of PCM the encoded byte bound is sized for.
+    static let bufferedAudioSeconds = 5
 
     private let apiKey: String
     private let model: String
-    private let sampleRate: Int
-    private let session: URLSession
-    private let stateLock = NSLock()
-    private let finishLock = NSLock()
-    private let pendingSends = DispatchGroup()
-    private let logger = SpeakLogger.logger(category: "MistralVoxtralLiveClient")
+    /// The rate `session.update` declares and the caller's PCM is encoded at.
+    let sampleRate: Int
+    let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    /// Encoded bytes of queued and in-flight append frames: the base64 of
+    /// `bufferedAudioSeconds` of PCM plus the wrapper and padding of every
+    /// frame the count bound admits, so that much audio fits in any framing.
+    let maximumBufferedBytes: Int
+    let lock = NSLock()
+    /// Guarded by `lock`. Before the first `start()` this is the idle run,
+    /// which holds audio offered early under the same bounds as a live run.
+    var run = MistralVoxtralLiveRun()
 
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isReady = false
-    private var isStopping = false
-    private var isFinishing = false
-    /// The append-only deltas folded into the transcript so far. Voxtral emits
-    /// fragments, so the running text is assembled here rather than by the
-    /// consumer.
-    private var streamedText = ""
-    private var accumulated = TranscriptAccumulator(shape: .cumulativeTranscript)
-    private var finishContinuation: CheckedContinuation<String?, Never>?
-
-    let preroll: StreamingAudioPreroll
-    let readiness = StreamingSessionReadiness()
-    let sendBudget: StreamingAudioSendBudget
-
-    public init(
+    /// Existing Apple entry point. It adapts the caller's session, which the
+    /// client uses but does not own or invalidate.
+    public convenience init(
         apiKey: String,
         model: String = MistralVoxtralRealtime.apiModelID,
         sampleRate: Int = 16_000,
         session: URLSession = .shared
     ) {
+        self.init(
+            apiKey: apiKey, model: model, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
+        )
+    }
+
+    public init(
+        apiKey: String,
+        model: String = MistralVoxtralRealtime.apiModelID,
+        sampleRate: Int = 16_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.model = model.isEmpty ? MistralVoxtralRealtime.apiModelID : model
         self.sampleRate = sampleRate
-        self.session = session
-        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
-        self.sendBudget = StreamingAudioSendBudget(sampleRate: sampleRate)
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        let pcmBytes = max(sampleRate, 1) * 2 * Self.bufferedAudioSeconds
+        self.maximumBufferedBytes = 4 * ((pcmBytes + 2) / 3)
+            + Self.maximumBufferedFrames * (Self.appendFrameWrapperBytes + 3)
     }
 
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        guard !apiKey.isEmpty else {
-            onError(StreamingClientError.missingAPIKey(provider: "Mistral"))
-            return
+    deinit { run.connection?.cancel() }
+
+    // MARK: - StreamingTranscriptionClient
+
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        let request = Self.webSocketRequest(apiKey: apiKey, model: model)
+        let armed: MistralVoxtralLiveRun? = withState { effects in
+            let active = arm(onTranscript: onTranscript, onError: onError, usesTransport: true, &effects)
+            // Audio refused before this start has already failed the run.
+            guard isCurrent(active) else { return nil }
+            guard !apiKey.isEmpty else {
+                fail(StreamingClientError.missingAPIKey(provider: "Mistral"), active, &effects)
+                return nil
+            }
+            guard request != nil else {
+                fail(StreamingClientError.invalidURL, active, &effects)
+                return nil
+            }
+            return active
         }
-        beginSession(onTranscript: onTranscript, onError: onError)
-        connect()
+        guard let armed, let request else { return }
+        connect(armed, request: request)
     }
 
-    /// Arms the callbacks and clears per-recording state without opening a
-    /// socket. `start` is this plus `connect()`; tests pair it with `ingest`.
-    func beginSession(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        withStateLock {
-            self.onTranscript = onTranscript
-            self.onError = onError
-            isReady = false
-            isStopping = false
-            isFinishing = false
-            streamedText = ""
-            accumulated.reset()
-            finishContinuation = nil
-        }
-        preroll.reset()
-        readiness.reset()
-        sendBudget.reset()
-    }
-
-    /// Feeds one raw server frame through the receive path. The WebSocket loop
-    /// is the only production caller; tests drive the client with it.
-    func ingest(_ text: String) {
-        handle(.string(text))
-    }
-
+    /// Admission is synchronous and bounded: at most `maximumBufferedFrames`
+    /// append frames and `maximumBufferedBytes` of their encoding may be queued
+    /// or in flight, audio held before readiness included. Exceeding either is
+    /// evidence the transport stopped working or the session is not coming, and
+    /// is reported as a terminal failure rather than discarding opening words.
+    /// Audio offered before `start()` is held under the same bounds and carried
+    /// into that session; one that cannot be held fails the next start. Nothing
+    /// is accepted once a finish has begun.
     public func sendAudio(_ audioData: Data) {
         guard !audioData.isEmpty else { return }
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard isReady, !isStopping, !isFinishing,
-                  let task = webSocketTask, task.state == .running else { return nil }
-            return task
-        }
-        guard let task else {
-            // The session must be created and configured before any audio, so
-            // the user's opening words are held rather than dropped.
-            if !isEnding { preroll.append(audioData) }
-            return
-        }
-        send(audioData, on: task)
-    }
-
-    public func finishAndWait() async -> String? {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            isFinishing = true
-            return webSocketTask
-        }
-        // No socket at all: there is nothing that could become ready.
-        guard let task else {
-            stop()
-            return fullTranscript()
-        }
-        let result = await awaitFinalTranscript { [weak self, weak task] in
-            DispatchQueue.global().async { [weak self, weak task] in
-                guard let self, let task else { return }
-                self.commitHeldCapture(to: task)
+        withState { effects in
+            let active = run
+            switch active.phase {
+            case .idle: holdBeforeStart(audioData, in: active)
+            case .connecting, .streaming: admit(audioData, into: active, &effects)
+            case .finishing, .closed: break
             }
         }
-        stop()
-        return result
     }
 
-    /// Commits the held capture and closes the stream, waiting first for
-    /// `session.created` if the session is still being set up.
-    ///
-    /// Finishing a short recording during setup used to drop the preroll
-    /// entirely: `stop()` erased it and cancelled a socket that was about to
-    /// be configured. The bounded wait lets the session finish configuring and
-    /// flush that audio; a session that cannot be created inside the budget is
-    /// still closed.
-    private func commitHeldCapture(to task: URLSessionWebSocketTask) {
-        guard readiness.waitUntilReady(), isCurrent(task) else {
-            logger.error("Mistral realtime session was never created; finishing without a flush")
-            resolveFinish()
-            return
+    /// Immediate teardown; `cancel()` is the same path. Text received so far
+    /// stays available to `finishAndWait()`, and every waiting finish resumes.
+    public func stop() { withState { effects in close(run, &effects) } }
+
+    public func cancel() { stop() }
+
+    /// Drains every admitted frame, then sends the flush, then the end, and
+    /// waits for `transcription.done`, all inside the one `finishBudget`
+    /// deadline. Returns the whole session transcript, so a done it consumes
+    /// is not also delivered through `onTranscript`. A finish that does not
+    /// reach `transcription.done` publishes its error before returning the text
+    /// folded so far, including to a finish that joins while that error is
+    /// still being delivered. Concurrent finishes share that one outcome.
+    public func finishAndWait() async -> String? {
+        let active = lock.withLock { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                withState { effects in
+                    guard isCurrent(active), !Task.isCancelled else {
+                        if isCurrent(active) { close(active, &effects) }
+                        active.answerRetired(continuation, &effects)
+                        return
+                    }
+                    active.waiters.append(continuation)
+                    beginFinish(active, &effects)
+                }
+            }
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.withState { effects in if self.isCurrent(active) { self.close(active, &effects) } }
         }
-        flushPreroll(to: task)
-        _ = pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
-        // Flush first, then end: the order is what the SDK sends and
-        // what its own tests assert.
-        sendJSON(["type": "input_audio.flush"], on: task)
-        sendJSON(["type": "input_audio.end"], on: task)
     }
 
-    /// The bounded wait for `transcription.done`, resolved by that frame (the
-    /// common case) or by the finish budget.
-    ///
-    /// `whenArmed` runs once the waiter is installed, so the flush/end frames
-    /// cannot race their own completion handlers; tests use it to deliver
-    /// frames into an armed finish without a socket.
+    // MARK: - Session seams
+
+    /// Whether the session is configured and accepts audio.
+    var isSessionReady: Bool { lock.withLock { isCurrent(run) && run.configured } }
+
+    /// Append frames admitted and not yet completed, held audio included.
+    var bufferedAudioFrames: Int { lock.withLock { run.bufferedFrames } }
+
+    /// Finishes waiting on the current run.
+    var finishWaiterCount: Int { lock.withLock { run.waiters.count } }
+
+    /// Arms the callbacks and a fresh run without opening a socket. `start` is
+    /// this plus `connect`; tests pair it with `ingest`.
+    func beginSession(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        withState { effects in _ = arm(onTranscript: onTranscript, onError: onError, usesTransport: false, &effects) }
+    }
+
+    /// Feeds one raw server frame through the receive path. The socket loop is
+    /// the only production caller; tests drive the client with it.
+    func ingest(_ text: String) { withState { effects in handle(.text(text), run, &effects) } }
+
+    /// The bounded wait for `transcription.done`, resolved by that frame or by
+    /// the budget. `whenArmed` runs once the waiter is installed, so a frame it
+    /// delivers cannot race its own completion; tests use it to deliver frames
+    /// into an armed finish without a socket.
     func awaitFinalTranscript(
         budget: TimeInterval = MistralVoxtralRealtime.finishBudget,
         whenArmed: () -> Void = {}
     ) async -> String? {
-        await withCheckedContinuation { continuation in
-            finishLock.lock()
-            finishContinuation = continuation
-            finishLock.unlock()
-
+        let active = lock.withLock { run }
+        return await withCheckedContinuation { continuation in
+            let armed: Bool = withState { effects in
+                guard isCurrent(active) else {
+                    active.answerRetired(continuation, &effects)
+                    return false
+                }
+                active.waiters.append(continuation)
+                return true
+            }
+            guard armed else { return }
+            after(budget, active) { client, active, effects in client.close(active, &effects) }
             whenArmed()
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + budget) { [weak self] in
-                self?.resolveFinish()
-            }
         }
     }
+}
 
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            isStopping = true
-            isReady = false
-            let task = webSocketTask
-            webSocketTask = nil
-            return task
-        }
-        preroll.reset()
-        readiness.reset()
-        sendBudget.reset()
-        task?.cancel(with: .normalClosure, reason: nil)
-        resolveFinish()
+// MARK: - Run lifecycle
+
+/// Every function taking `inout MistralVoxtralLiveEffects` runs with `lock`
+/// held and defers anything that could re-enter the client.
+extension MistralVoxtralLiveClient {
+    /// Runs `body` under the state lock, then performs the effects it queued.
+    @discardableResult
+    func withState<Value>(_ body: (inout MistralVoxtralLiveEffects) -> Value) -> Value {
+        var effects = MistralVoxtralLiveEffects()
+        lock.lock()
+        let value = body(&effects)
+        lock.unlock()
+        effects.perform()
+        return value
     }
 
-    // MARK: - Protocol frames
-
-    /// `model` is the socket's only query parameter: the audio format and the
-    /// streaming delay travel in `session.update` instead.
-    static func webSocketURL(model: String) -> URL? {
-        var components = URLComponents()
-        components.scheme = "wss"
-        components.host = MistralVoxtralRealtime.webSocketHost
-        components.path = MistralVoxtralRealtime.webSocketPath
-        components.queryItems = [URLQueryItem(name: "model", value: model)]
-        return components.url
+    /// Retires the current run and installs a fresh one with its callbacks.
+    /// Audio held by the idle run before the first start is carried in behind
+    /// the configuration; a refusal recorded then fails the new run at once,
+    /// through its `onError`, because there was no callback to report it to.
+    func arm(
+        onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void,
+        usesTransport: Bool, _ effects: inout MistralVoxtralLiveEffects
+    ) -> MistralVoxtralLiveRun {
+        let previous = run
+        let active = MistralVoxtralLiveRun()
+        active.usesTransport = usesTransport
+        active.onTranscript = onTranscript
+        active.onError = onError
+        active.phase = .connecting
+        active.outgoing.append(.sessionUpdate)
+        let refusal = previous.phase == .idle ? previous.deferredFailure : nil
+        if previous.phase == .idle, refusal == nil { active.adoptHeldAudio(from: previous) }
+        close(previous, &effects)
+        run = active
+        if let refusal { fail(refusal, active, &effects) }
+        return active
     }
 
-    /// The `session.update` frame. There is no language field in this protocol
-    /// — Voxtral detects the language and reports it as
-    /// `transcription.language` — so the app's language selection is not sent.
-    static func sessionUpdatePayload(sampleRate: Int) -> [String: Any] {
-        [
-            "type": "session.update",
-            "session": [
-                "audio_format": [
-                    "encoding": MistralVoxtralRealtime.encoding,
-                    "sample_rate": sampleRate
-                ],
-                "target_streaming_delay_ms": MistralVoxtralRealtime.targetStreamingDelayMilliseconds
-            ]
-        ]
-    }
-
-    /// Splits PCM into `input_audio.append` payloads no larger than the
-    /// documented decoded cap. Chunking happens before base64 encoding, because
-    /// the cap is on the decoded length.
-    static func appendPayloads(
-        for audio: Data,
-        maximumBytes: Int = MistralVoxtralRealtime.maximumAppendBytes
-    ) -> [[String: Any]] {
-        guard !audio.isEmpty else { return [] }
-        let limit = max(maximumBytes, 1)
-        var payloads: [[String: Any]] = []
-        var offset = audio.startIndex
-        while offset < audio.endIndex {
-            let end = audio.index(offset, offsetBy: limit, limitedBy: audio.endIndex) ?? audio.endIndex
-            payloads.append([
-                "type": "input_audio.append",
-                "audio": audio[offset..<end].base64EncodedString()
-            ])
-            offset = end
-        }
-        return payloads
-    }
-
-    // MARK: - Connection
-
-    private func connect() {
-        guard let url = Self.webSocketURL(model: model) else {
-            currentOnError()?(StreamingClientError.invalidURL)
+    /// There is no callback before `start()`, so a chunk that cannot be held is
+    /// recorded for the next start to report, and what was held is released
+    /// with it: a partial or misaligned opening is never sent, and nothing is
+    /// evicted silently. Nothing more is held once a refusal is recorded.
+    func holdBeforeStart(_ pcm: Data, in idle: MistralVoxtralLiveRun) {
+        guard idle.deferredFailure == nil else { return }
+        let refusal: Error
+        if !pcm.count.isMultiple(of: 2) {
+            refusal = MistralRealtimeStreamingError.invalidPCM
+        } else if idle.admit(pcm, frameLimit: Self.maximumBufferedFrames, byteLimit: maximumBufferedBytes) {
             return
-        }
-        var request = URLRequest(url: url)
-        // A native app can set the handshake header, so the long-lived key is
-        // used directly. The short-lived `rt_*` client-session token exists
-        // because browsers cannot set this header; nothing here needs it.
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let task = session.webSocketTask(with: request)
-        let published = withStateLock { () -> Bool in
-            guard !isStopping, !isFinishing else { return false }
-            isReady = false
-            webSocketTask = task
-            return true
-        }
-        guard published else {
-            task.cancel(with: .goingAway, reason: nil)
-            return
-        }
-        task.resume()
-        receiveMessages(on: task)
-    }
-
-    private func receiveMessages(on task: URLSessionWebSocketTask) {
-        task.receive { [weak self, weak task] result in
-            guard let self, let task, self.isCurrent(task) else { return }
-            switch result {
-            case .success(let message):
-                self.handle(message)
-                if self.isCurrent(task) { self.receiveMessages(on: task) }
-            case .failure(let error):
-                self.handleTransportFailure(error)
-            }
-        }
-    }
-
-    /// Only an explicit `error` event ends the session; everything the app
-    /// does not act on decodes to `nil` in `MistralRealtimeEvent` and is
-    /// ignored, because an unrecognised frame must never end a recording.
-    private func handle(_ message: URLSessionWebSocketTask.Message) {
-        guard let event = MistralRealtimeEvent(message: message) else { return }
-
-        switch event {
-        case .sessionCreated:
-            handleSessionCreated()
-        case .delta(let fragment):
-            handleDelta(fragment)
-        case .done(let text):
-            handleDone(text: text)
-        case .failure(let message, let code):
-            // An error before `session.created` is a handshake rejection —
-            // which is how a bad key or a blocked account arrives.
-            let isHandshake = withStateLock { !isReady }
-            fail(
-                isHandshake
-                    ? MistralRealtimeError.handshakeRejected(message: message)
-                    : MistralRealtimeError.server(message: message, code: code)
-            )
-        }
-    }
-
-    private func handleSessionCreated() {
-        guard let task = currentTask() else {
-            withStateLock { isReady = true }
-            readiness.markReady()
-            return
-        }
-        sendJSON(Self.sessionUpdatePayload(sampleRate: sampleRate), on: task)
-        withStateLock { isReady = true }
-        readiness.markReady()
-        flushPreroll(to: task)
-    }
-
-    /// Deltas are append-only fragments. Every other provider here reports
-    /// cumulative interim text, so the folding happens on this side.
-    private func handleDelta(_ fragment: String) {
-        let running = withStateLock { () -> String in
-            streamedText += fragment
-            return streamedText
-        }
-        let trimmed = running.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        currentOnTranscript()?(trimmed, false)
-    }
-
-    /// `transcription.done` is authoritative for the whole session, so it
-    /// replaces the folded deltas rather than extending them, and it releases a
-    /// waiting `finishAndWait()` immediately.
-    private func handleDone(text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            withStateLock {
-                streamedText = trimmed
-                accumulated.replace(with: trimmed)
-            }
         } else {
-            // A done frame with no text still commits whatever the deltas built.
-            withStateLock {
-                let folded = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !folded.isEmpty { accumulated.replace(with: folded) }
-            }
+            refusal = MistralRealtimeStreamingError.overflowBeforeStart
         }
-        if resolveFinish() {
-            // Consumed by finishAndWait(), which returns the whole transcript;
-            // delivering it again would double it for callers that append.
+        idle.deferredFailure = refusal
+        idle.discardOutbound()
+        log("Audio offered before start was refused")
+    }
+
+    func admit(_ pcm: Data, into active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+        guard pcm.count.isMultiple(of: 2) else {
+            fail(MistralRealtimeStreamingError.invalidPCM, active, &effects)
             return
         }
-        guard let final = fullTranscript() else { return }
-        currentOnTranscript()?(final, true)
-    }
-
-    private func handleTransportFailure(_ error: Error) {
-        if isEnding || WebSocketErrorFilter.shouldIgnore(error) {
-            resolveFinish()
+        guard active.admit(pcm, frameLimit: Self.maximumBufferedFrames, byteLimit: maximumBufferedBytes) else {
+            fail(stalledError, active, &effects)
             return
         }
-        fail(mapConnectionError(error))
+        requestPump(active, &effects)
     }
 
-    private func fail(_ error: Error) {
-        let callback = withStateLock { () -> ((Error) -> Void)? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            isReady = false
-            let callback = onError
-            webSocketTask?.cancel(with: .goingAway, reason: nil)
-            webSocketTask = nil
-            return callback
+    /// Stop sequencing: stop accepting audio, drain what was admitted, flush,
+    /// then end, then wait for `transcription.done`. A session that is still
+    /// connecting, including one whose transport factory has not returned yet,
+    /// keeps its capture and sends it once configured. One deadline bounds the
+    /// whole finish; which step it catches decides the error.
+    func beginFinish(_ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+        guard active.phase != .finishing else { return }
+        // The socket-free seam, or a session that captured no audio: there is
+        // nothing to flush, so the finish is the text heard so far.
+        guard active.usesTransport, active.admittedAudioBytes > 0 else {
+            close(active, &effects)
+            return
         }
-        callback?(error)
-        resolveFinish()
-    }
-
-    private func send(_ audio: Data, on task: URLSessionWebSocketTask) {
-        // Each chunk becomes one or more base64 JSON frames, and every one is
-        // retained until its send completes. A socket that has stopped
-        // completing them would otherwise grow that backlog for the whole
-        // recording, so each frame is admitted against a budget and a stalled
-        // transport becomes a reported failure, which cancels the socket and
-        // releases the work behind it.
-        for payload in Self.appendPayloads(for: audio) {
-            guard let json = Self.jsonString(payload) else { continue }
-            let byteCount = json.utf8.count
-            guard sendBudget.admit(byteCount) else {
-                handleTransportFailure(StreamingClientError.transportStalled(provider: "Mistral"))
-                return
-            }
-            sendFrame(json, on: task, releasing: byteCount)
-        }
-    }
-
-    private static func jsonString(_ payload: [String: Any]) -> String? {
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private func sendJSON(_ payload: [String: Any], on task: URLSessionWebSocketTask) {
-        guard let json = Self.jsonString(payload) else { return }
-        sendFrame(json, on: task, releasing: 0)
-    }
-
-    /// - Parameter releasing: Bytes reserved with `sendBudget` for this frame,
-    ///   released when the send completes. Control frames reserve nothing.
-    private func sendFrame(_ json: String, on task: URLSessionWebSocketTask, releasing byteCount: Int) {
-        pendingSends.enter()
-        task.send(.string(json)) { [weak self] error in
-            guard let self else { return }
-            if byteCount > 0 { self.sendBudget.release(byteCount) }
-            self.pendingSends.leave()
-            if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
-                self.logger.error("Mistral realtime send failed: \(error.localizedDescription)")
-                self.handleTransportFailure(error)
+        active.phase = .finishing
+        active.outgoing.append(.flush)
+        active.outgoing.append(.end)
+        log("Finishing")
+        requestPump(active, &effects)
+        effects.append { [weak self] in
+            self?.after(MistralVoxtralRealtime.finishBudget, active) { client, active, effects in
+                guard active.phase == .finishing else { return }
+                client.fail(client.finishDeadlineError(active), active, &effects)
             }
         }
     }
 
-    private func flushPreroll(to task: URLSessionWebSocketTask) {
-        for chunk in preroll.drain() { send(chunk, on: task) }
+    func finishDeadlineError(_ active: MistralVoxtralLiveRun) -> Error {
+        if !active.configured { return MistralRealtimeStreamingError.sessionNotReady }
+        if active.endHandedOff, !active.sending { return MistralRealtimeStreamingError.missingCompletion }
+        return stalledError
     }
 
-    @discardableResult
-    private func resolveFinish() -> Bool {
-        finishLock.lock()
-        let continuation = finishContinuation
-        finishContinuation = nil
-        finishLock.unlock()
-        guard let continuation else { return false }
-        continuation.resume(returning: fullTranscript())
-        return true
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "Mistral") }
+
+    /// Retires the run, then publishes `error` before any finish of it
+    /// returns. The run is detached first, so the callback may start a
+    /// replacement. Its waiters, and any finish that joins while the callback
+    /// runs, stay on the failed run and resume with its text only once the
+    /// callback has returned; nothing is held under the lock meanwhile.
+    func fail(_ error: Error, _ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        active.retire(&effects)
+        active.deliveringFailure = true
+        log("Session failed")
+        effects.append { callback?(error) }
+        effects.append { self.completeFailureDelivery(active) }
     }
 
-    private func mapConnectionError(_ error: Error) -> Error {
-        let description = (error as NSError).localizedDescription.lowercased()
-        if description.contains("401") || description.contains("403")
-            || description.contains("unauthorized") || description.contains("forbidden") {
-            return StreamingClientError.invalidAPIKey(provider: "Mistral")
-        }
-        return error
-    }
-
-    /// Whether `session.created` has arrived and the socket accepts audio.
-    var isSessionReady: Bool { withStateLock { isReady } }
-
-    private var isEnding: Bool { withStateLock { isStopping || isFinishing } }
-    private func isCurrent(_ task: URLSessionWebSocketTask) -> Bool {
-        withStateLock { webSocketTask === task }
-    }
-    private func currentTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-
-    /// The session transcript: the `transcription.done` text when it has
-    /// arrived, otherwise the deltas folded so far — never `nil` merely because
-    /// the terminal frame was lost.
-    private func fullTranscript() -> String? {
-        withStateLock {
-            if let committed = accumulated.transcriptOrNil { return committed }
-            let folded = streamedText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return folded.isEmpty ? nil : folded
+    /// Ends a failed run's delivery and resumes every finish that waited on it.
+    func completeFailureDelivery(_ active: MistralVoxtralLiveRun) {
+        withState { effects in
+            active.deliveringFailure = false
+            active.releaseWaiters(&effects)
         }
     }
 
-    @discardableResult
-    private func withStateLock<T>(_ body: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return body()
+    func close(_ active: MistralVoxtralLiveRun, _ effects: inout MistralVoxtralLiveEffects) {
+        guard active.retire(&effects) else { return }
+        active.releaseWaiters(&effects)
+    }
+
+    func isCurrent(_ active: MistralVoxtralLiveRun) -> Bool { active === run && active.phase != .closed }
+
+    typealias RunAction = @Sendable (MistralVoxtralLiveClient, MistralVoxtralLiveRun, inout MistralVoxtralLiveEffects)
+        -> Void
+
+    /// Schedules `action` for `active`, which runs under the lock only if that
+    /// run is still current. Call without the lock held.
+    func after(_ seconds: TimeInterval, _ active: MistralVoxtralLiveRun, action: @escaping RunAction) {
+        schedule(seconds) { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.withState { effects in if self.isCurrent(active) { action(self, active, &effects) } }
+        }
+    }
+
+    /// Lifecycle events only: never a key, a frame or transcript text.
+    func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "MistralVoxtralLiveClient").info("\(event, privacy: .public)")
+        #endif
     }
 }

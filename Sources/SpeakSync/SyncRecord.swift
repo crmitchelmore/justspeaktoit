@@ -2,21 +2,10 @@ import CloudKit
 import Foundation
 
 /// Handles conversion between transcription history and CKRecord.
+///
+/// The field set and value types are the shared `SyncSchema.History` format,
+/// which the CloudKit Web Services transport writes identically.
 public struct SyncRecord {
-
-    // MARK: - CKRecord Field Keys
-
-    private enum FieldKey {
-        static let entryID = "entryID"
-        static let createdAt = "createdAt"
-        static let rawTranscription = "rawTranscription"
-        static let postProcessedText = "postProcessedText"
-        static let model = "model"
-        static let duration = "duration"
-        static let wordCount = "wordCount"
-        static let originPlatform = "originPlatform"
-        static let updatedAt = "updatedAt"
-    }
 
     // MARK: - Syncable Entry
 
@@ -26,7 +15,7 @@ public struct SyncRecord {
         existingRecord: CKRecord? = nil
     ) -> CKRecord {
         let recordID = CKRecord.ID(
-            recordName: entry.id.uuidString,
+            recordName: SyncSchema.History.recordName(for: entry.id),
             zoneID: SyncConfiguration.zoneID
         )
 
@@ -35,47 +24,13 @@ public struct SyncRecord {
             recordID: recordID
         )
 
-        record[FieldKey.entryID] = entry.id.uuidString
-        record[FieldKey.createdAt] = entry.createdAt
-        record[FieldKey.rawTranscription] = entry.rawTranscription
-        record[FieldKey.postProcessedText] = entry.postProcessedText
-        record[FieldKey.model] = entry.model
-        record[FieldKey.duration] = entry.duration
-        record[FieldKey.wordCount] = entry.wordCount
-        record[FieldKey.originPlatform] = entry.originPlatform
-        record[FieldKey.updatedAt] = entry.updatedAt
-
+        var fields = CloudKitRecordFields(record)
+        fields.apply(HistoryRecordCodec.assignments(for: entry))
         return record
     }
 
     /// Creates a SyncableHistoryEntry from a CKRecord.
     public static func entry(from record: CKRecord) -> SyncableHistoryEntry? {
-        guard
-            let idString = record[FieldKey.entryID] as? String,
-            let entryID = UUID(uuidString: idString),
-            let createdAt = record[FieldKey.createdAt] as? Date
-        else {
-            return nil
-        }
-
-        let rawTranscription = record[FieldKey.rawTranscription] as? String
-        let postProcessedText = record[FieldKey.postProcessedText] as? String
-        let model = record[FieldKey.model] as? String ?? "unknown"
-        let duration = record[FieldKey.duration] as? Double ?? 0
-        let wordCount = record[FieldKey.wordCount] as? Int ?? 0
-        let originPlatform = record[FieldKey.originPlatform] as? String ?? "unknown"
-        let updatedAt = record[FieldKey.updatedAt] as? Date ?? createdAt
-
-        return SyncableHistoryEntry(
-            id: entryID,
-            createdAt: createdAt,
-            rawTranscription: rawTranscription,
-            postProcessedText: postProcessedText,
-            model: model,
-            duration: duration,
-            wordCount: wordCount,
-            originPlatform: originPlatform,
-            updatedAt: updatedAt
-        )
+        HistoryRecordCodec.entry(from: CloudKitRecordFields(record))
     }
 }

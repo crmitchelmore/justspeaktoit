@@ -408,6 +408,12 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         // Voxtral Realtime emits no per-utterance final: `transcription.done`
         // restates the whole session.
         XCTAssertEqual(MistralVoxtralLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+        // OpenAI Realtime restates the item-ordered session transcript on
+        // every delivery, so finals replace rather than append.
+        XCTAssertEqual(
+            OpenAIRealtimeLiveClient(apiKey: "k", model: "gpt-live-transcribe").finalShape,
+            .cumulativeTranscript
+        )
     }
 
     /// Every catalogued model must have a transport. A model the factory
@@ -428,13 +434,16 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         }
     }
 
-    /// The providers added alongside the shared Speechmatics client all commit
-    /// their tail on stop, so none of them can truncate a recording.
+    /// The providers added alongside the shared Speechmatics client, and those
+    /// ported onto shared finalising clients since, all commit their tail on
+    /// stop, so none of them can truncate a recording.
     func testTheNewlySharedProvidersAllFinaliseGracefully() {
         let clients: [StreamingTranscriptionClient] = [
             SpeechmaticsLiveClient(apiKey: "k"),
             RevAILiveClient(accessToken: "k"),
-            MistralVoxtralLiveClient(apiKey: "k")
+            MistralVoxtralLiveClient(apiKey: "k"),
+            GladiaLiveClient(apiKey: "k"),
+            CartesiaLiveClient(apiKey: "k")
         ]
         for client in clients {
             guard let finalizing = client as? FinalizingStreamingTranscriptionClient else {
@@ -508,8 +517,10 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
     }
 
     private static func elevenLabs(_ text: String, isFinal: Bool) -> String {
-        let event = isFinal ? "FINAL_TRANSCRIPT" : "PARTIAL_TRANSCRIPT"
-        return #"{"speech_event_type":"\#(event)","transcript":"\#(text)"}"#
+        // Current ElevenLabs Scribe v2 realtime shape: `message_type` frames
+        // carrying `text`, not the retired `speech_event_type`/`transcript`.
+        let messageType = isFinal ? "committed_transcript" : "partial_transcript"
+        return #"{"message_type":"\#(messageType)","text":"\#(text)"}"#
     }
 
     private static func xai(_ text: String, type: String) -> String {

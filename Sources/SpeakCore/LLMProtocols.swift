@@ -188,7 +188,14 @@ public protocol LiveTranscriptionSessionDelegate: AnyObject {
 public protocol LiveTranscriptionController: AnyObject {
     var delegate: LiveTranscriptionSessionDelegate? { get set }
     var isRunning: Bool { get }
+    /// Whole stop bound, including configured grace and terminal callback delivery.
+    /// This is a safety watchdog; healthy stops remain event-driven.
+    var stopCompletionTimeout: TimeInterval { get }
     func configure(language: String?, model: String)
     func start() async throws
     func stop() async
+}
+
+public extension LiveTranscriptionController {
+    var stopCompletionTimeout: TimeInterval { 10 }
 }

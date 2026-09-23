@@ -63,6 +63,7 @@ enum ProfilePolishChoice: String, CaseIterable, Identifiable {
 struct ProfileEditorDraft: Equatable {
   var name = ""
   var bundleIDs: [String] = []
+  var preservedMatchers: [DictationProfileMatcher] = []
   var transcriptionChoice: ProfileTranscriptionChoice = .useDefault
   var streamingModel = ""
   var batchModel = ""
@@ -82,6 +83,7 @@ struct ProfileEditorDraft: Equatable {
   init(profile: DictationProfile?, settings: AppSettings) {
     name = profile?.name ?? ""
     bundleIDs = profile?.matchers.filter { $0.kind == .bundleID }.map(\.value) ?? []
+    preservedMatchers = profile?.matchers.filter { $0.kind != .bundleID } ?? []
 
     streamingModel = settings.liveTranscriptionModel
     batchModel = settings.batchTranscriptionModel
@@ -149,7 +151,7 @@ struct ProfileEditorDraft: Equatable {
     return DictationProfile(
       id: id ?? UUID(),
       name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-      matchers: bundleIDs.map(DictationProfileMatcher.bundleID),
+      matchers: bundleIDs.map(DictationProfileMatcher.bundleID) + preservedMatchers,
       transcriptionModelID: transcriptionModelID,
       polishEnabled: polishEnabled,
       polishModelID: isPolishOverridden ? Self.normalized(polishModel) : nil,

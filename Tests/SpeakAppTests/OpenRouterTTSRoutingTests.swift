@@ -150,7 +150,10 @@ final class OpenRouterTTSRoutingTests: XCTestCase {
         let settings = AppSettings(defaults: UserDefaults(suiteName: "OpenRouterTTS-\(UUID().uuidString)")!)
         settings.ttsAutoPlay = false
         settings.ttsSaveToDirectory = false
-        let storage = SecureAppStorage(permissionsManager: PermissionsManager(), appSettings: settings)
+        let storage = SecureAppStorage(
+            permissionsManager: PermissionsManager(), appSettings: settings,
+            keychainService: "com.justspeaktoit.tests.openrouter-tts.\(UUID().uuidString)"
+        )
         let clients: [TTSProvider: TextToSpeechClient] = client.map { [.openrouter: $0] } ?? [:]
         let manager = TextToSpeechManager(
             appSettings: settings, secureStorage: storage, clients: clients, recordingSaver: recordingSaver

@@ -67,6 +67,9 @@ final class SonioxAsyncTranscriptionProviderTests: XCTestCase {
 
   func testTranscribeFile_throwsWhenPollingReportsError() async throws {
     StubURLProtocol.respond {  request in
+      if request.httpMethod == "DELETE" {
+        return try Self.makeResponse(for: request, body: "{}")
+      }
       switch request.url?.path {
       case "/v1/files":
         return try Self.makeResponse(for: request, body: #"{"id":"file-1"}"#, statusCode: 201)

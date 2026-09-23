@@ -106,27 +106,25 @@ final class WireUpBootstrapTests: XCTestCase {
     /// works from a stale set and can strand a locally newer item (#851).
     @MainActor
     func testPrepareForTermination_flushesPendingHistorySyncWrites() async throws {
-        let env = WireUp.bootstrap(options: makeWireUpTestOptions())
+        let host = try makeWireUpTestHost()
+        let env = WireUp.bootstrap(options: host.options())
         let adapter = try XCTUnwrap(
             env.historySyncAdapter,
             "Bootstrap must retain the history sync adapter so termination can flush it"
         )
-        let syncedIDsKey = "speak.sync.syncedMacHistoryIDs"
-        let previous = UserDefaults.standard.stringArray(forKey: syncedIDsKey)
-        defer {
-            if let previous {
-                UserDefaults.standard.set(previous, forKey: syncedIDsKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: syncedIDsKey)
-            }
-        }
+        let acknowledged = UUID()
 
-        await adapter.didAcknowledgeSyncedEntries(ids: [UUID()])
+        await adapter.didAcknowledgeSyncedEntries(ids: [acknowledged])
         await env.prepareForTermination()
 
         XCTAssertFalse(
             adapter.hasPendingSyncedIDWrites,
             "prepareForTermination() must flush coalesced synced-ID writes"
+        )
+        XCTAssertEqual(
+            host.defaults.stringArray(forKey: "speak.sync.syncedMacHistoryIDs"),
+            [acknowledged.uuidString],
+            "The flush must land in the bootstrap's own preferences"
         )
     }
 

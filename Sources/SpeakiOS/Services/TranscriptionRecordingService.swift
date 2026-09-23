@@ -1047,7 +1047,7 @@ public final class TranscriptionRecordingService: ObservableObject {
                 keyboard: keyboardOutcome,
                 clipboardWriteSucceeded: clipboardOutcome.writeSucceeded,
                 savedToHistory: historyItem != nil,
-                mac: iOSHistoryManager.shared.macLaneOutcome(for: historyItem)
+                mac: historyManager.macLaneOutcome(for: historyItem)
             )
         )
         lastCaptureReceipt = receipt

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Canonical AssemblyAI model identifiers and Streaming v3 request construction.
 ///

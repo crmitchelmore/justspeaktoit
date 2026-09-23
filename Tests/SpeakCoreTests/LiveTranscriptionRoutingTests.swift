@@ -201,7 +201,7 @@ final class LiveTranscriptionRoutingTests: XCTestCase {
         // frame, so a stop with nothing outstanding closes immediately rather
         // than burning the drain budget.
         XCTAssertEqual(deepgram?.finishFlushesBufferedAudio, true)
-        XCTAssertEqual(elevenLabs?.finishFlushesBufferedAudio, false)
+        XCTAssertEqual(elevenLabs?.finishFlushesBufferedAudio, true)
     }
 
     func testStreamingClientError_missingAPIKeyNamesTheProvider() {

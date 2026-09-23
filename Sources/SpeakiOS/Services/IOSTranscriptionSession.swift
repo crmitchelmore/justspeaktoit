@@ -9,6 +9,7 @@ import SpeakCore
 @MainActor
 protocol IOSRecordingSession: AnyObject {
     var isBatch: Bool { get }
+    var stopCompletionTimeout: TimeInterval { get }
     var resolution: IOSTranscriptionSession.Resolution { get }
     var partialText: String { get }
     var confidence: Double? { get }

@@ -404,7 +404,7 @@ final class TranscriberCoordinator: ObservableObject {
         let drained: TranscriptionResult
         do {
             if rearmHandsFree != nil {
-                drained = try await HandsFreeCaptureFinalisation().run {
+                drained = try await HandsFreeCaptureFinalisation(timeout: .seconds(session.stopCompletionTimeout)).run {
                     try await session.stop()
                 } cancelCapture: {
                     session.onPartialResult = nil

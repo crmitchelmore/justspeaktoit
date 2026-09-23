@@ -58,59 +58,11 @@ final class LocalModelManager: ObservableObject {
   #if !APP_STORE
   @Published private(set) var streamingModelSources: [LocalStreamingModelSource] = []
 
-  static let recommendedStreamingModelSources: [LocalStreamingModelSource] = [
-    LocalStreamingModelSource(
-      repoID: ParakeetLocalModels.tdtV3Int8RepoID,
-      modelName: ParakeetLocalModels.tdtV3Int8ModelName,
-      runtime: "sherpa-onnx streaming runtime",
-      approximateSizeMB: ParakeetLocalModels.tdtV3Int8DownloadSizeMB,
-      archiveURL: ParakeetLocalModels.tdtV3Int8ArchiveURL
-    ),
-    LocalStreamingModelSource(
-      repoID: "k2-fsa/sherpa-onnx",
-      modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25",
-      runtime: "sherpa-onnx streaming runtime",
-      approximateSizeMB: 632,
-      archiveURL: URL(
-        string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
-          + "sherpa-onnx-nemotron-speech-streaming-en-0.6b-1120ms-int8-2026-04-25.tar.bz2"
-      )
-    ),
-    LocalStreamingModelSource(
-      repoID: "k2-fsa/sherpa-onnx",
-      modelName: "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25",
-      runtime: "sherpa-onnx streaming runtime",
-      approximateSizeMB: 632,
-      archiveURL: URL(
-        string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
-          + "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2"
-      )
-    ),
-    LocalStreamingModelSource(
-      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06",
-      modelName: "streaming-zipformer-en-kroko-2025-08-06",
-      runtime: "sherpa-onnx streaming runtime",
-      approximateSizeMB: 71
-    ),
-    LocalStreamingModelSource(
-      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21",
-      modelName: "streaming-zipformer-en-2023-06-21",
-      runtime: "sherpa-onnx streaming runtime",
-      approximateSizeMB: 181
-    ),
-    LocalStreamingModelSource(
-      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
-      modelName: "streaming-zipformer-en-2023-06-26",
-      runtime: "sherpa-onnx streaming runtime",
-      approximateSizeMB: 73
-    ),
-    LocalStreamingModelSource(
-      repoID: "csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17",
-      modelName: "streaming-zipformer-en-20M-2023-02-17",
-      runtime: "sherpa-onnx streaming runtime",
-      approximateSizeMB: 44
-    )
-  ]
+  /// The canonical sherpa-onnx catalogue. It needs an installable runtime, so
+  /// App Store builds do not compile this projection.
+  nonisolated static var recommendedStreamingModelSources: [LocalStreamingModelSource] {
+    ModelCatalog.localStreamingSources
+  }
   #endif
 
   private var activePipelines: [String: WhisperKit] = [:]
@@ -224,20 +176,7 @@ final class LocalModelManager: ObservableObject {
     guard !modelName.isEmpty else {
       throw LocalModelError.invalidHuggingFaceModel
     }
-    let resolvedModel = Self.resolveHuggingFaceModel(repoID: repoID, modelName: modelName)
-
-    let model = LocalTranscriptionModel(
-      id: Self.huggingFaceModelID(repoID: repoID, modelName: resolvedModel.modelName),
-      displayName: "\(resolvedModel.displayName) from \(repoID)",
-      modelName: resolvedModel.modelName,
-      engine: .whisperKit,
-      modelRepo: repoID,
-      approximateSizeMB: resolvedModel.approximateSizeMB,
-      description: """
-      Imported from Hugging Face. WhisperKit will download the matching Core ML files from \(repoID).
-      """,
-      tags: [.quality]
-    )
+    let model = WhisperKitHuggingFaceModels.importedModel(repoID: repoID, modelName: modelName)
 
     importedModels.removeAll {
       $0.id == model.id || ($0.modelRepo == model.modelRepo && $0.modelName == model.modelName)
@@ -544,68 +483,31 @@ final class LocalModelManager: ObservableObject {
   }
   #endif
 
+  // Identity and migration rules are canonical in SpeakCore; these forwarders
+  // keep existing macOS call sites unchanged.
+
   nonisolated static func huggingFaceModelID(repoID: String, modelName: String) -> String {
-    "local/whisperkit/huggingface/\(slug(repoID))/\(slug(modelName))"
+    WhisperKitHuggingFaceModels.modelID(repoID: repoID, modelName: modelName)
   }
 
   nonisolated static func normalizedLocalModelID(_ identifier: String) -> String {
-    let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-    let prefix = "local/whisperkit/huggingface/"
-    guard trimmed.lowercased().hasPrefix(prefix) else { return trimmed }
-
-    let remainder = String(trimmed.dropFirst(prefix.count))
-    let components = remainder.split(separator: "/").map(String.init)
-    guard components.count >= 3 else { return trimmed }
-
-    let repoID = "\(components[0])/\(components[1])"
-    let modelSlug = components.dropFirst(2).joined(separator: "/")
-    let resolved = resolveHuggingFaceModel(repoID: repoID, modelName: modelSlug)
-    return huggingFaceModelID(repoID: repoID, modelName: resolved.modelName)
+    WhisperKitHuggingFaceModels.normalizedModelID(identifier)
   }
 
   nonisolated static func normalizedImportedModel(_ model: LocalTranscriptionModel) -> LocalTranscriptionModel {
-    guard let repoID = model.modelRepo else { return model }
-    let resolved = resolveHuggingFaceModel(repoID: repoID, modelName: model.modelName)
-    let expectedID = huggingFaceModelID(repoID: repoID, modelName: resolved.modelName)
-    guard expectedID != model.id
-      || resolved.modelName != model.modelName
-      || resolved.approximateSizeMB != model.approximateSizeMB
-    else {
-      return model
-    }
-    return LocalTranscriptionModel(
-      id: expectedID,
-      displayName: "\(resolved.displayName) from \(repoID)",
-      modelName: resolved.modelName,
-      engine: model.engine,
-      modelRepo: model.modelRepo,
-      approximateSizeMB: resolved.approximateSizeMB,
-      description: model.description,
-      tags: model.tags,
-      supportsLiveStreaming: model.supportsLiveStreaming
-    )
+    WhisperKitHuggingFaceModels.normalizedImportedModel(model)
   }
 
   #if !APP_STORE
-  nonisolated static func normalizedStreamingModelSource(_ source: LocalStreamingModelSource) -> LocalStreamingModelSource { // swiftlint:disable:this line_length
-    LocalStreamingModelSource(
-      repoID: source.repoID,
-      modelName: source.modelName,
-      runtime: streamingRuntimeHint(for: source.repoID, modelName: source.modelName),
-      approximateSizeMB: source.approximateSizeMB
-        ?? streamingApproximateSizeMB(repoID: source.repoID, modelName: source.modelName),
-      archiveURL: source.archiveURL
-    )
+  nonisolated static func normalizedStreamingModelSource(
+    _ source: LocalStreamingModelSource
+  ) -> LocalStreamingModelSource {
+    LocalStreamingModelSource.normalized(source)
   }
   #endif
 
   nonisolated static func slug(_ value: String) -> String {
-    value
-      .lowercased()
-      .map { character in
-        character.isLetter || character.isNumber || character == "-" || character == "/" ? character : "-"
-      }
-      .reduce(into: "") { result, character in result.append(character) }
+    LocalModelIdentity.slug(value)
   }
 
   private nonisolated static func deduplicateModels(_ models: [LocalTranscriptionModel]) -> [LocalTranscriptionModel] {
@@ -619,233 +521,25 @@ final class LocalModelManager: ObservableObject {
 
   #if !APP_STORE
   nonisolated static func streamingRuntimeHint(for repoID: String, modelName: String) -> String {
-    let searchText = "\(repoID) \(modelName)".lowercased()
-    if searchText.contains("sherpa") || searchText.contains("zipformer") || searchText.contains("onnx") {
-      return "sherpa-onnx streaming runtime"
-    }
-    if searchText.contains("whisper.cpp") || searchText.contains("ggml") || searchText.contains("gguf") {
-      return "whisper.cpp streaming runtime"
-    }
-    return "Streaming ASR runtime"
+    LocalStreamingModelSource.runtimeHint(repoID: repoID, modelName: modelName)
   }
 
   nonisolated static func streamingApproximateSizeMB(repoID: String, modelName: String) -> Int? {
-    let searchText = "\(repoID) \(modelName)".lowercased()
-    if searchText.contains("parakeet-tdt-0.6b-v3") {
-      return ParakeetLocalModels.tdtV3Int8DownloadSizeMB
-    }
-    if searchText.contains("en-kroko-2025-08-06") {
-      return 71
-    }
-    if searchText.contains("nemotron-speech-streaming-en-0.6b") {
-      return 632
-    }
-    if searchText.contains("en-2023-06-21") {
-      return 181
-    }
-    if searchText.contains("en-20m-2023-02-17") {
-      return 44
-    }
-    if searchText.contains("en-2023-06-26") {
-      return 73
-    }
-    return nil
+    LocalStreamingModelSource.knownApproximateSizeMB(repoID: repoID, modelName: modelName)
   }
 
   nonisolated static func isSupportedStreamingSource(_ source: LocalStreamingModelSource) -> Bool {
-    let text = "\(source.id) \(source.repoID) \(source.modelName) \(source.runtime)".lowercased()
-    // Only sherpa-onnx exports are runnable; raw NeMo checkpoints from
-    // nvidia/* repos are not. Parakeet is supported solely as the sherpa-onnx
-    // nemo-parakeet-tdt-0.6b-v3 conversion.
-    guard text.contains("sherpa"), !text.contains("nvidia") else { return false }
-    let isNemotron = text.contains("nemotron")
-    let isSherpaParakeetV3 = text.contains("nemo-parakeet-tdt-0.6b-v3")
-    guard isNemotron || isSherpaParakeetV3 || !text.contains("nemo") else { return false }
-    return text.contains("zipformer") || isNemotron || isSherpaParakeetV3
+    LocalStreamingModelSource.isRunnableSherpaOnnxSource(source)
   }
   #endif
 
   nonisolated static func resolveHuggingFaceModel(repoID: String, modelName: String) -> ResolvedHuggingFaceModel {
-    let repo = repoID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    let trimmedName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard repo == "argmaxinc/whisperkit-coreml" else {
-      return ResolvedHuggingFaceModel(
-        modelName: trimmedName,
-        displayName: trimmedName,
-        approximateSizeMB: sizeFromModelName(trimmedName) ?? 0
-      )
-    }
-
-    let lookupKey = trimmedName.lowercased()
-    if let known = knownArgmaxWhisperKitModels[lookupKey] {
-      return known
-    }
-    return ResolvedHuggingFaceModel(
-      modelName: trimmedName,
-      displayName: trimmedName,
-      approximateSizeMB: sizeFromModelName(trimmedName) ?? 0
-    )
-  }
-
-  private nonisolated static func sizeFromModelName(_ modelName: String) -> Int? {
-    let suffix = modelName.split(separator: "_").last.map(String.init) ?? ""
-    guard suffix.lowercased().hasSuffix("mb") else { return nil }
-    return Int(suffix.dropLast(2))
-  }
-
-  private nonisolated static let knownArgmaxWhisperKitModels: [String: ResolvedHuggingFaceModel] = {
-    func model(
-      _ aliases: [String],
-      name: String,
-      displayName: String,
-      size: Int
-    ) -> [(String, ResolvedHuggingFaceModel)] {
-      aliases.map {
-        (
-          $0,
-          ResolvedHuggingFaceModel(modelName: name, displayName: displayName, approximateSizeMB: size)
-        )
-      }
-    }
-
-    let models = [
-      model(
-        ["tiny", "whisper-tiny", "openai_whisper-tiny"],
-        name: "openai_whisper-tiny",
-        displayName: "Whisper Tiny",
-        size: 75
-      ),
-      model(
-        ["base", "whisper-base", "openai_whisper-base"],
-        name: "openai_whisper-base",
-        displayName: "Whisper Base",
-        size: 145
-      ),
-      model(
-        ["small", "whisper-small", "openai_whisper-small", "openai_whisper-small_216mb"],
-        name: "openai_whisper-small_216MB",
-        displayName: "Whisper Small",
-        size: 216
-      ),
-      model(
-        ["distil-large-v3", "distil-whisper_distil-large-v3", "distil-whisper_distil-large-v3_594mb"],
-        name: "distil-whisper_distil-large-v3_594MB",
-        displayName: "Distil-Whisper Large v3",
-        size: 594
-      ),
-      model(
-        [
-          "distil-large-v3-turbo",
-          "distil-large-v3_turbo",
-          "distil-whisper_distil-large-v3_turbo",
-          "distil-whisper_distil-large-v3_turbo_600mb"
-        ],
-        name: "distil-whisper_distil-large-v3_turbo_600MB",
-        displayName: "Distil-Whisper Large v3 Turbo",
-        size: 600
-      ),
-      model(
-        [
-          "large-v3-turbo",
-          "large-v3_turbo",
-          "openai_whisper-large-v3-v20240930_turbo",
-          "openai_whisper-large-v3-v20240930_turbo_632mb"
-        ],
-        name: "openai_whisper-large-v3-v20240930_turbo_632MB",
-        displayName: "Whisper Large v3 Turbo",
-        size: 632
-      ),
-      model(
-        [
-          "openai_whisper-large-v3_turbo",
-          "openai_whisper-large-v3_turbo_954mb",
-          "openai-whisper-large-v3-turbo",
-          "openai-whisper-large-v3-turbo-954mb"
-        ],
-        name: "openai_whisper-large-v3_turbo_954MB",
-        displayName: "Whisper Large v3 Turbo",
-        size: 954
-      )
-    ].flatMap { $0 }
-
-    return Dictionary(uniqueKeysWithValues: models)
-  }()
-}
-
-struct ResolvedHuggingFaceModel: Equatable, Sendable {
-  let modelName: String
-  let displayName: String
-  let approximateSizeMB: Int
-}
-
-#if !APP_STORE
-struct LocalStreamingModelSource: Codable, Equatable, Identifiable, Sendable {
-  let id: String
-  let repoID: String
-  let modelName: String
-  let runtime: String
-  let approximateSizeMB: Int?
-  let archiveURL: URL?
-
-  init(
-    repoID: String,
-    modelName: String,
-    runtime: String? = nil,
-    approximateSizeMB: Int? = nil,
-    archiveURL: URL? = nil
-  ) {
-    let repoID = repoID.trimmingCharacters(in: .whitespacesAndNewlines)
-    let modelName = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
-    self.id = "local/streaming/huggingface/\(LocalModelManager.slug(repoID))/\(LocalModelManager.slug(modelName))"
-    self.repoID = repoID
-    self.modelName = modelName
-    self.runtime = runtime ?? LocalModelManager.streamingRuntimeHint(for: repoID, modelName: modelName)
-    self.approximateSizeMB = approximateSizeMB
-      ?? LocalModelManager.streamingApproximateSizeMB(repoID: repoID, modelName: modelName)
-    self.archiveURL = archiveURL
-  }
-
-  var displayName: String {
-    "\(modelName) from \(repoID)"
+    WhisperKitHuggingFaceModels.resolve(repoID: repoID, modelName: modelName)
   }
 }
-#endif
 
-struct ImportedModelRecord: Codable {
-  let id: String
-  let displayName: String
-  let modelName: String
-  let engine: String
-  let modelRepo: String?
-  let approximateSizeMB: Int
-  let description: String
-  let supportsLiveStreaming: Bool
-
-  init(model: LocalTranscriptionModel) {
-    id = model.id
-    displayName = model.displayName
-    modelName = model.modelName
-    engine = model.engine.identifier
-    modelRepo = model.modelRepo
-    approximateSizeMB = model.approximateSizeMB
-    description = model.description
-    supportsLiveStreaming = model.supportsLiveStreaming
-  }
-
-  var model: LocalTranscriptionModel {
-    LocalTranscriptionModel(
-      id: id,
-      displayName: displayName,
-      modelName: modelName,
-      engine: LocalTranscriptionEngine(identifier: engine),
-      modelRepo: modelRepo,
-      approximateSizeMB: approximateSizeMB,
-      description: description,
-      tags: [.quality],
-      supportsLiveStreaming: supportsLiveStreaming
-    )
-  }
-}
+/// The persisted `imported-hugging-face-models.json` record, defined in SpeakCore.
+typealias ImportedModelRecord = LocalTranscriptionModelRecord
 
 extension LocalModelManager {
     func reloadAfterMigration() {

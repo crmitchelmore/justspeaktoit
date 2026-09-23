@@ -477,202 +477,26 @@ private extension AssemblyAILiveTranscriber {
 // MARK: - AssemblyAI Transcription Provider
 
 struct AssemblyAITranscriptionProvider: TranscriptionProvider {
-  let metadata = TranscriptionProviderMetadata(
-    id: "assemblyai",
-    displayName: "AssemblyAI",
-    systemImage: "waveform.badge.mic",
-    tintColor: "blue",
-    website: "https://assemblyai.com"
-  )
-
-  private let baseURL = URL(string: "https://api.assemblyai.com/v2")!
-  private let session: URLSession
+  private let client: AssemblyAIBatchClient
+  var metadata: TranscriptionProviderMetadata { client.metadata }
 
   init(session: URLSession = .shared) {
-    self.session = session
+    client = AssemblyAIBatchClient(session: session, durationResolver: { url in
+      let asset = AVURLAsset(url: url)
+      return try await asset.load(.duration).seconds
+    })
   }
-
-  // MARK: - Batch Transcription
 
   func transcribeFile(
-    at url: URL,
-    apiKey: String,
-    model: String,
-    language: String?
+    at url: URL, apiKey: String, model: String, language: String?
   ) async throws -> TranscriptionResult {
-    // Step 1: Upload audio file
-    let audioURL = try await uploadAudio(at: url, apiKey: apiKey)
-
-    // Step 2: Submit transcription request
-    let transcriptID = try await submitTranscription(
-      audioURL: audioURL,
-      apiKey: apiKey,
-      model: model,
-      language: language
-    )
-
-    // Step 3: Poll until complete
-    let response = try await pollForCompletion(transcriptID: transcriptID, apiKey: apiKey)
-
-    // Step 4: Build result
-    let asset = AVURLAsset(url: url)
-    let durationTime = try await asset.load(.duration)
-    let duration = durationTime.seconds
-    return buildTranscriptionResult(response: response, duration: duration, model: model)
+    try await client.transcribeFile(at: url, apiKey: apiKey, model: model, language: language)
   }
 
-  private func uploadAudio(at fileURL: URL, apiKey: String) async throws -> String {
-    let endpoint = baseURL.appendingPathComponent("upload")
-
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "POST"
-    request.setValue(apiKey, forHTTPHeaderField: "Authorization")
-    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try Data(contentsOf: fileURL)
-
-    let (data, response) = try await session.data(for: request)
-    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-      let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-      throw TranscriptionProviderError.httpError(code, body)
-    }
-
-    let decoded = try JSONDecoder().decode(AssemblyAIUploadResponse.self, from: data)
-    return decoded.upload_url
-  }
-
-  private func submitTranscription(
-    audioURL: String,
-    apiKey: String,
-    model: String,
-    language: String?
-  ) async throws -> String {
-    let endpoint = baseURL.appendingPathComponent("transcript")
-
-    var body: [String: Any] = [
-      "audio_url": audioURL,
-    ]
-
-    // Map model identifier to speech_models array
-    let speechModels = mapSpeechModels(from: model)
-    if !speechModels.isEmpty {
-      body["speech_models"] = speechModels
-    }
-
-    if let language {
-      body["language_code"] = language.localeLanguageCode
-    } else {
-      body["language_detection"] = true
-    }
-
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "POST"
-    request.setValue(apiKey, forHTTPHeaderField: "Authorization")
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-    let (data, response) = try await session.data(for: request)
-    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-      let responseBody = String(data: data, encoding: .utf8) ?? "<no-body>"
-      let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-      throw TranscriptionProviderError.httpError(code, responseBody)
-    }
-
-    let decoded = try JSONDecoder().decode(AssemblyAITranscriptStatus.self, from: data)
-    return decoded.id
-  }
-
-  private func pollForCompletion(
-    transcriptID: String,
-    apiKey: String
-  ) async throws -> AssemblyAITranscriptResult {
-    let endpoint = baseURL.appendingPathComponent("transcript/\(transcriptID)")
-
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "GET"
-    request.setValue(apiKey, forHTTPHeaderField: "Authorization")
-
-    for _ in 0..<120 {  // Timeout after ~120 seconds
-      try await Task.sleep(for: .seconds(1))
-
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-        continue
-      }
-
-      let status = try JSONDecoder().decode(AssemblyAITranscriptStatus.self, from: data)
-      switch status.status {
-      case "completed":
-        return try JSONDecoder().decode(AssemblyAITranscriptResult.self, from: data)
-      case "error":
-        throw TranscriptionProviderError.httpError(
-          500, status.error ?? "Unknown transcription error")
-      default:
-        continue  // queued or processing
-      }
-    }
-
-    throw TranscriptionProviderError.httpError(408, "Transcription timed out after 120 seconds")
-  }
-
-  private func buildTranscriptionResult(
-    response: AssemblyAITranscriptResult,
-    duration: TimeInterval,
-    model: String
-  ) -> TranscriptionResult {
-    let text = response.text ?? ""
-    let segments: [TranscriptionSegment]
-
-    if let words = response.words, !words.isEmpty {
-      segments = words.map { word in
-        TranscriptionSegment(
-          startTime: TimeInterval(word.start) / 1000.0,
-          endTime: TimeInterval(word.end) / 1000.0,
-          text: word.text
-        )
-      }
-    } else {
-      segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: text)]
-    }
-
-    return TranscriptionResult(
-      text: text,
-      segments: segments,
-      confidence: response.confidence,
-      duration: duration,
-      modelIdentifier: model,
-      cost: nil,
-      rawPayload: nil,
-      debugInfo: nil
-    )
-  }
-
-  // MARK: - API Key Validation
-
-  func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    // Use the /v2/transcript endpoint with a lightweight GET, limited to 1 result,
-    // just to validate auth.
-    let url = baseURL.appendingPathComponent("transcript")
-    var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-    components.queryItems = [URLQueryItem(name: "limit", value: "1")]
-
-    return await GETProbeAPIKeyValidator(
-      url: components.url ?? url,
-      headers: { ["Authorization": $0] },
-      serviceName: "AssemblyAI",
-      session: session
-    ).validate(key)
-  }
-
-  func requiresAPIKey(for model: String) -> Bool {
-    true
-  }
-
-  // MARK: - Supported Models
-
-  func supportedModels() -> [ModelCatalog.Option] {
-    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
-  }
+  func validateAPIKey(_ key: String) async -> APIKeyValidationResult { await client.validateAPIKey(key) }
+  func requiresAPIKey(for model: String) -> Bool { client.requiresAPIKey(for: model) }
+  func supportedModels() -> [ModelCatalog.Option] { client.supportedModels() }
+  func mapSpeechModels(from model: String) -> [String] { client.mapSpeechModels(from: model) }
 
   /// Creates a live transcriber for streaming audio.
   func createLiveTranscriber(
@@ -695,21 +519,6 @@ struct AssemblyAITranscriptionProvider: TranscriptionProvider {
     )
   }
 
-  // MARK: - Private Helpers
-
-  func mapSpeechModels(from model: String) -> [String] {
-    let name = model.split(separator: "/").last.map(String.init) ?? model
-    let cleaned = name.replacingOccurrences(of: "-streaming", with: "")
-    switch cleaned {
-    case AssemblyAIModels.universal35ProAPIName, "universal-3-pro":
-      return [AssemblyAIModels.universal35ProAPIName, AssemblyAIModels.universal2APIName]
-    case AssemblyAIModels.universal2APIName:
-      return [AssemblyAIModels.universal2APIName]
-    default:
-      return [AssemblyAIModels.universal35ProAPIName, AssemblyAIModels.universal2APIName]
-    }
-  }
-
 }
 
 // MARK: - Streaming Response Models
@@ -722,48 +531,27 @@ private struct AssemblyAIStreamEnvelope: Decodable {
 
 struct AssemblyAITurnResponse: Decodable {
   let type: String?
+  // swiftlint:disable:next identifier_name
   let turn_order: Int
+  // swiftlint:disable:next identifier_name
   let turn_is_formatted: Bool
+  // swiftlint:disable:next identifier_name
   let end_of_turn: Bool
   let transcript: String
+  // swiftlint:disable:next identifier_name
   let end_of_turn_confidence: Double?
   let words: [AssemblyAIStreamWord]?
   let utterance: String?
+  // swiftlint:disable:next identifier_name
   let language_code: String?
+  // swiftlint:disable:next identifier_name
   let language_confidence: Double?
 }
 
 struct AssemblyAIStreamWord: Decodable {
   let text: String
+  // swiftlint:disable:next identifier_name
   let word_is_final: Bool
-  let start: Int
-  let end: Int
-  let confidence: Double?
-}
-
-// MARK: - Batch Response Models
-
-private struct AssemblyAIUploadResponse: Decodable {
-  let upload_url: String
-}
-
-private struct AssemblyAITranscriptStatus: Decodable {
-  let id: String
-  let status: String
-  let error: String?
-}
-
-private struct AssemblyAITranscriptResult: Decodable {
-  let id: String
-  let status: String
-  let text: String?
-  let confidence: Double?
-  let words: [AssemblyAIBatchWord]?
-  let audio_duration: Double?
-}
-
-private struct AssemblyAIBatchWord: Decodable {
-  let text: String
   let start: Int
   let end: Int
   let confidence: Double?

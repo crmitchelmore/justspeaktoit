@@ -1,45 +1,9 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 import SpeakWindowsPlatform
 import CWindowsSupport
-
-/// One recording's audio source, created stopped. The controller serialises
-/// start, stop and destroy; destroy runs exactly once, after which no callback
-/// reaches the capture context.
-protocol WindowsRecordingCapture: AnyObject {
-    func start() throws
-    func stop() throws
-    func destroy()
-}
-
-/// Batch transcription input for one saved recording.
-struct WindowsTranscriptionRequest: Sendable {
-    let audio: URL
-    let model: String
-    let key: String
-    let duration: TimeInterval
-    let language: String?
-}
-
-/// Native, provider and file effects at the edge of the controller's recording,
-/// settings and output workflow. The app uses the Windows adapters; the
-/// executable self-test substitutes synthetic ones so that workflow runs
-/// without a microphone, credentials, network, clipboard or other application.
-protocol WindowsControllerEffects: Sendable {
-    func apiKey(name: String) throws -> String
-    func makeCapture(
-        context: WindowsCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
-    ) throws -> any WindowsRecordingCapture
-    func makeLiveClient(model: String, key: String, language: String?) -> (any FinalizingStreamingTranscriptionClient)?
-    func transcribe(
-        _ request: WindowsTranscriptionRequest, with controller: WindowsAppController
-    ) async throws -> TranscriptionResult
-    /// Blocking automatic output, called off the UI thread and the controller.
-    func perform(_ job: WindowsOutputJob, text: String) -> String
-    /// Replaces the settings file atomically.
-    func writeSettings(_ data: Data, to url: URL) throws
-}
 
 struct WindowsNativeEffects: WindowsControllerEffects {
     func apiKey(name: String) throws -> String { try WindowsNative.apiKey(name: name) }

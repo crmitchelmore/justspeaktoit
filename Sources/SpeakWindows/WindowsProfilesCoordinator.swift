@@ -1,17 +1,14 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 import CWindowsSupport
 
 /// Holds the exact catalogue and original list shown by one native editor.
 /// Callbacks validate synchronously without an actor hop; persistence follows
 /// in the same settings queue as model/key changes before the next recording.
 final class WindowsProfilesCoordinator: @unchecked Sendable {
-    struct Snapshot: Sendable {
-        let profiles: [DictationProfile]
-        let catalogue: DesktopProfileEditing.Catalogue
-        let notice: String
-    }
+    typealias Snapshot = DesktopHostProfilesSnapshot
 
     private let lock = NSLock()
     private var opening = false

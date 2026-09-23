@@ -1,36 +1,14 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
+import SpeakDesktopHost
 import CWindowsSupport
 
-enum WindowsModels {
-    // Native WinHTTP passed all five Windows runtime probes in run 35718564307.
-    static let streamingQualified = true
-    static var live: [ModelCatalog.Option] { streamingQualified ? DesktopLiveTranscription.liveModels : [] }
+// Native WinHTTP passed all five Windows runtime probes in run 35718564307, so
+// Windows keeps the shared default of DesktopHostModels.streamingQualified.
+typealias WindowsModels = DesktopHostModels
 
-    private final class Storage: @unchecked Sendable {
-        let lock = NSLock()
-        var slots = DesktopModelSlots(live: WindowsModels.live)
-    }
-    private static let storage = Storage()
-    /// Stable global slot order for captured native callbacks. Use visible for pickers.
-    static var all: [ModelCatalog.Option] { snapshot.entries.map(\.option) }
-    static var visible: [ModelCatalog.Option] {
-        let state = snapshot
-        return state.visibleIndices.map { state.entries[$0].option }
-    }
-    static var snapshot: DesktopModelSlots { storage.lock.withLock { storage.slots } }
-
-    static func update(discovered: [OpenRouterAudioModel], retaining: [String]) throws {
-        try storage.lock.withLock { try storage.slots.update(discovered: discovered, retaining: retaining) }
-    }
-
-    static func provider(for model: String) -> TranscriptionProviderMetadata? {
-        DesktopTranscription.provider(for: model) ?? DesktopLiveTranscription.provider(forID: model)
-    }
-
-    static func isLive(_ model: String) -> Bool { live.contains { $0.id == model } }
-
+extension DesktopHostModels {
     static func configureModes(batch: String?, live: String?) throws {
         let models = all
         let flags: [Int32] = models.map { isLive($0.id) ? 1 : 0 }
@@ -42,22 +20,9 @@ enum WindowsModels {
         guard result == 0 else { throw WindowsNativeError(message: "Could not configure transcription modes.") }
     }
 
-    // Provider metadata is untrusted UI text. Bound native control labels and
-    // replace embedded controls without changing canonical model identifiers.
-    private static func uiText(_ value: String) -> String {
-        String(String.UnicodeScalarView(value.unicodeScalars.prefix(1024).map {
-            CharacterSet.controlCharacters.contains($0) ? " " : $0
-        }))
-    }
-
-    private static func label(for entry: DesktopModelSlots.Entry) -> String {
-        let name = uiText(entry.option.displayName).trimmingCharacters(in: .whitespacesAndNewlines)
-        return (name.isEmpty ? entry.option.id : name) + (entry.isAvailable ? "" : " (not in current catalogue)")
-    }
-
     static func publish(status: String, refreshing: Bool) throws {
         let state = snapshot
-        let order = Dictionary(uniqueKeysWithValues: state.visibleIndices.enumerated().map { ($0.element, $0.offset) })
+        let order = displayOrder(state)
         var strings: [UnsafeMutablePointer<CChar>] = []
         defer { strings.forEach { $0.deallocate() } }
         func owned(_ value: String) -> UnsafePointer<CChar> {

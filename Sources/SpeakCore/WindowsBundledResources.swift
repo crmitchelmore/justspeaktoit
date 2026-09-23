@@ -1,4 +1,4 @@
-#if os(Windows)
+#if os(Windows) || os(Linux)
 import Foundation
 
 /// Exposes packaged data through SpeakCore's generated SwiftPM bundle accessor.

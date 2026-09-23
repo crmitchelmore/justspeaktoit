@@ -2,22 +2,22 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
-extension WindowsAppController {
+extension DesktopHostController {
     static func prepareModelCatalog(directory: URL, settings: inout Settings) throws -> OpenRouterAudioCatalogStore {
         let selection = DesktopModelSelection.migrated(
             model: settings.model, batchModel: settings.batchModel, liveModel: settings.liveModel,
-            isLive: WindowsModels.isLive, isBatch: { DesktopTranscription.provider(for: $0) != nil }
+            isLive: DesktopHostModels.isLive, isBatch: { DesktopTranscription.provider(for: $0) != nil }
         )
         settings.model = selection.model
         settings.batchModel = selection.batchModel
         settings.liveModel = selection.liveModel
-        let credential = DesktopTranscription.batchModels.lazy.compactMap { WindowsModels.provider(for: $0.id) }
+        let credential = DesktopTranscription.batchModels.lazy.compactMap { DesktopHostModels.provider(for: $0.id) }
             .first { $0.id == OpenRouterService.providerID }?.apiKeyIdentifier
         let catalog = OpenRouterAudioCatalogStore(
-            apiKeyProvider: { credential.flatMap { try? WindowsNative.apiKey(name: $0) } },
+            apiKeyProvider: { credential.flatMap { try? Platform.apiKey(name: $0) } },
             cacheURL: directory.appendingPathComponent("OpenRouterAudioCatalog.json")
         )
-        try WindowsModels.update(
+        try DesktopHostModels.update(
             discovered: catalog.snapshot.models,
             retaining: [settings.model, settings.batchModel, settings.liveModel].compactMap { $0 }
         )
@@ -25,11 +25,11 @@ extension WindowsAppController {
     }
 
     /// Initial labels come from disk only; startup never waits for discovery.
-    func configureModelCatalog() throws {
-        try WindowsModels.publish(status: modelCatalogStatus(modelCatalog.snapshot), refreshing: false)
+    package func configureModelCatalog() throws {
+        try Platform.publishModels(status: modelCatalogStatus(modelCatalog.snapshot), refreshing: false)
     }
 
-    func refreshModels(force: Bool) {
+    package func refreshModels(force: Bool) {
         guard !closed else { return }
         if !force, modelDiscoveryTask != nil { return }
         modelDiscoveryTask?.cancel()
@@ -46,16 +46,16 @@ extension WindowsAppController {
     func publishModelCatalog(_ state: OpenRouterAudioCatalogState) {
         guard !closed, state.revision >= modelCatalogRevision else { return }
         do {
-            try WindowsModels.update(
+            try DesktopHostModels.update(
                 discovered: state.models,
                 retaining: [settings.model, settings.batchModel, settings.liveModel].compactMap { $0 }
             )
-            try WindowsModels.publish(status: modelCatalogStatus(state), refreshing: state.isRefreshing)
+            try Platform.publishModels(status: modelCatalogStatus(state), refreshing: state.isRefreshing)
             modelCatalogRevision = state.revision
         } catch {
             // Catalogue feedback has its own control; recording status and
             // transcript text must remain unchanged while discovery completes.
-            try? WindowsModels.publish(status: error.localizedDescription, refreshing: false)
+            try? Platform.publishModels(status: error.localizedDescription, refreshing: false)
         }
     }
 

@@ -1,12 +1,10 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakWindowsPlatform
-import CWindowsSupport
 
-extension WindowsAppController {
+extension DesktopHostController {
     func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
-        guard WindowsModels.isLive(model),
+        guard DesktopHostModels.isLive(model),
               let client = effects.makeLiveClient(model: model, key: key, language: language) else { return nil }
         return DesktopLiveSession(client: client, id: id)
     }
@@ -31,7 +29,7 @@ extension WindowsAppController {
                 guard revision != snapshot.revision else { continue }
                 revision = snapshot.revision
                 transcript = snapshot.text
-                let status = "Live transcription… " + hotKeySettings().finishHint(for: recording?.trigger ?? .other)
+                let status = "Live transcription… " + Platform.finishHint(hotKeySettings(), for: recording?.trigger ?? .other)
                     + (recording.map { profileContext($0.record) } ?? "")
                 update(status, transcript: snapshot.text, state: 1)
             }
@@ -73,5 +71,5 @@ extension WindowsAppController {
         )
     }
 
-    func preferredModelIDs() -> (batch: String?, live: String?) { (settings.batchModel, settings.liveModel) }
+    package func preferredModelIDs() -> (batch: String?, live: String?) { (settings.batchModel, settings.liveModel) }
 }

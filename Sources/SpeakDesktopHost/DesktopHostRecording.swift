@@ -1,13 +1,11 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakWindowsPlatform
-import CWindowsSupport
 
-extension WindowsAppController {
+extension DesktopHostController {
     func startRecording(
-        target: WindowsInsertionTarget?, deviceID: String, profile: DesktopProfileSession,
-        textOutput: WindowsTextOutputOptions, trigger: HotKeySessionTrigger = .other
+        target: Platform.InsertionTarget?, deviceID: String, profile: DesktopProfileSession,
+        textOutput: Platform.TextOutputOptions, trigger: HotKeySessionTrigger = .other
     ) async throws {
         let key = try effects.apiKey(name: credentialIdentifier(for: profile.modelIdentifier))
         guard !key.isEmpty else { throw TranscriptionProviderError.apiKeyMissing }
@@ -26,7 +24,7 @@ extension WindowsAppController {
             guard !closed else { throw CancellationError() }
             live = makeLiveSession(model: profile.modelIdentifier, key: key, id: id, language: profile.language)
             live?.start()
-            let context = WindowsCaptureContext(file: file, live: live) { message in
+            let context = DesktopCaptureContext(file: file, live: live) { message in
                 Task { await self.captureFailed(message, recordingID: id) }
             }
             let capture = try effects.makeCapture(
@@ -54,7 +52,7 @@ extension WindowsAppController {
                     + "Audio finalization failed: \(error.localizedDescription)"
             }
             do { try await saveRecord(failed) } catch {
-                throw WindowsNativeError(message: "\(failed.failure ?? "Recording failed.") "
+                throw DesktopHostError(message: "\(failed.failure ?? "Recording failed.") "
                     + "History could not be saved: \(error.localizedDescription)")
             }
             throw startupFailure

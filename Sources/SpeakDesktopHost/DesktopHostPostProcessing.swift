@@ -2,10 +2,10 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
-extension WindowsAppController {
-    func postProcessingOptions() -> DesktopPostProcessing.Options { settings.postProcessing ?? .init() }
+extension DesktopHostController {
+    package func postProcessingOptions() -> DesktopPostProcessing.Options { settings.postProcessing ?? .init() }
 
-    func savePostProcessing(enabled: Bool, modelIndex: Int, prompt: String, key: String) {
+    package func savePostProcessing(enabled: Bool, modelIndex: Int, prompt: String, key: String) {
         guard !closed, DesktopPostProcessing.remoteModels.indices.contains(modelIndex) else { return }
         do {
             let model = DesktopPostProcessing.remoteModels[modelIndex].id
@@ -14,7 +14,7 @@ extension WindowsAppController {
                 customPrompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
             )
             if !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try WindowsNative.saveAPIKey(key, name: postProcessingCredential(for: model))
+                try Platform.saveAPIKey(key, name: postProcessingCredential(for: model))
             }
             var changed = settings
             changed.postProcessing = options
@@ -38,7 +38,7 @@ extension WindowsAppController {
         }
         guard !closed, !cancellationRequested, options.mode == .remote else { return record }
         do {
-            let key = try WindowsNative.apiKey(
+            let key = try Platform.apiKey(
                 name: postProcessingCredential(for: options.modelIdentifier)
             )
             update("Polishing transcript… The original is saved in History.", state: 2)

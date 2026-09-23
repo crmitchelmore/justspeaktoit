@@ -7,6 +7,7 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**
@@ -24,6 +25,7 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
       - Sources/SpeakWindows/**
       - Sources/SpeakWindowsPlatform/**
       - Sources/CWindowsSupport/**

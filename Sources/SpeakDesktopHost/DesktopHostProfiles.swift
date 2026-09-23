@@ -2,7 +2,14 @@ import Foundation
 import SpeakCore
 import SpeakDesktop
 
-extension WindowsAppController {
+/// The exact profiles, catalogue and notice one native profile editor opens with.
+package struct DesktopHostProfilesSnapshot: Sendable {
+    package let profiles: [DictationProfile]
+    package let catalogue: DesktopProfileEditing.Catalogue
+    package let notice: String
+}
+
+extension DesktopHostController {
     func profileRecord(id: UUID, filename: String, profile: DesktopProfileSession) -> DesktopRecordingStore.Record {
         var record = DesktopRecordingStore.Record(
             id: id, audioFilename: filename, modelIdentifier: profile.modelIdentifier
@@ -22,7 +29,7 @@ extension WindowsAppController {
     }
 
     func profileRecordingStatus(_ profile: DesktopProfileSession, trigger: HotKeySessionTrigger) -> String {
-        var status = "Recording… " + hotKeySettings().finishHint(for: trigger)
+        var status = "Recording… " + Platform.finishHint(hotKeySettings(), for: trigger)
         if let name = profile.profileName { status += " App profile: \(name)." }
         for limitation in profile.limitations { status += " " + limitation.message }
         return status
@@ -45,11 +52,11 @@ extension WindowsAppController {
         }
     }
 
-    func profileSnapshot() throws -> WindowsProfilesCoordinator.Snapshot {
+    package func profileSnapshot() throws -> DesktopHostProfilesSnapshot {
         guard !closed, !busy, recording == nil else {
-            throw WindowsNativeError(message: "Finish dictation before editing app profiles.")
+            throw DesktopHostError(message: "Finish dictation before editing app profiles.")
         }
-        return WindowsProfilesCoordinator.Snapshot(
+        return DesktopHostProfilesSnapshot(
             profiles: profiles,
             catalogue: DesktopProfileEditing.Catalogue(capabilities: profileCapabilities),
             notice: profileWarning ?? "Overrides apply to one recording; your normal app settings stay unchanged."
@@ -58,13 +65,13 @@ extension WindowsAppController {
 
     var profileCapabilities: DesktopProfileCapabilities {
         DesktopProfileCapabilities(
-            batchModels: WindowsModels.visible.filter { !WindowsModels.isLive($0.id) },
-            liveModels: WindowsModels.live, polishModels: DesktopPostProcessing.remoteModels,
+            batchModels: DesktopHostModels.visible.filter { !DesktopHostModels.isLive($0.id) },
+            liveModels: DesktopHostModels.live, polishModels: DesktopPostProcessing.remoteModels,
             liveLanguageModelIDs: DesktopLiveTranscription.languageHintModelIDs
         )
     }
 
-    func saveProfiles(_ profiles: [DictationProfile]) async {
+    package func saveProfiles(_ profiles: [DictationProfile]) async {
         guard !closed, !busy, recording == nil else {
             update("App profiles were not saved because dictation started. Reopen App profiles to try again.")
             return

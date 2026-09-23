@@ -1,13 +1,11 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakWindowsPlatform
-import CWindowsSupport
 
-extension WindowsAppController {
+extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
     func transcribe(
-        _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: WindowsRecordingOutput?,
+        _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
         profile: DesktopProfileSession? = nil
     ) async {
         var record = original
@@ -23,12 +21,12 @@ extension WindowsAppController {
             guard !closed else { throw CancellationError() }
             let size = try audio.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             guard size <= 25_000_000 else {
-                throw WindowsNativeError(
-                    message: "Audio exceeds this Windows preview’s 25 MB upload cap. The recording is saved."
+                throw DesktopHostError(
+                    message: "Audio exceeds this \(Platform.displayName) preview’s 25 MB upload cap. The recording is saved."
                 )
             }
             update("Transcribing… Your recording is saved locally.", state: 2)
-            let request = WindowsTranscriptionRequest(
+            let request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language
             )
             let effects = self.effects
@@ -63,7 +61,7 @@ extension WindowsAppController {
         }
     }
 
-    func present(_ record: DesktopRecordingStore.Record, output: WindowsRecordingOutput?) {
+    func present(_ record: DesktopRecordingStore.Record, output: DesktopHostRecordingOutput<Platform>?) {
         selectedHistoryID = record.id
         transcriptVariant = .processed
         refreshHistory(selectRecord: true)
@@ -77,8 +75,8 @@ extension WindowsAppController {
             status = started
         }
         if selectedHistoryID == record.id {
-            WindowsNative.recordingState(0)
-            WindowsNative.historyPresentation(record, variant: .processed, status: status + profileContext(record))
+            Platform.recordingState(0)
+            Platform.historyPresentation(record, variant: .processed, status: status + profileContext(record))
         } else {
             // An active search keeps its rows; the result is still shown here.
             status += " This recording is hidden by the current History search."
@@ -86,7 +84,7 @@ extension WindowsAppController {
         }
     }
 
-    func cancelTranscription() {
+    package func cancelTranscription() {
         guard !closed else { return }
         cancelOutput()
         guard busy else { return }

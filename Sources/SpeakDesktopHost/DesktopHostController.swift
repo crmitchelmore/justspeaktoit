@@ -1,11 +1,9 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakWindowsPlatform
-import CWindowsSupport
 
-actor WindowsAppController {
-    struct Settings: Codable {
+package actor DesktopHostController<Platform: DesktopHostPlatform> {
+    package struct Settings: Codable {
         var model = ModelCatalog.defaultBatchTranscriptionModel
         var postProcessing: DesktopPostProcessing.Options?
         var microphoneDeviceID: String?
@@ -13,64 +11,64 @@ actor WindowsAppController {
         var liveModel: String?
         // Edited in the Text output dialog. Absent or unknown keys keep the
         // smart insert-at-cursor default with clipboard restoration.
-        var textOutput: WindowsTextOutputOptions?
+        package var textOutput: Platform.TextOutputOptions?
         // Keyboard shortcut dialog; absent keeps Ctrl+Alt+Space, press-to-toggle.
-        var hotKey: WindowsHotKeySettings?
+        package var hotKey: Platform.HotKeySettings?
     }
 
     /// Target, profile and text output are fixed when recording starts; a
     /// later settings change applies only to later recordings.
-    struct Recording {
-        let capture: any WindowsRecordingCapture
-        let context: WindowsCaptureContext
+    package struct Recording {
+        let capture: any DesktopRecordingCapture
+        let context: DesktopCaptureContext
         var record: DesktopRecordingStore.Record
-        let target: WindowsInsertionTarget?
+        let target: Platform.InsertionTarget?
         let live: DesktopLiveSession?
         let profile: DesktopProfileSession
-        let textOutput: WindowsTextOutputOptions
+        let textOutput: Platform.TextOutputOptions
         /// What started this session; a shortcut gesture stops only its own kind.
-        let trigger: HotKeySessionTrigger
+        package let trigger: HotKeySessionTrigger
     }
 
-    struct StoppedRecording {
+    package struct StoppedRecording {
         let record: DesktopRecordingStore.Record
         let duration: TimeInterval
-        let target: WindowsInsertionTarget?
+        let target: Platform.InsertionTarget?
         let live: DesktopLiveSession?
         let profile: DesktopProfileSession
-        let textOutput: WindowsTextOutputOptions
-        var output: WindowsRecordingOutput { WindowsRecordingOutput(options: textOutput, target: target) }
+        let textOutput: Platform.TextOutputOptions
+        var output: DesktopHostRecordingOutput<Platform> { .init(options: textOutput, target: target) }
     }
 
-    let directory: URL
-    let effects: any WindowsControllerEffects
+    package let directory: URL
+    package let effects: any DesktopHostEffects<Platform>
     let store: DesktopRecordingStore
     let uploadStaging: SharedMultipartUploadStaging
     let modelCatalog: OpenRouterAudioCatalogStore
     var modelDiscoveryTask: Task<Void, Never>?
     var modelCatalogRevision: UInt64 = 0
     let profileStore: DesktopDictationProfileStore
-    var profiles: [DictationProfile]
+    package var profiles: [DictationProfile]
     var profileWarning: String?
-    var settings: Settings
-    var recording: Recording?
+    package var settings: Settings
+    package var recording: Recording?
     private var isReady = false
-    var busy = false
-    var closed = false
+    package var busy = false
+    package var closed = false
     private var shutdownComplete = false
     var activeOperations = 0
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     var transcript = ""
     /// Shortcut gesture bookkeeping, in the monotonic clock of recognition.
-    var lastHotKeyDoubleTap: TimeInterval = -.infinity
-    var hotKeyStartsAfter: TimeInterval = 0
-    var history: [UUID: DesktopRecordingStore.Record] = [:]
+    package var lastHotKeyDoubleTap: TimeInterval = -.infinity
+    package var hotKeyStartsAfter: TimeInterval = 0
+    package var history: [UUID: DesktopRecordingStore.Record] = [:]
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.
     var historySearchText: [UUID: String] = [:]
     var historyQuery = ""
-    var selectedHistoryID: UUID?
+    package var selectedHistoryID: UUID?
     var transcriptVariant: DesktopTranscriptVariant = .processed
     var transcriptionTask: Task<TranscriptionResult, Error>?
     var postProcessingTask: Task<DesktopPostProcessing.Outcome, Error>?
@@ -78,19 +76,16 @@ actor WindowsAppController {
     var cancellationRequested = false
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
-    var outputSlot = WindowsOutputState()
+    package var outputSlot = DesktopHostOutputState<Platform>()
     /// At most one audible native History playback; its status presenter is
     /// installed by preparePlayback once this actor exists.
-    let playback = WindowsAudioPlaybackController(
-        backend: WindowsAudioPlaybackNativeBackend(),
-        presenter: WindowsAudioPlaybackPresenter(show: { WindowsNative.playback($0) }, status: { _ in })
-    )
+    let playback = Platform.makePlayback()
 
-    init(directory: URL, effects: any WindowsControllerEffects = WindowsNativeEffects()) throws {
+    package init(directory: URL, effects: any DesktopHostEffects<Platform>) throws {
         self.directory = directory
         self.effects = effects
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
-        self.uploadStaging = WindowsNative.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
+        self.uploadStaging = Platform.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
         let profileStore = DesktopDictationProfileStore(directory: directory)
         self.profileStore = profileStore
         let loadedProfiles = try Self.loadProfiles(from: profileStore)
@@ -112,12 +107,12 @@ actor WindowsAppController {
 
     /// `textOutput` was read in settings order at the Record event, so a later
     /// Apply cannot change how this recording is output.
-    func toggle(
-        target: WindowsInsertionTarget?, modelIndex: Int, deviceID: String,
-        targetExecutablePath: String?, textOutput: WindowsTextOutputOptions,
+    package func toggle(
+        target: Platform.InsertionTarget?, modelIndex: Int, deviceID: String,
+        targetExecutablePath: String?, textOutput: Platform.TextOutputOptions,
         trigger: HotKeySessionTrigger = .other
     ) async {
-        guard isReady, !busy, !closed, WindowsModels.all.indices.contains(modelIndex) else { return }
+        guard isReady, !busy, !closed, DesktopHostModels.all.indices.contains(modelIndex) else { return }
         cancelOutput()
         selectModel(modelIndex)
         selectMicrophone(deviceID)
@@ -131,7 +126,7 @@ actor WindowsAppController {
             try await playback.stopAndWait()
             guard !closed else { return }
             let profile = resolvedProfile(executablePath: targetExecutablePath)
-            if let limitation = profile.blockingLimitation { throw WindowsNativeError(message: limitation.message) }
+            if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
             try await startRecording(
                 target: target, deviceID: deviceID, profile: profile, textOutput: textOutput, trigger: trigger
             )
@@ -140,10 +135,10 @@ actor WindowsAppController {
 
     /// Self-test only: startup without model discovery, which could reach the
     /// network with a real saved credential.
-    func markReadyForSelfTest() { isReady = true }
+    package func markReadyForSelfTest() { isReady = true }
 }
 
-extension WindowsAppController {
+extension DesktopHostController {
     private func stopAndTranscribe() async {
         let pending = recording?.record
         let live = recording?.live
@@ -202,10 +197,10 @@ extension WindowsAppController {
         }
     }
 
-    func importAudio(path: String, modelIndex: Int) async {
+    package func importAudio(path: String, modelIndex: Int) async {
         guard isReady, !busy, !closed, recording == nil,
-              WindowsModels.all.indices.contains(modelIndex),
-              !WindowsModels.isLive(WindowsModels.all[modelIndex].id) else { return }
+              DesktopHostModels.all.indices.contains(modelIndex),
+              !DesktopHostModels.isLive(DesktopHostModels.all[modelIndex].id) else { return }
         cancelOutput()
         selectModel(modelIndex)
         busy = true
@@ -218,7 +213,7 @@ extension WindowsAppController {
                 throw TranscriptionProviderError.apiKeyMissing
             }
             let source = URL(fileURLWithPath: path)
-            try WindowsNative.validateImport(source)
+            try DesktopHostImport.validate(source)
             let id = UUID()
             let filename = id.uuidString + "." + source.pathExtension
             let destination = directory.appendingPathComponent("History").appendingPathComponent(filename)
@@ -238,8 +233,8 @@ extension WindowsAppController {
 
 }
 
-extension WindowsAppController {
-    func close() async {
+extension DesktopHostController {
+    package func close() async {
         if closed {
             if !shutdownComplete {
                 await withCheckedContinuation { shutdownWaiters.append($0) }
@@ -286,7 +281,7 @@ extension WindowsAppController {
 
 }
 
-extension WindowsAppController {
+extension DesktopHostController {
     func saveRecord(_ record: DesktopRecordingStore.Record) async throws {
         try await store.save(record)
         indexHistory(record)
@@ -301,24 +296,24 @@ extension WindowsAppController {
         waiters.forEach { $0.resume() }
     }
 
-    func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {
+    package func update(_ status: String, transcript: String? = nil, state: Int32 = -1) {
         guard !closed else { return }
-        WindowsNative.update(status, transcript: transcript, state: state)
+        Platform.update(status, transcript: transcript, state: state)
     }
 
     func credentialIdentifier(for model: String) throws -> String {
-        guard let provider = WindowsModels.provider(for: model) else {
+        guard let provider = DesktopHostModels.provider(for: model) else {
             throw DesktopTranscriptionError.unsupportedModel
         }
         return provider.apiKeyIdentifier
     }
     var canUseHistory: Bool { isReady && !closed && !busy && recording == nil }
 
-    func selectedIndex() -> Int {
-        WindowsModels.all.firstIndex { $0.id == settings.model } ?? 0
+    package func selectedIndex() -> Int {
+        DesktopHostModels.all.firstIndex { $0.id == settings.model } ?? 0
     }
 
-    func ready() async {
+    package func ready() async {
         defer { isReady = true }
         guard !closed else { return }
         preparePlayback()
@@ -336,9 +331,9 @@ extension WindowsAppController {
             transcript = selectedHistoryID.flatMap { history[$0]?.displayText } ?? ""
             transcriptVariant = .processed
             refreshHistory(selectRecord: true)
-            let key = try WindowsNative.apiKey(name: credentialIdentifier(for: settings.model))
+            let key = try Platform.apiKey(name: credentialIdentifier(for: settings.model))
             var status = key.isEmpty ? "Enter and save the selected provider’s API key to record or import audio."
-                : "Ready. \(hotKeySettings().readyHint) \(records.count) saved recordings."
+                : "Ready. \(Platform.readyHint(hotKeySettings())) \(records.count) saved recordings."
             if !recovery.unreadableFiles.isEmpty {
                 status += " \(recovery.unreadableFiles.count) history records could not be read."
             }
@@ -348,11 +343,11 @@ extension WindowsAppController {
         } catch { update(error.localizedDescription, state: 0) }
     }
 
-    func selectModel(_ index: Int) {
-        guard !closed, !busy, recording == nil, WindowsModels.all.indices.contains(index) else { return }
-        let changed = settings.model != WindowsModels.all[index].id
-        settings.model = WindowsModels.all[index].id
-        if WindowsModels.isLive(settings.model) { settings.liveModel = settings.model } else {
+    package func selectModel(_ index: Int) {
+        guard !closed, !busy, recording == nil, DesktopHostModels.all.indices.contains(index) else { return }
+        let changed = settings.model != DesktopHostModels.all[index].id
+        settings.model = DesktopHostModels.all[index].id
+        if DesktopHostModels.isLive(settings.model) { settings.liveModel = settings.model } else {
             settings.batchModel = settings.model
         }
         do {
@@ -363,36 +358,34 @@ extension WindowsAppController {
                 == AzureSpeechConfiguration.credentialIdentifier
                 ? " Enter Azure credentials as key:region (for example, your key followed by :uksouth)." : ""
             if changed { publishModelCatalog(modelCatalog.snapshot) }
-            update("Selected \(WindowsModels.all[index].displayName).\(hint)")
+            update("Selected \(DesktopHostModels.all[index].displayName).\(hint)")
         } catch { update("Could not save settings: \(error.localizedDescription)") }
     }
 
-    func saveKey(_ key: String, modelIndex: Int) {
+    package func saveKey(_ key: String, modelIndex: Int) {
         guard !closed, !busy, recording == nil else { return }
         do {
-            guard WindowsModels.all.indices.contains(modelIndex),
-                  let provider = WindowsModels.provider(
-                    for: WindowsModels.all[modelIndex].id
+            guard DesktopHostModels.all.indices.contains(modelIndex),
+                  let provider = DesktopHostModels.provider(
+                    for: DesktopHostModels.all[modelIndex].id
                   ) else { throw DesktopTranscriptionError.unsupportedModel }
             let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleaned.isEmpty, provider.apiKeyIdentifier == AzureSpeechConfiguration.credentialIdentifier {
                 _ = try AzureSpeechConfiguration(credentials: cleaned)
             }
-            try WindowsNative.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
+            try Platform.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
             if provider.id == OpenRouterService.providerID { refreshModels(force: true) }
-            update(cleaned.isEmpty ? "API key removed." : "API key saved in Windows Credential Manager.")
+            update(cleaned.isEmpty ? "API key removed." : "API key saved in \(Platform.credentialStoreName).")
         } catch { update(error.localizedDescription) }
     }
 
     /// Text and version are the immutable display snapshot from the Copy click;
     /// a later selection or retry cannot replace the content this action uses.
-    func copyTranscript(_ text: String, variant: DesktopTranscriptVariant? = nil) {
+    package func copyTranscript(_ text: String, variant: DesktopTranscriptVariant? = nil) {
         guard !closed else { return }
         guard !text.isEmpty else { update("There is no transcript to copy."); return }
         do {
-            try text.withCString { text in
-                try WindowsNative.checked { jsti_clipboard_write(text, $0, $1) }
-            }
+            try Platform.copyToClipboard(text)
             update(variant == .original
                 ? "Original transcript copied." : "Transcript copied.")
         } catch { update(error.localizedDescription) }

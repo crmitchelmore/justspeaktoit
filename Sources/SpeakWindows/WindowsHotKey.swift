@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktopHost
 import SpeakWindowsPlatform
 import CWindowsSupport
 
@@ -195,8 +196,6 @@ final class WindowsHotKeyGestures: @unchecked Sendable {
 }
 
 extension WindowsAppController {
-    func hotKeySettings() -> WindowsHotKeySettings { settings.hotKey ?? .init() }
-
     func saveHotKey(_ hotKey: WindowsHotKeySettings) {
         guard !closed else { return }
         var changed = settings

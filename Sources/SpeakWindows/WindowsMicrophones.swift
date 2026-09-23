@@ -112,20 +112,3 @@ extension WindowsNative {
         return warning
     }
 }
-
-extension WindowsAppController {
-    func selectedMicrophone() -> String { settings.microphoneDeviceID ?? "" }
-    func setMicrophoneWarning(_ warning: String?) { microphoneWarning = warning }
-
-    func selectMicrophone(_ identifier: String) {
-        guard canUseHistory else { return }
-        var changed = settings
-        changed.microphoneDeviceID = identifier.isEmpty ? nil : identifier
-        do {
-            try JSONEncoder().encode(changed).write(
-                to: directory.appendingPathComponent("settings.json"), options: .atomic
-            )
-            settings = changed
-        } catch { update("Could not save the microphone choice: \(error.localizedDescription)") }
-    }
-}

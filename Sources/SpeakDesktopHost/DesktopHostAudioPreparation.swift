@@ -1,11 +1,9 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakWindowsPlatform
-import CWindowsSupport
 
-extension WindowsAppController {
-    func transcribePreparedAudio(
+extension DesktopHostController {
+    package func transcribePreparedAudio(
         _ audio: URL, model: String, key: String, duration: TimeInterval, language: String? = nil
     ) async throws -> TranscriptionResult {
         try Task.checkCancellation()
@@ -18,19 +16,17 @@ extension WindowsAppController {
         }
         update("Preparing audio… Your original file is saved in History.", state: 2)
         let conversionDirectory = directory.appendingPathComponent("ConvertedAudio")
-        try conversionDirectory.path.withCString { path in
-            try WindowsNative.checked { jsti_private_directory_prepare(path, $0, $1) }
-        }
+        try Platform.preparePrivateDirectory(conversionDirectory)
         let output = conversionDirectory.appendingPathComponent(UUID().uuidString + ".wav")
         // The converter owns partial-file cleanup. Only a successful conversion
         // transfers its output here; a collision must never remove an older file.
-        let converted = try await WindowsAudioConversion.convert(input: audio, output: output)
+        let convertedDuration = try await Platform.convertAudio(input: audio, output: output)
         defer { try? FileManager.default.removeItem(at: output) }
         try Task.checkCancellation()
         update("Transcribing… Your original file is saved in History.", state: 2)
         return try await DesktopTranscription.transcribe(
             audioURL: output, model: model, apiKey: key,
-            duration: converted.duration, language: language, staging: uploadStaging
+            duration: convertedDuration, language: language, staging: uploadStaging
         )
     }
 }

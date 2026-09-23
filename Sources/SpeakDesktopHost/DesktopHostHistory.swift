@@ -1,8 +1,7 @@
 import Foundation
-import CWindowsSupport
 import SpeakDesktop
 
-extension WindowsAppController {
+extension DesktopHostController {
     func indexHistory(_ record: DesktopRecordingStore.Record) {
         history[record.id] = record
         historySearchText[record.id] = DesktopHistorySearch.searchText(for: record)
@@ -26,29 +25,29 @@ extension WindowsAppController {
             transcript = ""
             transcriptVariant = .processed
             playback.stop()
-            WindowsNative.history(visible, selected: nil, selectRecord: selectRecord)
-            WindowsNative.transcriptVariant(nil, for: nil, switchable: false)
+            Platform.history(visible, selected: nil, selectRecord: selectRecord)
+            Platform.transcriptVariant(nil, for: nil, switchable: false)
             update(
                 "The selected recording is hidden by this search. Clear the search or choose a matching recording.",
                 transcript: ""
             )
             return
         }
-        WindowsNative.history(visible, selected: selectedHistoryID, selectRecord: selectRecord)
+        Platform.history(visible, selected: selectedHistoryID, selectRecord: selectRecord)
     }
 
     /// Startup renders the restored selection through the same record-bound
     /// path as later selections, while an empty History can display global text.
     func showSelectedHistory(status: String, state: Int32) {
         if let id = selectedHistoryID, let record = history[id] {
-            WindowsNative.recordingState(state)
-            WindowsNative.historyPresentation(record, variant: transcriptVariant, status: status)
+            Platform.recordingState(state)
+            Platform.historyPresentation(record, variant: transcriptVariant, status: status)
         } else {
             update(status, transcript: transcript, state: state)
         }
     }
 
-    func selectHistory(_ identifier: String) {
+    package func selectHistory(_ identifier: String) {
         guard canUseHistory, let id = UUID(uuidString: identifier),
               let record = history[id], isVisible(id) else { return }
         // A different record is displayed: the previous record's playback ends
@@ -61,7 +60,7 @@ extension WindowsAppController {
                 ? "Saved transcript. Transcript version switches between the processed and original text."
                 : "Saved transcript. Retry uses this recording’s original model.")
         transcriptVariant = .processed
-        WindowsNative.historyPresentation(record, variant: .processed, status: status + profileContext(record))
+        Platform.historyPresentation(record, variant: .processed, status: status + profileContext(record))
     }
 
     /// A selection event for a record that a newer search has already hidden
@@ -72,7 +71,7 @@ extension WindowsAppController {
         return DesktopHistorySearch.matches(query: historyQuery, searchText: searchText)
     }
 
-    func searchHistory(_ query: String) {
+    package func searchHistory(_ query: String) {
         guard !closed, query != historyQuery else { return }
         historyQuery = query
         refreshHistory()
@@ -83,13 +82,13 @@ extension WindowsAppController {
     func showTranscriptVariant(_ variant: DesktopTranscriptVariant, for record: DesktopRecordingStore.Record) {
         transcriptVariant = variant
         if record.hasTranscriptVariants {
-            WindowsNative.transcriptVariant(variant, for: record.id, switchable: true)
+            Platform.transcriptVariant(variant, for: record.id, switchable: true)
         } else {
-            WindowsNative.transcriptVariant(record.result == nil ? nil : .original, for: record.id, switchable: false)
+            Platform.transcriptVariant(record.result == nil ? nil : .original, for: record.id, switchable: false)
         }
     }
 
-    func selectTranscriptVariant(_ variant: DesktopTranscriptVariant, identifier: String) {
+    package func selectTranscriptVariant(_ variant: DesktopTranscriptVariant, identifier: String) {
         guard canUseHistory, let id = UUID(uuidString: identifier), id == selectedHistoryID,
               let record = history[id], record.hasTranscriptVariants else { return }
         transcriptVariant = variant
@@ -97,10 +96,10 @@ extension WindowsAppController {
         let status = variant == .original
             ? "Showing the original transcript. Copy and Export use the version shown here."
             : "Showing the processed transcript. Copy and Export use the version shown here."
-        WindowsNative.historyPresentation(record, variant: variant, status: status)
+        Platform.historyPresentation(record, variant: variant, status: status)
     }
 
-    func retryHistory(_ identifier: String) async {
+    package func retryHistory(_ identifier: String) async {
         guard canUseHistory, let id = UUID(uuidString: identifier),
               let record = history[id] else { return }
         guard DesktopTranscription.provider(for: record.modelIdentifier) != nil else {
@@ -117,7 +116,7 @@ extension WindowsAppController {
 
     /// Text and version were captured on the UI thread before the save dialog.
     /// A retry replacing the same record cannot change this action's content.
-    func exportHistory(text: String, variant: DesktopTranscriptVariant, path: String) async {
+    package func exportHistory(text: String, variant: DesktopTranscriptVariant, path: String) async {
         guard !closed else { return }
         activeOperations += 1
         defer { finishOperation() }
@@ -128,16 +127,14 @@ extension WindowsAppController {
         } catch { update("Could not export transcript: \(error.localizedDescription)") }
     }
 
-    func openHistoryAudio(_ identifier: String) async {
+    package func openHistoryAudio(_ identifier: String) async {
         guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
         activeOperations += 1
         defer { finishOperation() }
         do {
             let audio = try await store.audioURL(for: record)
             guard !closed else { return }
-            try audio.path.withCString { path in
-                try WindowsNative.checked { jsti_shell_open_file(path, $0, $1) }
-            }
+            try Platform.openFile(audio)
         } catch { update("Could not open recording: \(error.localizedDescription)") }
     }
 

@@ -14,8 +14,9 @@ Source: `Sources/CWindowsSupport/WindowsTextOutput.cpp` (adapter),
 `WindowsClipboardOutput.cpp` (clipboard-only output without a captured field),
 `WindowsTextOutputSettings.cpp` (the native Text output dialog),
 `Sources/SpeakWindowsPlatform/WindowsTextOutput.swift` (ownership, settings
-and status text), `Sources/SpeakWindows/WindowsInsertionController.swift`
-(the actor-owned output task and cancellation) and
+and status text), `Sources/SpeakWindows/WindowsOutputJob.swift` (the output
+job), `Sources/SpeakDesktopHost/DesktopHostOutput.swift` (the shared
+actor-owned output task and cancellation) and
 `Sources/SpeakWindows/WindowsTextOutputSettings.swift` (saving the dialog's
 choices).
 

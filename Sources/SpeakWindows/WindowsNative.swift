@@ -2,11 +2,7 @@ import Foundation
 import CWindowsSupport
 import SpeakDesktop
 import SpeakCore
-
-struct WindowsNativeError: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
-}
+import SpeakDesktopHost
 
 enum WindowsNative {
     static func checked(_ action: (UnsafeMutablePointer<CChar>, Int) -> Int32) throws {
@@ -152,39 +148,9 @@ enum WindowsNative {
     }
 }
 
-/// Owned until WASAPI stop has joined its worker, so no callback sees freed state.
-final class WindowsCaptureContext: @unchecked Sendable {
-    let file: PCMRecordingFile
-    let live: DesktopLiveSession?
-    let onFailure: @Sendable (String) -> Void
-    private let lock = NSLock()
-    private var failed = false
-
-    init(file: PCMRecordingFile, live: DesktopLiveSession? = nil, onFailure: @escaping @Sendable (String) -> Void) {
-        self.file = file
-        self.live = live
-        self.onFailure = onFailure
-    }
-
-    func fail(_ message: String) {
-        lock.lock()
-        let firstFailure = !failed
-        failed = true
-        lock.unlock()
-        if firstFailure { onFailure(message) }
-    }
-}
-
 func captureAudio(_ samples: UnsafePointer<Int16>?, _ count: Int, _ context: UnsafeMutableRawPointer?) {
     guard let samples, let context else { return }
-    let capture = Unmanaged<WindowsCaptureContext>.fromOpaque(context).takeUnretainedValue()
-    do {
-        let data = Data(bytes: samples, count: count * MemoryLayout<Int16>.size)
-        try capture.file.append(data)
-        capture.live?.sendAudio(data)
-    } catch {
-        capture.fail(error.localizedDescription)
-    }
+    Unmanaged<WindowsCaptureContext>.fromOpaque(context).takeUnretainedValue().receive(samples, count: count)
 }
 
 func captureError(_ message: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?) {

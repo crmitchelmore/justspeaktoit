@@ -44,7 +44,11 @@ Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs
 and xAI's dedicated speech-to-text live models use shared Swift clients with the native WinHTTP transport. The xAI
 stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is source-wired with
 fake-transport tests only and still needs a Windows provider receipt; the Grok
-Voice conversation route stays unavailable. Batch and Live retain separate model
+Voice conversation route stays unavailable. A WinHTTP socket whose native
+destruction cannot yet complete keeps its handles and callback context owned by
+a release queue that retries with capped backoff; at four such sockets new live
+connections are refused with a retryable error rather than accumulating native
+state. Batch and Live retain separate model
 selections. Native capture is joined before finalisation; received text and audio
 survive cancellation or failure, with no automatic insertion on failure.
 `Ctrl+Alt+Space` starts and stops recording when registration succeeds. Save the

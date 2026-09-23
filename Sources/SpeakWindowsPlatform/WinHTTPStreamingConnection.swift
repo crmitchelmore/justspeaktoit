@@ -11,8 +11,12 @@ public final class WinHTTPStreamingConnection: StreamingWebSocketConnection, @un
     private let events = WinHTTPEvents()
     private let native: WinHTTPSocket
 
-    public init(request: URLRequest) {
-        native = WinHTTPSocket(request: request, events: events)
+    public convenience init(request: URLRequest) {
+        self.init(request: request, releases: .shared)
+    }
+
+    init(request: URLRequest, releases: WinHTTPReleaseQueue) {
+        native = WinHTTPSocket(request: request, events: events, releases: releases)
         events.installAbort { [weak native] in native?.close() }
     }
 
@@ -53,15 +57,24 @@ public struct WinHTTPWebSocketError: LocalizedError, Sendable {
 
 /// The C context has its own retained lifetime. Destruction is dispatched away
 /// from native callbacks, drains the worker, and only then releases that context.
+/// A destruction that cannot complete stays owned by `WinHTTPReleaseQueue`.
 private final class WinHTTPSocket: @unchecked Sendable {
     private let lock = NSLock()
     private let events: WinHTTPEvents
+    private let releases: WinHTTPReleaseQueue
     private var socket: OpaquePointer?
     private var context: UnsafeMutableRawPointer?
     private var started = false
 
-    init(request: URLRequest, events: WinHTTPEvents) {
+    init(request: URLRequest, events: WinHTTPEvents, releases: WinHTTPReleaseQueue) {
         self.events = events
+        self.releases = releases
+        guard releases.admit() else {
+            events.fail(WinHTTPWebSocketError(
+                "Earlier Windows WebSocket connections are still closing. Try again shortly."
+            ))
+            return
+        }
         var strings: [UnsafeMutablePointer<CChar>] = []
         defer { strings.forEach { $0.deallocate() } }
         func owned(_ value: String) -> UnsafePointer<CChar> {
@@ -131,7 +144,7 @@ private final class WinHTTPSocket: @unchecked Sendable {
             jsti_websocket_cancel(socket)
             return WinHTTPDisposal(socket: socket, context: context)
         }
-        if let disposal { DispatchQueue.global(qos: .utility).async { disposal.finish() } }
+        if let disposal { releases.release { disposal.finish() } }
     }
 }
 
@@ -144,14 +157,13 @@ private final class WinHTTPDisposal: @unchecked Sendable {
         self.context = context
     }
 
-    func finish() {
+    /// Returns false, keeping the socket and callback context alive, while a
+    /// native worker may still use them. Destruction may then be retried.
+    func finish() -> Bool {
         var error = [CChar](repeating: 0, count: 1_024)
-        guard jsti_websocket_destroy(socket, &error, error.count) == 0 else {
-            // Do not free a callback context while a native worker may use it.
-            FileHandle.standardError.write(Data("Windows WebSocket cleanup did not complete.\n".utf8))
-            return
-        }
+        guard jsti_websocket_destroy(socket, &error, error.count) == 0 else { return false }
         Unmanaged<WinHTTPEvents>.fromOpaque(context).release()
+        return true
     }
 }
 

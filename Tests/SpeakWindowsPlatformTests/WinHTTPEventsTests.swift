@@ -209,6 +209,25 @@ final class WinHTTPEventsTests: XCTestCase {
             XCTAssertEqual(probe.sendResults.count, 1)
         }
     }
+
+    func testConnectionIsRefusedWithoutNativeStateWhileFailedReleasesAreOwned() throws {
+        let releases = WinHTTPReleaseQueue(limit: 1, initialDelay: 60, maximumDelay: 60)
+        releases.release { false }
+        let deadline = Date().addingTimeInterval(5)
+        while releases.outstanding == 0, Date() < deadline { Thread.sleep(forTimeInterval: 0.005) }
+        XCTAssertEqual(releases.outstanding, 1)
+        let request = URLRequest(url: try XCTUnwrap(URL(string: "ws://127.0.0.1:9/refused")))
+        let connection = WinHTTPStreamingConnection(request: request, releases: releases)
+        let probe = WinHTTPEventProbe()
+        connection.resume { probe.opened() }
+        connection.receive { probe.received($0) }
+        connection.send(.text("not sent")) { probe.sent($0) }
+        XCTAssertEqual(probe.openCount, 0)
+        XCTAssertEqual(probe.sendResults, [false])
+        let error = try XCTUnwrap(probe.failures.first as? WinHTTPWebSocketError)
+        XCTAssertTrue(error.message.contains("still closing"), error.message)
+        connection.cancel()
+    }
 }
 
 private final class WinHTTPEventProbe: @unchecked Sendable {

@@ -1,0 +1,4 @@
+module CLinuxGStreamer [system] {
+    header "shim.h"
+    export *
+}

@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+"""Bounded, credential-free RFC6455 echo peer for the native Swift runtime probe.
+
+Only binds IPv4 loopback. No third-party packages or external connections.
+The slow route deliberately applies socket backpressure; it is not a benchmark.
+The Voxtral route plays Mistral's realtime transcription peer for the actual
+shared Swift client, with a synthetic key and generated audio only.
+"""
+import argparse
+import base64
+import hashlib
+import json
+from pathlib import Path
+import socket
+import socketserver
+import struct
+import threading
+import time
+
+
+MAX_PAYLOAD = 4 * 1024 * 1024
+GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+LOG_LOCK = threading.Lock()
+
+# The Voxtral Realtime peer. The Swift probe sends the synthetic key, keeps
+# the client's own path and model query, and names a scenario in a header.
+MISTRAL_PATH = "/v1/audio/transcriptions/realtime"
+MISTRAL_MODEL = "voxtral-mini-transcribe-realtime-2602"
+MISTRAL_AUTHORIZATION = "Bearer jsti-loopback-synthetic"
+MISTRAL_SCENARIOS = ("complete", "fragment", "disconnect", "silent")
+MISTRAL_FRAME_BYTES = 3200  # 100 ms of 16 kHz mono PCM16
+MISTRAL_HELD_FRAMES = 10  # queued by the client before session.created
+MISTRAL_FRAMES = 20
+# Escapes keep composed U+00E9 distinct from e + U+0301 and the joiner visible.
+MISTRAL_UNICODE_HEAD = "\U0000754c \U00002014 caf\U000000e9"
+MISTRAL_UNICODE_TAIL = " e\U00000301 \U0001f469\U0001f3fd\U0000200d\U0001f4bb"
+MISTRAL_TEXT = {
+    "complete": (["helo", " wrld"], "Hello world."),
+    "fragment": ([MISTRAL_UNICODE_HEAD, MISTRAL_UNICODE_TAIL], MISTRAL_UNICODE_HEAD + MISTRAL_UNICODE_TAIL + "."),
+}
+
+
+def mistral_pcm(index):
+    """The generated frame the Swift probe sends at this index."""
+    return bytes((index * 31 + offset * 7) & 0xFF for offset in range(MISTRAL_FRAME_BYTES))
+
+
+def log(event, **fields):
+    with LOG_LOCK:
+        print(json.dumps({"event": event, **fields}, sort_keys=True), flush=True)
+
+
+class ProbeHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        if not self.server.slots.acquire(blocking=False):
+            return
+        try:
+            self.request.settimeout(10)
+            self.request.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024)
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.pending = bytearray()
+            self.slow = False
+            self.upgraded = False
+            self.run_connection()
+        except (ConnectionError, TimeoutError, OSError) as error:
+            log("connection-ended", reason=type(error).__name__)
+        except ValueError as error:
+            log("protocol-error", reason=str(error))
+            if not self.upgraded:
+                try:
+                    self.request.sendall(
+                        b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                except OSError:
+                    pass
+        finally:
+            self.server.slots.release()
+
+    def read_exact(self, count):
+        result = bytearray()
+        if self.pending:
+            take = min(count, len(self.pending))
+            result.extend(self.pending[:take])
+            del self.pending[:take]
+        while len(result) < count:
+            block = self.request.recv(min(count - len(result), 4096))
+            if not block:
+                raise ConnectionError("peer disconnected")
+            result.extend(block)
+            if self.slow and count > 4096:
+                time.sleep(0.002)
+        return result
+
+    def handshake(self):
+        while b"\r\n\r\n" not in self.pending:
+            block = self.request.recv(2048)
+            if not block:
+                raise ConnectionError("peer disconnected before handshake")
+            self.pending.extend(block)
+            if len(self.pending) > 16 * 1024:
+                raise ValueError("handshake exceeded bound")
+        header, remainder = self.pending.split(b"\r\n\r\n", 1)
+        self.pending = bytearray(remainder)
+        lines = header.decode("ascii").split("\r\n")
+        method, path, version = lines[0].split(" ")
+        headers = {}
+        for line in lines[1:]:
+            name, value = line.split(":", 1)
+            name, value = name.lower(), value.strip()
+            headers[name] = headers[name] + ", " + value if name in headers else value
+        # Only protocol fields and the synthetic marker are recorded. No
+        # credentials, arbitrary request headers or WebSocket keys enter logs.
+        log("handshake-request", method=method, path=path, version=version,
+            connection=headers.get("connection"), upgrade=headers.get("upgrade"),
+            websocketVersion=headers.get("sec-websocket-version"),
+            subprotocol=headers.get("sec-websocket-protocol"),
+            markerVerified=headers.get("x-jsti-probe") == "local-only")
+        connection_tokens = {value.strip().lower() for value in headers.get("connection", "").split(",")}
+        if (method != "GET" or version != "HTTP/1.1"
+                or headers.get("upgrade", "").lower() != "websocket"
+                or "upgrade" not in connection_tokens
+                or headers.get("sec-websocket-version") != "13"
+                or headers.get("x-jsti-probe") != "local-only"
+                or headers.get("sec-websocket-protocol") != "jsti-probe"):
+            raise ValueError("unexpected handshake")
+        key = headers.get("sec-websocket-key", "")
+        if len(base64.b64decode(key, validate=True)) != 16:
+            raise ValueError("invalid handshake key")
+        route, _, query = path.partition("?")
+        if route == MISTRAL_PATH:
+            self.mistral_scenario = self.verify_mistral_request(query, headers)
+            path = route
+        elif path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
+            raise ValueError("unknown route")
+        if path == "/delay":
+            time.sleep(1)
+        accept = base64.b64encode(hashlib.sha1((key + GUID).encode("ascii")).digest()).decode("ascii")
+        response = (
+            "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            f"Sec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: jsti-probe\r\n\r\n"
+        )
+        self.request.sendall(response.encode("ascii"))
+        self.upgraded = True
+        log("handshake", path=path, headerVerified=True)
+        return path
+
+    def read_frame(self):
+        first, second = self.read_exact(2)
+        if first & 0x70 or not second & 0x80:
+            raise ValueError("unsupported flags or unmasked client frame")
+        final, opcode, length = bool(first & 0x80), first & 0x0F, second & 0x7F
+        if length == 126:
+            length = struct.unpack("!H", self.read_exact(2))[0]
+        elif length == 127:
+            length = struct.unpack("!Q", self.read_exact(8))[0]
+        if length > MAX_PAYLOAD or (opcode >= 8 and (not final or length > 125)):
+            raise ValueError("frame exceeded bound")
+        mask = self.read_exact(4)
+        payload = self.read_exact(length)
+        for index in range(length):
+            payload[index] ^= mask[index % 4]
+        return final, opcode, payload
+
+    def send_frame(self, opcode, payload, final=True):
+        length = len(payload)
+        flags = (0x80 if final else 0) | opcode
+        if length < 126:
+            header = bytes([flags, length])
+        elif length <= 65535:
+            header = bytes([flags, 126]) + struct.pack("!H", length)
+        else:
+            header = bytes([flags, 127]) + struct.pack("!Q", length)
+        self.request.sendall(header)
+        self.request.sendall(payload)
+
+    def verify_mistral_request(self, query, headers):
+        """Checks the client's own query and synthetic credential, logging only verdicts."""
+        scenario = headers.get("x-jsti-mistral-scenario")
+        model_verified = query == f"model={MISTRAL_MODEL}"
+        authorization_verified = headers.get("authorization") == MISTRAL_AUTHORIZATION
+        log("mistral-handshake", scenario=scenario, modelVerified=model_verified,
+            authorizationVerified=authorization_verified)
+        if scenario not in MISTRAL_SCENARIOS or not model_verified or not authorization_verified:
+            raise ValueError("unexpected Voxtral handshake")
+        return scenario
+
+    def read_message(self):
+        """Returns one complete data message, answering pings; a close ends the peer."""
+        message = bytearray()
+        message_opcode = None
+        while True:
+            final, opcode, payload = self.read_frame()
+            if opcode == 8:
+                self.send_frame(8, payload)
+                raise ConnectionError("client closed")
+            if opcode == 9:
+                self.send_frame(10, payload)
+                continue
+            if opcode == 10:
+                continue
+            if opcode in (1, 2) and message_opcode is None:
+                message_opcode = opcode
+            elif opcode != 0 or message_opcode is None:
+                raise ValueError("invalid continuation")
+            if len(message) + len(payload) > MAX_PAYLOAD:
+                raise ValueError("message exceeded bound")
+            message.extend(payload)
+            if final:
+                return message_opcode, bytes(message)
+
+    def read_mistral_event(self):
+        opcode, message = self.read_message()
+        if opcode != 1:
+            raise ValueError("Voxtral client messages are JSON text")
+        event = json.loads(message.decode("utf-8"))
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            raise ValueError("Voxtral client message is not a typed JSON object")
+        return event
+
+    def send_mistral(self, event, fragmented):
+        payload = json.dumps(event, ensure_ascii=False).encode("utf-8")
+        if not fragmented:
+            self.send_frame(1, payload)
+            return
+        # Split inside a multi-byte scalar when there is one, so the client's
+        # transport must assemble the message before decoding its UTF-8.
+        split = next((index for index, byte in enumerate(payload) if 0x80 <= byte <= 0xBF), 2)
+        self.send_frame(1, payload[:split], final=False)
+        self.send_frame(0, payload[split:split + 3], final=False)
+        self.send_frame(0, payload[split + 3:])
+
+    def reject_mistral(self, reason):
+        self.send_frame(1, json.dumps({"type": "error", "error": {"message": reason, "code": 4000}}).encode())
+        self.send_frame(8, struct.pack("!H", 1008) + b"protocol")
+        raise ValueError(reason)
+
+    def run_mistral(self, scenario):
+        """Plays one Voxtral session: created, update before any audio, exact
+        PCM, flush then end, deltas and a revised done unless the scenario
+        withholds the completion."""
+        fragmented = scenario == "fragment"
+        deltas, done = MISTRAL_TEXT["fragment" if fragmented else "complete"]
+        # Hold session.created briefly: audio captured meanwhile must wait.
+        time.sleep(0.2)
+        self.send_mistral({"type": "session.created",
+                           "session": {"request_id": "loopback", "model": MISTRAL_MODEL}}, fragmented)
+        update = self.read_mistral_event()
+        if update["type"] != "session.update":
+            self.reject_mistral(f"{update['type']} before session.update")
+        session = update.get("session") or {}
+        if (session.get("audio_format") != {"encoding": "pcm_s16le", "sample_rate": 16000}
+                or session.get("target_streaming_delay_ms") != 480 or "language" in json.dumps(update)):
+            self.reject_mistral("unexpected session.update")
+        log("mistral-session-update", scenario=scenario, verified=True)
+        digest = hashlib.sha256()
+        frames = 0
+        flushed = False
+        while True:
+            event = self.read_mistral_event()
+            kind = event["type"]
+            if kind == "input_audio.append" and not flushed and frames < MISTRAL_FRAMES:
+                audio = base64.b64decode(event.get("audio", ""), validate=True)
+                if audio != mistral_pcm(frames):
+                    self.reject_mistral(f"append {frames} changed in transport")
+                digest.update(audio)
+                frames += 1
+                if frames == MISTRAL_HELD_FRAMES:
+                    self.send_mistral({"type": "session.updated", "session": session}, fragmented)
+                    self.send_mistral({"type": "transcription.language", "audio_language": "en"}, fragmented)
+                    for delta in deltas:
+                        self.send_mistral({"type": "transcription.text.delta", "text": delta}, fragmented)
+            elif kind == "input_audio.flush" and not flushed and frames == MISTRAL_FRAMES:
+                flushed = True
+            elif kind == "input_audio.end" and flushed:
+                break
+            else:
+                self.reject_mistral(f"unexpected {kind} after {frames} frames")
+        log("mistral-audio", scenario=scenario, frames=frames, bytes=frames * MISTRAL_FRAME_BYTES,
+            sha256=digest.hexdigest(), flushThenEnd=True)
+        if scenario == "disconnect":
+            # Let the end's send completion land, then drop the TCP connection.
+            time.sleep(0.1)
+            log("mistral-disconnect", scenario=scenario)
+            return
+        if scenario == "silent":
+            log("mistral-silent", scenario=scenario)
+            while True:
+                self.read_message()
+        self.send_mistral({"type": "transcription.done", "model": MISTRAL_MODEL, "text": done,
+                           "language": "en", "segments": [], "usage": {"prompt_audio_seconds": 2}}, fragmented)
+        self.send_frame(8, struct.pack("!H", 1000) + b"transcription-complete")
+        log("mistral-done", scenario=scenario)
+
+    def run_connection(self):
+        path = self.handshake()
+        if path == MISTRAL_PATH:
+            return self.run_mistral(self.mistral_scenario)
+        self.slow = path == "/slow"
+        if self.slow:
+            time.sleep(0.25)
+        message = bytearray()
+        message_opcode = None
+        message_count = 0
+        awaiting_pong = False
+        while message_count < 64:
+            final, opcode, payload = self.read_frame()
+            if opcode == 8:
+                self.send_frame(8, payload)
+                log("client-close", path=path)
+                return
+            if opcode == 9:
+                self.send_frame(10, payload)
+                continue
+            if opcode == 10:
+                if awaiting_pong:
+                    if payload != b"server-probe":
+                        raise ValueError("server ping payload not preserved")
+                    awaiting_pong = False
+                    self.send_frame(1, b"server-pong-verified")
+                    log("server-pong-verified", path=path)
+                continue
+            if opcode in (1, 2) and message_opcode is None:
+                message_opcode = opcode
+            elif opcode != 0 or message_opcode is None:
+                raise ValueError("invalid continuation")
+            if len(message) + len(payload) > MAX_PAYLOAD:
+                raise ValueError("message exceeded bound")
+            message.extend(payload)
+            if not final:
+                continue
+            message_count += 1
+            log("message", path=path, number=message_count, opcode=message_opcode,
+                bytes=len(message), sha256=hashlib.sha256(message).hexdigest())
+            if path == "/abrupt":
+                return
+            if path == "/oversize":
+                self.send_frame(2, bytes(MAX_PAYLOAD), final=False)
+                self.send_frame(0, b"x")
+                return
+            if message_opcode == 1 and message == b"server-ping":
+                awaiting_pong = True
+                self.send_frame(9, b"server-probe")
+                message.clear()
+                message_opcode = None
+                continue
+            if message_opcode == 1 and message == b"server-close":
+                self.send_frame(8, struct.pack("!H", 1000) + b"probe-complete")
+                log("server-close", path=path)
+                _, reply_opcode, _ = self.read_frame()
+                if reply_opcode != 8:
+                    raise ValueError("expected close acknowledgement")
+                log("close-acknowledged", path=path)
+                return
+            if path == "/fragment":
+                # Split through a possible UTF-8 scalar and require complete
+                # message assembly, independently of TCP receive chunking.
+                split = min(2, len(message))
+                self.send_frame(message_opcode, message[:split], final=False)
+                self.send_frame(0, message[split:])
+            elif path != "/hold":
+                self.send_frame(message_opcode, message)
+            message.clear()
+            message_opcode = None
+        raise ValueError("message count exceeded bound")
+
+
+class ProbeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    daemon_threads = True
+    allow_reuse_address = False
+    slots = threading.BoundedSemaphore(8)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ready-file", type=Path, required=True)
+    parser.add_argument("--max-seconds", type=int, default=120)
+    arguments = parser.parse_args()
+    if not 1 <= arguments.max_seconds <= 600:
+        parser.error("max-seconds must be between 1 and 600")
+    with ProbeServer(("127.0.0.1", 0), ProbeHandler) as server:
+        ready = {"host": "127.0.0.1", "port": server.server_address[1], "maximumPayloadBytes": MAX_PAYLOAD}
+        temporary = arguments.ready_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps(ready), encoding="utf-8")
+        temporary.replace(arguments.ready_file)
+        timer = threading.Timer(arguments.max_seconds, server.shutdown)
+        timer.daemon = True
+        timer.start()
+        log("ready", **ready)
+        try:
+            server.serve_forever(poll_interval=0.1)
+        finally:
+            timer.cancel()
+            log("stopped")
+
+
+if __name__ == "__main__":
+    main()

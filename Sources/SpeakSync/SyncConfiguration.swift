@@ -6,19 +6,22 @@ import Security
 #endif
 
 /// Configuration for CloudKit sync operations.
+///
+/// Schema names forward to the portable `SyncSchema`, which the CloudKit Web
+/// Services transport shares; this type adds the native container and database.
 public enum SyncConfiguration {
     /// The CloudKit container identifier.
     #if os(iOS)
-    public static let containerIdentifier = ReleaseTrain.current.iosCloudContainer
+    public static let containerIdentifier = SyncContainerFamily.iOS.containerIdentifier(in: .current)
     #elseif os(macOS)
-    public static let containerIdentifier = ReleaseTrain.current.macCloudContainer
+    public static let containerIdentifier = SyncContainerFamily.macOS.containerIdentifier(in: .current)
     #endif
 
     /// The custom zone name for transcription history.
-    public static let zoneName = "TranscriptionHistoryZone"
+    public static let zoneName = SyncSchema.zoneName
 
     /// The record type for transcription history entries.
-    public static let recordType = "TranscriptionHistory"
+    public static let recordType = SyncSchema.History.recordType
 
     /// UserDefaults key for storing the last sync token.
     public static let syncTokenKey = "speak.sync.serverChangeToken"
@@ -30,10 +33,10 @@ public enum SyncConfiguration {
     public static let subscriptionCreatedKey = "speak.sync.subscriptionCreated"
 
     /// The database subscription whose pushes announce a history change.
-    public static let historySubscriptionID = "transcription-history-changes"
+    public static let historySubscriptionID = SyncSchema.History.subscriptionID
 
     /// Maximum number of entries to sync in a single batch.
-    public static let batchSize = 100
+    public static let batchSize = SyncSchema.batchSize
 
     /// The CloudKit container.
     /// Returns `nil` when CloudKit entitlements are missing (Developer ID builds).

@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(MachO)
 import MachO
+#endif
 
 /// Version reported by `speak --version` and by the MCP `serverInfo`.
 ///
@@ -11,6 +13,9 @@ import MachO
 /// 2. The enclosing `JustSpeakToIt.app` bundle, for the CLI embedded at
 ///    `Contents/MacOS/speak`, so it can never disagree with the app it talks to.
 /// 3. A development fallback for unpackaged builds.
+///
+/// Windows executables have no Mach-O section; until packaging stamps a version
+/// resource there, a Windows `speak.exe` reports the development fallback.
 public enum SpeakCLIVersion {
     static let fallback = "0.0.0-dev"
     /// Section the release build creates with `-sectcreate __TEXT __speak_ver <file>`.
@@ -66,11 +71,15 @@ public enum SpeakCLIVersion {
 
     /// Reads `__TEXT,__speak_ver` from the main executable image, if present.
     static func embeddedVersionData() -> Data? {
+        #if canImport(MachO)
         guard let header = _dyld_get_image_header(0) else { return nil }
         var size: UInt = 0
         guard let bytes = header.withMemoryRebound(to: mach_header_64.self, capacity: 1, { header64 in
             getsectiondata(header64, embeddedSectionSegment, embeddedSectionName, &size)
         }), size > 0 else { return nil }
         return Data(bytes: bytes, count: Int(size))
+        #else
+        return nil
+        #endif
     }
 }

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Decodes a WebSocket frame into the JSON object a provider's event type
 /// parses. Text and binary frames are both accepted, because several services

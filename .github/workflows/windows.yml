@@ -1,0 +1,320 @@
+name: Windows and Portable Swift
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
+      - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - scripts/windows-cloudkit/**
+      - scripts/websocket-loopback-probe.py
+      - scripts/windows-local-runtime/**
+      - scripts/windows-bundle/runtime-policy.json
+      - Docs/windows-development.md
+      - .github/workflows/windows.yml
+      - .github/workflows/windows-local-runtime.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
+      - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - scripts/windows-cloudkit/**
+      - scripts/websocket-loopback-probe.py
+      - scripts/windows-local-runtime/**
+      - scripts/windows-bundle/runtime-policy.json
+      - Docs/windows-development.md
+      - .github/workflows/windows.yml
+      - .github/workflows/windows-local-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  local-runtime:
+    uses: ./.github/workflows/windows-local-runtime.yml
+
+  windows:
+    name: Native Windows x64 (Swift 6.2.3)
+    needs: local-runtime
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      # The pinned whisper.cpp runtime, its JFK sample and a cached model
+      # folder, so the on-device tests run the real runtime instead of skipping.
+      JSTI_WHISPER_RUNTIME_DIRECTORY: ${{ github.workspace }}\local-runtime\runtime
+      JSTI_WHISPER_TEST_AUDIO: ${{ github.workspace }}\local-runtime\fixtures\jfk.wav
+      JSTI_LOCAL_MODEL_DIRECTORY: ${{ github.workspace }}\local-models
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Swift toolchain
+        uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057
+        with:
+          source: swift.org
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+          build_arch: amd64
+          update-sdk-modules: false
+
+      - name: Verify portable source boundary
+        run: python scripts/verify-portable-core-boundary.py
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime
+          path: local-runtime
+
+      # The pinned tiny model is downloaded by the app's own installer on a
+      # miss and verified against its SHA-256 on every run.
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+
+      - name: Build native Windows executable
+        id: native-build
+        run: |
+          swift --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          swift build --configuration release --product SpeakWindows --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test shared core, desktop workflow and native adapters
+        id: native-tests
+        run: |
+          swift test --configuration release --jobs 4 --xunit-output windows-tests.xml 2>&1 |
+            Tee-Object -FilePath windows-native-tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify native WinHTTP WebSocket transport against loopback peer
+        id: websocket-probe
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 3
+        run: |
+          $readyPath = Join-Path $env:RUNNER_TEMP 'jsti-websocket-ready.json'
+          Remove-Item $readyPath -ErrorAction SilentlyContinue
+          $server = $null
+          $probe = $null
+          try {
+            $server = Start-Process -FilePath (Get-Command python).Source -PassThru -NoNewWindow `
+              -ArgumentList @('-u', 'scripts/websocket-loopback-probe.py', '--ready-file', $readyPath, '--max-seconds', '120') `
+              -RedirectStandardOutput windows-websocket-server.log -RedirectStandardError windows-websocket-server-errors.log
+            $deadline = [DateTime]::UtcNow.AddSeconds(10)
+            while (-not (Test-Path $readyPath)) {
+              if ($server.HasExited) { throw 'Loopback WebSocket server exited before readiness.' }
+              if ([DateTime]::UtcNow -gt $deadline) { throw 'Loopback WebSocket server readiness timed out.' }
+              Start-Sleep -Milliseconds 100
+            }
+            $ready = Get-Content $readyPath -Raw | ConvertFrom-Json
+            if ($ready.host -ne '127.0.0.1' -or $ready.port -lt 1 -or $ready.port -gt 65535) {
+              throw 'Unexpected loopback peer address.'
+            }
+            $env:JSTI_WEBSOCKET_PROBE_PORT = [string]$ready.port
+            $probe = Start-Process -FilePath (Get-Command swift).Source -PassThru -NoNewWindow `
+              -ArgumentList @('test', '--configuration', 'release', '--skip-build', '--filter', 'WinHTTPRuntimeProbeTests', `
+                '--xunit-output', 'windows-websocket-tests.xml') `
+              -RedirectStandardOutput windows-websocket-probe.log -RedirectStandardError windows-websocket-probe-errors.log
+            if (-not $probe.WaitForExit(90000)) {
+              $probe.Kill($true)
+              throw 'WebSocket runtime probe exceeded its 90-second process deadline.'
+            }
+            if ($probe.ExitCode -ne 0) { throw "WebSocket runtime probe failed: $($probe.ExitCode)" }
+          } finally {
+            Remove-Item Env:JSTI_WEBSOCKET_PROBE_PORT -ErrorAction SilentlyContinue
+            if ($probe -and -not $probe.HasExited) { $probe.Kill($true) }
+            if ($server -and -not $server.HasExited) { $server.Kill($true) }
+            Get-ChildItem windows-websocket-*.log | ForEach-Object { Get-Content $_.FullName }
+          }
+
+      - name: Run executable self-test and native window smoke test
+        id: native-smoke
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 3
+        run: |
+          $bin = swift build --configuration release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Join-Path $bin.Trim() 'SpeakWindows.exe'
+          $native = Start-Process -FilePath $exe -ArgumentList '--self-test' -PassThru -NoNewWindow `
+            -RedirectStandardOutput windows-self-test.log -RedirectStandardError windows-self-test-errors.log
+          $nativeFailure = $null
+          if (-not $native.WaitForExit(90000)) {
+            $native.Kill()
+            $nativeFailure = 'Native adapter self-test exceeded 90 seconds.'
+          } elseif ($native.ExitCode -ne 0) {
+            $nativeFailure = "Native adapter self-test failed: $($native.ExitCode)"
+          }
+          Get-Content windows-self-test.log
+          Get-Content windows-self-test-errors.log
+          # Window checks are independent of adapter assertions. Run both while
+          # retaining a failing job if either result fails.
+          $env:JSTI_UI_SNAPSHOT_PATH = Join-Path $env:GITHUB_WORKSPACE 'windows-ui-smoke.bmp'
+          $process = Start-Process -FilePath $exe -ArgumentList '--ui-smoke-test' -PassThru -NoNewWindow `
+            -RedirectStandardOutput windows-ui-smoke.log -RedirectStandardError windows-ui-smoke-errors.log
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'Native window did not create and shut down within 30 seconds.'
+          }
+          Get-Content windows-ui-smoke.log
+          Get-Content windows-ui-smoke-errors.log
+          if ($process.ExitCode -ne 0) { throw "Native window smoke test failed: $($process.ExitCode); $nativeFailure" }
+          if ($nativeFailure) { throw $nativeFailure }
+
+      - name: Transcribe the JFK sample on-device with the pinned tiny model
+        id: local-transcription
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 8
+        run: |
+          $bin = swift build --configuration release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $bin.Trim() 'SpeakWindows.exe') --local-transcription-self-test $env:JSTI_WHISPER_TEST_AUDIO `
+            --expect 'ask not what your country can do for you' 2>&1 | Tee-Object -FilePath windows-local-transcription.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage developer executable with provenance
+        id: developer-stage
+        if: ${{ !cancelled() && steps.native-tests.outcome == 'success' && steps.websocket-probe.outcome == 'success' && steps.native-smoke.outcome == 'success' }}
+        run: |
+          $bin = swift build --configuration release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $destination = New-Item -ItemType Directory -Path windows-developer-build
+          Copy-Item (Join-Path $bin.Trim() 'SpeakWindows.exe') $destination
+          Get-ChildItem -Path $bin.Trim() -Directory -Filter '*.resources' |
+            Copy-Item -Destination $destination -Recurse
+          [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            architecture = 'x86_64'
+            compiler = (swift --version) -join "`n"
+            distribution = 'developer executable; not an installer'
+            runtime = 'Requires the Swift 6.2.3 Windows runtime and Visual C++ runtime'
+            webSocketRuntimeProbe = '${{ steps.websocket-probe.outcome }}'
+          } | ConvertTo-Json | Set-Content (Join-Path $destination 'build-metadata.json') -Encoding utf8
+          @"
+          Just Speak to It — Windows developer build
+
+          This is an unsigned developer executable, not an installer or a feature-complete release.
+          Install the Swift 6.2.3 Windows toolchain/runtime and its Windows prerequisites:
+          https://www.swift.org/install/windows/
+
+          Development instructions and current parity limitations:
+          https://github.com/crmitchelmore/justspeaktoit/blob/${env:GITHUB_SHA}/Docs/windows-development.md
+
+          Run SpeakWindows.exe normally, or pass --self-test / --ui-smoke-test.
+          The smoke tests do not use a microphone or a real provider API key.
+          See build-metadata.json for the exact source revision and compiler.
+          "@ | Set-Content (Join-Path $destination 'README.txt') -Encoding utf8
+          Get-FileHash (Join-Path $destination 'SpeakWindows.exe') -Algorithm SHA256 |
+            Format-List | Out-String | Set-Content (Join-Path $destination 'SHA256.txt') -Encoding utf8
+
+      - name: Upload developer executable
+        if: ${{ !cancelled() && steps.developer-stage.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: justspeaktoit-windows-x64-developer-${{ github.sha }}
+          path: windows-developer-build/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload native test evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-test-evidence-${{ github.sha }}
+          path: |
+            windows-tests.xml
+            windows-native-tests.log
+            windows-self-test*.log
+            windows-ui-smoke*.log
+            windows-ui-smoke.bmp
+            windows-websocket-tests.xml
+            windows-websocket-*.log
+            windows-local-transcription.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  portable-macos:
+    name: Portable Swift on macOS
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      SPEAK_PORTABLE_CORE: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify portable source boundary
+        run: python3 scripts/verify-portable-core-boundary.py
+      - name: Test portable graph with Xcode Apple Swift
+        run: |
+          xcrun swift --version
+          xcrun swift test --configuration release --jobs 4
+      - name: Preserve Apple dependency lockfile
+        if: always()
+        # The dependency-free graph removes pins it does not need. It must not
+        # change the Apple graph's checked-in dependencies.
+        run: git restore --source=HEAD -- Package.resolved
+
+  portable-linux:
+    name: Portable Swift on Linux (Swift 6.2.3)
+    runs-on: ubuntu-22.04
+    container:
+      image: swift:6.2.3-jammy@sha256:33c73fc133767cdaafde26f0f9967c96ab25ff77618b7df1eabf46140bf2b6e6
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify portable source boundary
+        run: python3 scripts/verify-portable-core-boundary.py
+      - name: Test portable graph with native Linux Swift
+        run: |
+          swift --version
+          swift test --configuration release --jobs 4

@@ -1,43 +1,24 @@
 import Foundation
 import SpeakCore
 
+/// The Groq endpoint, catalogue and request contract are shared by all desktops.
 struct GroqTranscriptionProvider: TranscriptionProvider {
-  let metadata = TranscriptionProviderMetadata(
-    id: "groq",
-    displayName: "Groq",
-    systemImage: "bolt.horizontal.circle",
-    tintColor: "orange",
-    website: "https://console.groq.com"
-  )
+    private let client: GroqBatchClient
+    var metadata: TranscriptionProviderMetadata { client.metadata }
 
-  private let compatibleProvider: OpenAITranscriptionProvider
+    init(session: URLSession = .shared) {
+        client = GroqBatchClient(session: session, durationResolver: { url in
+            await resolvedTranscriptionDuration(reported: nil, lastSegmentEnd: nil, audioURL: url)
+        })
+    }
 
-  init(session: URLSession = .shared) {
-    compatibleProvider = OpenAITranscriptionProvider(
-      session: session,
-      baseURL: URL(string: "https://api.groq.com/openai/v1")!,
-      validationServiceName: "Groq"
-    )
-  }
+    func transcribeFile(
+        at url: URL, apiKey: String, model: String, language: String?
+    ) async throws -> TranscriptionResult {
+        try await client.transcribeFile(at: url, apiKey: apiKey, model: model, language: language)
+    }
 
-  func transcribeFile(
-    at url: URL,
-    apiKey: String,
-    model: String,
-    language: String?
-  ) async throws -> TranscriptionResult {
-    try await compatibleProvider.transcribeFile(at: url, apiKey: apiKey, model: model, language: language)
-  }
-
-  func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    await compatibleProvider.validateAPIKey(key)
-  }
-
-  func requiresAPIKey(for model: String) -> Bool {
-    true
-  }
-
-  func supportedModels() -> [ModelCatalog.Option] {
-    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
-  }
+    func validateAPIKey(_ key: String) async -> APIKeyValidationResult { await client.validateAPIKey(key) }
+    func requiresAPIKey(for model: String) -> Bool { client.requiresAPIKey(for: model) }
+    func supportedModels() -> [ModelCatalog.Option] { client.supportedModels() }
 }

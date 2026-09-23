@@ -29,12 +29,30 @@ public struct LiveModelCapabilities: Sendable, Hashable {
     /// non-zero to capture a ForceEndpoint response before teardown.
     public let postStopFinalizeBudget: TimeInterval
 
+    /// Whether the existing live protocol accepts a spoken-language hint.
+    /// Hosts must also implement forwarding before exposing this capability.
+    /// Unknown models remain conservative until their wire contract is verified.
+    public let supportsLanguageHint: Bool
+
+    /// Preserves the existing public initializer, including function references.
     public init(
         supportedSpeedModes: Set<SpeedModeID>,
         postStopFinalizeBudget: TimeInterval = 0
     ) {
+        self.init(
+            supportedSpeedModes: supportedSpeedModes, postStopFinalizeBudget: postStopFinalizeBudget,
+            supportsLanguageHint: false
+        )
+    }
+
+    public init(
+        supportedSpeedModes: Set<SpeedModeID>,
+        postStopFinalizeBudget: TimeInterval = 0,
+        supportsLanguageHint: Bool
+    ) {
         self.supportedSpeedModes = supportedSpeedModes
         self.postStopFinalizeBudget = postStopFinalizeBudget
+        self.supportsLanguageHint = supportsLanguageHint
     }
 
     /// The default for any model that doesn't appear in the lookup table:
@@ -80,13 +98,16 @@ extension ModelCatalog {
         // Live Polish is supported because MainManager's incremental tail
         // rewrite pipeline only needs incremental text updates.
         "deepgram/nova-3-streaming": LiveModelCapabilities(
-            supportedSpeedModes: [.instant, .livePolish]
+            supportedSpeedModes: [.instant, .livePolish],
+            supportsLanguageHint: true
         ),
+        // The English-only Flux route does not accept a language hint.
         "deepgram/flux-general-en-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
         "deepgram/flux-general-multi-streaming": LiveModelCapabilities(
-            supportedSpeedModes: [.instant, .livePolish]
+            supportedSpeedModes: [.instant, .livePolish],
+            supportsLanguageHint: true
         ),
         "cartesia/ink-2-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
@@ -111,7 +132,8 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish]
         ),
         "soniox/stt-rt-v5-streaming": LiveModelCapabilities(
-            supportedSpeedModes: [.instant, .livePolish]
+            supportedSpeedModes: [.instant, .livePolish],
+            supportsLanguageHint: true
         ),
         // Rev.ai finalises a segment as soon as its hypothesis stops changing,
         // so the incremental tail rewrite can polish each one. `EOS` returns a
@@ -130,10 +152,12 @@ extension ModelCatalog {
         ),
         "speechmatics/enhanced-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 2.0
+            postStopFinalizeBudget: 2.0,
+            supportsLanguageHint: true
         ),
         "elevenlabs/scribe-v2-streaming": LiveModelCapabilities(
-            supportedSpeedModes: [.instant, .livePolish]
+            supportedSpeedModes: [.instant, .livePolish],
+            supportsLanguageHint: true
         ),
         XAIVoiceModels.thinkFast2CatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
@@ -145,12 +169,14 @@ extension ModelCatalog {
         // budget stays non-zero to capture that frame before teardown.
         XAISpeechToText.liveCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 2.0
+            postStopFinalizeBudget: 2.0,
+            supportsLanguageHint: true
         ),
 
         // AssemblyAI Universal-3.5 Pro Streaming emits incremental turns and
         // one formatted final turn. Keep a non-zero post-stop budget so the
         // controller can capture the ForceEndpoint response before teardown.
+        // Its existing request has no supported spoken-language override.
         AssemblyAIModels.universal35ProStreamingID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
             postStopFinalizeBudget: 2.0
@@ -162,14 +188,16 @@ extension ModelCatalog {
         // commit to round-trip, then close the socket.
         "openai/gpt-realtime-whisper-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 0.5
+            postStopFinalizeBudget: 0.5,
+            supportsLanguageHint: true
         ),
 
         // OpenAI's recommended live transcription model emits low-latency
         // deltas and a completed event for each committed audio item.
         OpenAITranscriptionModels.gptLiveTranscribeStreamingCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 0.5
+            postStopFinalizeBudget: 0.5,
+            supportsLanguageHint: true
         ),
 
         // OpenAI gpt-4o-mini-transcribe / gpt-4o-transcribe over the
@@ -178,11 +206,13 @@ extension ModelCatalog {
         // `input_audio_transcription.prompt` field for keyterm biasing.
         "openai/gpt-4o-mini-transcribe-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 0.5
+            postStopFinalizeBudget: 0.5,
+            supportsLanguageHint: true
         ),
         "openai/gpt-4o-transcribe-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 0.5
+            postStopFinalizeBudget: 0.5,
+            supportsLanguageHint: true
         )
     ]
 }

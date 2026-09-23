@@ -86,15 +86,18 @@ final class MistralVoxtralLiveClientTests: XCTestCase {
     func testAudioBeforeSessionCreatedIsHeldNotDropped() {
         // Issue #641: the session must be configured before any audio, so the
         // user's opening words are held across the handshake.
+        var failure: Error?
         let client = MistralVoxtralLiveClient(apiKey: "k")
-        client.beginSession(onTranscript: { _, _ in }, onError: { _ in })
+        client.beginSession(onTranscript: { _, _ in }, onError: { failure = $0 })
 
         XCTAssertFalse(client.isSessionReady)
         client.sendAudio(Data(repeating: 1, count: 640))
         client.sendAudio(Data(repeating: 2, count: 640))
 
-        XCTAssertEqual(client.preroll.snapshot.chunkCount, 2)
-        XCTAssertEqual(client.preroll.snapshot.droppedChunkCount, 0)
+        // Both chunks wait in the run's bounded queue, which never evicts:
+        // overflowing it is a reported failure instead.
+        XCTAssertEqual(client.bufferedAudioFrames, 2)
+        XCTAssertNil(failure)
     }
 
     func testEmptyAudioChunksAreNotBuffered() {
@@ -103,7 +106,7 @@ final class MistralVoxtralLiveClientTests: XCTestCase {
 
         client.sendAudio(Data())
 
-        XCTAssertTrue(client.preroll.isEmpty)
+        XCTAssertEqual(client.bufferedAudioFrames, 0)
     }
 
     // MARK: - Delta folding
@@ -280,11 +283,11 @@ final class MistralVoxtralLiveClientTests: XCTestCase {
         let client = MistralVoxtralLiveClient(apiKey: "k")
         client.beginSession(onTranscript: { _, _ in }, onError: { _ in })
         client.sendAudio(Data(repeating: 0, count: 640))
-        XCTAssertFalse(client.preroll.isEmpty)
+        XCTAssertEqual(client.bufferedAudioFrames, 1)
 
         client.stop()
 
-        XCTAssertTrue(client.preroll.isEmpty)
+        XCTAssertEqual(client.bufferedAudioFrames, 0)
         let transcript = await client.finishAndWait()
         XCTAssertNil(transcript)
     }

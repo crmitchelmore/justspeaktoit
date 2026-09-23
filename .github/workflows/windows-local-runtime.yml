@@ -1,0 +1,51 @@
+name: Windows on-device runtime
+
+# Builds the pinned whisper.cpp runtime DLLs (CPU variants and Vulkan) once per
+# pin change and hands them to the calling workflow as the
+# `windows-local-runtime` artifact. Callers: windows.yml (native tests) and
+# windows-cross-proof.yml (runtime bundle and developer MSIX).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Build pinned whisper.cpp runtime (CPU and Vulkan)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check the runtime pins
+        shell: pwsh
+        run: |
+          python -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The DLLs depend only on these inputs; a changed pin, build script or
+      # import policy produces a new cache entry and a fresh build.
+      - name: Restore a runtime built from the same pins
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: local-runtime-output
+          key: whisper-runtime-${{ hashFiles('scripts/windows-local-runtime/dependencies.json', 'scripts/windows-local-runtime/build-whisper-runtime.py', 'scripts/windows-bundle/runtime-policy.json', 'scripts/windows-bundle/windows_pe.py') }}
+      - name: Build whisper.cpp from the pinned commit
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          python -B scripts/windows-local-runtime/build-whisper-runtime.py `
+            --output local-runtime-output --work (Join-Path $env:RUNNER_TEMP 'whisper-runtime-work') --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Show the runtime manifest
+        shell: pwsh
+        run: Get-Content local-runtime-output/runtime-manifest.json
+      - name: Upload the runtime
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-local-runtime
+          path: local-runtime-output/
+          if-no-files-found: error
+          retention-days: 14

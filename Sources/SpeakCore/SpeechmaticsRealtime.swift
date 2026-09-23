@@ -25,10 +25,12 @@ public enum SpeechmaticsRealtime {
     /// this size rather than dropped.
     static let minimumChunkBytes = 3_200
 
-    /// How long `finishAndWait()` waits for `EndOfTranscript` after
-    /// `EndOfStream`. Speechmatics finalises the buffered tail in that window;
-    /// the caller's own budget (`LiveModelCapabilities.postStopFinalizeBudget`)
-    /// governs the surrounding stop.
+    /// How long `finishAndWait()` allows for the whole graceful finish:
+    /// readiness, the audio drain, `EndOfStream` and the `EndOfTranscript`
+    /// that answers it, bounded together from the moment the finish begins.
+    /// Speechmatics finalises the buffered tail in that window; the caller's
+    /// own budget (`LiveModelCapabilities.postStopFinalizeBudget`) governs the
+    /// surrounding stop.
     static let finishBudget: TimeInterval = 5
 
     /// Resolves a Speak language selection to the concrete language code
@@ -65,6 +67,17 @@ public enum SpeechmaticsRealtimeError: LocalizedError, Equatable {
     /// is never read as entitlement.
     case quotaExceeded(message: String)
     case server(message: String)
+    /// `RecognitionStarted` did not arrive inside the bounded wait, so no
+    /// audio could be committed and nothing was transcribed.
+    case recognitionNotStarted
+    /// `EndOfTranscript` did not answer `EndOfStream` inside the bounded wait,
+    /// so the trailing audio may not have been transcribed. The finals received
+    /// before the deadline are kept.
+    case transcriptNotFinalised
+    /// `EndOfTranscript` arrived before the client's `EndOfStream` had been
+    /// handed to the socket: the service ended the session while audio was
+    /// still local, so this is a failure rather than a finalisation.
+    case unexpectedEndOfTranscript
 
     public var errorDescription: String? {
         switch self {
@@ -74,6 +87,12 @@ public enum SpeechmaticsRealtimeError: LocalizedError, Equatable {
             return "Speechmatics allowance exhausted: \(message)"
         case .server(let message):
             return "Speechmatics realtime error: \(message)"
+        case .recognitionNotStarted:
+            return "Speechmatics did not start recognition in time. Check your connection and try again."
+        case .transcriptNotFinalised:
+            return "Speechmatics did not finish the transcript in time. The words received so far were kept."
+        case .unexpectedEndOfTranscript:
+            return "Speechmatics ended the session before all audio was sent. The words received so far were kept."
         }
     }
 

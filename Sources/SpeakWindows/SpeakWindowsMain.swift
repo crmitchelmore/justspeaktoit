@@ -1,0 +1,400 @@
+import Foundation
+import CWindowsSupport
+import SpeakDesktop
+import SpeakWindowsPlatform
+
+private enum WindowsHistoryEvent: Sendable {
+    case selection(String)
+    case version(String, DesktopTranscriptVariant)
+}
+
+final class WindowsEventContext {
+    let controller: WindowsAppController
+    let smokeTest: Bool
+    var smokeTestFailure: Error?
+    var microphoneMonitor: WindowsMicrophoneMonitor?
+    var cloudSync: WindowsCloudSync?
+    let search: WindowsSearchCoalescer
+    private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
+    private let copies: DesktopTranscriptCopyDispatcher
+    private let settings = DesktopSettingsQueue()
+    lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
+    lazy var automation = WindowsAutomationSwitch(controller: controller)
+    lazy var profiles = WindowsProfilesCoordinator { [weak self] profiles in
+        guard let self else { return }
+        self.enqueueSettings { await self.controller.saveProfiles(profiles) }
+    }
+
+    init(controller: WindowsAppController, smokeTest: Bool) {
+        self.controller = controller
+        self.smokeTest = smokeTest
+        self.search = WindowsSearchCoalescer { query in await controller.searchHistory(query) }
+        self.copies = DesktopTranscriptCopyDispatcher { text, variant in
+            await controller.copyTranscript(text, variant: variant)
+        }
+        self.historyEvents = DesktopEventDispatcher { event in
+            switch event {
+            case .selection(let identifier): await controller.selectHistory(identifier)
+            case .version(let identifier, let variant):
+                await controller.selectTranscriptVariant(variant, identifier: identifier)
+            }
+        }
+    }
+
+    func copyTranscript(_ text: String, variant: DesktopTranscriptVariant?) {
+        copies.submit(text, variant: variant)
+    }
+
+    func selectHistory(_ identifier: String) { historyEvents.submit(.selection(identifier)) }
+    func selectHistoryVersion(_ variant: DesktopTranscriptVariant, identifier: String) {
+        historyEvents.submit(.version(identifier, variant))
+    }
+
+    // Called only by the native UI thread. Persist settings in UI event order,
+    // and let shutdown drain these short operations before closing the actor.
+    func enqueueSettings(_ action: @escaping @Sendable () async -> Void) { settings.submit(action) }
+
+    var currentSettingsTask: Task<Void, Never>? { settings.current }
+
+    func finishSettings() async { await settings.drain() }
+
+    /// Called by the UI thread at the Record event. Reads text output in
+    /// settings order: an Apply before Record is used, and one after it cannot
+    /// reach this recording however late the recording task runs.
+    func recordingTextOutput() -> Task<WindowsTextOutputOptions, Never> {
+        let controller = controller
+        return settings.read { await controller.textOutputOptions() }
+    }
+}
+
+/// Coalesces native search keystrokes. The UI thread only records the newest
+/// query and one task drains it, so a typing burst never queues an actor call
+/// per keystroke and the latest query always wins.
+final class WindowsSearchCoalescer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: String?
+    private var draining = false
+    private let perform: @Sendable (String) async -> Void
+
+    init(perform: @escaping @Sendable (String) async -> Void) { self.perform = perform }
+
+    func submit(_ query: String) {
+        lock.lock()
+        pending = query
+        let alreadyDraining = draining
+        draining = true
+        lock.unlock()
+        guard !alreadyDraining else { return }
+        Task { [self] in
+            while let query = self.next() { await self.perform(query) }
+        }
+    }
+
+    private func next() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let query = pending else { draining = false; return nil }
+        pending = nil
+        return query
+    }
+}
+
+func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
+    guard let context else { return }
+    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    let controller = holder.controller
+    let value = text.map(String.init(cString:)) ?? ""
+    switch event {
+    case 1:
+        // Capture synchronously before an actor hop or another app gains focus.
+        // No external field focused is not an error here: the transcript is
+        // still saved and offered for Copy.
+        let captured = try? WindowsInsertionTarget.capture()
+        toggleRecording(
+            controller, target: captured, textOutput: holder.recordingTextOutput(), modelIndex: Int(index),
+            deviceID: value
+        )
+    case 2:
+        let pendingSettings = holder.currentSettingsTask
+        Task {
+            await pendingSettings?.value
+            await controller.importAudio(path: value, modelIndex: Int(index))
+        }
+    case 3, 6, 15, 16, 18, 19: transcriptEvent(event, value: value, holder: holder)
+    case 4: saveKeyEvent(value, index: Int(index), holder: holder)
+    case 5: holder.enqueueSettings { await controller.selectModel(Int(index)) }
+    case 7:
+        ready(holder)
+    case 8: WindowsNative.update(value)
+    case 13: holder.enqueueSettings { await controller.selectMicrophone(value) }
+    default: secondaryWindowEvent(event, value: value, index: Int(index), holder: holder)
+    }
+}
+
+/// Like Copy, Read aloud captures the displayed text on the UI thread, paired
+/// with the record ID its event carries.
+private func readAloudEvent(_ identifier: String, holder: WindowsEventContext) {
+    do {
+        let text = try WindowsNative.displayedTranscript()
+        let controller = holder.controller
+        Task { await controller.readAloud(identifier, text: text) }
+    } catch { WindowsNative.update(error.localizedDescription) }
+}
+
+/// Shortcut press, release and gesture deadline on the UI thread.
+private func hotKeyWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    switch event {
+    case 21:
+        // As at the Record event: capture the focused field before anything else can change it.
+        holder.hotKeys.keyDown(
+            target: try? WindowsInsertionTarget.capture(), textOutput: holder.recordingTextOutput(),
+            modelIndex: index, deviceID: value
+        )
+    case 22: holder.hotKeys.keyUp()
+    case 23: holder.hotKeys.deadlineReached()
+    default: break
+    }
+}
+
+/// Starts or stops recording with the text output read at the Record event.
+/// That read also waits for every earlier settings change. The toggle runs
+/// outside the settings queue, so draining settings never waits on transcription.
+@discardableResult
+func toggleRecording(
+    _ controller: WindowsAppController, target: WindowsInsertionTarget?,
+    textOutput: Task<WindowsTextOutputOptions, Never>, modelIndex: Int, deviceID: String
+) -> Task<Void, Never> {
+    Task {
+        let options = await textOutput.value
+        await controller.toggle(
+            target: target, modelIndex: modelIndex, deviceID: deviceID, targetExecutablePath: target?.executablePath,
+            textOutput: options
+        )
+    }
+}
+
+private func openProfiles(_ holder: WindowsEventContext) {
+    let editor = holder.profiles
+    guard editor.begin() else { return }
+    holder.enqueueSettings {
+        do { try editor.show(await holder.controller.profileSnapshot()) } catch {
+            editor.cancel()
+            WindowsNative.update(error.localizedDescription)
+        }
+    }
+}
+
+// Copy and version events read the displayed version here, on the UI thread,
+// so it is paired with the record ID the same event carries. Playback events
+// carry the selected record ID for the same reason.
+private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
+    let controller = holder.controller
+    switch event {
+    case 3:
+        let variant = WindowsNative.displayedTranscriptVariant()
+        do {
+            let text = try WindowsNative.displayedTranscript()
+            holder.copyTranscript(text, variant: variant)
+        } catch { WindowsNative.update(error.localizedDescription) }
+    case 6: holder.microphoneMonitor?.cancel()
+    case 15: holder.search.submit(value)
+    case 16:
+        if let variant = WindowsNative.displayedTranscriptVariant() {
+            holder.selectHistoryVersion(variant, identifier: value)
+        }
+    case 18: Task { await controller.playbackToggle(value) }
+    case 19: Task { await controller.playbackStop() }
+    default: break
+    }
+}
+
+private func ready(_ holder: WindowsEventContext) {
+    guard holder.smokeTest else {
+        WindowsInsertionTarget.prepare()
+        do {
+            holder.microphoneMonitor = try WindowsMicrophoneMonitor()
+        } catch {
+            error.localizedDescription.withCString { _ = jsti_window_refresh_microphones(nil, 0, $0) }
+        }
+        Task { await holder.controller.ready() }
+        return
+    }
+    do {
+        try WindowsNative.checked { jsti_window_self_test($0, $1) }
+        if let path = ProcessInfo.processInfo.environment["JSTI_UI_SNAPSHOT_PATH"] {
+            try path.withCString { path in
+                try WindowsNative.checked { jsti_window_save_snapshot(path, $0, $1) }
+            }
+        }
+    } catch { holder.smokeTestFailure = error }
+    jsti_window_request_close()
+}
+
+func postProcessingEvent(
+    _ enabled: Int32, _ index: Int32, _ prompt: UnsafePointer<CChar>?,
+    _ newKey: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
+) {
+    guard let context else { return }
+    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
+    let prompt = prompt.map(String.init(cString:)) ?? ""
+    let key = newKey.map(String.init(cString:)) ?? ""
+    holder.enqueueSettings {
+        await holder.controller.savePostProcessing(
+            enabled: enabled != 0, modelIndex: Int(index), prompt: prompt, key: key
+        )
+        let saved = await holder.controller.postProcessingOptions()
+        do {
+            try WindowsNative.configurePostProcessing(saved, context: Unmanaged.passUnretained(holder).toOpaque())
+        } catch { WindowsNative.update(error.localizedDescription) }
+    }
+}
+
+private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, holder: WindowsEventContext) {
+    if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
+    if event == 24 { return readAloudEvent(value, holder: holder) }
+    if event == 25 { return automationEvent(requested: value == "1", holder: holder) }
+    otherWindowEvent(event, value: value, holder: holder)
+}
+
+private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
+    let controller = holder.controller
+    switch event {
+    case 17: openProfiles(holder)
+    case 9: holder.selectHistory(value)
+    case 10: Task { await controller.retryHistory(value) }
+    case 11:
+        // The dialog runs on the UI thread. Capture the record ID and displayed
+        // version and text before opening it. Its nested message loop may
+        // receive a replacement for the same record while the dialog is open.
+        let variant = WindowsNative.displayedTranscriptVariant() ?? .processed
+        do {
+            let text = try WindowsNative.displayedTranscript()
+            if let path = try WindowsNative.chooseExportPath(identifier: value) {
+                Task { await controller.exportHistory(text: text, variant: variant, path: path) }
+            }
+        } catch { WindowsNative.update(error.localizedDescription) }
+    case 12: Task { await controller.openHistoryAudio(value) }
+    case 14: Task { await controller.cancelTranscription() }
+    case 20: Task { await controller.refreshModels(force: true) }
+    default: break
+    }
+}
+
+@main
+enum SpeakWindowsMain {
+    static func main() async {
+        WindowsModels.configureForWindows()
+        do {
+            if CommandLine.arguments.contains("--bundle-self-test") {
+                try await WindowsBundleSelfTest.run()
+                return
+            }
+            if try await WindowsLocalSelfTest.handle(CommandLine.arguments) { return }
+            if CommandLine.arguments.contains("--self-test") {
+                try WindowsNative.checked { jsti_native_self_test($0, $1) }
+                try WindowsNative.checked { jsti_text_output_self_test($0, $1) }
+                try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
+                try await WindowsTextOutputSelfTest.run()
+                try await WindowsHotKeySelfTest.run()
+                try WindowsNative.storageMediaAndAutomationSelfTests()
+                try await WindowsLocalSelfTest.run()
+                guard !DesktopTranscription.batchModels.isEmpty else {
+                    throw WindowsNativeError(message: "No canonical desktop models available.")
+                }
+                print("Native Windows adapter and canonical model self-test passed.")
+                return
+            }
+            let smokeTest = CommandLine.arguments.contains("--ui-smoke-test")
+            let directory: URL
+            if smokeTest {
+                directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            } else {
+                guard let local = ProcessInfo.processInfo.environment["LOCALAPPDATA"] else {
+                    throw WindowsNativeError(message: "Windows did not provide the local app data directory.")
+                }
+                directory = URL(fileURLWithPath: local).appendingPathComponent("JustSpeakToIt")
+            }
+            defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
+            let controller = try await Task.detached {
+                try WindowsAppController(directory: directory)
+            }.value
+            let holder = WindowsEventContext(controller: controller, smokeTest: smokeTest)
+            try await runWindow(controller: controller, holder: holder)
+            if smokeTest { print("Native window creation and shutdown passed.") }
+        } catch {
+            FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
+            exit(1)
+        }
+    }
+
+    /// A hand-edited or corrupt shortcut falls back to the default rather than
+    /// none; the Read aloud voice resolves through the canonical catalogue.
+    private static func configureHotKey(_ holder: WindowsEventContext) async throws {
+        var hotKey = await holder.controller.hotKeySettings()
+        let context = Unmanaged.passUnretained(holder).toOpaque()
+        guard WindowsNative.configureVoiceOutput(await holder.controller.voiceOutputSettings(), context: context) else {
+            throw WindowsNativeError(message: "Could not configure Read aloud.")
+        }
+        if !WindowsNative.configureHotKey(hotKey, context: context) {
+            hotKey = WindowsHotKeySettings()
+            guard WindowsNative.configureHotKey(hotKey, context: context) else {
+                throw WindowsNativeError(message: "Could not configure the keyboard shortcut.")
+            }
+        }
+        holder.hotKeys.configure(style: hotKey.activation)
+    }
+
+    private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        let microphone = await controller.selectedMicrophone()
+        let smokeTest = holder.smokeTest
+        let warning = try await Task.detached {
+            try WindowsNative.configureMicrophones(selected: microphone, smokeTest: smokeTest)
+        }.value
+        await controller.setMicrophoneWarning(warning)
+        let processing = await controller.postProcessingOptions()
+        try WindowsNative.configurePostProcessing(
+            processing, context: Unmanaged.passUnretained(holder).toOpaque()
+        )
+        let textOutput = await controller.textOutputOptions()
+        try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
+        try await configureHotKey(holder)
+        await restoreServices(holder)
+        try await configureModelPickers(controller, holder: holder)
+        try await controller.configureModelCatalog()
+        let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
+        let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in
+            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)
+            pointer.initialize(from: chars, count: chars.count)
+            return pointer
+        }
+        defer { pointers.forEach { $0.deallocate() } }
+        let names: [UnsafePointer<CChar>?] = pointers.map { UnsafePointer($0) }
+        let selected = await controller.selectedIndex()
+        var windowFailure: Error?
+        do {
+            try names.withUnsafeBufferPointer { buffer in
+                try WindowsNative.checked { error, capacity in
+                    jsti_window_run(
+                        buffer.baseAddress, buffer.count, Int32(selected), windowEvent,
+                        Unmanaged.passUnretained(holder).toOpaque(), error, capacity
+                    )
+                }
+            }
+        } catch { windowFailure = error }
+        let monitor = holder.microphoneMonitor
+        await Task.detached { monitor?.stop() }.value
+        holder.microphoneMonitor = nil
+        await holder.finishSettings()
+        // A drained Apply may have refreshed the dialog; never leave it holding
+        // this context once the holder can be released.
+        jsti_window_clear_text_output()
+        jsti_window_clear_hotkey()
+        await releaseServices(holder)
+        await WindowsAutomationSwitch.shutDown(holder)
+        await holder.hotKeys.drain()
+        await controller.close()
+        withExtendedLifetime(holder) {}
+        if let windowFailure { throw windowFailure }
+        if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }
+    }
+}

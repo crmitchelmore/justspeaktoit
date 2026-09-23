@@ -1,9 +1,12 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Ink Whisper is a file-transcription model; Ink-2 remains a separate live route.
 /// Contract: https://docs.cartesia.ai/api-reference/stt/transcribe (2026-09-05).
 public struct CartesiaBatchClient: Sendable {
-    public static let catalogID = "cartesia/ink-whisper"
+    public static let catalogID = BatchTranscriptionModelIdentifiers.cartesiaInkWhisper
     public static let apiVersion = "2026-08-14"
     var uploadRecording: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
 

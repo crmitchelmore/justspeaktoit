@@ -27,71 +27,24 @@ public protocol HistorySyncDurabilityDelegate: HistorySyncDelegate {
     func persistRemoteChanges() async throws
 }
 
-enum HistoryRemoteChange {
-    case changed(SyncableHistoryEntry)
-    case deleted(UUID)
-
-    var id: UUID {
-        switch self {
-        case .changed(let entry):
-            return entry.id
-        case .deleted(let id):
-            return id
-        }
-    }
-}
-
-struct HistoryChangePage {
-    var changes: [HistoryRemoteChange]
-    var serverChangeTokenData: Data?
-    var moreComing: Bool
-}
-
-struct HistoryUploadResult {
-    var acknowledgedIDs: Set<UUID>
-    var remoteEntries: [SyncableHistoryEntry]
-    var failures: [UUID: Error]
-
-    static func success(ids: Set<UUID>) -> HistoryUploadResult {
-        HistoryUploadResult(acknowledgedIDs: ids, remoteEntries: [], failures: [:])
-    }
-}
-
-@MainActor
-protocol HistorySyncTransport: AnyObject {
-    func fetchChanges(after tokenData: Data?) async throws -> HistoryChangePage
-    func upload(entries: [SyncableHistoryEntry]) async -> HistoryUploadResult
-    func delete(entryID: UUID) async throws
-}
-
-/// Keeps only the final event for each record while preserving the order of
-/// those final events. This makes duplicate changes and tombstones deterministic
-/// across CloudKit pages.
-enum HistoryChangeReconciler {
-    static func coalesced(_ changes: [HistoryRemoteChange]) -> [HistoryRemoteChange] {
-        var latestByID: [UUID: (offset: Int, change: HistoryRemoteChange)] = [:]
-        for (offset, change) in changes.enumerated() {
-            latestByID[change.id] = (offset, change)
-        }
-        return latestByID.values
-            .sorted { $0.offset < $1.offset }
-            .map(\.change)
-    }
-}
-
 /// Main sync engine handling CloudKit operations for transcription history.
+///
+/// Reconciliation is the shared `HistorySyncCoordinator`, run on the main
+/// actor; this class keeps the native account, zone and subscription setup and
+/// publishes the coordinator's status through `SyncState`.
 @MainActor
 public final class HistorySyncEngine: ObservableObject {
-    @Published public private(set) var state = SyncState()
+    @Published public private(set) var state: SyncState
 
     public static let shared = HistorySyncEngine()
 
+    /// An upper bound on back-to-back passes; see `HistorySyncCoordinator`.
+    static let maxCoalescedPasses = HistorySyncCoordinator.maxCoalescedPasses
+
     private weak var delegate: HistorySyncDelegate?
-    private let transport: HistorySyncTransport
+    private let coordinator: HistorySyncCoordinator
     private let defaults: UserDefaults
     private let log = SpeakLogger.logger(category: "HistorySync")
-    /// A trigger observed while a pass was already running.
-    private var followUpRequested = false
 
     private convenience init() {
         self.init(
@@ -107,10 +60,19 @@ public final class HistorySyncEngine: ObservableObject {
         cloudAvailable: Bool,
         delegate: HistorySyncDelegate? = nil
     ) {
-        self.transport = transport
+        let state = SyncState()
+        state.isCloudAvailable = cloudAvailable
+        let eventLog = SpeakLogger.logger(category: "HistorySync")
+        self.state = state
         self.defaults = defaults
         self.delegate = delegate
-        state.isCloudAvailable = cloudAvailable
+        coordinator = HistorySyncCoordinator(
+            transport: transport,
+            tokenStore: UserDefaultsSyncChangeTokenStore(defaults: defaults, key: SyncConfiguration.syncTokenKey),
+            cloudAvailable: cloudAvailable,
+            observer: SyncStateMirror(state: state),
+            events: { Self.write($0, to: eventLog) }
+        )
     }
 
     public func initialize(delegate: HistorySyncDelegate) async {
@@ -123,116 +85,41 @@ public final class HistorySyncEngine: ObservableObject {
 
     /// Manually trigger a complete fetch, reconciliation, and upload pass.
     ///
-    /// A trigger that arrives while a pass is running is not dropped. The
-    /// change it is about may already be behind the running fetch's cursor —
-    /// a push notification for exactly that record, consumed and never
-    /// reconciled, is how a phone stays stale until some unrelated later sync
-    /// — so it is remembered and a follow-up pass runs when this one ends.
+    /// A trigger that arrives while a pass is running is not dropped: it is
+    /// remembered and a follow-up pass runs when this one ends.
     public func sync() async {
-        state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
-        state.pendingDownloadCount = 0
-
-        guard state.isCloudAvailable else {
-            state.error = SyncError.cloudUnavailable
-            log.warning("Sync requested but iCloud unavailable")
-            return
-        }
-        guard !state.isSyncing else {
-            followUpRequested = true
-            log.info("Sync already in progress; queued a follow-up reconciliation")
-            return
-        }
-        guard delegate != nil else {
-            state.error = SyncError.delegateUnavailable
-            return
-        }
-
-        state.isSyncing = true
-        state.error = nil
-        defer { state.isSyncing = false }
-
-        var passes = 0
-        repeat {
-            followUpRequested = false
-            await runReconciliationPass()
-            passes += 1
-        } while followUpRequested && passes < Self.maxCoalescedPasses
-    }
-
-    /// An upper bound on back-to-back passes, so a burst of triggers cannot
-    /// keep one `sync()` call running indefinitely. A trigger that arrives
-    /// after the cap simply starts the next `sync()`.
-    static let maxCoalescedPasses = 3
-
-    private func runReconciliationPass() async {
-        do {
-            try await fetchRemoteChanges()
-            try await uploadPendingEntries()
-            state.pendingDownloadCount = 0
-            state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
-            guard state.pendingUploadCount == 0 else {
-                throw SyncError.reconciliationIncomplete(state.pendingUploadCount)
-            }
-            state.lastSyncTime = Date()
-            log.info("Sync reconciliation completed successfully")
-        } catch {
-            state.error = error
-            state.pendingUploadCount = delegate?.pendingEntries().count ?? state.pendingUploadCount
-            log.error("Sync failed: \(error.localizedDescription)")
-        }
+        await coordinator.sync(store: delegateStore())
     }
 
     /// Upload a single entry and acknowledge it only after CloudKit confirms it.
     public func upload(entry: SyncableHistoryEntry) async throws {
-        guard state.isCloudAvailable else {
-            throw SyncError.cloudUnavailable
-        }
-        // Without a delegate the acknowledgement cannot be persisted, so the
-        // entry would upload again after relaunch. Fail before touching the
-        // transport and leave the entry pending.
-        guard delegate != nil else {
-            let syncError = SyncError.delegateUnavailable
-            state.error = syncError
-            throw syncError
-        }
-        let result = await transport.upload(entries: [entry])
-        try await applyUploadResult(result)
-        state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
-        if let error = result.failures[entry.id] {
-            let syncError = SyncError.cloudKit(error)
-            state.error = syncError
-            throw syncError
-        }
-        state.error = nil
-        log.debug("Uploaded entry: \(entry.id.uuidString)")
+        try await coordinator.upload(entry: entry, store: delegateStore())
     }
 
     public func delete(entryID: UUID) async throws {
-        guard state.isCloudAvailable else {
-            throw SyncError.cloudUnavailable
-        }
-        do {
-            try await transport.delete(entryID: entryID)
-            log.debug("Deleted entry: \(entryID.uuidString)")
-        } catch {
-            throw SyncError.cloudKit(error)
-        }
+        try await coordinator.delete(entryID: entryID)
+    }
+
+    /// The delegate as a shared-coordinator store for one call, or `nil`.
+    private func delegateStore() -> DelegateHistoryStore? {
+        delegate.map(DelegateHistoryStore.init)
     }
 
     private func checkCloudAvailability() async {
         guard SyncConfiguration.hasCloudKitEntitlement else {
-            state.isCloudAvailable = false
-            state.error = SyncError.cloudUnavailable
+            await coordinator.updateCloudAvailability(false, error: SyncError.cloudUnavailable)
             log.warning("CloudKit entitlement missing; history sync disabled")
             return
         }
         do {
             let status = try await SyncConfiguration.container?.accountStatus() ?? .noAccount
-            state.isCloudAvailable = status == .available
-            state.error = state.isCloudAvailable ? nil : SyncError.cloudUnavailable
+            let isAvailable = status == .available
+            await coordinator.updateCloudAvailability(
+                isAvailable,
+                error: isAvailable ? nil : SyncError.cloudUnavailable
+            )
         } catch {
-            state.isCloudAvailable = false
-            state.error = SyncError.cloudKit(error)
+            await coordinator.updateCloudAvailability(false, error: SyncError.cloudKit(error))
             log.warning("iCloud check failed: \(error.localizedDescription)")
         }
     }
@@ -274,79 +161,68 @@ public final class HistorySyncEngine: ObservableObject {
         _ = try await database.save(subscription)
     }
 
-    private func fetchRemoteChanges() async throws {
-        var tokenData = defaults.data(forKey: SyncConfiguration.syncTokenKey)
-        var finalTokenData = tokenData
-        var allChanges: [HistoryRemoteChange] = []
-
-        while true {
-            let page = try await transport.fetchChanges(after: tokenData)
-            allChanges.append(contentsOf: page.changes)
-            state.pendingDownloadCount = allChanges.count
-
-            if let pageToken = page.serverChangeTokenData {
-                guard !page.moreComing || pageToken != tokenData else {
-                    throw SyncError.invalidChangePage
-                }
-                tokenData = pageToken
-                finalTokenData = pageToken
-            } else if page.moreComing {
-                throw SyncError.invalidChangePage
-            }
-
-            if !page.moreComing {
-                break
-            }
-        }
-
-        let changes = HistoryChangeReconciler.coalesced(allChanges)
-        state.pendingDownloadCount = changes.count
-        for change in changes {
-            switch change {
-            case .changed(let entry):
-                await delegate?.didReceiveRemoteEntry(entry)
-            case .deleted(let id):
-                await delegate?.didDeleteRemoteEntry(id: id)
-            }
-            state.pendingDownloadCount -= 1
-        }
-
-        try await (delegate as? HistorySyncDurabilityDelegate)?.persistRemoteChanges()
-        if let finalTokenData {
-            defaults.set(finalTokenData, forKey: SyncConfiguration.syncTokenKey)
-        }
-        log.info("Reconciled \(changes.count) final remote changes")
-    }
-
-    private func uploadPendingEntries() async throws {
-        guard let delegate else { return }
-
-        while true {
-            let pending = delegate.pendingEntries()
-            state.pendingUploadCount = pending.count
-            guard !pending.isEmpty else { return }
-
-            let batch = Array(pending.prefix(SyncConfiguration.batchSize))
-            let result = await transport.upload(entries: batch)
-            try await applyUploadResult(result)
-            state.pendingUploadCount = delegate.pendingEntries().count
-
-            if !result.failures.isEmpty {
-                throw SyncError.partialUploadFailure(result.failures.count)
-            }
-            guard state.pendingUploadCount < pending.count else {
-                throw SyncError.reconciliationIncomplete(state.pendingUploadCount)
-            }
+    /// The log lines this engine has always written, with their privacy defaults.
+    private nonisolated static func write(_ event: HistorySyncEvent, to log: Logger) {
+        switch event {
+        case .syncRequestedWhileCloudUnavailable:
+            log.warning("Sync requested but iCloud unavailable")
+        case .followUpQueued:
+            log.info("Sync already in progress; queued a follow-up reconciliation")
+        case .passCompleted:
+            log.info("Sync reconciliation completed successfully")
+        case .passFailed(let error):
+            log.error("Sync failed: \(error.localizedDescription)")
+        case .uploaded(let id):
+            log.debug("Uploaded entry: \(id.uuidString)")
+        case .deleted(let id):
+            log.debug("Deleted entry: \(id.uuidString)")
+        case .reconciledRemoteChanges(let count):
+            log.info("Reconciled \(count) final remote changes")
         }
     }
+}
 
-    private func applyUploadResult(_ result: HistoryUploadResult) async throws {
-        for entry in result.remoteEntries {
-            await delegate?.didReceiveRemoteEntry(entry)
-        }
+/// Holds the delegate for the duration of one coordinator call, so a pass
+/// always reconciles against the delegate that started it.
+@MainActor
+private final class DelegateHistoryStore: HistorySyncStore {
+    private let delegate: HistorySyncDelegate
+
+    init(_ delegate: HistorySyncDelegate) {
+        self.delegate = delegate
+    }
+
+    func pendingEntries() async -> [SyncableHistoryEntry] {
+        delegate.pendingEntries()
+    }
+
+    func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async {
+        await delegate.didReceiveRemoteEntry(entry)
+    }
+
+    func didDeleteRemoteEntry(id: UUID) async {
+        await delegate.didDeleteRemoteEntry(id: id)
+    }
+
+    func didAcknowledgeSyncedEntries(ids: Set<UUID>) async {
+        await delegate.didAcknowledgeSyncedEntries(ids: ids)
+    }
+
+    func persistRemoteChanges() async throws {
         try await (delegate as? HistorySyncDurabilityDelegate)?.persistRemoteChanges()
-        if !result.acknowledgedIDs.isEmpty {
-            await delegate?.didAcknowledgeSyncedEntries(ids: result.acknowledgedIDs)
-        }
+    }
+}
+
+/// Publishes each coordinator assignment through the engine's `SyncState`.
+@MainActor
+private final class SyncStateMirror: HistorySyncStatusObserver {
+    private let state: SyncState
+
+    init(state: SyncState) {
+        self.state = state
+    }
+
+    func historySync(_ status: HistorySyncStatus, didChange field: HistorySyncStatus.Field) async {
+        state.apply(status, changed: field)
     }
 }

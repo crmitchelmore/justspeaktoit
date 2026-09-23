@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreFoundation)
+import CoreFoundation
+#endif
 
 // MARK: - AnyCodable Helper
 
@@ -139,10 +142,24 @@ public struct AnyCodable: Codable, Equatable, Sendable {
     }
 
     private static func canonicalise(_ number: NSNumber) -> JSONValue {
-        if CFGetTypeID(number) == CFBooleanGetTypeID() {
+        #if canImport(CoreFoundation)
+        let isBoolean = CFGetTypeID(number) == CFBooleanGetTypeID()
+        #else
+        // swift-corelibs on Windows does not expose the CoreFoundation module.
+        // Foundation's Boolean singleton identity distinguishes true/false from
+        // numeric 1/0, which share their ObjC encoding with signed byte values.
+        let isBoolean = number === NSNumber(value: true) || number === NSNumber(value: false)
+        #endif
+        if isBoolean {
             return .bool(number.boolValue)
         }
-        if !CFNumberIsFloatType(number), let int = Int(exactly: number) {
+        #if canImport(Darwin)
+        let isFloatingPoint = CFNumberIsFloatType(number)
+        #else
+        // NSNumber is not implicitly bridgeable to CFNumber in swift-corelibs.
+        let isFloatingPoint = ["f", "d", "D"].contains(String(cString: number.objCType))
+        #endif
+        if !isFloatingPoint, let int = Int(exactly: number) {
             return .int(int)
         }
         return .double(number.doubleValue)

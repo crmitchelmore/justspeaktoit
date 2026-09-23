@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import XCTest
 @testable import SpeakiOSLib
 
@@ -23,12 +24,12 @@ final class OpenAIRealtimeOverflowTests: XCTestCase {
         client.stop()
     }
 
-    func testCrossingChunk_reportsOnceOutsideLockAndStopsAdmissionAfterAcknowledgement() {
+    func testCrossingChunk_reportsOnceReentrantlyAndStopsAdmissionAfterAcknowledgement() {
         let (client, socket) = makeClient()
         var errors: [Error] = []
         client.start(onEvent: { _ in }, onError: {
             errors.append($0)
-            XCTAssertEqual(client.bufferedAudioBytes, 239_998, "Callback must run outside the state lock")
+            XCTAssertEqual(client.bufferedAudioBytes, 239_998, "Callback must be able to re-enter the client")
         })
         let prefix = Data(repeating: 7, count: 239_998)
         client.sendAudio(prefix)
@@ -37,7 +38,7 @@ final class OpenAIRealtimeOverflowTests: XCTestCase {
         XCTAssertEqual(client.bufferedAudioBytes, prefix.count)
         XCTAssertEqual(errors.count, 1)
         guard case .preReadyAudioOverflow? = errors.first as? OpenAIRealtimeError else {
-            return XCTFail("Expected the explicit overflow error")
+            return XCTFail("Expected the platform overflow error")
         }
         socket.acknowledge()
         client.sendAudio(Data(repeating: 1, count: 2))
@@ -61,6 +62,7 @@ final class OpenAIRealtimeOverflowTests: XCTestCase {
         XCTAssertEqual(errorCount, 1)
         XCTAssertEqual(client.bufferedAudioBytes, 0)
         XCTAssertTrue(socket.audio.isEmpty)
+        XCTAssertTrue(socket.isCancelled)
     }
 
     func testConcurrentAcknowledgementOverflowAndStop_stayBoundedAndReportAtMostOnce() {
@@ -99,18 +101,19 @@ final class OpenAIRealtimeOverflowTests: XCTestCase {
     }
 
     func testRestartResetsOverflowAndIgnoresOldSocketAcknowledgement() {
-        var socket = OverflowTestSocket()
+        let sockets = OverflowSocketHolder()
         let client = OpenAIRealtimeWebSocketClient(
             apiKey: "synthetic-test-key", model: "gpt-live-transcribe", language: nil, sampleRate: 24_000,
-            makeSocket: { _ in socket }
+            makeConnection: { _ in sockets.next() }
         )
         client.start(onEvent: { _ in }, onError: { _ in })
+        let oldSocket = sockets.current
         client.sendAudio(Data(repeating: 0, count: 240_002))
-        let oldSocket = socket
         client.stop()
-        socket = OverflowTestSocket()
         var errors = 0
         client.start(onEvent: { _ in }, onError: { _ in errors += 1 })
+        let socket = sockets.current
+        XCTAssertFalse(socket === oldSocket)
         let pcm = Data(repeating: 1, count: 4_800)
         client.sendAudio(pcm)
         oldSocket.acknowledge()
@@ -122,111 +125,88 @@ final class OpenAIRealtimeOverflowTests: XCTestCase {
         client.stop()
     }
 
-    func testAcknowledgementDoesNotReleaseStopBeforePrefixEntersSendGroup() async {
+    func testAcknowledgementFlushesThePrefixBeforeReadinessResumesAndCommitFollowsIt() async {
         let (client, socket) = makeClient()
-        let enteredSend = expectation(description: "Prefix send entered")
-        let releaseSend = DispatchSemaphore(value: 0)
-        socket.beforeAudioSend = {
-            enteredSend.fulfill()
-            _ = releaseSend.wait(timeout: .now() + 5)
-        }
         client.start(onEvent: { _ in }, onError: { _ in })
         client.sendAudio(Data(repeating: 0, count: 240_000))
         client.sendAudio(Data(repeating: 0, count: 2))
-        DispatchQueue.global().async { socket.acknowledge() }
-        await fulfillment(of: [enteredSend], timeout: 2)
-        let readyWhileFlushing = await client.awaitSessionReady(timeout: 0.01)
-        XCTAssertFalse(readyWhileFlushing)
-        releaseSend.signal()
+        let readyBeforeAcknowledgement = await client.awaitSessionReady(timeout: 0.01)
+        XCTAssertFalse(readyBeforeAcknowledgement)
+        XCTAssertTrue(socket.audio.isEmpty)
+        socket.acknowledge()
         let readyAfterFlush = await client.awaitSessionReady(timeout: 2)
         XCTAssertTrue(readyAfterFlush)
+        XCTAssertEqual(socket.audio.count, 1)
         await client.waitForPendingSends()
         client.commitInputBuffer()
         XCTAssertEqual(socket.types.suffix(2), ["input_audio_buffer.append", "input_audio_buffer.commit"])
         client.stop()
     }
 
-    func testLiveAudioCannotOvertakePrefixDuringAcknowledgementFlush() async {
+    func testLiveAudioCannotOvertakeThePrefixQueuedBeforeAcknowledgement() {
         let (client, socket) = makeClient()
-        let enteredPrefix = expectation(description: "Prefix submission paused")
-        let acknowledged = expectation(description: "Acknowledgement handled")
-        let liveSubmitted = expectation(description: "Live audio submitted")
-        let liveAttempted = expectation(description: "Live append attempted during flush")
-        let liveFinished = DispatchSemaphore(value: 0)
-        let releasePrefix = DispatchSemaphore(value: 0)
-        let submissions = LockedOverflowCounter()
-        socket.beforeAudioSend = {
-            submissions.increment()
-            if submissions.count == 1 {
-                enteredPrefix.fulfill()
-                _ = releasePrefix.wait(timeout: .now() + 5)
-            }
-        }
         client.start(onEvent: { _ in }, onError: { _ in XCTFail("Healthy startup failed") })
         let first = Data(repeating: 1, count: 4_800)
         let second = Data(repeating: 2, count: 4_800)
         let live = Data(repeating: 3, count: 4_800)
         client.sendAudio(first)
         client.sendAudio(second)
-        DispatchQueue.global().async {
-            socket.acknowledge()
-            acknowledged.fulfill()
-        }
-        await fulfillment(of: [enteredPrefix], timeout: 2)
-        DispatchQueue.global().async {
-            liveAttempted.fulfill()
-            client.sendAudio(live)
-            liveFinished.signal()
-            liveSubmitted.fulfill()
-        }
-        await fulfillment(of: [liveAttempted], timeout: 2)
-        XCTAssertEqual(liveFinished.wait(timeout: .now() + 0.05), .timedOut)
-        releasePrefix.signal()
-        await fulfillment(of: [acknowledged, liveSubmitted], timeout: 2)
+        socket.acknowledge()
+        client.sendAudio(live)
         XCTAssertEqual(socket.audio, [first, second, live])
         client.stop()
+    }
+
+    func testEmptyRecordingCommitsNothingAndStopClosesImmediately() {
+        let (client, socket) = makeClient()
+        client.start(onEvent: { _ in }, onError: { _ in XCTFail("Empty recording must not fail") })
+        socket.acknowledge()
+        client.commitInputBuffer()
+        XCTAssertEqual(socket.types, ["session.update"])
+        client.stop()
+        XCTAssertTrue(socket.isCancelled)
     }
 
     private func makeClient() -> (OpenAIRealtimeWebSocketClient, OverflowTestSocket) {
         let socket = OverflowTestSocket()
         let client = OpenAIRealtimeWebSocketClient(
             apiKey: "synthetic-test-key", model: "gpt-live-transcribe", language: nil, sampleRate: 24_000,
-            makeSocket: { _ in socket }
+            makeConnection: { _ in socket }
         )
         return (client, socket)
     }
 }
 
-/// Tests deliver parsed provider events; they do not substitute another buffer implementation.
-final class OverflowTestSocket: OpenAIRealtimeSocket, @unchecked Sendable {
+/// Fake transport at the shared connection seam: it opens on resume the way a
+/// URLSession task queues sends until its handshake, completes every send at
+/// once, and records the decoded JSON frames it was handed. Tests deliver
+/// parsed provider events; they do not substitute another buffer implementation.
+final class OverflowTestSocket: StreamingWebSocketConnection, @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [[String: Any]] = []
-    private var receiver: (@Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
-    private var running = false
-    var beforeAudioSend: (@Sendable () -> Void)?
+    private var receiver: (@Sendable (Result<StreamingWebSocketMessage, Error>) -> Void)?
+    private var cancelled = false
 
-    var state: URLSessionTask.State { lock.withLock { running ? .running : .canceling } }
     var types: [String] { lock.withLock { messages.compactMap { $0["type"] as? String } } }
     var audio: [Data] {
         lock.withLock { messages.compactMap { ($0["audio"] as? String).flatMap { Data(base64Encoded: $0) } } }
     }
-    func resume() { lock.withLock { running = true } }
-    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        lock.withLock { running = false }
-    }
-    func send(_ message: URLSessionWebSocketTask.Message, completionHandler: @escaping @Sendable (Error?) -> Void) {
-        if case .string(let text) = message,
+    var isCancelled: Bool { lock.withLock { cancelled } }
+
+    func resume(onOpen: @escaping @Sendable () -> Void) { onOpen() }
+    func send(_ message: StreamingWebSocketMessage, completion: @escaping @Sendable (Error?) -> Void) {
+        if case .text(let text) = message,
            let data = text.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if object["type"] as? String == "input_audio_buffer.append" { beforeAudioSend?() }
             lock.withLock { messages.append(object) }
         }
-        completionHandler(nil)
+        completion(nil)
     }
-    func receive(completionHandler: @escaping @Sendable (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
-        lock.withLock { receiver = completionHandler }
+    func receive(completion: @escaping @Sendable (Result<StreamingWebSocketMessage, Error>) -> Void) {
+        lock.withLock { receiver = completion }
     }
-    func acknowledge() { emit(["type": "session.updated"]) }
+    func cancel() { lock.withLock { cancelled = true } }
+    func acknowledge() { emit(["type": "session.updated", "session": ["type": "transcription"]]) }
     func emit(_ payload: [String: Any]) {
         let callback = lock.withLock {
             let callback = receiver
@@ -237,7 +217,19 @@ final class OverflowTestSocket: OpenAIRealtimeSocket, @unchecked Sendable {
               let text = String(data: data, encoding: .utf8) else {
             return XCTFail("Invalid synthetic provider event")
         }
-        callback?(.success(.string(text)))
+        callback?(.success(.text(text)))
+    }
+}
+
+private final class OverflowSocketHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latest = OverflowTestSocket()
+    var current: OverflowTestSocket { lock.withLock { latest } }
+    func next() -> OverflowTestSocket {
+        lock.withLock {
+            latest = OverflowTestSocket()
+            return latest
+        }
     }
 }
 

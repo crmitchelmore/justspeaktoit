@@ -193,7 +193,10 @@ public enum ModelCredentialResolver {
         "xai": "xAI"
     ]
 
-    private static let openRouterRequirement = ModelCredentialRequirement.apiKey(
+    /// The OpenRouter credential. Batch catalogue entries that resolve to it, and are not
+    /// local, are served by OpenRouter's inline-audio chat route on every platform; the
+    /// shared route derives its model set from this rule rather than from a second list.
+    static let openRouterRequirement = ModelCredentialRequirement.apiKey(
         identifier: "openrouter.apiKey",
         providerName: "OpenRouter"
     )

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Shared plumbing for provider batch APIs that transcribe as an asynchronous
 /// job: upload the recording, start the job, poll until a terminal state, then

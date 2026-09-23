@@ -3,11 +3,6 @@ import CWindowsSupport
 import SpeakDesktop
 import SpeakWindowsPlatform
 
-private enum WindowsHistoryEvent: Sendable {
-    case selection(String)
-    case version(String, DesktopTranscriptVariant)
-}
-
 final class WindowsEventContext {
     let controller: WindowsAppController
     let smokeTest: Bool
@@ -15,7 +10,7 @@ final class WindowsEventContext {
     var microphoneMonitor: WindowsMicrophoneMonitor?
     var cloudSync: WindowsCloudSync?
     let search: WindowsSearchCoalescer
-    private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
+    private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
@@ -32,11 +27,14 @@ final class WindowsEventContext {
         self.copies = DesktopTranscriptCopyDispatcher { text, variant in
             await controller.copyTranscript(text, variant: variant)
         }
-        self.historyEvents = DesktopEventDispatcher { event in
+        self.historyEvents = DesktopEventDispatcher(coalescing: DesktopHistoryEvent.coalesce) { event in
             switch event {
             case .selection(let identifier): await controller.selectHistory(identifier)
             case .version(let identifier, let variant):
                 await controller.selectTranscriptVariant(variant, identifier: identifier)
+            case .playPause(let identifier): await controller.playbackToggle(identifier)
+            case .stop: await controller.playbackStop()
+            case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
             }
         }
     }
@@ -49,6 +47,11 @@ final class WindowsEventContext {
     func selectHistoryVersion(_ variant: DesktopTranscriptVariant, identifier: String) {
         historyEvents.submit(.version(identifier, variant))
     }
+
+    /// Play/Pause, Stop and Read aloud join the selection order: a click on a
+    /// newly selected row reaches it after that selection, and Stop reaches
+    /// the host after the clicks before it, never before them.
+    func submitHistoryPlayback(_ event: DesktopHistoryEvent) { historyEvents.submit(event) }
 
     // Called only by the native UI thread. Persist settings in UI event order,
     // and let shutdown drain these short operations before closing the actor.
@@ -136,8 +139,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
 private func readAloudEvent(_ identifier: String, holder: WindowsEventContext) {
     do {
         let text = try WindowsNative.displayedTranscript()
-        let controller = holder.controller
-        Task { await controller.readAloud(identifier, text: text) }
+        holder.submitHistoryPlayback(.readAloud(identifier, text: text))
     } catch { WindowsNative.update(error.localizedDescription) }
 }
 
@@ -186,9 +188,8 @@ private func openProfiles(_ holder: WindowsEventContext) {
 
 // Copy and version events read the displayed version here, on the UI thread,
 // so it is paired with the record ID the same event carries. Playback events
-// carry the selected record ID for the same reason.
+// carry the selected record ID for the same reason, in the selection order.
 private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
-    let controller = holder.controller
     switch event {
     case 3:
         let variant = WindowsNative.displayedTranscriptVariant()
@@ -202,8 +203,8 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
         if let variant = WindowsNative.displayedTranscriptVariant() {
             holder.selectHistoryVersion(variant, identifier: value)
         }
-    case 18: Task { await controller.playbackToggle(value) }
-    case 19: Task { await controller.playbackStop() }
+    case 18: holder.submitHistoryPlayback(.playPause(value))
+    case 19: holder.submitHistoryPlayback(.stop)
     default: break
     }
 }

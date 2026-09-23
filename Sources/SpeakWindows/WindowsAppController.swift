@@ -67,6 +67,8 @@ actor WindowsAppController {
     var transcript = ""
     var hotKeySession = WindowsHotKeySessionState()
     var readAloudState = WindowsReadAloudState()
+    /// The one History Play or Read aloud request that may still start audio or report.
+    var playbackRequests = DesktopPlaybackRequests()
     var history: [UUID: DesktopRecordingStore.Record] = [:]
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.

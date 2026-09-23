@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakWindowsPlatform
 import CWindowsSupport
 
@@ -63,10 +64,10 @@ func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
 }
 
 /// The controller's Read aloud state. The engine and its private folder are
-/// created on first use, never at launch.
+/// created on first use, never at launch. Which Read aloud may still report
+/// is decided by the controller's shared `playbackRequests`.
 struct WindowsReadAloudState {
     var task: Task<Void, Never>?
-    var revision: UInt64 = 0
     private(set) var engine: WindowsVoiceOutput?
 
     mutating func output(directory: URL) -> WindowsVoiceOutput? {
@@ -112,8 +113,7 @@ extension WindowsAppController {
         let voice = voiceOutputSettings().voice
         let effects = effects
         let playback = playback
-        let revision = readAloudState.revision &+ 1
-        readAloudState.revision = revision
+        let ticket = playbackRequests.begin()
         update("Reading aloud with \(voice.name)…")
         readAloudState.task = Task {
             var outcome: String?
@@ -135,19 +135,22 @@ extension WindowsAppController {
             } catch {
                 outcome = "Read aloud failed: \(error.localizedDescription)"
             }
-            self.finishReadAloud(revision: revision, status: outcome)
+            self.finishReadAloud(ticket, status: outcome)
         }
     }
 
-    /// Ends Read aloud: the current segment stops through the shared
-    /// controller and no later segment is synthesized.
+    /// Ends Read aloud and every other playback request: the current segment
+    /// stops through the shared controller, no later segment is synthesized,
+    /// and a History start still resolving its audio never starts. The ended
+    /// request reports nothing, because whatever ended it owns the status.
     func stopReadAloud() {
+        playbackRequests.end()
         readAloudState.task?.cancel()
         readAloudState.task = nil
     }
 
-    private func finishReadAloud(revision: UInt64, status: String?) {
-        guard readAloudState.revision == revision else { return }
+    private func finishReadAloud(_ ticket: DesktopPlaybackRequests.Ticket, status: String?) {
+        guard playbackRequests.isCurrent(ticket) else { return }
         readAloudState.task = nil
         guard !closed, !busy, recording == nil, let status else { return }
         update(status)

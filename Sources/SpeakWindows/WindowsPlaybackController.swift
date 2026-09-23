@@ -35,26 +35,39 @@ extension WindowsAppController {
 
     /// Play/Pause for the selected record: pauses or resumes an active run for
     /// that record, otherwise starts a new run from the canonical audio file.
+    /// Whatever ends playback while the file is resolved (Stop, another row,
+    /// recording, import, closing) ends this request, so it never starts
+    /// audio after them, even when the row is still selected.
     func playbackToggle(_ identifier: String) async {
         guard !closed, let id = UUID(uuidString: identifier), let record = history[id] else { return }
         if playback.togglePause(recordID: id) { return }
         guard canUseHistory, selectedHistoryID == id, isVisible(id), !refuseSyncedAudio(record) else { return }
         // History playback replaces Read aloud, including a segment still being synthesized.
         stopReadAloud()
+        let ticket = playbackRequests.begin()
         activeOperations += 1
         defer { finishOperation() }
         do {
             let audio = try await store.audioURL(for: record)
             // Re-check after the suspension: the selection, a recording or
             // shutdown may have changed while the store resolved the file.
-            guard !closed, canUseHistory, selectedHistoryID == id else { return }
+            guard playbackRequests.isCurrent(ticket), !closed, canUseHistory, selectedHistoryID == id else { return }
             try playback.play(recordID: id, path: audio.path, knownDuration: record.result?.duration)
-        } catch { update("Could not play recording: \(error.localizedDescription)") }
+        } catch {
+            guard playbackRequests.isCurrent(ticket), !busy, recording == nil else { return }
+            update("Could not play recording: \(error.localizedDescription)")
+        }
     }
 
+    /// Ends History playback and Read aloud, including a start still resolving
+    /// its audio and a segment still being synthesized. The ended Read aloud
+    /// can no longer report, so its stop is reported here.
     func playbackStop() {
         guard !closed else { return }
+        let reading = readAloudState.task != nil
         stopReadAloud()
         playback.stop()
+        guard reading, !busy, recording == nil else { return }
+        update("Reading aloud stopped.")
     }
 }

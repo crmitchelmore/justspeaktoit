@@ -12,6 +12,8 @@ come from the bundle directory. Evidence is written even when a check fails, and
 every failure is reported before the script exits non-zero. With
 -LocalTranscriptionAudio it also transcribes that WAV on the CPU through the
 bundled whisper.cpp runtime and requires its DLLs to load from the bundle.
+Every run records the machine Windows reports for the process; an ARM64 bundle
+must run as a native ARM64 process with no x64 emulation module loaded.
 #>
 [CmdletBinding()]
 param(
@@ -28,6 +30,28 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'BundleEnvironment.ps1')
 $StatusDllNotFound = -1073741515  # NTSTATUS 0xC0000135 as a signed exit code
+# Loaded only into emulated x64 or ARM64EC, and WOW64, processes.
+$EmulationModules = @('xtajit.dll', 'xtajit64.dll', 'xtajit64se.dll', 'xtabase.dll', 'wow64.dll', 'wow64base.dll',
+    'wow64con.dll', 'wow64cpu.dll', 'wow64win.dll', 'wowarmhw.dll')
+$ProcessMachine = Add-Type -Namespace Jsti -Name ProcessMachine -PassThru -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool GetProcessInformation(System.IntPtr process, int informationClass, byte[] information, int size);
+[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+public static extern bool IsWow64Process2(System.IntPtr process, out ushort processMachine, out ushort nativeMachine);
+'@
+
+# IMAGE_FILE_MACHINE value Windows reports for a process (ProcessMachineTypeInfo,
+# Windows 11 and later), or $null when the query is unavailable.
+function Get-ProcessMachine([System.Diagnostics.Process] $process) {
+    $information = New-Object byte[] 8
+    if (-not $ProcessMachine::GetProcessInformation($process.Handle, 9, $information, 8)) { return $null }
+    return [int][System.BitConverter]::ToUInt16($information, 0)
+}
+
+function Format-Machine($value) {
+    if ($null -eq $value) { return $null }
+    return '0x{0:X4}' -f [int]$value
+}
 
 function Get-Sha256([string] $path) {
     return (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -46,6 +70,10 @@ $bundleDirectory = (Resolve-Path -LiteralPath $BundleDirectory).Path
 $workspace = (New-Item -ItemType Directory -Force -Path $Workspace).FullName
 $evidenceDirectory = (New-Item -ItemType Directory -Force -Path (Join-Path $workspace 'evidence')).FullName
 $failures = [System.Collections.Generic.List[string]]::new()
+$runnerProcessMachine = [uint16]0
+$runnerNativeMachine = [uint16]0
+[void] $ProcessMachine::IsWow64Process2([System.Diagnostics.Process]::GetCurrentProcess().Handle,
+    [ref] $runnerProcessMachine, [ref] $runnerNativeMachine)
 $report = [ordered]@{
     schemaVersion = 1
     expectedCommit = $ExpectedCommit
@@ -53,7 +81,9 @@ $report = [ordered]@{
         os = [System.Environment]::OSVersion.VersionString
         caption = (Get-CimInstance Win32_OperatingSystem).Caption
         architecture = $env:PROCESSOR_ARCHITECTURE
+        nativeMachine = Format-Machine $runnerNativeMachine
     }
+    bundleArchitecture = $null
     zip = $null
     isolation = $null
     negativeControl = $null
@@ -84,6 +114,17 @@ try {
     if ($manifest.application.sourceCommit -ne $ExpectedCommit -or $manifest.application.appBuiltForTesting -ne $false -or
         $manifest.application.configuration -ne 'release') {
         throw 'Manifest does not describe an optimised production build of the expected commit.'
+    }
+    # An ARM64 bundle proves native execution: its processes must be ARM64 on an ARM64 host.
+    $report.bundleArchitecture = $manifest.bundle.architecture
+    $expectedMachine = $null
+    if ($manifest.bundle.architecture -eq 'aarch64') {
+        $expectedMachine = 0xAA64
+        if ($runnerNativeMachine -ne $expectedMachine) {
+            throw "An ARM64 bundle needs an ARM64 runner; this one reports $(Format-Machine $runnerNativeMachine)."
+        }
+    } elseif ($manifest.bundle.architecture -ne 'x86_64') {
+        throw "Unexpected bundle architecture $($manifest.bundle.architecture)."
     }
 
     # --- 2. Every extracted file matches the manifest; nothing else is present ----
@@ -185,9 +226,11 @@ try {
         $env:JSTI_BUNDLE_PROBE_RELEASE_PATH = $probeRelease
         $process = Start-Process @parameters
         $loaded = @{}
+        $processMachine = $null
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         while (-not $process.HasExited) {
             try {
+                if ($null -eq $processMachine) { $processMachine = Get-ProcessMachine $process }
                 $process.Refresh()
                 foreach ($module in $process.Modules) { $loaded[$module.FileName.ToLowerInvariant()] = $module.FileName }
                 $allStaticObserved = $true
@@ -205,6 +248,8 @@ try {
             Start-Sleep -Milliseconds 20
         }
         $process.WaitForExit()
+        # The process object outlives the process, so a run too short to sample is still answered.
+        if ($null -eq $processMachine) { $processMachine = Get-ProcessMachine $process }
         # Write-Host keeps the log text out of this function's return value.
         Get-Content -LiteralPath (Join-Path $evidenceDirectory "bundle-$label.log") | ForEach-Object { Write-Host $_ }
         Get-Content -LiteralPath (Join-Path $evidenceDirectory "bundle-$label-errors.log") | ForEach-Object { Write-Host $_ }
@@ -228,10 +273,14 @@ try {
                 if ([System.IO.Path]::GetFileName($path) -ieq $entry.name) { $foreign += "$path (bundled module loaded from outside the bundle)" }
             }
         }
+        $emulation = @($fromSystem + $foreign | Where-Object {
+            $EmulationModules -contains [System.IO.Path]::GetFileName($_).ToLowerInvariant() })
         $run = [ordered]@{
             label = $label
             arguments = $arguments
             exitCode = $process.ExitCode
+            processMachine = Format-Machine $processMachine
+            emulationModules = $emulation
             modulesFromBundle = $fromBundle
             modulesFromSystemRoot = $fromSystem
             modulesFromElsewhere = $foreign
@@ -242,6 +291,13 @@ try {
         if ($fromBundle.Count -lt 2) { throw "$label module evidence was not captured." }
         if ($foreign.Count) { throw "$label loaded modules from outside the bundle and Windows: $($foreign -join '; ')" }
         if ($missing.Count) { throw "$label did not load bundled modules from the bundle: $($missing -join ', ')" }
+        if ($null -ne $expectedMachine) {
+            if ($processMachine -ne $expectedMachine) {
+                $observed = if ($null -eq $processMachine) { 'unknown' } else { Format-Machine $processMachine }
+                throw "$label ran as machine $observed, not native $(Format-Machine $expectedMachine)."
+            }
+            if ($emulation.Count) { throw "$label loaded emulation modules: $($emulation -join '; ')" }
+        }
         return $run
     }
 
@@ -306,7 +362,8 @@ try {
             }
             $runtimeModules = @('whisper.dll', 'ggml.dll', 'ggml-base.dll')
             $absent = @($runtimeModules | Where-Object { $name = $_; -not @($run.modulesFromBundle | Where-Object { $_ -ieq $name }).Count })
-            if (-not @($run.modulesFromBundle | Where-Object { $_ -like 'ggml-cpu-*.dll' }).Count) { $absent += 'ggml-cpu-*.dll' }
+            # x64 ships ggml-cpu-<variant>.dll; ARM64 ships a single ggml-cpu.dll.
+            if (-not @($run.modulesFromBundle | Where-Object { $_ -like 'ggml-cpu*.dll' }).Count) { $absent += 'a ggml-cpu backend' }
             if ($absent.Count) { throw "On-device transcription did not load $($absent -join ', ') from the bundle." }
             Write-Host "On-device transcription loaded $($run.modulesFromBundle.Count) modules from the bundle."
         } catch { $failures.Add($_.Exception.Message) }

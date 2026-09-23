@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Assemble the self-contained, unsigned Windows developer runtime bundle.
 
-Inputs are the Mac cross-build output (``build-windows-app.py``), the private
-cross-build cache (for the Swift 6.2.3 runtime DLLs and their installer
-provenance) and pinned official downloads (Microsoft's Visual C++ runtime and
-licence texts). The output is a deterministic ZIP holding the production
-``SpeakWindows.exe``, its SwiftPM resources, only the runtime DLLs reached from
-the executable's static and delay-load import closure, licence notices and a
-manifest of hashes and provenance. Compiler, SDK, header, import-library,
-symbol, installer and test files are refused.
+For x64, inputs are the Mac cross-build output (``build-windows-app.py``) and
+the private cross-build cache (for the Swift 6.2.3 runtime DLLs and their
+installer provenance). For ARM64 they are the native Windows ARM64 build
+staged by ``stage-native-app.py`` and the runtime that ``pin-swift-runtime.py``
+extracted from the pinned ARM64 installer, with its lock. Both use pinned
+official downloads (Microsoft's Visual C++ runtime and licence texts). The
+output is a deterministic ZIP holding the production ``SpeakWindows.exe``, its
+SwiftPM resources, only the runtime DLLs reached from the executable's static
+and delay-load import closure, licence notices and a manifest of hashes and
+provenance. Every executable and DLL must be an image a native process of the
+bundle's architecture loads. Compiler, SDK, header, import-library, symbol,
+installer and test files are refused.
 """
 import argparse
 import fnmatch
@@ -33,10 +37,13 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import redistributables  # noqa: E402
 import windows_pe  # noqa: E402
+import windows_targets  # noqa: E402
 
-CROSS = HERE.parent / "windows-cross"
 LOCAL_RUNTIME_PINS = HERE.parent / "windows-local-runtime" / "dependencies.json"
 APPLICATION = "SpeakWindows.exe"
+# The build that supplies each architecture's production executable: the Mac
+# cross-build for x64, the native Windows build for ARM64.
+APPLICATION_HOSTS = {"x64": "Darwin", "arm64": "Windows"}
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {"com%d" % n for n in range(1, 10)} | {"lpt%d" % n for n in range(1, 10)}
 ALLOWED_DOWNLOAD_HOSTS = {"download.visualstudio.microsoft.com", "raw.githubusercontent.com"}
@@ -262,13 +269,14 @@ def download(entry, directory):
 
 
 # --- application input ----------------------------------------------------------------
-def load_application(app_dir, policy):
+def load_application(app_dir, policy, architecture="x64"):
     metadata_path = app_dir / "app-build-metadata.json"
     if not metadata_path.is_file():
         raise BundleError("missing app-build-metadata.json in " + str(app_dir))
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    expectations = {"host": "Darwin", "target": "x86_64-unknown-windows-msvc", "configuration": "release",
-                    "appBuiltForTesting": False}
+    target = windows_targets.target(architecture)
+    expectations = {"host": APPLICATION_HOSTS[architecture], "target": target["swiftTriple"],
+                    "configuration": "release", "appBuiltForTesting": False}
     for key, value in expectations.items():
         if metadata.get(key) != value:
             raise BundleError("app metadata %s is %r; expected %r" % (key, metadata.get(key), value))
@@ -278,10 +286,11 @@ def load_application(app_dir, policy):
     data = executable.read_bytes()
     recorded = metadata.get("executables", {}).get(APPLICATION)
     if sha256(data) != recorded:
-        raise BundleError("SpeakWindows.exe does not match the hash recorded by the cross-build")
+        raise BundleError("SpeakWindows.exe does not match the hash recorded by the build")
     image = windows_pe.PEImage(data, APPLICATION)
-    if not image.is_x64 or image.is_dll:
-        raise BundleError("SpeakWindows.exe is not a Windows x64 executable")
+    if not image.runs_natively_on(architecture) or image.is_dll:
+        raise BundleError("SpeakWindows.exe is not a Windows %s executable (it is %s)" % (
+            target["displayName"], image.architecture))
     for module in image.imports() + image.delay_imports():
         if policy.classify(module) == TEST_MODULE:
             raise BundleError("SpeakWindows.exe imports " + module + "; refusing a test-enabled build")
@@ -304,23 +313,33 @@ def load_application(app_dir, policy):
 
 
 # --- Swift runtime source ---------------------------------------------------------------
-def load_swift_runtime(cache, lock_path=HERE / "swift-runtime-lock.json"):
-    runtime = cache / "swift-windows"
+def load_swift_runtime(runtime, lock_path=HERE / "swift-runtime-lock.json", architecture="x64"):
+    """Authenticate an extracted Swift runtime directory against a lock for the pinned installer.
+
+    x64 uses the cross-build cache's ``swift-windows`` directory and the
+    committed lock; ARM64 uses pin-swift-runtime.py's ``--runtime-output`` and
+    the lock it wrote, which must name the pinned ARM64 installer.
+    """
+    runtime = pathlib.Path(runtime)
     if not runtime.is_dir() or runtime.is_symlink() or not lock_path.is_file():
         raise BundleError("missing pinned Swift runtime provenance or runtime directory")
     # Authenticate against the reviewed source lock, never mutable metadata next
     # to the extracted DLLs. pin-swift-runtime.py reproduces the entire chain.
     source = json.loads(lock_path.read_text(encoding="utf-8"))
-    installer = json.loads((CROSS / "dependencies.json").read_text(encoding="utf-8"))
-    pinned = next(entry for entry in installer["downloads"] if entry["name"].endswith("-windows10.exe"))
-    if source["installer"] != pinned or source["swiftVersion"] != installer["swiftVersion"]:
-        raise BundleError("Swift runtime lock does not match the pinned cross compiler installer")
+    swift_version, pinned, pin_file = windows_targets.swift_runtime_installer(architecture)
+    installer = source.get("installer") or {}
+    if (source.get("architecture") != architecture or source.get("swiftVersion") != swift_version
+            or any(installer.get(key) != pinned[key] for key in ("name", "url", "sha256"))
+            or not isinstance(installer.get("bytes"), int)
+            or not windows_targets.installer_size_matches(pinned, installer["bytes"])):
+        raise BundleError("Swift runtime lock does not match the pinned %s installer in %s" % (
+            architecture, pin_file.relative_to(HERE.parent.parent)))
     layout = {row["path"]: row for row in source["files"]}
     if len(layout) != len(source["files"]):
         raise BundleError("duplicate Swift runtime lock path")
-    return {"directory": runtime, "layout": layout, "payloads": source["payloads"], "installer": pinned,
+    return {"directory": runtime, "layout": layout, "payloads": source["payloads"], "installer": installer,
             "lockSHA256": digest_file(lock_path), "bootstrapManifestSHA256": source["bootstrapManifestSHA256"],
-            "swiftVersion": installer["swiftVersion"]}
+            "swiftVersion": swift_version, "pinFile": pin_file.relative_to(HERE.parent.parent).as_posix()}
 
 
 def read_swift_module(source, name):
@@ -339,7 +358,14 @@ def read_swift_module(source, name):
 
 
 # --- Microsoft runtime source ------------------------------------------------------------
-def load_microsoft_runtime(bundle_path, lock, log):
+def load_microsoft_runtime(bundle_path, lock, log, architecture="x64"):
+    """Read the architecture's runtime package from the pinned Visual C++ redistributable.
+
+    Only DLLs a native process of ``architecture`` loads are offered to the
+    import closure. The ARM64 package also installs x64 and ARM64EC DLLs for
+    emulated programs; those are recorded as skipped and never bundled.
+    """
+    target = windows_targets.target(architecture)
     data = bundle_path.read_bytes()
     containers = redistributables.burn_containers(data)
     if len(containers) != 2:
@@ -360,9 +386,9 @@ def load_microsoft_runtime(bundle_path, lock, log):
     payloads = {element.get("Id"): element for element in manifest.iter()
                 if element.tag.endswith("}Payload") and element.get("Container") == "WixAttachedContainer"}
     by_path = {element.get("FilePath"): element for element in payloads.values()}
-    msi_payload = by_path.get(lock["packages"]["minimum"])
+    msi_payload = by_path.get(lock["packages"][target["visualCppPackage"]])
     if msi_payload is None:
-        raise BundleError("bundle manifest lacks the x64 minimum runtime package")
+        raise BundleError("bundle manifest lacks the %s runtime package" % target["displayName"])
     package = next(element for element in manifest.iter() if element.tag.endswith("}MsiPackage") and any(
         child.tag.endswith("}PayloadRef") and child.get("Id") == msi_payload.get("Id") for child in element))
     referenced = [payloads[child.get("Id")] for child in package if child.tag.endswith("}PayloadRef")]
@@ -387,7 +413,7 @@ def load_microsoft_runtime(bundle_path, lock, log):
             raise BundleError("package cabinet missing from the bundle: " + name)
         cabinets[name] = (redistributables.Cabinet(extracted[element.get("SourcePath")], name), element)
     components = {row["Component"]: row for row in database.table("Component")}
-    modules = {}
+    modules, skipped = {}, []
     for row in database.table("File"):
         cabinet_name = next(item["Cabinet"] for item in media if row["Sequence"] <= item["LastSequence"])
         cabinet, element = cabinets[cabinet_name]
@@ -397,27 +423,35 @@ def load_microsoft_runtime(bundle_path, lock, log):
             raise BundleError("extracted %s size differs from the MSI File table" % long_name)
         image = windows_pe.PEImage(blob, long_name)
         info = image.version_info() or {}
-        if not image.is_x64 or not image.is_dll or info.get("fileVersion") != row["Version"]:
-            raise BundleError("extracted %s is not the x64 %s runtime DLL" % (long_name, row["Version"]))
+        if not image.is_dll or info.get("fileVersion") != row["Version"]:
+            raise BundleError("extracted %s is not the %s runtime DLL" % (long_name, row["Version"]))
+        if not image.runs_natively_on(architecture):
+            skipped.append({"name": long_name, "architecture": image.architecture})
+            continue
         modules[long_name.lower()] = {"name": long_name, "bytes": blob, "provenance": {
             "download": lock["name"], "downloadSHA256": lock["sha256"], "package": msi_payload.get("FilePath"),
             "packageSHA1": msi_payload.get("Hash").lower(), "packageSHA256": sha256(msi_bytes),
             "productName": properties.get("ProductName"), "productCode": properties.get("ProductCode"),
             "productVersion": properties.get("ProductVersion"), "cabinet": element.get("FilePath"),
             "cabinetSHA1": element.get("Hash").lower(), "fileKey": row["File"], "fileVersion": row["Version"],
-            "installDirectory": components[row["Component_"]]["Directory_"]}}
-    log("Read %d x64 runtime DLLs from %s (%s)" % (len(modules), lock["name"], arp.get("DisplayName")))
+            "installDirectory": components[row["Component_"]]["Directory_"], "imageArchitecture": image.architecture}}
+    if not modules:
+        raise BundleError("%s holds no native %s runtime DLL" % (msi_payload.get("FilePath"), target["displayName"]))
+    log("Read %d %s runtime DLLs from %s (%s)%s" % (
+        len(modules), target["displayName"], lock["name"], properties.get("ProductName"),
+        "; skipped " + ", ".join("%s (%s)" % (item["name"], item["architecture"]) for item in skipped) if skipped else ""))
     return {"modules": modules, "version": version, "displayName": arp.get("DisplayName"),
-            "productName": properties.get("ProductName")}
+            "productName": properties.get("ProductName"), "skipped": skipped}
 
 
 # --- local inference runtime (whisper.cpp) -------------------------------------------------
-def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS):
+def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS, architecture="x64"):
     """Authenticate a whisper.cpp runtime build against its manifest and the repository pins.
 
     The DLLs are built on Windows by scripts/windows-local-runtime/build-whisper-runtime.py.
-    Every file must match the manifest's size and SHA-256, and the manifest must
-    name exactly the pinned commit, CMake arguments, Vulkan SDK and pin file.
+    Every file must match the manifest's size and SHA-256 and be a native DLL
+    for ``architecture``, and the manifest must name exactly that
+    architecture's pinned commit, CMake arguments, Vulkan SDK (or none) and pin file.
     """
     directory = pathlib.Path(directory)
     pins_bytes = pins_path.read_bytes()
@@ -426,19 +460,27 @@ def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS):
         manifest = json.loads((directory / "runtime-manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise BundleError("cannot read the local runtime manifest: %s" % error)
-    whisper = pins["whisperCpp"]
-    expectations = {"runtime": "whisper.cpp", "version": whisper["version"], "commit": whisper["commit"],
-                    "cmakeArguments": pins["cmakeArguments"], "pinsSHA256": sha256(pins_bytes.replace(b"\r\n", b"\n")),
-                    "vulkanSdk": {key: pins["vulkanSdk"][key] for key in ("version", "sha256", "bytes")}}
+    target = (pins.get("architectures") or {}).get(architecture)
+    if target is None:
+        raise BundleError("no whisper.cpp runtime is pinned for " + architecture)
+    whisper, sdk = pins["whisperCpp"], target["vulkanSdk"]
+    expectations = {"runtime": "whisper.cpp", "architecture": architecture, "version": whisper["version"],
+                    "commit": whisper["commit"], "cmakeArguments": target["cmakeArguments"],
+                    "pinsSHA256": sha256(pins_bytes.replace(b"\r\n", b"\n")),
+                    "vulkanSdk": None if sdk is None else {key: sdk[key] for key in ("version", "sha256", "bytes")}}
     for key, value in expectations.items():
         if manifest.get(key) != value:
             raise BundleError("local runtime manifest %s is %r; expected %r" % (key, manifest.get(key), value))
-    variant = re.compile(pins["cpuVariantPattern"])
+    variant = re.compile(target["cpuVariantPattern"]) if target["cpuVariantPattern"] else None
+
+    def is_variant(name):
+        return variant is not None and variant.match(name) is not None
+
     modules = {}
     for row in manifest.get("files") or []:
         name = row.get("name")
         if (not isinstance(name, str) or pathlib.PurePosixPath(name).name != name or
-                not (name in pins["requiredModules"] or variant.match(name))):
+                not (name in target["requiredModules"] or is_variant(name))):
             raise BundleError("unexpected local runtime file: %r" % (name,))
         path = directory / "runtime" / name
         if not path.is_file() or path.is_symlink():
@@ -447,14 +489,14 @@ def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS):
         if len(data) != row.get("bytes") or sha256(data) != row.get("sha256"):
             raise BundleError("local runtime file does not match its manifest: " + name)
         image = windows_pe.PEImage(data, name)
-        if not image.is_x64 or not image.is_dll:
-            raise BundleError(name + " is not an x64 DLL")
+        if not image.runs_natively_on(architecture) or not image.is_dll:
+            raise BundleError("%s is not a native %s DLL (it is %s)" % (name, architecture, image.architecture))
         modules[name.lower()] = {"name": name, "bytes": data, "provenance": {
             "runtime": "whisper.cpp", "version": manifest["version"], "commit": manifest["commit"],
-            "compiler": manifest.get("compiler"), "vulkanSdk": manifest["vulkanSdk"]["version"],
+            "compiler": manifest.get("compiler"), "vulkanSdk": manifest["vulkanSdk"]["version"] if sdk else None,
             "builtBy": "scripts/windows-local-runtime/build-whisper-runtime.py"}}
-    missing = sorted(set(name.lower() for name in pins["requiredModules"]) - set(modules))
-    if missing or sum(1 for name in modules if variant.match(name)) < pins["minimumCpuVariants"]:
+    missing = sorted(set(name.lower() for name in target["requiredModules"]) - set(modules))
+    if missing or sum(1 for name in modules if is_variant(name)) < target["minimumCpuVariants"]:
         raise BundleError("the local runtime is incomplete: " + (", ".join(missing) or "too few CPU variants"))
     licence = directory / "runtime" / "LICENSE-whisper.cpp.txt"
     if not licence.is_file() or digest_file(licence) != whisper["licenseSHA256"]:
@@ -494,14 +536,29 @@ def cross_check_with_llvm(tool, name, data, image, log):
 
 
 # --- assembly ------------------------------------------------------------------------------
-def readme_text(metadata, closure_names, microsoft, local_runtime=None):
+# Where each architecture's bundle runs, as the README and manifest state it.
+SUPPORTED_WINDOWS = {
+    "x64": (["automatic-update channel. It runs from this folder on 64-bit Windows 10 or",
+             "later without installing the Swift toolchain or Visual C++ redistributable:"],
+            "64-bit Windows 10 or later"),
+    "arm64": (["automatic-update channel. It runs from this folder on Windows 10 or later on",
+               "an ARM64 PC without installing the Swift toolchain or Visual C++ redistributable:"],
+              "Windows 10 or later on ARM64"),
+}
+
+
+def microsoft_runtime_name(microsoft, architecture):
+    # The x64 package is the redistributable's own; ARM64 names the package inside it.
+    return microsoft["displayName"] if architecture == "x64" else microsoft["productName"]
+
+
+def readme_text(metadata, closure_names, microsoft, local_runtime=None, architecture="x64"):
     commit = metadata.get("sourceCommit") or "main"
     return "\n".join([
-        "Just Speak to It - Windows x64 developer runtime bundle",
+        "Just Speak to It - Windows " + windows_targets.target(architecture)["displayName"] + " developer runtime bundle",
         "",
         "This is an unsigned developer build, not an installer, signed release or",
-        "automatic-update channel. It runs from this folder on 64-bit Windows 10 or",
-        "later without installing the Swift toolchain or Visual C++ redistributable:",
+    ] + SUPPORTED_WINDOWS[architecture][0] + [
         "the runtime DLLs the application imports sit beside SpeakWindows.exe.",
         "",
         "Run SpeakWindows.exe, or pass --bundle-self-test / --self-test / --ui-smoke-test. The smoke tests",
@@ -510,12 +567,17 @@ def readme_text(metadata, closure_names, microsoft, local_runtime=None):
         "code-signed, Windows SmartScreen may ask for confirmation before it runs.",
         "",
         "Bundled runtime: Swift 6.2.3 (" + ", ".join(name for name in closure_names if not name.lower().startswith(("msvcp", "vcruntime", "concrt", "vccorlib", "vcamp", "vcomp"))) + ")",
-        "and " + microsoft["displayName"] + ".",
+        "and " + microsoft_runtime_name(microsoft, architecture) + ".",
         "",
     ] + ([
         "On-device transcription: whisper.cpp " + local_runtime["manifest"]["version"] + " (whisper.dll and the",
         "ggml DLLs). It uses a Vulkan GPU when the graphics driver provides vulkan-1.dll",
         "and the CPU otherwise. Models are downloaded in the app (Settings > Local models).",
+        "",
+    ] if local_runtime and local_runtime["manifest"]["vulkanSdk"] else [
+        "On-device transcription: whisper.cpp " + local_runtime["manifest"]["version"] + " (whisper.dll and the",
+        "ggml DLLs). It runs on the CPU; this build has no GPU backend. Models are",
+        "downloaded in the app (Settings > Local models).",
         "",
     ] if local_runtime else []) + [
         "bundle-manifest.json lists every file with its SHA-256 and origin;",
@@ -527,12 +589,15 @@ def readme_text(metadata, closure_names, microsoft, local_runtime=None):
     ])
 
 
-def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock, licenses, local_runtime=None):
+def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock, licenses, local_runtime=None,
+                 architecture="x64", swift_pin_file="scripts/windows-cross/dependencies.json"):
     lines = ["THIRD-PARTY NOTICES", "", "Just Speak to It is distributed under the MIT License (licenses/" + app_license_name + ").", ""]
     swift_license = next(entry for entry in licenses if entry["name"] == "LICENSE-swift.txt")
+    installer = "Windows" if architecture == "x64" else "Windows " + windows_targets.target(architecture)["displayName"]
     lines += ["Swift 6.2.3 runtime (swift.org): " + ", ".join(swift_files),
               "  Licence: " + swift_license["license"] + " (licenses/LICENSE-swift.txt)",
-              "  Source: official swift-6.2.3-RELEASE Windows installer runtime package (rtl.msi), pinned in scripts/windows-cross/dependencies.json", ""]
+              "  Source: official swift-6.2.3-RELEASE " + installer + " installer runtime package (rtl.msi), pinned in "
+              + swift_pin_file, ""]
     icu = next((entry for entry in licenses if entry["name"] == "LICENSE-icu.txt"), None)
     if icu is not None:
         lines += ["_FoundationICU.dll additionally contains " + icu["covers"].split(" compiled")[0] + ":",
@@ -548,13 +613,16 @@ def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock
               "  Runtime licence terms: https://aka.ms/VCRedistLicense (licenses/NOTICE-microsoft-visual-cpp-runtime.txt)", ""]
     if local_runtime:
         manifest = local_runtime["manifest"]
+        built = "  Built from source by scripts/windows-local-runtime/build-whisper-runtime.py with " + str(
+            manifest.get("compiler"))
         lines += ["whisper.cpp " + manifest["version"] + " (commit " + manifest["commit"] + "), including ggml: "
                   + ", ".join(sorted(module["name"] for module in local_runtime["modules"].values())),
-                  "  Licence: MIT (licenses/LICENSE-whisper.cpp.txt)",
-                  "  Built from source by scripts/windows-local-runtime/build-whisper-runtime.py with " +
-                  str(manifest.get("compiler")) + "; the Vulkan SDK " + manifest["vulkanSdk"]["version"] +
-                  " was used at build time only.",
-                  "  vulkan-1.dll is not redistributed: it comes from the graphics driver when present.", ""]
+                  "  Licence: MIT (licenses/LICENSE-whisper.cpp.txt)"]
+        if manifest["vulkanSdk"]:
+            lines += [built + "; the Vulkan SDK " + manifest["vulkanSdk"]["version"] + " was used at build time only.",
+                      "  vulkan-1.dll is not redistributed: it comes from the graphics driver when present.", ""]
+        else:
+            lines += [built + "; CPU backend only, no GPU backend.", ""]
     lines += ["Windows operating-system modules (kernel32, user32, the Universal CRT and other API sets) are not redistributed.", ""]
     return "\n".join(lines)
 
@@ -576,9 +644,15 @@ def microsoft_notice_text(microsoft, lock, files):
     return "\n".join(lines)
 
 
-def assemble(application, swift, microsoft, licenses, app_license, policy, lock, cross_check, log, local_runtime=None):
+def assemble(application, swift, microsoft, licenses, app_license, policy, lock, cross_check, log, local_runtime=None,
+             architecture="x64"):
     """Return ``(entries, manifest)``: bundle bytes keyed by path, and the manifest document."""
+    target = windows_targets.target(architecture)
     executable = application["executable"]
+    application_image = windows_pe.PEImage(executable, APPLICATION)
+    if not application_image.runs_natively_on(architecture) or application_image.is_dll:
+        raise BundleError("SpeakWindows.exe is not a Windows %s executable (it is %s)" % (
+            target["displayName"], application_image.architecture))
     images = {}
     local_modules = local_runtime["modules"] if local_runtime else {}
     if local_modules and set(policy.local) != set(local_modules):
@@ -604,7 +678,8 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
     closure = resolve_closure(APPLICATION, read_imports, policy,
                               sorted(module["name"] for module in local_modules.values()))
     entries = {APPLICATION: executable}
-    files = [{"path": APPLICATION, "bytes": len(executable), "sha256": sha256(executable), "source": "application"}]
+    files = [{"path": APPLICATION, "bytes": len(executable), "sha256": sha256(executable), "source": "application",
+              "imageArchitecture": application_image.architecture}]
     for relative, data in sorted(application["resources"].items()):
         entries[relative] = data
         files.append({"path": relative, "bytes": len(data), "sha256": sha256(data), "source": "application-resources"})
@@ -622,12 +697,13 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
             data, provenance = module["bytes"], module["provenance"]
             microsoft_files.append(name)
         image = images.get(name) or windows_pe.PEImage(data, name)
-        if not image.is_x64 or not image.is_dll:
-            raise BundleError(name + " is not an x64 DLL")
+        if not image.runs_natively_on(architecture) or not image.is_dll:
+            raise BundleError("%s is not a native %s DLL (it is %s)" % (name, architecture, image.architecture))
         version = image.version_info() or {}
         entries[name] = data
         files.append({"path": name, "bytes": len(data), "sha256": sha256(data), "source": entry["source"],
-                      "fileVersion": version.get("fileVersion"), "provenance": provenance})
+                      "fileVersion": version.get("fileVersion"), "imageArchitecture": image.architecture,
+                      "provenance": provenance})
     if cross_check is not None:
         for name in [APPLICATION] + swift_files + microsoft_files + local_files:
             cross_check_with_llvm(cross_check, name, entries[name], images.get(name) or windows_pe.PEImage(entries[name], name), log)
@@ -650,8 +726,9 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         "licenses/NOTICE-microsoft-visual-cpp-runtime.txt": microsoft_notice_text(
             microsoft, lock, [(name, microsoft["modules"][name.lower()]) for name in microsoft_files]).encode(),
         "THIRD-PARTY-NOTICES.txt": notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock, licenses,
-                                                local_runtime).encode(),
-        "README.txt": readme_text(application["metadata"], swift_files + microsoft_files, microsoft, local_runtime).encode(),
+                                                local_runtime, architecture, swift["pinFile"]).encode(),
+        "README.txt": readme_text(application["metadata"], swift_files + microsoft_files, microsoft, local_runtime,
+                                  architecture).encode(),
     }
     for path, data in generated.items():
         entries[path] = data
@@ -661,30 +738,39 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
     metadata = application["metadata"]
     manifest = {
         "schemaVersion": 1,
-        "bundle": {"kind": "unsigned Windows x64 developer runtime bundle", "architecture": "x86_64",
-                   "requires": "64-bit Windows 10 or later; the Universal CRT and other Windows modules come from the operating system",
+        "bundle": {"kind": "unsigned Windows %s developer runtime bundle" % target["displayName"],
+                   "architecture": target["bundleArchitecture"],
+                   "requires": SUPPORTED_WINDOWS[architecture][1] + "; the Universal CRT and other Windows modules come from the operating system",
                    "notInstaller": True, "codeSigned": False},
         "application": {"sourceCommit": metadata.get("sourceCommit"), "configuration": metadata.get("configuration"),
                         "target": metadata.get("target"), "appBuiltForTesting": metadata.get("appBuiltForTesting"),
                         "executableSHA256": sha256(executable), "swiftCompiler": metadata.get("swiftCompiler"),
-                        "nativeCompiler": metadata.get("nativeCompiler")},
+                        "nativeCompiler": metadata.get("nativeCompiler"), "buildHost": metadata.get("host"),
+                        "imageArchitecture": application_image.architecture},
         "files": files,
         "dependencies": {"bundled": closure["bundled"], "system": closure["system"],
                          "additionalRuntimeModules": policy.additional},
         "sources": {
             "swiftRuntime": {"installer": swift["installer"], "payloads": swift["payloads"],
                              "swiftVersion": swift["swiftVersion"], "fileLockSHA256": swift["lockSHA256"],
-                             "bootstrapManifestSHA256": swift["bootstrapManifestSHA256"]},
+                             "bootstrapManifestSHA256": swift["bootstrapManifestSHA256"],
+                             "installerPin": swift["pinFile"], "fileLock": swift.get("lockOrigin")},
             "microsoftRuntime": {"download": {key: lock[key] for key in ("name", "url", "sha256", "bytes", "permalink", "version")},
-                                 "displayName": microsoft["displayName"], "productName": microsoft["productName"]},
+                                 "package": lock["packages"][target["visualCppPackage"]],
+                                 "displayName": microsoft["displayName"], "productName": microsoft["productName"],
+                                 "nonNativeFilesNotBundled": microsoft.get("skipped", [])},
             "licenses": [{key: entry[key] for key in ("name", "url", "sha256", "bytes", "license", "covers")} for entry in licenses],
             "localInferenceRuntime": None if not local_runtime else {
                 key: local_runtime["manifest"].get(key)
-                for key in ("runtime", "version", "commit", "repository", "cmakeArguments", "compiler", "vulkanSdk")
+                for key in ("runtime", "architecture", "version", "commit", "repository", "cmakeArguments", "compiler",
+                            "vulkanSdk")
             } | {"manifestSHA256": local_runtime["manifestSHA256"], "modules": sorted(local_files)},
         },
         "policy": policy.data,
         "verification": {"importReader": "windows_pe.py static and delay-load import directories",
+                         "imageArchitecture": "every executable and DLL is an image a native %s process loads (%s); "
+                                              "windows_pe.py reads the machine and the load configuration's hybrid "
+                                              "metadata" % (target["displayName"], ", ".join(target["peImages"])),
                          "llvmReadobjCrossCheck": cross_check is not None,
                          "windowsEvidence": "scripts/windows-bundle/verify-windows-bundle.ps1 runs the bundle with an isolated PATH and records sampled loaded modules"},
     }
@@ -698,10 +784,27 @@ def check_output_separation(app, cache, output):
         raise BundleError("Keep the app output, private cache and bundle output separate")
 
 
+def swift_runtime_inputs(args, architecture):
+    """``(runtime directory, lock path)``: the cross-build cache for x64 by default, explicit paths otherwise."""
+    committed = HERE / windows_targets.target(architecture)["swiftRuntimeLock"]
+    if args.swift_runtime is not None:
+        return args.swift_runtime.resolve(), (args.swift_runtime_lock or committed).resolve()
+    if architecture != "x64" or args.cache is None:
+        raise BundleError("pass --swift-runtime and --swift-runtime-lock (pin-swift-runtime.py --runtime-output) "
+                          "for %s, or --cache for the x64 cross-build" % architecture)
+    return args.cache.resolve() / "swift-windows", (args.swift_runtime_lock or committed).resolve()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app", required=True, type=pathlib.Path, help="build-windows-app.py output directory")
-    parser.add_argument("--cache", required=True, type=pathlib.Path, help="private cross-build cache (read only)")
+    parser.add_argument("--architecture", default="x64", choices=sorted(windows_targets.TARGETS))
+    parser.add_argument("--app", required=True, type=pathlib.Path,
+                        help="build-windows-app.py (x64) or stage-native-app.py (ARM64) output directory")
+    parser.add_argument("--cache", type=pathlib.Path, help="private x64 cross-build cache (read only)")
+    parser.add_argument("--swift-runtime", type=pathlib.Path,
+                        help="Swift runtime extracted by pin-swift-runtime.py --runtime-output")
+    parser.add_argument("--swift-runtime-lock", type=pathlib.Path,
+                        help="lock for that runtime (default: the architecture's committed lock)")
     parser.add_argument("--downloads", required=True, type=pathlib.Path, help="writable directory for pinned downloads")
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--source-root", type=pathlib.Path, default=HERE.parent.parent)
@@ -709,18 +812,25 @@ def main():
     parser.add_argument("--local-runtime", type=pathlib.Path,
                         help="whisper.cpp runtime build (build-whisper-runtime.py output) to bundle for on-device transcription")
     args = parser.parse_args()
-    app, cache, output = args.app.resolve(), args.cache.resolve(), args.output.resolve()
-    check_output_separation(app, cache, output)
+    architecture = args.architecture
+    runtime_directory, lock_path = swift_runtime_inputs(args, architecture)
+    app, output = args.app.resolve(), args.output.resolve()
+    check_output_separation(app, args.cache.resolve() if args.cache else runtime_directory, output)
     output.mkdir(parents=True, exist_ok=True)
     log = Log(output / "bundle-build.log")
-    local_runtime = load_local_runtime(args.local_runtime.resolve()) if args.local_runtime else None
+    local_runtime = load_local_runtime(args.local_runtime.resolve(), architecture=architecture) if args.local_runtime else None
     policy = Policy.load(local_runtime=[module["name"] for module in local_runtime["modules"].values()]
                          if local_runtime else ())
     lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
-    application = load_application(app, policy)
-    swift = load_swift_runtime(cache)
+    application = load_application(app, policy, architecture)
+    swift = load_swift_runtime(runtime_directory, lock_path, architecture)
+    committed = HERE / windows_targets.target(architecture)["swiftRuntimeLock"]
+    swift["lockOrigin"] = ("committed " + committed.name if committed.is_file() and lock_path == committed.resolve()
+                           else "regenerated in this build from the pinned installer; no committed lock was compared")
+    log("Swift runtime lock: " + swift["lockOrigin"])
     downloads = args.downloads.resolve()
-    microsoft = load_microsoft_runtime(download(lock["microsoftRuntime"], downloads), lock["microsoftRuntime"], log)
+    microsoft = load_microsoft_runtime(download(lock["microsoftRuntime"], downloads), lock["microsoftRuntime"], log,
+                                       architecture)
     licenses = []
     for entry in lock["licenses"]:
         path = download(entry, downloads)
@@ -733,17 +843,18 @@ def main():
     if cross_check is not None and not cross_check.is_file():
         raise BundleError("llvm-readobj not found at " + str(cross_check))
     entries, manifest = assemble(application, swift, microsoft, licenses, app_license, policy,
-                                 lock["microsoftRuntime"], cross_check, log, local_runtime)
+                                 lock["microsoftRuntime"], cross_check, log, local_runtime, architecture)
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
     entries["bundle-manifest.json"] = manifest_bytes
     commit = manifest["application"]["sourceCommit"]
-    name = "justspeaktoit-windows-x64-developer-" + (commit[:7] if commit else "local") + ".zip"
+    name = "justspeaktoit-windows-%s-developer-%s.zip" % (architecture, commit[:7] if commit else "local")
     archive = output / name
     names = write_deterministic_zip(archive, entries)
     archive_digest = digest_file(archive)
     (output / "bundle-manifest.json").write_bytes(manifest_bytes)
     evidence = {
         "schemaVersion": 1,
+        "architecture": architecture,
         "zip": {"name": name, "sha256": archive_digest, "bytes": archive.stat().st_size, "entries": len(names)},
         "manifest": {"name": "bundle-manifest.json", "sha256": sha256(manifest_bytes)},
         "application": {"sourceCommit": commit, "executableSHA256": manifest["application"]["executableSHA256"]},
@@ -761,5 +872,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (BundleError, redistributables.ExtractionError, windows_pe.PEFormatError) as error:
+    except (BundleError, redistributables.ExtractionError, windows_pe.PEFormatError, ValueError) as error:
         raise SystemExit("windows bundle: " + str(error))

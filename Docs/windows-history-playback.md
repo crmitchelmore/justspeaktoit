@@ -77,14 +77,15 @@ queued behind a Stop can play.
 Pause and resume are commands acknowledged through a 100 ms sampler that
 presents only changes. A pause requested before a job starts is applied
 before its native start, so the engine never renders it. Stop requests
-cancellation and resets the display only after output acknowledges silence. Only the user's Stop reports "Playback
-stopped."; stopping to make way for another row, a hidden or deleted row,
-recording or import leaves the status line to that work, while a finished or
-failed playback always reports. Replacement playback and microphone capture
-wait for that acknowledgement, with a three-second deadline that reports an
-error instead of pretending output stopped. Decoder flush and resource release
-can continue in the background. Cancelling a suspended file open forbids its
-future start, allowing silence to be acknowledged without waiting for that open.
+cancellation and resets the display only after output acknowledges silence.
+Only the user's Stop reports "Playback stopped."; stopping to make way for
+another row, a hidden or deleted row, recording or import leaves the status
+line to that work, while a finished or failed playback always reports.
+Replacement playback and microphone capture wait for that acknowledgement,
+with a three-second deadline that reports an error instead of pretending
+output stopped. Decoder flush and resource release can continue in the
+background. Cancelling a suspended file open forbids its future start,
+allowing silence to be acknowledged without waiting for that open.
 
 Display delivery retains only one pending update beside the callback in flight,
 so a slow presenter coalesces progress instead of accumulating a queue.
@@ -102,14 +103,14 @@ selected, when a search hides the selected record and on shutdown. It only
 plays the URL resolved by `DesktopRecordingStore.audioURL(for:)`.
 
 The native window keeps the controls record-bound: a playback report applies
-only while its record is still the selected row, selecting another row resets
-the display until the host reports again (row changes that coalesce back to
-the playing or speaking record present its state again), and a History refresh that
-re-selects the same record (after Retry, for example) keeps that record's last
-report because the sampler never re-sends an unchanged paused state. Stop is
-enabled only while a playback or Read aloud speech is active, and Play/Pause
-is enabled for a selected idle record or while either is active so it can
-always be paused. Playback reports never
+only while its record is still the selected row, and selecting another row
+resets the display until the host reports again. If quick row changes
+coalesce back to the playing or speaking record, the host presents its state
+again. A History refresh that re-selects the same record (after Retry, for
+example) keeps that record's last report because the sampler never re-sends
+an unchanged paused state. Stop is enabled only while a playback or Read
+aloud speech is active, and Play/Pause is enabled for a selected idle record
+or while either is active so it can always be paused. Playback reports never
 touch the status or transcript text. Controls use explicit identifiers 160 to
 162 and events 18 and 19, outside the existing control enumeration.
 

@@ -7,21 +7,22 @@ import XCTest
 
 /// Drives the real shared Rev.ai client through its injected transport and
 /// scheduler. The scripted socket, factory and clock are the Cartesia suite's
-/// (`CartesiaLiveTestSupport.swift`); only Rev.ai's frames and the event log
-/// are its own. Every handshake, send completion, server frame, closure and
-/// deadline happens only when a test says so: no sleeps, no network, no
-/// credential. Payloads are generated.
+/// (`CartesiaLiveTestSupport.swift`); only Rev.ai's frames, the deadline
+/// record and the event log are its own. Every handshake, send completion,
+/// server frame, closure and deadline happens only when a test says so: no
+/// sleeps, no network, no credential. Payloads are generated.
 final class RevAILiveFixture: @unchecked Sendable {
     let factory = CartesiaSocketFactory()
     let clock = CartesiaTestClock()
+    let deadlines = RevAIDeadlineRecord()
     let log = RevAIEventLog()
     let client: RevAILiveClient
 
     init(token: String = "synthetic-token", language: String? = "en_GB", sampleRate: Int = 16_000) {
-        let factory = factory, clock = clock
+        let factory = factory, clock = clock, deadlines = deadlines
         client = RevAILiveClient(
             accessToken: token, language: language, sampleRate: sampleRate,
-            makeConnection: { factory.make($0) }, schedule: { clock.schedule($0, action: $1) }
+            makeConnection: { factory.make($0) }, schedule: { clock.schedule($0, action: deadlines.arm($0, $1)) }
         )
     }
 
@@ -69,11 +70,35 @@ final class RevAILiveFixture: @unchecked Sendable {
     /// Waits, within a bound, until `count` finish callers are registered on
     /// the active run. It polls a condition; it never sleeps for an outcome.
     func waitForFinishes(_ count: Int, file: StaticString = #filePath, line: UInt = #line) async {
+        guard await Self.poll({ client.pendingFinishes >= count }) else {
+            return XCTFail("Only \(client.pendingFinishes) of \(count) finishes registered", file: file, line: line)
+        }
+    }
+
+    /// Waits, within a bound, until the client has armed `count` deadlines. A
+    /// finish arms its own on its caller's task, just after it registers.
+    func waitForDeadlines(_ count: Int, file: StaticString = #filePath, line: UInt = #line) async {
+        guard await Self.poll({ deadlines.armed.count >= count }) else {
+            return XCTFail("Only \(deadlines.armed.count) of \(count) deadlines armed", file: file, line: line)
+        }
+    }
+
+    /// Runs only the deadline armed `order`-th and checks that it ended the
+    /// finish. One that does not fails the test and the run is cancelled, so
+    /// a finish still waiting cannot hang the suite.
+    func fireEndingTheFinish(_ order: Int, file: StaticString = #filePath, line: UInt = #line) {
+        deadlines.fire(order)
+        guard client.pendingFinishes > 0 else { return }
+        XCTFail("Deadline \(order) did not end the finish", file: file, line: line)
+        client.cancel()
+    }
+
+    private static func poll(_ condition: () -> Bool) async -> Bool {
         for _ in 0..<1_000 {
-            if client.pendingFinishes >= count { return }
+            if condition() { return true }
             try? await Task.sleep(for: .milliseconds(2))
         }
-        XCTFail("Only \(client.pendingFinishes) of \(count) finishes registered", file: file, line: line)
+        return condition()
     }
 
     /// 100 ms of generated 16 kHz PCM16 mono with a recognisable fill byte.
@@ -117,6 +142,43 @@ extension CartesiaTestSocket {
     {"type":"text","value":"two","ts":1.84,"end_ts":2.15,"confidence":1.0},\
     {"type":"punct","value":"."}]}
     """
+}
+
+/// Every deadline the client arms through its scheduler, in the order it arms
+/// them, and which have run. Rev.ai's send deadline and whole-finish budget
+/// have the same length, so a length never says which deadline is which: a
+/// test names one by when it was armed. Nothing runs unless the test runs it,
+/// through the clock or `fire(_:)`, and each deadline runs at most once.
+final class RevAIDeadlineRecord: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lengths: [TimeInterval] = []
+    private var actions: [@Sendable () -> Void] = []
+    private var ran: Set<Int> = []
+
+    /// The length of every deadline armed so far; the index is its order.
+    var armed: [TimeInterval] { lock.withLock { lengths } }
+    /// The orders of the deadlines that have run, ascending.
+    var fired: [Int] { lock.withLock { ran.sorted() } }
+
+    /// Records a deadline and returns the action to schedule, which runs it
+    /// through `fire(_:)`.
+    func arm(_ seconds: TimeInterval, _ action: @escaping @Sendable () -> Void) -> @Sendable () -> Void {
+        let order = lock.withLock { () -> Int in
+            lengths.append(seconds)
+            actions.append(action)
+            return lengths.count - 1
+        }
+        return { [weak self] in self?.fire(order) }
+    }
+
+    /// Runs the deadline armed `order`-th, unless it already ran or was never armed.
+    func fire(_ order: Int) {
+        let action = lock.withLock { () -> (@Sendable () -> Void)? in
+            guard actions.indices.contains(order), ran.insert(order).inserted else { return nil }
+            return actions[order]
+        }
+        action?()
+    }
 }
 
 /// Transcript callbacks, errors and finish returns in the order they happened.

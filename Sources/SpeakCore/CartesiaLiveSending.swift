@@ -7,6 +7,8 @@ struct CartesiaOutbound {
     let connection: any StreamingWebSocketConnection
     let message: StreamingWebSocketMessage
     let generation: UInt64
+    /// `{"type":"close"}`: it counts as sent only once it is handed over.
+    let closesStream: Bool
 }
 
 extension CartesiaLiveClient {
@@ -36,7 +38,7 @@ extension CartesiaLiveClient {
             // Deferred work runs between claiming a frame and handing it over,
             // and may have cancelled or replaced the run meanwhile: a frame its
             // run no longer owns is never given to a socket.
-            guard withState({ _ in owns(outbound) }) else { return }
+            guard withState({ _ in handOff(outbound) }) else { return }
             outbound.connection.send(outbound.message) { [weak self, weak active] error in
                 guard let self, let active else { return }
                 self.completeSend(error, generation: outbound.generation, active)
@@ -60,20 +62,34 @@ extension CartesiaLiveClient {
             && active.connection === outbound.connection
     }
 
+    /// Caller holds the lock, immediately before `send` is invoked. The close
+    /// command counts as sent from here, not while it only waited behind
+    /// deferred work: a closure that lands in between did not answer it.
+    private func handOff(_ outbound: CartesiaOutbound) -> Bool {
+        guard owns(outbound) else { return false }
+        if outbound.closesStream {
+            outbound.run.closeSent = true
+            log("Close command sent")
+        }
+        return true
+    }
+
     /// Admitted audio first, in capture order; then, once a finish has seen
     /// every audio frame complete, the close command.
     private func nextOutbound(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) -> CartesiaOutbound? {
         guard isCurrent(active), active.opened, !active.sending, let connection = active.connection else { return nil }
         let message: StreamingWebSocketMessage
+        let closesStream: Bool
         if !active.outgoing.isEmpty {
             let audio = active.outgoing.removeFirst()
             active.inFlightAudioBytes = audio.count
             message = .binary(audio)
-        } else if active.phase == .finishing, !active.closeSent {
-            active.closeSent = true
+            closesStream = false
+        } else if active.phase == .finishing, !active.closeClaimed {
+            active.closeClaimed = true
             active.inFlightAudioBytes = 0
             message = .text(CartesiaLiveProtocol.closeCommand)
-            log("Close command sent")
+            closesStream = true
         } else {
             return nil
         }
@@ -84,7 +100,9 @@ extension CartesiaLiveClient {
             guard active.sending, active.sendGeneration == generation else { return }
             client.fail(active, client.stalledError, &effects)
         }
-        return CartesiaOutbound(run: active, connection: connection, message: message, generation: generation)
+        return CartesiaOutbound(
+            run: active, connection: connection, message: message, generation: generation, closesStream: closesStream
+        )
     }
 
     /// A completion counts only for the run and send that are still current,

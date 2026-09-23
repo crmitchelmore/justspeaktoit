@@ -102,6 +102,32 @@ final class CartesiaLiveClosureTests: XCTestCase {
         XCTAssertEqual(fixture.socket.closeCommands, 0, "Audio was still owed, so the stream cannot have ended")
     }
 
+    /// `close` is claimed under the lock but reaches the socket only when the
+    /// send loop runs, after the deferred work it waits behind (here, arming its
+    /// send deadline). A normal closure that lands in between did not answer
+    /// it: the server ended the stream on its own, so the finish fails.
+    func testNormalClosureBeforeTheClaimedCloseReachesTheSocketIsAFailure() async {
+        let fixture = CartesiaLiveFixture()
+        fixture.startAndOpen()
+        fixture.socket.turn("Confirmed.")
+        let release = DispatchSemaphore(value: 0)
+        let claimed = expectation(description: "Close claimed; its send deadline is being armed")
+        fixture.clock.holdNextSchedule(of: CartesiaLiveClient.sendDeadline, until: release) { claimed.fulfill() }
+        let finish = fixture.finish()
+        await fulfillment(of: [claimed], timeout: 2)
+
+        fixture.socket.closeNormally()
+        XCTAssertEqual(fixture.log.errors.first as? CartesiaStreamingError, .closed(code: 1_000),
+                       "A closure ahead of the handoff is not the answer to close")
+        // Were the claimed close still handed over, it would complete at once.
+        fixture.socket.setSendMode(.synchronous)
+        release.signal()
+        let transcript = await finish.value
+        XCTAssertEqual(transcript, "Confirmed.", "The confirmed text is kept")
+        XCTAssertEqual(fixture.socket.closeCommands, 0, "The failed run never hands the close command over")
+        XCTAssertEqual(Array(fixture.log.entries.suffix(2)), [.error("closed(code: 1000)"), .finished("Confirmed.")])
+    }
+
     func testAbnormalClosureWhileCloseIsInFlightFailsOnceItCompletes() async {
         let fixture = CartesiaLiveFixture()
         fixture.startAndOpen()

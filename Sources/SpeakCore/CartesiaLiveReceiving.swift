@@ -114,8 +114,9 @@ extension CartesiaLiveClient {
     }
 
     /// The receive failed: the server closed the stream or the transport
-    /// broke. Only a closure after `close` has been sent can end the stream;
-    /// if that command's send has not completed yet, its completion settles it.
+    /// broke. Only a closure after `close` has been handed to the transport can
+    /// end the stream; one while it is merely claimed did not answer it. If
+    /// that command's send has not completed yet, its completion settles it.
     private func closed(by error: Error, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
         guard active.closeSent else {
             fail(active, CartesiaLiveProtocol.connectionError(error), &effects)

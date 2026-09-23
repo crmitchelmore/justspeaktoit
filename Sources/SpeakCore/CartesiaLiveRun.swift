@@ -33,7 +33,11 @@ final class CartesiaLiveRun: @unchecked Sendable {
     /// A pump loop is handing frames to the transport; everyone else leaves
     /// the next frame to it, so a synchronous completion never recurses.
     var pumping = false
-    /// `{"type":"close"}` was handed to the transport, and later completed.
+    /// `{"type":"close"}` was claimed under the lock, so it is never queued twice.
+    var closeClaimed = false
+    /// The close command was handed to the transport (its `send` invoked, not
+    /// merely claimed), and later completed. Only a closure after the handoff
+    /// can answer it.
     var closeSent = false
     var closeDelivered = false
     /// How the server ended the stream while the close command was still in

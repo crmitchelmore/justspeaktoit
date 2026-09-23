@@ -73,7 +73,7 @@ def swift_runtime_installer(architecture, cross=CROSS_PINS, bundle=BUNDLE_PINS):
 
 
 def installer_size_matches(pin, size):
-    """An exact ``bytes`` pin must match; a ``maximumBytes`` pin only bounds the size."""
-    if "bytes" in pin:
-        return size == pin["bytes"]
-    return 0 < size <= pin["maximumBytes"]
+    """Every installer pin records the exact byte count of the SHA-256-pinned download."""
+    if not isinstance(pin.get("bytes"), int):
+        raise ValueError("the installer pin for %s lacks its exact byte count" % pin.get("name"))
+    return isinstance(size, int) and size == pin["bytes"]

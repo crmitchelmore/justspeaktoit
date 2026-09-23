@@ -57,13 +57,15 @@ def download(pin, directory):
         raise PinError("unexpected download source: " + pin["url"])
     if Path(pin["name"]).name != pin["name"]:
         raise PinError("download name must be a basename: " + pin["name"])
+    if not isinstance(pin.get("bytes"), int):
+        raise PinError("the pin for %s lacks its exact byte count" % pin["name"])
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / pin["name"]
     if destination.exists():
         if not check_size(pin, destination.stat().st_size) or digest(destination) != pin["sha256"]:
             raise PinError("cached download differs from its pin: " + pin["name"])
         return destination
-    limit = pin.get("bytes", pin.get("maximumBytes"))
+    limit = pin["bytes"]
     partial = destination.with_name(pin["name"] + ".partial")
     print("Downloading pinned file: " + pin["name"], flush=True)
     with urllib.request.urlopen(pin["url"], timeout=300) as response, partial.open("wb") as output:

@@ -14,7 +14,7 @@ modules and, for ARM64, the machine of each process.
 | Architecture | Application | Swift runtime | Visual C++ runtime |
 |---|---|---|---|
 | x64 (default) | Mac cross-build (`build-windows-app.py`) | Cross-build cache, committed `swift-runtime-lock.json` | x64 package of the pinned `VC_redist.x64.exe` |
-| ARM64 | Native Windows ARM64 build (`stage-native-app.py`) | `pin-swift-runtime.py --architecture arm64 --runtime-output` from the pinned ARM64 installer | ARM64 package inside the same pinned `VC_redist.x64.exe` |
+| ARM64 | Native Windows ARM64 build (`stage-native-app.py`) | `pin-swift-runtime.py --architecture arm64 --runtime-output` from the pinned ARM64 installer, equal to the committed `swift-runtime-lock-arm64.json` | ARM64 package inside the same pinned `VC_redist.x64.exe` |
 
 `verify-native-execution.py` records, on Windows, that a host and the programs
 it runs are native for an architecture rather than emulated.
@@ -32,10 +32,11 @@ python3 scripts/windows-bundle/build-windows-bundle.py \
   --output /path/to/windows-runtime-bundle
 python3 scripts/windows-bundle/pin-swift-runtime.py --architecture arm64 \
   --downloads /path/to/private/arm64-downloads --temporary-parent /path/to/private \
-  --output /path/to/swift-runtime-lock-arm64.json --runtime-output /path/to/swift-runtime-arm64
+  --output /path/to/swift-runtime-lock-arm64.json --runtime-output /path/to/swift-runtime-arm64 \
+  --compare scripts/windows-bundle/swift-runtime-lock-arm64.json
 python3 scripts/windows-bundle/build-windows-bundle.py --architecture arm64 \
   --app /path/to/windows-arm64-app \
-  --swift-runtime /path/to/swift-runtime-arm64 --swift-runtime-lock /path/to/swift-runtime-lock-arm64.json \
+  --swift-runtime /path/to/swift-runtime-arm64 --swift-runtime-lock scripts/windows-bundle/swift-runtime-lock-arm64.json \
   --downloads /path/to/private/bundle-downloads \
   --local-runtime /path/to/windows-local-runtime-arm64 \
   --output /path/to/windows-runtime-bundle-arm64

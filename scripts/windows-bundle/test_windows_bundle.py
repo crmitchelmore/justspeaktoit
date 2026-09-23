@@ -587,7 +587,7 @@ class SwiftRuntimeSourceTests(unittest.TestCase):
     def arm64_lock(self, **installer_changes):
         pins = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
         pin = pins["swiftRuntimeInstallers"]["arm64"]
-        installer = {key: pin[key] for key in ("name", "url", "sha256")} | {"bytes": 876543210}
+        installer = {key: pin[key] for key in ("name", "url", "sha256", "bytes")}
         installer.update(installer_changes)
         return dict(self.lock, architecture="arm64", installer=installer)
 
@@ -632,11 +632,11 @@ class SwiftRuntimeSourceTests(unittest.TestCase):
         self.write_lock(self.arm64_lock())
         source = BUILD.load_swift_runtime(self.runtime, self.lock_path, "arm64")
         self.assertEqual(source["installer"]["name"], "swift-6.2.3-RELEASE-windows10-arm64.exe")
-        self.assertEqual(source["installer"]["bytes"], 876543210)
+        self.assertEqual(source["installer"]["bytes"], 635789872)
         self.assertEqual(source["pinFile"], "scripts/windows-bundle/dependencies.json")
-        # The size is only bounded until it is pinned exactly; the SHA-256 is always exact.
-        for changes in [{"bytes": 1200000001}, {"bytes": 0}, {"sha256": "0" * 64},
-                        {"url": "https://download.swift.org/other.exe"}, {"bytes": "876543210"}]:
+        # Size and SHA-256 are both exact: a lock for any other download is refused.
+        for changes in [{"bytes": 635789873}, {"bytes": 635789871}, {"bytes": 0}, {"sha256": "0" * 64},
+                        {"url": "https://download.swift.org/other.exe"}, {"bytes": "635789872"}]:
             self.write_lock(self.arm64_lock(**changes))
             with self.assertRaisesRegex(BUILD.BundleError, "pinned arm64 installer"):
                 BUILD.load_swift_runtime(self.runtime, self.lock_path, "arm64")
@@ -644,6 +644,46 @@ class SwiftRuntimeSourceTests(unittest.TestCase):
         self.write_lock(self.lock)
         with self.assertRaisesRegex(BUILD.BundleError, "pinned arm64 installer"):
             BUILD.load_swift_runtime(self.runtime, self.lock_path, "arm64")
+        # A pin that only bounds the size is not a pin.
+        with self.assertRaisesRegex(ValueError, "lacks its exact byte count"):
+            BUILD.windows_targets.installer_size_matches({"name": "x.exe", "maximumBytes": 10}, 5)
+
+
+class CommittedRuntimeLockTests(unittest.TestCase):
+    """The committed Swift runtime locks agree with their installer pins and the runtime policy."""
+
+    def committed(self, architecture):
+        path = HERE / BUILD.windows_targets.target(architecture)["swiftRuntimeLock"]
+        return path, json.loads(path.read_text(encoding="utf-8"))
+
+    def test_each_lock_names_its_pinned_installer_and_loads_only_for_its_architecture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = pathlib.Path(directory)
+            for architecture, other in [("x64", "arm64"), ("arm64", "x64")]:
+                path, lock = self.committed(architecture)
+                swift_version, pin, _ = BUILD.windows_targets.swift_runtime_installer(architecture)
+                self.assertEqual(lock["installer"], {key: pin[key] for key in ("name", "url", "sha256", "bytes")})
+                self.assertEqual((lock["architecture"], lock["swiftVersion"]), (architecture, swift_version))
+                self.assertEqual(BUILD.load_swift_runtime(runtime, path, architecture)["installer"]["bytes"],
+                                 pin["bytes"])
+                with self.assertRaisesRegex(BUILD.BundleError, "pinned %s installer" % other):
+                    BUILD.load_swift_runtime(runtime, path, other)
+
+    def test_locked_files_are_authenticated_runtime_dlls_the_policy_classifies(self):
+        policy = BUILD.Policy.load()
+        for architecture in ("x64", "arm64"):
+            _, lock = self.committed(architecture)
+            self.assertEqual(sorted(lock["payloads"]), ["rtl.cab", "rtl.msi"])
+            for receipt in lock["payloads"].values():
+                self.assertRegex(receipt["sha512"], "^[0-9a-f]{128}$")
+            paths = [row["path"] for row in lock["files"]]
+            self.assertEqual(len({path.lower() for path in paths}), len(paths))
+            for row in lock["files"]:
+                self.assertEqual(BUILD.check_bundle_path(row["path"]), row["path"])
+                self.assertNotIn("/", row["path"])
+                self.assertRegex(row["sha256"], "^[0-9a-f]{64}$")
+                self.assertIn(policy.classify(row["path"]), (BUILD.SWIFT_RUNTIME, BUILD.MICROSOFT_RUNTIME),
+                              "%s %s" % (architecture, row["path"]))
 
 
 class CabinetTests(unittest.TestCase):

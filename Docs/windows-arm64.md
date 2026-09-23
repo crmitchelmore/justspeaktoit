@@ -12,10 +12,14 @@ process, not an x64 build running under Windows' x64 emulation.
 **Status.** This is CI wiring and tooling, not a receipt. No run of
 `windows-arm64.yml` had completed when it was written, so there is no ARM64
 test count, executable hash or bundle hash yet. ARM64 is not verified until a
-run for the exact revision passes. It is still a developer build, not a signed
-release or an updater. It does not claim feature parity, physical-device
-acceptance or measured performance; see [Remaining gates](#remaining-gates).
-[Windows development](windows-development.md) is the parity matrix.
+run for the exact revision passes. The ARM64 Swift runtime the bundle uses is
+now pinned and was authenticated locally from the official installer (see
+[ARM64 Swift runtime pin](#arm64-swift-runtime-pin)); that is a check of
+pinned inputs on a Mac, not ARM64 execution. It is still a developer build,
+not a signed release or an updater. It does not claim feature parity,
+physical-device acceptance or measured performance; see
+[Remaining gates](#remaining-gates). [Windows development](windows-development.md)
+is the parity matrix.
 
 ## Primary sources (checked 23 September 2026)
 
@@ -106,21 +110,23 @@ Studio's ARM64 developer environment, with clang targeting
 ## Bundle and developer MSIX
 
 - **Swift runtime.** ARM64 DLLs exist only in the ARM64 installer.
-  `pin-swift-runtime.py` now finds the Burn cabinets from the installer's
+  `pin-swift-runtime.py` finds the Burn cabinets from the installer's
   `.wixburn` header, not from fixed x64 offsets. It authenticates `rtl.msi`
   and `rtl.cab` against the installer's SHA-512 manifest and hashes every DLL
-  into a lock. Its exact byte count was not measured when it was pinned, so
-  `maximumBytes` bounds the download; the generated lock records the measured
-  size. Until `scripts/windows-bundle/swift-runtime-lock-arm64.json` is
-  committed, each run regenerates the lock from the SHA-256-pinned installer
-  and uploads it with the bundle. The bundle manifest says which lock was
-  used. Once it is committed, a regenerated lock that differs fails the run.
+  into a lock. The installer is pinned by SHA-256 and its exact size, and
+  `scripts/windows-bundle/swift-runtime-lock-arm64.json` is committed. Each
+  run regenerates the lock from the pinned download and fails unless it
+  equals the committed lock. The bundle is then assembled against the
+  committed lock, and its manifest names it.
 - **Visual C++ runtime.** Taken from the same pinned `VC_redist.x64.exe`
   (14.51.36247.0). Its Burn manifest carries
   `packages\VC_Runtime_arm64\VC_Runtime_arm64.msi`, installed only when
   `Arm64_Check` is ARM64. Its 25 ARM64/ARM64X DLLs are the candidates. Its
   ARM64EC `vcruntime140_1.dll` and two x64 MFC shims are recorded as not
-  native and are never bundled.
+  native and are never bundled. Nothing native needs that file: native ARM64
+  C++ code takes `__CxxFrameHandler3` from the ARM64X `vcruntime140.dll`.
+  `__CxxFrameHandler4`, which the x64 app imports from `vcruntime140_1.dll`,
+  exists on ARM64 only in that ARM64EC file, for emulated code.
 - **Application.** The production executable staged by the `native` job, with
   `app-build-metadata.json` (host Windows, target
   `aarch64-unknown-windows-msvc`, release, not built for testing). The bundle
@@ -131,13 +137,51 @@ Studio's ARM64 developer environment, with clang targeting
   Windows installs only the package matching the PC. A later `.msixbundle`
   could hold both, but a family cannot move back from a bundle to one `.msix`.
 
+## ARM64 Swift runtime pin
+
+On 23 September 2026 the integrator ran this repository's unchanged
+`pin-swift-runtime.py --architecture arm64` against the official download,
+with the pinned macOS 7-Zip. The download matched the pinned SHA-256
+(`42e1dbfd…f747`) and measured 635,789,872 bytes; that exact size is now the
+pin. The installer manifest's SHA-512 digests authenticated `rtl.msi`
+(442,368 bytes) and `rtl.cab` (18,034,513 bytes). The script reconstructed 33
+files and locked the 32 DLLs; `plutil.exe` is not locked, as for x64. The
+committed `swift-runtime-lock-arm64.json` is that generated lock, byte for
+byte (SHA-256 `49c082dc10c3ef3f810f644ce3e9d4c1824bc315d25256fc4502ac443469dd55`).
+
+Reviewed independently from the extracted runtime:
+
+- Every locked file re-hashed to its recorded size and SHA-256. The lock
+  lists the same 32 DLL names as the x64 lock, all classified by the runtime
+  policy: 22 Swift runtime modules and 10 Visual C++ runtime names.
+- The 22 Swift runtime DLLs and `plutil.exe` are plain ARM64 images. The
+  installer's own copies of the Visual C++ runtime are ARM64X, and its
+  `vcruntime140_1.dll` is ARM64EC. Bundles never take those copies: the
+  policy sources the Visual C++ runtime from Microsoft's redistributable only.
+- Every import of every runtime image is a module the policy classifies, and
+  none imports `vcruntime140_1.dll`.
+- A dry run of the bundle builder, run locally, used this runtime, the
+  committed lock and the pinned ARM64 Visual C++ package. Its application was
+  a synthetic ARM64 executable with the real x64 app's imports, less
+  `vcruntime140_1.dll`. It assembled 29 files with 16 runtime DLLs: 14 Swift
+  DLLs, ARM64X `msvcp140.dll` and `vcruntime140.dll`. Every image was
+  recorded as native ARM64. The real ARM64 executable is built only in CI.
+
+This authenticates the pinned inputs; it is not evidence that anything ran on
+ARM64.
+
 ## Verification in this change
 
 - Python suites on macOS (Python 3.14.4), each also run on the tree of each
-  commit: bundle tooling 78 tests (the ARM64 assembly class skips its two
+  commit: bundle tooling 80 tests (the ARM64 assembly class skips its two
   x64-only cases), whisper.cpp runtime 11, developer MSIX 38, cross-build 14,
   all passing with encoding warnings as errors. They include native execution,
-  staging, ARM64 runtime, ARM64 assembly and PE architecture cases.
+  staging, ARM64 runtime, ARM64 assembly and PE architecture cases. Two of the
+  bundle tests came with the runtime pin: each committed lock must name its
+  pinned installer exactly and load only for its own architecture, and must
+  list only well-formed runtime DLLs the policy classifies. Changing the pinned
+  size or SHA-256, restoring `maximumBytes`, or altering the lock's installer,
+  architecture, file names or payload digests each fails them.
 - The generalised extractor regenerated the committed x64
   `swift-runtime-lock.json` from the pinned x64 installer and pinned 7-Zip.
   Every field was byte-identical; the one addition is `"architecture": "x64"`.
@@ -150,17 +194,15 @@ Studio's ARM64 developer environment, with clang targeting
 - The ARM64 Visual C++ package was read from the real pinned redistributable
   with the bundle builder's own loader.
 - Not run here: actionlint (it needed approval in this session; a strict
-  structural check of the workflow YAML was used instead), PowerShell parsing
-  (no PowerShell on the Mac), the ARM64 installer download and any Windows
-  ARM64 execution. Those are CI's first receipt.
+  structural check of the workflow YAML was used instead; the integrator's
+  actionlint run then passed), PowerShell parsing (no PowerShell on the Mac)
+  and any Windows ARM64 execution. Those are CI's first receipt.
 
 ## Remaining gates
 
 - **First CI receipt** of `windows-arm64.yml` for an exact revision: test and
-  skip counts, WinHTTP probes, native-execution evidence, bundle and MSIX hashes.
-- **ARM64 Swift runtime pin.** Commit the generated
-  `swift-runtime-lock-arm64.json` after reviewing it, and replace
-  `maximumBytes` with the measured byte count, so later runs compare against it.
+  skip counts, WinHTTP probes, native-execution evidence, bundle and MSIX
+  hashes, and the regenerated ARM64 runtime lock equal to the committed one.
 - **Import cross-check.** ARM64 bundle imports are read by `windows_pe.py`
   only. The `llvm-readobj` cross-check still runs for x64.
 - **GPU inference on ARM64** (Vulkan or OpenCL Adreno), and CPU feature
@@ -201,11 +243,13 @@ python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64
   --expect-output 'self-test passed' -- windows-arm64-app\SpeakWindows.exe --self-test
 ```
 
-To pin the ARM64 runtime lock from a Mac with the pinned 7-Zip (downloads the
-installer, about 1 GB):
+To regenerate the ARM64 runtime lock on a Mac and require it to equal the
+committed one (downloads the 636 MB installer and the pinned 7-Zip):
 
 ```sh
 python3 -B scripts/windows-bundle/pin-swift-runtime.py --architecture arm64 \
   --downloads /path/to/private/arm64-downloads --temporary-parent /path/to/private \
-  --output scripts/windows-bundle/swift-runtime-lock-arm64.json
+  --output /path/to/private/swift-runtime-lock-arm64.json \
+  --runtime-output /path/to/private/swift-runtime-arm64 \
+  --compare scripts/windows-bundle/swift-runtime-lock-arm64.json
 ```

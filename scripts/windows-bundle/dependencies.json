@@ -19,7 +19,7 @@
       "name": "swift-6.2.3-RELEASE-windows10-arm64.exe",
       "url": "https://download.swift.org/swift-6.2.3-release/windows10-arm64/swift-6.2.3-RELEASE/swift-6.2.3-RELEASE-windows10-arm64.exe",
       "sha256": "42e1dbfdae613a67d99b62e84aa6503620760d35391f409f5ac64862fe70f747",
-      "maximumBytes": 1200000000
+      "bytes": 635789872
     }
   },
   "licenses": [
@@ -68,6 +68,7 @@
     "Licence texts are pinned to the release tag commits of the official repositories so the bundle notices cannot drift silently.",
     "swift-runtime-lock.json authenticates every cached Swift DLL against hashes regenerated from the fully SHA-256-verified installer, SHA-512-verified rtl.msi/rtl.cab and reconstructed MSI file identities; cache-local metadata is not trusted.",
     "The ARM64 Visual C++ runtime comes from the same pinned VC_redist.x64.exe: Microsoft documents that the x64 redistributable contains both ARM64 and x64 binaries, and its Burn manifest carries packages\\VC_Runtime_arm64\\VC_Runtime_arm64.msi (Microsoft Visual C++ 2022 Arm64 Runtime 14.51.36247), installed only when Arm64_Check is ARM64. Its runtime DLLs are ARM64X images; its vcruntime140_1.dll is ARM64EC for emulated x64 programs and is never loaded by, or bundled for, a native ARM64 process.",
-    "The Swift 6.2.3 ARM64 runtime comes from the official swift.org windows10-arm64 installer (rtl.msi and rtl.cab). Its SHA-256 is the value the microsoft/winget-pkgs Swift.Toolchain 6.2.3 manifest publishes for the arm64 installer; that manifest's x64 value equals the independently computed x64 pin in scripts/windows-cross/dependencies.json. Its exact byte count was not measured when it was pinned, so maximumBytes bounds the download and pin-swift-runtime.py records the measured size in the generated lock."
+    "The Swift 6.2.3 ARM64 runtime comes from the official swift.org windows10-arm64 installer (rtl.msi and rtl.cab). Its SHA-256 is the value the microsoft/winget-pkgs Swift.Toolchain 6.2.3 manifest publishes for the arm64 installer; that manifest's x64 value equals the independently computed x64 pin in scripts/windows-cross/dependencies.json.",
+    "Its byte count, 635,789,872, was measured on 2026-09-23 when pin-swift-runtime.py --architecture arm64 downloaded the installer, matched that SHA-256, authenticated rtl.msi and rtl.cab against the installer manifest's SHA-512 digests with the pinned 7-Zip and wrote swift-runtime-lock-arm64.json. Downloads must now match both the SHA-256 and the exact size, and a regenerated lock must equal the committed one."
   ]
 }

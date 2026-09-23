@@ -115,6 +115,7 @@ class DesktopCloudSyncTestCase: XCTestCase {
     }
 
     func makeService(
+        transport: (any CloudKitWebServicesHTTPTransport)? = nil,
         onChanges: @escaping @Sendable ([DesktopHistorySyncChange]) async -> Void = { _ in }
     ) throws -> (DesktopCloudSyncService, DesktopCloudSyncStateStore) {
         let state = try DesktopCloudSyncStateStore(url: directory.appendingPathComponent("cloud-sync.json"))
@@ -125,7 +126,7 @@ class DesktopCloudSyncTestCase: XCTestCase {
         )
         let service = DesktopCloudSyncService(
             resolution: resolution,
-            transport: FakeServerTransport(server: server),
+            transport: transport ?? FakeServerTransport(server: server),
             vault: vault,
             state: state,
             historyStore: history,
@@ -136,9 +137,10 @@ class DesktopCloudSyncTestCase: XCTestCase {
     }
 
     func signedInService(
+        transport: (any CloudKitWebServicesHTTPTransport)? = nil,
         onChanges: @escaping @Sendable ([DesktopHistorySyncChange]) async -> Void = { _ in }
     ) async throws -> (DesktopCloudSyncService, DesktopCloudSyncStateStore) {
-        let (service, state) = try makeService(onChanges: onChanges)
+        let (service, state) = try makeService(transport: transport, onChanges: onChanges)
         let page = try await service.signInPage()
         XCTAssertEqual(page?.absoluteString, FakeCloudKitWebServer.signInURL)
         try await service.completeSignIn(webAuthToken: server.completeSignIn())
@@ -163,4 +165,95 @@ class DesktopCloudSyncTestCase: XCTestCase {
 actor ChangeLog {
     private(set) var all: [DesktopHistorySyncChange] = []
     func append(_ changes: [DesktopHistorySyncChange]) { all += changes }
+}
+
+/// Routes to the fake server like `FakeServerTransport`, notes every request,
+/// and can hold requests for one operation without observing cancellation, as
+/// a transport that cannot abandon a request in flight would.
+actor RecordingServerTransport: CloudKitWebServicesHTTPTransport {
+    struct Sent: Sendable {
+        /// For example `private/records/modify`.
+        let operation: String
+        let body: String
+    }
+
+    private let server: FakeCloudKitWebServer
+    private(set) var sent: [Sent] = []
+    private var heldOperation: String?
+    private var held: [CheckedContinuation<Void, Never>] = []
+
+    init(server: FakeCloudKitWebServer) {
+        self.server = server
+    }
+
+    var heldCount: Int { held.count }
+
+    func hold(_ operation: String) {
+        heldOperation = operation
+    }
+
+    func releaseHeld() {
+        heldOperation = nil
+        let waiting = held
+        held.removeAll()
+        waiting.forEach { $0.resume() }
+    }
+
+    func send(
+        _ request: CloudKitWebServicesHTTPRequest,
+        responseLimit: Int
+    ) async throws -> CloudKitWebServicesHTTPResponse {
+        // `/database/1/<container>/<environment>/<database>/<operation…>`
+        let operation = request.url.path.split(separator: "/").dropFirst(4).joined(separator: "/")
+        let body = request.body.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        sent.append(Sent(operation: operation, body: body))
+        if operation == heldOperation {
+            await withCheckedContinuation { held.append($0) }
+        }
+        let response = server.handle(method: request.method, url: request.url, body: request.body)
+        return CloudKitWebServicesHTTPResponse(
+            statusCode: response.status, headers: response.headers, body: response.body
+        )
+    }
+}
+
+/// Holds the first History change report until released, as a slow window
+/// would, leaving the sync pass waiting between two of its steps.
+actor ChangeGate {
+    private var hasHeld = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    var isHolding: Bool { waiter != nil }
+
+    func report(_ changes: [DesktopHistorySyncChange]) async {
+        guard !hasHeld else { return }
+        hasHeld = true
+        await withCheckedContinuation { waiter = $0 }
+    }
+
+    func release() {
+        waiter?.resume()
+        waiter = nil
+    }
+}
+
+enum DesktopSyncTestError: Error {
+    case conditionNotMet
+}
+
+/// Polls an asynchronous condition, yielding between checks, until it holds
+/// or `timeout` passes. The deadline only bounds a failing test.
+func eventually(
+    within timeout: Duration = .seconds(10),
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ condition: () async -> Bool
+) async throws {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if await condition() { return }
+        await Task.yield()
+    }
+    XCTFail("Condition was not satisfied within \(timeout)", file: file, line: line)
+    throw DesktopSyncTestError.conditionNotMet
 }

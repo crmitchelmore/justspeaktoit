@@ -58,9 +58,11 @@ extension DesktopCloudSyncError: LocalizedError {
 /// CloudKit sync for a desktop host: History through the shared
 /// reconciliation, and opt-in, read-only import of the API keys a Mac syncs.
 ///
-/// The service owns the History coordinator on this actor. A host calls
-/// `sync()` on a timer and after local History changes; calls are serialised
-/// by the actor and a trigger during a pass queues one follow-up pass.
+/// A host calls `sync()` on a timer and after local History changes. One pass
+/// runs at a time; a trigger during a pass runs one more complete pass after
+/// it. Each pass runs in the iCloud session its account was validated in, and
+/// stops, applying nothing more, once that session ends (sign-out or another
+/// sign-in), History sync is turned off, or its task is cancelled.
 public actor DesktopCloudSyncService {
     private let resolution: DesktopCloudSyncConfiguration.Resolution
     private let client: CloudKitWebServicesClient?
@@ -68,9 +70,9 @@ public actor DesktopCloudSyncService {
     private let historyStore: DesktopHistorySyncStore
     private let vault: any DesktopCredentialVault
     private let envelope: EncryptedSecretEnvelope?
-    private var coordinator: HistorySyncCoordinator?
     private var signedIn = false
     private var syncing = false
+    private var followUpRequested = false
     private var lastError: String?
 
     public init(
@@ -154,7 +156,6 @@ public actor DesktopCloudSyncService {
     public func signOut() async throws {
         let client = try requireClient()
         signedIn = false
-        coordinator = nil
         try await client.signOut()
     }
 
@@ -164,7 +165,6 @@ public actor DesktopCloudSyncService {
         try await state.update { state in
             if enabled { state.enabledFeatures.insert(.history) } else { state.enabledFeatures.remove(.history) }
         }
-        coordinator = nil
     }
 
     /// Turns on read-only API-key import: verifies the passphrase against the
@@ -180,7 +180,7 @@ public actor DesktopCloudSyncService {
         try vault.writeCredential(key.base64EncodedString(), name: DesktopCloudSyncCredential.apiKeySyncKey)
         try await state.update { $0.enabledFeatures.insert(.apiKeys) }
         var report = DesktopCloudSyncReport()
-        try await importKeys(client: client, envelope: envelope, report: &report)
+        try await importKeys(client: client, session: nil, envelope: envelope, report: &report)
         return report
     }
 
@@ -201,31 +201,65 @@ public actor DesktopCloudSyncService {
     // MARK: - Sync
 
     /// One complete pass: confirm the iCloud user, then reconcile History and
-    /// import keys as enabled. Errors are reported, never thrown, so a timer
-    /// can call this freely.
+    /// import keys as enabled, and one more pass if another trigger arrived
+    /// meanwhile. Errors are reported, never thrown, so a timer can call this
+    /// freely; a call during a pass returns an empty report at once.
     public func sync() async -> DesktopCloudSyncReport {
         var report = DesktopCloudSyncReport()
         guard let client else {
             if case .unavailable(let reason) = resolution { report.error = reason }
             return report
         }
-        let features = await state.current.enabledFeatures
-        guard signedIn, !features.isEmpty else { return report }
         guard !syncing else {
-            // A running History pass remembers this trigger and runs one
-            // follow-up pass, so a change made during it is not missed.
-            if let coordinator {
-                await coordinator.sync(store: historyStore)
-            }
+            // The running pass is followed by one more, so a change made
+            // during it is not missed. Only that call validates and syncs.
+            followUpRequested = true
             return report
         }
         syncing = true
         defer { syncing = false }
+        var passes = 0
+        repeat {
+            followUpRequested = false
+            let features = await state.current.enabledFeatures
+            guard signedIn, !features.isEmpty else { break }
+            await runPass(client: client, features: features, report: &report)
+            passes += 1
+        } while followUpRequested && passes < HistorySyncCoordinator.maxCoalescedPasses
+        return report
+    }
+
+    /// One pass in one session: the account is validated in the session
+    /// current now, and every request and every cursor, acknowledgement and
+    /// binding change of the pass belongs to that session or does not happen.
+    private func runPass(
+        client: CloudKitWebServicesClient,
+        features: Set<CloudKitWebSyncFeature>,
+        report: inout DesktopCloudSyncReport
+    ) async {
         do {
-            try await runPass(client: client, features: features, report: &report)
+            let session = await client.session()
+            _ = try await CloudKitWebSyncAccount.validate(
+                client: client, store: state, accountBoundCursors: [state], in: session
+            )
+            if features.contains(.history) {
+                let consent = CloudKitWebSyncConsent(enabledFeatures: features)
+                try await syncHistory(client: client, session: session, consent: consent)
+            }
+            if features.contains(.apiKeys), let envelope {
+                try await importKeys(client: client, session: session, envelope: envelope, report: &report)
+            }
             try await state.update { $0.lastSuccessfulSync = Date() }
             lastError = nil
+            report.error = nil
         } catch {
+            if case CloudKitWebServicesError.consentRequired(let feature) = error,
+               await !state.current.enabledFeatures.contains(feature) {
+                // Turned off during the pass, which stopped as asked.
+                lastError = nil
+                report.error = nil
+                return
+            }
             switch error {
             case CloudKitWebServicesError.authenticationRequired, CloudKitWebServicesError.authenticationFailed:
                 signedIn = false
@@ -235,34 +269,24 @@ public actor DesktopCloudSyncService {
             lastError = error.localizedDescription
             report.error = lastError
         }
-        return report
     }
 
-    private func runPass(
+    private func syncHistory(
         client: CloudKitWebServicesClient,
-        features: Set<CloudKitWebSyncFeature>,
-        report: inout DesktopCloudSyncReport
+        session: CloudKitWebSession,
+        consent: CloudKitWebSyncConsent
     ) async throws {
-        let binding = try await CloudKitWebSyncAccount.validate(
-            client: client, store: state, accountBoundCursors: [state]
-        )
-        if binding == .changed { coordinator = nil }
-        if features.contains(.history) {
-            try await syncHistory(client: client, consent: CloudKitWebSyncConsent(enabledFeatures: features))
-        }
-        if features.contains(.apiKeys), let envelope {
-            try await importKeys(client: client, envelope: envelope, report: &report)
-        }
-    }
-
-    private func syncHistory(client: CloudKitWebServicesClient, consent: CloudKitWebSyncConsent) async throws {
-        try await CloudKitWebSyncAccount.ensureSyncZone(for: .history, client: client, consent: consent)
-        let coordinator = try self.coordinator ?? HistorySyncCoordinator(
-            transport: CloudKitWebHistorySyncTransport(client: client, consent: consent),
+        try await CloudKitWebSyncAccount.ensureSyncZone(for: .history, client: client, consent: consent, in: session)
+        let transport = try CloudKitWebHistorySyncTransport(client: client, consent: consent, session: session)
+        let coordinator = HistorySyncCoordinator(
+            transport: transport,
             tokenStore: state,
-            cloudAvailable: true
+            cloudAvailable: true,
+            fence: DesktopHistoryPassFence(
+                session: CloudKitWebSessionFence(client: client, session: session),
+                state: state
+            )
         )
-        self.coordinator = coordinator
         await coordinator.sync(store: historyStore)
         if let error = coordinator.status.error {
             throw error
@@ -271,6 +295,7 @@ public actor DesktopCloudSyncService {
 
     private func importKeys(
         client: CloudKitWebServicesClient,
+        session: CloudKitWebSession?,
         envelope: EncryptedSecretEnvelope,
         report: inout DesktopCloudSyncReport
     ) async throws {
@@ -282,7 +307,7 @@ public actor DesktopCloudSyncService {
         do {
             snapshot = try await CloudKitWebKeySync.read(
                 key: key, client: client, consent: CloudKitWebSyncConsent(enabledFeatures: [.apiKeys]),
-                envelope: envelope
+                envelope: envelope, in: session
             )
         } catch CloudKitKeySyncError.incorrectPassphrase {
             // The passphrase changed on the Mac: ask for it again.
@@ -321,5 +346,30 @@ public actor DesktopCloudSyncService {
             throw DesktopCloudSyncError.unavailable("iCloud sync is not available.")
         }
         return client
+    }
+}
+
+/// A History pass on this device goes on only while its web session is the
+/// one the account was validated in and History sync is still turned on, so
+/// turning it off stops the pass before its next upload or change.
+private final class DesktopHistoryPassFence: HistorySyncPassFence {
+    private let session: CloudKitWebSessionFence
+    private let state: DesktopCloudSyncStateStore
+
+    init(session: CloudKitWebSessionFence, state: DesktopCloudSyncStateStore) {
+        self.session = session
+        self.state = state
+    }
+
+    func admit<Value>(
+        isolation: isolated (any Actor)?,
+        _ work: () async throws -> Value
+    ) async throws -> Value {
+        try await session.admit(isolation: isolation) {
+            guard await state.current.enabledFeatures.contains(.history) else {
+                throw CloudKitWebServicesError.consentRequired(.history)
+            }
+            return try await work()
+        }
     }
 }

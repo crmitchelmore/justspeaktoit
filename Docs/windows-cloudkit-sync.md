@@ -96,13 +96,20 @@ From Apple's
   `ComparisonSyncCoordinator` (which the Apple engines now run on the main
   actor), `CloudKitWebServicesClient` with a FIFO session gate and bounded
   retries, the History and Compare Models web transports,
-  `CloudKitWebSyncAccount` (caller identity and zone creation),
-  `EncryptedSecretEnvelope` and the read-only `CloudKitWebKeySync`.
+  `CloudKitWebSyncAccount` (caller identity, account binding and zone
+  creation), `EncryptedSecretEnvelope` and the read-only `CloudKitWebKeySync`.
+  A web History pass is bound to the session its account was validated in:
+  its requests run in that session, and `CloudKitWebSessionFence` (a
+  `HistorySyncPassFence`) admits its cursor, change and acknowledgement writes
+  only while that session is current, under the same gate as sign-in and
+  sign-out. Rebinding the account holds that gate too.
 - `Sources/SpeakDesktopSync` (portable): `DesktopHistorySyncStore` maps desktop
   records onto the shared entry and keeps synced copies audio-less;
   `DesktopCloudSyncStateStore` holds cursors, the bound account and
-  acknowledgements; `DesktopCloudSyncService` runs sign-in, passes and key
-  import; `DesktopCloudSyncConfiguration` resolves the build-time token.
+  acknowledgements; `DesktopCloudSyncService` runs sign-in, one pass at a time
+  (stopping it when the session ends, History sync is turned off or the pass is
+  cancelled) and key import; `DesktopCloudSyncConfiguration` resolves the
+  build-time token.
 - `Sources/SpeakWindowsPlatform/WindowsCloudKitNative.swift` with
   `Sources/CWindowsSupport/WindowsHTTP.cpp`, `WindowsLoopback.cpp` and
   `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener and the
@@ -121,6 +128,9 @@ From Apple's
   every platform: Mac-format records in and out, edits and tombstones through
   the cursor, both conflict directions, paging, expiry, account switches,
   consent, key unlock, wrong or reset passphrases and misfiled key records.
+  Held fixtures interrupt a pass between pages, batches and steps with a
+  sign-in, sign-out, History turned off or cancellation (including a transport
+  that returns regardless), and interleave account validations.
 - `Tests/SpeakWindowsPlatformTests/WindowsCloudKitNativeTests.swift` serves the
   fake over a real loopback socket through WinHTTP, checks the sign-in callback
   and cancellation, and holds CNG to the independent PBKDF2 and AES-GCM vectors

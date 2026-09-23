@@ -788,10 +788,125 @@ class AssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(BUILD.BundleError, "layout size"):
             self.assemble()
 
+    def test_local_runtime_is_bundled_with_its_licence_and_provenance(self):
+        pins = write_local_runtime(pathlib.Path(self.directory.name) / "local")
+        local = BUILD.load_local_runtime(pathlib.Path(self.directory.name) / "local", pins)
+        for name in ["concrt140.dll"]:
+            self.microsoft["modules"][name]["bytes"] = build_pe(["KERNEL32.dll"], dll=True, version=(
+                (14, 51, 36247, 0), {"OriginalFilename": name}))
+        policy = BUILD.Policy.load(local_runtime=[module["name"] for module in local["modules"].values()])
+        entries, manifest = self.assemble(policy=policy, local_runtime=local)
+        for name in LOCAL_GRAPH:
+            self.assertIn(name, entries)
+            row = next(item for item in manifest["files"] if item["path"] == name)
+            self.assertEqual(row["source"], BUILD.LOCAL_RUNTIME)
+        self.assertIn("concrt140.dll", entries)
+        self.assertIn("licenses/LICENSE-whisper.cpp.txt", entries)
+        notices = entries["THIRD-PARTY-NOTICES.txt"].decode()
+        self.assertIn("whisper.cpp " + LOCAL_PINS["whisperCpp"]["version"], notices)
+        self.assertIn("vulkan-1.dll is not redistributed", notices)
+        self.assertEqual(manifest["sources"]["localInferenceRuntime"]["commit"], LOCAL_PINS["whisperCpp"]["commit"])
+        self.assertNotIn("vulkan-1.dll", entries)
+        with self.assertRaisesRegex(BUILD.BundleError, "not loaded with the local runtime"):
+            self.assemble(local_runtime=local)
+
     def test_forbidden_resource_files_are_refused(self):
         self.application["resources"]["SpeakApp_SpeakCore.resources/swiftCore.lib"] = b"lib"
         with self.assertRaisesRegex(BUILD.BundleError, "forbids"):
             self.assemble()
+
+
+
+LOCAL_PINS = json.loads((HERE.parent / "windows-local-runtime" / "dependencies.json").read_text(encoding="utf-8"))
+LOCAL_GRAPH = {
+    "whisper.dll": (["ggml.dll", "ggml-base.dll", "KERNEL32.dll", "MSVCP140.dll", "VCRUNTIME140.dll"], []),
+    "ggml.dll": (["ggml-base.dll", "KERNEL32.dll"], []),
+    "ggml-base.dll": (["KERNEL32.dll", "msvcp140.dll", "concrt140.dll"], []),
+    "ggml-vulkan.dll": (["ggml-base.dll", "vulkan-1.dll", "KERNEL32.dll"], []),
+    "ggml-cpu-x64.dll": (["ggml-base.dll", "KERNEL32.dll"], []),
+    "ggml-cpu-sse42.dll": (["ggml-base.dll"], []),
+    "ggml-cpu-haswell.dll": (["ggml-base.dll"], []),
+    "ggml-cpu-icelake.dll": (["ggml-base.dll"], []),
+}
+
+
+def write_local_runtime(root, graph=LOCAL_GRAPH, pins=LOCAL_PINS, **manifest_overrides):
+    runtime = root / "runtime"
+    runtime.mkdir(parents=True)
+    files = []
+    for name, (static, delayed) in graph.items():
+        data = build_pe(static, delayed, dll=True)
+        (runtime / name).write_bytes(data)
+        files.append({"name": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                      "imports": static, "delayImports": delayed})
+    licence = b"MIT licence fixture"
+    (runtime / "LICENSE-whisper.cpp.txt").write_bytes(licence)
+    pins = json.loads(json.dumps(pins))
+    pins["whisperCpp"]["licenseSHA256"] = hashlib.sha256(licence).hexdigest()
+    pins_path = root / "pins.json"
+    pins_path.write_text(json.dumps(pins), encoding="utf-8")
+    manifest = {"schemaVersion": 1, "runtime": "whisper.cpp", "version": pins["whisperCpp"]["version"],
+                "commit": pins["whisperCpp"]["commit"], "repository": pins["whisperCpp"]["repository"],
+                "cmakeArguments": pins["cmakeArguments"], "compiler": "MSVC 19.44",
+                "vulkanSdk": {key: pins["vulkanSdk"][key] for key in ("version", "sha256", "bytes")},
+                "files": files, "pinsSHA256": hashlib.sha256(pins_path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
+    manifest.update(manifest_overrides)
+    (root / "runtime-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return pins_path
+
+
+class LocalRuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = pathlib.Path(self.directory.name)
+
+    def test_authenticated_runtime_lists_every_pinned_module(self):
+        pins = write_local_runtime(self.root)
+        runtime = BUILD.load_local_runtime(self.root, pins)
+        self.assertEqual(sorted(runtime["modules"]), sorted(name.lower() for name in LOCAL_GRAPH))
+        self.assertEqual(runtime["modules"]["whisper.dll"]["provenance"]["commit"], LOCAL_PINS["whisperCpp"]["commit"])
+
+    def test_tampered_or_unpinned_runtime_is_refused(self):
+        pins = write_local_runtime(self.root)
+        dll = self.root / "runtime" / "ggml.dll"
+        dll.write_bytes(dll.read_bytes()[:-1] + b"X")
+        with self.assertRaisesRegex(BUILD.BundleError, "does not match its manifest"):
+            BUILD.load_local_runtime(self.root, pins)
+        for key, value in [("commit", "0" * 40), ("cmakeArguments", ["-DGGML_VULKAN=OFF"])]:
+            with tempfile.TemporaryDirectory() as other:
+                pins = write_local_runtime(pathlib.Path(other), **{key: value})
+                with self.assertRaisesRegex(BUILD.BundleError, "manifest " + key):
+                    BUILD.load_local_runtime(pathlib.Path(other), pins)
+        with tempfile.TemporaryDirectory() as other:
+            graph = dict(LOCAL_GRAPH, **{"extra.dll": (["KERNEL32.dll"], [])})
+            pins = write_local_runtime(pathlib.Path(other), graph=graph)
+            with self.assertRaisesRegex(BUILD.BundleError, "unexpected local runtime file"):
+                BUILD.load_local_runtime(pathlib.Path(other), pins)
+        with tempfile.TemporaryDirectory() as other:
+            graph = {name: value for name, value in LOCAL_GRAPH.items() if name != "ggml-vulkan.dll"}
+            pins = write_local_runtime(pathlib.Path(other), graph=graph)
+            with self.assertRaisesRegex(BUILD.BundleError, "incomplete: ggml-vulkan.dll"):
+                BUILD.load_local_runtime(pathlib.Path(other), pins)
+
+    def test_run_time_loaded_imports_are_not_expected_in_ordinary_runs(self):
+        policy = BUILD.Policy.load(local_runtime=list(LOCAL_GRAPH))
+        graph = dict(ClosureTests.GRAPH, **LOCAL_GRAPH, **{"concrt140.dll": (["KERNEL32.dll"], [])})
+
+        def read(name, category):
+            return graph[name]
+        closure = BUILD.resolve_closure("SpeakWindows.exe", read, policy, sorted(LOCAL_GRAPH))
+        whisper = closure["bundled"]["whisper.dll"]
+        self.assertEqual(whisper["source"], BUILD.LOCAL_RUNTIME)
+        self.assertEqual(whisper["importedBy"], [{"importer": "SpeakWindows.exe", "kind": "runtime-loaded"}])
+        self.assertTrue(all(reference["kind"].startswith("runtime-")
+                            for reference in closure["bundled"]["concrt140.dll"]["importedBy"]))
+        self.assertIn({"importer": "SpeakWindows.exe", "kind": "static"}, closure["bundled"]["msvcp140.dll"]["importedBy"])
+        self.assertIn("vulkan-1.dll", closure["system"])
+        with self.assertRaisesRegex(BUILD.BundleError, "not part of the local runtime"):
+            BUILD.resolve_closure("SpeakWindows.exe", read, policy, ["swiftCore.dll"])
+        with self.assertRaisesRegex(BUILD.BundleError, "more than one category"):
+            BUILD.Policy.load(local_runtime=["kernel32.dll"])
 
 
 if __name__ == "__main__":

@@ -25,8 +25,11 @@ on:
       - scripts/verify-portable-core-boundary.py
       - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
+      - scripts/windows-local-runtime/**
+      - scripts/windows-bundle/runtime-policy.json
       - Docs/windows-development.md
       - .github/workflows/windows.yml
+      - .github/workflows/windows-local-runtime.yml
   pull_request:
     branches: [main]
     paths:
@@ -51,8 +54,11 @@ on:
       - scripts/verify-portable-core-boundary.py
       - scripts/windows-cloudkit/**
       - scripts/websocket-loopback-probe.py
+      - scripts/windows-local-runtime/**
+      - scripts/windows-bundle/runtime-policy.json
       - Docs/windows-development.md
       - .github/workflows/windows.yml
+      - .github/workflows/windows-local-runtime.yml
   workflow_dispatch:
 
 permissions:
@@ -63,10 +69,20 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  local-runtime:
+    uses: ./.github/workflows/windows-local-runtime.yml
+
   windows:
     name: Native Windows x64 (Swift 6.2.3)
+    needs: local-runtime
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 30
+    env:
+      # The pinned whisper.cpp runtime, its JFK sample and a cached model
+      # folder, so the on-device tests run the real runtime instead of skipping.
+      JSTI_WHISPER_RUNTIME_DIRECTORY: ${{ github.workspace }}\local-runtime\runtime
+      JSTI_WHISPER_TEST_AUDIO: ${{ github.workspace }}\local-runtime\fixtures\jfk.wav
+      JSTI_LOCAL_MODEL_DIRECTORY: ${{ github.workspace }}\local-models
     defaults:
       run:
         shell: pwsh
@@ -86,6 +102,19 @@ jobs:
 
       - name: Verify portable source boundary
         run: python scripts/verify-portable-core-boundary.py
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime
+          path: local-runtime
+
+      # The pinned tiny model is downloaded by the app's own installer on a
+      # miss and verified against its SHA-256 on every run.
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
 
       - name: Build native Windows executable
         id: native-build
@@ -175,6 +204,17 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Native window smoke test failed: $($process.ExitCode); $nativeFailure" }
           if ($nativeFailure) { throw $nativeFailure }
 
+      - name: Transcribe the JFK sample on-device with the pinned tiny model
+        id: local-transcription
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 8
+        run: |
+          $bin = swift build --configuration release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $bin.Trim() 'SpeakWindows.exe') --local-transcription-self-test $env:JSTI_WHISPER_TEST_AUDIO `
+            --expect 'ask not what your country can do for you' 2>&1 | Tee-Object -FilePath windows-local-transcription.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Stage developer executable with provenance
         id: developer-stage
         if: ${{ !cancelled() && steps.native-tests.outcome == 'success' && steps.websocket-probe.outcome == 'success' && steps.native-smoke.outcome == 'success' }}
@@ -232,6 +272,7 @@ jobs:
             windows-ui-smoke.bmp
             windows-websocket-tests.xml
             windows-websocket-*.log
+            windows-local-transcription.log
           if-no-files-found: ignore
           retention-days: 14
 

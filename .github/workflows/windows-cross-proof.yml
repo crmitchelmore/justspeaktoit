@@ -27,8 +27,10 @@ on:
       - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
+      - scripts/windows-local-runtime/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
+      - .github/workflows/windows-local-runtime.yml
   push:
     branches: [main]
     paths:
@@ -54,8 +56,10 @@ on:
       - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
       - scripts/windows-package/**
+      - scripts/windows-local-runtime/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
+      - .github/workflows/windows-local-runtime.yml
 
 permissions:
   contents: read
@@ -65,14 +69,24 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # The pinned whisper.cpp DLLs are built with MSVC on Windows (or restored
+  # from cache) and bundled beside the Mac-built executable.
+  local-runtime:
+    uses: ./.github/workflows/windows-local-runtime.yml
+
   compile:
     name: Cross-compile Swift app and tests on macOS
+    needs: local-runtime
     runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime
+          path: ${{ runner.temp }}/windows-local-runtime
       - name: Build Windows PE with private pinned prerequisites
         shell: bash
         run: |
@@ -115,6 +129,7 @@ jobs:
             --cache "$RUNNER_TEMP/private-windows-cross-sdk" \
             --downloads "$RUNNER_TEMP/private-windows-cross-sdk/bundle-downloads" \
             --output "$RUNNER_TEMP/windows-runtime-bundle" \
+            --local-runtime "$RUNNER_TEMP/windows-local-runtime" \
             --llvm-readobj "$RUNNER_TEMP/private-windows-cross-sdk/llvm-20/LLVM-20.1.8-macOS-ARM64/bin/llvm-readobj" 2>&1 |
             tee "$RUNNER_TEMP/windows-runtime-bundle/bootstrap.log"
       - name: Upload self-contained runtime bundle
@@ -276,9 +291,9 @@ jobs:
 
   bundle-execute:
     name: Run the self-contained bundle on Windows without Swift
-    needs: compile
+    needs: [local-runtime, compile]
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
@@ -287,6 +302,17 @@ jobs:
         with:
           name: windows-runtime-bundle
           path: bundle
+      # Only the JFK sample is used from the runtime artifact: the DLLs under
+      # test are the bundled copies.
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime
+          path: local-runtime
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
       # No Swift setup action runs in this job. The script additionally isolates
       # PATH to the Windows system directories, proves the executable cannot
       # start without the bundled DLLs, and records sampled loaded modules's path.
@@ -294,8 +320,12 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/windows-bundle/test-bundle-environment.ps1
+          $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
           ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
-            -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA
+            -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `
+            -LocalTranscriptionAudio local-runtime/fixtures/jfk.wav `
+            -LocalTranscriptionPhrase $pins.whisperCpp.fixture.expectedPhrase `
+            -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models')
       - name: Upload bundle execution evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1

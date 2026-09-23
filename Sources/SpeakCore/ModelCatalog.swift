@@ -288,6 +288,27 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         "elevenlabs/scribe_v1_experimental"
     ]
 
+    // Retired transcription identifiers are defined once, here, and read by
+    // both normalisers, so no host keeps its own list or resets a provider by
+    // prefix. Only identifiers that once shipped and were then replaced belong
+    // here; current entries and custom models are never listed.
+
+    /// Retired batch identifiers and the current entry each one now selects.
+    static let batchTranscriptionSuccessors: [String: String] = Dictionary(
+        AssemblyAIModels.legacyUniversal3BatchIDs.map { ($0, AssemblyAIModels.universal35ProBatchID) }
+            + legacyElevenLabsBatchIDs.map { ($0, elevenLabsScribeV2BatchID) },
+        uniquingKeysWith: { first, _ in first }
+    )
+
+    /// Retired live identifiers and the current entry each one now selects.
+    /// Nova-2 is Deepgram's only retired stream (the Nova-3 upgrade in #64):
+    /// Flux and any later `deepgram/` entry are current, so they never appear here.
+    static let liveTranscriptionSuccessors: [String: String] = Dictionary(
+        AssemblyAIModels.legacyUniversal3StreamingIDs.map { ($0, AssemblyAIModels.universal35ProStreamingID) }
+            + [("deepgram/nova-2-streaming", "deepgram/nova-3-streaming")],
+        uniquingKeysWith: { first, _ in first }
+    )
+
     public static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
 
     /// Batch catalogue options owned by a provider, matched by the `provider/`
@@ -379,11 +400,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
     public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if AssemblyAIModels.legacyUniversal3BatchIDs.contains(trimmed) {
-            return AssemblyAIModels.universal35ProBatchID
-        }
-        if legacyElevenLabsBatchIDs.contains(trimmed) {
-            return elevenLabsScribeV2BatchID
+        if let successor = batchTranscriptionSuccessors[trimmed] {
+            return successor
         }
         if trimmed == AppleLocalModels.speechTranscriberModelID,
            !AppleLocalModels.supportsSpeechTranscriber {
@@ -676,15 +694,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         )]
     }()
 
+    /// Apple speech follows this device's preferred engine and retired streams
+    /// follow their successor. Current and custom remote identifiers are kept.
     public static func normalizedLiveTranscriptionModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if AppleLocalModels.isAppleSpeechModel(trimmed) || trimmed.isEmpty {
             return AppleLocalModels.preferredSpeechModelID
         }
-        if AssemblyAIModels.legacyUniversal3StreamingIDs.contains(trimmed) {
-            return AssemblyAIModels.universal35ProStreamingID
-        }
-        return trimmed
+        return liveTranscriptionSuccessors[trimmed] ?? trimmed
     }
 
     public static let defaultPostProcessingModel = "openai/gpt-5-mini"

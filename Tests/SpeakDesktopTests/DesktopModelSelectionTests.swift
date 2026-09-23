@@ -1,6 +1,6 @@
 import Foundation
-import SpeakCore
 import XCTest
+@testable import SpeakCore
 @testable import SpeakDesktop
 
 final class DesktopModelSelectionTests: XCTestCase {
@@ -40,6 +40,55 @@ final class DesktopModelSelectionTests: XCTestCase {
         XCTAssertEqual(active, DesktopModelSelection(model: successor, batchModel: batch, liveModel: successor))
         let remembered = migrate(batch, batch: batch, live: "assemblyai/u3-rt-pro")
         XCTAssertEqual(remembered, DesktopModelSelection(model: batch, batchModel: batch, liveModel: successor))
+    }
+
+    /// Every identifier the shared catalogue retires, including ones retired
+    /// later, resumes as its successor in the active slot and its mode's slot.
+    func testEveryRetiredIdentifierResumesAsItsSharedSuccessor() {
+        for (retired, successor) in ModelCatalog.liveTranscriptionSuccessors {
+            XCTAssertEqual(migrate(retired, live: retired),
+                           DesktopModelSelection(model: successor, batchModel: nil, liveModel: successor), retired)
+        }
+        for (retired, successor) in ModelCatalog.batchTranscriptionSuccessors {
+            XCTAssertEqual(migrate(retired, batch: retired),
+                           DesktopModelSelection(model: successor, batchModel: successor, liveModel: nil), retired)
+        }
+    }
+
+    /// Current entries are never retired: every route this host implements,
+    /// including routes added later, resumes exactly as saved.
+    func testEveryDesktopRouteResumesUnchanged() {
+        for option in DesktopTranscription.batchModels {
+            XCTAssertEqual(migrate(option.id, batch: option.id),
+                           DesktopModelSelection(model: option.id, batchModel: option.id, liveModel: nil), option.id)
+        }
+        for option in DesktopLiveTranscription.liveModels {
+            XCTAssertEqual(migrate(option.id, live: option.id),
+                           DesktopModelSelection(model: option.id, batchModel: nil, liveModel: option.id), option.id)
+        }
+    }
+
+    /// Reported regression (justspeaktoit-iif.3.1): Deepgram Flux is current,
+    /// so it stays active and remembered while the retired Nova-2 stream moves.
+    func testDeepgramFluxResumesWhileNova2MovesToNova3() throws {
+        let batch = try XCTUnwrap(DesktopTranscription.batchModels.first?.id)
+        for flux in ["deepgram/flux-general-en-streaming", "deepgram/flux-general-multi-streaming"] {
+            XCTAssertEqual(migrate(flux, batch: batch, live: flux),
+                           DesktopModelSelection(model: flux, batchModel: batch, liveModel: flux))
+            XCTAssertEqual(migrate(batch, batch: batch, live: flux),
+                           DesktopModelSelection(model: batch, batchModel: batch, liveModel: flux))
+        }
+        XCTAssertEqual(migrate("deepgram/nova-2-streaming", batch: batch, live: "deepgram/nova-2-streaming"),
+                       DesktopModelSelection(model: "deepgram/nova-3-streaming", batchModel: batch,
+                                             liveModel: "deepgram/nova-3-streaming"))
+    }
+
+    /// A discovered OpenRouter selection is not retired, so it stays routable
+    /// even when the cached discovery no longer lists it.
+    func testDiscoveredOpenRouterSelectionResumesAsSaved() {
+        let discovered = OpenRouterTranscriptionSelection.identifier(for: "vendor/not-cached")
+        XCTAssertEqual(migrate(discovered, batch: discovered),
+                       DesktopModelSelection(model: discovered, batchModel: discovered, liveModel: nil))
     }
 
     func testLegacySettingsWithOnlyAnActiveModelFillItsModeSlot() throws {

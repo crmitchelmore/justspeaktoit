@@ -773,6 +773,10 @@ void applyUpdate(HWND window) {
         // report, because the host never re-sends an unchanged state such as paused.
         if (selectionChanged || explicitHistorySelection) {
             invalidateHistoryPresentation(window, true);
+            // With no row selected no presentation follows, so a status the host
+            // sent with this refresh (such as Ready on a fresh launch) is newer
+            // than the placeholder and must stay visible.
+            if (statusChanged && nowSelected.empty()) SetDlgItemTextW(window, statusID, status.c_str());
             applyVariant(window, -1, false, recording);
             if (selectionChanged) applyPlayback(window, playbackIdle, L"", !nowSelected.empty(), recording);
         }
@@ -1991,6 +1995,17 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         GetDlgItemTextW(window, historyDetailID, detail, 64);
         if (std::wstring(detail) != L"No saved recordings match this search.") {
             failure = "An empty search result did not explain the missing rows."; return false;
+        }
+        // A fresh launch sends its empty History and Ready status together; the
+        // status must not be replaced by the no-selection placeholder.
+        if (jsti_window_set_history(nullptr, 0, "") != 0 || jsti_window_update("Ready sentinel", "", 0) != 0) {
+            failure = "Empty history with status update failed."; return false;
+        }
+        applyUpdate(window);
+        wchar_t readyStatus[64] = {};
+        GetDlgItemTextW(window, statusID, readyStatus, 64);
+        if (std::wstring(readyStatus) != L"Ready sentinel") {
+            failure = "A status sent with an empty History refresh was replaced by the placeholder."; return false;
         }
         // Clearing empties the box, reports a blank query and lets the host
         // restore the full rows with a consistent selection.

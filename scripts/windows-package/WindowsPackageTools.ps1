@@ -84,12 +84,16 @@ function Invoke-JstiPython {
     return $result.StandardOutput
 }
 
-function Get-JstiPackagingTools {
-    # Downloads the pinned Microsoft.Windows.SDK.BuildTools package once,
-    # authenticates it by SHA-512 and size, extracts only its x64 tool directory
-    # and requires valid Microsoft signatures on MakeAppx and SignTool.
-    param([Parameter(Mandatory = $true)] [string] $CacheDirectory)
-    $pins = (Read-JstiJson (Join-Path $PSScriptRoot 'dependencies.json')).packagingTools
+function Expand-JstiPinnedNuGet {
+    # Downloads a pinned nuget.org package once into CacheDirectory,
+    # authenticates it by SHA-512 and size, and extracts only the pinned
+    # toolDirectory into CacheDirectory\<Folder>. Returns the directory, digest
+    # and size.
+    param(
+        [Parameter(Mandatory = $true)] $Pins,
+        [Parameter(Mandatory = $true)] [string] $CacheDirectory,
+        [Parameter(Mandatory = $true)] [string] $Folder
+    )
     $cache = (New-Item -ItemType Directory -Force -Path $CacheDirectory).FullName
     $archive = Join-Path $cache $pins.name
     if (-not (Test-Path -LiteralPath $archive)) {
@@ -106,9 +110,9 @@ function Get-JstiPackagingTools {
     $digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA512).Hash.ToLowerInvariant()
     if ($bytes -ne $pins.bytes -or $digest -ne $pins.sha512) {
         Remove-Item -LiteralPath $archive -Force
-        throw "Packaging tools download does not match its pin ($bytes bytes, SHA-512 $digest)."
+        throw "$($pins.name) does not match its pin ($bytes bytes, SHA-512 $digest)."
     }
-    $tools = Join-Path $cache 'tools'
+    $tools = Join-Path $cache $Folder
     $marker = Join-Path $tools '.jsti-extracted'
     # Reuse an extraction from this verified archive; the tool hashes and
     # signatures are checked again below either way.
@@ -125,7 +129,7 @@ function Get-JstiPackagingTools {
                     $name.EndsWith('/')) { continue }
                 $relative = $name.Substring($pins.toolDirectory.Length)
                 if ($relative -match '(^|/)\.\.(/|$)' -or $relative -match '^[/\\]' -or $relative -match ':') {
-                    throw "Unsafe path in packaging tools archive: $name"
+                    throw "Unsafe path in $($pins.name): $name"
                 }
                 $destination = Join-Path $tools ($relative.Replace('/', '\'))
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
@@ -134,6 +138,17 @@ function Get-JstiPackagingTools {
         } finally { $zip.Dispose() }
         [System.IO.File]::WriteAllText($marker, $digest)
     }
+    return [pscustomobject]@{ Directory = $tools; Digest = $digest; Bytes = $bytes }
+}
+
+function Get-JstiPackagingTools {
+    # Downloads the pinned Microsoft.Windows.SDK.BuildTools package once,
+    # authenticates it by SHA-512 and size, extracts only its x64 tool directory
+    # and requires valid Microsoft signatures on MakeAppx and SignTool.
+    param([Parameter(Mandatory = $true)] [string] $CacheDirectory)
+    $pins = (Read-JstiJson (Join-Path $PSScriptRoot 'dependencies.json')).packagingTools
+    $expanded = Expand-JstiPinnedNuGet -Pins $pins -CacheDirectory $CacheDirectory -Folder 'tools'
+    $tools = $expanded.Directory; $digest = $expanded.Digest; $bytes = $expanded.Bytes
     $evidence = [ordered]@{ package = $pins.name; sha512 = $digest; bytes = $bytes; tools = [ordered]@{} }
     $paths = @{}
     foreach ($tool in $pins.tools) {
@@ -172,5 +187,29 @@ function Read-JstiPackageIdentity([string] $Package) {
     return [pscustomobject]@{
         Name = $identity.GetAttribute('Name'); Publisher = $identity.GetAttribute('Publisher')
         Version = $identity.GetAttribute('Version'); Architecture = $identity.GetAttribute('ProcessorArchitecture')
+    }
+}
+
+function Get-JstiArtifactSigningClient {
+    # The pinned Azure Artifact Signing dlib for SignTool /dlib. Its x64
+    # directory is extracted beside the packaging tools; the dlib must carry a
+    # valid Microsoft signature.
+    param([Parameter(Mandatory = $true)] [string] $CacheDirectory)
+    $pins = (Read-JstiJson (Join-Path $PSScriptRoot 'dependencies.json')).artifactSigningClient
+    $expanded = Expand-JstiPinnedNuGet -Pins $pins -CacheDirectory $CacheDirectory -Folder 'artifact-signing'
+    $dlib = Join-Path $expanded.Directory $pins.dlib
+    if (-not (Test-Path -LiteralPath $dlib -PathType Leaf)) { throw "The pinned Artifact Signing client lacks $($pins.dlib)." }
+    $signature = Get-AuthenticodeSignature -LiteralPath $dlib
+    $signer = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '' }
+    if ($signature.Status -ne 'Valid' -or $signer -notmatch 'O=Microsoft Corporation') {
+        throw "$($pins.dlib) is not validly signed by Microsoft: $($signature.Status) $signer"
+    }
+    return [pscustomobject]@{
+        Dlib = $dlib
+        Evidence = [ordered]@{
+            package = $pins.name; sha512 = $expanded.Digest; bytes = $expanded.Bytes
+            dlib = [ordered]@{ name = $pins.dlib; sha256 = Get-JstiSha256 $dlib
+                               fileVersion = (Get-Item -LiteralPath $dlib).VersionInfo.FileVersion; signer = $signer }
+        }
     }
 }

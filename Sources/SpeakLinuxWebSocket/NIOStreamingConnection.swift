@@ -122,8 +122,8 @@ public final class NIOStreamingConnection: StreamingWebSocketConnection, @unchec
         )
         let initial = HandshakeHandler(target: target, headers: headers, owner: self)
         let bootstrap = ClientBootstrap(group: Self.group)
+            // ClientBootstrap already enables TCP_NODELAY at the TCP level.
             .connectTimeout(.seconds(15))
-            .channelOption(ChannelOptions.socketOption(.tcp_nodelay), value: 1)
             .channelInitializer { channel in
                 do {
                     if let tls {

@@ -16,6 +16,17 @@ public struct LocalModelDownloadRequest: Sendable, Equatable {
         self.allowedHosts = allowedHosts
         self.resumeOffset = resumeOffset
     }
+
+    /// Whether a download may connect to `host`. An entry that starts with a
+    /// dot (".hf.co") admits every subdomain of that domain; any other entry
+    /// must match exactly.
+    public func allows(host: String) -> Bool {
+        let host = host.lowercased()
+        guard !host.isEmpty else { return false }
+        return allowedHosts.contains { entry in
+            entry.hasPrefix(".") ? host.hasSuffix(entry) : host == entry
+        }
+    }
 }
 
 /// How the server answered, reported once before any body bytes.
@@ -79,7 +90,7 @@ public final class LocalModelURLSessionTransport: LocalModelDownloadTransport {
         sink: @escaping @Sendable (Data) throws -> Void
     ) async throws {
         guard request.url.scheme == "https", let host = request.url.host?.lowercased(),
-              request.allowedHosts.contains(host) else { throw LocalModelDownloadError.insecureURL }
+              request.allows(host: host) else { throw LocalModelDownloadError.insecureURL }
         let delegate = StreamingDownloadDelegate(request: request, start: start, sink: sink)
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -199,7 +210,7 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
         _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        guard let http = response as? HTTPURLResponse else {
+        guard let http = response as? HTTPURLResponse, lock.withLock({ failure == nil }) else {
             fail(LocalModelDownloadError.httpStatus(0))
             completionHandler(.cancel)
             return
@@ -246,8 +257,11 @@ private final class StreamingDownloadDelegate: NSObject, URLSessionDataDelegate,
         newRequest: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
     ) {
         let host = newRequest.url?.host?.lowercased() ?? ""
-        guard newRequest.url?.scheme == "https", request.allowedHosts.contains(host) else {
-            fail(LocalModelDownloadError.redirectRefused(host))
+        guard newRequest.url?.scheme == "https", request.allows(host: host) else {
+            // Refuse first and cancel only when the 3xx arrives as the response:
+            // swift-corelibs-foundation traps if the task is cancelled while it
+            // waits for this completion handler.
+            lock.withLock { if failure == nil { failure = LocalModelDownloadError.redirectRefused(host) } }
             completionHandler(nil)
             return
         }

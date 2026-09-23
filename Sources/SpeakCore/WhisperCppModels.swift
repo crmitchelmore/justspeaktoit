@@ -72,10 +72,10 @@ public enum WhisperCppModels {
     public static let repository = "ggerganov/whisper.cpp"
     public static let revision = "5359861c739e955e79d9a303bcbc70fb988958b1"
 
-    static let huggingFaceHosts: Set<String> = [
-        "huggingface.co", "cdn-lfs.huggingface.co", "cdn-lfs-us-1.huggingface.co", "cdn-lfs-eu-1.huggingface.co",
-        "cdn-lfs.hf.co", "cdn-lfs-us-1.hf.co", "cdn-lfs-eu-1.hf.co", "cas-bridge.xethub.hf.co", "transfer.xethub.hf.co"
-    ]
+    /// Hugging Face redirects file downloads to regional content hosts that
+    /// change over time (for example `us.aws.cdn.hf.co`), so its own domains
+    /// are admitted with their subdomains (a leading dot).
+    static let huggingFaceHosts: Set<String> = ["huggingface.co", ".huggingface.co", ".hf.co"]
 
     static let provenance = "OpenAI Whisper weights converted to GGML by the whisper.cpp project "
         + "(huggingface.co/\(repository) at revision \(revision))"

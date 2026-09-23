@@ -249,4 +249,20 @@ final class LocalModelInstallerTests: XCTestCase {
             } catch { XCTFail("Unexpected \(error)") }
         }
     }
+
+    func testPinnedModelsAdmitHuggingFaceContentHostsOnly() throws {
+        let model = try XCTUnwrap(WhisperCppModels.all.first)
+        let artifact = model.artifact
+        let request = LocalModelDownloadRequest(
+            url: artifact.url, expectedByteCount: artifact.byteCount, allowedHosts: artifact.allowedHosts
+        )
+        for host in ["huggingface.co", "US.AWS.CDN.HF.CO", "cas-bridge.xethub.hf.co", "cdn-lfs.huggingface.co"] {
+            XCTAssertTrue(request.allows(host: host), host)
+        }
+        for host in ["hf.co.example.com", "evilhf.co", "example.com", "", "huggingface.co.evil"] {
+            XCTAssertFalse(request.allows(host: host), host)
+        }
+        let exact = LocalModelDownloadRequest(url: model.artifact.url, expectedByteCount: 1, allowedHosts: ["hf.co"])
+        XCTAssertFalse(exact.allows(host: "cdn.hf.co"), "Entries without a leading dot match exactly")
+    }
 }

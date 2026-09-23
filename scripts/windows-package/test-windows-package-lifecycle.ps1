@@ -281,7 +281,8 @@ function Test-InstalledPayload([string] $InstallLocation, [string] $Layout) {
         if ($expected.ContainsKey($key)) {
             if ((Get-JstiSha256 $file.FullName) -ne $expected[$key]) { [void] $problems.Add("changed $relative") }
             $expected.Remove($key)
-        } elseif (@('appxblockmap.xml', 'appxsignature.p7x', '[content_types].xml') -notcontains $key) {
+        } elseif (@('appxblockmap.xml', 'appxsignature.p7x', '[content_types].xml',
+                'appxmetadata/codeintegrity.cat') -notcontains $key) {
             [void] $problems.Add("unexpected $relative")
         }
     }

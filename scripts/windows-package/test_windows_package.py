@@ -93,13 +93,19 @@ def build_blockmap(files):
     return ET.tostring(root, xml_declaration=True, encoding="utf-8")
 
 
-def make_package(layout, path, signed=False, extra=None, drop=None, blockmap=None, replace=None):
-    """Write an .msix-shaped archive as MakeAppx would, from a layout directory."""
+def make_package(layout, path, signed=False, extra=None, drop=None, blockmap=None, replace=None, listed_extra=None):
+    """Write an .msix-shaped archive as MakeAppx (and SignTool) would, from a layout directory.
+
+    ``listed_extra`` adds parts that the block map also lists, as SignTool does
+    for its code integrity catalogue.
+    """
     files = {item.relative_to(layout).as_posix(): item.read_bytes() for item in layout.rglob("*") if item.is_file()}
     for name in drop or ():
         files.pop(name)
     listed = dict(files)
+    listed.update(listed_extra or {})
     files.update(replace or {})
+    files.update(listed_extra or {})
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(files.items()):
             archive.writestr(urllib.parse.quote(name), data)
@@ -476,6 +482,34 @@ class PackageVerificationTests(unittest.TestCase):
         with self.assertRaisesRegex(windows_msix.PackageError, "signing changed the block map"):
             windows_msix.verify_package(signed, self.layout, signed=True, unsigned_reference=other)
         windows_msix.verify_package(signed, self.layout, signed=True, unsigned_reference=unsigned)
+
+    def test_signing_may_add_only_its_code_integrity_catalogue(self):
+        catalogue = {windows_msix.CODE_INTEGRITY_PART: b"0\x82catalogue"}
+        unsigned = make_package(self.layout, self.root / "unsigned.msix")
+        listed = make_package(self.layout, self.root / "listed.msix", signed=True, listed_extra=catalogue)
+        result = windows_msix.verify_package(listed, self.layout, signed=True, unsigned_reference=unsigned)
+        self.assertEqual(result["payloadFiles"], len(windows_msix.verify_layout(self.layout)[1]))
+        unlisted = make_package(self.layout, self.root / "unlisted.msix", signed=True, extra=catalogue)
+        windows_msix.verify_package(unlisted, self.layout, signed=True, unsigned_reference=unsigned)
+        with self.assertRaisesRegex(windows_msix.PackageError, "unexpected \\['AppxMetadata/CodeIntegrity.cat'\\]"):
+            windows_msix.verify_package(make_package(self.layout, self.root / "unsigned-catalogue.msix",
+                                                     listed_extra=catalogue), self.layout, signed=False)
+        files = {path.relative_to(self.layout).as_posix(): path.read_bytes()
+                 for path in self.layout.rglob("*") if path.is_file()}
+        stale = build_blockmap(dict(files, **{windows_msix.CODE_INTEGRITY_PART: b"other"}))
+        tampered = make_package(self.layout, self.root / "stale-catalogue.msix", signed=True, extra=catalogue,
+                                blockmap=stale)
+        with self.assertRaisesRegex(windows_msix.PackageError, "block map hashes do not match AppxMetadata"):
+            windows_msix.verify_package(tampered, self.layout, signed=True)
+        changed = dict(files, **catalogue)
+        changed["README.txt"] = b"changed while signing"
+        rewritten = make_package(self.layout, self.root / "rewritten.msix", signed=True, extra=catalogue,
+                                 blockmap=build_blockmap(changed))
+        with self.assertRaises(windows_msix.PackageError):
+            windows_msix.verify_package(rewritten, self.layout, signed=True, unsigned_reference=unsigned)
+        other = make_package(self.layout, self.root / "other.msix", blockmap=build_blockmap({"AppxManifest.xml": b"x"}))
+        with self.assertRaisesRegex(windows_msix.PackageError, "signing changed the block map"):
+            windows_msix.verify_package(listed, self.layout, signed=True, unsigned_reference=other)
 
     def test_percent_encoded_part_names_are_decoded(self):
         package_manifest = json.loads((self.layout / windows_msix.PACKAGE_MANIFEST).read_text(encoding="utf-8"))

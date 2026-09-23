@@ -614,6 +614,9 @@ BLOCK_SIZE = 65536
 BLOCKMAP_PART = "AppxBlockMap.xml"
 CONTENT_TYPES_PART = "[Content_Types].xml"
 SIGNATURE_PART = "AppxSignature.p7x"
+# SignTool catalogues the package's PE files here while signing. It is a
+# signing artifact, never payload, and appears only beside a signature.
+CODE_INTEGRITY_PART = "AppxMetadata/CodeIntegrity.cat"
 
 
 def _package_parts(archive):
@@ -629,6 +632,19 @@ def _package_parts(archive):
     return parts
 
 
+def _blockmap_entries(blockmap_bytes, ignored):
+    """Hash method and per-file size and block hashes, without signing artifacts."""
+    root = ET.fromstring(blockmap_bytes)
+    entries = {}
+    for element in root.findall("{%s}File" % BLOCKMAP_NAMESPACE):
+        name = (element.get("Name") or "").replace("\\", "/")
+        if name in ignored:
+            continue
+        entries[name] = (element.get("Size"), tuple(block.get("Hash") for block in
+                                                     element.findall("{%s}Block" % BLOCKMAP_NAMESPACE)))
+    return root.get("HashMethod"), entries
+
+
 def block_hashes(data):
     return [base64.b64encode(hashlib.sha256(data[offset:offset + BLOCK_SIZE]).digest()).decode("ascii")
             for offset in range(0, len(data), BLOCK_SIZE)]
@@ -639,7 +655,8 @@ def verify_package(package_path, layout_dir, signed, unsigned_reference=None):
 
     MakeAppx is the authoritative packer; this independent reader proves its
     output still equals the verified layout, and that signing changed nothing
-    except adding the signature part.
+    except adding the signature and its code integrity catalogue, which the
+    signed block map may list with matching hashes.
     """
     package_manifest, layout_hashes = verify_layout(layout_dir)
     package_path = pathlib.Path(package_path)
@@ -652,7 +669,8 @@ def verify_package(package_path, layout_dir, signed, unsigned_reference=None):
             if (SIGNATURE_PART in parts) != bool(signed):
                 raise PackageError("package is %s but %s was expected" % (
                     "signed" if SIGNATURE_PART in parts else "unsigned", "signed" if signed else "unsigned"))
-            payload = set(parts) - {BLOCKMAP_PART, CONTENT_TYPES_PART, SIGNATURE_PART}
+            signing = {SIGNATURE_PART, CODE_INTEGRITY_PART} if signed else {SIGNATURE_PART}
+            payload = set(parts) - {BLOCKMAP_PART, CONTENT_TYPES_PART} - signing
             if payload != set(layout_hashes):
                 raise PackageError("package payload differs from the layout; missing %s, unexpected %s" % (
                     sorted(set(layout_hashes) - payload), sorted(payload - set(layout_hashes))))
@@ -666,8 +684,14 @@ def verify_package(package_path, layout_dir, signed, unsigned_reference=None):
                 if name in listed:
                     raise PackageError("block map repeats " + name)
                 listed[name] = element
-            if set(listed) != payload:
+            catalogue = {CODE_INTEGRITY_PART} & set(listed) & set(parts) if signed else set()
+            if set(listed) - catalogue != payload:
                 raise PackageError("block map does not list exactly the payload files")
+            for name in sorted(catalogue):
+                data = archive.read(parts[name])
+                recorded = [block.get("Hash") for block in listed[name].findall("{%s}Block" % BLOCKMAP_NAMESPACE)]
+                if int(listed[name].get("Size", "-1")) != len(data) or recorded != block_hashes(data):
+                    raise PackageError("block map hashes do not match " + name)
             for name in sorted(payload):
                 data = archive.read(parts[name])
                 if sha256(data) != layout_hashes[name]:
@@ -681,8 +705,10 @@ def verify_package(package_path, layout_dir, signed, unsigned_reference=None):
         raise PackageError("package is unreadable: %s" % error)
     if unsigned_reference is not None:
         with zipfile.ZipFile(unsigned_reference) as reference:
-            if reference.read(BLOCKMAP_PART) != blockmap_bytes:
-                raise PackageError("signing changed the block map of the unsigned package")
+            unsigned_bytes = reference.read(BLOCKMAP_PART)
+        if unsigned_bytes != blockmap_bytes and (
+                _blockmap_entries(unsigned_bytes, set()) != _blockmap_entries(blockmap_bytes, {CODE_INTEGRITY_PART})):
+            raise PackageError("signing changed the block map of the unsigned package")
     data = package_path.read_bytes()
     return {"name": package_path.name, "sha256": sha256(data), "bytes": len(data), "signed": bool(signed),
             "payloadFiles": len(payload), "blockMapSHA256": sha256(blockmap_bytes),

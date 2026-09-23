@@ -2,7 +2,8 @@
 """Check an .msix holds exactly its verified layout under a valid SHA-256 block map.
 
 Run after MakeAppx (``--unsigned``) and after signing (``--signed`` with
-``--unsigned-reference``): signing may add only AppxSignature.p7x. This reader
+``--unsigned-reference``): signing may add only AppxSignature.p7x and SignTool's
+AppxMetadata/CodeIntegrity.cat, which the block map may list. This reader
 is independent of the Windows packaging API that produced the package.
 """
 import argparse

@@ -426,12 +426,19 @@ reused; its sherpa and bzip2 path is not.
   Remote Live and Local keep separate saved models. Local
   recordings skip API keys and the provider upload cap. Silent recordings stay
   empty. History and headers show the friendly name, for example "Whisper Tiny
-  (on-device)".
+  (on-device)". History Retry transcribes a local recording again with its own
+  saved model and language, whatever the pickers show, after checking that the
+  model is downloaded and the runtime can run; if not, the recording and its
+  audio are left untouched and the status says why. Only genuinely live-only
+  recordings get the import guidance (`DesktopHistoryRetry`, SpeakDesktop).
 - **Checks.** `--self-test` covers CNG vectors, a download, resume, tamper
-  and removal cycle, and the controller's removal ownership with a held
-  transcription and teardown. With the runtime present, the platform tests
-  also delete a loaded model's file and hold a removal while another model
-  replaces it in the cache. `--local-transcription-self-test <wav> --expect <phrase>`
+  and removal cycle, the controller's removal ownership with a held
+  transcription and teardown, and History Retry of on-device recordings
+  through the real controller: its own model, language and audio, refusal
+  without a model or runtime, and failed or silent retries keeping the
+  recording. With the runtime present, the platform tests also delete a
+  loaded model's file and hold a removal while another model replaces it in
+  the cache. `--local-transcription-self-test <wav> --expect <phrase>`
   downloads the pinned model into `JSTI_LOCAL_MODEL_DIRECTORY` and transcribes
   the WAV; CI runs it on the native build and from the self-contained bundle
   with the JFK sample. `JSTI_WHISPER_RUNTIME_DIRECTORY` points a developer

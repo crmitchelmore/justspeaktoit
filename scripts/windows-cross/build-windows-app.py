@@ -64,7 +64,7 @@ def run_package_build(command, environment, log, package):
         raise ValueError("Package.resolved must be a regular file for an in-place cross-build")
     contents = lockfile.read_bytes() if original is not None else None
     try:
-        with log.open("a") as stream:
+        with log.open("a", encoding="utf-8") as stream:
             stream.write("\nARGV: " + json.dumps([str(value) for value in command]) + "\n")
             stream.flush()
             subprocess.run([str(value) for value in command], env=environment, stdout=stream,
@@ -163,8 +163,8 @@ def main():
     cache, output, scratch = build_locations(args)
     output.mkdir(parents=True, exist_ok=True)
     log = output / "macos-app-build.log"
-    log.write_text("")
-    lock = json.loads((HERE / "dependencies.json").read_text())
+    log.write_text("", encoding="utf-8")
+    lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
     archive = BOOTSTRAP.download(lock["appCompiler"], cache / "downloads")
     print("Extracting the pinned LLVM 20 compiler privately", flush=True)
     clang = extract_compiler(archive, cache / "llvm-20")
@@ -196,7 +196,7 @@ def main():
                 "nativeCompiler": subprocess.check_output([clang / "clang", "--version"], text=True).strip(),
                 "executables": artifacts, "dependencies": lock,
                 "runtimeStatus": "Windows execution remains required"}
-    (output / "app-build-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    (output / "app-build-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     print("Windows app and test executables linked; runtime verification is separate", flush=True)
 
 

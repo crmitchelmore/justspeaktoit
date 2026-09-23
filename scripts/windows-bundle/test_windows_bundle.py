@@ -479,7 +479,7 @@ class ApplicationInputTests(unittest.TestCase):
         self.write_metadata()
 
     def write_metadata(self):
-        (self.app / "app-build-metadata.json").write_text(json.dumps(self.metadata))
+        (self.app / "app-build-metadata.json").write_text(json.dumps(self.metadata), encoding="utf-8")
 
     def test_production_executable_and_non_test_resources_are_loaded(self):
         application = BUILD.load_application(self.app, self.policy)
@@ -490,7 +490,7 @@ class ApplicationInputTests(unittest.TestCase):
         for key, value in [("configuration", "debug"), ("appBuiltForTesting", True), ("host", "Windows")]:
             metadata = dict(self.metadata)
             metadata[key] = value
-            (self.app / "app-build-metadata.json").write_text(json.dumps(metadata))
+            (self.app / "app-build-metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
             with self.assertRaisesRegex(BUILD.BundleError, key):
                 BUILD.load_application(self.app, self.policy)
 
@@ -525,19 +525,19 @@ class SwiftRuntimeSourceTests(unittest.TestCase):
         self.cache = pathlib.Path(self.directory.name)
         (self.cache / "swift-windows").mkdir()
         (self.cache / "windows-extraction/bootstrap").mkdir(parents=True)
-        (self.cache / "windows-extraction/bootstrap/0").write_text(self.MANIFEST)
+        (self.cache / "windows-extraction/bootstrap/0").write_text(self.MANIFEST, encoding="utf-8")
         data = build_pe(["KERNEL32.dll"], dll=True)
         (self.cache / "swift-windows/swiftCore.dll").write_bytes(data)
         (self.cache / "windows-extraction/rtl-layout.json").write_text(json.dumps(
-            [{"path": "swiftCore.dll", "cabinet": "rtl.cab", "id": "filCore", "bytes": len(data)}]))
-        cross = json.loads((HERE.parent / "windows-cross/dependencies.json").read_text())
+            [{"path": "swiftCore.dll", "cabinet": "rtl.cab", "id": "filCore", "bytes": len(data)}]), encoding="utf-8")
+        cross = json.loads((HERE.parent / "windows-cross/dependencies.json").read_text(encoding="utf-8"))
         installer = next(item for item in cross["downloads"] if item["name"].endswith("-windows10.exe"))
         self.lock_path = self.cache / "source-lock.json"
         self.lock_path.write_text(json.dumps({"swiftVersion": "6.2.3", "installer": installer,
             "bootstrapManifestSHA256": "fixture", "payloads": {
                 "rtl.msi": {"bytes": 450560, "sha512": "abc"}, "rtl.cab": {"bytes": 18542881, "sha512": "def"}},
             "files": [{"path": "swiftCore.dll", "cabinet": "rtl.cab", "id": "filCore", "bytes": len(data),
-                       "sha256": hashlib.sha256(data).hexdigest()}]}))
+                       "sha256": hashlib.sha256(data).hexdigest()}]}), encoding="utf-8")
 
     def test_runtime_package_provenance_and_modules_are_read(self):
         source = BUILD.load_swift_runtime(self.cache, self.lock_path)
@@ -561,16 +561,16 @@ class SwiftRuntimeSourceTests(unittest.TestCase):
         changed = bytearray(path.read_bytes())
         changed[-1] ^= 1
         path.write_bytes(changed)
-        (self.cache / "windows-extraction/rtl-layout.json").write_text("[]")
-        (self.cache / "windows-extraction/bootstrap/0").write_text("substituted metadata")
+        (self.cache / "windows-extraction/rtl-layout.json").write_text("[]", encoding="utf-8")
+        (self.cache / "windows-extraction/bootstrap/0").write_text("substituted metadata", encoding="utf-8")
         source = BUILD.load_swift_runtime(self.cache, self.lock_path)
         with self.assertRaisesRegex(BUILD.BundleError, "checksum"):
             BUILD.read_swift_module(source, "swiftCore.dll")
 
     def test_source_lock_must_match_cross_installer_pin(self):
-        lock = json.loads(self.lock_path.read_text())
+        lock = json.loads(self.lock_path.read_text(encoding="utf-8"))
         lock["installer"]["sha256"] = "0" * 64
-        self.lock_path.write_text(json.dumps(lock))
+        self.lock_path.write_text(json.dumps(lock), encoding="utf-8")
         with self.assertRaisesRegex(BUILD.BundleError, "installer"):
             BUILD.load_swift_runtime(self.cache, self.lock_path)
 
@@ -757,7 +757,7 @@ class AssemblyTests(unittest.TestCase):
         self.assertEqual(manifest["application"]["executableSHA256"], hashlib.sha256(self.executable).hexdigest())
 
     def test_pinned_licences_cover_embedded_networking_dependencies(self):
-        lock = json.loads((HERE / "dependencies.json").read_text())
+        lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
         for name in ["curl", "zlib"]:
             entry = next(item for item in lock["licenses"] if item["name"] == "LICENSE-" + name + ".txt")
             self.assertEqual(len(entry["sha256"]), 64)

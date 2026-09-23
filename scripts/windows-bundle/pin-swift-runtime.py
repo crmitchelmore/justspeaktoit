@@ -25,7 +25,7 @@ def digest(path, algorithm="sha256"):
 
 
 def generate(installer, seven, temporary_parent):
-    lock = json.loads((HERE.parent / "windows-cross/dependencies.json").read_text())
+    lock = json.loads((HERE.parent / "windows-cross/dependencies.json").read_text(encoding="utf-8"))
     pin = next(item for item in lock["downloads"] if item["name"].endswith("-windows10.exe"))
     if installer.stat().st_size != pin["bytes"] or digest(installer) != pin["sha256"]:
         raise ValueError("Swift installer differs from the committed SHA-256 pin")
@@ -64,7 +64,7 @@ def generate(installer, seven, temporary_parent):
                         "--workspace", str(workspace), "--seven", str(seven), "--output", str(workspace / "runtime")],
                        check=True)
         files = []
-        for row in json.loads((workspace / "rtl-layout.json").read_text()):
+        for row in json.loads((workspace / "rtl-layout.json").read_text(encoding="utf-8")):
             if row["path"].lower().endswith(".dll"):
                 files.append(dict(row, sha256=digest(workspace / "runtime" / row["path"])))
         return {"schemaVersion": 1, "swiftVersion": lock["swiftVersion"], "installer": pin,
@@ -80,5 +80,5 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     document = generate(args.installer, args.seven, args.temporary_parent)
-    args.output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+    args.output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print("Authenticated and pinned", len(document["files"]), "runtime DLLs")

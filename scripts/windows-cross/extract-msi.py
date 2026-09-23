@@ -63,7 +63,7 @@ def read_table(name):
             result[index][column] = (strings[value] if kind & 0x800 else
                                     value - (1 << (width * 8 - 1)) if value else None)
         offset += count * width
-    (TABLES / (name + ".json")).write_text(json.dumps(result, indent=2) + "\n")
+    (TABLES / (name + ".json")).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result
 
 
@@ -107,5 +107,5 @@ for row in read_table("File"):
     else:
         shutil.copy2(source, destination)
     manifest.append({"path": str(relative), "cabinet": cabinet, "id": row["File"], "bytes": row["FileSize"]})
-(BASE / (NAME + "-layout.json")).write_text(json.dumps(manifest, indent=2) + "\n")
+(BASE / (NAME + "-layout.json")).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 print("Reconstructed", len(manifest), NAME, "files in", OUT)

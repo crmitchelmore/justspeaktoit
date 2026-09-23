@@ -63,7 +63,7 @@ def download(entry, directory):
 
 
 def run(arguments, log):
-    with log.open("a") as output:
+    with log.open("a", encoding="utf-8") as output:
         output.write("\nARGV: " + json.dumps([str(value) for value in arguments]) + "\n")
         output.flush()
         subprocess.run([str(value) for value in arguments], stdout=output, stderr=subprocess.STDOUT, check=True)
@@ -153,8 +153,8 @@ def main():
     cache.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
     log = output / "macos-cross-build.log"
-    log.write_text("")
-    lock = json.loads((HERE / "dependencies.json").read_text())
+    log.write_text("", encoding="utf-8")
+    lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
     downloads = cache / "downloads"
     downloads.mkdir(exist_ok=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
@@ -221,7 +221,7 @@ def main():
                 "target": "x86_64-unknown-windows-msvc", "executableSHA256": digest(executable),
                 "sourceSHA256": digest(HERE / "FoundationWindowsProof.swift"), "dependencies": lock,
                 "runtimeStatus": "Not run on macOS; Windows job must execute assertions"}
-    (output / "build-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    (output / "build-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     shutil.copy2(HERE / "FoundationWindowsProof.swift", output / "FoundationWindowsProof.swift")
     print("Windows Foundation PE linked:", metadata["executableSHA256"], flush=True)
 

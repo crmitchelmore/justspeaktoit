@@ -78,7 +78,7 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
                 "zip": {"name": archive.name, "sha256": sha256(data), "bytes": len(data), "entries": len(entries)},
                 "manifest": {"name": "bundle-manifest.json", "sha256": sha256(manifest_bytes)},
                 "application": {"sourceCommit": commit, "executableSHA256": sha256(executable)}}
-    (directory / "bundle-evidence.json").write_text(json.dumps(evidence, indent=2))
+    (directory / "bundle-evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     return directory
 
 
@@ -118,7 +118,7 @@ class IdentityTests(unittest.TestCase):
         identity = windows_msix.load_identity()
         self.assertEqual(identity["channel"], "developer")
         self.assertIsNone(identity["releaseTrain"])
-        trains = json.loads((windows_msix.REPOSITORY / "Sources/SpeakCore/Resources/ReleaseTrains.json").read_text())
+        trains = json.loads((windows_msix.REPOSITORY / "Sources/SpeakCore/Resources/ReleaseTrains.json").read_text(encoding="utf-8"))
         claimed = {value for train in trains.values() for value in train.values()}
         for value in (identity["identity"]["name"], identity["presentation"]["displayName"],
                       identity["application"]["executionAlias"][:-4]):
@@ -152,7 +152,7 @@ class IdentityTests(unittest.TestCase):
                          "com.justspeaktoit.windows.developer")
 
     def test_policy_changes_to_identity_are_refused(self):
-        original = json.loads(windows_msix.IDENTITY_PATH.read_text())
+        original = json.loads(windows_msix.IDENTITY_PATH.read_text(encoding="utf-8"))
         changes = [
             lambda data: data["fileSystem"].update(writeVirtualization="enabled"),
             lambda data: data["targetDeviceFamily"].update(minVersion="10.0.18362.0"),
@@ -167,7 +167,7 @@ class IdentityTests(unittest.TestCase):
                 data = copy.deepcopy(original)
                 change(data)
                 path = pathlib.Path(scratch) / "identity.json"
-                path.write_text(json.dumps(data))
+                path.write_text(json.dumps(data), encoding="utf-8")
                 with self.assertRaises(windows_msix.PackageError):
                     windows_msix.load_identity(path)
 
@@ -329,9 +329,9 @@ class LayoutTests(unittest.TestCase):
 
         def rewrite_evidence(bundle, change):
             path = bundle / "bundle-evidence.json"
-            evidence = json.loads(path.read_text())
+            evidence = json.loads(path.read_text(encoding="utf-8"))
             change(evidence)
-            path.write_text(json.dumps(evidence))
+            path.write_text(json.dumps(evidence), encoding="utf-8")
 
         cases = {
             "archive changed": ("does not match bundle-evidence", tamper_archive),
@@ -380,9 +380,9 @@ class LayoutTests(unittest.TestCase):
         with zipfile.ZipFile(archive, "a") as handle:
             handle.writestr("extra.txt", b"not in the manifest")
         data = archive.read_bytes()
-        evidence = json.loads((bundle / "bundle-evidence.json").read_text())
+        evidence = json.loads((bundle / "bundle-evidence.json").read_text(encoding="utf-8"))
         evidence["zip"].update(sha256=sha256(data), bytes=len(data))
-        (bundle / "bundle-evidence.json").write_text(json.dumps(evidence))
+        (bundle / "bundle-evidence.json").write_text(json.dumps(evidence), encoding="utf-8")
         with self.assertRaisesRegex(windows_msix.PackageError, "does not list: extra.txt"):
             self.build(bundle, output="out-extra")
 
@@ -396,9 +396,9 @@ class LayoutTests(unittest.TestCase):
         entries["README.txt"] = bytes(notes)
         BUILD.write_deterministic_zip(archive, entries)
         data = archive.read_bytes()
-        evidence = json.loads((bundle / "bundle-evidence.json").read_text())
+        evidence = json.loads((bundle / "bundle-evidence.json").read_text(encoding="utf-8"))
         evidence["zip"].update(sha256=sha256(data), bytes=len(data))
-        (bundle / "bundle-evidence.json").write_text(json.dumps(evidence))
+        (bundle / "bundle-evidence.json").write_text(json.dumps(evidence), encoding="utf-8")
         with self.assertRaisesRegex(windows_msix.PackageError, "README.txt"):
             self.build(bundle)
 
@@ -410,7 +410,7 @@ class LayoutTests(unittest.TestCase):
         with self.assertRaises(windows_msix.PackageError):
             windows_msix.build_layout(bundle, bundle / "inside", "0.0.1.0")
         (self.root / "occupied").mkdir()
-        (self.root / "occupied/file").write_text("x")
+        (self.root / "occupied/file").write_text("x", encoding="utf-8")
         with self.assertRaises(windows_msix.PackageError):
             self.build(bundle, output="occupied")
 
@@ -478,12 +478,12 @@ class PackageVerificationTests(unittest.TestCase):
         windows_msix.verify_package(signed, self.layout, signed=True, unsigned_reference=unsigned)
 
     def test_percent_encoded_part_names_are_decoded(self):
-        package_manifest = json.loads((self.layout / windows_msix.PACKAGE_MANIFEST).read_text())
+        package_manifest = json.loads((self.layout / windows_msix.PACKAGE_MANIFEST).read_text(encoding="utf-8"))
         data = b"spaced"
         (self.layout / "licenses/With Space.txt").write_bytes(data)
         package_manifest["files"].append({"path": "licenses/With Space.txt", "bytes": len(data),
                                           "sha256": sha256(data), "origin": "bundle"})
-        (self.layout / windows_msix.PACKAGE_MANIFEST).write_text(json.dumps(package_manifest))
+        (self.layout / windows_msix.PACKAGE_MANIFEST).write_text(json.dumps(package_manifest), encoding="utf-8")
         package = make_package(self.layout, self.root / "spaced.msix")
         with zipfile.ZipFile(package) as archive:
             self.assertIn("licenses/With%20Space.txt", archive.namelist())
@@ -505,10 +505,10 @@ class LifecycleSupportTests(unittest.TestCase):
         # PCMRecordingFile.recoverInterruptedFile, reproduced for the test.
         recovery = self.expectations["recovery"]
         record_path = self.data / recovery["record"]
-        record = json.loads(record_path.read_text())
+        record = json.loads(record_path.read_text(encoding="utf-8"))
         record["failure"] = recovery["failure"]
         record["createdAt"] = int(record["createdAt"])
-        record_path.write_text(json.dumps(record, indent=2, sort_keys=True))
+        record_path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
         audio_path = self.data / recovery["audio"]
         audio = bytearray(audio_path.read_bytes())
         payload = len(audio) - 44
@@ -517,11 +517,11 @@ class LifecycleSupportTests(unittest.TestCase):
         audio_path.write_bytes(bytes(audio))
 
     def test_fixture_uses_the_apps_formats(self):
-        completed = json.loads((self.data / ("History/%s.json" % lifecycle_support.COMPLETED_ID)).read_text())
+        completed = json.loads((self.data / ("History/%s.json" % lifecycle_support.COMPLETED_ID)).read_text(encoding="utf-8"))
         self.assertEqual(completed["result"]["text"], lifecycle_support.TRANSCRIPT)
         self.assertEqual(completed["id"], lifecycle_support.COMPLETED_ID)
         self.assertEqual(set(completed["result"]), {"duration", "modelIdentifier", "segments", "text"})
-        interrupted = json.loads((self.data / ("History/%s.json" % lifecycle_support.INTERRUPTED_ID)).read_text())
+        interrupted = json.loads((self.data / ("History/%s.json" % lifecycle_support.INTERRUPTED_ID)).read_text(encoding="utf-8"))
         self.assertNotIn("result", interrupted)
         self.assertNotIn("failure", interrupted)
         self.assertGreater(completed["createdAt"], interrupted["createdAt"], "completed record is listed first")
@@ -532,7 +532,7 @@ class LifecycleSupportTests(unittest.TestCase):
         audio = (self.data / ("History/%s.wav" % lifecycle_support.COMPLETED_ID)).read_bytes()
         self.assertEqual(audio[:44], lifecycle_support.wav_header(len(audio) - 44))
         self.assertTrue(any(audio[44:]), "fixture audio is not silent")
-        self.assertEqual(json.loads((self.data / "settings.json").read_text()), {"model": lifecycle_support.MODEL})
+        self.assertEqual(json.loads((self.data / "settings.json").read_text(encoding="utf-8")), {"model": lifecycle_support.MODEL})
         with self.assertRaises(SystemExit):
             lifecycle_support.write_fixture(self.data, self.root / "again.json")
 
@@ -540,7 +540,7 @@ class LifecycleSupportTests(unittest.TestCase):
         self.assertEqual(lifecycle_support.check_data(self.data, self.expectations, "seeded")["failures"], [])
         self.assertTrue(lifecycle_support.check_data(self.data, self.expectations, "recovered")["failures"])
         self.recover_like_the_app()
-        (self.data / "OpenRouterAudioCatalog.json").write_text("{}")
+        (self.data / "OpenRouterAudioCatalog.json").write_text("{}", encoding="utf-8")
         report = lifecycle_support.check_data(self.data, self.expectations, "recovered")
         self.assertEqual(report["failures"], [])
         self.assertEqual(report["appCreatedFiles"], ["OpenRouterAudioCatalog.json"])
@@ -551,8 +551,8 @@ class LifecycleSupportTests(unittest.TestCase):
         cases = {
             "completed audio": lambda: (self.data / ("History/%s.wav" % lifecycle_support.COMPLETED_ID)).write_bytes(b"x"),
             "user note": lambda: (self.data / "keep-user-notes.txt").unlink(),
-            "settings": lambda: (self.data / "settings.json").write_text('{"model": "other"}'),
-            "unexpected": lambda: (self.data / "History/stray.json").write_text("{}"),
+            "settings": lambda: (self.data / "settings.json").write_text('{"model": "other"}', encoding="utf-8"),
+            "unexpected": lambda: (self.data / "History/stray.json").write_text("{}", encoding="utf-8"),
         }
         for label, change in cases.items():
             with self.subTest(label):

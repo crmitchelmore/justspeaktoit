@@ -63,12 +63,12 @@ class Log:
     def __init__(self, path=None):
         self.path = path
         if path is not None:
-            path.write_text("")
+            path.write_text("", encoding="utf-8")
 
     def __call__(self, message):
         print(message, flush=True)
         if self.path is not None:
-            with self.path.open("a") as stream:
+            with self.path.open("a", encoding="utf-8") as stream:
                 stream.write(message + "\n")
 
 
@@ -93,7 +93,7 @@ class Policy:
 
     @classmethod
     def load(cls, path=HERE / "runtime-policy.json"):
-        return cls(json.loads(path.read_text()))
+        return cls(json.loads(path.read_text(encoding="utf-8")))
 
     def classify(self, module):
         lower = module.lower()
@@ -238,7 +238,7 @@ def load_application(app_dir, policy):
     metadata_path = app_dir / "app-build-metadata.json"
     if not metadata_path.is_file():
         raise BundleError("missing app-build-metadata.json in " + str(app_dir))
-    metadata = json.loads(metadata_path.read_text())
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     expectations = {"host": "Darwin", "target": "x86_64-unknown-windows-msvc", "configuration": "release",
                     "appBuiltForTesting": False}
     for key, value in expectations.items():
@@ -282,8 +282,8 @@ def load_swift_runtime(cache, lock_path=HERE / "swift-runtime-lock.json"):
         raise BundleError("missing pinned Swift runtime provenance or runtime directory")
     # Authenticate against the reviewed source lock, never mutable metadata next
     # to the extracted DLLs. pin-swift-runtime.py reproduces the entire chain.
-    source = json.loads(lock_path.read_text())
-    installer = json.loads((CROSS / "dependencies.json").read_text())
+    source = json.loads(lock_path.read_text(encoding="utf-8"))
+    installer = json.loads((CROSS / "dependencies.json").read_text(encoding="utf-8"))
     pinned = next(entry for entry in installer["downloads"] if entry["name"].endswith("-windows10.exe"))
     if source["installer"] != pinned or source["swiftVersion"] != installer["swiftVersion"]:
         raise BundleError("Swift runtime lock does not match the pinned cross compiler installer")
@@ -597,7 +597,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     log = Log(output / "bundle-build.log")
     policy = Policy.load()
-    lock = json.loads((HERE / "dependencies.json").read_text())
+    lock = json.loads((HERE / "dependencies.json").read_text(encoding="utf-8"))
     application = load_application(app, policy)
     swift = load_swift_runtime(cache)
     downloads = args.downloads.resolve()
@@ -634,7 +634,7 @@ def main():
         "llvmReadobjCrossCheck": cross_check is not None,
         "runtimeStatus": "Windows execution with an isolated PATH remains required",
     }
-    (output / "bundle-evidence.json").write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n")
+    (output / "bundle-evidence.json").write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     log("Bundled %d files into %s (%s)" % (len(names), name, archive_digest))
     log("Runtime modules: " + ", ".join(evidence["bundledModules"]))
 

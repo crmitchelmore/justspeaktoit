@@ -85,6 +85,41 @@ final class AssemblyAIModelsTests: XCTestCase {
         )
     }
 
+    func testTranscriptAssemblerPreservesDuplicateTurnsAndLaterInterim() throws {
+        var assembler = AssemblyAIStreamingTranscriptAssembler()
+        _ = assembler.consume(try decodeTurn(
+            #"{"turn_order":0,"turn_is_formatted":true,"end_of_turn":true,"transcript":"Again."}"#
+        ))
+        _ = assembler.consume(try decodeTurn(
+            #"{"turn_order":2,"turn_is_formatted":false,"end_of_turn":false,"transcript":"Later"}"#
+        ))
+        _ = assembler.consume(try decodeTurn(
+            #"{"turn_order":1,"turn_is_formatted":true,"end_of_turn":true,"transcript":"Again."}"#
+        ))
+        _ = assembler.consume(try decodeTurn(
+            #"{"turn_order":0,"turn_is_formatted":true,"end_of_turn":true,"transcript":"Again, corrected."}"#
+        ))
+
+        XCTAssertEqual(assembler.confirmedText, "Again, corrected. Again.")
+        XCTAssertEqual(assembler.latestInterim, "Later")
+        XCTAssertEqual(assembler.confirmedWithLatestInterim, "Again, corrected. Again. Later")
+    }
+
+    func testPCMFramerEmitsHundredMillisecondsAndPadsShortTailToFifty() {
+        var framer = AssemblyAIPCMFramer(sampleRate: 1_000)
+        XCTAssertNil(framer.finish())
+        XCTAssertTrue(framer.append(Data(repeating: 1, count: 99)).isEmpty)
+        let frames = framer.append(Data(repeating: 2, count: 151))
+
+        XCTAssertEqual(frames.map(\.count), [200])
+        XCTAssertEqual(Array(frames[0].prefix(99)), [UInt8](repeating: 1, count: 99))
+        XCTAssertEqual(framer.finish()?.count, 100)
+
+        var unpadded = AssemblyAIPCMFramer(sampleRate: 1_000)
+        XCTAssertTrue(unpadded.append(Data(repeating: 3, count: 120)).isEmpty)
+        XCTAssertEqual(unpadded.finish(), Data(repeating: 3, count: 120))
+    }
+
     private func decodeTurn(_ json: String) throws -> AssemblyAIStreamingTurn {
         try JSONDecoder().decode(AssemblyAIStreamingTurn.self, from: Data(json.utf8))
     }

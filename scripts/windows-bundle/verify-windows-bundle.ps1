@@ -33,7 +33,10 @@ $StatusDllNotFound = -1073741515  # NTSTATUS 0xC0000135 as a signed exit code
 # Loaded only into emulated x64 or ARM64EC, and WOW64, processes.
 $EmulationModules = @('xtajit.dll', 'xtajit64.dll', 'xtajit64se.dll', 'xtabase.dll', 'wow64.dll', 'wow64base.dll',
     'wow64con.dll', 'wow64cpu.dll', 'wow64win.dll', 'wowarmhw.dll')
-$ProcessMachine = Add-Type -Namespace Jsti -Name ProcessMachine -PassThru -MemberDefinition @'
+# Named apart from the per-run $processMachine results: PowerShell variable names
+# ignore case and functions see their caller's locals, so a shared name would
+# hand Get-ProcessMachine the caller's $null instead of this type.
+$MachineQuery = Add-Type -Namespace Jsti -Name ProcessMachine -PassThru -MemberDefinition @'
 [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
 public static extern bool GetProcessInformation(System.IntPtr process, int informationClass, byte[] information, int size);
 [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
@@ -44,7 +47,7 @@ public static extern bool IsWow64Process2(System.IntPtr process, out ushort proc
 # Windows 11 and later), or $null when the query is unavailable.
 function Get-ProcessMachine([System.Diagnostics.Process] $process) {
     $information = New-Object byte[] 8
-    if (-not $ProcessMachine::GetProcessInformation($process.Handle, 9, $information, 8)) { return $null }
+    if (-not $script:MachineQuery::GetProcessInformation($process.Handle, 9, $information, 8)) { return $null }
     return [int][System.BitConverter]::ToUInt16($information, 0)
 }
 
@@ -72,7 +75,7 @@ $evidenceDirectory = (New-Item -ItemType Directory -Force -Path (Join-Path $work
 $failures = [System.Collections.Generic.List[string]]::new()
 $runnerProcessMachine = [uint16]0
 $runnerNativeMachine = [uint16]0
-[void] $ProcessMachine::IsWow64Process2([System.Diagnostics.Process]::GetCurrentProcess().Handle,
+[void] $MachineQuery::IsWow64Process2([System.Diagnostics.Process]::GetCurrentProcess().Handle,
     [ref] $runnerProcessMachine, [ref] $runnerNativeMachine)
 $report = [ordered]@{
     schemaVersion = 1

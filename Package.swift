@@ -334,7 +334,9 @@ if linuxTargetBuild {
             // xtst.pc links only libXtst; the core Xlib calls need libX11.
             linkerSettings: [.linkedLibrary("X11")]
         ),
-        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "SpeakSync", "CLinuxSupport"]),
+        .target(
+            name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "SpeakSync", "SpeakDesktopSync", "CLinuxSupport"]
+        ),
         .target(
             name: "SpeakLinuxWebSocket",
             dependencies: [
@@ -355,7 +357,10 @@ if linuxTargetBuild {
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
-            dependencies: ["SpeakCore", "SpeakSync", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
+            dependencies: [
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakDesktopSync", "SpeakLinuxPlatform", "CLinuxSupport",
+                "SpeakTestSupport"
+            ]
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",

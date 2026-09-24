@@ -42,6 +42,19 @@ final class DesktopLocalTranscriptionTests: XCTestCase {
         )
     }
 
+    func testLinuxOffersTheSamePickerOptionsAsWindows() {
+        let linux = DesktopLocalTranscription.options(host: .linux)
+        let windows = DesktopLocalTranscription.options(host: .windows)
+        XCTAssertEqual(linux.map(\.id), windows.map(\.id))
+        XCTAssertEqual(linux.map(\.displayName), windows.map(\.displayName))
+        XCTAssertEqual(linux.first?.displayName, "Whisper Tiny (on-device)")
+        XCTAssertEqual(DesktopLocalTranscription.models(host: .linux), DesktopLocalTranscription.models(host: .windows))
+        XCTAssertEqual(
+            DesktopLocalTranscription.model(for: "local/whisperkit/small", host: .linux)?.artifact.filename,
+            "ggml-small.bin"
+        )
+    }
+
     func testHistoryAndProfilesUseTheRuntimeNeutralName() {
         XCTAssertEqual(
             DesktopHistorySearch.modelDisplayName(for: "local/whisperkit/small"), "Whisper Small (on-device)"

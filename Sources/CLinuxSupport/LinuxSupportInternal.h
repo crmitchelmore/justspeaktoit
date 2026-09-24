@@ -20,4 +20,16 @@ void jsti_main_call_complete(JSTIMainCall *call);
 /* TRUE while the GTK window's main loop is running. */
 gboolean jsti_window_loop_running(void);
 
+/* For window sections kept in their own files: the window's ordered,
+ * thread-safe setter queue (apply runs on the GTK main thread while the window
+ * exists; destroy always runs) and its event callback (main thread only). */
+typedef void (*jsti_window_apply_fn)(gpointer data);
+int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy);
+void jsti_window_emit(gint32 event, const char *text, gint32 index);
+
+/* LinuxLocalModels.c: the Local models group, built once with the window,
+ * and its part of the window self-test. */
+struct _GtkWidget *jsti_local_models_group_new(void);
+int32_t jsti_local_models_self_test(char *error, size_t capacity);
+
 #endif

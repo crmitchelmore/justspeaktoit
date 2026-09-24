@@ -52,11 +52,13 @@ enum LinuxWindow {
 
     /// Model rows in global slot order, with each visible slot's picker position.
     static func modelRows(_ strings: Strings) -> [JSTIModelRow] {
-        let state = DesktopHostModels.snapshot
+        // On-device models carry their install state, e.g. "— download in Local models".
+        let (state, localLabels) = DesktopHostModels.labelledSnapshot
         let order = DesktopHostModels.displayOrder(state)
         return state.entries.enumerated().map { index, entry in
             JSTIModelRow(
-                id: strings.add(entry.option.id), name: strings.add(DesktopHostModels.label(for: entry)),
+                id: strings.add(entry.option.id),
+                name: strings.add(DesktopHostModels.label(for: entry, localLabels: localLabels)),
                 is_live: entry.isLive ? 1 : 0, display_order: Int32(order[index] ?? -1)
             )
         }

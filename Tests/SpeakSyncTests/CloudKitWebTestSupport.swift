@@ -283,18 +283,22 @@ actor RecordingSleeper {
     }
 }
 
-/// Polls an asynchronous condition, yielding between checks.
+/// Polls an asynchronous condition, yielding between checks, until it holds
+/// or `timeout` passes. The deadline only bounds a failing test: a count of
+/// yields finished in under a second, before a busy runner's URLSession had
+/// handed a request to the stub protocol.
 func eventually(
-    attempts: Int = 5_000,
+    within timeout: Duration = .seconds(10),
     file: StaticString = #filePath,
     line: UInt = #line,
     _ condition: () async -> Bool
 ) async throws {
-    for _ in 0..<attempts {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
         if await condition() { return }
         await Task.yield()
     }
-    XCTFail("Condition was not satisfied after \(attempts) attempts", file: file, line: line)
+    XCTFail("Condition was not satisfied within \(timeout)", file: file, line: line)
     throw CloudKitWebTestError.conditionNotMet
 }
 

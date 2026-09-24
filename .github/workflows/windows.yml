@@ -2,7 +2,8 @@ name: Windows and Portable Swift
 
 on:
   push:
-    branches: [main]
+    # The consolidation branch runs here until its PR exists; drop it before merging.
+    branches: [main, claude/windows-linux-migration-tyshm0]
     paths:
       - Package.swift
       - Sources/SpeakCore/**

@@ -2,7 +2,8 @@ name: Linux Desktop
 
 on:
   push:
-    branches: [main, claude/linux-port]
+    # The consolidation branch runs here until its PR exists; drop it before merging.
+    branches: [main, claude/windows-linux-migration-tyshm0]
     paths:
       - Package.swift
       - Sources/SpeakCore/**

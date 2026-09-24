@@ -237,6 +237,10 @@ extern "C" JSTIWhisperRuntime *jsti_whisper_runtime_open(const char *directory, 
         return nullptr;
     }
     api.logSet(logCallback, nullptr);
+    // ggml's loader also loads whatever GGML_BACKEND_PATH names, so an inherited
+    // variable could put another DLL into the app. Removing it from the shared
+    // UCRT environment keeps registration to this directory.
+    _putenv_s("GGML_BACKEND_PATH", "");
     // Registers the best CPU variant and, when its loader and a driver exist,
     // Vulkan, from this directory only.
     const std::string backendDirectory = jsti::utf8(folder);

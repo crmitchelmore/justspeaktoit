@@ -50,6 +50,14 @@ enum {
     JSTI_EVENT_AZURE_RESOURCE = 34
 };
 
+/* Read aloud. Linux-only numbers 40-44. */
+enum {
+    /* text: the selected record id; the displayed transcript is captured
+     * with jsti_window_transcript_snapshot while this event runs. */
+    JSTI_EVENT_READ_ALOUD = 40,
+    JSTI_EVENT_VOICE_OUTPUT = 41 /* index: position in the voice list */
+};
+
 /* Recording state for jsti_window_update: -1 keeps the current state. */
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
 
@@ -100,6 +108,9 @@ int32_t jsti_window_set_post_processing(
 int32_t jsti_window_set_azure_resource(const char *endpoint);
 /* The shortcut behaviour picker, indexed as JSTI_EVENT_SHORTCUT_STYLE. */
 int32_t jsti_window_set_shortcut_style(int32_t index);
+/* The Read aloud voices in picker order and the saved one. Read aloud is
+ * offered once at least one voice is listed. */
+int32_t jsti_window_set_voices(const char *const *names, size_t count, int32_t selected);
 /* Main thread only: the transcript and version the window displays now. */
 int32_t jsti_window_transcript_snapshot(char *buffer, size_t capacity, size_t *required);
 int32_t jsti_window_transcript_variant(void);

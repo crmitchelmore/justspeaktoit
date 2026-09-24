@@ -325,7 +325,9 @@ enum SpeakWindowsMain {
         }
     }
 
-    private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+    /// Hands every dialog its saved state and restores services before the
+    /// window opens.
+    private static func configureWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
         let warning = try await Task.detached {
@@ -343,6 +345,10 @@ enum SpeakWindowsMain {
         await restoreServices(holder)
         try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
+    }
+
+    private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
+        try await configureWindow(controller: controller, holder: holder)
         let strings = WindowsModels.all.map { Array($0.displayName.utf8CString) }
         let pointers = strings.map { chars -> UnsafeMutablePointer<CChar> in
             let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)

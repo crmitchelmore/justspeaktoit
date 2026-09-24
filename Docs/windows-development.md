@@ -449,6 +449,9 @@ reused; its sherpa and bzip2 path is not.
   runtime frees the model only if it was loaded from the removed file, checked
   under the lock it loads under, so a model loaded in its place stays warm.
   Deleting first is safe: the runtime closes a model's file once it is loaded.
+  The controller side of downloads, readiness, recognition and removal lives
+  in `SpeakDesktopHost` (`DesktopHostLocalModelManagement.swift`), shared with
+  Linux; `WindowsLocalModels.swift` supplies CNG, `whisper.dll` and the dialog.
 - **Controls.** The window's Source picker chooses Remote or Local above Batch or
   Live (Local has no live models yet, so Mode hides for it); Remote Batch,
   Remote Live and Local keep separate saved models. Local

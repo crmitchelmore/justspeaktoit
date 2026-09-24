@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakDesktopHost
 import SpeakWindowsPlatform
 import CWindowsSupport
@@ -64,10 +65,13 @@ func voiceOutputEvent(_ index: Int32, _ context: UnsafeMutableRawPointer?) {
 }
 
 /// The controller's Read aloud state. The engine and its private folder are
-/// created on first use, never at launch.
+/// created on first use, never at launch. Which Read aloud may still report
+/// is decided by the controller's shared `playbackRequests`.
 struct WindowsReadAloudState {
     var task: Task<Void, Never>?
-    var revision: UInt64 = 0
+    /// Keeps the record's playback controls active, so Pause and Stop work
+    /// while segments are synthesised and between them.
+    var speech: WindowsAudioPlaybackController.Speech?
     private(set) var engine: WindowsVoiceOutput?
 
     mutating func output(directory: URL) -> WindowsVoiceOutput? {
@@ -110,11 +114,19 @@ extension WindowsAppController {
             return
         }
         stopReadAloud()
+        let speech: WindowsAudioPlaybackController.Speech
+        do {
+            // Playback stops now, and the record's controls stay active until the speech ends.
+            speech = try playback.beginSpeech(recordID: id)
+        } catch {
+            update("Read aloud failed: \(error.localizedDescription)")
+            return
+        }
         let voice = voiceOutputSettings().voice
         let effects = effects
         let playback = playback
-        let revision = readAloudState.revision &+ 1
-        readAloudState.revision = revision
+        let ticket = playbackRequests.begin()
+        readAloudState.speech = speech
         update("Reading aloud with \(voice.name)…")
         readAloudState.task = Task {
             var outcome: String?
@@ -125,7 +137,7 @@ extension WindowsAppController {
                     _ = try await voiceOutput.speak(request, credential: {
                         try effects.apiKey(name: VoiceOutputProvider.deepgram.apiKeyIdentifier)
                     }, through: { file in
-                        try await playback.playToCompletion(recordID: id, path: file.path)
+                        try await playback.playToCompletion(speech, path: file.path)
                     })
                 }
                 outcome = "Finished reading aloud."
@@ -136,13 +148,13 @@ extension WindowsAppController {
             } catch {
                 outcome = "Read aloud failed: \(error.localizedDescription)"
             }
-            self.finishReadAloud(revision: revision, status: outcome)
+            self.finishReadAloud(ticket, status: outcome)
         }
     }
 
-    private func finishReadAloud(revision: UInt64, status: String?) {
-        guard readAloudState.revision == revision else { return }
-        readAloudState.task = nil
+    private func finishReadAloud(_ ticket: DesktopPlaybackRequests.Ticket, status: String?) {
+        guard playbackRequests.isCurrent(ticket) else { return }
+        WindowsHostPlatform.stopReadAloud(&readAloudState, playback: playback)
         guard !closed, !busy, recording == nil, let status else { return }
         update(status)
     }

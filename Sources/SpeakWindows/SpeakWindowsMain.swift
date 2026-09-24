@@ -3,11 +3,6 @@ import CWindowsSupport
 import SpeakDesktop
 import SpeakWindowsPlatform
 
-private enum WindowsHistoryEvent: Sendable {
-    case selection(String)
-    case version(String, DesktopTranscriptVariant)
-}
-
 final class WindowsEventContext {
     let controller: WindowsAppController
     let smokeTest: Bool
@@ -15,7 +10,7 @@ final class WindowsEventContext {
     var microphoneMonitor: WindowsMicrophoneMonitor?
     var cloudSync: WindowsCloudSync?
     let search: WindowsSearchCoalescer
-    private let historyEvents: DesktopEventDispatcher<WindowsHistoryEvent>
+    private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
     lazy var hotKeys = WindowsHotKeyGestures { [controller] request in await controller.hotKey(request) }
@@ -32,11 +27,14 @@ final class WindowsEventContext {
         self.copies = DesktopTranscriptCopyDispatcher { text, variant in
             await controller.copyTranscript(text, variant: variant)
         }
-        self.historyEvents = DesktopEventDispatcher { event in
+        self.historyEvents = DesktopEventDispatcher(coalescing: DesktopHistoryEvent.coalesce) { event in
             switch event {
             case .selection(let identifier): await controller.selectHistory(identifier)
             case .version(let identifier, let variant):
                 await controller.selectTranscriptVariant(variant, identifier: identifier)
+            case .playPause(let identifier): await controller.playbackToggle(identifier)
+            case .stop: await controller.playbackStop()
+            case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
             }
         }
     }
@@ -49,6 +47,11 @@ final class WindowsEventContext {
     func selectHistoryVersion(_ variant: DesktopTranscriptVariant, identifier: String) {
         historyEvents.submit(.version(identifier, variant))
     }
+
+    /// Play/Pause, Stop and Read aloud join the selection order: a click on a
+    /// newly selected row reaches it after that selection, and Stop reaches
+    /// the host after the clicks before it, never before them.
+    func submitHistoryPlayback(_ event: DesktopHistoryEvent) { historyEvents.submit(event) }
 
     // Called only by the native UI thread. Persist settings in UI event order,
     // and let shutdown drain these short operations before closing the actor.
@@ -64,38 +67,6 @@ final class WindowsEventContext {
     func recordingTextOutput() -> Task<WindowsTextOutputOptions, Never> {
         let controller = controller
         return settings.read { await controller.textOutputOptions() }
-    }
-}
-
-/// Coalesces native search keystrokes. The UI thread only records the newest
-/// query and one task drains it, so a typing burst never queues an actor call
-/// per keystroke and the latest query always wins.
-final class WindowsSearchCoalescer: @unchecked Sendable {
-    private let lock = NSLock()
-    private var pending: String?
-    private var draining = false
-    private let perform: @Sendable (String) async -> Void
-
-    init(perform: @escaping @Sendable (String) async -> Void) { self.perform = perform }
-
-    func submit(_ query: String) {
-        lock.lock()
-        pending = query
-        let alreadyDraining = draining
-        draining = true
-        lock.unlock()
-        guard !alreadyDraining else { return }
-        Task { [self] in
-            while let query = self.next() { await self.perform(query) }
-        }
-    }
-
-    private func next() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let query = pending else { draining = false; return nil }
-        pending = nil
-        return query
     }
 }
 
@@ -136,8 +107,7 @@ func windowEvent(_ event: Int32, _ text: UnsafePointer<CChar>?, _ index: Int32, 
 private func readAloudEvent(_ identifier: String, holder: WindowsEventContext) {
     do {
         let text = try WindowsNative.displayedTranscript()
-        let controller = holder.controller
-        Task { await controller.readAloud(identifier, text: text) }
+        holder.submitHistoryPlayback(.readAloud(identifier, text: text))
     } catch { WindowsNative.update(error.localizedDescription) }
 }
 
@@ -186,9 +156,8 @@ private func openProfiles(_ holder: WindowsEventContext) {
 
 // Copy and version events read the displayed version here, on the UI thread,
 // so it is paired with the record ID the same event carries. Playback events
-// carry the selected record ID for the same reason.
+// carry the selected record ID for the same reason, in the selection order.
 private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
-    let controller = holder.controller
     switch event {
     case 3:
         let variant = WindowsNative.displayedTranscriptVariant()
@@ -202,8 +171,8 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
         if let variant = WindowsNative.displayedTranscriptVariant() {
             holder.selectHistoryVersion(variant, identifier: value)
         }
-    case 18: Task { await controller.playbackToggle(value) }
-    case 19: Task { await controller.playbackStop() }
+    case 18: holder.submitHistoryPlayback(.playPause(value))
+    case 19: holder.submitHistoryPlayback(.stop)
     default: break
     }
 }
@@ -296,6 +265,8 @@ enum SpeakWindowsMain {
                 try WindowsNative.checked { jsti_clipboard_output_self_test($0, $1) }
                 try await WindowsTextOutputSelfTest.run()
                 try await WindowsHotKeySelfTest.run()
+                try await WindowsHistoryRetrySelfTest.run()
+                try await WindowsPostProcessingSelfTest.run()
                 try WindowsNative.storageMediaAndAutomationSelfTests()
                 try await WindowsLocalSelfTest.run()
                 guard !DesktopTranscription.batchModels.isEmpty else {
@@ -344,6 +315,16 @@ enum SpeakWindowsMain {
         holder.hotKeys.configure(style: hotKey.activation)
     }
 
+    /// A hand-edited endpoint the dialog cannot show falls back to none rather
+    /// than blocking launch; the saved setting is unchanged until the next Apply.
+    private static func configureAzureResource(_ holder: WindowsEventContext) async throws {
+        let context = Unmanaged.passUnretained(holder).toOpaque()
+        guard WindowsNative.configureAzureResource(await holder.controller.azureResourceEndpoint(), context: context)
+                || WindowsNative.configureAzureResource("", context: context) else {
+            throw WindowsNativeError(message: "Could not configure the Azure Speech resource.")
+        }
+    }
+
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let microphone = await controller.selectedMicrophone()
         let smokeTest = holder.smokeTest
@@ -358,6 +339,7 @@ enum SpeakWindowsMain {
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)
+        try await configureAzureResource(holder)
         await restoreServices(holder)
         try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
@@ -389,6 +371,7 @@ enum SpeakWindowsMain {
         // this context once the holder can be released.
         jsti_window_clear_text_output()
         jsti_window_clear_hotkey()
+        jsti_window_clear_azure_resource()
         await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
         await holder.hotKeys.drain()

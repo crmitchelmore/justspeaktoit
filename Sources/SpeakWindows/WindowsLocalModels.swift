@@ -16,6 +16,11 @@ struct WindowsLocalModelsState {
     var runtime: WindowsWhisperRuntime?
     var runtimeFailure: String?
     var context: UnsafeMutableRawPointer?
+    /// The models recordings and transcriptions use, and the downloads and
+    /// removals that own model files.
+    var ownership = LocalModelOwnership()
+    /// Deletes removed models and frees the runtime's cache off the actor.
+    let teardown = LocalModelTeardown()
 }
 
 extension WindowsAppController {
@@ -51,6 +56,9 @@ extension WindowsAppController {
         guard let spec = DesktopLocalTranscription.model(for: model, host: .windows) else {
             return "This on-device model is not available in this Windows build."
         }
+        if localModels.ownership.isRemoving(spec.catalogueID) {
+            return "\(spec.displayName) is being removed from this PC."
+        }
         guard localRuntimeBundled else {
             return "This build does not include the on-device speech runtime. Use the Windows bundle or package."
         }
@@ -82,6 +90,9 @@ extension WindowsAppController {
             throw DesktopTranscriptionError.unsupportedModel
         }
         if let problem = localReadiness(model) { throw WindowsNativeError(message: problem) }
+        // Checked and held together: no removal can start before recognition ends.
+        let used = beginLocalUse(model)
+        defer { endLocalUse(used) }
         let file = try localInstaller.verifiedFile(for: .init(spec))
         let runtime = try await localRuntime()
         update("Transcribing on this PC with \(spec.displayName)\u{2026} Your recording is saved locally.", state: 2)
@@ -123,7 +134,8 @@ extension WindowsAppController {
     }
 
     private func startDownload(_ spec: WindowsModelSpec) {
-        guard localModels.downloads[spec.catalogueID] == nil else { return }
+        // A download or a removal already running for this model owns its files.
+        guard localModels.ownership.beginDownload(spec.catalogueID) else { return }
         let installer = localInstaller
         let identifier = spec.catalogueID
         let item = LocalModelInstaller.Item(spec)
@@ -156,6 +168,7 @@ extension WindowsAppController {
     }
 
     private func finishDownload(_ spec: WindowsModelSpec, failure: String?) {
+        localModels.ownership.endDownload(spec.catalogueID)
         localModels.downloads[spec.catalogueID] = nil
         localModels.progress[spec.catalogueID] = nil
         if let failure {
@@ -163,20 +176,6 @@ extension WindowsAppController {
         } else {
             update("\(spec.displayName) downloaded and verified. Choose it under Source: Local.")
         }
-        publishLocalModels()
-    }
-
-    private func removeLocalModel(_ spec: WindowsModelSpec) {
-        guard localModels.downloads[spec.catalogueID] == nil else { return }
-        if busy || recording != nil, settings.model == spec.catalogueID {
-            update("\(spec.displayName) is in use. Remove it after the current recording finishes.")
-            return
-        }
-        do {
-            localModels.runtime?.releaseModel()
-            try localInstaller.remove(.init(spec))
-            update("\(spec.displayName) removed from this PC.")
-        } catch { update("\(spec.displayName) could not be removed: \(error.localizedDescription)") }
         publishLocalModels()
     }
 
@@ -208,32 +207,9 @@ extension WindowsAppController {
         var labels: [String: String] = [:]
         var rows: [WindowsLocalModelRow] = []
         for spec in DesktopLocalTranscription.models(host: .windows) {
-            let size = Self.megabytes(spec.artifact.byteCount)
-            let state: Int32
-            let detail: String
-            if let received = localModels.progress[spec.catalogueID], localModels.downloads[spec.catalogueID] != nil {
-                state = Int32(JSTI_LOCAL_MODEL_DOWNLOADING.rawValue)
-                detail = "Downloading \(received * 100 / max(spec.artifact.byteCount, 1))% of \(size)"
-                labels[spec.catalogueID] = "downloading"
-            } else {
-                switch installer.state(of: .init(spec)) {
-                case .installed:
-                    state = Int32(JSTI_LOCAL_MODEL_INSTALLED.rawValue)
-                    detail = "\(size) \u{00B7} Downloaded and verified"
-                case .partial(let received, let total):
-                    state = Int32(JSTI_LOCAL_MODEL_PARTIAL.rawValue)
-                    detail = "\(size) \u{00B7} \(received * 100 / max(total, 1))% downloaded, paused"
-                    labels[spec.catalogueID] = "download paused"
-                case .notInstalled:
-                    state = Int32(JSTI_LOCAL_MODEL_NOT_INSTALLED.rawValue)
-                    detail = "\(size) \u{00B7} Not downloaded"
-                    labels[spec.catalogueID] = "download in Local models"
-                }
-            }
-            let about = "\(spec.summary) Whisper weights (\(spec.quantization), \(spec.artifact.license) licence) "
-                + "from huggingface.co/\(WhisperCppModels.repository), pinned by SHA-256 "
-                + "\(spec.artifact.sha256.prefix(12))\u{2026} and verified after download."
-            rows.append(WindowsLocalModelRow(name: spec.displayName, detail: detail, about: about, state: state))
+            let (row, label) = localModelRow(spec, installer: installer)
+            rows.append(row)
+            labels[spec.catalogueID] = label
         }
         WindowsModels.setLocalLabels(labels)
         publishModelCatalog(modelCatalog.snapshot)
@@ -252,6 +228,45 @@ extension WindowsAppController {
                 )
             }
         }
+    }
+
+    /// One model's row in the Local models dialog, and the state shown after
+    /// its name in the model picker unless it is simply downloaded.
+    private func localModelRow(
+        _ spec: WindowsModelSpec, installer: LocalModelInstaller
+    ) -> (row: WindowsLocalModelRow, label: String?) {
+        let size = Self.megabytes(spec.artifact.byteCount)
+        let state: Int32
+        let detail: String
+        var label: String?
+        if let received = localModels.progress[spec.catalogueID], localModels.downloads[spec.catalogueID] != nil {
+            state = Int32(JSTI_LOCAL_MODEL_DOWNLOADING.rawValue)
+            detail = "Downloading \(received * 100 / max(spec.artifact.byteCount, 1))% of \(size)"
+            label = "downloading"
+        } else if localModels.ownership.isRemoving(spec.catalogueID) {
+            // Only Remove stays enabled, and it is ignored until this removal finishes.
+            state = Int32(JSTI_LOCAL_MODEL_INSTALLED.rawValue)
+            detail = "\(size) \u{00B7} Removing\u{2026}"
+            label = "removing"
+        } else {
+            switch installer.state(of: .init(spec)) {
+            case .installed:
+                state = Int32(JSTI_LOCAL_MODEL_INSTALLED.rawValue)
+                detail = "\(size) \u{00B7} Downloaded and verified"
+            case .partial(let received, let total):
+                state = Int32(JSTI_LOCAL_MODEL_PARTIAL.rawValue)
+                detail = "\(size) \u{00B7} \(received * 100 / max(total, 1))% downloaded, paused"
+                label = "download paused"
+            case .notInstalled:
+                state = Int32(JSTI_LOCAL_MODEL_NOT_INSTALLED.rawValue)
+                detail = "\(size) \u{00B7} Not downloaded"
+                label = "download in Local models"
+            }
+        }
+        let about = "\(spec.summary) Whisper weights (\(spec.quantization), \(spec.artifact.license) licence) "
+            + "from huggingface.co/\(WhisperCppModels.repository), pinned by SHA-256 "
+            + "\(spec.artifact.sha256.prefix(12))\u{2026} and verified after download."
+        return (WindowsLocalModelRow(name: spec.displayName, detail: detail, about: about, state: state), label)
     }
 
     static func megabytes(_ bytes: Int64) -> String {

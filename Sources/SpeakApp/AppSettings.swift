@@ -1127,28 +1127,11 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
         rawValue: defaults.string(forKey: DefaultsKey.transcriptionMode.rawValue)
           ?? TranscriptionMode.liveNative.rawValue) ?? .liveNative
     transcriptionMode = loadedTranscriptionMode
-    let liveModel = defaults.string(forKey: DefaultsKey.liveTranscriptionModel.rawValue)
-      ?? AppleLocalModels.preferredSpeechModelID
-    let legacyAssemblyAILiveIDs: Set<String> = [
-      "universal-streaming",
-      "universal-streaming-english",
-      "universal-streaming-multilingual",
-      "assemblyai/universal-streaming",
-      "assemblyai/universal-streaming-english",
-      "assemblyai/universal-streaming-multilingual",
-      "assemblyai/u3-rt-pro-streaming"
-    ]
-    let migratedLive: String
-    if liveModel.hasPrefix("deepgram/") {
-      migratedLive = "deepgram/nova-3-streaming"
-    } else if legacyAssemblyAILiveIDs.contains(liveModel)
-      || (liveModel.hasPrefix("assemblyai/")
-        && liveModel != AssemblyAIModels.universal35ProStreamingID) {
-      migratedLive = AssemblyAIModels.universal35ProStreamingID
-    } else {
-      migratedLive = liveModel
-    }
-    liveTranscriptionModel = ModelCatalog.normalizedLiveTranscriptionModel(migratedLive)
+    // Remote choices relaunch as saved unless the shared catalogue retired
+    // them, so a current entry such as Deepgram Flux is never reset.
+    liveTranscriptionModel =
+      ModelCatalog.normalizedLiveTranscriptionModel(
+        defaults.string(forKey: DefaultsKey.liveTranscriptionModel.rawValue))
     liveTranscriptionSelection = LiveTranscriptionSelection(defaults: defaults)
     rememberedLocalTranscriptionSource =
       LocalTranscriptionSource(

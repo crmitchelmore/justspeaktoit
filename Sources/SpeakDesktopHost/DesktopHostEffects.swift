@@ -38,7 +38,10 @@ package protocol DesktopHostEffects<Platform>: Sendable {
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture
-    func makeLiveClient(model: String, key: String, language: String?) -> (any FinalizingStreamingTranscriptionClient)?
+    /// `azureEndpoint` is the saved Azure Speech resource; other routes ignore it.
+    func makeLiveClient(
+        model: String, key: String, language: String?, azureEndpoint: String
+    ) -> (any FinalizingStreamingTranscriptionClient)?
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<Platform>
     ) async throws -> TranscriptionResult

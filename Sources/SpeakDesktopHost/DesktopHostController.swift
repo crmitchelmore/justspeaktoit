@@ -22,6 +22,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package var localModel: String?
         // Local models dialog; absent lets whisper.cpp use a GPU when available.
         package var localUseGPU: Bool?
+        /// The Azure Speech resource dialog, under the Apple apps' key for the same
+        /// device-local value; absent means none, and recorded audio uses the region.
+        package var azureSpeechResourceEndpoint: String?
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -64,12 +67,14 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     package var busy = false
     package var closed = false
     private var shutdownComplete = false
-    var activeOperations = 0
+    package var activeOperations = 0
     private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     package var transcript = ""
     package var hotKeySession = DesktopHostHotKeySessionState()
     package var readAloudState = Platform.makeReadAloudState()
+    /// The one History Play or Read aloud request that may still start audio or report.
+    package var playbackRequests = DesktopPlaybackRequests()
     package var history: [UUID: DesktopRecordingStore.Record] = [:]
     /// Folded search text per record, refreshed only when a record is saved so
     /// each keystroke filters cached strings instead of re-normalising transcripts.
@@ -221,6 +226,8 @@ extension DesktopHostController {
             try await playback.stopAndWait()
             guard !closed else { return }
             _ = try requireCredentialOrLocalModel(settings.model)
+            let localModel = beginLocalUse(settings.model) // Held across the save until transcription ends.
+            defer { endLocalUse(localModel) }
             let source = URL(fileURLWithPath: path)
             try DesktopHostImport.validate(source)
             let id = UUID()
@@ -290,14 +297,14 @@ extension DesktopHostController {
 }
 
 extension DesktopHostController {
-    func saveRecord(_ record: DesktopRecordingStore.Record) async throws {
+    package func saveRecord(_ record: DesktopRecordingStore.Record) async throws {
         try await store.save(record)
         indexHistory(record)
         refreshHistory()
         cloudSync.historyChanged?()
     }
 
-    func finishOperation() {
+    package func finishOperation() {
         activeOperations -= 1
         guard activeOperations == 0 else { return }
         let waiters = operationWaiters
@@ -359,29 +366,12 @@ extension DesktopHostController {
             try JSONEncoder().encode(settings).write(
                 to: directory.appendingPathComponent("settings.json"), options: .atomic
             )
-            let hint = DesktopTranscription.provider(for: settings.model)?.apiKeyIdentifier
+            let hint = DesktopHostModels.provider(for: settings.model)?.apiKeyIdentifier
                 == AzureSpeechConfiguration.credentialIdentifier
-                ? " Enter Azure credentials as key:region (for example, your key followed by :uksouth)." : ""
+                ? DesktopHostAzureResource.selectionHint(for: settings.model) : ""
             if changed { publishModelCatalog(modelCatalog.snapshot) }
             update("Selected \(DesktopHostModels.all[index].displayName).\(hint)")
         } catch { update("Could not save settings: \(error.localizedDescription)") }
-    }
-
-    package func saveKey(_ key: String, modelIndex: Int) {
-        guard !closed, !busy, recording == nil else { return }
-        do {
-            guard DesktopHostModels.all.indices.contains(modelIndex),
-                  let provider = DesktopHostModels.provider(
-                    for: DesktopHostModels.all[modelIndex].id
-                  ) else { throw DesktopTranscriptionError.unsupportedModel }
-            let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty, provider.apiKeyIdentifier == AzureSpeechConfiguration.credentialIdentifier {
-                _ = try AzureSpeechConfiguration(credentials: cleaned)
-            }
-            try Platform.saveAPIKey(cleaned, name: provider.apiKeyIdentifier)
-            if provider.id == OpenRouterService.providerID { refreshModels(force: true) }
-            update(cleaned.isEmpty ? "API key removed." : "API key saved in \(Platform.credentialStoreName).")
-        } catch { update(error.localizedDescription) }
     }
 
     /// Text and version are the immutable display snapshot from the Copy click;

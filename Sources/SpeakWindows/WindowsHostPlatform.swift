@@ -99,10 +99,18 @@ enum WindowsHostPlatform: DesktopHostPlatform {
 
     package static func makeReadAloudState() -> WindowsReadAloudState { WindowsReadAloudState() }
 
-    package static func stopReadAloud(_ state: inout WindowsReadAloudState) {
+    /// Cancels the segment being synthesized, so no later one is admitted, and
+    /// returns the record's controls to idle once nothing more will be spoken.
+    package static func stopReadAloud(
+        _ state: inout WindowsReadAloudState, playback: WindowsAudioPlaybackController
+    ) {
         state.task?.cancel()
         state.task = nil
+        if let speech = state.speech { playback.endSpeech(speech) }
+        state.speech = nil
     }
+
+    package static func isReadingAloud(_ state: WindowsReadAloudState) -> Bool { state.task != nil }
 
     package static func makeLocalModelsState() -> WindowsLocalModelsState { WindowsLocalModelsState() }
 
@@ -116,6 +124,16 @@ enum WindowsHostPlatform: DesktopHostPlatform {
         _ audio: URL, model: String, language: String?, controller: isolated WindowsAppController
     ) async throws -> TranscriptionResult {
         try await controller.transcribeLocally(audio, model: model, language: language)
+    }
+
+    package static func beginLocalUse(_ model: String, controller: isolated WindowsAppController) -> String? {
+        guard let spec = DesktopLocalTranscription.model(for: model, host: .windows) else { return nil }
+        controller.localModels.ownership.beginUse(spec.catalogueID)
+        return spec.catalogueID
+    }
+
+    package static func endLocalUse(_ held: String, controller: isolated WindowsAppController) {
+        controller.localModels.ownership.endUse(held)
     }
 
     package static var defaultHotKey: WindowsHotKeySettings { WindowsHotKeySettings() }

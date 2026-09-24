@@ -96,13 +96,29 @@ From Apple's
   `ComparisonSyncCoordinator` (which the Apple engines now run on the main
   actor), `CloudKitWebServicesClient` with a FIFO session gate and bounded
   retries, the History and Compare Models web transports,
-  `CloudKitWebSyncAccount` (caller identity and zone creation),
-  `EncryptedSecretEnvelope` and the read-only `CloudKitWebKeySync`.
+  `CloudKitWebSyncAccount` (caller identity, account binding and zone
+  creation), `EncryptedSecretEnvelope` and the read-only `CloudKitWebKeySync`.
+  A web History pass is bound to the session its account was validated in:
+  its requests run in that session, and `CloudKitWebSessionFence` (a
+  `HistorySyncPassFence`) admits its cursor, change and acknowledgement writes
+  only while that session is current, under the same gate as sign-in and
+  sign-out. Rebinding the account holds that gate too. The store's commit
+  (`persistRemoteChanges`) is not admitted; it may only commit or report what
+  the admitted steps applied.
 - `Sources/SpeakDesktopSync` (portable): `DesktopHistorySyncStore` maps desktop
-  records onto the shared entry and keeps synced copies audio-less;
-  `DesktopCloudSyncStateStore` holds cursors, the bound account and
-  acknowledgements; `DesktopCloudSyncService` runs sign-in, passes and key
-  import; `DesktopCloudSyncConfiguration` resolves the build-time token.
+  records onto the shared entry and keeps synced copies audio-less, and its
+  commit only reports records already saved; `DesktopCloudSyncStateStore`
+  holds cursors, the bound account, acknowledgements and imported-key
+  bookkeeping; `DesktopCloudSyncService` runs sign-in, one pass at a time and
+  key import, with every History write, key change, key-sync key and success
+  time admitted in the validated session (`DesktopCloudSyncSteps`). It writes
+  nothing more once the session ends, a feature is turned off or the pass is
+  cancelled; earlier writes stay. Turning key import on or off takes a
+  revision, so an earlier turn-on still in progress stores nothing once a later
+  change begins, and a key saved by hand is written once its mark is saved;
+  `DesktopCloudSyncWork` owns a host's sync tasks so shutdown stops new work
+  and drains what runs within a bound; `DesktopCloudSyncConfiguration`
+  resolves the build-time token.
 - `Sources/SpeakWindowsPlatform/WindowsCloudKitNative.swift` with
   `Sources/CWindowsSupport/WindowsHTTP.cpp`, `WindowsLoopback.cpp` and
   `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener and the
@@ -121,10 +137,49 @@ From Apple's
   every platform: Mac-format records in and out, edits and tombstones through
   the cursor, both conflict directions, paging, expiry, account switches,
   consent, key unlock, wrong or reset passphrases and misfiled key records.
+  Held fixtures interrupt a pass between pages, batches and steps with a
+  sign-in, sign-out, History or key import turned off or cancellation
+  (including a transport that returns regardless), interrupt turning key import
+  on, and interleave account validations. A sync state file that cannot be
+  written shows that a typed key is not saved without its mark. Host shutdown
+  ownership is tested through `DesktopCloudSyncWork`.
 - `Tests/SpeakWindowsPlatformTests/WindowsCloudKitNativeTests.swift` serves the
   fake over a real loopback socket through WinHTTP, checks the sign-in callback
   and cancellation, and holds CNG to the independent PBKDF2 and AES-GCM vectors
   that the Apple implementation also meets.
+- The Windows executable's `--self-test` runs `WindowsPostProcessingSelfTest`:
+  the post-processing dialog's Apply through the real controller and settings
+  queue with a synthetic sync key hook, covering a typed and a blank key, a
+  setting saved while the key is saved, queued Applies, refused saves and
+  closing midway.
+
+## Changing Apple ID
+
+Signing out keeps this PC's sync state, so signing back in as the same Apple
+ID resumes where it stopped. Each pass, and turning key import on, first
+compares the signed-in user with the bound one. A different user resets the
+state kept for the previous one: the History cursor, acknowledgements, the
+marks for recordings deleted on its Mac, which API keys were imported, and the
+last sync time. Nothing is deleted from History or Credential Manager, and the
+previous account's iCloud data is untouched.
+
+What then reaches the new account is a product decision still open for
+review. Current behaviour, by kind of record:
+
+- **Recordings made on this PC** (audio here, origin `windows`) upload to the
+  new account, as on a first sign-in. A recording the previous account had
+  deleted on its Mac, and this PC kept, loses that mark and uploads too.
+- **Transcripts downloaded from the previous account** (audio-less copies of
+  its Mac History) also upload, keeping the Mac as their origin, so that
+  account's Mac transcripts appear in the new account. Switching back resets
+  again and carries the other account's copies the same way. Records are
+  matched by ID, so nothing is duplicated; the newer copy wins.
+- **API keys**: saved values stay in Credential Manager. The new account's
+  keys import as new, a deletion there removes no key saved before the switch,
+  and keys saved by hand are no longer told apart from imported ones. The
+  stored key-sync key belongs to the previous account: against the new one it
+  fails the passphrase check, so import turns off and asks for that account's
+  passphrase, or sync reports that the account has no synced keys.
 
 ## Limits
 
@@ -134,4 +189,5 @@ From Apple's
 | Expired cursor | No documented error code identifies an expired `syncToken`; it surfaces as a sync error. |
 | Loopback callback | Unverified until the API token is created. If CloudKit Console refuses `http://127.0.0.1:47823/cloudkit-sign-in`, a custom URI scheme through the MSIX manifest is needed instead. |
 | Token size | Credential Manager holds up to 2,560 bytes per credential. A longer web auth token would fail to save and ask for sign-in again. |
+| Keys typed by hand | The "saved by hand" mark is saved before the key. If the sync state cannot be saved, the key is not saved and the error is shown. If Credential Manager then refuses the key, or the app stops between the two, the key saved before stays and counts as typed: a deletion on the Mac no longer removes it, though a newer key from the Mac still replaces it. |
 | Compare Models, iPhone History, settings, Handoff | Not wired on Windows. |

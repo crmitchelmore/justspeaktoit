@@ -5,9 +5,18 @@ import SpeakDesktop
 /// Hooks the controller calls into a host's History sync once it is configured.
 package struct DesktopHostSyncHooks: Sendable {
     package var historyChanged: (@Sendable () -> Void)?
+    /// Saves a provider key typed in Settings or the post-processing dialog
+    /// (removes it when empty) and marks it saved by hand in the same step, so
+    /// a key imported from the Mac and deleted there cannot take a newly typed
+    /// key with it.
+    package var saveKeyByHand: (@Sendable (_ value: String, _ identifier: String) async throws -> Void)?
 
-    package init(historyChanged: (@Sendable () -> Void)? = nil) {
+    package init(
+        historyChanged: (@Sendable () -> Void)? = nil,
+        saveKeyByHand: (@Sendable (_ value: String, _ identifier: String) async throws -> Void)? = nil
+    ) {
         self.historyChanged = historyChanged
+        self.saveKeyByHand = saveKeyByHand
     }
 }
 
@@ -30,6 +39,13 @@ package extension DesktopHostPlatform where LocalModelsState == Void {
     static func makeLocalModelsState() {}
 }
 
+// Hosts without Read aloud keep no state and never speak.
+package extension DesktopHostPlatform where ReadAloudState == Void {
+    static func makeReadAloudState() {}
+    static func stopReadAloud(_ state: inout Void, playback: Playback) {}
+    static func isReadingAloud(_ state: Void) -> Bool { false }
+}
+
 package extension DesktopHostPlatform {
     static var localDeviceName: String { "this computer" }
 
@@ -42,9 +58,21 @@ package extension DesktopHostPlatform {
     ) async throws -> TranscriptionResult {
         throw DesktopTranscriptionError.unsupportedModel
     }
+
+    static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String? { nil }
+
+    static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>) {}
 }
 
 extension DesktopHostController {
+    /// Holds `model` while a recording, import or transcription uses it, when
+    /// it is an on-device model; pass the result to `endLocalUse`.
+    package func beginLocalUse(_ model: String) -> String? { Platform.beginLocalUse(model, controller: self) }
+
+    package func endLocalUse(_ held: String?) {
+        if let held { Platform.endLocalUse(held, controller: self) }
+    }
+
     /// The key a remote model needs, or an empty key after checking that an
     /// on-device model can run. Throws with the user-facing reason otherwise.
     @discardableResult

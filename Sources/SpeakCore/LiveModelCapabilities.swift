@@ -109,12 +109,22 @@ extension ModelCatalog {
             supportedSpeedModes: [.instant, .livePolish],
             supportsLanguageHint: true
         ),
+        // Ink-2's turns stream is English only and has no language field in
+        // its query or `config` message, so a selected language is reported as
+        // unavailable rather than sent.
         "cartesia/ink-2-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish]
         ),
+        // Gladia's trailing finals and `end_session` follow `stop_recording`.
+        // The macOS Gladia controller waits this window after its own
+        // `stop_recording`; the shared client used on iOS and Windows builds
+        // its whole finish bound from the same window. Its session request
+        // pins a selected language in `language_config.languages`, as the
+        // macOS controller and the iOS route already send it.
         "gladia/solaria-1-streaming": LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 1.5
+            postStopFinalizeBudget: GladiaLive.finalEventWindow,
+            supportsLanguageHint: true
         ),
         // Gemini finalises a turn after server-side VAD detects the pause; the
         // client audioStreamEnd flush needs a moment to bring the trailing
@@ -137,10 +147,13 @@ extension ModelCatalog {
         ),
         // Rev.ai finalises a segment as soon as its hypothesis stops changing,
         // so the incremental tail rewrite can polish each one. `EOS` returns a
-        // trailing hypothesis, which the budget keeps room for.
+        // trailing hypothesis, which the budget keeps room for. The stream's
+        // documented `language` query takes the selection, which the shared
+        // client maps to Rev.ai's own code.
         RevAIStreaming.liveCatalogID: LiveModelCapabilities(
             supportedSpeedModes: [.instant, .livePolish],
-            postStopFinalizeBudget: 2.0
+            postStopFinalizeBudget: 2.0,
+            supportsLanguageHint: true
         ),
         // Voxtral Realtime streams append-only deltas and emits no
         // per-utterance final: the authoritative transcript is the

@@ -139,10 +139,6 @@ enum LinuxHostPlatform: DesktopHostPlatform {
 
     package static func makePlayback() -> LinuxAudioPlayback { LinuxAudioPlayback() }
 
-    package static func makeReadAloudState() {}
-
-    package static func stopReadAloud(_ state: inout Void) {}
-
     // MARK: Shortcut text
 
     package static var defaultHotKey: LinuxHotKeySettings { LinuxHotKeySettings() }

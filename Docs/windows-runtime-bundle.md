@@ -7,8 +7,10 @@ tooling. This bundle closes that gap: a deterministic ZIP containing the
 **production executable, its resources and only the redistributable runtime
 DLLs it actually imports**, with licences, hashes and provenance. It is an
 **unsigned developer bundle**. It is not an installer, an updater, a signed
-release, an ARM64 build or evidence of physical audio, insertion or
-performance acceptance; those remain separate gates.
+release or evidence of physical audio, insertion or performance acceptance;
+those remain separate gates. This document describes the x64 bundle; the ARM64
+bundle, built from the native ARM64 build, is described in
+[Windows ARM64](windows-arm64.md).
 
 ## What the bundle contains
 
@@ -246,7 +248,8 @@ separate test-enabled executable, as before.
 - Code signing and SmartScreen reputation: the executable and archive are
   unsigned; the developer MSIX can be signed as described in
   [Docs/windows-installer.md](windows-installer.md#signing).
-- ARM64 Windows: only x64 is built and verified.
+- ARM64 Windows: `windows-arm64.yml` assembles an ARM64 bundle and runs it
+  natively ([Windows ARM64](windows-arm64.md)); it has no CI receipt yet.
 - Physical microphone, provider, insertion and performance acceptance, as
   recorded in [Docs/windows-development.md](windows-development.md).
 - Runtime updates: a newer Swift or Microsoft runtime requires re-pinning the

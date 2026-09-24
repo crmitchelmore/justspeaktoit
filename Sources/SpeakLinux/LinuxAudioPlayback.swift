@@ -81,7 +81,16 @@ final class LinuxAudioPlayback: DesktopHostPlayback, @unchecked Sendable {
         return true
     }
 
-    package func stop() { end(lock.withLock { () -> Run? in defer { current = nil }; return current }) }
+    /// Only the user's Stop is `announcing` and reports "Playback stopped.";
+    /// stopping for another row, recording or import leaves the status line
+    /// to that work.
+    package func stop(announcing: Bool = false) {
+        let run = lock.withLock { () -> Run? in defer { current = nil }; return current }
+        end(run)
+        guard announcing, let run else { return }
+        let handler = lock.withLock { status }
+        handler?(run.revision, "Playback stopped.")
+    }
 
     package func stop(unless recordID: UUID) {
         end(lock.withLock { () -> Run? in

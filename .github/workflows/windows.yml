@@ -161,6 +161,8 @@ jobs:
             $env:JSTI_WEBSOCKET_PROBE_PORT = [string]$ready.port
             $probe = Start-Process -FilePath (Get-Command swift).Source -PassThru -NoNewWindow `
               -ArgumentList @('test', '--configuration', 'release', '--skip-build', '--filter', 'WinHTTPRuntimeProbeTests', `
+                '--filter', 'GladiaWinHTTPRuntimeTests', '--filter', 'CartesiaWinHTTPRuntimeTests', `
+                '--filter', 'RevAIWinHTTPRuntimeTests', '--filter', 'AzureWinHTTPRuntimeTests', `
                 '--xunit-output', 'windows-websocket-tests.xml') `
               -RedirectStandardOutput windows-websocket-probe.log -RedirectStandardError windows-websocket-probe-errors.log
             if (-not $probe.WaitForExit(90000)) {

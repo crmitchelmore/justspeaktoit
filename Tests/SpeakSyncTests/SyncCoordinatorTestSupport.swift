@@ -11,14 +11,16 @@ actor HistoryHost {
         transport: any HistorySyncTransport,
         tokens: any SyncChangeTokenStore,
         cloudAvailable: Bool = true,
-        observer: (any HistorySyncStatusObserver)? = nil
+        observer: (any HistorySyncStatusObserver)? = nil,
+        fence: (any HistorySyncPassFence)? = nil
     ) {
         coordinator = HistorySyncCoordinator(
             transport: transport,
             tokenStore: tokens,
             cloudAvailable: cloudAvailable,
             observer: observer,
-            now: { Date(timeIntervalSince1970: 42) }
+            now: { Date(timeIntervalSince1970: 42) },
+            fence: fence
         )
     }
 
@@ -142,6 +144,60 @@ actor StatusRecorder: HistorySyncStatusObserver {
 
     func historySync(_ status: HistorySyncStatus, didChange field: HistorySyncStatus.Field) async {
         fields.append(field)
+    }
+}
+
+/// Holds the pass inside the first status assignment that matches, as a slow
+/// window would, so a test can change the session between pages or batches.
+actor HeldStatusObserver: HistorySyncStatusObserver {
+    /// The pass stopped syncing without reaching the hold.
+    struct NeverHeld: Error {}
+
+    private let predicate: @Sendable (HistorySyncStatus, HistorySyncStatus.Field) -> Bool
+    private var hasHeld = false
+    private var hasStopped = false
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var arrivals: [CheckedContinuation<Void, Error>] = []
+
+    init(holdWhen predicate: @escaping @Sendable (HistorySyncStatus, HistorySyncStatus.Field) -> Bool) {
+        self.predicate = predicate
+    }
+
+    var isHolding: Bool { waiter != nil }
+
+    /// Returns once the pass is held, however long its work before the hold
+    /// takes: its arrival ends the wait, not a count of scheduler turns.
+    /// Throws `NeverHeld` if the pass stops syncing first.
+    func waitUntilHolding() async throws {
+        guard waiter == nil else { return }
+        guard !hasStopped else { throw NeverHeld() }
+        try await withCheckedThrowingContinuation { (arrival: CheckedContinuation<Void, Error>) in
+            arrivals.append(arrival)
+        }
+    }
+
+    func historySync(_ status: HistorySyncStatus, didChange field: HistorySyncStatus.Field) async {
+        if field == .isSyncing, !status.isSyncing {
+            hasStopped = true
+            resolveArrivals(.failure(NeverHeld()))
+        }
+        guard !hasHeld, predicate(status, field) else { return }
+        hasHeld = true
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            waiter = continuation
+            resolveArrivals(.success(()))
+        }
+    }
+
+    func release() {
+        waiter?.resume()
+        waiter = nil
+    }
+
+    private func resolveArrivals(_ outcome: Result<Void, Error>) {
+        let waiting = arrivals
+        arrivals.removeAll()
+        waiting.forEach { $0.resume(with: outcome) }
     }
 }
 

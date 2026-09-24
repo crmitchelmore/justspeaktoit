@@ -261,11 +261,13 @@ final class DesktopLiveSessionTests: XCTestCase {
 }
 
 extension DesktopLiveSessionTests {
+    // One client-type expectation per projected provider: branches grow with the route list, not logic.
+    // swiftlint:disable:next cyclomatic_complexity
     func testLiveProjectionAndDescriptorsUseCanonicalCatalogueAndRoutes() throws {
         let canonical = ModelCatalog.liveTranscription.filter {
             guard let route = LiveTranscriptionRouting.route(for: $0.id) else { return false }
-            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral]
-                .contains(route.provider) || route.modelID == XAISpeechToText.liveCatalogID
+            return [.deepgram, .assemblyai, .openai, .speechmatics, .soniox, .elevenlabs, .mistral, .gladia, .cartesia,
+                    .revai, .azure].contains(route.provider) || route.modelID == XAISpeechToText.liveCatalogID
         }
         XCTAssertFalse(canonical.isEmpty)
         XCTAssertTrue(canonical.contains { $0.id == XAISpeechToText.liveCatalogID })
@@ -288,6 +290,10 @@ extension DesktopLiveSessionTests {
             if route.provider == .soniox { XCTAssertTrue(client is SonioxLiveClient) }
             if route.provider == .elevenlabs { XCTAssertTrue(client is ElevenLabsLiveClient) }
             if route.provider == .mistral { XCTAssertTrue(client is MistralVoxtralLiveClient) }
+            if route.provider == .gladia { XCTAssertTrue(client is GladiaLiveClient) }
+            if route.provider == .cartesia { XCTAssertTrue(client is CartesiaLiveClient) }
+            if route.provider == .revai { XCTAssertTrue(client is RevAILiveClient) }
+            if route.provider == .azure { XCTAssertTrue(client is AzureVoiceLiveClient) }
             if route.provider == .openai {
                 XCTAssertTrue(client is OpenAIRealtimeLiveClient)
                 XCTAssertEqual(route.sampleRate, OpenAIRealtimeProtocol.sampleRate)

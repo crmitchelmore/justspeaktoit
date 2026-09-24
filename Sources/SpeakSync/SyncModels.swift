@@ -36,6 +36,15 @@ public struct SyncableHistoryEntry: Codable, Identifiable, Sendable {
     }
 }
 
+/// The upload conflict rule every History transport applies after looking up
+/// the existing record: a CloudKit copy at least as new as the local entry is
+/// acknowledged and reconciled locally instead of being overwritten.
+enum HistoryConflictPolicy {
+    static func remoteWins(_ remote: SyncableHistoryEntry, over local: SyncableHistoryEntry) -> Bool {
+        remote.updatedAt >= local.updatedAt
+    }
+}
+
 /// Errors that can occur during sync.
 public enum SyncError: LocalizedError {
     case cloudUnavailable

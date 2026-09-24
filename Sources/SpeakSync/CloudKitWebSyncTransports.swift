@@ -6,17 +6,31 @@ import SpeakCore
 /// devices and this client read and write the same records.
 public final class CloudKitWebHistorySyncTransport: HistorySyncTransport, Sendable {
     private let client: CloudKitWebServicesClient
+    private let session: CloudKitWebSession?
 
     /// Refuses to exist without the user's History consent.
-    public init(client: CloudKitWebServicesClient, consent: CloudKitWebSyncConsent) throws {
+    ///
+    /// A reconciliation pass spans many calls. Bind it to `session`, the one
+    /// `CloudKitWebSyncAccount.validate` confirmed, and every call fails with
+    /// `sessionChanged` once that session ends, instead of sending the previous
+    /// account's cursor or entries in the next one; pair it with a
+    /// `CloudKitWebSessionFence` for the same session. Without a session, each
+    /// call runs in the session current as it begins.
+    public init(
+        client: CloudKitWebServicesClient,
+        consent: CloudKitWebSyncConsent,
+        session: CloudKitWebSession? = nil
+    ) throws {
         try consent.require(.history)
         self.client = client
+        self.session = session
     }
 
     public func fetchChanges(after tokenData: Data?) async throws -> HistoryChangePage {
         let page = try await client.fetchZoneChanges(
             zoneName: SyncSchema.zoneName,
-            syncToken: try CloudKitWebSyncToken.string(from: tokenData)
+            syncToken: try CloudKitWebSyncToken.string(from: tokenData),
+            in: session
         )
         var changes: [HistoryRemoteChange] = []
         for result in page.records {
@@ -48,7 +62,7 @@ public final class CloudKitWebHistorySyncTransport: HistorySyncTransport, Sendab
     public func upload(entries: [SyncableHistoryEntry]) async -> HistoryUploadResult {
         var result = HistoryUploadResult(acknowledgedIDs: [], remoteEntries: [], failures: [:])
         // Writes are built from this session's records, so they are sent in it or not at all.
-        let session = await client.session()
+        let session = await client.session(or: self.session)
         let names = entries.map { SyncSchema.History.recordName(for: $0.id) }
         let existing: [String: CloudKitWebLookupOutcome]
         do {
@@ -127,7 +141,8 @@ public final class CloudKitWebHistorySyncTransport: HistorySyncTransport, Sendab
         try await CloudKitWebRecordBatch.forceDelete(
             recordName: SyncSchema.History.recordName(for: entryID),
             zoneName: SyncSchema.zoneName,
-            client: client
+            client: client,
+            session: session
         )
     }
 }

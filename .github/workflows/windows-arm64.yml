@@ -1,0 +1,536 @@
+name: Windows ARM64
+
+# Native Windows ARM64 counterpart of windows.yml (native build, tests, WinHTTP,
+# executable and window checks, on-device transcription) and of the bundle and
+# developer MSIX jobs in windows-cross-proof.yml. Every executed ARM64 program
+# must be a native ARM64 image and run as an ARM64 process, not under x64
+# emulation; see Docs/windows-arm64.md.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
+      - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - scripts/websocket-loopback-probe.py
+      - scripts/windows-bundle/**
+      - scripts/windows-cross/**
+      - scripts/windows-local-runtime/**
+      - scripts/windows-package/**
+      - Resources/AppIcon.iconset/**
+      - .github/workflows/windows-arm64.yml
+      - .github/workflows/windows-local-runtime.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Sources/CWindowsSupport/**
+      - Sources/CWindowsAutomation/**
+      - Sources/SpeakAutomationKit/**
+      - Sources/SpeakCLI/**
+      - Tests/SpeakPortableTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakWindowsPlatformTests/**
+      - Tests/SpeakAutomationKitTests/**
+      - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - scripts/websocket-loopback-probe.py
+      - scripts/windows-bundle/**
+      - scripts/windows-cross/**
+      - scripts/windows-local-runtime/**
+      - scripts/windows-package/**
+      - Resources/AppIcon.iconset/**
+      - .github/workflows/windows-arm64.yml
+      - .github/workflows/windows-local-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  local-runtime:
+    uses: ./.github/workflows/windows-local-runtime.yml
+    with:
+      architecture: arm64
+
+  native:
+    name: Native Windows ARM64 (Swift 6.2.3)
+    needs: local-runtime
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+    env:
+      # The pinned ARM64 whisper.cpp runtime, its JFK sample and a cached model
+      # folder, so the on-device tests run the real runtime instead of skipping.
+      JSTI_WHISPER_RUNTIME_DIRECTORY: ${{ github.workspace }}\local-runtime\runtime
+      JSTI_WHISPER_TEST_AUDIO: ${{ github.workspace }}\local-runtime\fixtures\jfk.wav
+      JSTI_LOCAL_MODEL_DIRECTORY: ${{ github.workspace }}\local-models
+      NATIVE_EVIDENCE: ${{ github.workspace }}\windows-arm64-native-execution.json
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Swift toolchain (ARM64)
+        uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057
+        with:
+          source: swift.org
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+          build_arch: arm64
+          update-sdk-modules: false
+
+      # Fails unless Windows reports an ARM64 machine, and records whether the
+      # toolchain itself runs natively or under emulation.
+      - name: Require a native ARM64 host and record the toolchain images
+        run: |
+          $toolchain = @('swift', 'clang') | ForEach-Object { (Get-Command $_ -ErrorAction SilentlyContinue).Source } |
+            Where-Object { $_ }
+          $arguments = @($toolchain | ForEach-Object { '--toolchain'; $_ })
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            host @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify portable source boundary
+        run: python scripts/verify-portable-core-boundary.py
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime-arm64
+          path: local-runtime
+
+      # The pinned tiny model is downloaded by the app's own installer on a
+      # miss and verified against its SHA-256 on every run.
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+
+      - name: Build native Windows ARM64 executable
+        id: native-build
+        run: |
+          swift --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          swift build --configuration release --product SpeakWindows --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # The test build recompiles the same modules with testable imports, so the
+      # production executable is copied first, as the Mac cross-build does.
+      - name: Retain the production executable before the test build
+        id: production
+        run: |
+          $bin = (swift build --configuration release --show-bin-path).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B scripts/windows-bundle/stage-native-app.py --architecture arm64 --bin-path $bin --output windows-arm64-app
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            images windows-arm64-app/SpeakWindows.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test shared core, desktop workflow and native adapters
+        id: native-tests
+        run: |
+          swift test --configuration release --jobs 4 --xunit-output windows-arm64-tests.xml 2>&1 |
+            Tee-Object -FilePath windows-arm64-native-tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # An ARM64 image cannot run under x64 emulation, so native test and
+      # runtime images on a native host rule it out for the test run.
+      - name: Require native ARM64 test and runtime images
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        run: |
+          $bin = (swift build --configuration release --show-bin-path).Trim()
+          $images = @(Join-Path $bin 'SpeakWindows.exe')
+          $tests = Join-Path $bin 'SpeakAppPackageTests.xctest'
+          if (Test-Path -LiteralPath $tests) { $images += $tests }
+          $images += @(Get-ChildItem -LiteralPath local-runtime/runtime -Filter *.dll | ForEach-Object FullName)
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            images @images
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify native WinHTTP WebSocket transport against loopback peer
+        id: websocket-probe
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          $readyPath = Join-Path $env:RUNNER_TEMP 'jsti-websocket-ready.json'
+          Remove-Item $readyPath -ErrorAction SilentlyContinue
+          $server = $null
+          $probe = $null
+          try {
+            $server = Start-Process -FilePath (Get-Command python).Source -PassThru -NoNewWindow `
+              -ArgumentList @('-u', 'scripts/websocket-loopback-probe.py', '--ready-file', $readyPath, '--max-seconds', '180') `
+              -RedirectStandardOutput windows-arm64-websocket-server.log -RedirectStandardError windows-arm64-websocket-server-errors.log
+            $deadline = [DateTime]::UtcNow.AddSeconds(10)
+            while (-not (Test-Path $readyPath)) {
+              if ($server.HasExited) { throw 'Loopback WebSocket server exited before readiness.' }
+              if ([DateTime]::UtcNow -gt $deadline) { throw 'Loopback WebSocket server readiness timed out.' }
+              Start-Sleep -Milliseconds 100
+            }
+            $ready = Get-Content $readyPath -Raw | ConvertFrom-Json
+            if ($ready.host -ne '127.0.0.1' -or $ready.port -lt 1 -or $ready.port -gt 65535) {
+              throw 'Unexpected loopback peer address.'
+            }
+            $env:JSTI_WEBSOCKET_PROBE_PORT = [string]$ready.port
+            $probe = Start-Process -FilePath (Get-Command swift).Source -PassThru -NoNewWindow `
+              -ArgumentList @('test', '--configuration', 'release', '--skip-build', '--filter', 'WinHTTPRuntimeProbeTests', `
+                '--filter', 'GladiaWinHTTPRuntimeTests', '--filter', 'CartesiaWinHTTPRuntimeTests', `
+                '--filter', 'RevAIWinHTTPRuntimeTests', '--filter', 'AzureWinHTTPRuntimeTests', `
+                '--xunit-output', 'windows-arm64-websocket-tests.xml') `
+              -RedirectStandardOutput windows-arm64-websocket-probe.log -RedirectStandardError windows-arm64-websocket-probe-errors.log
+            if (-not $probe.WaitForExit(150000)) {
+              $probe.Kill($true)
+              throw 'WebSocket runtime probe exceeded its 150-second process deadline.'
+            }
+            if ($probe.ExitCode -ne 0) { throw "WebSocket runtime probe failed: $($probe.ExitCode)" }
+          } finally {
+            Remove-Item Env:JSTI_WEBSOCKET_PROBE_PORT -ErrorAction SilentlyContinue
+            if ($probe -and -not $probe.HasExited) { $probe.Kill($true) }
+            if ($server -and -not $server.HasExited) { $server.Kill($true) }
+            Get-ChildItem windows-arm64-websocket-*.log | ForEach-Object { Get-Content $_.FullName }
+          }
+
+      # The retained production executable runs under verify-native-execution.py,
+      # which records the machine Windows reports for each process and its
+      # loaded modules, and fails on anything but native ARM64.
+      - name: Run executable self-test and native window smoke test natively
+        id: native-smoke
+        if: ${{ !cancelled() && steps.production.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          $exe = (Resolve-Path windows-arm64-app/SpeakWindows.exe).Path
+          $failures = [System.Collections.Generic.List[string]]::new()
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            run --label self-test --timeout 90 --stdout windows-arm64-self-test.log --stderr windows-arm64-self-test-errors.log `
+            --expect-output 'self-test passed' -- $exe --self-test
+          if ($LASTEXITCODE -ne 0) { $failures.Add("Native adapter self-test failed: $LASTEXITCODE") }
+          # Window checks are independent of adapter assertions. Run both while
+          # retaining a failing job if either result fails.
+          $env:JSTI_UI_SNAPSHOT_PATH = Join-Path $env:GITHUB_WORKSPACE 'windows-arm64-ui-smoke.bmp'
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            run --label ui-smoke-test --timeout 30 --stdout windows-arm64-ui-smoke.log --stderr windows-arm64-ui-smoke-errors.log `
+            --expect-output 'Native window creation and shutdown passed' -- $exe --ui-smoke-test
+          if ($LASTEXITCODE -ne 0) { $failures.Add("Native window smoke test failed: $LASTEXITCODE") }
+          if (-not (Test-Path $env:JSTI_UI_SNAPSHOT_PATH)) { $failures.Add('Native client snapshot missing.') }
+          if ($failures.Count) { throw ($failures -join '; ') }
+
+      - name: Transcribe the JFK sample on-device natively with the pinned tiny model
+        id: local-transcription
+        if: ${{ !cancelled() && steps.production.outcome == 'success' }}
+        timeout-minutes: 10
+        run: |
+          $exe = (Resolve-Path windows-arm64-app/SpeakWindows.exe).Path
+          $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            run --label local-transcription --timeout 480 --stdout windows-arm64-local-transcription.log `
+            --stderr windows-arm64-local-transcription-errors.log --expect-output 'Local transcription self-test passed' `
+            -- $exe --local-transcription-self-test $env:JSTI_WHISPER_TEST_AUDIO --expect $pins.whisperCpp.fixture.expectedPhrase
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage developer executable with provenance
+        id: developer-stage
+        if: ${{ !cancelled() && steps.native-tests.outcome == 'success' && steps.websocket-probe.outcome == 'success' && steps.native-smoke.outcome == 'success' }}
+        run: |
+          $destination = New-Item -ItemType Directory -Path windows-arm64-developer-build
+          Get-ChildItem windows-arm64-app | Copy-Item -Destination $destination -Recurse
+          Copy-Item $env:NATIVE_EVIDENCE $destination
+          [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            architecture = 'aarch64'
+            compiler = (swift --version) -join "`n"
+            distribution = 'developer executable; not an installer'
+            runtime = 'Requires the Swift 6.2.3 Windows ARM64 runtime and Visual C++ runtime'
+            nativeExecution = 'windows-arm64-native-execution.json'
+            webSocketRuntimeProbe = '${{ steps.websocket-probe.outcome }}'
+            localTranscription = '${{ steps.local-transcription.outcome }}'
+          } | ConvertTo-Json | Set-Content (Join-Path $destination 'build-metadata.json') -Encoding utf8
+          @"
+          Just Speak to It - Windows ARM64 developer build
+
+          This is an unsigned developer executable, not an installer or a feature-complete release.
+          Install the Swift 6.2.3 Windows ARM64 toolchain/runtime and its Windows prerequisites:
+          https://www.swift.org/install/windows/
+
+          Development instructions, ARM64 evidence and current parity limitations:
+          https://github.com/crmitchelmore/justspeaktoit/blob/${env:GITHUB_SHA}/Docs/windows-arm64.md
+
+          Run SpeakWindows.exe normally, or pass --self-test / --ui-smoke-test.
+          The smoke tests do not use a microphone or a real provider API key.
+          See build-metadata.json, app-build-metadata.json and
+          windows-arm64-native-execution.json for the source, compiler and native execution evidence.
+          "@ | Set-Content (Join-Path $destination 'README.txt') -Encoding utf8
+          Get-FileHash (Join-Path $destination 'SpeakWindows.exe') -Algorithm SHA256 |
+            Format-List | Out-String | Set-Content (Join-Path $destination 'SHA256.txt') -Encoding utf8
+
+      - name: Upload developer executable
+        if: ${{ !cancelled() && steps.developer-stage.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: justspeaktoit-windows-arm64-developer-${{ github.sha }}
+          path: windows-arm64-developer-build/
+          if-no-files-found: error
+          retention-days: 14
+
+      # The bundle job assembles the self-contained ARM64 bundle from exactly
+      # this production executable.
+      - name: Upload the production ARM64 app for bundling
+        if: ${{ !cancelled() && steps.production.outcome == 'success' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-arm64-app
+          path: windows-arm64-app/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload native test and execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-arm64-test-evidence-${{ github.sha }}
+          path: |
+            windows-arm64-native-execution.json
+            windows-arm64-tests.xml
+            windows-arm64-native-tests.log
+            windows-arm64-self-test*.log
+            windows-arm64-ui-smoke*.log
+            windows-arm64-ui-smoke.bmp
+            windows-arm64-websocket-tests.xml
+            windows-arm64-websocket-*.log
+            windows-arm64-local-transcription*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  bundle:
+    name: Assemble the self-contained ARM64 runtime bundle
+    needs: [local-runtime, native]
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-arm64-app
+          path: ${{ runner.temp }}/windows-arm64-app
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime-arm64
+          path: ${{ runner.temp }}/windows-local-runtime-arm64
+      - name: Test the bundle tooling
+        shell: bash
+        run: python3 -B -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s scripts/windows-bundle -p 'test_*.py'
+      # The runtime DLLs come from the official ARM64 installer, pinned by the
+      # SHA-256 winget publishes, extracted as data with the pinned 7-Zip. Once
+      # scripts/windows-bundle/swift-runtime-lock-arm64.json is committed, the
+      # regenerated lock must equal it.
+      - name: Extract the Swift runtime from the pinned ARM64 installer
+        shell: bash
+        run: |
+          set -o pipefail
+          output="$RUNNER_TEMP/windows-runtime-bundle-arm64"
+          mkdir -p "$output"
+          compare=()
+          if [ -f scripts/windows-bundle/swift-runtime-lock-arm64.json ]; then
+            compare=(--compare scripts/windows-bundle/swift-runtime-lock-arm64.json)
+          fi
+          python3 -B scripts/windows-bundle/pin-swift-runtime.py --architecture arm64 \
+            --downloads "$RUNNER_TEMP/arm64-swift-downloads" --temporary-parent "$RUNNER_TEMP" \
+            --output "$output/swift-runtime-lock-arm64.json" --runtime-output "$RUNNER_TEMP/swift-runtime-arm64" \
+            "${compare[@]}" 2>&1 | tee "$output/swift-runtime.log"
+      - name: Assemble the self-contained ARM64 bundle
+        shell: bash
+        run: |
+          set -o pipefail
+          output="$RUNNER_TEMP/windows-runtime-bundle-arm64"
+          lock="$output/swift-runtime-lock-arm64.json"
+          if [ -f scripts/windows-bundle/swift-runtime-lock-arm64.json ]; then
+            lock=scripts/windows-bundle/swift-runtime-lock-arm64.json
+          fi
+          python3 scripts/windows-bundle/build-windows-bundle.py --architecture arm64 \
+            --app "$RUNNER_TEMP/windows-arm64-app" \
+            --swift-runtime "$RUNNER_TEMP/swift-runtime-arm64" --swift-runtime-lock "$lock" \
+            --downloads "$RUNNER_TEMP/bundle-downloads" --output "$output" \
+            --local-runtime "$RUNNER_TEMP/windows-local-runtime-arm64" 2>&1 |
+            tee "$output/bootstrap.log"
+      - name: Upload the self-contained ARM64 runtime bundle
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-runtime-bundle-arm64
+          path: ${{ runner.temp }}/windows-runtime-bundle-arm64/
+          if-no-files-found: warn
+          retention-days: 14
+
+  bundle-execute:
+    name: Run the self-contained ARM64 bundle natively without Swift
+    needs: [local-runtime, bundle]
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-runtime-bundle-arm64
+          path: bundle
+      # Only the JFK sample is used from the runtime artifact: the DLLs under
+      # test are the bundled copies.
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-local-runtime-arm64
+          path: local-runtime
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+      # No Swift setup action runs in this job. The script isolates PATH, proves
+      # the executable cannot start without the bundled DLLs, records loaded
+      # modules and requires every run to be a native ARM64 process.
+      - name: Verify hashes, isolate PATH and run the bundled production app natively
+        shell: pwsh
+        run: |
+          ./scripts/windows-bundle/test-bundle-environment.ps1
+          $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
+          ./scripts/windows-bundle/verify-windows-bundle.ps1 -BundleDirectory bundle `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `
+            -LocalTranscriptionAudio local-runtime/fixtures/jfk.wav `
+            -LocalTranscriptionPhrase $pins.whisperCpp.fixture.expectedPhrase `
+            -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models')
+      - name: Upload bundle execution evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-runtime-bundle-arm64-execution-evidence
+          path: ${{ runner.temp }}/bundle-run/evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  package-lifecycle:
+    name: Pack, install, upgrade and uninstall the ARM64 developer MSIX
+    needs: bundle
+    runs-on: windows-11-arm
+    timeout-minutes: 45
+    env:
+      # Developer package versions for this run only, as in windows-cross-proof.yml.
+      BASE_VERSION: 0.0.${{ github.run_number }}.1
+      UPGRADE_VERSION: 0.0.${{ github.run_number }}.2
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-runtime-bundle-arm64
+          path: bundle
+      - name: Test the packaging tools and build both verified ARM64 layouts
+        shell: pwsh
+        run: |
+          python --version
+          python -B -X warn_default_encoding -W error::EncodingWarning -m unittest discover -s scripts/windows-package -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/windows-package/test-lifecycle-ownership.ps1
+          foreach ($kind in 'base', 'upgrade') {
+            $version = if ($kind -eq 'base') { $env:BASE_VERSION } else { $env:UPGRADE_VERSION }
+            python -B scripts/windows-package/build-windows-package-layout.py --bundle bundle `
+              --expected-commit $env:GITHUB_SHA --version $version --output (Join-Path $env:RUNNER_TEMP "package-$kind")
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $layout = Get-Content (Join-Path $env:RUNNER_TEMP "package-$kind/package-layout-evidence.json") -Raw | ConvertFrom-Json
+            if ($layout.package.architecture -ne 'arm64') { throw "The $kind layout is $($layout.package.architecture), not arm64." }
+          }
+      - name: Pack both layouts with the pinned Windows SDK MakeAppx
+        id: pack
+        shell: powershell
+        run: |
+          foreach ($kind in 'base', 'upgrade') {
+            $root = Join-Path $env:RUNNER_TEMP "package-$kind"
+            $version = if ($kind -eq 'base') { $env:BASE_VERSION } else { $env:UPGRADE_VERSION }
+            ./scripts/windows-package/pack-windows-package.ps1 -Layout (Join-Path $root 'layout') `
+              -Output (Join-Path $root "JustSpeakToIt-Developer_${version}_arm64_unsigned.msix") `
+              -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+          }
+      - name: Upload the unsigned ARM64 developer package
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msix-arm64-unsigned
+          path: |
+            ${{ runner.temp }}/package-upgrade/*.msix
+            ${{ runner.temp }}/package-upgrade/*.json
+            ${{ runner.temp }}/package-upgrade/*.log
+          if-no-files-found: error
+          retention-days: 14
+      # The ephemeral test certificates are created, trusted and removed inside
+      # these steps on this disposable runner; they are never exported or uploaded.
+      - name: Install, launch, refuse failed upgrades, upgrade and uninstall
+        shell: powershell
+        run: |
+          ./scripts/windows-package/test-lifecycle-ownership.ps1
+          $base = Join-Path $env:RUNNER_TEMP 'package-base'
+          $upgrade = Join-Path $env:RUNNER_TEMP 'package-upgrade'
+          ./scripts/windows-package/test-windows-package-lifecycle.ps1 `
+            -BaseLayout (Join-Path $base 'layout') `
+            -BasePackage (Join-Path $base "JustSpeakToIt-Developer_$($env:BASE_VERSION)_arm64_unsigned.msix") `
+            -UpgradeLayout (Join-Path $upgrade 'layout') `
+            -UpgradePackage (Join-Path $upgrade "JustSpeakToIt-Developer_$($env:UPGRADE_VERSION)_arm64_unsigned.msix") `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'package-lifecycle')
+      # Negative control for the lifecycle test itself: with an existing
+      # installation, running app and user data present, it must refuse
+      # admission and change nothing.
+      - name: Refuse a machine with an existing installation and change nothing
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        shell: powershell
+        run: |
+          $base = Join-Path $env:RUNNER_TEMP 'package-base'
+          $upgrade = Join-Path $env:RUNNER_TEMP 'package-upgrade'
+          ./scripts/windows-package/test-windows-package-admission.ps1 `
+            -BaseLayout (Join-Path $base 'layout') `
+            -BasePackage (Join-Path $base "JustSpeakToIt-Developer_$($env:BASE_VERSION)_arm64_unsigned.msix") `
+            -UpgradeLayout (Join-Path $upgrade 'layout') `
+            -UpgradePackage (Join-Path $upgrade "JustSpeakToIt-Developer_$($env:UPGRADE_VERSION)_arm64_unsigned.msix") `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') `
+            -Workspace (Join-Path $env:RUNNER_TEMP 'package-admission-control')
+      - name: Upload lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msix-arm64-lifecycle-evidence
+          path: |
+            ${{ runner.temp }}/package-lifecycle/evidence/
+            ${{ runner.temp }}/package-admission-control/evidence/
+            ${{ runner.temp }}/package-admission-control/refused-lifecycle/evidence/
+          if-no-files-found: warn
+          retention-days: 14

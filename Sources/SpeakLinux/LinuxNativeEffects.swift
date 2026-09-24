@@ -21,9 +21,9 @@ struct LinuxNativeEffects: DesktopHostEffects {
     }
 
     func makeLiveClient(
-        model: String, key: String, language: String?
+        model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
-        LinuxLiveTransport.makeClient(model: model, key: key, language: language)
+        LinuxLiveTransport.makeClient(model: model, key: key, language: language, azureEndpoint: azureEndpoint)
     }
 
     func transcribe(
@@ -70,10 +70,11 @@ enum LinuxLiveTransport {
     static let qualified = true
 
     static func makeClient(
-        model: String, key: String, language: String?
+        model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, makeConnection: { NIOStreamingConnection(request: $0) }
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            makeConnection: { NIOStreamingConnection(request: $0) }
         )
     }
 }

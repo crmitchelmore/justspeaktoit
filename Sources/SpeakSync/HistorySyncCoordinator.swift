@@ -124,15 +124,6 @@ enum HistoryChangeReconciler {
     }
 }
 
-/// The upload conflict rule every History transport applies after looking up
-/// the existing record: a CloudKit copy at least as new as the local entry is
-/// acknowledged and reconciled locally instead of being overwritten.
-enum HistoryConflictPolicy {
-    static func remoteWins(_ remote: SyncableHistoryEntry, over local: SyncableHistoryEntry) -> Bool {
-        remote.updatedAt >= local.updatedAt
-    }
-}
-
 /// The History reconciliation every client runs: fetch every page, coalesce to
 /// one final event per record, commit through the store, advance the cursor
 /// only after that commit, then upload pending entries and acknowledge only
@@ -155,22 +146,26 @@ public final class HistorySyncCoordinator {
     private let observer: (any HistorySyncStatusObserver)?
     private let events: (@Sendable (HistorySyncEvent) -> Void)?
     private let now: @Sendable () -> Date
+    let fence: (any HistorySyncPassFence)?
     /// A trigger observed while a pass was already running.
     private var followUpRequested = false
 
+    /// `fence` admits each pass's account-bound work; see `HistorySyncPassFence`.
     public init(
         transport: any HistorySyncTransport,
         tokenStore: any SyncChangeTokenStore,
         cloudAvailable: Bool,
         observer: (any HistorySyncStatusObserver)? = nil,
         events: (@Sendable (HistorySyncEvent) -> Void)? = nil,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        fence: (any HistorySyncPassFence)? = nil
     ) {
         self.transport = transport
         self.tokenStore = tokenStore
         self.observer = observer
         self.events = events
         self.now = now
+        self.fence = fence
         status = HistorySyncStatus(isCloudAvailable: cloudAvailable)
     }
 
@@ -247,6 +242,7 @@ public final class HistorySyncCoordinator {
             await set(\.error, syncError, .error, isolation: isolation)
             throw syncError
         }
+        try await admitted(isolation: isolation) {}
         let result = await transport.upload(entries: [entry])
         try await applyUploadResult(result, store: store, isolation: isolation)
         let pendingCount = await store.pendingEntries().count
@@ -264,6 +260,7 @@ public final class HistorySyncCoordinator {
         guard status.isCloudAvailable else {
             throw SyncError.cloudUnavailable
         }
+        try await admitted(isolation: isolation) {}
         do {
             try await transport.delete(entryID: entryID)
             events?(.deleted(entryID))
@@ -299,11 +296,12 @@ public final class HistorySyncCoordinator {
         store: any HistorySyncStore,
         isolation: isolated (any Actor)?
     ) async throws {
-        var tokenData = try await tokenStore.loadChangeToken()
+        var tokenData = try await admitted(isolation: isolation) { try await tokenStore.loadChangeToken() }
         var finalTokenData = tokenData
         var allChanges: [HistoryRemoteChange] = []
 
         while true {
+            try await admitted(isolation: isolation) {}
             let page = try await transport.fetchChanges(after: tokenData)
             allChanges.append(contentsOf: page.changes)
             await set(\.pendingDownloadCount, allChanges.count, .pendingDownloadCount, isolation: isolation)
@@ -326,11 +324,13 @@ public final class HistorySyncCoordinator {
         let changes = HistoryChangeReconciler.coalesced(allChanges)
         await set(\.pendingDownloadCount, changes.count, .pendingDownloadCount, isolation: isolation)
         for change in changes {
-            switch change {
-            case .changed(let entry):
-                await store.didReceiveRemoteEntry(entry)
-            case .deleted(let id):
-                await store.didDeleteRemoteEntry(id: id)
+            try await admitted(isolation: isolation) {
+                switch change {
+                case .changed(let entry):
+                    await store.didReceiveRemoteEntry(entry)
+                case .deleted(let id):
+                    await store.didDeleteRemoteEntry(id: id)
+                }
             }
             await set(\.pendingDownloadCount, status.pendingDownloadCount - 1, .pendingDownloadCount,
                       isolation: isolation)
@@ -338,7 +338,7 @@ public final class HistorySyncCoordinator {
 
         try await store.persistRemoteChanges()
         if let finalTokenData {
-            try await tokenStore.saveChangeToken(finalTokenData)
+            try await admitted(isolation: isolation) { try await tokenStore.saveChangeToken(finalTokenData) }
         }
         events?(.reconciledRemoteChanges(changes.count))
     }
@@ -353,6 +353,7 @@ public final class HistorySyncCoordinator {
             guard !pending.isEmpty else { return }
 
             let batch = Array(pending.prefix(SyncSchema.batchSize))
+            try await admitted(isolation: isolation) {}
             let result = await transport.upload(entries: batch)
             try await applyUploadResult(result, store: store, isolation: isolation)
             let remaining = await store.pendingEntries().count
@@ -372,11 +373,14 @@ public final class HistorySyncCoordinator {
         store: any HistorySyncStore,
         isolation: isolated (any Actor)?
     ) async throws {
-        for entry in result.remoteEntries {
-            await store.didReceiveRemoteEntry(entry)
+        try await admitted(isolation: isolation) {
+            for entry in result.remoteEntries {
+                await store.didReceiveRemoteEntry(entry)
+            }
         }
         try await store.persistRemoteChanges()
-        if !result.acknowledgedIDs.isEmpty {
+        guard !result.acknowledgedIDs.isEmpty else { return }
+        try await admitted(isolation: isolation) {
             await store.didAcknowledgeSyncedEntries(ids: result.acknowledgedIDs)
         }
     }

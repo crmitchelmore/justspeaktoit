@@ -26,7 +26,11 @@ struct PlaybackTestPlan: Sendable {
 }
 
 final class PlaybackTestHandle: WindowsAudioPlaybackHandle, @unchecked Sendable {
-    struct Counts { var started = 0, paused = 0, resumed = 0, cancelled = 0, destroyed = 0, destroyAttempts = 0 }
+    struct Counts {
+        var started = 0, paused = 0, resumed = 0, cancelled = 0, destroyed = 0, destroyAttempts = 0
+        /// Pauses requested before `start`, which the native engine honours before any sound.
+        var pausedBeforeStart = 0
+    }
     private let lock = NSLock()
     private let completion: @Sendable (WindowsAudioPlaybackCompletion) -> Void
     let plan: PlaybackTestPlan
@@ -69,6 +73,7 @@ final class PlaybackTestHandle: WindowsAudioPlaybackHandle, @unchecked Sendable 
     func pause() {
         lock.withLock {
             values.paused += 1
+            if values.started == 0 { values.pausedBeforeStart += 1 }
             value = WindowsAudioPlaybackSnapshot(state: .paused, position: value.position, duration: value.duration)
         }
     }

@@ -81,6 +81,25 @@ final class WindowsAudioPlaybackCompletionTests: XCTestCase {
         XCTAssertNil(controller.activity)
     }
 
+    /// A Read aloud segment whose task was cancelled (by Play, Stop or a new
+    /// Read aloud) just before it reached the controller must not replace
+    /// the playback that superseded it, or open another file.
+    func testCallerCancelledBeforeAdmission_LeavesTheCurrentPlaybackPlaying() async throws {
+        let id = UUID()
+        try controller.play(recordID: id, path: "history.wav", knownDuration: 2)
+        await playbackEventually { self.backend.handles.first?.counts.started == 1 }
+        let current = try XCTUnwrap(backend.handles.first)
+        let owned = try XCTUnwrap(controller)
+        let stale = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await owned.playToCompletion(recordID: id, path: "stale-speech.wav")
+        }
+        await assertCancelled(stale)
+        XCTAssertEqual(controller.activity?.recordID, id, "the cancelled caller replaced the current playback")
+        XCTAssertEqual(current.counts.cancelled, 0)
+        XCTAssertEqual(backend.handles.count, 1, "the cancelled caller opened its file")
+    }
+
     func testFailedPlaybackAndReleaseAreReportedToTheCaller() async throws {
         backend.enqueue(PlaybackTestPlan(startFailure: "No endpoint"))
         let owned = try XCTUnwrap(controller)

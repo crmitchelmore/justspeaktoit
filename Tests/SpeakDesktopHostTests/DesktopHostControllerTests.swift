@@ -25,7 +25,7 @@ final class FakePlayback: DesktopHostPlayback, @unchecked Sendable {
     func isCurrent(revision: UInt64) -> Bool { false }
     func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {}
     func togglePause(recordID: UUID) -> Bool { false }
-    func stop() {}
+    func stop(announcing: Bool) {}
     func stop(unless recordID: UUID) {}
     func stopAndWait() async throws {}
     func close() async throws {}
@@ -86,8 +86,6 @@ enum FakePlatform: DesktopHostPlatform {
     static func cancel(_ job: FakeJob) {}
     static func isClipboard(_ job: FakeJob) -> Bool { job.target == nil }
     static func makePlayback() -> FakePlayback { FakePlayback() }
-    static func makeReadAloudState() {}
-    static func stopReadAloud(_ state: inout Void) {}
     static var defaultHotKey: FakeHotKey { FakeHotKey() }
     static func readyHint(_ hotKey: FakeHotKey) -> String { "Shortcut starts or stops recording." }
     static func finishHint(_ hotKey: FakeHotKey, for trigger: HotKeySessionTrigger) -> String { "Press to finish." }
@@ -130,7 +128,7 @@ final class SyntheticEffects: DesktopHostEffects, @unchecked Sendable {
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture { SyntheticCapture(context: context) }
     func makeLiveClient(
-        model: String, key: String, language: String?
+        model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         nil
     }
@@ -357,7 +355,7 @@ final class GatedEffects: DesktopHostEffects, @unchecked Sendable {
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
     ) throws -> any DesktopRecordingCapture { SyntheticCapture(context: context) }
     func makeLiveClient(
-        model: String, key: String, language: String?
+        model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         nil
     }

@@ -231,6 +231,29 @@ final class WinHTTPEventsTests: XCTestCase {
         XCTAssertTrue(error.message.contains("still closing"), error.message)
         connection.cancel()
     }
+
+    func testClosedSocketsCountUntilTheirQueuedDestroyRunsAndLaterConnectionsCreateNothing() throws {
+        let request = URLRequest(url: try XCTUnwrap(URL(string: "ws://127.0.0.1:9/closing")))
+        let destruction = DispatchQueue(label: "WinHTTPEventsTests.release")
+        let releases = WinHTTPReleaseQueue(limit: 4, initialDelay: 60, maximumDelay: 60, queue: destruction)
+        destruction.suspend()
+        var refusals = 0
+        for _ in 0..<64 {
+            // Created but never started, so no network; cancel hands the socket over.
+            let connection = WinHTTPStreamingConnection(request: request, releases: releases)
+            let probe = WinHTTPEventProbe()
+            connection.receive { probe.received($0) }
+            connection.cancel()
+            let failure = probe.failures.first as? WinHTTPWebSocketError
+            if failure?.message.contains("still closing") == true { refusals += 1 }
+        }
+        let owned = releases.outstanding
+        destruction.resume()
+        XCTAssertEqual(owned, 4, "closed sockets stay counted while their destruction is queued")
+        XCTAssertEqual(refusals, 60, "later connections are refused before creating native state")
+        destruction.sync {}
+        XCTAssertEqual(releases.outstanding, 0)
+    }
 }
 
 private final class WinHTTPEventProbe: @unchecked Sendable {

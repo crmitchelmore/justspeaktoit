@@ -127,13 +127,20 @@ jobs:
           echo "JSTI_WHISPER_TEST_AUDIO=$GITHUB_WORKSPACE/local-runtime/fixtures/jfk.wav" >> "$GITHUB_ENV"
           echo "JSTI_LOCAL_MODEL_DIRECTORY=$GITHUB_WORKSPACE/local-models" >> "$GITHUB_ENV"
 
+      # The root Package.resolved pins the Apple graph. The Linux graph (SwiftNIO)
+      # is pinned separately, and --force-resolved-versions fails the build
+      # rather than float if those pins stop satisfying Package.swift.
+      - name: Pin the Linux dependency graph
+        run: cp packaging/linux/Package.resolved Package.resolved
+
       - name: Build the Linux app
         run: |
           swift --version
-          swift build --configuration release --product SpeakLinux --jobs 4
+          swift build --configuration release --product SpeakLinux --jobs 4 --force-resolved-versions
+          cmp packaging/linux/Package.resolved Package.resolved
 
       - name: Test shared core, desktop host and Linux adapters
-        run: swift test --configuration release --jobs 4
+        run: swift test --configuration release --jobs 4 --force-resolved-versions
 
       - name: Self-test and GTK window smoke test
         env:

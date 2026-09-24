@@ -77,11 +77,19 @@ flatpak run com.justspeaktoit.JustSpeakToIt --toggle
 Xvfb `--ui-smoke-test` passed. iCloud sync has since added a link to
 `libcrypto` (OpenSSL), which the freedesktop SDK under the GNOME SDK ships;
 no Flatpak has been built with it yet. Not yet done: an installed `flatpak run` on a
-desktop, a `.flatpak` bundle in CI, and Flathub readiness. The build fetches
-SwiftNIO with network access (`build-args: --share=network`); Flathub builds
-offline, so a submission must list those packages as git sources. SwiftPM
-also reads the repository's Apple-graph `Package.resolved`, which the Linux
-graph does not match; a Linux submission should carry its own resolved file.
+desktop, a `.flatpak` bundle in CI, and Flathub readiness.
+
+The root `Package.resolved` pins the Apple graph, which the Linux graph does not
+match. `packaging/linux/Package.resolved` pins the Linux graph (SwiftNIO,
+NIOSSL, swift-atomics, swift-collections, swift-system). CI and the Flatpak
+manifest copy it into place and build with `--force-resolved-versions`, so a
+pin that no longer satisfies `Package.swift` fails the build instead of
+floating, and CI also fails if the build rewrites the pins. After changing the
+Linux dependencies, regenerate it with
+`SPEAK_LINUX_TARGET=1 swift package resolve`, copy `Package.resolved` to
+`packaging/linux/`, and restore the root file. The Flatpak build still fetches
+those pins with network access (`build-args: --share=network`); Flathub builds
+offline, so a submission must also list them as git sources.
 
 ## Desktop support
 

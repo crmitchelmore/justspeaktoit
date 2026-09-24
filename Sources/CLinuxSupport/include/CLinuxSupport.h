@@ -135,6 +135,30 @@ int32_t jsti_credential_delete(const char *name, char *error, size_t error_capac
 
 /* ------------------------------------------------------------- iCloud sync */
 
+/* The window's iCloud sync group reports these on the GTK main thread. */
+enum {
+    /* Apply. index: bit 0 Sync History, bit 1 Import API keys; text: the
+     * passphrase as typed ("" when none), cleared from its entry once sent. */
+    JSTI_EVENT_CLOUD_SYNC_APPLY = 60,
+    JSTI_EVENT_CLOUD_SYNC_SIGN_IN = 61,
+    JSTI_EVENT_CLOUD_SYNC_SIGN_OUT = 62,
+    JSTI_EVENT_CLOUD_SYNC_NOW = 63
+};
+
+typedef struct JSTICloudSyncView {
+    const char *status;
+    int32_t available;
+    int32_t signed_in;
+    int32_t history_enabled;
+    int32_t key_import_enabled;
+} JSTICloudSyncView;
+
+/* Shows sync state in the iCloud sync group. Until the first call, and while
+ * `available` is 0, none of its actions can be used. A switch follows the
+ * state only when that value changed, so a refresh keeps unapplied choices.
+ * Safe from any thread, like jsti_window_update. */
+int32_t jsti_window_set_cloud_sync(const JSTICloudSyncView *view);
+
 /* OpenSSL (libcrypto) primitives for the API-key sync envelope, the same ones
  * CNG provides on Windows: PBKDF2-HMAC-SHA256, and AES-256-GCM with a fresh
  * random 96-bit nonce, no associated data and a 128-bit tag kept apart from

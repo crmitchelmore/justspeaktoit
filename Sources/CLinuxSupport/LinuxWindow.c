@@ -541,6 +541,7 @@ static void build_window(void) {
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.open_audio));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(history), history_actions);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(history));
+    jsti_cloud_sync_build(page);
     refresh_actions();
 }
 
@@ -712,6 +713,13 @@ static void close_posts(void) {
     while ((pending = g_queue_pop_head(&early_posts)) != NULL) pending_free(pending);
     g_mutex_unlock(&post_lock);
 }
+
+/* Window parts built in other files use the same queue and callback. */
+int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy) {
+    return post(apply, data, destroy);
+}
+
+void jsti_window_emit(int32_t event, const char *text, int32_t index) { emit(event, text, index); }
 
 typedef struct Update {
     gchar *status;
@@ -1221,6 +1229,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!shown_for_azure || shown_for_other) {
         return fail(error, capacity, "the Azure resource row did not follow the selected model");
     }
+    if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {

@@ -30,6 +30,22 @@ enum LinuxIntegrationChecks {
         try LinuxCredentialStore.save("", name: name)
         try require(try LinuxCredentialStore.read(name: name).isEmpty, "an empty save did not remove the key")
         print("Keyring: saved, read and removed a Unicode key.")
+        try syncVault()
+    }
+
+    /// iCloud sync's vault: a long web auth token replaced as it rotates,
+    /// then removed as signing out does.
+    private static func syncVault() throws {
+        let vault = LinuxCredentialVault()
+        let name = "jsti-integration-\(UUID().uuidString)"
+        let first = String(repeating: "A1b2_-", count: 700)
+        let rotated = String(repeating: "Z9y8_-", count: 700)
+        try vault.writeCredential(first, name: name)
+        try vault.writeCredential(rotated, name: name)
+        try require(try vault.readCredential(name) == rotated, "the rotated web auth token did not replace the first")
+        try vault.deleteCredential(name)
+        try require(try vault.readCredential(name) == nil, "signing out did not remove the web auth token")
+        print("Keyring: the iCloud sync vault replaced and removed a \(rotated.utf8.count)-byte token.")
     }
 
     /// Records from the test source and checks framing and signal.

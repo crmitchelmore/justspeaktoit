@@ -17,6 +17,14 @@ class ConfigureCloudKitWebTests(unittest.TestCase):
         self.assertIn("static let apiToken: String? = nil", self.committed())
         self.assertIn('static let environment = "production"', self.committed())
 
+    def test_every_desktop_app_is_configured_and_committed_without_a_token(self):
+        self.assertEqual({target.parent.name for target in CONFIGURE.TARGETS}, {"SpeakWindows", "SpeakLinux"})
+        for target in CONFIGURE.TARGETS:
+            committed = target.read_text(encoding="utf-8")
+            self.assertIn("static let apiToken: String? = nil", committed)
+            source = CONFIGURE.configured_source(committed, "synthetic0token0value0abcdef", "production", target)
+            self.assertIn('static let apiToken: String? = "synthetic0token0value0abcdef"', source)
+
     def test_token_and_environment_are_written(self):
         source = CONFIGURE.configured_source(self.committed(), "synthetic0token0value0abcdef", "development")
         self.assertIn('static let apiToken: String? = "synthetic0token0value0abcdef"', source)

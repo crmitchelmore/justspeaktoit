@@ -29,6 +29,8 @@ final class LinuxEventContext: @unchecked Sendable {
     let shortcuts: LinuxShortcuts
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
+    /// Set before the window opens, when iCloud sync is configured.
+    var cloudSync: LinuxCloudSync?
 
     init(controller: LinuxAppController, smokeTest: Bool) {
         self.controller = controller
@@ -163,6 +165,7 @@ func linuxWindowEvent(
     let event = Int(event)
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxCloudSyncEvent(event, value: value, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
 }
 
@@ -281,7 +284,9 @@ private func linuxReady(_ holder: LinuxEventContext) {
     }
     guard holder.smokeTest else {
         let controller = holder.controller
-        holder.markReady(Task { await controller.ready() })
+        let ready = Task { await controller.ready() }
+        holder.markReady(ready)
+        LinuxCloudSync.start(holder, after: ready)
         holder.shortcuts.start(holder)
         do { try holder.microphones.start() } catch {
             LinuxHostPlatform.update("Microphone changes will not be noticed: \(error.localizedDescription)")

@@ -352,7 +352,7 @@ if linuxTargetBuild {
             name: "SpeakLinux",
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport"
+                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync"
             ]
         ),
         .testTarget(

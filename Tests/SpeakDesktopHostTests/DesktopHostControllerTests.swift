@@ -49,7 +49,7 @@ final class FakeLog: @unchecked Sendable {
 }
 
 enum FakePlatform: DesktopHostPlatform {
-    typealias VoiceOutputSettings = FakeHotKey
+    typealias VoiceOutputSettings = DesktopVoiceOutputSettings
     static let displayName = "Test"
     static let credentialStoreName = "the test keyring"
 

@@ -17,8 +17,10 @@ typealias WindowsNativeError = DesktopHostError
 
 /// Win32 window, Credential Manager, WASAPI, Media Foundation and UI Automation
 /// behind the shared desktop host.
-enum WindowsHostPlatform: DesktopHostPlatform {
+enum WindowsHostPlatform: DesktopHostReadAloudPlatform {
     typealias VoiceOutputSettings = WindowsVoiceOutputSettings
+    typealias VoiceOutput = WindowsVoiceOutput
+    typealias ReadAloudState = DesktopHostReadAloudState<WindowsAudioPlaybackController.Speech, WindowsVoiceOutput>
     typealias LocalModelsState = WindowsLocalModelsState
 
     package static let displayName = "Windows"
@@ -97,20 +99,12 @@ enum WindowsHostPlatform: DesktopHostPlatform {
         return false
     }
 
-    package static func makeReadAloudState() -> WindowsReadAloudState { WindowsReadAloudState() }
-
-    /// Cancels the segment being synthesized, so no later one is admitted, and
-    /// returns the record's controls to idle once nothing more will be spoken.
-    package static func stopReadAloud(
-        _ state: inout WindowsReadAloudState, playback: WindowsAudioPlaybackController
-    ) {
-        state.task?.cancel()
-        state.task = nil
-        if let speech = state.speech { playback.endSpeech(speech) }
-        state.speech = nil
+    /// Read aloud's engine, created on first use in the app's protected folder.
+    package static func makeVoiceOutput(stagingDirectory directory: URL) throws -> WindowsVoiceOutput {
+        try WindowsVoiceOutput(stagingDirectory: directory)
     }
 
-    package static func isReadingAloud(_ state: WindowsReadAloudState) -> Bool { state.task != nil }
+    package static let deepgramKeyHint = "choose a Deepgram model, then Save key"
 
     package static func makeLocalModelsState() -> WindowsLocalModelsState { WindowsLocalModelsState() }
 
@@ -157,6 +151,12 @@ extension WindowsAppController {
         try self.init(directory: directory, effects: WindowsNativeEffects())
     }
 }
+
+// Read aloud plays its segments through the History player (see
+// WindowsAudioPlaybackController+Speech), so only one is ever audible.
+extension WindowsAudioPlaybackController: DesktopHostSpeechPlayback {}
+
+extension WindowsVoiceOutput: DesktopHostVoiceOutput {}
 
 extension WindowsAudioPlaybackController: DesktopHostPlayback {
     package func setStatusHandler(_ handler: @escaping @Sendable (_ revision: UInt64, _ message: String) -> Void) {

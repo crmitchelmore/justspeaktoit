@@ -11,10 +11,10 @@ criterion; this document says exactly what is verified and what is not.
 
 | Target | Role |
 |---|---|
-| `SpeakDesktopHost` | Recording, transcription, History, output, post-processing, profiles and model catalogue orchestration, generic over `DesktopHostPlatform`. Shared with Windows (moved out of `SpeakWindows`). |
-| `CLinuxSystem/*` | pkg-config system libraries: `libadwaita-1`, `gio-unix-2.0`, `libpulse`, `libsecret-1`, `xtst`. |
-| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`): window, clipboard, credentials, capture, private files, X11, portals, self-tests. |
-| `SpeakLinuxPlatform` | Testable Swift over the C ABI: keyring, capture, session detection, text-output options, output planning and the output job. |
+| `SpeakDesktopHost` | Recording, transcription, History, output, post-processing, profiles, model catalogue and iCloud sync orchestration, generic over `DesktopHostPlatform`. Shared with Windows (moved out of `SpeakWindows`). |
+| `CLinuxSystem/*` | pkg-config system libraries: `libadwaita-1`, `gio-unix-2.0`, `libpulse`, `libsecret-1`, `xtst`, `libcrypto` (OpenSSL). |
+| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`): window, clipboard, credentials, capture, private files, X11, portals, iCloud sync (group, loopback listener, sign-in page, envelope crypto), self-tests. |
+| `SpeakLinuxPlatform` | Testable Swift over the C ABI: keyring, capture, session detection, text-output options, output planning, the output job and the iCloud sync adapters. |
 | `SpeakLinux` | The executable: `LinuxHostPlatform`, events, shortcuts, `--self-test`, `--ui-smoke-test`, `--integration-test`. |
 
 The Linux targets are opt-in with `SPEAK_LINUX_TARGET=1`, like
@@ -28,7 +28,7 @@ Ubuntu 24.04 (or any distribution with GTK 4.14+, libadwaita 1.5+) and Swift 6.2
 ```sh
 sudo apt install libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev \
   libx11-dev libxtst-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  gstreamer1.0-plugins-good pkg-config
+  gstreamer1.0-plugins-good libssl-dev pkg-config
 export SPEAK_LINUX_TARGET=1
 swift build --product SpeakLinux
 swift test                                  # portable, host and Linux tests
@@ -52,7 +52,8 @@ Data lives in `$XDG_DATA_HOME/JustSpeakToIt` (`~/.local/share/JustSpeakToIt`;
 Flatpak: `~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt`):
 `settings.json`, `History/`, profiles and the OpenRouter catalogue cache, all
 private to the user (0700/0600). API keys are in the Secret Service keyring
-under the same canonical identifiers as Windows Credential Manager.
+under the same canonical identifiers as Windows Credential Manager. iCloud
+sync keeps its state in `CloudSync/state.json` there (see below).
 
 ### Flatpak
 
@@ -73,7 +74,9 @@ flatpak run com.justspeaktoit.JustSpeakToIt --toggle
 
 `flatpak-builder` has built this manifest on GNOME 48 (Swift 6.2) and GNOME 50
 (Swift 6.3.3); inside the resulting build environment `--self-test` and the
-Xvfb `--ui-smoke-test` passed. Not yet done: an installed `flatpak run` on a
+Xvfb `--ui-smoke-test` passed. iCloud sync has since added a link to
+`libcrypto` (OpenSSL), which the freedesktop SDK under the GNOME SDK ships;
+no Flatpak has been built with it yet. Not yet done: an installed `flatpak run` on a
 desktop, a `.flatpak` bundle in CI, and Flathub readiness. The build fetches
 SwiftNIO with network access (`build-args: --share=network`); Flathub builds
 offline, so a submission must list those packages as git sources. SwiftPM
@@ -99,6 +102,52 @@ not visible to clients, so the paste goes to whatever is focused at delivery,
 never to JustSpeakToIt's own window; focus re-verification and per-app
 profiles are X11-only.
 
+## iCloud sync
+
+Linux joins the **Mac** CloudKit container through CloudKit Web Services
+exactly as Windows does, and runs the same flow: `DesktopHostCloudSync` in
+`SpeakDesktopHost`, with Linux adapters for the transport, keyring,
+cryptography, loopback listener and browser. Formats, protocol evidence and
+limits are in [Windows CloudKit sync](windows-cloudkit-sync.md); the one-time
+CloudKit Console setup is in
+[Windows development: iCloud sync](windows-development.md#icloud-sync). One
+API token serves both apps: they share the callback URL.
+
+- The **iCloud sync** group, below History, shows the status beside
+  **Sign in…** and **Sign out**. Sign in asks CloudKit for Apple's sign-in
+  page, opens it in the default browser (only `https` pages on `apple.com` or
+  `icloud.com`; through the OpenURI portal inside Flatpak) and listens on
+  `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
+  `ckWebAuthToken`, only during sign-in and for at most ten minutes. A
+  connection that sends no complete request within five seconds is dropped,
+  so an idle browser preconnection cannot hold the callback. The rotating
+  token is kept in the keyring as `cloudkit.webAuthToken`.
+- **Sync History with my Mac** and **Import API keys from my Mac** (off by
+  default; needs the key-sync passphrase set on the Mac) take effect with
+  **Apply**. Sync runs at launch, every five minutes, after each saved
+  transcript and on **Sync now**. Transcripts from the Mac show "from your
+  Mac" and refuse playback, opening audio and retry. Recordings made here
+  upload with `originPlatform` `linux`, which the Mac shows as their origin.
+  Only the key derived from the passphrase is stored (keyring,
+  `cloudkit.apiKeySyncKey`); keys are imported from the canonical list only
+  and never uploaded. A key typed here is never removed by a later deletion
+  on the Mac.
+- Sync state (cursor, bound iCloud user, acknowledgements, imported-key
+  bookkeeping) is in `CloudSync/state.json` in the data folder, created
+  private to the user. Signing out keeps it, History and saved keys; another
+  Apple ID resets it and deletes nothing, as on Windows.
+- Closing the window stops sync, lets running work end within three seconds
+  and only then closes the controller.
+
+The CloudKit API token is a build setting:
+`scripts/windows-cloudkit/configure-cloudkit-web.py` writes the
+`CLOUDKIT_WEB_API_TOKEN` secret into both `Sources/SpeakWindows` and
+`Sources/SpeakLinux/CloudKitWebBuildConfiguration.swift`, which are committed
+without one. No Linux workflow injects it yet, so every Linux build says
+"iCloud sync is not available in this build" and otherwise works. For local
+development set `JSTI_CLOUDKIT_WEB_API_TOKEN` (and
+`JSTI_CLOUDKIT_WEB_ENVIRONMENT=development`) before starting the app.
+
 ## Parity matrix
 
 "Verified" means exercised by an automated check listed here on Linux, not
@@ -121,6 +170,7 @@ proven on a physical desktop.
 | Live transcription transport (SwiftNIO, `SpeakLinuxWebSocket`) | Verified against the loopback probe | `SpeakLinuxWebSocketTests`: echo, PCM frames, ping/pong payload, peer close code and reason with acknowledgement, 2 × 2 MiB through a slow peer, fragmented Unicode and binary, cancellation of pending receive and pre-handshake send, abrupt disconnect, oversize, refused upgrade, and the shared Mistral client's four Voxtral scenarios. TLS (`wss`) to real providers, and live providers other than Mistral's protocol peer, **unverified**; HTTP(S) proxies are **not** honoured by this transport |
 | Live transcription in the app | Wired to the same shared live clients as Windows (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI, Mistral, Gladia, Cartesia, Rev.ai and Azure Voice Live) | No provider receipt yet: **unverified** with real keys |
 | Azure Speech resource endpoint | Settings shows an entry row while an Azure model is selected; entries are checked with the shared `DesktopHostAzureResource` rules before saving, and live Azure refuses to start without one | `DesktopHostAzureResourceTests`; the window self-test checks the row follows the picker |
+| iCloud sync: History with the Mac, API-key import | Same shared flow as Windows (`DesktopHostCloudSync`); the flow, the adapters and the group verified against the fake CloudKit server | `DesktopHostCloudSyncTests` (sign-in, History both ways, deletion, sign-out, timeout, shutdown); `LinuxCloudKitTransportTests` and `LinuxLoopbackListenerTests` (fake server over a real loopback socket through URLSession and OpenSSL, callback, idle connections, cancellation); `LinuxEnvelopeCryptographyTests` (the CryptoKit/CNG vectors); window self-test; keyring integration check. A live CloudKit receipt, the Console setup (API token, callback URL, Production schema), a real Apple ID sign-in in a browser and the OpenURI portal inside Flatpak are **unverified** |
 | Shortcut styles (press, hold, double-tap, both) | Session rules verified in the shared host | `SpeakDesktopHostTests`; the X11 grab reports press and release (integration check); portal Deactivated on real desktops **unverified** |
 | History playback in the app | Verified player (a tone plays to the end through PipeWire) | App WAV recordings only; other imports use Open audio; audible hardware output **unverified** |
 | App profiles | Controller support shared; **no Linux editor** | The X11 target's `/proc/<pid>/exe` path reaches the shared resolver, whose matcher is written for Windows paths: **unverified** |
@@ -142,6 +192,11 @@ proven on a physical desktop.
 4. Insertion into Firefox, Chromium/Electron, LibreOffice, GNOME Terminal and
    Konsole (Ctrl+Shift+V), GTK and Qt fields, with a non-US layout.
 5. USB and Bluetooth microphones through PipeWire.
+6. iCloud sync, once the container owner has created the API token: that
+   CloudKit Console accepts the plain `http://127.0.0.1` callback, a real
+   Apple ID sign-in in Firefox and Chromium (and through the OpenURI portal
+   from the Flatpak), a Mac transcript arriving and a Linux one reaching the
+   Mac, and key import with a real passphrase.
 
 ## CI
 

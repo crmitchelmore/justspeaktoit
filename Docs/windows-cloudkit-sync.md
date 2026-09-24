@@ -4,6 +4,9 @@ Windows syncs History with the Mac by reading and writing the **existing**
 CloudKit records through CloudKit Web Services. The Apple apps keep their
 native CloudKit framework path. Setup and the user-facing behaviour are in
 [Windows development: iCloud sync](windows-development.md#icloud-sync).
+Linux runs the same shared flow with its own adapters and the same API token
+and callback; see [Linux development: iCloud sync](linux-development.md#icloud-sync).
+Everything below applies to both unless it names one.
 
 Status: source, portable tests and Windows loopback tests only. No request in
 this repository's tests reaches iCloud. A live Mac to Windows receipt needs the
@@ -64,7 +67,7 @@ holds it once; the native `CKRecord` mappers and the web transport both use it.
 | Item | Existing format |
 |---|---|
 | Zone | `TranscriptionHistoryZone` in the private database |
-| History | `TranscriptionHistory`, record name = entry UUID, nine fields: `entryID` String, `createdAt` Date, `rawTranscription` String?, `postProcessedText` String?, `model` String, `duration` Double, `wordCount` Int64, `originPlatform` String, `updatedAt` Date. Deletions are CloudKit tombstones. No assets: audio never leaves the device. Windows writes `originPlatform` `windows`. |
+| History | `TranscriptionHistory`, record name = entry UUID, nine fields: `entryID` String, `createdAt` Date, `rawTranscription` String?, `postProcessedText` String?, `model` String, `duration` Double, `wordCount` Int64, `originPlatform` String, `updatedAt` Date. Deletions are CloudKit tombstones. No assets: audio never leaves the device. Windows writes `originPlatform` `windows`, Linux `linux`. |
 | Compare Models | `ModelComparisonRound`, name `comparison-<UUID>`, flat fields and a JSON `payload`. A transport exists; Windows does not sync rounds yet. |
 | API keys | `EncryptedSecret`, name `secret-<unpadded base64url identifier>`, `ciphertext`/`nonce`/`tag` Bytes, `updatedAt` Date, `isDeleted` Int64; one `EncryptedSecretMetadata` record with the salt and verifier. The identifier list is `SyncSchema.EncryptedSecret.syncableIdentifiers`. |
 | Conflicts | History: a CloudKit copy at least as new as the local entry wins. Saves are conditional on the fetched record (`CONFLICT` and `EXISTS` stay pending and retry). |
@@ -118,14 +121,30 @@ From Apple's
   change begins, and a key saved by hand is written once its mark is saved;
   `DesktopCloudSyncWork` owns a host's sync tasks so shutdown stops new work
   and drains what runs within a bound; `DesktopCloudSyncConfiguration`
-  resolves the build-time token.
+  resolves the build-time token; `DesktopLoopbackListener` and
+  `DesktopCloudSyncSignIn.awaitCallback` wait for the sign-in callback on a
+  host's listener.
+- `Sources/SpeakDesktopHost/DesktopHostCloudSync.swift` (portable): the flow
+  both hosts run, generic over the host platform: the settings' actions
+  (Apply, Sign in, Sign out, Sync now), the loopback sign-in, the periodic
+  pass, `DesktopCloudSyncWork` ownership for shutdown, status lines and the
+  controller's synced-History presentation. A host supplies only
+  `DesktopHostCloudSyncNative`: how the settings show state, the listener,
+  the browser launch, its origin platform and where its choices live.
 - `Sources/SpeakWindowsPlatform/WindowsCloudKitNative.swift` with
   `Sources/CWindowsSupport/WindowsHTTP.cpp`, `WindowsLoopback.cpp` and
   `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener and the
   CNG envelope primitives.
 - `Sources/SpeakWindows/WindowsCloudSync.swift` and
-  `Sources/CWindowsSupport/WindowsCloudSyncSettings.cpp`: the dialog, sign-in
-  and History updates in the window.
+  `Sources/CWindowsSupport/WindowsCloudSyncSettings.cpp`: the Windows
+  specialisation and its dialog.
+- `Sources/SpeakLinuxPlatform/LinuxCloudKitNative.swift` and
+  `LinuxEnvelopeCryptography.swift` with `Sources/CLinuxSupport/LinuxLoopback.c`
+  and `LinuxCrypto.c`: the FoundationNetworking URLSession transport, the
+  Secret Service vault, the POSIX 127.0.0.1 listener and the OpenSSL envelope
+  primitives. `Sources/SpeakLinux/LinuxCloudSync.swift` and
+  `Sources/CLinuxSupport/LinuxCloudSync.c`: the Linux specialisation, its
+  window group and the sign-in page launch.
 
 ## Tests
 
@@ -143,6 +162,16 @@ From Apple's
   on, and interleave account validations. A sync state file that cannot be
   written shows that a typed key is not saved without its mark. Host shutdown
   ownership is tested through `DesktopCloudSyncWork`.
+- `Tests/SpeakDesktopHostTests/DesktopHostCloudSyncTests.swift` runs the shared
+  host flow on every platform with a fake platform and a scripted listener:
+  sign-in through the callback, History both ways with the host's origin, a
+  remote deletion of the selected transcript, sign-out, a replaced and a
+  timed-out sign-in, a build without a token and shutdown.
+- `Tests/SpeakLinuxPlatformTests/LinuxCloudKitNativeTests.swift` serves the fake
+  over a real loopback socket and runs the desktop sync service through
+  URLSession and OpenSSL (History both ways, key import, token rotation),
+  checks the callback, idle connections and cancellation;
+  `LinuxEnvelopeCryptographyTests` holds OpenSSL to the same vectors as CNG.
 - `Tests/SpeakWindowsPlatformTests/WindowsCloudKitNativeTests.swift` serves the
   fake over a real loopback socket through WinHTTP, checks the sign-in callback
   and cancellation, and holds CNG to the independent PBKDF2 and AES-GCM vectors
@@ -161,7 +190,9 @@ compares the signed-in user with the bound one. A different user resets the
 state kept for the previous one: the History cursor, acknowledgements, the
 marks for recordings deleted on its Mac, which API keys were imported, and the
 last sync time. Nothing is deleted from History or Credential Manager, and the
-previous account's iCloud data is untouched.
+previous account's iCloud data is untouched. Linux behaves the same, with the
+Secret Service keyring in place of Credential Manager and `linux` as the
+origin of its own recordings.
 
 What then reaches the new account is a product decision still open for
 review. Current behaviour, by kind of record:
@@ -187,7 +218,7 @@ review. Current behaviour, by kind of record:
 |---|---|
 | Change notifications | Not available to web clients for these subscriptions; Windows polls every five minutes and after each saved transcript. |
 | Expired cursor | No documented error code identifies an expired `syncToken`; it surfaces as a sync error. |
-| Loopback callback | Unverified until the API token is created. If CloudKit Console refuses `http://127.0.0.1:47823/cloudkit-sign-in`, a custom URI scheme through the MSIX manifest is needed instead. |
-| Token size | Credential Manager holds up to 2,560 bytes per credential. A longer web auth token would fail to save and ask for sign-in again. |
+| Loopback callback | Unverified until the API token is created. If CloudKit Console refuses `http://127.0.0.1:47823/cloudkit-sign-in`, a custom URI scheme is needed instead: through the MSIX manifest on Windows, an `x-scheme-handler` in the desktop file on Linux. |
+| Token size | Credential Manager holds up to 2,560 bytes per credential, and Linux reads up to 8 KiB from the keyring. A longer web auth token would fail to save or read and ask for sign-in again. |
 | Keys typed by hand | The "saved by hand" mark is saved before the key. If the sync state cannot be saved, the key is not saved and the error is shown. If Credential Manager then refuses the key, or the app stops between the two, the key saved before stays and counts as typed: a deletion on the Mac no longer removes it, though a newer key from the Mac still replaces it. |
-| Compare Models, iPhone History, settings, Handoff | Not wired on Windows. |
+| Compare Models, iPhone History, settings, Handoff | Not wired on Windows or Linux. |

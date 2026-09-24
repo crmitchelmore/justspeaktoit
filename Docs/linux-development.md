@@ -119,7 +119,8 @@ proven on a physical desktop.
 | `--toggle` / app action | Built on GApplication | Forwarding **unverified** by an automated check |
 | Import and conversion | Verified for WAV (44.1 kHz stereo to 16 kHz mono) | `LinuxAudioConversionTests` through GStreamer; MP3, M4A and Opus depend on installed plugins and are **unverified**; conversion runs only for 16 kHz-WAV-only models (Meta, Azure) |
 | Live transcription transport (SwiftNIO, `SpeakLinuxWebSocket`) | Verified against the loopback probe | `SpeakLinuxWebSocketTests`: echo, PCM frames, ping/pong payload, peer close code and reason with acknowledgement, 2 × 2 MiB through a slow peer, fragmented Unicode and binary, cancellation of pending receive and pre-handshake send, abrupt disconnect, oversize, refused upgrade, and the shared Mistral client's four Voxtral scenarios. TLS (`wss`) to real providers, and live providers other than Mistral's protocol peer, **unverified**; HTTP(S) proxies are **not** honoured by this transport |
-| Live transcription in the app | Wired to the shared live clients (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI, Mistral) | No provider receipt yet: **unverified** with real keys |
+| Live transcription in the app | Wired to the same shared live clients as Windows (OpenAI, Deepgram, AssemblyAI, Speechmatics, Soniox, ElevenLabs, xAI, Mistral, Gladia, Cartesia, Rev.ai and Azure Voice Live) | No provider receipt yet: **unverified** with real keys |
+| Azure Speech resource endpoint | Settings shows an entry row while an Azure model is selected; entries are checked with the shared `DesktopHostAzureResource` rules before saving, and live Azure refuses to start without one | `DesktopHostAzureResourceTests`; the window self-test checks the row follows the picker |
 | Shortcut styles (press, hold, double-tap, both) | Session rules verified in the shared host | `SpeakDesktopHostTests`; the X11 grab reports press and release (integration check); portal Deactivated on real desktops **unverified** |
 | History playback in the app | Verified player (a tone plays to the end through PipeWire) | App WAV recordings only; other imports use Open audio; audible hardware output **unverified** |
 | App profiles | Controller support shared; **no Linux editor** | The X11 target's `/proc/<pid>/exe` path reaches the shared resolver, whose matcher is written for Windows paths: **unverified** |
@@ -149,5 +150,6 @@ digest) installs the packages above, then runs the boundary check, the
 release build, `swift test` with `SPEAK_LINUX_TARGET=1`,
 `scripts/linux-desktop-checks.sh` (uploading the window snapshot),
 `scripts/linux-integration-checks.sh`, and the Windows Swift type-check. It
-also runs on pushes to `claude/linux-port`, which should be dropped when the
+also runs on pushes to the consolidation branch
+`claude/windows-linux-migration-tyshm0`, which should be dropped when the
 branch merges.

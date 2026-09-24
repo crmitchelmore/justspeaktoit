@@ -45,7 +45,9 @@ enum {
     JSTI_EVENT_SHORTCUT_STYLE = 32,    /* index: 0 press, 1 hold, 2 double-tap, 3 hold and double-tap */
     /* Apply in Post-processing. index: model index, or -1 - index when
      * disabled; text: prompt, U+001F, then a new OpenRouter key or nothing. */
-    JSTI_EVENT_POST_PROCESSING = 33
+    JSTI_EVENT_POST_PROCESSING = 33,
+    /* Apply in Azure Speech resource. text: the endpoint as typed ("" clears). */
+    JSTI_EVENT_AZURE_RESOURCE = 34
 };
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
@@ -94,6 +96,8 @@ int32_t jsti_window_set_text_output(int32_t method, int32_t restore_clipboard, c
 /* The Post-processing group: shared remote model names and saved choices. */
 int32_t jsti_window_set_post_processing(
     const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt);
+/* Shows the saved Azure Speech resource endpoint ("" for none). */
+int32_t jsti_window_set_azure_resource(const char *endpoint);
 /* The shortcut behaviour picker, indexed as JSTI_EVENT_SHORTCUT_STYLE. */
 int32_t jsti_window_set_shortcut_style(int32_t index);
 /* Main thread only: the transcript and version the window displays now. */

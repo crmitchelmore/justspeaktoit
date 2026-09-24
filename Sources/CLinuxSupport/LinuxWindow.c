@@ -31,6 +31,8 @@ typedef struct UI {
     GtkLabel *catalog_status;
     GtkButton *catalog_refresh;
     AdwPasswordEntryRow *key_row;
+    /* Shown while an Azure model is selected: live routes need the endpoint. */
+    AdwEntryRow *azure_row;
     /* Microphones */
     GtkStringList *microphone_names;
     GPtrArray *microphone_ids;
@@ -156,10 +158,24 @@ static void on_copy(GtkButton *button, gpointer data) {
     emit(JSTI_EVENT_COPY, "", 0);
 }
 
+/* The Azure resource row belongs to Azure models only. */
+static void refresh_azure_row(void) {
+    guint position = adw_combo_row_get_selected(ui.model_row);
+    gboolean azure = ui.model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < ui.model_slots->len
+        && g_str_has_prefix(g_array_index(ui.model_slots, Slot, position).id, "azure/");
+    gtk_widget_set_visible(GTK_WIDGET(ui.azure_row), azure);
+}
+
 static void on_model(GObject *object, GParamSpec *spec, gpointer data) {
     (void)object; (void)spec; (void)data;
+    refresh_azure_row();
     gint32 slot = selected_model_slot();
     if (slot >= 0) emit(JSTI_EVENT_SELECT_MODEL, "", slot);
+}
+
+static void on_azure_apply(AdwEntryRow *row, gpointer data) {
+    (void)data;
+    emit(JSTI_EVENT_AZURE_RESOURCE, gtk_editable_get_text(GTK_EDITABLE(row)), 0);
 }
 
 static void on_microphone(GObject *object, GParamSpec *spec, gpointer data) {
@@ -405,6 +421,16 @@ static void build_window(void) {
     adw_entry_row_set_show_apply_button(ADW_ENTRY_ROW(ui.key_row), TRUE);
     g_signal_connect(ui.key_row, "apply", G_CALLBACK(on_key_apply), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(settings), GTK_WIDGET(ui.key_row));
+
+    /* Recorded audio falls back to the key's region; live Azure needs this. */
+    ui.azure_row = ADW_ENTRY_ROW(adw_entry_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.azure_row),
+                                  "Azure Speech resource endpoint (https://…cognitiveservices.azure.com)");
+    adw_entry_row_set_show_apply_button(ui.azure_row, TRUE);
+    adw_entry_row_set_input_purpose(ui.azure_row, GTK_INPUT_PURPOSE_URL);
+    g_signal_connect(ui.azure_row, "apply", G_CALLBACK(on_azure_apply), NULL);
+    gtk_widget_set_visible(GTK_WIDGET(ui.azure_row), FALSE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(settings), GTK_WIDGET(ui.azure_row));
 
     ui.microphone_names = gtk_string_list_new(NULL);
     ui.microphone_ids = g_ptr_array_new_with_free_func(g_free);
@@ -787,6 +813,7 @@ static void models_apply(gpointer pointer) {
     gtk_string_list_splice(ui.model_names, 0, existing, (const char *const *)models->names->pdata);
     g_ptr_array_set_size(models->names, models->names->len - 1);
     if (position != GTK_INVALID_LIST_POSITION) adw_combo_row_set_selected(ui.model_row, position);
+    refresh_azure_row();
     if (models->status != NULL) gtk_label_set_text(ui.catalog_status, models->status);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.catalog_refresh), !models->refreshing);
     ui.suppress = FALSE;
@@ -1090,6 +1117,16 @@ int32_t jsti_window_set_post_processing(
     return post(polish_apply, polish, polish_free);
 }
 
+static void azure_apply(gpointer data) {
+    ui.suppress = TRUE;
+    gtk_editable_set_text(GTK_EDITABLE(ui.azure_row), data != NULL ? data : "");
+    ui.suppress = FALSE;
+}
+
+int32_t jsti_window_set_azure_resource(const char *endpoint) {
+    return post(azure_apply, g_strdup(endpoint != NULL ? endpoint : ""), g_free);
+}
+
 static void style_apply(gpointer data) {
     ui.suppress = TRUE;
     adw_combo_row_set_selected(ui.style_row, (guint)GPOINTER_TO_INT(data));
@@ -1162,6 +1199,27 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");
+    }
+    /* The Azure resource row follows the picker: shown for Azure models only. */
+    guint original = adw_combo_row_get_selected(ui.model_row);
+    guint azure = GTK_INVALID_LIST_POSITION, other = GTK_INVALID_LIST_POSITION;
+    for (guint index = 0; index < ui.model_slots->len; index++) {
+        gboolean is_azure = g_str_has_prefix(g_array_index(ui.model_slots, Slot, index).id, "azure/");
+        if (is_azure && azure == GTK_INVALID_LIST_POSITION) azure = index;
+        if (!is_azure && other == GTK_INVALID_LIST_POSITION) other = index;
+    }
+    if (azure == GTK_INVALID_LIST_POSITION || other == GTK_INVALID_LIST_POSITION) {
+        return fail(error, capacity, "the picker offers no Azure model, or only Azure models");
+    }
+    ui.suppress = TRUE;
+    adw_combo_row_set_selected(ui.model_row, azure);
+    gboolean shown_for_azure = gtk_widget_get_visible(GTK_WIDGET(ui.azure_row));
+    adw_combo_row_set_selected(ui.model_row, other);
+    gboolean shown_for_other = gtk_widget_get_visible(GTK_WIDGET(ui.azure_row));
+    adw_combo_row_set_selected(ui.model_row, original);
+    ui.suppress = FALSE;
+    if (!shown_for_azure || shown_for_other) {
+        return fail(error, capacity, "the Azure resource row did not follow the selected model");
     }
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";

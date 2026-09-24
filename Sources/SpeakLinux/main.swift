@@ -49,6 +49,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         try await controller.configureModelCatalog()
         holder.applyShortcutStyle(await controller.hotKeySettings())
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
+        _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         return await controller.selectedIndex()
     }
     let strings = LinuxWindow.Strings()

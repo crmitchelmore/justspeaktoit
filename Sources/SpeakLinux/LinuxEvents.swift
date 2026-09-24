@@ -247,6 +247,20 @@ private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: 
             await controller.savePostProcessing(enabled: enabled, modelIndex: model, prompt: prompt, key: key)
             LinuxWindow.postProcessing(await controller.postProcessingOptions())
         }
+    case Int(JSTI_EVENT_AZURE_RESOURCE):
+        // Checked before it is queued, with the shared rules the live clients
+        // apply, so a saved endpoint can never fail later.
+        let endpoint: String
+        do {
+            endpoint = try DesktopHostAzureResource.normalized(value)
+        } catch {
+            LinuxHostPlatform.update(error.localizedDescription)
+            return true
+        }
+        holder.enqueueSettings {
+            await controller.saveAzureResourceEndpoint(endpoint)
+            _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
+        }
     case Int(JSTI_EVENT_SHORTCUT_STYLE):
         guard LinuxHotKeySettings.styles.indices.contains(slot) else { break }
         let hotKey = LinuxHotKeySettings(style: LinuxHotKeySettings.styles[slot].rawValue)

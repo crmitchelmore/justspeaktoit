@@ -28,6 +28,7 @@ package enum DesktopHostSync {
         case "macos": return "your Mac"
         case "ios": return "your iPhone"
         case "windows": return "another PC"
+        case "linux": return "a Linux computer"
         default: return "another device"
         }
     }

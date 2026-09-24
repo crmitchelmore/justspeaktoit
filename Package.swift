@@ -186,9 +186,11 @@ let portablePackage = Package(
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
-        // Recording, History, output and settings orchestration shared by the
-        // Windows and Linux hosts behind DesktopHostPlatform.
-        .target(name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop"]),
+        // Recording, History, output, settings and iCloud sync orchestration
+        // shared by the Windows and Linux hosts behind DesktopHostPlatform.
+        .target(
+            name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync"]
+        ),
         .target(
             name: "SpeakSync",
             dependencies: ["SpeakCore"],
@@ -201,7 +203,12 @@ let portablePackage = Package(
         .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
         .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
-        .testTarget(name: "SpeakDesktopHostTests", dependencies: ["SpeakDesktopHost", "SpeakDesktop", "SpeakCore"]),
+        .testTarget(
+            name: "SpeakDesktopHostTests",
+            dependencies: [
+                "SpeakDesktopHost", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync", "SpeakCore", "SpeakTestSupport"
+            ]
+        ),
         .testTarget(
             name: "SpeakDesktopSyncTests",
             dependencies: ["SpeakDesktopSync", "SpeakDesktop", "SpeakSync", "SpeakCore", "SpeakTestSupport"]

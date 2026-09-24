@@ -32,4 +32,9 @@ void jsti_window_emit(gint32 event, const char *text, gint32 index);
 struct _GtkWidget *jsti_local_models_group_new(void);
 int32_t jsti_local_models_self_test(char *error, size_t capacity);
 
+/* The iCloud sync group (LinuxCloudSync.c): added to the window's preferences
+ * page, and exercised by the window self-test. */
+void jsti_cloud_sync_build(gpointer page);
+int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+
 #endif

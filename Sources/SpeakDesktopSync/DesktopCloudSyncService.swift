@@ -43,6 +43,8 @@ public enum DesktopCloudSyncError: Error, Equatable, Sendable {
     case unavailable(String)
     case untrustedSignInURL
     case signInNotOffered
+    /// The browser did not return from Apple's sign-in page in time.
+    case signInTimedOut
     /// Key import was turned on or off again while this change to it was in
     /// progress; the later change decides, and this one made no further changes.
     case keyImportSuperseded
@@ -54,6 +56,7 @@ extension DesktopCloudSyncError: LocalizedError {
         case .unavailable(let reason): return reason
         case .untrustedSignInURL: return "iCloud offered a sign-in page that is not an Apple page; it was not opened."
         case .signInNotOffered: return "iCloud did not offer a sign-in page. Try again later."
+        case .signInTimedOut: return "The browser did not return from Apple ID sign-in in time. Sign in again to retry."
         case .keyImportSuperseded: return "A later change to API-key import replaced this one."
         }
     }

@@ -186,9 +186,11 @@ let portablePackage = Package(
             swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
         ),
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
-        // Recording, History, output and settings orchestration shared by the
-        // Windows and Linux hosts behind DesktopHostPlatform.
-        .target(name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop"]),
+        // Recording, History, output, settings and iCloud sync orchestration
+        // shared by the Windows and Linux hosts behind DesktopHostPlatform.
+        .target(
+            name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync"]
+        ),
         .target(
             name: "SpeakSync",
             dependencies: ["SpeakCore"],
@@ -201,7 +203,12 @@ let portablePackage = Package(
         .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
         .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
         .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
-        .testTarget(name: "SpeakDesktopHostTests", dependencies: ["SpeakDesktopHost", "SpeakDesktop", "SpeakCore"]),
+        .testTarget(
+            name: "SpeakDesktopHostTests",
+            dependencies: [
+                "SpeakDesktopHost", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync", "SpeakCore", "SpeakTestSupport"
+            ]
+        ),
         .testTarget(
             name: "SpeakDesktopSyncTests",
             dependencies: ["SpeakDesktopSync", "SpeakDesktop", "SpeakSync", "SpeakCore", "SpeakTestSupport"]
@@ -314,10 +321,13 @@ if linuxTargetBuild {
         linuxSystemLibrary(
             "CLinuxGStreamer", "gstreamer-app-1.0", apt: ["libgstreamer1.0-dev", "libgstreamer-plugins-base1.0-dev"]
         ),
+        // iCloud sync: PBKDF2 and AES-GCM for the API-key envelope.
+        linuxSystemLibrary("CLinuxCrypto", "libcrypto", apt: ["libssl-dev"]),
         .target(
             name: "CLinuxSupport",
             dependencies: [
-                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer"
+                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer",
+                "CLinuxCrypto"
             ],
             publicHeadersPath: "include",
             cSettings: [.define("_GNU_SOURCE")],
@@ -325,7 +335,10 @@ if linuxTargetBuild {
             // libdl opens the whisper.cpp runtime (part of libc since glibc 2.34).
             linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl")]
         ),
-        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "SpeakDesktop", "CLinuxSupport"]),
+        .target(
+            name: "SpeakLinuxPlatform",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "CLinuxSupport"]
+        ),
         .target(
             name: "SpeakLinuxWebSocket",
             dependencies: [
@@ -341,12 +354,15 @@ if linuxTargetBuild {
             name: "SpeakLinux",
             dependencies: [
                 "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport"
+                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync"
             ]
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
-            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
+            dependencies: [
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakDesktopSync", "SpeakLinuxPlatform", "CLinuxSupport",
+                "SpeakTestSupport"
+            ]
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",

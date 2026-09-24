@@ -15,8 +15,8 @@ public enum DesktopCloudSyncConfiguration {
     public static let tokenVariable = "JSTI_CLOUDKIT_WEB_API_TOKEN"
     public static let environmentVariable = "JSTI_CLOUDKIT_WEB_ENVIRONMENT"
 
-    /// The Mac container family: Windows joins the Mac App Store build's
-    /// History, so a user's Mac History appears on Windows.
+    /// The Mac container family: Windows and Linux join the Mac App Store
+    /// build's History, so a user's Mac History appears on them.
     public static let family = SyncContainerFamily.macOS
 
     public enum Resolution: Equatable, Sendable {
@@ -59,7 +59,8 @@ public enum DesktopCloudSyncConfiguration {
     }
 }
 
-/// The platform credential store (Windows Credential Manager on Windows).
+/// The platform credential store: Windows Credential Manager, or the Secret
+/// Service keyring on Linux.
 public protocol DesktopCredentialVault: Sendable {
     func readCredential(_ name: String) throws -> String?
     func writeCredential(_ value: String, name: String) throws

@@ -55,6 +55,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         await controller.configureLocalModels()
         return await controller.selectedIndex()
     }
+    LinuxCloudSync.configure(holder)
     let strings = LinuxWindow.Strings()
     let rows = LinuxWindow.modelRows(strings)
     let context = Unmanaged.passUnretained(holder).toOpaque()
@@ -78,6 +79,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         holder.shortcuts.stop()
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
+        await LinuxCloudSync.shutDown(holder)
         await holder.drainShortcuts()
         await controller.close()
         LinuxPortal.stopRemoteDesktop()

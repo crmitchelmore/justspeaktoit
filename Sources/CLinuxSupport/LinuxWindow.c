@@ -593,6 +593,7 @@ static void build_window(void) {
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(history), history_actions);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(history));
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(read_aloud_group()));
+    jsti_cloud_sync_build(page);
     refresh_actions();
 }
 
@@ -1375,6 +1376,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
         break;
     }
     if (jsti_local_models_self_test(error, capacity) != 0) return -1;
+    if (jsti_cloud_sync_self_test(error, capacity) != 0) return -1;
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {

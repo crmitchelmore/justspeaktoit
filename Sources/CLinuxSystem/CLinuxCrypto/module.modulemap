@@ -1,0 +1,4 @@
+module CLinuxCrypto [system] {
+    header "shim.h"
+    export *
+}

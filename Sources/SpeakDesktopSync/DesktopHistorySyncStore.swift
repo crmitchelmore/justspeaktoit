@@ -16,7 +16,10 @@ public enum DesktopHistorySyncChange: Equatable, Sendable {
 /// Projects desktop History records onto the shared nine-field
 /// `SyncableHistoryEntry`, exactly as the Mac and iPhone project theirs.
 public enum DesktopHistorySyncProjection {
+    /// What Windows writes as `originPlatform` on its own recordings; the default.
     public static let originPlatform = "windows"
+    /// What Linux writes as `originPlatform` on its own recordings.
+    public static let linuxOriginPlatform = "linux"
 
     /// Only a finished transcript syncs. A recording still waiting for (or
     /// failing) transcription stays local until it has text.
@@ -24,9 +27,11 @@ public enum DesktopHistorySyncProjection {
         record.result != nil || record.processedText != nil
     }
 
+    /// `origin` names this device's platform; a synced copy keeps its own.
     public static func entry(
         for record: DesktopRecordingStore.Record,
-        updatedAt: Date
+        updatedAt: Date,
+        origin: String = originPlatform
     ) -> SyncableHistoryEntry {
         let text = record.processedText ?? record.result?.text
         return SyncableHistoryEntry(
@@ -38,7 +43,7 @@ public enum DesktopHistorySyncProjection {
             duration: record.result?.duration ?? 0,
             // The Mac counts space-separated words the same way.
             wordCount: text?.split(separator: " ").count ?? 0,
-            originPlatform: record.originPlatform ?? originPlatform,
+            originPlatform: record.originPlatform ?? origin,
             updatedAt: updatedAt
         )
     }
@@ -91,6 +96,8 @@ public enum DesktopHistorySyncProjection {
 public actor DesktopHistorySyncStore: HistorySyncStore {
     private let records: DesktopRecordingStore
     private let state: DesktopCloudSyncStateStore
+    /// The `originPlatform` written on recordings made on this device.
+    private let origin: String
     private let now: @Sendable () -> Date
     private let onChanges: @Sendable ([DesktopHistorySyncChange]) async -> Void
     /// Fingerprints of the content handed to the transport, by record.
@@ -100,11 +107,13 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
     public init(
         records: DesktopRecordingStore,
         state: DesktopCloudSyncStateStore,
+        origin: String = DesktopHistorySyncProjection.originPlatform,
         now: @escaping @Sendable () -> Date = { Date() },
         onChanges: @escaping @Sendable ([DesktopHistorySyncChange]) async -> Void = { _ in }
     ) {
         self.records = records
         self.state = state
+        self.origin = origin
         self.now = now
         self.onChanges = onChanges
     }
@@ -118,7 +127,7 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
             observed = try await state.update { state in
                 for record in syncable {
                     let fingerprint = DesktopHistorySyncProjection.fingerprint(
-                        DesktopHistorySyncProjection.entry(for: record, updatedAt: stamp)
+                        DesktopHistorySyncProjection.entry(for: record, updatedAt: stamp, origin: origin)
                     )
                     if var entry = state.history[record.id] {
                         guard entry.observed != fingerprint else { continue }
@@ -144,7 +153,7 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
         for record in syncable {
             guard let entry = observed[record.id], !entry.deletedElsewhere,
                   entry.acknowledged != entry.observed else { continue }
-            pending.append(DesktopHistorySyncProjection.entry(for: record, updatedAt: entry.updatedAt))
+            pending.append(DesktopHistorySyncProjection.entry(for: record, updatedAt: entry.updatedAt, origin: origin))
             offered[record.id] = entry.observed
         }
         return pending.sorted { $0.createdAt < $1.createdAt }
@@ -164,7 +173,7 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
         do {
             try await records.save(record)
             let fingerprint = DesktopHistorySyncProjection.fingerprint(
-                DesktopHistorySyncProjection.entry(for: record, updatedAt: entry.updatedAt)
+                DesktopHistorySyncProjection.entry(for: record, updatedAt: entry.updatedAt, origin: origin)
             )
             try await state.update { state in
                 state.history[entry.id] = DesktopCloudSyncState.HistoryEntry(

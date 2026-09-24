@@ -253,11 +253,14 @@ behaviour can be tested locally.
 On Linux, install Swift 6.2.3 using the
 [official Linux installation instructions](https://www.swift.org/install/linux/)
 and run `swift test --configuration release`. CI uses the official
-`swift:6.2.3-jammy` container pinned to its image digest. Linux is a portability
-gate for the libraries; this change does not provide a Linux desktop app.
+`swift:6.2.3-jammy` container pinned to its image digest. That job is the
+portability gate for the libraries. The Linux desktop app (`SPEAK_LINUX_TARGET=1`)
+shares the Windows controller through `SpeakDesktopHost`; see
+[linux-development.md](linux-development.md).
 
-The portable graph has no external Swift package dependencies and may remove
-`Package.resolved` while resolving. Preserve the Apple lockfile: restore only
+Without `SPEAK_LINUX_TARGET` the portable graph has no external Swift package
+dependencies and may remove `Package.resolved` while resolving; the Linux app
+graph (SwiftNIO) rewrites it. Preserve the Apple lockfile: restore only
 that file from the starting revision after portable validation, provided it had
 no unrelated changes before the run. Do not commit its deletion.
 

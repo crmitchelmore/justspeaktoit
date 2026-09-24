@@ -94,11 +94,11 @@ every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
 | `SpeakSync` | library target | Depends on `SpeakCore`; the portable CloudKit Web Services client and envelope formats. |
 | `SpeakDesktop` | library target | Depends on `SpeakCore`; desktop batch and live transcription routing, the recording store, History search and retry, post-processing, profiles and on-device model download, verification and ownership. |
 | `SpeakDesktopSync` | library target | Depends on `SpeakDesktop`, `SpeakSync` and `SpeakCore`; iCloud History sync and key import for desktop hosts. |
-| `SpeakDesktopHost` | library target | Depends on `SpeakCore` and `SpeakDesktop`; `DesktopHostController<Platform>`, the recording, History, playback, output, settings and model orchestration shared by the Windows and Linux apps behind `DesktopHostPlatform`. |
+| `SpeakDesktopHost` | library target | Depends on `SpeakCore`, `SpeakDesktop`, `SpeakDesktopSync` and `SpeakSync`; `DesktopHostController<Platform>`, the recording, History, playback, output, settings, Read aloud, on-device model and iCloud sync orchestration shared by the Windows and Linux apps behind `DesktopHostPlatform`. |
 | `CWindowsSupport`, `CWindowsAutomation` | C++ targets | `SPEAK_WINDOWS_TARGET`; Win32, WASAPI, Media Foundation, UI Automation, WinHTTP, CNG, Credential Manager and the run-time whisper.cpp loader. |
 | `SpeakWindowsPlatform` | library target | `SPEAK_WINDOWS_TARGET`; Swift over the Windows C++ ABI. |
 | `SpeakWindows` | executable target | `SPEAK_WINDOWS_TARGET`; the Windows app, `WindowsHostPlatform` and its self-tests. The product also ships `speak` (`SpeakCLI`) over a named pipe. |
-| `CLinuxSystem/*`, `CLinuxSupport` | system library and C targets | `SPEAK_LINUX_TARGET`; GTK 4/libadwaita, libpulse, libsecret, X11/XTest, GStreamer and the XDG portals behind the `jsti_*` ABI. |
+| `CLinuxSystem/*`, `CLinuxSupport` | system library and C targets | `SPEAK_LINUX_TARGET`; GTK 4/libadwaita, libpulse, libsecret, X11/XTest, GStreamer, OpenSSL libcrypto and the XDG portals behind the `jsti_*` ABI, plus the run-time whisper.cpp loader. |
 | `SpeakLinuxPlatform`, `SpeakLinuxWebSocket` | library targets | `SPEAK_LINUX_TARGET`; Swift over the Linux C ABI, and the SwiftNIO live-transcription transport. |
 | `SpeakLinux` | executable target | `SPEAK_LINUX_TARGET`; the Linux app, `LinuxHostPlatform` and its self-tests. |
 | `SpeakPortableTests`, `SpeakDesktopTests`, `SpeakDesktopHostTests`, `SpeakDesktopSyncTests`, `SpeakSyncTests` | test targets | Shared-core, desktop and host tests run on Linux, Windows and portable macOS. |
@@ -111,9 +111,9 @@ flowchart TD
     Desktop --> DesktopSync[SpeakDesktopSync]
     Sync --> DesktopSync
     Desktop --> Host[SpeakDesktopHost]
+    DesktopSync --> Host
     Host --> Windows[SpeakWindows]
     Host --> Linux[SpeakLinux]
-    DesktopSync --> Windows
     WinPlatform[SpeakWindowsPlatform] --> Windows
     LinuxPlatform[SpeakLinuxPlatform] --> Linux
 ```
@@ -205,8 +205,10 @@ or closing keeps the audio.
 `DesktopHostPlatform` is the whole platform boundary: window presenter, credential store (Windows Credential Manager,
 the Secret Service keyring on Linux), private files, audio conversion, clipboard, output jobs, playback, Read aloud and
 on-device models. Platform-neutral rules such as model slots, the Azure Speech resource endpoint, key saving with the
-sync hooks, History retry routing and playback request ownership live in `SpeakDesktopHost` or `SpeakDesktop`, so both
-hosts behave the same. Live transcription uses the shared clients over an injected WebSocket transport: WinHTTP on
+sync hooks, History retry routing, playback request ownership, the Read aloud controller, on-device model management
+and the iCloud sync flow live in `SpeakDesktopHost` or `SpeakDesktop`, so both hosts behave the same; each host
+supplies only its native pieces (player, whisper.cpp loader and digest, CloudKit transport, envelope cryptography,
+credential vault and loopback listener). Live transcription uses the shared clients over an injected WebSocket transport: WinHTTP on
 Windows and SwiftNIO on Linux.
 
 ## Extensions and companion surfaces

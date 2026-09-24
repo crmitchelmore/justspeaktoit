@@ -113,6 +113,34 @@ enum LinuxIntegrationChecks {
         try require(state == Int32(JSTI_PLAYER_FINISHED), "playback ended in state \(state)")
         try require(abs(jsti_player_position(player) - 0.5) < 0.01, "playback position was not the whole tone")
         print("Playback: a 0.5 s tone played to the end.")
+        try speech()
+    }
+
+    /// Read aloud: one segment in the WAV format synthesized speech is
+    /// rewritten to (24 kHz mono PCM16) plays to the end through the History
+    /// player's speech mode.
+    private static func speech() throws {
+        var pcm = Data()
+        for index in 0..<7_200 {
+            let sample = UInt16(bitPattern: Int16(8_000 * sin(Double(index) * 2 * .pi * 330 / 24_000)))
+            pcm.append(UInt8(truncatingIfNeeded: sample))
+            pcm.append(UInt8(truncatingIfNeeded: sample >> 8))
+        }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("jsti-speech-\(UUID().uuidString).wav")
+        let wav = PCMWaveWriter.wavData(pcm: pcm, sampleRate: 24_000)
+        try require(wav != nil, "the speech segment could not be encoded")
+        try wav?.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let playback = LinuxAudioPlayback()
+        let played = try blocking { () -> TimeInterval in
+            let speech = try playback.beginSpeech(recordID: UUID())
+            let played = try await playback.playToCompletion(speech, path: file.path)
+            playback.endSpeech(speech)
+            try await playback.close()
+            return played
+        }
+        try require(abs(played - 0.3) < 0.01, "the speech segment reported \(played) s")
+        print("Read aloud: a 0.3 s segment at 24 kHz played to the end through the History player.")
     }
 
     /// X11 paste into a real window, with focus re-verification and clipboard

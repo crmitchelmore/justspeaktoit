@@ -5,11 +5,6 @@ import SpeakDesktopHost
 import SpeakLinuxPlatform
 import CLinuxSupport
 
-private enum LinuxHistoryEvent: Sendable {
-    case selection(String)
-    case version(String, DesktopTranscriptVariant)
-}
-
 /// Routes GTK events (on the GTK thread) and shortcut presses (on the X11 or
 /// portal thread) to the shared controller, in the same order-preserving
 /// structures the Windows host uses.
@@ -19,7 +14,7 @@ final class LinuxEventContext: @unchecked Sendable {
     var smokeTestFailure: Error?
     /// Runs off the GTK thread once the window is ready, then closes it.
     var windowCheck: (@Sendable () throws -> Void)?
-    private let historyEvents: DesktopEventDispatcher<LinuxHistoryEvent>
+    private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let searches: DesktopEventDispatcher<String>
     private let copies: DesktopTranscriptCopyDispatcher
     private let settings = DesktopSettingsQueue()
@@ -52,11 +47,14 @@ final class LinuxEventContext: @unchecked Sendable {
         self.copies = DesktopTranscriptCopyDispatcher { text, variant in
             await controller.copyTranscript(text, variant: variant)
         }
-        self.historyEvents = DesktopEventDispatcher { event in
+        self.historyEvents = DesktopEventDispatcher(coalescing: DesktopHistoryEvent.coalesce) { event in
             switch event {
             case .selection(let identifier): await controller.selectHistory(identifier)
             case .version(let identifier, let variant):
                 await controller.selectTranscriptVariant(variant, identifier: identifier)
+            case .playPause(let identifier): await controller.playbackToggle(identifier)
+            case .stop: await controller.playbackStop()
+            case .readAloud(let identifier, let text): await controller.readAloud(identifier, text: text)
             }
         }
     }
@@ -149,6 +147,11 @@ final class LinuxEventContext: @unchecked Sendable {
         historyEvents.submit(.version(identifier, variant))
     }
 
+    /// Play/Pause, Stop and Read aloud join the selection order: a click on a
+    /// newly selected row reaches it after that selection, and Stop reaches
+    /// the host after the clicks before it, never before them.
+    func submitHistoryPlayback(_ event: DesktopHistoryEvent) { historyEvents.submit(event) }
+
     func search(_ query: String) { searches.submit(query) }
 }
 
@@ -163,6 +166,7 @@ func linuxWindowEvent(
     let event = Int(event)
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
 }
 
@@ -215,8 +219,8 @@ private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: L
     case Int(JSTI_EVENT_SEARCH_HISTORY): holder.search(value)
     case Int(JSTI_EVENT_TRANSCRIPT_VERSION):
         holder.selectVersion(slot == 1 ? .original : .processed, identifier: value)
-    case Int(JSTI_EVENT_PLAYBACK_TOGGLE): Task { await controller.playbackToggle(value) }
-    case Int(JSTI_EVENT_PLAYBACK_STOP): Task { await controller.playbackStop() }
+    case Int(JSTI_EVENT_PLAYBACK_TOGGLE): holder.submitHistoryPlayback(.playPause(value))
+    case Int(JSTI_EVENT_PLAYBACK_STOP): holder.submitHistoryPlayback(.stop)
     default: return false
     }
     return true

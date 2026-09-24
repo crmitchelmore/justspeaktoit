@@ -77,6 +77,14 @@ typedef struct UI {
 } UI;
 
 static UI ui;
+
+/* Read aloud: its History action and the voice picker in its own group. */
+static struct {
+    GtkButton *button;
+    AdwComboRow *voice_row;
+    GtkStringList *voices;
+} read_aloud;
+
 static gint loop_running;
 static GMutex post_lock;
 static gboolean window_closed;
@@ -134,6 +142,10 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), has_record && (idle || ui.playback_state != 0));
     gtk_widget_set_sensitive(GTK_WIDGET(ui.stop_play), has_record && ui.playback_state != 0);
     gtk_button_set_label(ui.play, ui.playback_state == 1 ? "Pause" : "Play");
+    /* Speaks the presented record's displayed text, so it needs both. */
+    gboolean voices = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) > 0;
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.button), idle && presented && has_text && voices);
+    gtk_widget_set_sensitive(GTK_WIDGET(read_aloud.voice_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
@@ -266,6 +278,20 @@ static void on_stop_play(GtkButton *button, gpointer data) {
     emit(JSTI_EVENT_PLAYBACK_STOP, ui.selected_id, 0);
 }
 
+/* The host captures the displayed text with jsti_window_transcript_snapshot
+ * while this event runs, so it is the text shown under this record. */
+static void on_read_aloud(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    if (ui.selected_id == NULL || g_strcmp0(ui.presented_id, ui.selected_id) != 0) return;
+    emit(JSTI_EVENT_READ_ALOUD, ui.selected_id, 0);
+}
+
+static void on_voice(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    guint position = adw_combo_row_get_selected(read_aloud.voice_row);
+    if (position != GTK_INVALID_LIST_POSITION) emit(JSTI_EVENT_VOICE_OUTPUT, "", (gint32)position);
+}
+
 static void on_open_audio(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, ui.selected_id, 0);
@@ -337,6 +363,23 @@ static gboolean on_close_request(GtkWindow *window, gpointer data) {
 static GtkWidget *group(const char *title) {
     GtkWidget *widget = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(widget), title);
+    return widget;
+}
+
+/* The voice Read aloud uses; the list comes from jsti_window_set_voices. */
+static GtkWidget *read_aloud_group(void) {
+    GtkWidget *widget = group("Read aloud");
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(widget),
+        "Read aloud speaks the transcript shown for the selected recording with a Deepgram voice, using the "
+        "saved Deepgram API key. Play, Pause and Stop control it.");
+    read_aloud.voices = gtk_string_list_new(NULL);
+    read_aloud.voice_row = ADW_COMBO_ROW(adw_combo_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(read_aloud.voice_row), "Voice");
+    adw_combo_row_set_model(read_aloud.voice_row, G_LIST_MODEL(read_aloud.voices));
+    adw_combo_row_set_enable_search(read_aloud.voice_row, TRUE);
+    g_signal_connect(read_aloud.voice_row, "notify::selected", G_CALLBACK(on_voice), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(widget), GTK_WIDGET(read_aloud.voice_row));
     return widget;
 }
 
@@ -533,14 +576,18 @@ static void build_window(void) {
     ui.stop_play = GTK_BUTTON(gtk_button_new_with_label("Stop"));
     g_signal_connect(ui.play, "clicked", G_CALLBACK(on_play), NULL);
     g_signal_connect(ui.stop_play, "clicked", G_CALLBACK(on_stop_play), NULL);
+    read_aloud.button = GTK_BUTTON(gtk_button_new_with_label("Read aloud"));
+    g_signal_connect(read_aloud.button, "clicked", G_CALLBACK(on_read_aloud), NULL);
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.playback_label));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.play));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.stop_play));
+    gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(read_aloud.button));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.retry));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.export_button));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.open_audio));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(history), history_actions);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(history));
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(read_aloud_group()));
     refresh_actions();
 }
 
@@ -1138,6 +1185,40 @@ int32_t jsti_window_set_shortcut_style(int32_t index) {
     return post(style_apply, GINT_TO_POINTER(index), NULL);
 }
 
+typedef struct Voices {
+    GPtrArray *names;
+    gint32 selected;
+} Voices;
+
+static void voices_free(gpointer pointer) {
+    Voices *voices = pointer;
+    g_ptr_array_unref(voices->names);
+    g_free(voices);
+}
+
+static void voices_apply(gpointer pointer) {
+    Voices *voices = pointer;
+    ui.suppress = TRUE;
+    guint existing = g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices));
+    g_ptr_array_add(voices->names, NULL);
+    gtk_string_list_splice(read_aloud.voices, 0, existing, (const char *const *)voices->names->pdata);
+    g_ptr_array_set_size(voices->names, voices->names->len - 1);
+    if (voices->selected >= 0 && (guint)voices->selected < voices->names->len) {
+        adw_combo_row_set_selected(read_aloud.voice_row, (guint)voices->selected);
+    }
+    ui.suppress = FALSE;
+    refresh_actions();
+}
+
+int32_t jsti_window_set_voices(const char *const *names, size_t count, int32_t selected) {
+    if (count > 0 && names == NULL) return -1;
+    Voices *voices = g_new0(Voices, 1);
+    voices->names = g_ptr_array_new_with_free_func(g_free);
+    for (size_t index = 0; index < count; index++) g_ptr_array_add(voices->names, g_strdup(names[index]));
+    voices->selected = selected;
+    return post(voices_apply, voices, voices_free);
+}
+
 static void active_work(JSTIMainCall *call, gpointer data) {
     *(gint *)data = ui.window != NULL && gtk_window_is_active(ui.window) ? 1 : 0;
     jsti_main_call_complete(call);
@@ -1193,6 +1274,57 @@ void jsti_notify(const char *title, const char *body) {
 static int32_t fail(char *error, size_t capacity, const char *message) {
     jsti_set_error(error, capacity, "Window self-test: %s", message);
     return -1;
+}
+
+/* The last event the Read aloud check observed instead of reporting it. */
+static struct {
+    gint32 event;
+    gchar *text;
+    gint32 index;
+} observed;
+
+static void observe_event(gint32 event, const char *text, gint32 index, void *context) {
+    (void)context;
+    observed.event = event;
+    g_free(observed.text);
+    observed.text = g_strdup(text);
+    observed.index = index;
+}
+
+/* Read aloud follows the presented record: offered while its text is shown
+ * and the window is idle, it reports that record, and the voice picker
+ * reports the chosen position. */
+static int32_t read_aloud_self_test(const char *record, char *error, size_t capacity) {
+    if (g_list_model_get_n_items(G_LIST_MODEL(read_aloud.voices)) < 2) {
+        return fail(error, capacity, "Read aloud offers fewer than two voices");
+    }
+    if (!gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.button))) {
+        return fail(error, capacity, "Read aloud was unavailable for the presented record");
+    }
+    jsti_window_event_fn callback = ui.callback;
+    ui.callback = observe_event;
+    observed.event = 0;
+    g_signal_emit_by_name(read_aloud.button, "clicked");
+    gboolean reported = observed.event == JSTI_EVENT_READ_ALOUD && g_strcmp0(observed.text, record) == 0;
+    guint saved = adw_combo_row_get_selected(read_aloud.voice_row);
+    guint other = saved == 0 ? 1 : 0;
+    observed.event = 0;
+    adw_combo_row_set_selected(read_aloud.voice_row, other);
+    gboolean chosen = observed.event == JSTI_EVENT_VOICE_OUTPUT && observed.index == (gint32)other;
+    ui.suppress = TRUE;
+    adw_combo_row_set_selected(read_aloud.voice_row, saved);
+    ui.suppress = FALSE;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    if (!reported) return fail(error, capacity, "Read aloud did not report the presented record");
+    if (!chosen) return fail(error, capacity, "the voice picker did not report the chosen voice");
+    Update working = { .state = JSTI_STATE_WORKING };
+    update_apply(&working);
+    gboolean offered = gtk_widget_get_sensitive(GTK_WIDGET(read_aloud.button));
+    Update idle = { .state = JSTI_STATE_IDLE };
+    update_apply(&idle);
+    if (offered) return fail(error, capacity, "Read aloud stayed available while transcribing");
+    return 0;
 }
 
 int32_t jsti_window_self_test(char *error, size_t capacity) {
@@ -1252,6 +1384,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!gtk_widget_get_sensitive(GTK_WIDGET(ui.copy)) || !gtk_widget_get_visible(GTK_WIDGET(ui.version))) {
         return fail(error, capacity, "Copy or the version control stayed unavailable");
     }
+    if (read_aloud_self_test(first, error, capacity) != 0) return -1;
     History *empty = history_copy(NULL, 0, "");
     history_apply(empty);
     history_free(empty);

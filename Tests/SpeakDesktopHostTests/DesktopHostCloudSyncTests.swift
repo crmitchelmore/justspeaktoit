@@ -258,7 +258,9 @@ final class DesktopHostCloudSyncTests: XCTestCase {
         XCTAssertEqual(received?.result?.text, "from the mac")
         let uploaded = server.recordFields(zone: SyncSchema.zoneName, recordName: local.id.uuidString)
         XCTAssertEqual(uploaded?["originPlatform"]?.value as? String, "linux")
-        XCTAssertEqual(log.statuses.last?.historyEnabled, true)
+        // The pass uploads before it hands the settings their state, so the
+        // shown state is awaited rather than read straight after the upload.
+        try await waitFor("the settings to show History sync on") { self.log.statuses.last?.historyEnabled == true }
     }
 
     func testTheSelectedTranscriptLeavesWhenTheMacDeletesIt() async throws {

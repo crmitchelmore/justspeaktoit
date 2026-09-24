@@ -321,17 +321,20 @@ if linuxTargetBuild {
         linuxSystemLibrary(
             "CLinuxGStreamer", "gstreamer-app-1.0", apt: ["libgstreamer1.0-dev", "libgstreamer-plugins-base1.0-dev"]
         ),
+        // iCloud sync: PBKDF2 and AES-GCM for the API-key envelope.
+        linuxSystemLibrary("CLinuxCrypto", "libcrypto", apt: ["libssl-dev"]),
         .target(
             name: "CLinuxSupport",
             dependencies: [
-                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer"
+                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer",
+                "CLinuxCrypto"
             ],
             publicHeadersPath: "include",
             cSettings: [.define("_GNU_SOURCE")],
             // xtst.pc links only libXtst; the core Xlib calls need libX11.
             linkerSettings: [.linkedLibrary("X11")]
         ),
-        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "CLinuxSupport"]),
+        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "SpeakSync", "CLinuxSupport"]),
         .target(
             name: "SpeakLinuxWebSocket",
             dependencies: [
@@ -352,7 +355,7 @@ if linuxTargetBuild {
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
-            dependencies: ["SpeakCore", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
+            dependencies: ["SpeakCore", "SpeakSync", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",

@@ -133,6 +133,24 @@ int32_t jsti_credential_write(
     const char *name, const uint8_t *bytes, size_t count, char *error, size_t error_capacity);
 int32_t jsti_credential_delete(const char *name, char *error, size_t error_capacity);
 
+/* ------------------------------------------------------------- iCloud sync */
+
+/* OpenSSL (libcrypto) primitives for the API-key sync envelope, the same ones
+ * CNG provides on Windows: PBKDF2-HMAC-SHA256, and AES-256-GCM with a fresh
+ * random 96-bit nonce, no associated data and a 128-bit tag kept apart from
+ * the ciphertext. open returns 1 when the tag does not verify, and releases no
+ * plaintext then. All return -1 on other failures. */
+int32_t jsti_crypto_pbkdf2_sha256(
+    const uint8_t *password, size_t password_count, const uint8_t *salt, size_t salt_count, uint64_t iterations,
+    uint8_t *key, size_t key_count, char *error, size_t error_capacity);
+int32_t jsti_crypto_aes_gcm_seal(
+    const uint8_t *key, size_t key_count, const uint8_t *plaintext, size_t count, uint8_t *nonce12,
+    uint8_t *ciphertext, uint8_t *tag16, char *error, size_t error_capacity);
+int32_t jsti_crypto_aes_gcm_open(
+    const uint8_t *key, size_t key_count, const uint8_t *nonce12, const uint8_t *ciphertext, size_t count,
+    const uint8_t *tag16, uint8_t *plaintext, char *error, size_t error_capacity);
+int32_t jsti_crypto_random(uint8_t *bytes, size_t count, char *error, size_t error_capacity);
+
 /* ----------------------------------------------------------------- capture */
 
 typedef struct jsti_capture jsti_capture;

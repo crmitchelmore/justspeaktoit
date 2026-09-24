@@ -154,6 +154,8 @@ extension WindowsAppController {
 
     private func finishReadAloud(_ ticket: DesktopPlaybackRequests.Ticket, status: String?) {
         guard playbackRequests.isCurrent(ticket) else { return }
+        // The finishing task is not cancelled; only its speech is ended.
+        readAloudState.task = nil
         WindowsHostPlatform.stopReadAloud(&readAloudState, playback: playback)
         guard !closed, !busy, recording == nil, let status else { return }
         update(status)

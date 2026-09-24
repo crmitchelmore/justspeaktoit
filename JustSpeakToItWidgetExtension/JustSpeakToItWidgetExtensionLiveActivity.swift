@@ -16,10 +16,29 @@ private let brandAccent = Color(red: 1.0, green: 0.42, blue: 0.24)
 
 struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
     var body: some WidgetConfiguration {
+        if #available(iOS 18.0, *) {
+            activityConfiguration.supplementalActivityFamilies([.small])
+        } else {
+            activityConfiguration
+        }
+    }
+
+    private var activityConfiguration: some WidgetConfiguration {
         ActivityConfiguration(for: TranscriptionActivityAttributes.self) { context in
-            // Lock Screen / Banner view
-            LockScreenTranscriptionView(state: context.state, startTime: context.attributes.startTime)
+            if #available(iOS 18.0, *) {
+                TranscriptionActivityFamilyContent(
+                    state: context.state,
+                    startTime: context.attributes.startTime
+                )
                 .widgetURL(ReleaseTrain.current.deepLink("transcribe"))
+            } else {
+                // Lock Screen / Banner view
+                LockScreenTranscriptionView(
+                    state: context.state,
+                    startTime: context.attributes.startTime
+                )
+                .widgetURL(ReleaseTrain.current.deepLink("transcribe"))
+            }
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -99,6 +118,85 @@ struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
                 }
             }
             .widgetURL(ReleaseTrain.current.deepLink("transcribe"))
+        }
+    }
+}
+
+// MARK: - Supplemental Activity Families
+
+/// The activity-family environment key is itself iOS 18-only, so the whole
+/// stored-property owner is availability guarded rather than only its body.
+@available(iOS 18.0, *)
+private struct TranscriptionActivityFamilyContent: View {
+    let state: TranscriptionActivityAttributes.ContentState
+    let startTime: Date
+
+    @Environment(\.activityFamily) private var activityFamily
+
+    @ViewBuilder
+    var body: some View {
+        if activityFamily == .small {
+            SmallTranscriptionActivityView(state: state)
+        } else {
+            // Medium and future families preserve the existing presentation.
+            LockScreenTranscriptionView(state: state, startTime: startTime)
+        }
+    }
+}
+
+/// Privacy-neutral content suitable for the small Smart Stack presentation
+/// and incidental small-family surfaces such as CarPlay.
+@available(iOS 18.0, *)
+private struct SmallTranscriptionActivityView: View {
+    let state: TranscriptionActivityAttributes.ContentState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            transcriptionStatusIndicator(for: state.status)
+                .font(.title3)
+                .frame(width: 28)
+
+            Text(statusText)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+
+            Spacer(minLength: 4)
+
+            if offersStop {
+                Button(intent: StopTranscriptionRecordingIntent()) {
+                    Text("Stop")
+                        .font(.caption.weight(.semibold))
+                        .frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .tint(.red)
+                .accessibilityLabel("Stop recording")
+                .handGestureShortcut(.primaryAction)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var offersStop: Bool {
+        state.status == .recording || state.status == .listening
+    }
+
+    private var statusText: String {
+        switch state.status {
+        case .recording: "Recording"
+        case .listening: "Listening"
+        case .arming: "Preparing…"
+        case .armed: "Ready for speech"
+        case .idle: "Ready"
+        case .paused: "Paused"
+        case .finalising: "Finishing…"
+        case .processing: "Processing…"
+        case .error: "Needs attention"
+        case .completed: TranscriptionResultRow(state: state)?.outcomeMessage ?? "Finished"
         }
     }
 }
@@ -323,22 +421,31 @@ private struct ResultRowActions: View {
 
 // MARK: - Preview
 
-#Preview("Lock Screen", as: .content, using: TranscriptionActivityAttributes()) {
+#Preview("Small and Lock Screen states", as: .content, using: TranscriptionActivityAttributes()) {
     JustSpeakToItWidgetExtensionLiveActivity()
 } contentStates: {
+    TranscriptionActivityAttributes.ContentState(status: .idle, lastSnippet: "Ignored stale snippet")
+    TranscriptionActivityAttributes.ContentState(status: .arming, lastSnippet: "Ignored stale snippet")
+    TranscriptionActivityAttributes.ContentState(status: .armed, lastSnippet: "Ignored stale snippet")
+    TranscriptionActivityAttributes.ContentState(status: .recording, lastSnippet: "Ignored live snippet")
     TranscriptionActivityAttributes.ContentState(
         status: .listening,
-        lastSnippet: "The quick brown fox jumps over the lazy dog...",
-        wordCount: 42,
-        duration: 125,
-        provider: "Apple Speech"
+        lastSnippet: "Ignored live snippet",
+        wordCount: 42
+    )
+    TranscriptionActivityAttributes.ContentState(status: .paused, lastSnippet: "Ignored stale snippet")
+    TranscriptionActivityAttributes.ContentState(status: .finalising, lastSnippet: "Ignored stale snippet")
+    TranscriptionActivityAttributes.ContentState(status: .processing, lastSnippet: "Ignored stale snippet")
+    TranscriptionActivityAttributes.ContentState(
+        status: .error,
+        lastSnippet: "Ignored stale snippet",
+        errorMessage: "Ignored error detail"
     )
     TranscriptionActivityAttributes.ContentState(
         status: .completed,
-        lastSnippet: "Transcription complete",
-        wordCount: 156,
-        duration: 300,
-        provider: "Deepgram"
+        lastSnippet: "Ignored stale snippet",
+        completionOutcome: .ready,
+        resultPreview: "Ignored result preview"
     )
 }
 

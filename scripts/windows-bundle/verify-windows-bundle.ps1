@@ -7,8 +7,10 @@ Verifies the ZIP and every extracted file against the hashes recorded on the Mac
 isolates PATH to the Windows system directories, proves the runner cannot satisfy
 the executable's runtime on its own (a copy without the bundled DLLs must fail to
 start), then runs the production executable's self-test and native window smoke
-test while sampling the process’s loaded module paths. Any non-system module must
-come from the bundle directory. Evidence is written even when a check fails, and
+test while sampling the process’s loaded module paths. Any module outside
+%SystemRoot% and Microsoft's own Store packages (Media Foundation codec
+extensions) must come from the bundle directory, and no bundled module may load
+from anywhere else. Evidence is written even when a check fails, and
 every failure is reported before the script exits non-zero. With
 -LocalTranscriptionAudio it also transcribes that WAV on the CPU through the
 bundled whisper.cpp runtime and requires its DLLs to load from the bundle.
@@ -49,6 +51,18 @@ function Get-ProcessMachine([System.Diagnostics.Process] $process) {
     $information = New-Object byte[] 8
     if (-not $script:MachineQuery::GetProcessInformation($process.Handle, 9, $information, 8)) { return $null }
     return [int][System.BitConverter]::ToUInt16($information, 0)
+}
+
+# Media Foundation can load codecs Microsoft ships as Store packages, such as
+# Web Media Extensions, from %ProgramFiles%\WindowsApps. Only the package
+# deployment service writes there, after checking the package signature, and
+# 8wekyb3d8bbwe is Microsoft's publisher ID, so such a module is part of Windows
+# rather than something the runner or a toolchain supplied.
+$MicrosoftPackageRoot = Join-Path ([System.Environment]::GetFolderPath('ProgramFiles')) 'WindowsApps'
+function Test-MicrosoftPackageModule([string] $path) {
+    if (-not $path.StartsWith("$MicrosoftPackageRoot\", [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $package = $path.Substring($MicrosoftPackageRoot.Length + 1).Split('\')[0]
+    return $package -match '^Microsoft\.[A-Za-z0-9.]+_[0-9.]+_(x86|x64|arm|arm64|neutral)_[^_\\]*_8wekyb3d8bbwe$'
 }
 
 function Format-Machine($value) {
@@ -256,13 +270,15 @@ try {
         # Write-Host keeps the log text out of this function's return value.
         Get-Content -LiteralPath (Join-Path $evidenceDirectory "bundle-$label.log") | ForEach-Object { Write-Host $_ }
         Get-Content -LiteralPath (Join-Path $evidenceDirectory "bundle-$label-errors.log") | ForEach-Object { Write-Host $_ }
-        $fromBundle = @(); $fromSystem = @(); $foreign = @()
+        $fromBundle = @(); $fromSystem = @(); $fromPackages = @(); $foreign = @()
         foreach ($path in ($loaded.Values | Sort-Object)) {
             if ($path.StartsWith("$bundle\", [System.StringComparison]::OrdinalIgnoreCase)) {
                 $relative = $path.Substring($bundle.Length + 1).Replace('\', '/')
                 if (-not $expected.ContainsKey($relative.ToLowerInvariant())) { $foreign += $path } else { $fromBundle += $relative }
             } elseif ($path.StartsWith("$systemRoot\", [System.StringComparison]::OrdinalIgnoreCase)) {
                 $fromSystem += $path
+            } elseif (Test-MicrosoftPackageModule $path) {
+                $fromPackages += $path
             } else {
                 $foreign += $path
             }
@@ -272,11 +288,11 @@ try {
             $static = @($entry.importedBy | Where-Object { $_.kind -eq 'static' }).Count -gt 0
             $observed = @($fromBundle | Where-Object { $_ -ieq $entry.name }).Count -gt 0
             if ($static -and -not $observed) { $missing += $entry.name }
-            foreach ($path in $fromSystem + $foreign) {
+            foreach ($path in $fromSystem + $fromPackages + $foreign) {
                 if ([System.IO.Path]::GetFileName($path) -ieq $entry.name) { $foreign += "$path (bundled module loaded from outside the bundle)" }
             }
         }
-        $emulation = @($fromSystem + $foreign | Where-Object {
+        $emulation = @($fromSystem + $fromPackages + $foreign | Where-Object {
             $EmulationModules -contains [System.IO.Path]::GetFileName($_).ToLowerInvariant() })
         $run = [ordered]@{
             label = $label
@@ -286,6 +302,7 @@ try {
             emulationModules = $emulation
             modulesFromBundle = $fromBundle
             modulesFromSystemRoot = $fromSystem
+            modulesFromMicrosoftPackages = $fromPackages
             modulesFromElsewhere = $foreign
             staticallyImportedModulesNotObserved = $missing
         }

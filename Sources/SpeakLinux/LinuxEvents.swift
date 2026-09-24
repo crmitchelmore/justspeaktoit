@@ -167,6 +167,7 @@ func linuxWindowEvent(
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxLocalModelEvent(event, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
 }
 

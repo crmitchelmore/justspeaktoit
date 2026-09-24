@@ -25,10 +25,14 @@ on:
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
       - scripts/linux-*
+      - scripts/linux-local-runtime/**
+      - scripts/windows-local-runtime/**
+      - Sources/CWindowsSupport/whisper-cpp/**
       - scripts/typecheck-windows-swift.sh
       - scripts/verify-portable-core-boundary.py
       - packaging/linux/**
       - .github/workflows/linux.yml
+      - .github/workflows/linux-local-runtime.yml
   pull_request:
     branches: [main]
     paths:
@@ -52,10 +56,14 @@ on:
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
       - scripts/linux-*
+      - scripts/linux-local-runtime/**
+      - scripts/windows-local-runtime/**
+      - Sources/CWindowsSupport/whisper-cpp/**
       - scripts/typecheck-windows-swift.sh
       - scripts/verify-portable-core-boundary.py
       - packaging/linux/**
       - .github/workflows/linux.yml
+      - .github/workflows/linux-local-runtime.yml
   workflow_dispatch:
 
 permissions:
@@ -66,8 +74,12 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  local-runtime:
+    uses: ./.github/workflows/linux-local-runtime.yml
+
   linux-desktop:
     name: Linux desktop (GTK 4, Swift 6.2.3)
+    needs: local-runtime
     runs-on: ubuntu-24.04
     container:
       image: swift:6.2.3-noble@sha256:6dd90eb2359663a2cde8f03e9951f488b23134b3b8fce20e9dcb6cada75dd803
@@ -92,6 +104,29 @@ jobs:
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py
 
+      # The pinned whisper.cpp runtime, its JFK sample and a cached model
+      # folder, so the on-device tests run the real runtime instead of skipping.
+      - uses: actions/download-artifact@v5
+        with:
+          name: linux-local-runtime
+          path: local-runtime
+
+      # The pinned tiny model is downloaded by the app's own installer on a
+      # miss and verified against its SHA-256 on every run.
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-linux-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+
+      # github.workspace names the host path; inside the container only
+      # $GITHUB_WORKSPACE is right.
+      - name: Point the on-device checks at the runtime
+        run: |
+          echo "JSTI_WHISPER_RUNTIME_DIRECTORY=$GITHUB_WORKSPACE/local-runtime/runtime" >> "$GITHUB_ENV"
+          echo "JSTI_WHISPER_TEST_AUDIO=$GITHUB_WORKSPACE/local-runtime/fixtures/jfk.wav" >> "$GITHUB_ENV"
+          echo "JSTI_LOCAL_MODEL_DIRECTORY=$GITHUB_WORKSPACE/local-models" >> "$GITHUB_ENV"
+
       - name: Build the Linux app
         run: |
           swift --version
@@ -104,6 +139,12 @@ jobs:
         env:
           JSTI_UI_SNAPSHOT_PATH: ${{ runner.temp }}/linux-window.png
         run: scripts/linux-desktop-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+
+      - name: Transcribe the JFK sample on-device with the pinned tiny model
+        timeout-minutes: 8
+        run: |
+          "$(swift build --configuration release --show-bin-path)/SpeakLinux" --local-transcription-self-test \
+            "$JSTI_WHISPER_TEST_AUDIO" --expect 'ask not what your country can do for you'
 
       - name: GTK window smoke test on headless Wayland (Weston)
         run: scripts/linux-wayland-smoke.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"

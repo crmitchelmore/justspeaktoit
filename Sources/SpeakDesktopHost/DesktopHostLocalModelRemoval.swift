@@ -1,13 +1,13 @@
 import Foundation
 import SpeakCore
 import SpeakDesktop
-import SpeakWindowsPlatform
 
-extension WindowsAppController {
+// Moved from the Windows host, which shares it with Linux.
+extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
     /// Refuses a model in use, whichever model the app has selected. Otherwise
     /// deletes it and frees the runtime's cache off this actor, so a running
     /// recognition cannot hold up cancellation, recording or settings.
-    func removeLocalModel(_ spec: WindowsModelSpec) {
+    func removeLocalModel(_ spec: WhisperCppModel) {
         if localModelInUse(spec.catalogueID) {
             update("\(spec.displayName) is in use. Remove it after the current recording finishes.")
             return
@@ -38,17 +38,17 @@ extension WindowsAppController {
     /// choose, is in use, as is every model a transcription holds.
     private func localModelInUse(_ model: String) -> Bool {
         let recorded = recording.flatMap {
-            DesktopLocalTranscription.model(for: $0.record.modelIdentifier, host: .windows)
+            DesktopLocalTranscription.model(for: $0.record.modelIdentifier, host: Platform.localModelHost)
         }
         return recorded?.catalogueID == model || localModels.ownership.isInUse(model)
     }
 
-    private func finishRemoval(_ spec: WindowsModelSpec, failure: String?) {
+    private func finishRemoval(_ spec: WhisperCppModel, failure: String?) {
         localModels.ownership.endRemoval(spec.catalogueID)
         if let failure {
             update("\(spec.displayName) could not be removed: \(failure)")
         } else {
-            update("\(spec.displayName) removed from this PC.")
+            update("\(spec.displayName) removed from \(Platform.localDeviceName).")
         }
         publishLocalModels()
         finishOperation()

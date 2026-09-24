@@ -322,9 +322,10 @@ if linuxTargetBuild {
             publicHeadersPath: "include",
             cSettings: [.define("_GNU_SOURCE")],
             // xtst.pc links only libXtst; the core Xlib calls need libX11.
-            linkerSettings: [.linkedLibrary("X11")]
+            // libdl opens the whisper.cpp runtime (part of libc since glibc 2.34).
+            linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl")]
         ),
-        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "CLinuxSupport"]),
+        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "SpeakDesktop", "CLinuxSupport"]),
         .target(
             name: "SpeakLinuxWebSocket",
             dependencies: [
@@ -345,7 +346,7 @@ if linuxTargetBuild {
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
-            dependencies: ["SpeakCore", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",

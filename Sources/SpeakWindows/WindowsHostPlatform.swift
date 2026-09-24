@@ -17,11 +17,12 @@ typealias WindowsNativeError = DesktopHostError
 
 /// Win32 window, Credential Manager, WASAPI, Media Foundation and UI Automation
 /// behind the shared desktop host.
-enum WindowsHostPlatform: DesktopHostReadAloudPlatform {
+enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPlatform {
     typealias VoiceOutputSettings = WindowsVoiceOutputSettings
     typealias VoiceOutput = WindowsVoiceOutput
     typealias ReadAloudState = DesktopHostReadAloudState<WindowsAudioPlaybackController.Speech, WindowsVoiceOutput>
     typealias LocalModelsState = WindowsLocalModelsState
+    typealias LocalRuntime = WindowsWhisperRuntime
 
     package static let displayName = "Windows"
     package static let credentialStoreName = "Windows Credential Manager"
@@ -106,29 +107,9 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform {
 
     package static let deepgramKeyHint = "choose a Deepgram model, then Save key"
 
-    package static func makeLocalModelsState() -> WindowsLocalModelsState { WindowsLocalModelsState() }
-
+    // On-device models: the shared host answers readiness, recognition and
+    // model use; WindowsLocalModels.swift supplies CNG, whisper.dll and the dialog.
     package static var localDeviceName: String { "this PC" }
-
-    package static func localReadiness(_ model: String, controller: isolated WindowsAppController) -> String? {
-        controller.localReadiness(model)
-    }
-
-    package static func transcribeLocally(
-        _ audio: URL, model: String, language: String?, controller: isolated WindowsAppController
-    ) async throws -> TranscriptionResult {
-        try await controller.transcribeLocally(audio, model: model, language: language)
-    }
-
-    package static func beginLocalUse(_ model: String, controller: isolated WindowsAppController) -> String? {
-        guard let spec = DesktopLocalTranscription.model(for: model, host: .windows) else { return nil }
-        controller.localModels.ownership.beginUse(spec.catalogueID)
-        return spec.catalogueID
-    }
-
-    package static func endLocalUse(_ held: String, controller: isolated WindowsAppController) {
-        controller.localModels.ownership.endUse(held)
-    }
 
     package static var defaultHotKey: WindowsHotKeySettings { WindowsHotKeySettings() }
 

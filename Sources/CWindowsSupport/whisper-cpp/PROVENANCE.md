@@ -22,7 +22,14 @@ The DLLs themselves are built from the same commit by
 `scripts/windows-local-runtime/build-whisper-runtime.py`, pinned in
 `scripts/windows-local-runtime/dependencies.json`.
 
+`Sources/CLinuxSupport/LinuxWhisper.c` includes the same headers, not a copy,
+and loads `libwhisper.so.1` built from the same pin by
+`scripts/linux-local-runtime/build-whisper-runtime.py`, which reads the
+whisper.cpp pin from the Windows file.
+
 Updating whisper.cpp means replacing these headers, their hashes, the expected
-version in `WindowsWhisper.cpp` and the runtime pin together.
-`scripts/windows-local-runtime/test_whisper_runtime.py` checks that the header
-hashes, this file and the runtime pin agree.
+version in `WindowsWhisper.cpp` and `LinuxWhisper.c` and the runtime pin
+together. `scripts/windows-local-runtime/test_whisper_runtime.py` checks that
+the header hashes, this file and the runtime pin agree;
+`scripts/linux-local-runtime/test_whisper_runtime.py` checks the Linux loader
+against the same pin.

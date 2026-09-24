@@ -1,0 +1,59 @@
+name: Linux on-device runtime
+
+# Builds the pinned whisper.cpp runtime libraries (x86-64, every CPU variant,
+# no Vulkan) once per pin change, in the same pinned Swift image the Linux app
+# is tested in, and hands them to linux.yml as the `linux-local-runtime`
+# artifact with the pinned JFK sample.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Build pinned whisper.cpp runtime (Linux x86-64 CPU)
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.2.3-noble@sha256:6dd90eb2359663a2cde8f03e9951f488b23134b3b8fce20e9dcb6cada75dd803
+    timeout-minutes: 60
+    steps:
+      - name: Install the build tools
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q cmake ninja-build g++ git python3
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check the runtime pins
+        run: |
+          python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py'
+          python3 -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py'
+
+      # The libraries depend only on these inputs (the Linux builder reuses the
+      # Windows builder's checkout helpers and pin); a change rebuilds them.
+      - name: Restore a runtime built from the same pins
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: local-runtime-output
+          key: whisper-runtime-linux-x86_64-${{ hashFiles('scripts/linux-local-runtime/dependencies.json', 'scripts/linux-local-runtime/build-whisper-runtime.py', 'scripts/windows-local-runtime/dependencies.json', 'scripts/windows-local-runtime/build-whisper-runtime.py') }}
+
+      - name: Build whisper.cpp from the pinned commit
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -B scripts/linux-local-runtime/build-whisper-runtime.py \
+            --output local-runtime-output --work "$RUNNER_TEMP/whisper-runtime-work" --jobs 4
+
+      - name: Show the runtime manifest
+        run: cat local-runtime-output/runtime-manifest.json
+
+      - name: Upload the runtime
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: linux-local-runtime
+          path: local-runtime-output/
+          if-no-files-found: error
+          retention-days: 14

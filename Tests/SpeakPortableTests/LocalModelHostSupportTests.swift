@@ -50,6 +50,27 @@ final class LocalModelHostSupportTests: XCTestCase {
         }
     }
 
+    /// Both desktop hosts run the same whisper.cpp pin, so a newly pinned
+    /// catalogue entry appears on Windows and Linux together, with the same
+    /// identifiers and order, and neither gains a runtime the other lacks.
+    func testLinuxProjectsExactlyTheWindowsWhisperCppEntries() throws {
+        let linux = LocalModelHostSupport.linux
+        let windows = LocalModelHostSupport.windows
+
+        XCTAssertEqual(linux, windows)
+        XCTAssertEqual(linux.executableModels(in: transcription), windows.executableModels(in: transcription))
+        XCTAssertEqual(
+            Set(linux.executableModels(in: transcription).map(\.id)), Set(WhisperCppModels.all.map(\.catalogueID)),
+            "Every pinned GGML entry, and nothing else"
+        )
+        XCTAssertTrue(linux.executableModels(in: streaming).isEmpty)
+        XCTAssertTrue(linux.executableModels(in: postProcessing).isEmpty)
+        XCTAssertTrue(linux.executableModels(in: try Self.importedTranscriptionModels()).isEmpty)
+        for model in linux.executableModels(in: transcription) {
+            XCTAssertEqual(linux.preferredBackend(for: model), .whisperCppGGML)
+        }
+    }
+
     func testCoreMLArtifactsNeedTheCoreMLRuntimeWhateverElseAHostRuns() throws {
         // Every non-Apple backend, plus a Core ML loader that is not WhisperKit
         // and WhisperKit reading another format.

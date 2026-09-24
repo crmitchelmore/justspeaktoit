@@ -13,7 +13,7 @@ criterion; this document says exactly what is verified and what is not.
 |---|---|
 | `SpeakDesktopHost` | Recording, transcription, History, output, post-processing, profiles and model catalogue orchestration, generic over `DesktopHostPlatform`. Shared with Windows (moved out of `SpeakWindows`). |
 | `CLinuxSystem/*` | pkg-config system libraries: `libadwaita-1`, `gio-unix-2.0`, `libpulse`, `libsecret-1`, `xtst`. |
-| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`): window, clipboard, credentials, capture, private files, X11, portals, self-tests. |
+| `CLinuxSupport` | The `jsti_*` C ABI (`include/CLinuxSupport.h`): window, clipboard, credentials, capture, private files, X11, portals, the whisper.cpp loader and GChecksum SHA-256, self-tests. |
 | `SpeakLinuxPlatform` | Testable Swift over the C ABI: keyring, capture, session detection, text-output options, output planning and the output job. |
 | `SpeakLinux` | The executable: `LinuxHostPlatform`, events, shortcuts, `--self-test`, `--ui-smoke-test`, `--integration-test`. |
 
@@ -125,7 +125,8 @@ proven on a physical desktop.
 | History playback in the app | Verified player (a tone plays to the end through PipeWire) | App WAV recordings only; other imports use Open audio; audible hardware output **unverified** |
 | App profiles | Controller support shared; **no Linux editor** | The X11 target's `/proc/<pid>/exe` path reaches the shared resolver, whose matcher is written for Windows paths: **unverified** |
 | Read aloud | Verified with a stubbed Deepgram response, a device-free player and a virtual sink. Read aloud in History speaks the displayed transcript (the version shown) with a canonical Deepgram Aura or Flux voice chosen in the Read aloud group, in sentence-bounded segments within Deepgram's 2,000-character limit, through the History player: Play/Pause and Stop act on it, and recording, import, another row, History playback and close end it. The controller is shared with Windows (`DesktopHostReadAloud`). Synthesized WAVs are staged in `VoiceOutput/` (0700, files 0600) only while they play; leftovers from an earlier run are removed | `DesktopHostReadAloudTests` (segments, voice, missing key, Stop, supersession, persistence); `LinuxAudioPlaybackSpeechTests` (speech state, pause between segments, refused segments after Stop); `LinuxVoiceOutputTests` (private staging, a stubbed Deepgram WAV through the engine and speech mode); the window self-test (the button follows the presented record and reports its id, the picker reports the voice); the integration check (a 24 kHz segment plays to the end through PipeWire). A real Deepgram receipt (including Flux linear16/WAV), audible output on a physical desktop, speed control and other providers **unverified** |
-| Local models, IBus insertion, tray, autostart | **Not implemented** | Later phases |
+| On-device transcription (whisper.cpp 1.9.4, the four pinned Whisper models) | Verified in a container with the CPU runtime built from the pin | `--local-transcription-self-test` downloaded the pinned tiny model through the app's installer and transcribed the JFK sample; `LinuxLocalTranscriptionTests` (GChecksum vectors; with the runtime: JFK, silence, cancellation before and during recognition, cache release by path, held removal); `DesktopHostLocalModelsTests` (download, pause and resume, readiness, removal ownership, a keyless local recording); `--self-test` (installer cycle, loader refusals); window self-test (Local models rows, events, no key row). Linux CI receipt for this revision, Vulkan (not built), aarch64 (not pinned), large models' speed and memory, and the group on real desktops **unverified**; no Flatpak runtime module |
+| IBus insertion, tray, autostart | **Not implemented** | Later phases |
 | Flatpak | Built with `flatpak-builder` (GNOME 50, Swift 6.3.3); self-test and window smoke test pass in its environment | Installed `flatpak run`, portals from inside the sandbox and Flathub offline build **unverified** |
 
 ### Needs a physical desktop
@@ -144,13 +145,104 @@ proven on a physical desktop.
    Konsole (Ctrl+Shift+V), GTK and Qt fields, with a non-US layout.
 5. USB and Bluetooth microphones through PipeWire.
 
+## On-device transcription
+
+Linux transcribes recordings and imported files on this computer with the same
+whisper.cpp 1.9.4 runtime and pinned GGML models as Windows
+([windows-development.md](windows-development.md#on-device-transcription)).
+
+- **Catalogue.** `LocalModelHostSupport.linux` runs whisper.cpp's GGML backend,
+  so Linux projects exactly the shared catalogue entries Windows does (Whisper
+  Tiny, Base, Small and Large v3 Turbo, under their canonical
+  `local/whisperkit/...` identifiers). `LocalModelHostSupportTests` and
+  `DesktopLocalTranscriptionTests` fail if the two hosts ever differ.
+- **Shared workflow.** Downloads, verification, readiness, recognition and
+  removal ownership moved from the Windows host into `SpeakDesktopHost`
+  (`DesktopHostLocalModelManagement.swift`, `DesktopHostLocalModelRemoval.swift`)
+  behind `DesktopHostLocalModelPlatform`; a host supplies only its SHA-256, its
+  runtime loader and its presenter. Windows type-checks against it.
+- **Download.** Models live in `$XDG_DATA_HOME/JustSpeakToIt/LocalModels`, one
+  0700 folder per model. `LocalModelInstaller` downloads with HTTP Range into a
+  `.partial` file, resumes after a pause or dropped connection, hashes the whole
+  file with GLib's `GChecksum` SHA-256, then renames it atomically and writes a
+  receipt. A tampered or truncated file is deleted and never loaded.
+- **Runtime.** `LinuxWhisper.c` opens `libggml-base.so.0`, `libggml.so.0` and
+  `libwhisper.so.1` by absolute path, in dependency order, from the executable's
+  directory or `JSTI_WHISPER_RUNTIME_DIRECTORY`, so their sonames resolve to
+  those copies and neither `LD_LIBRARY_PATH` nor the system is searched (the
+  libraries carry no RPATH or RUNPATH). The directory and libraries must not be
+  links or writable by other users. It refuses any `whisper_version()` other
+  than 1.9.4 (the headers vendored for Windows are shared, not copied), then
+  registers the best-scoring `libggml-cpu-*.so` variant and, with the GPU choice
+  on and `libggml-vulkan.so` present, Vulkan. It picks those files itself:
+  ggml's own loader would also load whatever `GGML_BACKEND_PATH` names. At
+  startup `GGML_NO_BACKTRACE` is set (unless already set), so a ggml abort or an
+  escaped C++ exception never runs `gdb` from `PATH` against the app. Models
+  stay loaded between recordings; cancelling aborts recognition.
+- **Controls.** The model picker lists each model with its friendly name and
+  state, for example "Whisper Tiny (on-device) — download in Local models", and
+  hides the API key row for it. The Local models group lists each model with
+  its size and state (Not downloaded, Downloading 42% of 74 MB, 10% downloaded,
+  paused, Downloaded and verified, Removing…) and Download or Resume download,
+  Cancel and Remove, with licence and provenance as the row's tooltip. The GPU
+  switch appears only when the runtime has a Vulkan backend. Local recordings
+  need no API key and skip the upload cap; silent recordings stay empty;
+  History shows the friendly name. A model that a recording, import or
+  transcription uses cannot be removed.
+- **Checks.** `--self-test` checks the GChecksum vectors, a download, resume,
+  tamper and removal cycle in private folders, and the loader's refusals
+  (relative, missing, shared-writable, incomplete and damaged runtimes).
+  `--local-transcription-self-test <wav> --expect <phrase> [--model <id>]`
+  downloads the pinned model into `JSTI_LOCAL_MODEL_DIRECTORY` and transcribes
+  the WAV (`JSTI_WHISPER_CPU_ONLY=1` keeps a Vulkan runtime on the CPU).
+
+### Building the runtime
+
+`scripts/linux-local-runtime/build-whisper-runtime.py` reads the whisper.cpp
+pin (tag, commit, licence and JFK fixture digests) from
+`scripts/windows-local-runtime/dependencies.json`, so both desktops build one
+pin, and takes the Linux CMake switches from
+`scripts/linux-local-runtime/dependencies.json`: shared libraries,
+`GGML_BACKEND_DL` with every x86-64 CPU variant, OpenMP and native tuning off,
+no RPATH. It refuses any library that is not an x86-64 shared object, carries
+a search path or needs anything but the C and C++ runtimes and its own
+libraries, and writes `runtime/`, `fixtures/jfk.wav` and `runtime-manifest.json`
+(sizes, SHA-256, sonames, needed libraries, compiler).
+
+```sh
+sudo apt install cmake ninja-build g++ git python3
+python3 scripts/linux-local-runtime/build-whisper-runtime.py \
+  --output /tmp/whisper-runtime --work /tmp/whisper-work
+export JSTI_WHISPER_RUNTIME_DIRECTORY=/tmp/whisper-runtime/runtime
+.build/debug/SpeakLinux --local-transcription-self-test \
+  /tmp/whisper-runtime/fixtures/jfk.wav --expect 'ask not what your country can do for you'
+```
+
+In a 4-vCPU container shared with other builds, the tiny model transcribed the
+11-second sample in about 7.5 seconds on the CPU; that is a smoke check, not a
+benchmark. `--vulkan` adds `libggml-vulkan.so` (it needs `libvulkan-dev` and
+`glslc`, and uses the system's `libvulkan.so.1`); it has not been built or run.
+Only x86-64 is pinned.
+
+A Flatpak does not include the runtime yet. It would need a whisper.cpp module
+built from the pinned commit (a pinned source, since Flathub builds offline)
+with the same switches, installing the libraries beside
+`/app/bin/justspeaktoit` and the licence under `/app/share/licenses`. Models
+would download into
+`~/.var/app/com.justspeaktoit.JustSpeakToIt/data/JustSpeakToIt/LocalModels`
+over the existing network permission. None of this is built or tested.
+
 ## CI
 
 `.github/workflows/linux.yml` (ubuntu-24.04, `swift:6.2.3-noble`, pinned by
 digest) installs the packages above, then runs the boundary check, the
 release build, `swift test` with `SPEAK_LINUX_TARGET=1`,
 `scripts/linux-desktop-checks.sh` (uploading the window snapshot),
-`scripts/linux-integration-checks.sh`, and the Windows Swift type-check. It
+`scripts/linux-integration-checks.sh`, `--local-transcription-self-test` on
+the JFK sample, and the Windows Swift type-check. The reusable
+`linux-local-runtime.yml` first builds the pinned whisper.cpp runtime in the
+same image (cached by its pins); the desktop job downloads it and a cached
+tiny model, so the Linux platform tests run against the real runtime. It
 also runs on pushes to the consolidation branch
 `claude/windows-linux-migration-tyshm0`, which should be dropped when the
 branch merges.

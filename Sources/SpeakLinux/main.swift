@@ -37,6 +37,7 @@ func runSelfTest() throws {
         throw DesktopHostError(message: "Live models are offered without a qualified transport.")
     }
     print("Native Linux adapter and canonical model self-test passed.")
+    try blocking { try await LinuxLocalSelfTest.run() }
 }
 
 /// Configures the window from saved settings, runs GTK on this (main) thread
@@ -51,6 +52,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
+        await controller.configureLocalModels()
         return await controller.selectedIndex()
     }
     let strings = LinuxWindow.Strings()
@@ -86,13 +88,19 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
 }
 
 let arguments = CommandLine.arguments
-DesktopHostModels.configure(streamingQualified: LinuxLiveTransport.qualified)
+DesktopHostModels.configure(
+    streamingQualified: LinuxLiveTransport.qualified, local: DesktopLocalTranscription.options(host: .linux)
+)
 if arguments.contains("--version") {
     print("JustSpeakToIt for Linux (developer preview)")
     exit(0)
 }
 if arguments.contains("--self-test") {
     do { try runSelfTest() } catch { fail(error) }
+    exit(0)
+}
+if arguments.contains("--local-transcription-self-test") {
+    do { try blocking { try await LinuxLocalSelfTest.transcribe(arguments: arguments) } } catch { fail(error) }
     exit(0)
 }
 

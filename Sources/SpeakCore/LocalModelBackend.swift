@@ -117,6 +117,13 @@ public struct LocalModelHostSupport: Equatable, Sendable {
     /// Whether the runtime DLLs are present is a separate runtime check.
     public static let windows = LocalModelHostSupport(backends: [.whisperCppGGML])
 
+    /// Linux runs the same pinned GGML Whisper weights through a whisper.cpp
+    /// runtime built from the same pin and loaded from beside the executable
+    /// (the CPU, or Vulkan when the runtime was built with it). It therefore
+    /// projects exactly the entries Windows does; whether the libraries are
+    /// present is a separate runtime check.
+    public static let linux = LocalModelHostSupport(backends: [.whisperCppGGML])
+
     /// macOS runs WhisperKit's Core ML models in process on every channel.
     /// sherpa-onnx and llama.cpp install or spawn executables, which only
     /// Developer ID builds may do; SpeakApp applies the same rule at compile

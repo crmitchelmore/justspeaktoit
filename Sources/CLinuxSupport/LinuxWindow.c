@@ -176,6 +176,10 @@ static void refresh_azure_row(void) {
     gboolean azure = ui.model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < ui.model_slots->len
         && g_str_has_prefix(g_array_index(ui.model_slots, Slot, position).id, "azure/");
     gtk_widget_set_visible(GTK_WIDGET(ui.azure_row), azure);
+    /* On-device models (canonical "local/" identifiers) need no API key. */
+    gboolean local = ui.model_slots != NULL && position != GTK_INVALID_LIST_POSITION && position < ui.model_slots->len
+        && g_str_has_prefix(g_array_index(ui.model_slots, Slot, position).id, "local/");
+    gtk_widget_set_visible(GTK_WIDGET(ui.key_row), !local);
 }
 
 static void on_model(GObject *object, GParamSpec *spec, gpointer data) {
@@ -520,6 +524,7 @@ static void build_window(void) {
     gtk_box_append(GTK_BOX(catalog), GTK_WIDGET(ui.catalog_refresh));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(settings), catalog);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(settings));
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(jsti_local_models_group_new()));
 
     /* Post-processing */
     GtkWidget *polish = group("Post-processing");
@@ -742,6 +747,12 @@ static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
     g_mutex_unlock(&post_lock);
     return 0;
 }
+
+int32_t jsti_window_post(jsti_window_apply_fn apply, gpointer data, GDestroyNotify destroy) {
+    return post(apply, data, destroy);
+}
+
+void jsti_window_emit(gint32 event, const char *text, gint32 index) { emit(event, text, index); }
 
 static void open_posts(void) {
     g_mutex_lock(&post_lock);
@@ -1353,6 +1364,17 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (!shown_for_azure || shown_for_other) {
         return fail(error, capacity, "the Azure resource row did not follow the selected model");
     }
+    for (guint index = 0; index < ui.model_slots->len; index++) {
+        if (!g_str_has_prefix(g_array_index(ui.model_slots, Slot, index).id, "local/")) continue;
+        ui.suppress = TRUE;
+        adw_combo_row_set_selected(ui.model_row, index);
+        gboolean key_for_local = gtk_widget_get_visible(GTK_WIDGET(ui.key_row));
+        adw_combo_row_set_selected(ui.model_row, original);
+        ui.suppress = FALSE;
+        if (key_for_local) return fail(error, capacity, "an on-device model asks for an API key");
+        break;
+    }
+    if (jsti_local_models_self_test(error, capacity) != 0) return -1;
     const char *first = "00000000-0000-0000-0000-000000000001";
     const char *second = "00000000-0000-0000-0000-000000000002";
     JSTIHistoryRow rows[] = {

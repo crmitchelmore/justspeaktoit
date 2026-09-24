@@ -42,6 +42,14 @@ test-release: ## Run tests in release configuration
 .PHONY: test-all
 test-all: test test-release ## Run tests in both debug and release
 
+.PHONY: test-tooling
+test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
+	node --test scripts/tests/*.test.mjs
+	ruby scripts/tests/release_apple_test.rb
+	ruby scripts/tests/create_ios_app_store_profile_test.rb
+	python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+	python3 scripts/generate-release-train-config.py --check
+
 .PHONY: release
 release: ## Build optimized release binary
 	swift build -c release $(SWIFT_FLAGS)

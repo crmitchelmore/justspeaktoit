@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
 
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const makefile = readFileSync(new URL('../../Makefile', import.meta.url), 'utf8');
 const aggregate = workflow.slice(workflow.indexOf('\n  required-macos:'));
 const predicate = aggregate.match(/name: Reject unsuccessful CI gates\n        if: >-\n([\s\S]*?)\n        env:/)?.[1];
 assert.ok(predicate, 'must test the actual workflow rejection predicate');
@@ -26,6 +27,18 @@ test('aggregate never checks out or executes repository helper code', () => {
   assert.doesNotMatch(aggregate, /uses:|run:.*scripts\//);
   assert.match(aggregate, /permissions: \{\}/);
   assert.match(aggregate, /exit 1/);
+});
+
+test('tooling gate delegates to the complete local discovery target', () => {
+  assert.match(workflow, /- name: SwiftLint\n\s+run: make lint/);
+  assert.match(workflow, /- name: Check tooling Package\.resolved drift\n\s+run: git diff --exit-code/);
+  assert.match(workflow, /- name: Test CI and release gates\n\s+run: make test-tooling/);
+  assert.match(makefile, /node --test scripts\/tests\/\*\.test\.mjs/);
+  assert.match(makefile, /ruby scripts\/tests\/release_apple_test\.rb/);
+  assert.match(makefile, /ruby scripts\/tests\/create_ios_app_store_profile_test\.rb/);
+  assert.match(makefile, /python3 -m unittest discover -s scripts\/tests -p 'test_\*\.py' -v/);
+  assert.match(makefile, /python3 scripts\/generate-release-train-config\.py --check/);
+  assert.doesNotMatch(workflow, /Tests\/ReleaseNotesTests|scripts\/release-train\.test\.mjs/);
 });
 
 function passing() {

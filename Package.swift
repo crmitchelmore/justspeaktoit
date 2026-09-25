@@ -228,6 +228,11 @@ let portablePackage = Package(
 )
 
 if windowsTargetBuild {
+    // The Swift 6.2.3 toolchain compiles C++ with its own clang 19, while the
+    // MSVC STL in Visual Studio 2026 (the windows-11-arm images) refuses any
+    // clang before 20 (STL1000). The adapters use only long-standing C++17
+    // library features, so they opt out of that version check.
+    let windowsCxxSettings: [CXXSetting] = [.define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")]
     portablePackage.products.append(.executable(name: "SpeakWindows", targets: ["SpeakWindows"]))
     portablePackage.products.append(.executable(name: "speak", targets: ["SpeakCLI"]))
     portablePackage.targets.append(contentsOf: [
@@ -237,6 +242,7 @@ if windowsTargetBuild {
             // their licence and provenance travel with them.
             exclude: ["whisper-cpp/LICENSE", "whisper-cpp/PROVENANCE.md"],
             publicHeadersPath: "include",
+            cxxSettings: windowsCxxSettings,
             linkerSettings: [
                 .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
                 .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
@@ -260,6 +266,7 @@ if windowsTargetBuild {
             name: "CWindowsAutomation",
             path: "Sources/CWindowsAutomation",
             publicHeadersPath: "include",
+            cxxSettings: windowsCxxSettings,
             linkerSettings: [.linkedLibrary("advapi32")]
         ),
         .target(

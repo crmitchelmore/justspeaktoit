@@ -627,6 +627,11 @@ JSTILoopbackListener *jsti_loopback_listen(uint16_t port, uint16_t *bound_port,
 int jsti_loopback_accept(JSTILoopbackListener *listener, int timeout_milliseconds,
                          JSTILoopbackConnection **connection, char *error, size_t error_capacity);
 const uint8_t *jsti_loopback_request(const JSTILoopbackConnection *connection, size_t *count);
+/* Who owns the socket at the other end, from the TCP table's owning process:
+ * 0 a process of this process's user, 1 another user's, -1 when that cannot
+ * be determined (including a process this user may not open). Only while the
+ * peer's socket is open. */
+int jsti_loopback_peer_owner(const JSTILoopbackConnection *connection);
 int jsti_loopback_respond(JSTILoopbackConnection *connection, const uint8_t *bytes, size_t count);
 void jsti_loopback_connection_destroy(JSTILoopbackConnection *connection);
 /* Thread safe; a blocked accept returns 3 promptly. */

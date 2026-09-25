@@ -209,6 +209,17 @@ public final class WindowsLoopbackListener: @unchecked Sendable {
             return parts.count == 3 ? String(parts[1]) : nil
         }
 
+        /// Whether a process of this user opened the connection, from the TCP
+        /// table's owning process: `false` for another account, `nil` when
+        /// that cannot be determined. Read before `respond`.
+        public var peerIsCurrentUser: Bool? {
+            switch jsti_loopback_peer_owner(handle) {
+            case 0: return true
+            case 1: return false
+            default: return nil
+            }
+        }
+
         /// Writes a complete response and closes the connection.
         public func respond(_ bytes: Data) {
             _ = bytes.withUnsafeBytes {

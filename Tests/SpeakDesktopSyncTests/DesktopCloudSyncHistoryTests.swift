@@ -48,6 +48,10 @@ final class DesktopCloudSyncHistoryTests: DesktopCloudSyncTestCase {
         XCTAssertEqual(overridden.configuration?.apiToken, "developer")
         XCTAssertEqual(overridden.configuration?.environment, .development)
         XCTAssertEqual(overridden.configuration?.containerIdentifier, "iCloud.com.justspeaktoit.alpha")
+        // Neither the build nor the process environment can move the endpoint
+        // that receives both tokens.
+        XCTAssertEqual(built.configuration?.baseURL, CloudKitWebServicesConfiguration.defaultBaseURL)
+        XCTAssertEqual(overridden.configuration?.baseURL, CloudKitWebServicesConfiguration.defaultBaseURL)
 
         let wrong = DesktopCloudSyncConfiguration.resolve(
             buildToken: "built", buildEnvironment: "staging", processEnvironment: [:], train: .stable

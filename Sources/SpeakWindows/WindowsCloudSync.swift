@@ -42,7 +42,13 @@ extension WindowsLoopbackListener: DesktopLoopbackListener {
     }
 }
 
-extension WindowsLoopbackListener.Connection: DesktopLoopbackRequest {}
+extension WindowsLoopbackListener.Connection: DesktopLoopbackRequest {
+    public var head: DesktopLoopbackRequestHead? { DesktopLoopbackRequestHead(parsing: request) }
+
+    public var peer: DesktopLoopbackPeer {
+        peerIsCurrentUser.map { $0 ? .currentUser : .otherUser } ?? .unknown
+    }
+}
 
 /// The window's event context as a sendable value, for the dialog callback.
 private struct WindowsSyncContext: @unchecked Sendable {

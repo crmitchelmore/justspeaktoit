@@ -82,7 +82,8 @@ public enum LinuxSignInPage {
 /// A 127.0.0.1-only HTTP listener: the Apple ID sign-in callback, and the
 /// loopback fake server in tests. A connection that sends no complete request
 /// within `requestWindow` is dropped, so an idle browser preconnection cannot
-/// hold the callback.
+/// hold the callback. Each request reports which user's process sent it, so
+/// the callback can refuse other accounts on this computer.
 public final class LinuxLoopbackListener: DesktopLoopbackListener, @unchecked Sendable {
     public struct Connection: DesktopLoopbackRequest, @unchecked Sendable {
         fileprivate let handle: OpaquePointer
@@ -93,11 +94,17 @@ public final class LinuxLoopbackListener: DesktopLoopbackListener, @unchecked Se
             return Data(bytes: bytes, count: count)
         }
 
-        /// The request target of the first line, such as `/cloudkit-sign-in?…`.
-        public var target: String? {
-            let head = String(bytes: request.prefix(8 * 1024), encoding: .utf8) ?? ""
-            let parts = head.components(separatedBy: "\r\n").first?.split(separator: " ") ?? []
-            return parts.count == 3 ? String(parts[1]) : nil
+        /// The request line and header fields.
+        public var head: DesktopLoopbackRequestHead? { DesktopLoopbackRequestHead(parsing: request) }
+
+        /// Whose process connected, from the kernel's TCP tables. Read while
+        /// the connection is open, before `respond`.
+        public var peer: DesktopLoopbackPeer {
+            switch jsti_loopback_peer_owner(handle) {
+            case 0: return .currentUser
+            case 1: return .otherUser
+            default: return .unknown
+            }
         }
 
         /// Writes a complete response and closes the connection.

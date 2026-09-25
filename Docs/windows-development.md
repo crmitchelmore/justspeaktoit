@@ -498,7 +498,9 @@ What the Windows app does:
   `apple.com` or `icloud.com`), and listens on
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
   `ckWebAuthToken`. The listener runs only during sign-in, for at most ten
-  minutes. The token rotates on every response and is kept in Credential
+  minutes, and takes the redirect only from a process of the signed-in
+  Windows user and only as a top-level browser navigation (see
+  [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback)). The token rotates on every response and is kept in Credential
   Manager as `com.justspeaktoit/cloudkit.webAuthToken`.
 - **Sync History with my Mac** turns on History sync. The app syncs at launch,
   every five minutes, after each saved transcript, and on **Sync now**.

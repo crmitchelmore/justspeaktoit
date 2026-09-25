@@ -202,6 +202,15 @@ int32_t jsti_loopback_accept(
     size_t error_capacity);
 /* The complete request, valid until the connection is destroyed. */
 const uint8_t *jsti_loopback_request(const jsti_loopback_connection *connection, size_t *count);
+/* Who owns the socket at the other end, from /proc/net/tcp and tcp6: 0 a
+ * process of this (effective) user, 1 another user's, -1 when that cannot be
+ * determined. Only while the peer's socket is open. */
+int32_t jsti_loopback_peer_owner(const jsti_loopback_connection *connection);
+/* The same decision over given table texts (either may be NULL), for tests:
+ * addresses as in sin_addr.s_addr, ports in host order. */
+int32_t jsti_loopback_peer_owner_in_tables(
+    const char *tcp, const char *tcp6, uint32_t peer_address, uint16_t peer_port, uint32_t local_address,
+    uint16_t local_port, uint32_t user);
 /* Writes a complete response and ends the connection's sending side. */
 int32_t jsti_loopback_respond(jsti_loopback_connection *connection, const uint8_t *bytes, size_t count);
 /* Closes the connection and wipes its request. */

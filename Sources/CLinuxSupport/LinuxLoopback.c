@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/eventfd.h>
@@ -61,6 +62,7 @@ static int wait_readable(jsti_loopback *listener, int fd, gint64 deadline) {
 /* Bytes a complete request occupies once its header block is known, 0 before
  * that, or SIZE_MAX when it declares a body over the limit. */
 static size_t expected_length(const GByteArray *bytes) {
+    if (bytes->len == 0) return 0;
     const char *text = (const char *)bytes->data;
     const char *end = g_strstr_len(text, bytes->len, "\r\n\r\n");
     if (end == NULL) return 0;
@@ -195,6 +197,110 @@ int32_t jsti_loopback_accept(
 const uint8_t *jsti_loopback_request(const jsti_loopback_connection *connection, size_t *count) {
     if (count != NULL) *count = connection != NULL ? connection->request->len : 0;
     return connection != NULL && connection->request->len > 0 ? connection->request->data : NULL;
+}
+
+/*
+ * The owner of the socket at the other end of an accepted connection. A TCP
+ * peer has no SO_PEERCRED, but the kernel's TCP tables list that socket with
+ * the user that created it: the entry whose local end is the peer's address
+ * and port and whose remote end is this listener's. The tables print each
+ * address as its network-order value read as a native integer and each port
+ * in host order; IPv6 sockets connected to 127.0.0.1 appear in tcp6 as
+ * ::ffff:127.0.0.1. Entries in TIME_WAIT belong to no process and are
+ * skipped. No match, or matches with different owners, is unknown.
+ */
+enum { PEER_CURRENT_USER = 0, PEER_OTHER_USER = 1, PEER_UNKNOWN = -1 };
+enum { TABLE_TIME_WAIT = 0x06 };
+
+typedef struct {
+    guint32 peer_address;
+    guint16 peer_port;
+    guint32 local_address;
+    guint16 local_port;
+    gboolean found;
+    gboolean conflict;
+    guint32 owner;
+} peer_search;
+
+/* Four native words from the 32 hex digits of a tcp6 address. */
+static gboolean parse_words(const char *hex, guint32 words[4]) {
+    if (strlen(hex) != 32) return FALSE;
+    for (int index = 0; index < 4; index++) {
+        char word[9] = { 0 };
+        memcpy(word, hex + index * 8, 8);
+        gchar *end = NULL;
+        words[index] = (guint32)g_ascii_strtoull(word, &end, 16);
+        if (end != word + 8) return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean is_mapped(const guint32 words[4], guint32 address) {
+    return words[0] == 0 && words[1] == 0 && words[2] == htonl(0xFFFF) && words[3] == address;
+}
+
+static void scan_table(const char *table, gboolean six, peer_search *search) {
+    if (table == NULL) return;
+    gchar **lines = g_strsplit(table, "\n", -1);
+    for (gchar **line = lines; *line != NULL; line++) {
+        unsigned int local_port = 0, remote_port = 0, state = 0, owner = 0;
+        if (six) {
+            char local[33] = { 0 }, remote[33] = { 0 };
+            guint32 local_words[4], remote_words[4];
+            if (sscanf(*line, " %*d: %32[0-9A-Fa-f]:%4x %32[0-9A-Fa-f]:%4x %2x %*x:%*x %*x:%*x %*x %u", local,
+                       &local_port, remote, &remote_port, &state, &owner) != 6 ||
+                !parse_words(local, local_words) || !parse_words(remote, remote_words) ||
+                !is_mapped(local_words, search->peer_address) || !is_mapped(remote_words, search->local_address)) {
+                continue;
+            }
+        } else {
+            unsigned int local = 0, remote = 0;
+            if (sscanf(*line, " %*d: %8x:%4x %8x:%4x %2x %*x:%*x %*x:%*x %*x %u", &local, &local_port, &remote,
+                       &remote_port, &state, &owner) != 6 ||
+                local != search->peer_address || remote != search->local_address) {
+                continue;
+            }
+        }
+        if (local_port != search->peer_port || remote_port != search->local_port || state == TABLE_TIME_WAIT) continue;
+        if (search->found && search->owner != owner) search->conflict = TRUE;
+        search->found = TRUE;
+        search->owner = owner;
+    }
+    g_strfreev(lines);
+}
+
+int32_t jsti_loopback_peer_owner_in_tables(
+    const char *tcp, const char *tcp6, uint32_t peer_address, uint16_t peer_port, uint32_t local_address,
+    uint16_t local_port, uint32_t user) {
+    peer_search search = {
+        .peer_address = peer_address, .peer_port = peer_port,
+        .local_address = local_address, .local_port = local_port,
+    };
+    scan_table(tcp, FALSE, &search);
+    scan_table(tcp6, TRUE, &search);
+    if (!search.found || search.conflict) return PEER_UNKNOWN;
+    return search.owner == user ? PEER_CURRENT_USER : PEER_OTHER_USER;
+}
+
+int32_t jsti_loopback_peer_owner(const jsti_loopback_connection *connection) {
+    if (connection == NULL || connection->socket < 0) return PEER_UNKNOWN;
+    struct sockaddr_in peer = { 0 }, local = { 0 };
+    socklen_t peer_length = sizeof peer, local_length = sizeof local;
+    if (getpeername(connection->socket, (struct sockaddr *)&peer, &peer_length) != 0 || peer.sin_family != AF_INET ||
+        getsockname(connection->socket, (struct sockaddr *)&local, &local_length) != 0 || local.sin_family != AF_INET) {
+        return PEER_UNKNOWN;
+    }
+    /* Either table may be missing, as tcp6 is without IPv6; a peer found in
+     * neither is unknown. */
+    gchar *tcp = NULL, *tcp6 = NULL;
+    if (!g_file_get_contents("/proc/net/tcp", &tcp, NULL, NULL)) tcp = NULL;
+    if (!g_file_get_contents("/proc/net/tcp6", &tcp6, NULL, NULL)) tcp6 = NULL;
+    int32_t owner = jsti_loopback_peer_owner_in_tables(
+        tcp, tcp6, peer.sin_addr.s_addr, ntohs(peer.sin_port), local.sin_addr.s_addr, ntohs(local.sin_port),
+        (uint32_t)geteuid());
+    g_free(tcp);
+    g_free(tcp6);
+    return owner;
 }
 
 int32_t jsti_loopback_respond(jsti_loopback_connection *connection, const uint8_t *bytes, size_t count) {

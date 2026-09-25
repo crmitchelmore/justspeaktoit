@@ -55,6 +55,13 @@ private final class ScriptedListener: DesktopLoopbackListener, @unchecked Sendab
     struct Request: DesktopLoopbackRequest {
         let target: String?
         let listener: ScriptedListener
+        /// A GET from this user's browser, as Apple's redirect arrives.
+        var head: DesktopLoopbackRequestHead? {
+            target.map {
+                DesktopLoopbackRequestHead(method: "GET", target: $0, fields: [.init(name: "Host", value: "127.0.0.1")])
+            }
+        }
+        var peer: DesktopLoopbackPeer { .currentUser }
         func respond(_ bytes: Data) { listener.record(target, bytes) }
     }
 

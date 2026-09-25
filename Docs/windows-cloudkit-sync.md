@@ -99,6 +99,68 @@ From Apple's
   `zones/modify` and `users/caller`. None of them needs a queryable index. The
   key reader looks records up by name instead of querying.
 
+## Sign-in callback
+
+Apple appends only `ckWebAuthToken` to the API token's registered callback.
+The reference documents no state or nonce parameter that the redirect would
+echo, and the callback URL is fixed in CloudKit Console, so the request that
+arrives cannot be tied to the sign-in that opened the listener. Instead
+`DesktopCloudSyncSignIn.evaluateCallback`, a pure function of the request
+head and the connecting socket's owner, takes a request as the callback only
+when all of these hold:
+
+- **A process of this user connected.** Linux reads the owner of the peer's
+  socket from `/proc/net/tcp` and `/proc/net/tcp6`: the row whose local end is
+  the peer's address and port and whose remote end is the listener's, with
+  IPv6 sockets matched as `::ffff:127.0.0.1`. It must equal the app's
+  effective UID. Windows finds the same row in `GetExtendedTcpTable`
+  (`TCP_TABLE_OWNER_PID_ALL`, IPv4 and IPv6), opens the owning process's token
+  and compares its user SID with the app's. Another account's process is
+  refused, and so is a peer whose owner cannot be read: no row, rows with
+  different owners, or a process this user may not open.
+- **It is a GET addressed to `127.0.0.1`.** Exactly one `Host` header, naming
+  `127.0.0.1` with any port, so a DNS-rebinding page is refused.
+- **It is a top-level navigation.** When the browser sends fetch metadata,
+  which pages cannot set, `Sec-Fetch-Mode` must be `navigate`,
+  `Sec-Fetch-Dest` `document` and `Sec-Fetch-Site` `cross-site` (Apple's page)
+  or `none` (the address opened directly). `fetch` and XHR, images and
+  scripts, frames, and navigations from another page on `127.0.0.1` are
+  refused.
+- **Its `Origin` and `Referer`, when present, are HTTPS pages on `apple.com`
+  or `icloud.com`.** Absent headers are allowed: Apple's referrer policy is
+  not documented, and an HTTPS page's default policy sends no `Referer` to an
+  `http` address.
+
+A refused request gets a 403 page and waiting goes on, so it can neither
+complete nor cut short the sign-in; other paths still get a 404. The listener
+still runs only during sign-in, for at most ten minutes, and closes at the
+first accepted callback.
+
+What remains:
+
+- **A process running as the same user** can still send a callback that
+  passes. That is out of scope: such a process can already read the web auth
+  token and key-sync key from Credential Manager or the keyring, and History
+  itself.
+- **A web page open in the user's browser** can still navigate a top-level tab
+  to the callback with its referrer suppressed, which is indistinguishable
+  from Apple's redirect without a value Apple echoes. It has to know a sign-in
+  is in progress, hold a token for its own Apple ID issued through this app's
+  API token, and arrive before Apple's redirect. If it wins, this PC is signed
+  in to that account and, as [Changing Apple ID](#changing-apple-id)
+  describes, an enabled History sync uploads local History there. Closing
+  that race needs a per-attempt value from Apple, or a confirmation before
+  uploading to a newly bound account (the open product decision in that
+  section).
+- **Not yet verified on real desktops.** On Windows the owner check is
+  compiled and tested only in CI, against WinHTTP in the test process. A
+  browser whose networking process
+  this user cannot open (a sandboxed network service, for example) would be
+  refused: sign-in then fails closed, the browser shows the 403 page and the
+  app reports a timeout. Edge, Chrome and Firefox need a live receipt. On
+  Linux, Flatpak needs the host network namespace (`--share=network`, which
+  sync needs anyway) for `/proc/net/tcp` to list the browser's socket.
+
 ## Source layout
 
 - `Sources/SpeakSync` (portable except `appleSyncSources` in `Package.swift`):
@@ -130,7 +192,7 @@ From Apple's
   and drains what runs within a bound; `DesktopCloudSyncConfiguration`
   resolves the build-time token; `DesktopLoopbackListener` and
   `DesktopCloudSyncSignIn.awaitCallback` wait for the sign-in callback on a
-  host's listener.
+  host's listener, and `evaluateCallback` decides which request it is.
 - `Sources/SpeakDesktopHost/DesktopHostCloudSync.swift` (portable): the flow
   both hosts run, generic over the host platform: the settings' actions
   (Apply, Sign in, Sign out, Sync now), the loopback sign-in, the periodic
@@ -169,6 +231,12 @@ From Apple's
   on, and interleave account validations. A sync state file that cannot be
   written shows that a typed key is not saved without its mark. Host shutdown
   ownership is tested through `DesktopCloudSyncWork`.
+  `DesktopCloudSyncCallbackTests` holds `evaluateCallback` to browser-shaped
+  requests: Apple's redirect with and without fetch metadata or an Apple
+  referrer is taken; another account, an unknown owner, a POST, another or a
+  duplicate `Host`, fetch, image and frame requests, same-site navigations and
+  non-Apple, `null` or `http` initiators are refused with a 403 while the
+  sign-in keeps waiting.
 - `Tests/SpeakDesktopHostTests/DesktopHostCloudSyncTests.swift` runs the shared
   host flow on every platform with a fake platform and a scripted listener:
   sign-in through the callback, History both ways with the host's origin, a
@@ -178,11 +246,17 @@ From Apple's
   over a real loopback socket and runs the desktop sync service through
   URLSession and OpenSSL (History both ways, key import, token rotation),
   checks the callback, idle connections and cancellation;
+  `LinuxLoopbackPeerTests` reads peer owners from synthetic `/proc/net` tables
+  (this user, another, `TIME_WAIT`, conflicting rows, IPv6-mapped peers) and
+  from real IPv4 and dual-stack connections, refuses a page-shaped request over
+  the real listener, and, when the tests run as root, has `curl` run as
+  `nobody` refused while this user's callback signs in;
   `LinuxEnvelopeCryptographyTests` holds OpenSSL to the same vectors as CNG.
 - `Tests/SpeakWindowsPlatformTests/WindowsCloudKitNativeTests.swift` serves the
   fake over a real loopback socket through WinHTTP, checks the sign-in callback
-  and cancellation, and holds CNG to the independent PBKDF2 and AES-GCM vectors
-  that the Apple implementation also meets.
+  (including that its TCP-table owner is this user) and cancellation, and
+  holds CNG to the independent PBKDF2 and AES-GCM vectors that the Apple
+  implementation also meets.
 - The Windows executable's `--self-test` runs `WindowsPostProcessingSelfTest`:
   the post-processing dialog's Apply through the real controller and settings
   queue with a synthetic sync key hook, covering a typed and a blank key, a
@@ -226,6 +300,7 @@ review. Current behaviour, by kind of record:
 | Change notifications | Not available to web clients for these subscriptions; Windows polls every five minutes and after each saved transcript. |
 | Expired cursor | No documented error code identifies an expired `syncToken`; it surfaces as a sync error. |
 | Loopback callback | Unverified until the API token is created. If CloudKit Console refuses `http://127.0.0.1:47823/cloudkit-sign-in`, a custom URI scheme is needed instead: through the MSIX manifest on Windows, an `x-scheme-handler` in the desktop file on Linux. |
+| Callback binding | Apple echoes no per-attempt value, so the callback is taken only from this user's processes as a top-level navigation; a web page that races Apple's redirect with a suppressed referrer is not refused. See [Sign-in callback](#sign-in-callback). |
 | Token size | Credential Manager holds up to 2,560 bytes per credential, and Linux reads up to 8 KiB from the keyring. A longer web auth token would fail to save or read and ask for sign-in again. |
 | Keys typed by hand | The "saved by hand" mark is saved before the key. If the sync state cannot be saved, the key is not saved and the error is shown. If Credential Manager then refuses the key, or the app stops between the two, the key saved before stays and counts as typed: a deletion on the Mac no longer removes it, though a newer key from the Mac still replaces it. |
 | Compare Models, iPhone History, settings, Handoff | Not wired on Windows or Linux. |

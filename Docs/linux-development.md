@@ -128,7 +128,10 @@ API token serves both apps: they share the callback URL.
   `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
   `ckWebAuthToken`, only during sign-in and for at most ten minutes. A
   connection that sends no complete request within five seconds is dropped,
-  so an idle browser preconnection cannot hold the callback. The rotating
+  so an idle browser preconnection cannot hold the callback. The redirect is
+  taken only from a process of this user (read from `/proc/net/tcp`) and only
+  as a top-level browser navigation; see
+  [Sign-in callback](windows-cloudkit-sync.md#sign-in-callback). The rotating
   token is kept in the keyring as `cloudkit.webAuthToken`.
 - **Sync History with my Mac** and **Import API keys from my Mac** (off by
   default; needs the key-sync passphrase set on the Mac) take effect with

@@ -242,8 +242,9 @@ if windowsTargetBuild {
                 .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
                 .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
                 // CloudKit sync: CNG for the API-key envelope, Winsock for the
-                // loopback sign-in callback.
-                .linkedLibrary("bcrypt"), .linkedLibrary("ws2_32"),
+                // loopback sign-in callback, and the IP helper's TCP table
+                // for which user's process sent that callback.
+                .linkedLibrary("bcrypt"), .linkedLibrary("ws2_32"), .linkedLibrary("iphlpapi"),
                 .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
                 // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
                 .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"),

@@ -233,11 +233,14 @@ final class WinHTTPCloudKitTransportTests: XCTestCase {
         }
         let connection = try await accepted.value
         let received = try XCTUnwrap(connection.target)
+        // WinHTTP in this process: the TCP table's owner is this user.
+        let owner = connection.peerIsCurrentUser
         connection.respond(Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".utf8))
         let response = try await reply.value
         listener.close()
 
         XCTAssertEqual(received, target)
+        XCTAssertEqual(owner, true)
         XCTAssertEqual(response.statusCode, 200)
         XCTAssertEqual(String(bytes: response.body, encoding: .utf8), "ok")
     }

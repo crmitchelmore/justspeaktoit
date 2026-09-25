@@ -42,7 +42,13 @@ final class PlaybackTestHandle: WindowsAudioPlaybackHandle, @unchecked Sendable 
     private var failuresRemaining: Int
     private var reads = 0
 
-    init(plan: PlaybackTestPlan, completion: @escaping @Sendable (WindowsAudioPlaybackCompletion) -> Void) {
+    /// The file the controller opened this handle for.
+    let path: String
+
+    init(
+        path: String, plan: PlaybackTestPlan, completion: @escaping @Sendable (WindowsAudioPlaybackCompletion) -> Void
+    ) {
+        self.path = path
         self.plan = plan
         self.completion = completion
         self.failuresRemaining = plan.destroyFailures
@@ -127,7 +133,7 @@ final class PlaybackTestBackend: WindowsAudioPlaybackBackend, @unchecked Sendabl
         path: String, completion: @escaping @Sendable (WindowsAudioPlaybackCompletion) -> Void
     ) throws -> any WindowsAudioPlaybackHandle {
         let plan = lock.withLock { plans.isEmpty ? PlaybackTestPlan() : plans.removeFirst() }
-        let handle = PlaybackTestHandle(plan: plan, completion: completion)
+        let handle = PlaybackTestHandle(path: path, plan: plan, completion: completion)
         lock.withLock { values.append(handle) }
         if let gate = plan.openGate, !gate.wait() { throw WindowsAudioPlaybackError("Test open gate timed out") }
         return handle

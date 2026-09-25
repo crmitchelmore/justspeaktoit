@@ -23,11 +23,13 @@ final class WindowsAudioPlaybackControllerTests: XCTestCase {
         controller = nil
         try await super.tearDown()
     }
+    /// Plays a file of its own and returns its handle once started, so an
+    /// earlier playback's asynchronous open is never mistaken for it.
     private func play(_ id: UUID = UUID()) async throws -> PlaybackTestHandle {
-        let count = backend.handles.count
-        try controller.play(recordID: id, path: "fixture.wav", knownDuration: 2)
-        await playbackEventually { self.backend.handles.count > count }
-        let handle = try XCTUnwrap(backend.handles.last)
+        let path = "fixture-\(UUID().uuidString).wav"
+        try controller.play(recordID: id, path: path, knownDuration: 2)
+        await playbackEventually { self.backend.handles.contains { $0.path == path } }
+        let handle = try XCTUnwrap(backend.handles.first { $0.path == path })
         await playbackEventually { handle.counts.started == 1 }
         return handle
     }

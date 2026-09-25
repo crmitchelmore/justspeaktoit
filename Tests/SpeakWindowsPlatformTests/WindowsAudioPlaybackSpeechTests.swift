@@ -198,11 +198,12 @@ final class WindowsAudioPlaybackSpeechTests: XCTestCase {
     private func segment(
         _ speech: WindowsAudioPlaybackController.Speech
     ) async throws -> (Task<TimeInterval, Error>, PlaybackTestHandle) {
-        let count = backend.handles.count
+        // A path of its own, so another playback's asynchronous open is never mistaken for it.
+        let path = "segment-\(UUID().uuidString).wav"
         let owned = try XCTUnwrap(controller)
-        let task = Task { try await owned.playToCompletion(speech, path: "segment.wav") }
-        await playbackEventually { self.backend.handles.count > count }
-        let handle = try XCTUnwrap(backend.handles.last)
+        let task = Task { try await owned.playToCompletion(speech, path: path) }
+        await playbackEventually { self.backend.handles.contains { $0.path == path } }
+        let handle = try XCTUnwrap(backend.handles.first { $0.path == path })
         await playbackEventually { handle.counts.started == 1 }
         return (task, handle)
     }

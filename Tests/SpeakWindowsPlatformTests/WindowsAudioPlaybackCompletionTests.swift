@@ -26,12 +26,16 @@ final class WindowsAudioPlaybackCompletionTests: XCTestCase {
         try await super.tearDown()
     }
 
+    /// Starts an awaited run and returns once its own file has started. Each
+    /// run opens a path of its own, so a handle another playback opens
+    /// meanwhile (a History replacement opens asynchronously) is never
+    /// mistaken for it.
     private func awaited(_ id: UUID = UUID()) async throws -> (Task<TimeInterval, Error>, PlaybackTestHandle) {
-        let count = backend.handles.count
+        let path = "speech-\(UUID().uuidString).wav"
         let owned = try XCTUnwrap(controller)
-        let task = Task { try await owned.playToCompletion(recordID: id, path: "speech.wav") }
-        await playbackEventually { self.backend.handles.count > count }
-        let handle = try XCTUnwrap(backend.handles.last)
+        let task = Task { try await owned.playToCompletion(recordID: id, path: path) }
+        await playbackEventually { self.backend.handles.contains { $0.path == path } }
+        let handle = try XCTUnwrap(backend.handles.first { $0.path == path })
         await playbackEventually { handle.counts.started == 1 }
         return (task, handle)
     }

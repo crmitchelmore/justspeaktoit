@@ -93,6 +93,9 @@ public enum DesktopHistorySyncProjection {
 ///   shared conflict rule (the newer `updatedAt` wins) decides.
 /// - Changes are reported to the host only after they are saved, so the UI
 ///   renders records that exist on disk.
+/// - A remote change that cannot be saved fails the commit that follows it,
+///   so the pass keeps its cursor before that change and the next pass
+///   applies it again. Applying a change twice is harmless.
 public actor DesktopHistorySyncStore: HistorySyncStore {
     private let records: DesktopRecordingStore
     private let state: DesktopCloudSyncStateStore
@@ -103,6 +106,8 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
     /// Fingerprints of the content handed to the transport, by record.
     private var offered: [UUID: String] = [:]
     private var unreported: [DesktopHistorySyncChange] = []
+    /// Remote changes received since the last commit that could not be saved.
+    private var unapplied = 0
 
     public init(
         records: DesktopRecordingStore,
@@ -184,13 +189,25 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
             }
             unreported.append(.saved(entry.id))
         } catch {
-            // Not saved: nothing is acknowledged, so the next pass replays it.
+            // Not saved and nothing acknowledged: the commit fails, so the
+            // cursor stays before this change and the next pass replays it.
+            unapplied += 1
         }
     }
 
     public func didDeleteRemoteEntry(id: UUID) async {
         do {
-            if try await records.removeSyncedCopy(id: id) {
+            let removed: Bool
+            do {
+                removed = try await records.removeSyncedCopy(id: id)
+            } catch where Self.isUnreadableRecord(error) {
+                // A record file that can never be read may be a recording made
+                // here, so it is kept as one would be: left exactly as it is
+                // and marked deleted elsewhere. No retry could read it, so
+                // failing the commit would hold the cursor here for good.
+                removed = false
+            }
+            if removed {
                 try await state.update { $0.history[id] = nil }
                 unreported.append(.removed(id))
             } else {
@@ -208,7 +225,8 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
                 unreported.append(.keptAfterRemoteDeletion(id))
             }
         } catch {
-            // Unreadable: leave it exactly as it is.
+            // Not applied: the commit fails and the next pass replays it.
+            unapplied += 1
         }
     }
 
@@ -222,17 +240,44 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
         }
     }
 
-    /// Reports the changes applied since the last report. Each was saved, with
-    /// its sync state, by a step the pass fence admitted; this writes nothing
-    /// account-bound, which is why the fence does not admit it. It can
-    /// therefore run after the pass's session has ended, and a pass stopped
-    /// before reaching it leaves its saved changes for the next one to report:
-    /// either way the window only learns of records already on disk.
+    /// Reports the changes applied since the last report, then throws
+    /// `historyChangesNotSaved` if any change received since the last commit
+    /// could not be saved, so the coordinator keeps the cursor from before it
+    /// and the next pass fetches and applies it again.
+    ///
+    /// Each applied change was saved, with its sync state, by a step the pass
+    /// fence admitted; this writes nothing account-bound, which is why the
+    /// fence does not admit it. It can therefore run after the pass's session
+    /// has ended, and a pass stopped before reaching it leaves its saved
+    /// changes for the next one to report: either way the window only learns
+    /// of records already on disk.
     public func persistRemoteChanges() async throws {
-        guard !unreported.isEmpty else { return }
         let changes = unreported
         unreported.removeAll()
-        await onChanges(changes)
+        let failed = unapplied
+        unapplied = 0
+        if !changes.isEmpty {
+            await onChanges(changes)
+        }
+        if failed > 0 {
+            throw DesktopCloudSyncError.historyChangesNotSaved(failed)
+        }
+    }
+
+    /// Starts a History pass. A pass stopped between a change it could not
+    /// save and its commit saved no cursor past that change, so the change is
+    /// fetched and decided again; its failure must not fail this pass, which
+    /// may belong to another account. Passes over one store never overlap.
+    func beginPass() {
+        unapplied = 0
+    }
+
+    /// A record file that exists but can never be read as a record: not a
+    /// regular file, another record's identity, or not a record at all. An
+    /// I/O failure, which a later pass may not meet, is not one of these.
+    private static func isUnreadableRecord(_ error: Error) -> Bool {
+        if error is DecodingError { return true }
+        return (error as? CocoaError)?.code == .fileReadCorruptFile
     }
 
     /// Builds the local record for a remote entry. A recording made here keeps

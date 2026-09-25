@@ -48,6 +48,9 @@ public enum DesktopCloudSyncError: Error, Equatable, Sendable {
     /// Key import was turned on or off again while this change to it was in
     /// progress; the later change decides, and this one made no further changes.
     case keyImportSuperseded
+    /// This many History changes from iCloud could not be saved on this
+    /// device. The pass kept its place before them, so the next one retries.
+    case historyChangesNotSaved(Int)
 }
 
 extension DesktopCloudSyncError: LocalizedError {
@@ -58,6 +61,10 @@ extension DesktopCloudSyncError: LocalizedError {
         case .signInNotOffered: return "iCloud did not offer a sign-in page. Try again later."
         case .signInTimedOut: return "The browser did not return from Apple ID sign-in in time. Sign in again to retry."
         case .keyImportSuperseded: return "A later change to API-key import replaced this one."
+        case .historyChangesNotSaved(let count):
+            let changes = count == 1 ? "A History change" : "\(count) History changes"
+            let them = count == 1 ? "it" : "them"
+            return "\(changes) from iCloud could not be saved on this device. The next sync tries \(them) again."
         }
     }
 }
@@ -76,7 +83,8 @@ extension DesktopCloudSyncError: LocalizedError {
 /// History step; turning key import off stops it before its next credential
 /// change. Committing applied History
 /// (`DesktopHistorySyncStore.persistRemoteChanges`) is not fenced: it writes
-/// nothing account-bound and only reports records already saved. Key import
+/// nothing account-bound, only reports records already saved, and fails when
+/// a change could not be saved so the cursor stays before it. Key import
 /// and keys saved by hand are in `DesktopCloudSyncService+Keys.swift`.
 public actor DesktopCloudSyncService {
     private let resolution: DesktopCloudSyncConfiguration.Resolution
@@ -276,6 +284,7 @@ public actor DesktopCloudSyncService {
             cloudAvailable: true,
             fence: DesktopHistoryPassFence(session: fence, state: state)
         )
+        await historyStore.beginPass()
         await coordinator.sync(store: historyStore)
         if let error = coordinator.status.error {
             throw error

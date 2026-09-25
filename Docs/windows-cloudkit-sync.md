@@ -110,7 +110,8 @@ From Apple's
   the admitted steps applied.
 - `Sources/SpeakDesktopSync` (portable): `DesktopHistorySyncStore` maps desktop
   records onto the shared entry and keeps synced copies audio-less, and its
-  commit only reports records already saved; `DesktopCloudSyncStateStore`
+  commit reports records already saved and fails if a change could not be
+  saved, so the cursor stays before it; `DesktopCloudSyncStateStore`
   holds cursors, the bound account, acknowledgements and imported-key
   bookkeeping; `DesktopCloudSyncService` runs sign-in, one pass at a time and
   key import, with every History write, key change, key-sync key and success

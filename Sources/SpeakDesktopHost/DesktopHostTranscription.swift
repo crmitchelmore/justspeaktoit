@@ -34,6 +34,8 @@ extension DesktopHostController {
             }
             transcriptionTask = task
             defer { transcriptionTask = nil }
+            // A Cancel while the audio was being found had no request to cancel yet.
+            if cancellationRequested { task.cancel() }
             let result = try await task.value
             record.result = result
             record.failure = nil

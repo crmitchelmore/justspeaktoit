@@ -450,6 +450,8 @@ jobs:
   # signing secrets and variables are absent. No key, certificate or client
   # secret exists in the repository or on the runner: GitHub OIDC signs in to
   # Entra ID and the key stays in Artifact Signing's HSMs.
+  # Holds the OIDC token and signing credentials, so every action is pinned to
+  # a reviewed commit rather than a tag that could be moved.
   sign:
     name: Sign the developer MSIX with Azure Artifact Signing
     needs: compile
@@ -463,7 +465,7 @@ jobs:
     env:
       SIGNED_VERSION: 0.0.${{ github.run_number }}.3
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Read the signing configuration
@@ -488,7 +490,7 @@ jobs:
           client-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         if: ${{ steps.config.outputs.enabled == 'true' }}
         with:
           name: windows-runtime-bundle
@@ -513,7 +515,7 @@ jobs:
             -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
       - name: Upload the signed developer package
         if: ${{ steps.config.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-developer-msix-signed
           path: |

@@ -41,12 +41,12 @@ final class CloudKitWebEndToEndTests: XCTestCase {
         XCTAssertNil(error)
         let lastSync = await host.lastSyncTime
         XCTAssertEqual(lastSync, Date(timeIntervalSince1970: 42))
-        // The feed commits before its cursor advances; applying the upload's
+        // Each page commits before its cursor advances; applying the upload's
         // acknowledgements commits again, exactly as the Apple engine does.
         let log = await store.log
-        XCTAssertEqual(log, ["receive", "delete", "commit", "save-cursor", "commit"])
+        XCTAssertEqual(log, ["receive", "commit", "save-cursor", "delete", "commit", "save-cursor", "commit"])
         let saves = await cursor.saves
-        XCTAssertEqual(saves, [Data("t2".utf8)])
+        XCTAssertEqual(saves, [Data("t1".utf8), Data("t2".utf8)])
         let acknowledged = await store.acknowledgedIDs
         XCTAssertEqual(acknowledged, [local.id, remote.id])
         let operations = await transport.requests.map { request in

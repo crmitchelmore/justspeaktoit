@@ -65,8 +65,12 @@ public protocol HistorySyncStore: AnyObject {
     func didDeleteRemoteEntry(id: UUID) async
     /// Record IDs that CloudKit has acknowledged.
     func didAcknowledgeSyncedEntries(ids: Set<UUID>) async
-    /// Commit reconciled remote changes. The change token advances only after
-    /// this returns, so a failure replays the same changes on the next pass.
+    /// Commit the remote changes reconciled since the last commit: one page of
+    /// the change feed, or the server copies an upload returned. That page's
+    /// change token is saved, and that upload's acknowledgements recorded,
+    /// only after this returns, so throwing replays the same changes on the
+    /// next pass. A store that could not apply one of those changes throws
+    /// here for the same reason.
     func persistRemoteChanges() async throws
 }
 
@@ -109,25 +113,18 @@ public enum HistorySyncEvent {
     case reconciledRemoteChanges(Int)
 }
 
-/// Keeps only the final event for each record while preserving the order of
-/// those final events. This makes duplicate changes and tombstones deterministic
-/// across CloudKit pages.
-enum HistoryChangeReconciler {
-    static func coalesced(_ changes: [HistoryRemoteChange]) -> [HistoryRemoteChange] {
-        var latestByID: [UUID: (offset: Int, change: HistoryRemoteChange)] = [:]
-        for (offset, change) in changes.enumerated() {
-            latestByID[change.id] = (offset, change)
-        }
-        return latestByID.values
-            .sorted { $0.offset < $1.offset }
-            .map(\.change)
-    }
-}
-
-/// The History reconciliation every client runs: fetch every page, coalesce to
-/// one final event per record, commit through the store, advance the cursor
-/// only after that commit, then upload pending entries and acknowledge only
-/// what CloudKit confirmed.
+/// The History reconciliation every client runs: walk the change feed one page
+/// at a time — coalesce the page to one final event per record, apply it,
+/// commit it through the store and only then save that page's cursor, before
+/// fetching the next — then upload pending entries and acknowledge only what
+/// CloudKit confirmed.
+///
+/// A pass therefore holds one page, however long the feed, and what it has
+/// committed survives a failure or stop on a later page: the next pass
+/// resumes from the last saved cursor. Every cursor a page returns is a valid
+/// resume point (CloudKit's `moreComing` contract), and none is saved ahead
+/// of a change that was not committed. Applying pages in feed order reaches
+/// the same states as syncing between them would, which stores already handle.
 ///
 /// A coordinator is confined to one isolation domain. Each method runs on the
 /// caller's actor (`#isolation`), so the Apple engine keeps executing on the
@@ -297,31 +294,40 @@ public final class HistorySyncCoordinator {
         isolation: isolated (any Actor)?
     ) async throws {
         var tokenData = try await admitted(isolation: isolation) { try await tokenStore.loadChangeToken() }
-        var finalTokenData = tokenData
-        var allChanges: [HistoryRemoteChange] = []
+        var reconciled = 0
 
         while true {
             try await admitted(isolation: isolation) {}
             let page = try await transport.fetchChanges(after: tokenData)
-            allChanges.append(contentsOf: page.changes)
-            await set(\.pendingDownloadCount, allChanges.count, .pendingDownloadCount, isolation: isolation)
+            await set(\.pendingDownloadCount, page.changes.count, .pendingDownloadCount, isolation: isolation)
 
-            if let pageToken = page.serverChangeTokenData {
-                guard !page.moreComing || pageToken != tokenData else {
-                    throw SyncError.invalidChangePage
-                }
-                tokenData = pageToken
-                finalTokenData = pageToken
-            } else if page.moreComing {
+            // Checked before anything on the page is applied: a page that
+            // cannot advance the cursor would be fetched again forever.
+            let pageToken = page.serverChangeTokenData
+            guard !page.moreComing || (pageToken != nil && pageToken != tokenData) else {
                 throw SyncError.invalidChangePage
             }
 
-            if !page.moreComing {
-                break
+            reconciled += try await applyAndCommit(page, store: store, isolation: isolation)
+            if let pageToken {
+                try await admitted(isolation: isolation) { try await tokenStore.saveChangeToken(pageToken) }
+                tokenData = pageToken
             }
+            guard page.moreComing else { break }
         }
 
-        let changes = HistoryChangeReconciler.coalesced(allChanges)
+        events?(.reconciledRemoteChanges(reconciled))
+    }
+
+    /// Applies one page's final events and commits them through the store;
+    /// returns how many were applied. The caller saves the page's cursor only
+    /// after this returns.
+    private func applyAndCommit(
+        _ page: HistoryChangePage,
+        store: any HistorySyncStore,
+        isolation: isolated (any Actor)?
+    ) async throws -> Int {
+        let changes = HistoryChangeReconciler.coalesced(page.changes)
         await set(\.pendingDownloadCount, changes.count, .pendingDownloadCount, isolation: isolation)
         for change in changes {
             try await admitted(isolation: isolation) {
@@ -335,12 +341,8 @@ public final class HistorySyncCoordinator {
             await set(\.pendingDownloadCount, status.pendingDownloadCount - 1, .pendingDownloadCount,
                       isolation: isolation)
         }
-
         try await store.persistRemoteChanges()
-        if let finalTokenData {
-            try await admitted(isolation: isolation) { try await tokenStore.saveChangeToken(finalTokenData) }
-        }
-        events?(.reconciledRemoteChanges(changes.count))
+        return changes.count
     }
 
     private func uploadPendingEntries(

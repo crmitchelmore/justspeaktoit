@@ -7,16 +7,20 @@ import XCTest
 /// The shared reconciliation, driven the way a desktop host drives it: from
 /// its own actor, with no main actor or run loop.
 final class SyncCoordinatorTests: XCTestCase {
-    func testPagesCoalesceAndTheCursorAdvancesOnlyAfterTheStoreCommits() async throws {
+    /// A pass holds one page at a time: it coalesces the page, applies and
+    /// commits it, and saves that page's cursor before fetching the next, so
+    /// a long feed neither accumulates in memory nor loses what it applied.
+    func testEachPageIsAppliedAndCommittedBeforeItsCursorIsSavedAndTheNextPageFetched() async throws {
         let deleted = SyncWireFixture.entry(raw: "delete me")
         let duplicateID = UUID()
         let older = SyncWireFixture.entry(id: duplicateID, raw: "old", updatedAt: Date(timeIntervalSince1970: 10))
         let newer = SyncWireFixture.entry(id: duplicateID, raw: "new", updatedAt: Date(timeIntervalSince1970: 20))
         let transport = FakeHistoryTransport(pages: [
-            page([.changed(deleted), .changed(older)], token: "p1", moreComing: true),
-            page([.deleted(deleted.id), .changed(newer)], token: "p2", moreComing: false)
+            page([.changed(deleted), .changed(older), .changed(newer)], token: "p1", moreComing: true),
+            page([.deleted(deleted.id)], token: "p2", moreComing: false)
         ])
         let store = FakeHistoryStore(entries: [deleted])
+        await transport.logFetches(into: store)
         let cursor = OrderedCursorStore(token: nil, loggingInto: store)
         let host = HistoryHost(transport: transport, tokens: cursor)
 
@@ -25,13 +29,56 @@ final class SyncCoordinatorTests: XCTestCase {
         let tokens = await transport.requestedTokens
         XCTAssertEqual(tokens, [nil, Data("p1".utf8)])
         let saves = await cursor.saves
-        XCTAssertEqual(saves, [Data("p2".utf8)])
+        XCTAssertEqual(saves, [Data("p1".utf8), Data("p2".utf8)])
+        let log = await store.log
+        XCTAssertEqual(log, [
+            "fetch", "receive", "receive", "commit", "save-cursor",
+            "fetch", "delete", "commit", "save-cursor"
+        ])
+        // Within a page only the final event per record is applied; across
+        // pages each is applied in feed order, so a later tombstone still wins.
+        let received = await store.received
+        XCTAssertEqual(received.map(\.rawTranscription), ["delete me", "new"])
         let deletedIDs = await store.deletedIDs
         XCTAssertEqual(deletedIDs, [deleted.id])
-        let received = await store.received
-        XCTAssertEqual(received.map(\.rawTranscription), ["new"])
-        let log = await store.log
-        XCTAssertEqual(log, ["delete", "receive", "commit", "save-cursor"])
+        let stored = await store.storedIDs
+        XCTAssertEqual(stored, [duplicateID])
+        let error = await host.errorDescription
+        XCTAssertNil(error)
+    }
+
+    /// Progress is durable page by page: a pass that fails on a later page
+    /// keeps the pages it committed, and the next pass resumes after them. The
+    /// failing page is not applied, and no cursor is saved ahead of it.
+    func testAPassThatFailsOnALaterPageResumesAfterTheLastCommittedPage() async throws {
+        let first = SyncWireFixture.entry(raw: "page one")
+        let unconfirmed = SyncWireFixture.entry(raw: "page without a cursor")
+        let transport = FakeHistoryTransport(pages: [
+            page([.changed(first)], token: "p1", moreComing: true),
+            HistoryChangePage(changes: [.changed(unconfirmed)], serverChangeTokenData: nil, moreComing: true),
+            page([.changed(unconfirmed)], token: "p2", moreComing: false)
+        ])
+        let store = FakeHistoryStore(entries: [])
+        let cursor = OrderedCursorStore(token: nil, loggingInto: store)
+        let host = HistoryHost(transport: transport, tokens: cursor)
+
+        await host.sync(store: store)
+
+        let failure = await host.errorDescription
+        XCTAssertEqual(failure, String(describing: SyncError.invalidChangePage))
+        let committed = await cursor.saves
+        XCTAssertEqual(committed, [Data("p1".utf8)])
+        let appliedFirst = await store.received.map(\.id)
+        XCTAssertEqual(appliedFirst, [first.id])
+
+        await host.sync(store: store)
+
+        let tokens = await transport.requestedTokens
+        XCTAssertEqual(tokens, [nil, Data("p1".utf8), Data("p1".utf8)])
+        let saves = await cursor.saves
+        XCTAssertEqual(saves, [Data("p1".utf8), Data("p2".utf8)])
+        let applied = await store.received.map(\.id)
+        XCTAssertEqual(applied, [first.id, unconfirmed.id])
         let error = await host.errorDescription
         XCTAssertNil(error)
     }

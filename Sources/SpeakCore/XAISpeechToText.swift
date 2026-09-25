@@ -92,6 +92,15 @@ public enum XAISpeechToTextError: LocalizedError, Equatable {
     /// rather than silently replaced, because the caller encodes its PCM at
     /// the rate it asked for.
     case unsupportedSampleRate(Int)
+    /// `transcript.created` did not arrive in time, so no audio could be
+    /// sent. Reported rather than absorbed: a finish that waited out its
+    /// budget must not look like a silent recording.
+    case sessionNotReady
+    /// `audio.done` was sent but `transcript.done` never followed inside the
+    /// finish budget, so the session's authoritative transcript is missing.
+    /// Reported rather than absorbed: the locked spans received so far are
+    /// returned for recovery, but they are not a completed transcription.
+    case missingCompletion
     case fileTooLarge
     case emptyTranscript
     case invalidResponse
@@ -116,6 +125,12 @@ public enum XAISpeechToTextError: LocalizedError, Equatable {
                 .joined(separator: ", ")
             return "xAI live speech-to-text cannot accept \(rate) Hz audio. "
                 + "It accepts \(supported)."
+        case .sessionNotReady:
+            return "xAI did not confirm the live speech-to-text session in time. "
+                + "Check your network and start again."
+        case .missingCompletion:
+            return "xAI did not complete the live transcript after the audio ended. "
+                + "The text received so far was kept."
         case .fileTooLarge:
             return "The recording is larger than the 500 MB xAI speech-to-text accepts."
         case .emptyTranscript:

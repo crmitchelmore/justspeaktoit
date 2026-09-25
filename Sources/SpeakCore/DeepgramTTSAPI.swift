@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Errors surfaced by the shared Deepgram Aura speech-synthesis transport.
 ///
@@ -47,6 +50,28 @@ public struct DeepgramTTSAPI: Sendable {
         apiKey: String,
         queryItems: [URLQueryItem]
     ) async throws -> Data {
+        let request = try Self.speakRequest(text: text, apiKey: apiKey, queryItems: queryItems)
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw DeepgramTTSAPIError.invalidResponse
+        }
+
+        if let failure = Self.failure(statusCode: httpResponse.statusCode, message: Self.errorMessage(from: data)) {
+            throw failure
+        }
+
+        return data
+    }
+
+    /// The one synthesis request shape, shared by `synthesize` and the bounded
+    /// portable voice-output path.
+    static func speakRequest(
+        text: String,
+        apiKey: String,
+        queryItems: [URLQueryItem]
+    ) throws -> URLRequest {
         let model = queryItems.first { $0.name == "model" }?.value ?? ""
         let endpoint = model.hasPrefix("flux-") ? Self.fluxSpeakEndpoint : Self.speakEndpoint
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
@@ -60,28 +85,21 @@ public struct DeepgramTTSAPI: Sendable {
         request.setValue("Token \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["text": text])
+        return request
+    }
 
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DeepgramTTSAPIError.invalidResponse
+    /// Classifies a response status exactly as `synthesize` does: `nil` for
+    /// success. The message is only evaluated for a failure.
+    static func failure(statusCode: Int, message: @autoclosure () -> String) -> DeepgramTTSAPIError? {
+        if statusCode == 401 || statusCode == 403 {
+            return .unauthorized(statusCode: statusCode, message: message())
         }
 
-        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-            throw DeepgramTTSAPIError.unauthorized(
-                statusCode: httpResponse.statusCode,
-                message: Self.errorMessage(from: data)
-            )
+        guard (200..<300).contains(statusCode) else {
+            return .httpError(statusCode: statusCode, message: message())
         }
 
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw DeepgramTTSAPIError.httpError(
-                statusCode: httpResponse.statusCode,
-                message: Self.errorMessage(from: data)
-            )
-        }
-
-        return data
+        return nil
     }
 
     /// Validates a Deepgram API key against the `/v1/projects` endpoint.

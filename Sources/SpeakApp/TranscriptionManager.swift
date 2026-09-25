@@ -132,6 +132,7 @@ final class TranscriptionManager: ObservableObject {
   private let batchClient: BatchTranscriptionClient
   private let openRouter: OpenRouterAPIClient
   private let secureStorage: SecureAppStorage
+  private let stopTimeoutSleep: @MainActor (TimeInterval) async throws -> Void
 
   private var continuation: CheckedContinuation<TranscriptionResult, Error>?
   private var pendingError: Error?
@@ -152,9 +153,13 @@ final class TranscriptionManager: ObservableObject {
     batchClient: BatchTranscriptionClient,
     openRouter: OpenRouterAPIClient,
     secureStorage: SecureAppStorage,
-    controllerOverride: ((String) -> any LiveTranscriptionController)? = nil
+    controllerOverride: ((String) -> any LiveTranscriptionController)? = nil,
+    stopTimeoutSleep: @escaping @MainActor (TimeInterval) async throws -> Void = {
+      try await Task.sleep(for: .seconds($0))
+    }
   ) {
     self.appSettings = appSettings
+    self.stopTimeoutSleep = stopTimeoutSleep
     self.liveController = SwitchingLiveTranscriber(
       appSettings: appSettings,
       permissionsManager: permissionsManager,
@@ -252,6 +257,9 @@ final class TranscriptionManager: ObservableObject {
     guard isLiveTranscribing else { throw TranscriptionManagerError.liveSessionNotRunning }
     stopGeneration += 1
     let generation = stopGeneration
+    let requestedTimeout = liveController.stopCompletionTimeout
+    let timeout = requestedTimeout.isFinite && requestedTimeout > 0 ? requestedTimeout : 10
+    let sleep = stopTimeoutSleep
     return try await withCheckedThrowingContinuation { continuation in
       self.continuation = continuation
       // Capture the run now; a delayed stop must never resolve its target
@@ -262,12 +270,12 @@ final class TranscriptionManager: ObservableObject {
       // timeout from a previous session can't resume a later session's continuation.
       stopTimeoutTask?.cancel()
       stopTimeoutTask = Task { @MainActor [weak self] in
-        try? await Task.sleep(nanoseconds: 10_000_000_000)
+        try? await sleep(timeout)
         guard let self, !Task.isCancelled,
           self.stopGeneration == generation,
           let cont = self.continuation
         else { return }
-        logger.error("Safety timeout: continuation not resumed after 10s, forcing error")
+        logger.error("Safety timeout: continuation not resumed after \(timeout)s, forcing error")
         self.continuation = nil
         self.stopTimeoutTask = nil
         self.isLiveTranscribing = false

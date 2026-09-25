@@ -1,7 +1,385 @@
 // swift-tools-version: 5.9
+import Foundation
 import PackageDescription
 
-let package = Package(
+// Manifest conditionals evaluate on the build host. Explicitly select the
+// Windows product graph when cross-compiling on macOS; default Apple builds
+// retain their established products, targets and dependencies.
+#if os(Windows)
+let windowsTargetBuild = true
+#else
+let windowsTargetBuild = ProcessInfo.processInfo.environment["SPEAK_WINDOWS_TARGET"] == "1"
+#endif
+
+// The Linux desktop app needs GTK 4, libadwaita, libpulse, libsecret, X11 and
+// GIO development packages, so it is opt-in: the portable Linux core job builds
+// and tests without them. See Docs/linux-development.md.
+let linuxTargetBuild = ProcessInfo.processInfo.environment["SPEAK_LINUX_TARGET"] == "1"
+
+// The native Apple app keeps its established dependency graph. Windows and
+// Linux compile the same canonical domain sources without resolving Apple-only
+// packages or xcframeworks. This is a portable kernel, not a claim that every
+// platform has implemented every catalogued provider or OS integration.
+#if os(macOS)
+let portableCoreBuild = windowsTargetBuild || ProcessInfo.processInfo.environment["SPEAK_PORTABLE_CORE"] == "1"
+#else
+let portableCoreBuild = true
+#endif
+
+// New SpeakCore files are portable by default. An Apple adapter must be
+// explicitly classified here, so future domain work reaches every platform.
+let appleCoreSources: [String] = [
+    "AppGroupAvailability.swift",
+    "AppVisualDensity.swift",
+    "AppleSpeechAnalyzerLiveSession.swift",
+    "AppleSpeechAnalyzerTranscriber.swift",
+    "AppleSpeechAssets.swift",
+    "AppleSpeechDependencyWait.swift",
+    "AppleSpeechDetector.swift",
+    "AppleSpeechModelPreparation.swift",
+    "AppleSpeechPreparationOperations.swift",
+    "AutoCorrectionEngine.swift",
+    "AutoCorrectionStore.swift",
+    "AutomationIntentSupport.swift",
+    "AzureSpeechEndpointField.swift",
+    "BrandColors.swift",
+    "CaptureDisruptionObserver.swift",
+    "CaptureEndPointing.swift",
+    "CaptureHealth.swift",
+    "CaptureHealthReportBuilder.swift",
+    "CaptureOnboarding.swift",
+    "CaptureOnboardingStore.swift",
+    "CaptureSafetyClaim.swift",
+    "CaptureSelfTest.swift",
+    "CaptureWatchdogs.swift",
+    "CartesiaTTSAPI.swift",
+    "DeepgramBalanceClient.swift",
+    "DeprecatedCompatibility.swift",
+    "DeviceIdentityStore.swift",
+    "ElevenLabsBalanceClient.swift",
+    "FileProductAnalyticsStateStore.swift",
+    "GeminiLiveClient.swift",
+    "GeminiLiveProtocol.swift",
+    "GeminiTTSAPI.swift",
+    "GroqTTSAPI.swift",
+    "HandsFreeAudioPreRollBuffer.swift",
+    "HandsFreeDictation.swift",
+    "KeyDerivation.swift",
+    "KeyboardDelivery.swift",
+    "KeyboardDeliveryPolicies.swift",
+    "KeyboardDeliveryStore.swift",
+    "KeyboardDictationMachine.swift",
+    "KeyboardDictationPreferences.swift",
+    "KeyboardDictationProfile.swift",
+    "KeyboardHandoff.swift",
+    "KeyboardHandoffModels.swift",
+    "KeyboardHandoffStorage.swift",
+    "KeyboardHandoffTransitions.swift",
+    "KeyboardInstantDictation.swift",
+    "KeyboardTranscriptStreamer.swift",
+    "KeychainAccessibilityMigration.swift",
+    "KeychainSync.swift",
+    "LiveAudioConverterDrain.swift",
+    "LiveTranscriptionClientFactory.swift",
+    "Logging.swift",
+    "MacConnection.swift",
+    "MetaMuseLiveClient.swift",
+    "MistralTTSAPI.swift",
+    "ModulateLiveClient.swift",
+    "OpenClawClient.swift",
+    "OpenClawClientReceive.swift",
+    "OpenRouterAPIClient.swift",
+    "OpenRouterAudioBrowser.swift",
+    "OpenRouterAudioClient+Download.swift",
+    "OpenRouterAudioClient+Speech.swift",
+    "OpenRouterAudioFilter.swift",
+    "OpenRouterAudioModelDetail.swift",
+    "OpenRouterAudioPreview.swift",
+    "OpenRouterBalanceClient.swift",
+    "PersonalLexiconService.swift",
+    "PersonalLexiconStore.swift",
+    "ProductAnalytics.swift",
+    "ProductAnalyticsDimensions.swift",
+    "PronunciationManager.swift",
+    "ProviderBalanceStore.swift",
+    "ProviderBalanceTransport.swift",
+    "RecordingSoundPlayer.swift",
+    "ReleaseNotes.swift",
+    "ReleaseNotesContentView.swift",
+    "ReleaseTrainCompatibility.swift",
+    "RevAIBalanceClient.swift",
+    "SecureStorage.swift",
+    "SettingsSync.swift",
+    "SharedAudioImport.swift",
+    "SharedRecordingInbox.swift",
+    "SonioxTTSRealtime.swift",
+    "SpeakCLIManifest.swift",
+    "SpeechInsights/SpeechInsightsAggregate.swift",
+    "SpeechInsights/SpeechInsightsConfiguration.swift",
+    "SpeechInsights/SpeechInsightsEngine.swift",
+    "SpeechInsights/SpeechInsightsSummary.swift",
+    "SpeechInsights/SpeechInsightsSummaryBuilder.swift",
+    "SpeechInsights/SpeechSessionRecord.swift",
+    "SpeechInsights/SpeechTokenizer.swift",
+    "SpeechmaticsTTSAPI.swift",
+    "StartupDiagnostics.swift",
+    "TranscriptHandoffActivity.swift",
+    "TranscriptionActivityHandle.swift",
+    "TranscriptionActivityManager+ResultRow.swift",
+    "TranscriptionActivityManager.swift",
+    "TransportChannel.swift",
+    "TransportProtocol.swift",
+    "WatchCaptureImportJournal.swift",
+    "WatchCaptureProtocol.swift",
+    "WatchComplicationState.swift",
+    "WatchRecordingLifecycle.swift",
+    "WatchRecordingToggleSerialiser.swift",
+    "WatchSharedContainer.swift",
+    "XAILiveClient.swift",
+    "XAILiveFinalisation.swift",
+    "XAILiveProtocol.swift",
+    "XAITTSAPI.swift",
+    "XAITTSRealtime.swift"
+]
+
+// SpeakSync's schema, reconciliation and CloudKit Web Services transport are
+// portable by default. These files adapt the native CloudKit framework (and its
+// CryptoKit/Combine surfaces) and stay on Apple platforms.
+let appleSyncSources: [String] = [
+    "CloudKitComparisonSyncTransport.swift",
+    "CloudKitHistorySyncTransport.swift",
+    "CloudKitKeySync.swift",
+    "CloudKitRecordFields.swift",
+    "ComparisonSyncEngine.swift",
+    "ComparisonSyncRecord.swift",
+    "CryptoKitSyncEnvelopeCryptography.swift",
+    "HistorySyncEngine.swift",
+    "HistorySyncPushRouting.swift",
+    "SyncConfiguration.swift",
+    "SyncRecord.swift",
+    "SyncState.swift"
+]
+
+// Tests of those native adapters. Every other SpeakSync test runs on all platforms.
+let appleSyncTestSources: [String] = [
+    "CloudKitKeySyncTests.swift",
+    "ComparisonSyncTests.swift",
+    "HistorySyncEngineGuardTests.swift",
+    "HistorySyncEngineTests.swift",
+    "NativeRecordParityTests.swift"
+]
+
+let portablePackage = Package(
+    name: "SpeakApp",
+    defaultLocalization: "en",
+    platforms: [.macOS(.v14)],
+    products: [
+        .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        .library(name: "SpeakDesktop", targets: ["SpeakDesktop"])
+    ],
+    targets: [
+        .target(
+            name: "SpeakCore",
+            path: "Sources/SpeakCore",
+            exclude: appleCoreSources,
+            resources: [.process("Resources")],
+            swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
+        ),
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        // Recording, History, output, settings and iCloud sync orchestration
+        // shared by the Windows and Linux hosts behind DesktopHostPlatform.
+        .target(
+            name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync"]
+        ),
+        .target(
+            name: "SpeakSync",
+            dependencies: ["SpeakCore"],
+            path: "Sources/SpeakSync",
+            exclude: appleSyncSources,
+            swiftSettings: [.define("SPEAK_PORTABLE_CORE")]
+        ),
+        // Desktop History and API-key sync over CloudKit Web Services. Portable
+        // only: Apple apps keep their native CloudKit engines.
+        .target(name: "SpeakDesktopSync", dependencies: ["SpeakDesktop", "SpeakSync", "SpeakCore"]),
+        .target(name: "SpeakTestSupport", path: "Tests/SpeakTestSupport"),
+        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
+        .testTarget(
+            name: "SpeakDesktopHostTests",
+            dependencies: [
+                "SpeakDesktopHost", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync", "SpeakCore", "SpeakTestSupport"
+            ]
+        ),
+        .testTarget(
+            name: "SpeakDesktopSyncTests",
+            dependencies: ["SpeakDesktopSync", "SpeakDesktop", "SpeakSync", "SpeakCore", "SpeakTestSupport"]
+        ),
+        .testTarget(
+            name: "SpeakSyncTests",
+            dependencies: ["SpeakSync", "SpeakCore", "SpeakTestSupport"],
+            path: "Tests/SpeakSyncTests",
+            exclude: appleSyncTestSources
+        ),
+        .testTarget(
+            name: "SpeakPortableTests",
+            dependencies: ["SpeakCore", "SpeakTestSupport"],
+            path: "Tests/SpeakPortableTests"
+        )
+    ]
+)
+
+if windowsTargetBuild {
+    // The Swift 6.2.3 toolchain compiles C++ with its own clang 19, while the
+    // MSVC STL in Visual Studio 2026 (the windows-11-arm images) refuses any
+    // clang before 20 (STL1000). The adapters use only long-standing C++17
+    // library features, so they opt out of that version check.
+    let windowsCxxSettings: [CXXSetting] = [.define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")]
+    portablePackage.products.append(.executable(name: "SpeakWindows", targets: ["SpeakWindows"]))
+    portablePackage.products.append(.executable(name: "speak", targets: ["SpeakCLI"]))
+    portablePackage.targets.append(contentsOf: [
+        .target(
+            name: "CWindowsSupport",
+            // Vendored whisper.cpp headers are compile-time declarations only;
+            // their licence and provenance travel with them.
+            exclude: ["whisper-cpp/LICENSE", "whisper-cpp/PROVENANCE.md"],
+            publicHeadersPath: "include",
+            cxxSettings: windowsCxxSettings,
+            linkerSettings: [
+                .linkedLibrary("user32"), .linkedLibrary("gdi32"), .linkedLibrary("ole32"),
+                .linkedLibrary("uuid"), .linkedLibrary("advapi32"), .linkedLibrary("comdlg32"),
+                .linkedLibrary("shell32"), .linkedLibrary("ntdll"), .linkedLibrary("winhttp"),
+                // CloudKit sync: CNG for the API-key envelope, Winsock for the
+                // loopback sign-in callback, and the IP helper's TCP table
+                // for which user's process sent that callback.
+                .linkedLibrary("bcrypt"), .linkedLibrary("ws2_32"), .linkedLibrary("iphlpapi"),
+                .linkedLibrary("avrt"), .linkedLibrary("mfuuid"),
+                // BSTR/SAFEARRAY helpers used by the UI Automation insertion adapter.
+                .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"),
+                // The Keyboard shortcut dialog's native hotkey control.
+                .linkedLibrary("comctl32"),
+                // CNG SHA-256 for downloaded local models.
+                .linkedLibrary("bcrypt")
+            ]
+        ),
+        // Same-user named pipes for `speak` and the app; kept apart so the CLI
+        // links only kernel32 and advapi32.
+        .target(
+            name: "CWindowsAutomation",
+            path: "Sources/CWindowsAutomation",
+            publicHeadersPath: "include",
+            cxxSettings: windowsCxxSettings,
+            linkerSettings: [.linkedLibrary("advapi32")]
+        ),
+        .target(
+            name: "SpeakAutomationKit",
+            dependencies: ["SpeakCore", "CWindowsAutomation"],
+            path: "Sources/SpeakAutomationKit"
+        ),
+        .executableTarget(
+            name: "SpeakCLI",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            path: "Sources/SpeakCLI"
+        ),
+        .target(
+            name: "SpeakWindowsPlatform",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "CWindowsSupport", "CWindowsAutomation"]
+        ),
+        .executableTarget(
+            name: "SpeakWindows", dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakDesktopSync", "SpeakSync",
+                "SpeakWindowsPlatform", "CWindowsSupport", "CWindowsAutomation"
+            ]
+        ),
+        .testTarget(
+            name: "SpeakAutomationKitTests",
+            dependencies: ["SpeakAutomationKit", "SpeakCore"],
+            path: "Tests/SpeakAutomationKitTests"
+        ),
+        .testTarget(
+            name: "SpeakWindowsPlatformTests",
+            dependencies: [
+                "SpeakCore", "SpeakSync", "SpeakWindowsPlatform", "CWindowsSupport", "SpeakTestSupport",
+                "SpeakAutomationKit"
+            ],
+            resources: [.copy("Fixtures")]
+        )
+    ])
+    portablePackage.cxxLanguageStandard = .cxx17
+}
+
+if linuxTargetBuild {
+    // System libraries resolved with pkg-config. Only the C adapter includes
+    // their headers; Swift sees the narrow jsti_* ABI in CLinuxSupport.h.
+    func linuxSystemLibrary(_ name: String, _ pkgConfig: String, apt: [String]) -> Target {
+        .systemLibrary(name: name, path: "Sources/CLinuxSystem/\(name)", pkgConfig: pkgConfig, providers: [.apt(apt)])
+    }
+    portablePackage.products.append(.executable(name: "SpeakLinux", targets: ["SpeakLinux"]))
+    // Live transcription: FoundationNetworking's WebSocket shares the corelibs
+    // defects found on Windows, so Linux uses SwiftNIO behind the same
+    // StreamingWebSocketConnection seam. Batch HTTP stays on URLSession.
+    portablePackage.dependencies.append(contentsOf: [
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.27.0")
+    ])
+    portablePackage.targets.append(contentsOf: [
+        linuxSystemLibrary("CLinuxAdwaita", "libadwaita-1", apt: ["libadwaita-1-dev", "libgtk-4-dev"]),
+        linuxSystemLibrary("CLinuxGio", "gio-unix-2.0", apt: ["libglib2.0-dev"]),
+        linuxSystemLibrary("CLinuxPulse", "libpulse", apt: ["libpulse-dev"]),
+        linuxSystemLibrary("CLinuxSecret", "libsecret-1", apt: ["libsecret-1-dev"]),
+        linuxSystemLibrary("CLinuxXTest", "xtst", apt: ["libx11-dev", "libxtst-dev"]),
+        linuxSystemLibrary(
+            "CLinuxGStreamer", "gstreamer-app-1.0", apt: ["libgstreamer1.0-dev", "libgstreamer-plugins-base1.0-dev"]
+        ),
+        // iCloud sync: PBKDF2 and AES-GCM for the API-key envelope.
+        linuxSystemLibrary("CLinuxCrypto", "libcrypto", apt: ["libssl-dev"]),
+        .target(
+            name: "CLinuxSupport",
+            dependencies: [
+                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer",
+                "CLinuxCrypto"
+            ],
+            publicHeadersPath: "include",
+            cSettings: [.define("_GNU_SOURCE")],
+            // xtst.pc links only libXtst; the core Xlib calls need libX11.
+            // libdl opens the whisper.cpp runtime (part of libc since glibc 2.34).
+            linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl")]
+        ),
+        .target(
+            name: "SpeakLinuxPlatform",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakSync", "SpeakDesktopSync", "CLinuxSupport"]
+        ),
+        .target(
+            name: "SpeakLinuxWebSocket",
+            dependencies: [
+                "SpeakCore",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOWebSocket", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl")
+            ]
+        ),
+        .executableTarget(
+            name: "SpeakLinux",
+            dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
+                "CLinuxSupport", "SpeakDesktopSync", "SpeakSync"
+            ]
+        ),
+        .testTarget(
+            name: "SpeakLinuxPlatformTests",
+            dependencies: [
+                "SpeakCore", "SpeakSync", "SpeakDesktop", "SpeakDesktopSync", "SpeakLinuxPlatform", "CLinuxSupport",
+                "SpeakTestSupport"
+            ]
+        ),
+        .testTarget(
+            name: "SpeakLinuxWebSocketTests",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakLinuxWebSocket"]
+        )
+    ])
+}
+
+let package = portableCoreBuild ? portablePackage : Package(
     name: "SpeakApp",
     defaultLocalization: "en",
     platforms: [
@@ -11,6 +389,7 @@ let package = Package(
     products: [
         .library(name: "SpeakHotKeys", targets: ["SpeakHotKeys"]),
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        .library(name: "SpeakDesktop", targets: ["SpeakDesktop"]),
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
@@ -56,6 +435,8 @@ let package = Package(
                 + "TranscribeCpp.xcframework.zip",
             checksum: "b7a3442e2f3552cac1ee71b5e164934dd4db243f6b4b16b1e3e3ed5d1645eefd"
         ),
+        .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
+        .testTarget(name: "SpeakDesktopTests", dependencies: ["SpeakDesktop", "SpeakCore", "SpeakTestSupport"]),
         .target(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"
@@ -145,7 +526,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SpeakSyncTests",
-            dependencies: ["SpeakSync"]
+            dependencies: ["SpeakSync", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakAppTests",

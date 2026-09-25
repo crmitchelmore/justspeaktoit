@@ -68,6 +68,23 @@ of hand-maintained structure documentation.
 3. **Public APIs for libraries**: Types in `SpeakiOSLib` must be `public` for Xcode project to access
 4. **Tuist links packages**: `Project.swift` references the local Swift package for Xcode generation
 
+### Windows and shared desktop behaviour
+
+- Put provider contracts, parsing, catalogues and transcript policies in `SpeakCore`;
+  put portable desktop recording/history orchestration in `SpeakDesktop`.
+- New shared source files enter the Windows/Linux build by default. Keep native
+  framework dependencies in platform adapters; do not expand `appleCoreSources`
+  to avoid implementing a shared feature on Windows.
+- Keep capture, resampling, inference and insertion native and in process. Reuse
+  shared Swift behaviour without adding IPC or disk polling to the audio path.
+- Use the canonical catalogue and stable identifiers. A platform may expose only
+  routes its host actually implements; catalogue membership alone is not support.
+- Changes to shared behaviour must pass the normal Apple suite and portable
+  Windows/macOS/Linux checks. Native adapters also need target-platform evidence.
+- Follow [Docs/windows-development.md](Docs/windows-development.md) for builds,
+  the current parity matrix and performance/device acceptance gates. Preserve
+  `Package.resolved` when the dependency-free portable graph removes it.
+
 ## Build, Test, and Development Commands
 
 ### macOS (SwiftPM)
@@ -264,7 +281,7 @@ version/baseline authority. `VERSION` is a build hint only.
 - Validate OpenAI Realtime transcription changes against the live WebSocket API before shipping; this API changed during rollout and stale docs/assumptions caused regressions.
 - All OpenAI transcription models use `wss://api.openai.com/v1/realtime?intent=transcription` with a GA `session.update` payload; do **not** use `?model=<name>` for transcription.
 - Do **not** send the legacy `OpenAI-Beta: realtime=v1` header for transcription sessions; it pins the old schema and rejects `session.type`.
-- Keep macOS and iOS OpenAI Realtime wiring in sync when changing endpoint shape, event names, payload fields, or stop/finalisation sequencing.
+- Endpoint shape, event names, payload fields and stop/finalisation sequencing live once in the shared SpeakCore client (see Key files below); macOS and iOS only adapt it, so change the shared client rather than a platform copy.
 
 ### Prompt semantics
 - `gpt-live-transcribe`, `gpt-transcribe`, `gpt-4o-transcribe`, and `gpt-4o-mini-transcribe`
@@ -275,6 +292,22 @@ version/baseline authority. `VERSION` is a build hint only.
   completed recordings. Although `gpt-transcribe` can run in Realtime after a
   committed turn, do not present it as a live-delta model.
 - Treat the OpenAI transcription `prompt` as vocabulary/keyterm biasing, not a custom formatting or tone prompt. Keep tone/style changes in post-processing.
+
+### Key files
+- `Sources/SpeakCore/OpenAIRealtimeLiveClient.swift` (+ `…LiveConnection`, `…LiveSending`, `…LiveRun`, `…Protocol`, `…TranscriptAssembler`) — the shared portable client: endpoint, GA `session.update`, readiness gating on `session.updated`, bounded PCM admission, ordered single-in-flight sends, commit/finalisation and per-run identity. Transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows).
+- `Sources/SpeakApp/OpenAIRealtimeTranscriptionProvider.swift` and `Sources/SpeakiOS/Services/OpenAIRealtimeWebSocketClient.swift` — thin platform adapters; keep behaviour changes in the shared client, not here.
+- Portable lifecycle tests live in `Tests/SpeakDesktopTests/OpenAIRealtime*Tests.swift` and drive the real client through a fake `StreamingWebSocketConnection`.
+
+## xAI Dedicated Speech-to-Text Streaming
+
+### Protocol
+- `wss://api.x.ai/v1/stt` is configured entirely by query items (`model=grok-voice-transcribe-2.0`, `encoding=pcm`, `sample_rate`, `interim_results=true`, optional `language`, repeated `keyterm`); there is no start message. Audio goes up as raw binary PCM and must wait for `transcript.created`; `{"type":"audio.done"}` requests `transcript.done`. This is a different protocol from the Grok Voice session in `XAILiveClient`, which shares the `xai/` prefix and credential.
+- Server frames are `transcript.partial` with `is_final`/`speech_final` (there is no `transcript.chunk`). A final's identity is `channel_index` + `start`: a locked chunk restated as an utterance final has the same start and is dropped, while identical text at a new start is a genuine repeat. A non-empty `transcript.done` replaces the folded finals; an empty one keeps them.
+- Only `transcript.done` completes a session: the server closes the socket after it, so a closure before it (even after `audio.done` left) or a finish budget that elapses without it is published as an error (`sessionNotReady`, `missingCompletion` or `transportStalled`) before the finish returns the locked spans received so far. Hosts keep that text as recovery material, not as a completed transcript.
+
+### Key files
+- `Sources/SpeakCore/XAISpeechToTextLiveClient.swift` (+ `…LiveRun`, `…LiveConnection`, `…LiveSending`, `…LiveProtocol`, `XAISpeechToTextEvent.swift`) — the shared portable client: injected transport, readiness gating on `transcript.created`, bounded single-in-flight sends, one bounded finish and per-run identity. `LiveTranscriptionClientFactory` (Apple) and `DesktopLiveTranscription` (Windows) construct it; the desktop factory admits only `XAISpeechToText.liveCatalogID`, never the Grok Voice route.
+- Portable lifecycle tests: `Tests/SpeakDesktopTests/XAISpeechToText*Tests.swift`; established protocol expectations: `Tests/SpeakCoreTests/XAISpeechToTextLiveClientTests.swift`.
 
 ## Accessibility Text Insertion
 

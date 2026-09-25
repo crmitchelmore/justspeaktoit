@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Gladia's asynchronous pre-recorded API: upload the recording to `/v2/upload`,
 /// start a job on `/v2/pre-recorded`, then poll the job's `result_url` until it
@@ -9,7 +12,7 @@ import Foundation
 /// Solaria provider stores is used here; Gladia issues one account key for
 /// both surfaces, so no extra credential or endpoint is required.
 public struct GladiaBatchClient: Sendable {
-    public static let catalogID = "gladia/solaria-1"
+    public static let catalogID = BatchTranscriptionModelIdentifiers.gladiaSolaria
     public static let providerName = "Gladia"
     static let modelName = "solaria-1"
     public static let defaultBaseURL = URL(string: "https://api.gladia.io")!
@@ -96,7 +99,8 @@ public struct GladiaBatchClient: Sendable {
     }
 
     /// Step 2. Start the job. An empty `languages` array is Gladia's documented
-    /// way to ask for detection, so "Automatic" stays automatic.
+    /// way to ask for detection, so "Automatic", and a language Gladia does not
+    /// list, detect instead of failing the job.
     private func startJob(audioURL: String, apiKey: String, language: String?) async throws -> Job {
         var request = URLRequest(url: self.baseURL.appendingPathComponent("v2/pre-recorded"))
         request.httpMethod = "POST"
@@ -159,7 +163,7 @@ public struct GladiaBatchClient: Sendable {
 
     static func requestBody(audioURL: String, language: String?) -> [String: Any] {
         var body: [String: Any] = ["audio_url": audioURL, "model": Self.modelName]
-        let languages = BatchTranscriptionJob.languageCode(from: language).map { [$0] } ?? []
+        let languages = GladiaLive.languageCode(for: language).map { [$0] } ?? []
         body["language_config"] = ["languages": languages, "code_switching": languages.isEmpty]
         return body
     }

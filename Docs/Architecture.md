@@ -1,14 +1,15 @@
 # Architecture
 
-This document describes the repository at commit `2ff982d` (12 September 2026). It is a current-state map, not a
-target architecture. Feature-gated targets are declarations in the build manifest; their presence does not prove that
-provisioning or distribution has been completed.
+This document describes the repository at commit `2ff982d` (12 September 2026), with the Windows and Linux desktop
+graph added on 24 September 2026. It is a current-state map, not a target architecture. Feature-gated targets are
+declarations in the build manifest; their presence does not prove that provisioning or distribution has been completed.
 
 ## Module and build map
 
 The repository has three build graphs:
 
 - [Package.swift](../Package.swift) owns reusable modules, the macOS executable, CLI, demo, benchmark and host tests.
+  On Windows and Linux it declares the portable graph instead, with the desktop apps (see below).
 - [Project.swift](../Project.swift) owns generated Apple app, extension and UI-test targets. It consumes products from
   the local root package. [Workspace.swift](../Workspace.swift) generates the `Just Speak to It` workspace containing
   the root project; generated Xcode projects are not hand-maintained declarations.
@@ -80,6 +81,47 @@ identity and entitlement set; it is independent of `TUIST_RELEASE_TRAIN`, which 
 The Watch targets do not depend on the `SpeakCore` package product because transitive package manifests do not declare
 watchOS support. Their `Project.swift` source lists are direct shared-source inclusion, not module dependency arrows.
 
+### Portable, Windows and Linux graph
+
+[Package.swift](../Package.swift) switches to a portable graph on Windows and Linux, and on macOS when
+`SPEAK_PORTABLE_CORE=1` or `SPEAK_WINDOWS_TARGET=1` is set. It compiles the canonical `SpeakCore` sources without
+Apple-only packages; an Apple adapter must be listed in `appleCoreSources` to be left out, so new domain files reach
+every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
+
+| Target | Kind | Direct internal dependencies / role |
+| --- | --- | --- |
+| `SpeakCore` | library target | Portable build (`SPEAK_PORTABLE_CORE`) of the shared catalogues, provider clients and policies. |
+| `SpeakSync` | library target | Depends on `SpeakCore`; the portable CloudKit Web Services client and envelope formats. |
+| `SpeakDesktop` | library target | Depends on `SpeakCore`; desktop batch and live transcription routing, the recording store, History search and retry, post-processing, profiles and on-device model download, verification and ownership. |
+| `SpeakDesktopSync` | library target | Depends on `SpeakDesktop`, `SpeakSync` and `SpeakCore`; iCloud History sync and key import for desktop hosts. |
+| `SpeakDesktopHost` | library target | Depends on `SpeakCore`, `SpeakDesktop`, `SpeakDesktopSync` and `SpeakSync`; `DesktopHostController<Platform>`, the recording, History, playback, output, settings, Read aloud, on-device model and iCloud sync orchestration shared by the Windows and Linux apps behind `DesktopHostPlatform`. |
+| `CWindowsSupport`, `CWindowsAutomation` | C++ targets | `SPEAK_WINDOWS_TARGET`; Win32, WASAPI, Media Foundation, UI Automation, WinHTTP, CNG, Credential Manager and the run-time whisper.cpp loader. |
+| `SpeakWindowsPlatform` | library target | `SPEAK_WINDOWS_TARGET`; Swift over the Windows C++ ABI. |
+| `SpeakWindows` | executable target | `SPEAK_WINDOWS_TARGET`; the Windows app, `WindowsHostPlatform` and its self-tests. The product also ships `speak` (`SpeakCLI`) over a named pipe. |
+| `CLinuxSystem/*`, `CLinuxSupport` | system library and C targets | `SPEAK_LINUX_TARGET`; GTK 4/libadwaita, libpulse, libsecret, X11/XTest, GStreamer, OpenSSL libcrypto and the XDG portals behind the `jsti_*` ABI, plus the run-time whisper.cpp loader. |
+| `SpeakLinuxPlatform`, `SpeakLinuxWebSocket` | library targets | `SPEAK_LINUX_TARGET`; Swift over the Linux C ABI, and the SwiftNIO live-transcription transport. |
+| `SpeakLinux` | executable target | `SPEAK_LINUX_TARGET`; the Linux app, `LinuxHostPlatform` and its self-tests. |
+| `SpeakPortableTests`, `SpeakDesktopTests`, `SpeakDesktopHostTests`, `SpeakDesktopSyncTests`, `SpeakSyncTests` | test targets | Shared-core, desktop and host tests run on Linux, Windows and portable macOS. |
+| `SpeakWindowsPlatformTests`, `SpeakLinuxPlatformTests`, `SpeakLinuxWebSocketTests` | test targets | Platform adapter tests behind the matching target flag. |
+
+```mermaid
+flowchart TD
+    Core[SpeakCore] --> Desktop[SpeakDesktop]
+    Core --> Sync[SpeakSync]
+    Desktop --> DesktopSync[SpeakDesktopSync]
+    Sync --> DesktopSync
+    Desktop --> Host[SpeakDesktopHost]
+    DesktopSync --> Host
+    Host --> Windows[SpeakWindows]
+    Host --> Linux[SpeakLinux]
+    WinPlatform[SpeakWindowsPlatform] --> Windows
+    LinuxPlatform[SpeakLinuxPlatform] --> Linux
+```
+
+`scripts/typecheck-windows-swift.sh` compiles the Windows Swift targets against the shared host on a Linux or macOS
+host. Windows development, packaging and parity are described in [windows-development.md](windows-development.md);
+Linux in [linux-development.md](linux-development.md).
+
 ## Shared responsibilities
 
 | Concern | Current owner |
@@ -150,6 +192,24 @@ extensions, Live Activity result actions and background completions.
 All backends feed the service's common start, stop, cancellation, recording-safety, history and activity completion
 boundaries, but batch intentionally has no partial transcript. App Intents may launch and execute in the app process
 without the foreground scene, so scene construction is not the only lifecycle entry.
+
+## Windows and Linux runtime
+
+Each desktop app runs one native window on its UI thread and one `DesktopHostController` actor. The window reports
+events (record, import, History selection, settings Applies) to Swift; the controller owns recording, History,
+transcription, post-processing, output and settings, and pushes display state back through the host's setters, which
+are safe from any thread. Settings Applies are serialised on a settings queue. A recording fixes its target field,
+profile and text-output choice when it starts; History records are saved before any network request, and cancellation
+or closing keeps the audio.
+
+`DesktopHostPlatform` is the whole platform boundary: window presenter, credential store (Windows Credential Manager,
+the Secret Service keyring on Linux), private files, audio conversion, clipboard, output jobs, playback, Read aloud and
+on-device models. Platform-neutral rules such as model slots, the Azure Speech resource endpoint, key saving with the
+sync hooks, History retry routing, playback request ownership, the Read aloud controller, on-device model management
+and the iCloud sync flow live in `SpeakDesktopHost` or `SpeakDesktop`, so both hosts behave the same; each host
+supplies only its native pieces (player, whisper.cpp loader and digest, CloudKit transport, envelope cryptography,
+credential vault and loopback listener). Live transcription uses the shared clients over an injected WebSocket transport: WinHTTP on
+Windows and SwiftNIO on Linux.
 
 ## Extensions and companion surfaces
 

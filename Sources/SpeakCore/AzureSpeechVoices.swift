@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Provider-returned voice names are authoritative for the resource's region.
 /// This includes MAI-Voice-2 and Flash without guessing regional availability.

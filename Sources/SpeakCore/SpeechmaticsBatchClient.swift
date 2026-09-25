@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Speechmatics' asynchronous Jobs API: `POST /v2/jobs` with the recording and a
 /// transcription config, poll `GET /v2/jobs/{id}` until the job leaves
@@ -12,8 +15,8 @@ import Foundation
 /// changed, which is why `baseURL` is injectable.
 public struct SpeechmaticsBatchClient: Sendable {
     public static let providerName = "Speechmatics"
-    public static let enhancedCatalogID = "speechmatics/enhanced"
-    public static let standardCatalogID = "speechmatics/standard"
+    public static let enhancedCatalogID = BatchTranscriptionModelIdentifiers.speechmaticsEnhanced
+    public static let standardCatalogID = BatchTranscriptionModelIdentifiers.speechmaticsStandard
     public static let catalogIDs: Set<String> = [enhancedCatalogID, standardCatalogID]
     public static let defaultBaseURL = URL(string: "https://eu1.asr.api.speechmatics.com")!
 

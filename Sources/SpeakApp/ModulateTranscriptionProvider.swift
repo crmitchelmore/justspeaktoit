@@ -1,78 +1,24 @@
-// swiftlint:disable file_length
 import AVFoundation
 import Foundation
 import SpeakCore
 import os.log
 
-struct ModulateFeatureConfiguration: Equatable, Sendable {
-  let speakerDiarization: Bool
-  let emotionSignal: Bool
-  let accentSignal: Bool
-  let piiPhiTagging: Bool
+typealias ModulateFeatureConfiguration = ModulateTranscriptionFeatures
+typealias ModulateUtterance = ModulateBatchUtterance
 
-  init(
-    speakerDiarization: Bool,
-    emotionSignal: Bool,
-    accentSignal: Bool,
-    piiPhiTagging: Bool
-  ) {
-    self.speakerDiarization = speakerDiarization
-    self.emotionSignal = emotionSignal
-    self.accentSignal = accentSignal
-    self.piiPhiTagging = piiPhiTagging
-  }
-
+extension ModulateTranscriptionFeatures {
   init(defaults: UserDefaults) {
-    speakerDiarization =
-      defaults.object(forKey: AppSettings.DefaultsKey.modulateSpeakerDiarization.rawValue) as? Bool
-      ?? true
-    emotionSignal =
-      defaults.object(forKey: AppSettings.DefaultsKey.modulateEmotionSignal.rawValue) as? Bool
-      ?? false
-    accentSignal =
-      defaults.object(forKey: AppSettings.DefaultsKey.modulateAccentSignal.rawValue) as? Bool
-      ?? false
-    piiPhiTagging =
-      defaults.object(forKey: AppSettings.DefaultsKey.modulatePIIPhiTagging.rawValue) as? Bool
-      ?? false
-  }
-
-  var queryItems: [URLQueryItem] {
-    [
-      URLQueryItem(name: "speaker_diarization", value: boolString(speakerDiarization)),
-      URLQueryItem(name: "emotion_signal", value: boolString(emotionSignal)),
-      URLQueryItem(name: "accent_signal", value: boolString(accentSignal)),
-      URLQueryItem(name: "pii_phi_tagging", value: boolString(piiPhiTagging))
-    ]
-  }
-
-  var multipartFields: [(String, String)] {
-    [
-      ("speaker_diarization", boolString(speakerDiarization)),
-      ("emotion_signal", boolString(emotionSignal)),
-      ("accent_signal", boolString(accentSignal)),
-      ("pii_phi_tagging", boolString(piiPhiTagging))
-    ]
-  }
-
-  func formattedTranscript(from utterances: [ModulateUtterance], fallbackText: String) -> String {
-    guard shouldLabelSpeakers(in: utterances) else { return fallbackText }
-    return utterances.map { "Speaker \($0.speaker): \($0.text)" }.joined(separator: "\n")
-  }
-
-  func segmentText(for utterance: ModulateUtterance, within utterances: [ModulateUtterance]) -> String {
-    if shouldLabelSpeakers(in: utterances) && utterance.speaker > 0 {
-      return "Speaker \(utterance.speaker): \(utterance.text)"
-    }
-    return utterance.text
-  }
-
-  private func shouldLabelSpeakers(in utterances: [ModulateUtterance]) -> Bool {
-    speakerDiarization && Set(utterances.map(\.speaker)).count > 1
-  }
-
-  private func boolString(_ value: Bool) -> String {
-    value ? "true" : "false"
+    let fallback = Self()
+    self.init(
+      speakerDiarization: defaults.object(forKey: AppSettings.DefaultsKey.modulateSpeakerDiarization.rawValue) as? Bool
+        ?? fallback.speakerDiarization,
+      emotionSignal: defaults.object(forKey: AppSettings.DefaultsKey.modulateEmotionSignal.rawValue) as? Bool
+        ?? fallback.emotionSignal,
+      accentSignal: defaults.object(forKey: AppSettings.DefaultsKey.modulateAccentSignal.rawValue) as? Bool
+        ?? fallback.accentSignal,
+      piiPhiTagging: defaults.object(forKey: AppSettings.DefaultsKey.modulatePIIPhiTagging.rawValue) as? Bool
+        ?? fallback.piiPhiTagging
+    )
   }
 }
 
@@ -343,292 +289,45 @@ final class ModulateLiveTranscriber: @unchecked Sendable {
   }
 }
 
-// swiftlint:disable type_body_length
 struct ModulateTranscriptionProvider: TranscriptionProvider {
-  let metadata = TranscriptionProviderMetadata(
-    id: "modulate",
-    displayName: "Modulate",
-    systemImage: "waveform.badge.magnifyingglass",
-    tintColor: "teal",
-    website: "https://www.modulate-developer-apis.com/web/docs.html"
-  )
-
-  private let baseURL = URL(string: "https://modulate-developer-apis.com")!
   private let session: URLSession
   private let defaultsSuiteName: String?
+  private let multipartStaging: MultipartUploadStaging
+  var metadata: TranscriptionProviderMetadata { client.metadata }
 
   init(
-    session: URLSession = .shared,
-    defaults: UserDefaults = .standard
+    session: URLSession = .shared, defaults: UserDefaults = .standard,
+    multipartStaging: MultipartUploadStaging = .shared
   ) {
     self.session = session
     self.defaultsSuiteName = Self.defaultsSuiteName(for: defaults)
+    self.multipartStaging = multipartStaging
+  }
+
+  private var client: ModulateBatchClient {
+    ModulateBatchClient(
+      session: session, features: ModulateFeatureConfiguration(defaults: currentDefaults()),
+      multipartStaging: multipartStaging.sharedStore
+    )
   }
 
   func transcribeFile(
-    at url: URL,
-    apiKey: String,
-    model: String,
-    language: String?
+    at url: URL, apiKey: String, model: String, language: String?
   ) async throws -> TranscriptionResult {
-    let featureConfiguration = ModulateFeatureConfiguration(defaults: currentDefaults())
-    let endpoint = endpointURL(for: model)
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "POST"
-
-    let boundary = "Boundary-\(UUID().uuidString)"
-    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-    request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
-
-    let audioData = try Data(contentsOf: url)
-    var body = Data()
-    body.appendFileField(
-      named: "upload_file",
-      filename: url.lastPathComponent,
-      mimeType: mimeType(for: url),
-      fileData: audioData,
-      boundary: boundary
-    )
-
-    if usesFeatureFlags(for: model) {
-      for (name, value) in featureConfiguration.multipartFields {
-        body.appendFormField(named: name, value: value, boundary: boundary)
-      }
-    }
-
-    body.appendString("--\(boundary)--\r\n")
-    request.httpBody = body
-
-    let (data, response) = try await session.data(for: request)
-    guard let http = response as? HTTPURLResponse else {
-      throw TranscriptionProviderError.invalidResponse
-    }
-
-    guard (200..<300).contains(http.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-      throw TranscriptionProviderError.httpError(http.statusCode, body)
-    }
-
-    if isEnglishFastModel(model) {
-      let decoded = try JSONDecoder().decode(ModulateEnglishFastBatchResponse.self, from: data)
-      return buildEnglishFastResult(response: decoded, model: model, payload: data)
-    }
-
-    let decoded = try JSONDecoder().decode(ModulateBatchResponse.self, from: data)
-    return buildBatchResult(
-      response: decoded,
-      model: model,
-      payload: data,
-      featureConfiguration: featureConfiguration
-    )
+    try await client.transcribeFile(at: url, apiKey: apiKey, model: model, language: language)
   }
 
-  func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-      return .failure(message: "API key is empty")
-    }
-
-    let request = makeValidationRequest(apiKey: trimmed)
-
-    do {
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else {
-        return .failure(message: "Received a non-HTTP response", debug: .capture(request: request))
-      }
-
-      let debug = APIKeyValidationDebugSnapshot.capture(request: request, response: http, data: data)
-      let detail = parseValidationDetail(from: data)
-
-      switch http.statusCode {
-      case 200..<300:
-        return .success(message: "Modulate API key validated", debug: debug)
-      case 400, 422:
-        return .success(
-          message: "Modulate API key accepted, but the validation audio payload was rejected.",
-          debug: debug
-        )
-      case 401:
-        return .failure(message: detail ?? "Invalid API key.", debug: debug)
-      case 403:
-        if detail?.localizedCaseInsensitiveContains("invalid_api_key") == true {
-          return .failure(message: "Invalid API key.", debug: debug)
-        }
-        return .failure(
-          message: detail ?? "This Modulate model is not enabled for your organisation.",
-          debug: debug
-        )
-      case 429:
-        return .success(
-          message: "Modulate API key validated, but the current quota or concurrency limit is exhausted.",
-          debug: debug
-        )
-      default:
-        return .failure(
-          message: "HTTP \(http.statusCode) while validating key",
-          debug: debug
-        )
-      }
-    } catch {
-      return .failure(
-        message: "Validation failed: \(error.localizedDescription)",
-        debug: .capture(request: request, error: error)
-      )
-    }
-  }
-
-  func requiresAPIKey(for model: String) -> Bool {
-    true
-  }
-
-  func supportedModels() -> [ModelCatalog.Option] {
-    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
-  }
+  func validateAPIKey(_ key: String) async -> APIKeyValidationResult { await client.validateAPIKey(key) }
+  func requiresAPIKey(for model: String) -> Bool { client.requiresAPIKey(for: model) }
+  func supportedModels() -> [ModelCatalog.Option] { client.supportedModels() }
+  func makeValidationRequest(apiKey: String) -> URLRequest { client.makeValidationRequest(apiKey: apiKey) }
 
   func createLiveTranscriber(
-    apiKey: String,
-    sampleRate: Int = 16_000,
-    featureConfiguration: ModulateFeatureConfiguration
+    apiKey: String, sampleRate: Int = 16_000, featureConfiguration: ModulateFeatureConfiguration
   ) -> ModulateLiveTranscriber {
-      ModulateLiveTranscriber(
-        apiKey: apiKey,
-        sampleRate: sampleRate,
-        featureConfiguration: featureConfiguration,
-        session: session
-      )
-  }
-
-  private func endpointURL(for model: String) -> URL {
-    if isEnglishFastModel(model) {
-      return baseURL.appendingPathComponent("api/velma-2-stt-batch-english-vfast")
-    }
-    return baseURL.appendingPathComponent("api/velma-2-stt-batch")
-  }
-
-  private func isEnglishFastModel(_ model: String) -> Bool {
-    model.hasSuffix("velma-2-stt-batch-english-vfast")
-  }
-
-  private func usesFeatureFlags(for model: String) -> Bool {
-    !isEnglishFastModel(model)
-  }
-
-  private func mimeType(for url: URL) -> String {
-    let mimeTypes = [
-      "aac": "audio/aac",
-      "aiff": "audio/aiff",
-      "aif": "audio/aiff",
-      "flac": "audio/flac",
-      "mov": "video/quicktime",
-      "mp3": "audio/mpeg",
-      "mp4": "audio/mp4",
-      "m4a": "audio/mp4",
-      "ogg": "audio/ogg",
-      "opus": "audio/opus",
-      "wav": "audio/wav",
-      "webm": "audio/webm"
-    ]
-    return mimeTypes[url.pathExtension.lowercased()] ?? "application/octet-stream"
-  }
-
-  private func buildBatchResult(
-    response: ModulateBatchResponse,
-    model: String,
-    payload: Data,
-    featureConfiguration: ModulateFeatureConfiguration
-  ) -> TranscriptionResult {
-    let duration = TimeInterval(response.durationMs) / 1000
-    let utterances = response.utterances
-    let segments = response.utterances.map { utterance in
-      TranscriptionSegment(
-        startTime: TimeInterval(utterance.startMs) / 1000,
-        endTime: TimeInterval(utterance.startMs + utterance.durationMs) / 1000,
-        text: featureConfiguration.segmentText(for: utterance, within: utterances)
-      )
-    }
-    let text = featureConfiguration.formattedTranscript(
-      from: utterances,
-      fallbackText: response.text
+    ModulateLiveTranscriber(
+      apiKey: apiKey, sampleRate: sampleRate, featureConfiguration: featureConfiguration, session: session
     )
-
-    return TranscriptionResult(
-      text: text,
-      segments: segments,
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: model,
-      cost: estimatedCost(durationSeconds: duration, model: model),
-      rawPayload: String(data: payload, encoding: .utf8),
-      debugInfo: nil
-    )
-  }
-
-  private func buildEnglishFastResult(
-    response: ModulateEnglishFastBatchResponse,
-    model: String,
-    payload: Data
-  ) -> TranscriptionResult {
-    let duration = TimeInterval(response.durationMs) / 1000
-    return TranscriptionResult(
-      text: response.text,
-      segments: [TranscriptionSegment(startTime: 0, endTime: duration, text: response.text)],
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: model,
-      cost: estimatedCost(durationSeconds: duration, model: model),
-      rawPayload: String(data: payload, encoding: .utf8),
-      debugInfo: nil
-    )
-  }
-
-  private func estimatedCost(durationSeconds: TimeInterval, model: String) -> ChatCostBreakdown? {
-    guard durationSeconds > 0 else { return nil }
-
-    let ratePerHour: Decimal
-    if isEnglishFastModel(model) {
-      ratePerHour = Decimal(string: "0.025")!
-    } else if model.contains("streaming") {
-      ratePerHour = Decimal(string: "0.06")!
-    } else {
-      ratePerHour = Decimal(string: "0.03")!
-    }
-
-    let hours = Decimal(durationSeconds / 3600)
-    let totalCost = hours * ratePerHour
-    return ChatCostBreakdown(
-      inputTokens: Int(durationSeconds),
-      outputTokens: 0,
-      totalCost: totalCost,
-      currency: "USD"
-    )
-  }
-
-  private func parseValidationDetail(from data: Data) -> String? {
-    guard let error = try? JSONDecoder().decode(ModulateErrorResponse.self, from: data) else { return nil }
-    return error.detail
-  }
-
-  func makeValidationRequest(apiKey: String) -> URLRequest {
-    let url = baseURL.appendingPathComponent("api/velma-2-stt-batch")
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-
-    let boundary = "Boundary-\(UUID().uuidString)"
-    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-    request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
-
-    var body = Data()
-    body.appendFileField(
-      named: "upload_file",
-      filename: "validation.wav",
-      mimeType: "audio/wav",
-      fileData: Self.makeValidationAudioData(),
-      boundary: boundary
-    )
-    body.appendString("--\(boundary)--\r\n")
-    request.httpBody = body
-
-    return request
   }
 
   private func currentDefaults() -> UserDefaults {
@@ -647,90 +346,6 @@ struct ModulateTranscriptionProvider: TranscriptionProvider {
       .first(where: { name in name != argumentDomain && name != registrationDomain && name != standardDomain })
   }
 
-  private static func makeValidationAudioData(sampleRate: Int = 16_000, durationMs: Int = 250) -> Data {
-    let sampleCount = sampleRate * durationMs / 1000
-    let pcmData = Data(count: sampleCount * MemoryLayout<Int16>.size)
-    let byteRate = sampleRate * MemoryLayout<Int16>.size
-    let chunkSize = 36 + pcmData.count
-    let bitsPerSample: UInt16 = 16
-    let blockAlign: UInt16 = UInt16(MemoryLayout<Int16>.size)
-
-    var data = Data()
-    data.append("RIFF".data(using: .ascii)!)
-    data.append(Self.littleEndianUInt32(UInt32(chunkSize)))
-    data.append("WAVE".data(using: .ascii)!)
-    data.append("fmt ".data(using: .ascii)!)
-    data.append(Self.littleEndianUInt32(16))
-    data.append(Self.littleEndianUInt16(1))
-    data.append(Self.littleEndianUInt16(1))
-    data.append(Self.littleEndianUInt32(UInt32(sampleRate)))
-    data.append(Self.littleEndianUInt32(UInt32(byteRate)))
-    data.append(Self.littleEndianUInt16(blockAlign))
-    data.append(Self.littleEndianUInt16(bitsPerSample))
-    data.append("data".data(using: .ascii)!)
-    data.append(Self.littleEndianUInt32(UInt32(pcmData.count)))
-    data.append(pcmData)
-    return data
-  }
-
-  private static func littleEndianUInt16(_ value: UInt16) -> Data {
-    var littleEndian = value.littleEndian
-    return Data(bytes: &littleEndian, count: MemoryLayout<UInt16>.size)
-  }
-
-  private static func littleEndianUInt32(_ value: UInt32) -> Data {
-    var littleEndian = value.littleEndian
-    return Data(bytes: &littleEndian, count: MemoryLayout<UInt32>.size)
-  }
-}
-// swiftlint:enable type_body_length
-
-struct ModulateUtterance: Codable, Equatable, Sendable {
-  let utteranceUUID: UUID?
-  let text: String
-  let startMs: Int
-  let durationMs: Int
-  let speaker: Int
-  let language: String
-  let emotion: String?
-  let accent: String?
-
-  enum CodingKeys: String, CodingKey {
-    case utteranceUUID = "utterance_uuid"
-    case text
-    case startMs = "start_ms"
-    case durationMs = "duration_ms"
-    case speaker
-    case language
-    case emotion
-    case accent
-  }
-}
-
-private struct ModulateBatchResponse: Decodable {
-  let text: String
-  let durationMs: Int
-  let utterances: [ModulateUtterance]
-
-  enum CodingKeys: String, CodingKey {
-    case text
-    case durationMs = "duration_ms"
-    case utterances
-  }
-}
-
-private struct ModulateEnglishFastBatchResponse: Decodable {
-  let text: String
-  let durationMs: Int
-
-  enum CodingKeys: String, CodingKey {
-    case text
-    case durationMs = "duration_ms"
-  }
-}
-
-private struct ModulateErrorResponse: Decodable {
-  let detail: String
 }
 
 private struct ModulateStreamingEnvelope: Decodable {
@@ -756,4 +371,3 @@ private struct ModulateStreamingErrorMessage: Decodable {
   let type: String
   let error: String
 }
-// swiftlint:enable file_length

@@ -1,32 +1,51 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
+import os.log
+#endif
 
-/// Cross-platform realtime client for xAI's dedicated speech-to-text endpoint.
+/// Shared realtime client for xAI's dedicated speech-to-text endpoint, used by
+/// macOS, iOS and Windows.
 ///
 /// Separate from `XAILiveClient`, which drives the Grok Voice realtime session
 /// in transcription-only mode. This one speaks the `wss://api.x.ai/v1/stt`
-/// protocol: binary PCM frames up, `transcript.partial` frames down, and one
-/// `transcript.done` after `audio.done`.
+/// protocol: the session is configured by the URL's query items (there is no
+/// start message), binary PCM frames go up, `transcript.partial` frames come
+/// down, and one `transcript.done` follows `audio.done`.
 ///
-/// The class owns the connection, the ready handshake, the bounded
-/// finalisation and the frame dispatch; the frame shapes live in
-/// `XAISpeechToTextEvent`.
+/// The transport is injected (`URLSessionStreamingConnection` on Apple, WinHTTP
+/// on Windows). PCM is admitted synchronously into a bounded queue and sent one
+/// frame at a time once `transcript.created` has arrived; finalisation drains
+/// the queue, sends `audio.done` and waits for `transcript.done` inside one
+/// bounded budget. Frame shapes live in `XAISpeechToTextEvent`.
 ///
 /// Contract: https://docs.x.ai/developers/model-capabilities/audio/speech-to-text
-/// (read 2026-09-10).
-public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable { // swiftlint:disable:this type_body_length line_length
+/// (read 2026-09-22).
+public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     /// Chunk finals lock a span of speech that is never restated, so each one
     /// is a new segment.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
     /// `audio.done` flushes audio xAI has received but not yet transcribed, so
     /// a caller must always finish gracefully.
     public let finishFlushesBufferedAudio = true
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
+    /// One deadline bounds a graceful finish: the handshake wait, the audio
+    /// drain, `audio.done` and the `transcript.done` wait.
     static let finishBudget: TimeInterval = 5
-    private static let sendDrainBudget: TimeInterval = 1
     /// How long a graceful finish waits for `transcript.created` before giving
     /// up on the held capture. Inside `finishBudget`, so the caller's stop is
     /// still bounded by it.
-    static let readyBudget: TimeInterval = 2
+    static let readyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
+    /// `transcript.created` must follow `start()` within this bound.
+    static let readyDeadline: TimeInterval = 10
+    /// A single send that has not completed by then means the transport stalled.
+    static let sendDeadline: TimeInterval = 5
+    /// Queued frames are bounded by count as well as by the five-second byte budget.
+    static let maximumQueuedFrames = 256
 
     private let apiKey: String
     private let language: String?
@@ -36,344 +55,246 @@ public final class XAISpeechToTextLiveClient: FinalizingStreamingTranscriptionCl
     /// different one here would have the session declare a rate the audio does
     /// not have, which recognises badly and silently.
     public let sampleRate: Int
-    private let session: URLSession
-    private let stateLock = NSLock()
-    private let finishLock = NSLock()
-    private let pendingSends = DispatchGroup()
-    private let logger = SpeakLogger.logger(category: "XAISpeechToTextLiveClient")
-
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isReady = false
-    private var isStopping = false
-    private var isFinishing = false
-    private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
-    private var finishContinuation: CheckedContinuation<String?, Never>?
-
+    let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    private let queue = DispatchQueue(label: "XAISpeechToTextLiveClient.state")
+    private let queueKey = DispatchSpecificKey<Bool>()
+    private(set) var run: XAISpeechToTextLiveRun
+    /// The pre-start priming contract shared with the other clients: audio
+    /// offered before `start()` is held here. Once a session starts, its
+    /// bounded send queue holds connecting audio without silently evicting it.
     let preroll: StreamingAudioPreroll
-    /// The shared handshake gate, so this client, Speechmatics, Rev.ai and
-    /// Voxtral all commit held capture the same way.
-    let readiness = StreamingSessionReadiness()
 
-    public init(
+    public convenience init(
         apiKey: String,
         language: String? = nil,
         keywords: [String] = [],
         sampleRate: Int = 24_000,
         session: URLSession = .shared
     ) {
+        self.init(
+            apiKey: apiKey, language: language, keywords: keywords, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
+        )
+    }
+
+    public init(
+        apiKey: String,
+        language: String? = nil,
+        keywords: [String] = [],
+        sampleRate: Int = 24_000,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = language
         self.keywords = keywords
         self.sampleRate = sampleRate
-        self.session = session
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.run = XAISpeechToTextLiveRun(sampleRate: sampleRate)
         self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
     }
 
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        guard !apiKey.isEmpty else {
-            onError(StreamingClientError.missingAPIKey(provider: "xAI"))
-            return
+    deinit { run.connection?.cancel() }
+
+    // MARK: - StreamingTranscriptionClient
+
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        synchronized {
+            let active = arm(onTranscript: onTranscript, onError: onError)
+            guard !apiKey.isEmpty else {
+                fail(StreamingClientError.missingAPIKey(provider: "xAI"), active)
+                return
+            }
+            // An unsupported rate is refused rather than quietly replaced: the
+            // caller encodes its PCM at the rate it asked for, so a substitution
+            // here would declare one rate and send another.
+            guard XAISpeechToText.supportedSampleRates.contains(sampleRate) else {
+                fail(XAISpeechToTextError.unsupportedSampleRate(sampleRate), active)
+                return
+            }
+            guard let request = Self.webSocketRequest(
+                apiKey: apiKey, sampleRate: sampleRate, language: language, keywords: keywords
+            ) else {
+                fail(StreamingClientError.invalidURL, active)
+                return
+            }
+            connect(active, request: request)
         }
-        // An unsupported rate is refused rather than quietly replaced: the
-        // caller encodes its PCM at the rate it asked for, so a substitution
-        // here would declare one rate and send another.
-        guard XAISpeechToText.supportedSampleRates.contains(sampleRate) else {
-            onError(XAISpeechToTextError.unsupportedSampleRate(sampleRate))
-            return
-        }
-        beginSession(onTranscript: onTranscript, onError: onError)
-        connect()
     }
+
+    /// Admission is synchronous and bounded: at most five seconds of PCM may be
+    /// queued or in flight and at most `maximumQueuedFrames` frames may wait.
+    /// Exceeding either is evidence that the transport has stopped working, or
+    /// that `transcript.created` is not coming, and is reported instead of
+    /// holding the recording without bound. Nothing leaves before
+    /// `transcript.created`, because the service refuses audio sent earlier.
+    public func sendAudio(_ audioData: Data) {
+        guard !audioData.isEmpty else { return }
+        synchronized {
+            let active = run
+            if active.phase == .idle { preroll.append(audioData); return }
+            guard active.phase == .connecting || active.phase == .active else { return }
+            guard active.outgoing.count + (active.sending ? 1 : 0) < Self.maximumQueuedFrames,
+                  active.budget.admit(audioData.count) else {
+                fail(stalledError, active)
+                return
+            }
+            active.outgoing.append(audioData)
+            pump(active)
+        }
+    }
+
+    /// Immediate teardown; `cancel()` is the same path. Text received so far
+    /// stays available to `finishAndWait()`.
+    public func stop() { synchronized { close(run) } }
+
+    /// Drains every admitted frame, sends `audio.done` and waits for
+    /// `transcript.done`, all inside `finishBudget`. The return value is the
+    /// whole session transcript, so finals that arrive during the finish are
+    /// folded into it and returned once rather than also delivered through
+    /// `onTranscript`. A finish that does not reach `transcript.done`, whether
+    /// the socket closes early or the budget elapses, publishes its error
+    /// before returning the spans received so far.
+    public func finishAndWait() async -> String? {
+        let active = synchronized { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                synchronized {
+                    guard isCurrent(active), active.connection != nil else {
+                        if active === run { close(active) }
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    if Task.isCancelled {
+                        close(active)
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    active.waiters.append(continuation)
+                    beginFinish(active)
+                }
+            }
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { self.close(active) } }
+        }
+    }
+
+    // MARK: - Session seams
+
+    /// Whether `transcript.created` has arrived and the session accepts audio.
+    var isSessionReady: Bool { synchronized { isCurrent(run) && run.ready } }
 
     /// Arms the callbacks and clears per-recording state without opening a
-    /// socket. `start` is this plus `connect()`; tests pair it with `ingest`.
-    func beginSession(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        withStateLock {
-            self.onTranscript = onTranscript
-            self.onError = onError
-            isReady = false
-            isStopping = false
-            isFinishing = false
-            accumulated.reset()
-            finishContinuation = nil
-        }
-        preroll.reset()
-        readiness.reset()
+    /// socket. `start` is this plus `connect`; tests pair it with `ingest`.
+    func beginSession(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        synchronized { _ = arm(onTranscript: onTranscript, onError: onError) }
     }
 
     /// Feeds one raw server frame through the receive path. The WebSocket loop
     /// is the only production caller; tests drive the client with it.
-    func ingest(_ text: String) {
-        handle(.string(text))
-    }
-
-    public func sendAudio(_ audioData: Data) {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard isReady, !isStopping, !isFinishing,
-                  let task = webSocketTask, task.state == .running else { return nil }
-            return task
-        }
-        guard let task else {
-            // xAI requires `transcript.created` before audio, so anything the
-            // user says during the handshake is held rather than dropped.
-            if !isEnding { preroll.append(audioData) }
-            return
-        }
-        send(audioData, on: task)
-    }
-
-    public func finishAndWait() async -> String? {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            isFinishing = true
-            return webSocketTask
-        }
-        guard let task else {
-            stop()
-            return fullTranscript()
-        }
-        let result = await awaitFinalTranscript { [weak self, weak task] in
-            DispatchQueue.global().async {
-                guard let self, let task else { return }
-                self.commitHeldCapture(to: task)
-            }
-        }
-        stop()
-        return result
-    }
+    func ingest(_ text: String) { synchronized { handle(Data(text.utf8), run) } }
 
     /// The bounded wait for `transcript.done`, resolved by that frame (the
-    /// common case, one round trip) or by the finish budget.
+    /// common case, one round trip) or by the budget.
     ///
-    /// `whenArmed` runs once the waiter is installed, so the `audio.done` frame
-    /// cannot race its own completion handler; tests use it to deliver frames
-    /// into an armed finish without a socket.
+    /// `whenArmed` runs once the waiter is installed, so a frame it delivers
+    /// cannot race its own completion; tests use it to deliver frames into an
+    /// armed finish without a socket. `finishAndWait()` is this wait plus the
+    /// drain and `audio.done` sequencing.
     func awaitFinalTranscript(
         budget: TimeInterval = XAISpeechToTextLiveClient.finishBudget,
         whenArmed: () -> Void = {}
     ) async -> String? {
-        await withCheckedContinuation { continuation in
-            finishLock.lock()
-            finishContinuation = continuation
-            finishLock.unlock()
-
+        let active = synchronized { run }
+        return await withCheckedContinuation { continuation in
+            let armed: Bool = synchronized {
+                guard isCurrent(active) else { return false }
+                active.waiters.append(continuation)
+                after(budget, active) { client, active in client.close(active) }
+                return true
+            }
+            guard armed else {
+                continuation.resume(returning: active.transcript)
+                return
+            }
             whenArmed()
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + budget) { [weak self] in
-                self?.resolveFinish()
-            }
         }
     }
 
-    /// Sends the held capture and closes the stream, waiting first for the
-    /// ready frame if the handshake is still in flight.
-    ///
-    /// xAI requires `transcript.created` before audio, so a short recording
-    /// finished during an ordinary handshake must hold its capture until the
-    /// session is ready rather than push PCM the service will refuse. A
-    /// session that cannot become ready inside `readyBudget` is finished
-    /// without sending, so the stop still completes.
-    private func commitHeldCapture(to task: URLSessionWebSocketTask) {
-        guard readiness.waitUntilReady(budget: Self.readyBudget), isCurrent(task) else {
-            logger.error("xAI session never became ready; finishing without sending held audio")
-            resolveFinish()
-            return
-        }
-        flushPreroll(to: task)
-        _ = pendingSends.wait(timeout: .now() + Self.sendDrainBudget)
-        task.send(.string(#"{"type":"audio.done"}"#)) { [weak self, weak task] error in
-            guard let self, let task, self.isCurrent(task) else { return }
-            guard let error, !WebSocketErrorFilter.shouldIgnore(error) else { return }
-            self.logger.error("xAI audio.done send failed: \(error.localizedDescription)")
-            self.resolveFinish()
-        }
+    // MARK: - Run lifecycle
+
+    /// Replaces the current run with a fresh one whose callbacks are armed.
+    private func arm(
+        onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void
+    ) -> XAISpeechToTextLiveRun {
+        close(run)
+        let active = XAISpeechToTextLiveRun(sampleRate: sampleRate)
+        run = active
+        active.onTranscript = onTranscript
+        active.onError = onError
+        active.phase = .connecting
+        return active
     }
 
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            isStopping = true
-            isReady = false
-            let task = webSocketTask
-            webSocketTask = nil
-            return task
-        }
-        preroll.reset()
-        readiness.reset()
-        task?.cancel(with: .normalClosure, reason: nil)
-        resolveFinish()
-    }
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "xAI") }
 
-    // MARK: - Connection
-
-    private func connect() {
-        guard let url = Self.webSocketURL(
-            sampleRate: sampleRate, language: language, keywords: keywords
-        ) else {
-            currentOnError()?(StreamingClientError.invalidURL)
-            return
-        }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let task = session.webSocketTask(with: request)
-        let published = withStateLock { () -> Bool in
-            guard !isStopping, !isFinishing else { return false }
-            isReady = false
-            webSocketTask = task
-            return true
-        }
-        guard published else {
-            task.cancel(with: .goingAway, reason: nil)
-            return
-        }
-        task.resume()
-        receiveMessages(on: task)
-    }
-
-    private func receiveMessages(on task: URLSessionWebSocketTask) {
-        task.receive { [weak self, weak task] result in
-            guard let self, let task, self.isCurrent(task) else { return }
-            switch result {
-            case .success(let message):
-                self.handle(message)
-                if self.isCurrent(task) { self.receiveMessages(on: task) }
-            case .failure(let error):
-                self.handleTransportFailure(error)
-            }
-        }
-    }
-
-    /// Only an explicit `error` frame ends the session. An unrecognised frame —
-    /// a keepalive, or a field added upstream — is ignored, matching every
-    /// other shared client, because it must never end a live recording.
-    private func handle(_ message: URLSessionWebSocketTask.Message) {
-        let data: Data
-        switch message {
-        case .data(let value): data = value
-        case .string(let value): data = Data(value.utf8)
-        @unknown default: return
-        }
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let event = XAISpeechToTextEvent(object: object) else { return }
-
-        switch event {
-        case .created:
-            withStateLock { isReady = true }
-            readiness.markReady()
-            if let task = currentTask() { flushPreroll(to: task) }
-        case .partial(let text, let isFinal, _, let eventID):
-            handlePartial(text: text, isFinal: isFinal, eventID: eventID)
-        case .done(let text):
-            handleDone(text: text)
-        case .failure(let message):
-            fail(Self.error(fromServerMessage: message))
-        }
-    }
-
-    private func handlePartial(text: String, isFinal: Bool, eventID: String?) {
-        guard isFinal else {
-            currentOnTranscript()?(text, false)
-            return
-        }
-        let isNew = withStateLock { () -> Bool in
-            let before = accumulated.text
-            accumulated.append(final: text, eventID: eventID)
-            return accumulated.text != before
-        }
-        if isNew { currentOnTranscript()?(text, true) }
-    }
-
-    /// `transcript.done` is authoritative for the whole session, so it replaces
-    /// the folded chunk finals rather than appending to them, and it releases a
-    /// waiting `finishAndWait()` immediately.
-    private func handleDone(text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            withStateLock { accumulated.replace(with: trimmed) }
-        }
-        if resolveFinish() {
-            // Consumed by finishAndWait(), which returns the whole transcript;
-            // delivering it again would double it for callers that append.
-            return
-        }
-        if !trimmed.isEmpty { currentOnTranscript()?(trimmed, true) }
-    }
-
-    private func handleTransportFailure(_ error: Error) {
-        if isEnding || WebSocketErrorFilter.shouldIgnore(error) {
-            resolveFinish()
-            return
-        }
-        fail(mapConnectionError(error))
-    }
-
-    private func fail(_ error: Error) {
-        let callback = withStateLock { () -> ((Error) -> Void)? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            isReady = false
-            let callback = onError
-            webSocketTask?.cancel(with: .goingAway, reason: nil)
-            webSocketTask = nil
-            return callback
-        }
+    func fail(_ error: Error, _ active: XAISpeechToTextLiveRun) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        close(active)
+        log("Session failed")
+        // Publish the failure before finish returns. The run is already
+        // detached, so the callback may start a replacement session safely.
         callback?(error)
-        resolveFinish()
+        waiters.forEach { $0.resume(returning: transcript) }
     }
 
-    private func send(_ audio: Data, on task: URLSessionWebSocketTask) {
-        pendingSends.enter()
-        task.send(.data(audio)) { [weak self, weak task] error in
-            guard let self else { return }
-            self.pendingSends.leave()
-            // A completion from a socket that is no longer the session's must
-            // not cancel the current one or report its error: beginning
-            // another session replaces `webSocketTask`, and a late failure
-            // from the old one says nothing about the new one.
-            guard let task, self.isCurrent(task) else { return }
-            if let error, !self.isEnding, !WebSocketErrorFilter.shouldIgnore(error) {
-                self.handleTransportFailure(error)
-            }
+    func close(_ active: XAISpeechToTextLiveRun) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        let connection = active.connection
+        active.connection = nil
+        active.outgoing.removeAll(keepingCapacity: false)
+        active.budget.reset()
+        active.sending = false
+        if active === run { preroll.reset() }
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        connection?.cancel()
+        waiters.forEach { $0.resume(returning: transcript) }
+        active.onTranscript = nil
+        active.onError = nil
+    }
+
+    func isCurrent(_ active: XAISpeechToTextLiveRun) -> Bool { active === run && active.phase != .closed }
+
+    func after(_ seconds: TimeInterval, _ active: XAISpeechToTextLiveRun,
+               action: @escaping @Sendable (XAISpeechToTextLiveClient, XAISpeechToTextLiveRun) -> Void) {
+        schedule(seconds) { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { action(self, active) } }
         }
     }
 
-    private func flushPreroll(to task: URLSessionWebSocketTask) {
-        for chunk in preroll.drain() { send(chunk, on: task) }
+    func synchronized<Value>(_ action: () -> Value) -> Value {
+        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
+        return queue.sync(execute: action)
     }
 
-    @discardableResult
-    private func resolveFinish() -> Bool {
-        finishLock.lock()
-        let continuation = finishContinuation
-        finishContinuation = nil
-        finishLock.unlock()
-        guard let continuation else { return false }
-        continuation.resume(returning: fullTranscript())
-        return true
-    }
-
-    /// Whether `transcript.created` has arrived and the socket accepts audio.
-    var isSessionReady: Bool { withStateLock { isReady } }
-
-    private var isEnding: Bool { withStateLock { isStopping || isFinishing } }
-    private func isCurrent(_ task: URLSessionWebSocketTask) -> Bool {
-        withStateLock { webSocketTask === task }
-    }
-    private func currentTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-    private func fullTranscript() -> String? { withStateLock { accumulated.transcriptOrNil } }
-
-    @discardableResult
-    private func withStateLock<T>(_ body: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return body()
+    /// Lifecycle events only: never a key, a frame or transcript text.
+    func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "XAISpeechToTextLiveClient").info("\(event, privacy: .public)")
+        #endif
     }
 }

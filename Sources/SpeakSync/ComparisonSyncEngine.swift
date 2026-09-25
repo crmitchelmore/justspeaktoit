@@ -10,32 +10,10 @@ public protocol ComparisonSyncDelegate: AnyObject {
     func applyLegacyDeletion(id: UUID) async throws
 }
 
-enum ComparisonRemoteChange {
-    case changed(ModelComparisonRound)
-    case deleted(UUID)
-    case revision(ModelComparisonRevision)
-}
-
-struct ComparisonChangePage {
-    var changes: [ComparisonRemoteChange]
-    var serverChangeTokenData: Data?
-    var moreComing: Bool
-    static let empty = ComparisonChangePage(changes: [], serverChangeTokenData: nil, moreComing: false)
-}
-
-struct ComparisonUploadResult {
-    var acknowledged: [ModelComparisonRevision] = []
-    var remote: [ModelComparisonRevision] = []
-    var failures: [UUID: Error] = [:]
-}
-
-@MainActor
-protocol ComparisonSyncTransport: AnyObject {
-    func fetchChanges(after tokenData: Data?) async throws -> ComparisonChangePage
-    func upload(revisions: [ModelComparisonRevision]) async -> ComparisonUploadResult
-}
-
 /// One serialized reconciliation path handles local writes, retry and remote changes.
+///
+/// The pass itself is the shared `ComparisonSyncCoordinator`, run on the main
+/// actor; this class supplies the native CloudKit transport and publishes status.
 @MainActor
 public final class ComparisonSyncEngine: ObservableObject {
     @Published public private(set) var isSyncing = false
@@ -43,13 +21,11 @@ public final class ComparisonSyncEngine: ObservableObject {
     @Published public private(set) var lastSyncTime: Date?
     public static let shared = ComparisonSyncEngine()
     public static let syncTokenKey = "speak.sync.comparison.serverChangeToken"
-    static let maxCoalescedPasses = 3
+    static let maxCoalescedPasses = ComparisonSyncCoordinator.maxCoalescedPasses
 
     private weak var delegate: ComparisonSyncDelegate?
-    private let transport: ComparisonSyncTransport
-    private let defaults: UserDefaults
-    private let cloudAvailability: () async -> Bool
-    private var followUpRequested = false
+    private let coordinator: ComparisonSyncCoordinator
+    private let statusMirror: StatusMirror
 
     private convenience init() {
         self.init(transport: CloudKitComparisonSyncTransport(), defaults: .standard, cloudAvailability: {
@@ -59,74 +35,65 @@ public final class ComparisonSyncEngine: ObservableObject {
     }
 
     init(transport: ComparisonSyncTransport, defaults: UserDefaults, cloudAvailability: @escaping () async -> Bool) {
-        self.transport = transport
-        self.defaults = defaults
-        self.cloudAvailability = cloudAvailability
+        let mirror = StatusMirror()
+        statusMirror = mirror
+        coordinator = ComparisonSyncCoordinator(
+            transport: transport,
+            tokenStore: UserDefaultsSyncChangeTokenStore(defaults: defaults, key: Self.syncTokenKey),
+            cloudAvailability: cloudAvailability,
+            isChangeTokenExpired: { ($0 as? CKError)?.code == .changeTokenExpired },
+            observer: mirror
+        )
+        mirror.engine = self
     }
 
     public func initialize(delegate: ComparisonSyncDelegate) async { self.delegate = delegate }
 
     public func sync() async {
-        guard delegate != nil else { return }
-        guard !isSyncing else { followUpRequested = true; return }
-        isSyncing = true
-        defer { isSyncing = false }
-        var passes = 0
-        repeat {
-            followUpRequested = false
-            do {
-                guard await cloudAvailability() else { throw SyncError.cloudUnavailable }
-                do {
-                    try await fetchRemoteChanges()
-                } catch let error as CKError where error.code == .changeTokenExpired {
-                    defaults.removeObject(forKey: Self.syncTokenKey)
-                    try await fetchRemoteChanges()
-                }
-                try await uploadPending()
-                lastError = nil
-                lastSyncTime = Date()
-            } catch {
-                lastError = error
-            }
-            passes += 1
-        } while followUpRequested && passes < Self.maxCoalescedPasses
+        await coordinator.sync(store: delegate.map(DelegateComparisonStore.init))
     }
 
-    private func fetchRemoteChanges() async throws {
-        guard let delegate else { throw SyncError.delegateUnavailable }
-        var token = defaults.data(forKey: Self.syncTokenKey)
-        while true {
-            let page = try await transport.fetchChanges(after: token)
-            guard !page.moreComing || (page.serverChangeTokenData != nil && page.serverChangeTokenData != token) else {
-                throw SyncError.invalidChangePage
-            }
-            for change in page.changes {
-                switch change {
-                case .changed(let round): try await delegate.applyRemoteRevision(ModelComparisonRevision(round: round))
-                case .revision(let revision): try await delegate.applyRemoteRevision(revision)
-                case .deleted(let id): try await delegate.applyLegacyDeletion(id: id)
-                }
-            }
-            // Throwing persistence prevents cursor advancement. Replay is idempotent.
-            if let next = page.serverChangeTokenData {
-                defaults.set(next, forKey: Self.syncTokenKey)
-                token = next
-            }
-            if !page.moreComing { return }
+    fileprivate func apply(_ status: ComparisonSyncStatus, changed field: ComparisonSyncStatus.Field) {
+        switch field {
+        case .isSyncing: isSyncing = status.isSyncing
+        case .lastError: lastError = status.lastError
+        case .lastSyncTime: lastSyncTime = status.lastSyncTime
         }
     }
+}
 
-    private func uploadPending() async throws {
-        guard let delegate else { throw SyncError.delegateUnavailable }
-        // Snapshot each batch. Acknowledgements carry precisely the submitted revision.
-        var remaining = delegate.pendingRevisions()
-        while !remaining.isEmpty {
-            let batch = Array(remaining.prefix(SyncConfiguration.batchSize))
-            remaining.removeFirst(batch.count)
-            let result = await transport.upload(revisions: batch)
-            for remote in result.remote { try await delegate.applyRemoteRevision(remote) }
-            try await delegate.acknowledgeRevisions(result.acknowledged)
-            if !result.failures.isEmpty { throw SyncError.partialUploadFailure(result.failures.count) }
-        }
+/// Publishes each coordinator assignment through the engine's properties.
+@MainActor
+private final class StatusMirror: ComparisonSyncStatusObserver {
+    weak var engine: ComparisonSyncEngine?
+
+    func comparisonSync(_ status: ComparisonSyncStatus, didChange field: ComparisonSyncStatus.Field) async {
+        engine?.apply(status, changed: field)
+    }
+}
+
+/// Holds the delegate for the duration of one coordinator call.
+@MainActor
+private final class DelegateComparisonStore: ComparisonSyncStore {
+    private let delegate: ComparisonSyncDelegate
+
+    init(_ delegate: ComparisonSyncDelegate) {
+        self.delegate = delegate
+    }
+
+    func pendingRevisions() async -> [ModelComparisonRevision] {
+        delegate.pendingRevisions()
+    }
+
+    func applyRemoteRevision(_ revision: ModelComparisonRevision) async throws {
+        try await delegate.applyRemoteRevision(revision)
+    }
+
+    func acknowledgeRevisions(_ revisions: [ModelComparisonRevision]) async throws {
+        try await delegate.acknowledgeRevisions(revisions)
+    }
+
+    func applyLegacyDeletion(id: UUID) async throws {
+        try await delegate.applyLegacyDeletion(id: id)
     }
 }

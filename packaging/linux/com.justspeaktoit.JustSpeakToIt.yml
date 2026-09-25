@@ -1,0 +1,63 @@
+# Flatpak manifest for the Linux developer preview (GNOME 50 runtime,
+# freedesktop 25.08, Swift from the swift6 extension). Build from the
+# repository root:
+#
+#   flatpak-builder --user --install --force-clean build-dir \
+#     packaging/linux/com.justspeaktoit.JustSpeakToIt.yml
+#   flatpak run com.justspeaktoit.JustSpeakToIt
+#
+# The Swift toolchain comes from the Flathub swift6 SDK extension, which must
+# provide Swift 6.2 or newer (see Docs/linux-development.md).
+app-id: com.justspeaktoit.JustSpeakToIt
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.swift6
+command: justspeaktoit
+finish-args:
+  # Provider APIs.
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  # X11 sessions: the window, the XTest paste and the Ctrl+Alt+Space grab.
+  - --socket=fallback-x11
+  # Microphone capture through PipeWire's pulse server.
+  - --socket=pulseaudio
+  - --device=dri
+  # libsecret reaches the Secret portal from inside the sandbox; the
+  # GlobalShortcuts, RemoteDesktop, Clipboard and notification portals need no
+  # extra permissions.
+build-options:
+  append-path: /usr/lib/sdk/swift6/bin
+  prepend-ld-library-path: /usr/lib/sdk/swift6/lib
+modules:
+  - name: justspeaktoit
+    buildsystem: simple
+    build-options:
+      env:
+        SPEAK_LINUX_TARGET: "1"
+      # SwiftPM fetches SwiftNIO and NIOSSL at the versions pinned in
+      # packaging/linux/Package.resolved. Flathub builds offline, so a Flathub
+      # submission must also vendor those pins as git sources.
+      build-args:
+        - --share=network
+    build-commands:
+      - cp packaging/linux/Package.resolved Package.resolved
+      - swift build --configuration release --product SpeakLinux --static-swift-stdlib --disable-sandbox
+        --force-resolved-versions
+      - install -Dm755 .build/release/SpeakLinux /app/bin/justspeaktoit
+      # Bundle.module looks for SwiftPM resource bundles beside the executable.
+      - cp -r .build/release/SpeakApp_SpeakCore.resources /app/bin/
+      - install -Dm644 packaging/linux/com.justspeaktoit.JustSpeakToIt.desktop
+        /app/share/applications/com.justspeaktoit.JustSpeakToIt.desktop
+      - install -Dm644 packaging/linux/com.justspeaktoit.JustSpeakToIt.metainfo.xml
+        /app/share/metainfo/com.justspeaktoit.JustSpeakToIt.metainfo.xml
+      - install -Dm644 Resources/Brand/AppIcon.svg
+        /app/share/icons/hicolor/scalable/apps/com.justspeaktoit.JustSpeakToIt.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .build
+          - .git

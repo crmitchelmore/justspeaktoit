@@ -1,0 +1,887 @@
+#ifndef JSTI_WINDOWS_SUPPORT_H
+#define JSTI_WINDOWS_SUPPORT_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* UTF-8 strings throughout. Zero is success; -1 is failure with a caller-owned
+ * error buffer. No API logs credential or transcript contents. Windows only. */
+enum JSTIWindowEvent {
+    JSTI_EVENT_TOGGLE_RECORDING = 1,
+    JSTI_EVENT_IMPORT_AUDIO = 2,
+    JSTI_EVENT_COPY_TRANSCRIPT = 3,
+    JSTI_EVENT_SAVE_CREDENTIAL = 4,
+    JSTI_EVENT_MODEL_CHANGED = 5,
+    JSTI_EVENT_CLOSING = 6,
+    JSTI_EVENT_READY = 7,
+    JSTI_EVENT_ERROR = 8,
+    JSTI_EVENT_HISTORY_SELECTED = 9,
+    JSTI_EVENT_HISTORY_RETRY = 10,
+    JSTI_EVENT_HISTORY_EXPORT = 11,
+    JSTI_EVENT_HISTORY_OPEN_AUDIO = 12,
+    JSTI_EVENT_MICROPHONE_CHANGED = 13,
+    JSTI_EVENT_CANCEL_TRANSCRIPTION = 14,
+    JSTI_EVENT_HISTORY_SEARCH = 15,
+    JSTI_EVENT_TRANSCRIPT_VARIANT = 16,
+    /* Native History playback controls; both carry the selected record ID. */
+    JSTI_EVENT_HISTORY_PLAY_PAUSE = 18,
+    JSTI_EVENT_HISTORY_STOP = 19,
+    JSTI_EVENT_REFRESH_MODELS = 20,
+    /* Gesture activation styles only (see jsti_window_set_hotkey). DOWN carries
+     * the selected microphone ID like TOGGLE_RECORDING; UP and DEADLINE carry
+     * no text. A press-to-toggle style keeps sending TOGGLE_RECORDING. */
+    JSTI_EVENT_HOTKEY_DOWN = 21,
+    JSTI_EVENT_HOTKEY_UP = 22,
+    JSTI_EVENT_HOTKEY_DEADLINE = 23,
+    /* Carries the selected record ID; read the displayed transcript with
+     * jsti_window_transcript_snapshot synchronously in the callback, as for Copy. */
+    JSTI_EVENT_HISTORY_READ_ALOUD = 24,
+    /* The Settings menu's automation item: text is "1" to allow automation and
+     * "0" to stop it. Report the state reached with jsti_window_set_automation. */
+    JSTI_EVENT_AUTOMATION_TOGGLED = 25
+};
+
+/* Runs on the UI thread. text is borrowed until callback returns. model_index
+ * is the selected caller-supplied model. READY is sent after controls exist.
+ * COPY_TRANSCRIPT carries the selected history ID, or empty if none is selected.
+ * MICROPHONE_CHANGED and TOGGLE_RECORDING carry the selected microphone ID;
+ * empty selects the default communications microphone. HISTORY_SEARCH carries
+ * the current search text (empty when cleared); the host filters the rows it
+ * supplies through jsti_window_set_history. TRANSCRIPT_VARIANT carries the
+ * selected record ID after the user chose a transcript version; pair it with
+ * jsti_window_transcript_variant() synchronously inside the callback. */
+typedef void (*JSTIWindowCallback)(int event, const char *text, int model_index, void *context);
+int jsti_window_run(const char *const *model_names, size_t model_count, int selected_index,
+                    JSTIWindowCallback callback, void *context, char *error, size_t error_capacity);
+/* Optional pre-run mode catalogue with the same count/order as window_run's
+ * full model array. Each mode is 0 remote batch, 1 remote live, 2 local batch
+ * or 3 local live: bit 0 is live, bit 1 is local. The window shows a Source
+ * picker (Remote, Local) when both sources have models, then a Mode picker
+ * (Batch, Live) when the selected source has both. Preferences are global
+ * indices of a remote batch, a remote live and a local batch row; -1 chooses
+ * that mode's first model. Null/count0 restores the legacy all-batch
+ * catalogue. Inputs are copied. window_run's selected_index overrides that
+ * mode's preference. Every callback continues to report a global model index,
+ * never a filtered combo row. */
+int jsti_window_set_model_modes(const int *modes, size_t count, int preferred_batch_index,
+                                int preferred_live_index, int preferred_local_index);
+typedef struct JSTIModelRow {
+    const char *id;
+    const char *name;
+    int is_live;
+    int display_order; /* -1 hidden; otherwise unique visible rank, independent of slot index. */
+    int is_local; /* 1 for an on-device model; the Source picker separates Local from Remote. */
+} JSTIModelRow;
+/* Deep-copies a model snapshot. Configure before window_run, then append-only
+ * identity slots may be updated from any thread. Existing IDs/modes must stay
+ * at the same indices; labels and visible order may change. Current selections
+ * remain visible and selected even when their display_order becomes -1.
+ * Programmatic refresh never emits MODEL_CHANGED or changes recording state.
+ * status/refreshing update a separate discovery control; event20 requests a
+ * refresh. No network operation runs inside the native window loop. */
+int jsti_window_set_model_catalog(const JSTIModelRow *rows, size_t count,
+                                   const char *status, int refreshing);
+/* Thread safe; updates coalesce. Null status/transcript retains the prior value.
+ * recording: -1 retains current value, 0 idle, 1 recording, 2 busy (disable controls). */
+int jsti_window_update(const char *status, const char *transcript, int recording);
+void jsti_window_request_close(void);
+/* Copies IDs/names before return; also valid before window_run. Caller may
+ * include a synthetic default row with an empty ID. Selection updates are
+ * programmatic; a user change emits MICROPHONE_CHANGED with its device ID. */
+int jsti_window_set_microphones(const char *const *ids, const char *const *names,
+                                size_t count, const char *selected_id);
+
+
+/* A complete active capture-device snapshot; borrowed only during the callback.
+ * Endpoint IDs are opaque; an empty ID is reserved for the system-default row. */
+typedef struct JSTIAudioDevice {
+    const char *id;
+    const char *name;
+    int is_default;
+} JSTIAudioDevice;
+/* Latest-only refresh on the UI thread. Does not change the selected ID or emit
+ * selection events; a missing selection becomes an unavailable row. Snapshots
+ * received while recording/busy are deferred until idle. Error-only snapshots
+ * (non-null error) retain the prior list. Must be called after window creation. */
+int jsti_window_refresh_microphones(const JSTIAudioDevice *devices, size_t count, const char *error);
+/* One owned worker registers endpoint notifications and enumerates off the UI
+ * and capture threads. OS callbacks only signal coalesced work. The callback
+ * receives a complete snapshot or an error, never a partial list; it must return
+ * promptly and must not destroy the monitor. No credentials or capture access. */
+typedef void (*JSTIAudioDevicesChangedCallback)(const JSTIAudioDevice *devices, size_t count,
+                                               const char *error, void *context);
+typedef struct JSTIAudioDeviceMonitor JSTIAudioDeviceMonitor;
+JSTIAudioDeviceMonitor *jsti_audio_device_monitor_create(JSTIAudioDevicesChangedCallback callback, void *context,
+                                                        char *error, size_t error_capacity);
+/* Nonblocking and valid from the callback. No later snapshot is dispatched once
+ * cancellation is observed; an already-running callback finishes normally. */
+void jsti_audio_device_monitor_cancel(JSTIAudioDeviceMonitor *monitor);
+/* Cancels, unregisters off the notification callback, drains and joins. The
+ * caller retains context until success. Returns -1 without destroying when
+ * called by the snapshot worker, preventing self-join. Do not call concurrently
+ * with another destroy. Call outside the UI/actor after the window loop ends. */
+int jsti_audio_device_monitor_destroy(JSTIAudioDeviceMonitor *monitor, char *error, size_t error_capacity);
+int jsti_audio_device_monitor_self_test(char *error, size_t error_capacity);
+
+typedef struct JSTIHistoryRow {
+    const char *id;
+    const char *title;
+    const char *detail;
+} JSTIHistoryRow;
+/* Atomically replaces history; synchronously deep-copies all UTF-8 strings.
+ * selected_id: null preserves the current selection if it still exists, an
+ * empty string clears it. A user selection made after enqueue takes precedence.
+ * Programmatic updates do not emit selection events.
+ * Events 9-12 and 16 carry the selected record ID in their borrowed text
+ * argument. Rows are whatever the host chose to show (for example a search
+ * result); the window never filters, reorders or edits them itself. Clearing
+ * or changing the selected row also resets the displayed transcript variant
+ * until the host reports one. */
+int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* Which retained transcript the window shows for record_id. It is applied only
+ * while that record is still the selected row, so a late report can never
+ * describe a different record; null/empty record_id clears the control.
+ * selected: -1 none, 0 processed, 1 original. can_switch (0/1) lets the user
+ * choose between both versions; otherwise the control only reports the one
+ * displayed. Thread safe; updates coalesce with jsti_window_update. A user
+ * choice emits TRANSCRIPT_VARIANT and is retained until the selection changes. */
+int jsti_window_set_transcript_variant(const char *record_id, int selected, int can_switch);
+/* Copies one complete saved-record presentation. UI applies only to the current
+ * record and requested version; selection changes clear text/actions meanwhile.
+ * selected: 0 processed, 1 original, -1 no result. Thread-safe, latest-only. */
+int jsti_window_set_history_presentation(const char *record_id, int selected, int can_switch,
+    const char *transcript_utf8, const char *status_utf8);
+/* Snapshot this window's displayed transcript on its UI thread before an action
+ * or modal dialog. Returns 0 including valid empty text, 2 when the buffer is too
+ * small (required includes NUL), or -1 when unavailable/invalid/over 8 MiB UTF-8.
+ * Passing null/0 queries capacity. Never falls back to saved or external text. */
+int jsti_window_transcript_snapshot(char *text_utf8, size_t capacity, size_t *required);
+/* The displayed transcript variant: -1 none, 0 processed, 1 original. UI thread
+ * only; call synchronously from the COPY_TRANSCRIPT, HISTORY_EXPORT or
+ * TRANSCRIPT_VARIANT callback so it pairs with that event's record ID. */
+int jsti_window_transcript_variant(void);
+/* Record-bound native playback display for the History pane. state: 0 idle,
+ * 1 preparing, 2 playing, 3 paused. time_text is the host-formatted
+ * elapsed/remaining text (null keeps the idle placeholder). The report is
+ * applied only while record_id is still the selected row, so a late report can
+ * never describe another record; a null/empty record_id resets the controls.
+ * Selecting another row also resets the display to idle until the host
+ * reports again. Play/Pause is enabled for a selected idle record or while a
+ * playback is active; Stop only while a playback is active. Thread safe;
+ * latest-only, coalesced with jsti_window_update. Never touches the status or
+ * transcript text. */
+int jsti_window_set_playback(const char *record_id, int state, const char *time_text);
+/* Call synchronously from the UI event callback, capturing the event's record
+ * ID first. Returns 0 chosen (UTF-8 path), 1 cancelled, -1 failed. A too-small
+ * output buffer is an error; paths are never silently truncated. */
+int jsti_window_choose_export_path(const char *suggested_filename, char *path, size_t path_capacity,
+                                   char *error, size_t error_capacity);
+/* Opens an existing audio file through its registered Windows application.
+ * Only recognised audio filename extensions are accepted; never executes an
+ * arbitrary imported file. Shell activation errors are returned. */
+int jsti_shell_open_file(const char *path, char *error, size_t error_capacity);
+
+/* Atomic Apply callback from the native settings dialog, on the UI thread.
+ * prompt/new_key are borrowed until return. Empty new_key means keep the saved
+ * credential; no saved credential is read back into the password field. */
+typedef void (*JSTIPostProcessingCallback)(int enabled, int model_index, const char *prompt,
+                                          const char *new_key, void *context);
+/* Thread safe; deep-copies model labels and persisted settings. Remote
+ * processing remains unavailable until configured, and defaults disabled. */
+int jsti_window_set_postprocessing(const char *const *model_names, size_t model_count,
+                                   int selected_index, int enabled, const char *prompt,
+                                   JSTIPostProcessingCallback callback, void *context);
+
+/* Stable text output choices across the native boundary. restore_clipboard is
+ * 0/1 and only affects a Smart paste at the cursor; the dialog keeps every
+ * stored choice even while it is irrelevant to the selected method. */
+enum JSTITextOutputMethod {
+    JSTI_TEXT_OUTPUT_SMART = 0,
+    JSTI_TEXT_OUTPUT_DIRECT_ONLY = 1,
+    JSTI_TEXT_OUTPUT_CLIPBOARD_ONLY = 2
+};
+enum JSTITextOutputInsertion {
+    JSTI_TEXT_OUTPUT_AT_CURSOR = 0,
+    JSTI_TEXT_OUTPUT_REPLACE_FIELD = 1
+};
+/* Atomic Apply from the native Text output dialog, on the UI thread: exactly
+ * one complete snapshot per Apply. Cancel, Escape and closing emit nothing.
+ * Return promptly; never wait for a Swift actor here. */
+typedef void (*JSTITextOutputSettingsCallback)(int method, int insertion, int restore_clipboard, void *context);
+/* Thread safe; valid before window_run and from any thread afterwards. Invalid
+ * values or a null callback return -1 and keep the previous configuration.
+ * The context is borrowed: keep it alive until a later configuration or
+ * jsti_window_clear_text_output has replaced it AND any dialog opened from it
+ * has closed, because an open dialog keeps its own copy of the callback and
+ * context and can still Apply. No dialog is open once window_run returns. The
+ * dialog opens from the latest configuration; refresh it with the persisted
+ * choices after every save attempt so a reopened dialog never shows unsaved
+ * choices. */
+int jsti_window_set_text_output(int method, int insertion, int restore_clipboard,
+                                JSTITextOutputSettingsCallback callback, void *context);
+/* Reads the configuration the dialog will open with. -1 when unconfigured or
+ * an output pointer is null. */
+int jsti_window_text_output(int *method, int *insertion, int *restore_clipboard);
+/* Thread safe. Drops the configured callback and context so no later dialog
+ * can use them; the dialog is unavailable until configured again. A dialog
+ * already open is unaffected and keeps its copied callback and context until
+ * it closes, so the caller must retain the context until then as well. Once
+ * window_run has returned no dialog is open, and clearing ends the borrow. */
+void jsti_window_clear_text_output(void);
+
+/* Global recording shortcut. modifiers combine MOD_ALT (1), MOD_CONTROL (2) and
+ * MOD_SHIFT (4) and must include Ctrl or Alt; virtual_key is a non-modifier
+ * virtual-key code. The Shortcut dialog lists style_names with their
+ * descriptions; press_style is the index whose presses toggle recording
+ * natively (TOGGLE_RECORDING, or CANCEL_TRANSCRIPTION while transcribing).
+ * Every other style reports HOTKEY_DOWN on the press and HOTKEY_UP when the key
+ * is released, for the host's gesture recognition; presses while a modal
+ * dialog is open or a transcription is running are ignored. The callback runs
+ * on the UI thread once per Apply, after the new shortcut is registered;
+ * persist it and never wait for a Swift actor there. Thread safe; the
+ * combination is registered when window_run starts and afterwards changes only
+ * through the dialog. The context is borrowed like jsti_window_set_text_output's. */
+typedef void (*JSTIHotKeySettingsCallback)(unsigned modifiers, unsigned virtual_key, int style, void *context);
+int jsti_window_set_hotkey(unsigned modifiers, unsigned virtual_key,
+                           const char *const *style_names, const char *const *style_descriptions,
+                           size_t style_count, int style, int press_style,
+                           JSTIHotKeySettingsCallback callback, void *context);
+/* Drops the callback and context; the dialog is unavailable until configured again. */
+void jsti_window_clear_hotkey(void);
+/* UI thread only, from a hotkey event: arms the one gesture deadline timer,
+ * which later sends HOTKEY_DEADLINE. Negative milliseconds cancel it. */
+int jsti_window_set_hotkey_deadline(int milliseconds);
+/* Voice output dialog: the canonical voices the host can speak with, as
+ * UTF-8 labels, and the selected index. The callback runs on the UI thread
+ * once per Apply with the chosen index. Thread safe; the context is borrowed
+ * like jsti_window_set_text_output's. */
+typedef void (*JSTIVoiceOutputCallback)(int voice, void *context);
+int jsti_window_set_voice_output(const char *const *voice_names, size_t voice_count, int selected,
+                                 JSTIVoiceOutputCallback callback, void *context);
+void jsti_window_clear_voice_output(void);
+/* Azure Speech resource dialog: the HTTPS endpoint of the user's Azure Speech
+ * or Foundry resource, shown and edited as UTF-8 text (empty when none is
+ * saved). Azure live transcription connects only to that resource; recorded
+ * audio uses it when set. The callback runs on the UI thread once per Apply
+ * with the entered text. It validates synchronously, never waiting for a Swift
+ * actor, and returns 0 to accept, which closes the dialog, or -1 after writing
+ * a readable reason into error, which the dialog shows while it stays open.
+ * Thread safe; the context is borrowed like the voice dialog's. */
+typedef int (*JSTIAzureResourceCallback)(const char *endpoint, void *context, char *error, size_t error_capacity);
+int jsti_window_set_azure_resource(const char *endpoint, JSTIAzureResourceCallback callback, void *context);
+void jsti_window_clear_azure_resource(void);
+/* Local models dialog: rows of the on-device models the host offers, in the
+ * host's order, with their install state. Thread safe; an open dialog refreshes
+ * in place. The callback runs on the UI thread with one action and the row
+ * index (-1 for the GPU choice); it must return promptly and never block on a
+ * Swift actor. The runtime status is also shown under the model picker while
+ * the Local source is selected. The context is borrowed like the voice
+ * dialog's. */
+enum JSTILocalModelState {
+    JSTI_LOCAL_MODEL_NOT_INSTALLED = 0,
+    JSTI_LOCAL_MODEL_PARTIAL = 1,
+    JSTI_LOCAL_MODEL_DOWNLOADING = 2,
+    JSTI_LOCAL_MODEL_INSTALLED = 3
+};
+enum JSTILocalModelAction {
+    JSTI_LOCAL_MODEL_DOWNLOAD = 1,
+    JSTI_LOCAL_MODEL_CANCEL = 2,
+    JSTI_LOCAL_MODEL_REMOVE = 3,
+    JSTI_LOCAL_MODEL_GPU_ON = 4,
+    JSTI_LOCAL_MODEL_GPU_OFF = 5
+};
+typedef struct JSTILocalModelRow {
+    const char *name;
+    const char *detail;
+    const char *about;
+    int state;
+} JSTILocalModelRow;
+typedef void (*JSTILocalModelCallback)(int action, int model_index, void *context);
+int jsti_window_set_local_models(const JSTILocalModelRow *rows, size_t count, const char *runtime_status,
+                                 int use_gpu, JSTILocalModelCallback callback, void *context);
+void jsti_window_clear_local_models(void);
+/* Thread safe: checks or clears the Settings menu's automation item. */
+int jsti_window_set_automation(int enabled);
+/* The localised key name, for example "Ctrl+Alt+Space". */
+int jsti_hotkey_name(unsigned modifiers, unsigned virtual_key, char *name, size_t capacity);
+
+/* Borrowed UTF-8 draft values. Choice -1 inherits the app setting, -2 preserves
+ * an existing unavailable value, otherwise indexes the supplied catalogue.
+ * polish_mode: 0 inherit, 1 disabled, 2 enabled. Paths are newline-separated. */
+typedef struct JSTIProfileDraft {
+    const char *id, *name, *paths, *prompt, *output_language, *notes;
+    int transcription, polish_mode, polish_model, language;
+} JSTIProfileDraft;
+/* UI-thread callback: action 1 validates/copies all drafts for an atomic save;
+ * return -1 with a readable error to keep the editor open. Action 0 cancels.
+ * All pointers expire on return. Never block waiting for a Swift actor. */
+typedef int (*JSTIProfilesCallback)(int action, const JSTIProfileDraft *drafts, size_t count,
+                                  void *context, char *error, size_t error_capacity);
+int jsti_window_set_profiles(const JSTIProfileDraft *drafts, size_t count,
+                            const char *const *transcription_names, size_t transcription_count,
+                            const char *const *polish_names, size_t polish_count,
+                            const char *const *language_names, size_t language_count,
+                            const char *notice,
+                            JSTIProfilesCallback callback, void *context);
+/* Posts an open request to the native UI thread. Ignored during recording. */
+void jsti_window_request_profiles(void);
+
+typedef struct JSTICapture JSTICapture;
+/* Active capture endpoints only; the default marker means eCommunications.
+ * Callbacks run synchronously after enumeration succeeds; strings are borrowed
+ * until callback return. A successful empty list means no active microphones.
+ * Enumeration does not activate a microphone or request recording access. */
+typedef void (*JSTIAudioDeviceCallback)(const char *id, const char *name, int is_default, void *context);
+int jsti_audio_devices_enumerate(JSTIAudioDeviceCallback callback, void *context,
+                                 char *error, size_t error_capacity);
+/* Dedicated bounded writer callback, PCM16 little-endian mono at the capture's
+ * sample rate: 16 kHz unless explicitly configured. Legacy constructors emit
+ * 100 ms frames; create_with_options selects 20 or 100 ms. Stop flushes a final
+ * partial frame without padding. Copy synchronously and return promptly.
+ * Do not call capture stop/destroy from either callback. */
+typedef void (*JSTIAudioCallback)(const int16_t *samples, size_t sample_count, void *context);
+typedef void (*JSTIAudioErrorCallback)(const char *message, void *context);
+/* Default communications microphone at 16 kHz. */
+JSTICapture *jsti_capture_create(JSTIAudioCallback callback, JSTIAudioErrorCallback error_callback,
+                                 void *context);
+/* Copies the opaque endpoint ID and captures at 16 kHz. Null/empty chooses the
+ * default communications microphone at start. An explicit ID must still be
+ * active and a capture device; it never silently falls back to another
+ * microphone. On success an error buffer is cleared rather than left stale. */
+JSTICapture *jsti_capture_create_with_device(const char *device_id, JSTIAudioCallback callback,
+                                             JSTIAudioErrorCallback error_callback, void *context,
+                                             char *error, size_t error_capacity);
+/* As create_with_device, capturing directly at sample_rate: exactly 16000 or
+ * 24000 (OpenAI Realtime canonical PCM) Hz PCM16 mono. The Windows audio engine
+ * converts to the selected rate in a single pass; frames carry sample_rate/10
+ * samples. Any other rate fails here with a descriptive error before any
+ * microphone is activated. The rate is fixed for the capture's lifetime; create
+ * a new capture to change it. */
+JSTICapture *jsti_capture_create_with_format(const char *device_id, uint32_t sample_rate,
+                                             JSTIAudioCallback callback,
+                                             JSTIAudioErrorCallback error_callback, void *context,
+                                             char *error, size_t error_capacity);
+/* As create_with_format, with an explicit frame duration of exactly 20 or
+ * 100 ms. Rejects other durations before device activation. PCM storage stays
+ * fixed and the writer queue retains 12.8 seconds at either duration/rate.
+ * This sets application batching only, not the audio driver's packet period.
+ * Choose a duration compatible with the provider; AssemblyAI requires at least
+ * 50 ms and should use 100 ms. Legacy constructors always retain 100 ms. */
+JSTICapture *jsti_capture_create_with_options(const char *device_id, uint32_t sample_rate,
+                                              uint32_t frame_milliseconds, JSTIAudioCallback callback,
+                                              JSTIAudioErrorCallback error_callback, void *context,
+                                              char *error, size_t error_capacity);
+/* Serialize start/stop/destroy on the caller side. start reports initialization
+ * errors synchronously; later device/stream failures invoke error_callback. */
+int jsti_capture_start(JSTICapture *capture, char *error, size_t error_capacity);
+int jsti_capture_stop(JSTICapture *capture, char *error, size_t error_capacity);
+void jsti_capture_destroy(JSTICapture *capture);
+
+/* Legacy direct path, retained for source/ABI compatibility. Capture at the
+ * recording hotkey before showing UI. Insertion is explicitly addressed to the
+ * original native Edit/RichEdit control only; other applications fail closed
+ * and should offer Copy. This entrypoint never sends keystrokes or touches the
+ * clipboard. New callers use the opaque jsti_insertion_* API below. */
+typedef struct JSTITextTarget {
+    uintptr_t window;
+    uintptr_t focused_control;
+    uint32_t process_id;
+    uint32_t thread_id;
+} JSTITextTarget;
+int jsti_target_capture(JSTITextTarget *target, char *error, size_t error_capacity);
+int jsti_target_insert_text(const JSTITextTarget *target, const char *text,
+                            char *error, size_t error_capacity);
+/* Deliberate user copy: plain CF_UNICODETEXT, eligible for clipboard history. */
+int jsti_clipboard_write(const char *text, char *error, size_t error_capacity);
+
+/* Opaque insertion target with explicit lifetime. Capture synchronously at the
+ * recording hotkey: it records the foreground window, its thread and the
+ * focused control immediately and never blocks on the target application. A
+ * dedicated worker resolves the snapshotted focus event to its exact UI
+ * Automation element so later insertion can prove field identity; startup
+ * never waits for that provider. Every insertion re-verifies the original
+ * process, thread, window and focused control, refuses password/read-only
+ * fields and never steals focus or types into another application.
+ *
+ * Methods, in order of preference for the captured control:
+ *  1. Native Unicode Edit/RichEdit: EM_REPLACESEL to the captured control
+ *     (inserts at the caret or replaces the selection).
+ *  2. UI Automation Value pattern SetValue, used only when it is exactly
+ *     equivalent to insertion: the field is empty or the whole text is
+ *     selected (or the replace-field flag is set). UI Automation's Text
+ *     pattern is read-only and cannot insert; the field is never replaced
+ *     wholesale to emulate a caret insertion.
+ *  3. Guarded clipboard paste: the current clipboard is snapshotted, the text
+ *     is placed as CF_UNICODETEXT excluded from clipboard history/cloud sync,
+ *     Ctrl+V is sent while the captured control still owns focus, the field is
+ *     read back through UI Automation where possible, and the previous
+ *     clipboard content is restored unless it changed meanwhile.
+ * Insertion into a process of higher integrity (for example an elevated app)
+ * fails closed because Windows UIPI blocks both messages and input.
+ *
+ * Insert blocks the caller for a bounded time (about six seconds worst case)
+ * and may be called at most once at a time per target. Destroy is nonblocking:
+ * a worker still blocked inside a provider call is detached and
+ * releases its own resources when that call returns. Destroy after insert
+ * returns, never from another thread concurrently with insert. */
+typedef struct JSTIInsertionTarget JSTIInsertionTarget;
+enum JSTIInsertionFlags {
+    /* Replace the whole field instead of inserting at the caret. Native
+     * controls select all first; UI Automation requires a writable Value
+     * pattern; the clipboard fallback is never used for replacement. */
+    JSTI_INSERTION_REPLACE_FIELD = 1u << 0,
+    /* Leave the transcript on the clipboard after a paste instead of
+     * restoring the previous content (macOS "restore clipboard" off). */
+    JSTI_INSERTION_KEEP_TRANSCRIPT_ON_CLIPBOARD = 1u << 1,
+    /* Never use the clipboard/keystroke fallback; fail closed instead. */
+    JSTI_INSERTION_NO_PASTE_FALLBACK = 1u << 2
+};
+enum JSTIInsertionMethod {
+    JSTI_INSERTION_METHOD_NONE = 0,
+    JSTI_INSERTION_METHOD_NATIVE_EDIT = 1,
+    JSTI_INSERTION_METHOD_UIA_VALUE = 2,
+    JSTI_INSERTION_METHOD_PASTE = 3
+};
+enum JSTIInsertionIdentity {
+    /* Process, thread, foreground window and focused control matched. */
+    JSTI_INSERTION_IDENTITY_WINDOW = 1,
+    /* Additionally the same UI Automation element that had focus at capture. */
+    JSTI_INSERTION_IDENTITY_FIELD = 2
+};
+enum JSTIInsertionClipboard {
+    JSTI_INSERTION_CLIPBOARD_UNTOUCHED = 0,
+    JSTI_INSERTION_CLIPBOARD_RESTORED = 1,
+    /* Restored what fit; oversized or non-memory formats were not preserved. */
+    JSTI_INSERTION_CLIPBOARD_RESTORED_PARTIALLY = 2,
+    /* The transcript was intentionally left on the clipboard. */
+    JSTI_INSERTION_CLIPBOARD_TRANSCRIPT_LEFT = 3,
+    JSTI_INSERTION_CLIPBOARD_RESTORE_FAILED = 4,
+    /* Another application changed the clipboard meanwhile; it was left alone. */
+    JSTI_INSERTION_CLIPBOARD_CHANGED_MEANWHILE = 5
+};
+typedef struct JSTIInsertionResult {
+    int method;    /* JSTIInsertionMethod */
+    int verified;  /* 1 when the field was read back and contains the text */
+    int identity;  /* JSTIInsertionIdentity */
+    int clipboard; /* JSTIInsertionClipboard */
+} JSTIInsertionResult;
+/* Start the bounded focus-event observer during normal application startup. */
+void jsti_insertion_prepare(void);
+/* Null with an error when no external application field is focused. */
+JSTIInsertionTarget *jsti_insertion_capture(char *error, size_t error_capacity);
+/* Zero: input was submitted by result->method; verified reports read-back.
+ * -1: no text mutation was submitted. 1: mutation may have occurred or shortcut
+ * submission was partial; do not retry automatically. Clipboard state is
+ * reported in result->clipboard. Text must be non-empty UTF-8. */
+int jsti_insertion_insert(JSTIInsertionTarget *target, const char *text, unsigned flags,
+                          JSTIInsertionResult *result, char *error, size_t error_capacity);
+/* Thread-safe nonblocking abandonment. Prevents pending mutations; an operation
+ * already dispatched may complete, and insert then reports its actual/uncertain
+ * outcome. The target remains owned until insert returns and destroy is called. */
+void jsti_insertion_cancel(JSTIInsertionTarget *target);
+/* Explicit clipboard-only output, guarded by the captured request's cancellation
+ * state immediately before replacement. Does not follow or mutate field focus. */
+int jsti_insertion_copy_text(JSTIInsertionTarget *target, const char *text, JSTIInsertionResult *result,
+                              char *error, size_t error_capacity);
+/* Original captured process handle, never a fresh focus/PID lookup. required_bytes
+ * includes the NUL; 0 success, 2 insufficient buffer, -1 unavailable. */
+int jsti_insertion_executable_path(const JSTIInsertionTarget *target, char *path, size_t path_capacity,
+                                   size_t *required_bytes, char *error, size_t error_capacity);
+void jsti_insertion_destroy(JSTIInsertionTarget *target);
+
+/* Automatic clipboard output for one completed recording whose method is copy
+ * to clipboard, including recordings started with Record in this window, which
+ * have no captured field. It never queries or follows focus, never inserts and
+ * never sends input. The transcript is left as plain Unicode text, exactly like
+ * jsti_insertion_copy_text and jsti_clipboard_write: an ordinary copy without
+ * the guarded paste's history and cloud exclusion formats. A job copies at
+ * most once. */
+typedef struct JSTIClipboardOutput JSTIClipboardOutput;
+/* Allocates a job without touching the clipboard. */
+JSTIClipboardOutput *jsti_clipboard_output_create(char *error, size_t error_capacity);
+/* Blocks for a bounded time; call off the UI thread and outside actors. A
+ * cancelled job, or one used by an earlier attempt, is refused before the text
+ * is read or the clipboard opened; any other attempt uses the job up.
+ * Otherwise the clipboard is opened (10 attempts, 20 ms apart) and its content
+ * snapshotted; then, while it is still owned, cancellation is checked under the
+ * job's lock immediately before replacement. A cancel that returned before
+ * that check guarantees no clipboard change; a later cancel cannot stop the
+ * committed write, which is reported. 0 copied; -1 nothing copied, and
+ * clipboard_state (JSTIInsertionClipboard, optional) reports whether a failed
+ * write restored the previous content. Text must be non-empty UTF-8. */
+int jsti_clipboard_output_copy(JSTIClipboardOutput *job, const char *text, int *clipboard_state,
+                               char *error, size_t error_capacity);
+/* Thread safe and nonblocking, including while copy runs on another thread. */
+void jsti_clipboard_output_cancel(JSTIClipboardOutput *job);
+/* Call once, after copy has returned or when it was never called. */
+void jsti_clipboard_output_destroy(JSTIClipboardOutput *job);
+/* Synthetic in-memory clipboard only: copy, cancellation before and inside the
+ * owned section, single use, failed-write restore and bounded busy failure.
+ * Never touches the system clipboard. */
+int jsti_clipboard_output_self_test(char *error, size_t error_capacity);
+
+/* Deterministic native checks on app-owned synthetic hidden controls with
+ * injected foreground, clipboard and keystroke seams: caret/selection
+ * insertion, surrogate pairs, stale identity, password/read-only refusal,
+ * UI Automation value/paste paths, timeouts and worker cleanup. Never sends
+ * real input, touches the system clipboard or inserts into another app. */
+int jsti_text_output_self_test(char *error, size_t error_capacity);
+
+/* Generic credentials scoped to this Windows user; names are automatically
+ * prefixed with com.justspeaktoit/. Read: 1 missing, 2 buffer too small (required
+ * byte count returned). No terminator is appended to credential bytes. */
+int jsti_credential_write(const char *name, const uint8_t *bytes, size_t count,
+                          char *error, size_t error_capacity);
+int jsti_credential_read(const char *name, uint8_t *bytes, size_t capacity, size_t *count,
+                         char *error, size_t error_capacity);
+int jsti_credential_delete(const char *name, char *error, size_t error_capacity);
+
+/* App-owned multipart staging only. Absolute local paths; relative paths,
+ * alternate data streams and all reparse points in the path are rejected.
+ * Directory preparation creates/repairs only the supplied leaf directory; its
+ * parent must exist and an existing leaf must belong to the current user.
+ * Both APIs apply an explicit protected DACL granting only the current user
+ * and SYSTEM full control. File creation is exclusive: existing files are
+ * never opened, truncated or followed. No parent ACL is changed. */
+int jsti_private_directory_prepare(const char *path, char *error, size_t error_capacity);
+int jsti_private_file_create(const char *path, char *error, size_t error_capacity);
+/* Uses a unique temporary directory and synthetic bytes only; verifies ACLs,
+ * directory repair, existing-file preservation and junction refusal. */
+int jsti_private_storage_self_test(char *error, size_t error_capacity);
+
+typedef struct JSTIWebSocket JSTIWebSocket;
+enum JSTIWebSocketEvent {
+    JSTI_WEBSOCKET_OPEN = 1,
+    JSTI_WEBSOCKET_TEXT = 2,
+    JSTI_WEBSOCKET_BINARY = 3,
+    JSTI_WEBSOCKET_SEND_COMPLETE = 4,
+    JSTI_WEBSOCKET_CLOSED = 5,
+    JSTI_WEBSOCKET_ERROR = 6
+};
+/* All callbacks run serially on one dedicated worker. Bytes are borrowed until
+ * return; copy synchronously. Messages are complete and bounded to 4 MiB. Code
+ * is the native error for ERROR/SEND_COMPLETE (zero means send succeeded), or
+ * the peer close status for CLOSED. Error bytes never include URL/header data.
+ * Callbacks may send or cancel, but must not destroy this socket. */
+typedef void (*JSTIWebSocketCallback)(int event, const uint8_t *bytes, size_t count,
+                                     int code, void *context);
+/* Copies all inputs. wss is required except ws on literal loopback addresses
+ * or localhost for local probes. Credentials in URLs and redirects are refused.
+ * Header names/values are validated; WinHTTP owns the upgrade control headers. */
+JSTIWebSocket *jsti_websocket_create(const char *url, const char *const *header_names,
+                                     const char *const *header_values, size_t header_count,
+                                     JSTIWebSocketCallback callback, void *context,
+                                     char *error, size_t error_capacity);
+int jsti_websocket_start(JSTIWebSocket *socket, char *error, size_t error_capacity);
+/* Copies at most 4 MiB. Exactly one send may be outstanding. A return of zero
+ * guarantees one later SEND_COMPLETE callback, including during cancellation. */
+int jsti_websocket_send(JSTIWebSocket *socket, const uint8_t *bytes, size_t count,
+                        int is_text, char *error, size_t error_capacity);
+/* Thread safe cancellation, including during the HTTP upgrade. No join. */
+void jsti_websocket_cancel(JSTIWebSocket *socket);
+/* Serialize destruction against all caller API calls. Cancels, drains native
+ * callbacks and joins the worker. On failure the socket/context remain owned
+ * by the caller and must be retained; zero releases the socket permanently. */
+int jsti_websocket_destroy(JSTIWebSocket *socket, char *error, size_t error_capacity);
+/* Deterministic URL/header validation; no network or credentials. */
+int jsti_websocket_self_test(char *error, size_t error_capacity);
+
+/* ---- CloudKit sync -------------------------------------------------------- */
+
+/* One HTTPS request through WinHTTP, for CloudKit Web Services. Blocking: call
+ * perform from a worker thread. https is required except http to the literal
+ * loopback address or localhost (local fake servers). Redirects, cookies,
+ * credentials in the URL and automatic authentication are refused; responses
+ * are never cached. headers is "Name: value" lines joined by CRLF, or NULL.
+ * The URL and headers carry tokens: they are never copied into errors.
+ * perform returns 0 with *status set, 1 when cancelled, 2 when the body exceeds
+ * response_limit, 3 on timeout, 4 on a transient connection failure, and -1
+ * on any other failure. After 0, body/headers stay valid until destroy. */
+typedef struct JSTIHTTPRequest JSTIHTTPRequest;
+JSTIHTTPRequest *jsti_http_request_create(void);
+int jsti_http_request_perform(JSTIHTTPRequest *request, const char *method, const char *url,
+                              const char *headers, const uint8_t *body, size_t body_count,
+                              size_t response_limit, int timeout_milliseconds, int *status,
+                              char *error, size_t error_capacity);
+/* The response body and the raw CRLF-separated response headers (UTF-8). */
+const uint8_t *jsti_http_request_body(const JSTIHTTPRequest *request, size_t *count);
+const char *jsti_http_request_headers(const JSTIHTTPRequest *request);
+/* Thread safe; a blocked perform returns 1 promptly. */
+void jsti_http_request_cancel(JSTIHTTPRequest *request);
+/* Never while perform runs on another thread. */
+void jsti_http_request_destroy(JSTIHTTPRequest *request);
+
+/* A one-connection-at-a-time HTTP listener on 127.0.0.1, for the Apple ID
+ * sign-in callback and for loopback test servers. port 0 picks a free port.
+ * accept waits up to timeout for one complete request (at most 1 MiB):
+ * 0 success, 1 timeout, 3 cancelled, -1 failure. respond writes raw bytes and
+ * closes the connection. */
+typedef struct JSTILoopbackListener JSTILoopbackListener;
+typedef struct JSTILoopbackConnection JSTILoopbackConnection;
+JSTILoopbackListener *jsti_loopback_listen(uint16_t port, uint16_t *bound_port,
+                                           char *error, size_t error_capacity);
+int jsti_loopback_accept(JSTILoopbackListener *listener, int timeout_milliseconds,
+                         JSTILoopbackConnection **connection, char *error, size_t error_capacity);
+const uint8_t *jsti_loopback_request(const JSTILoopbackConnection *connection, size_t *count);
+/* Who owns the socket at the other end, from the TCP table's owning process:
+ * 0 a process of this process's user, 1 another user's, -1 when that cannot
+ * be determined (including a process this user may not open). Only while the
+ * peer's socket is open. */
+int jsti_loopback_peer_owner(const JSTILoopbackConnection *connection);
+int jsti_loopback_respond(JSTILoopbackConnection *connection, const uint8_t *bytes, size_t count);
+void jsti_loopback_connection_destroy(JSTILoopbackConnection *connection);
+/* Thread safe; a blocked accept returns 3 promptly. */
+void jsti_loopback_cancel(JSTILoopbackListener *listener);
+void jsti_loopback_destroy(JSTILoopbackListener *listener);
+
+/* CNG primitives for the API-key sync envelope: PBKDF2-HMAC-SHA256, and
+ * AES-256-GCM with a fresh random 96-bit nonce, no associated data and a
+ * 128-bit tag kept apart from the ciphertext. open returns 1 when the tag does
+ * not verify. All return -1 on other failures. */
+int jsti_crypto_pbkdf2_sha256(const uint8_t *password, size_t password_count, const uint8_t *salt,
+                              size_t salt_count, uint64_t iterations, uint8_t *key, size_t key_count,
+                              char *error, size_t error_capacity);
+int jsti_crypto_aes_gcm_seal(const uint8_t *key, size_t key_count, const uint8_t *plaintext, size_t count,
+                             uint8_t *nonce12, uint8_t *ciphertext, uint8_t *tag16,
+                             char *error, size_t error_capacity);
+int jsti_crypto_aes_gcm_open(const uint8_t *key, size_t key_count, const uint8_t *nonce12,
+                             const uint8_t *ciphertext, size_t count, const uint8_t *tag16,
+                             uint8_t *plaintext, char *error, size_t error_capacity);
+int jsti_crypto_random(uint8_t *bytes, size_t count, char *error, size_t error_capacity);
+
+/* Opens an https URL on an apple.com or icloud.com host in the default browser. */
+int jsti_shell_open_sign_in_page(const char *url, char *error, size_t error_capacity);
+
+/* The iCloud sync dialog (Settings menu). The host supplies a snapshot; the
+ * dialog closes after one action and calls back on the UI thread with it:
+ * 1 apply choices, 2 sign in, 3 sign out, 4 sync now. passphrase is the typed
+ * API-key passphrase (empty when none) and is wiped when the callback returns.
+ * Thread safe; the context is borrowed like jsti_window_set_voice_output's. */
+typedef struct JSTICloudSyncView {
+    const char *status;
+    int available;
+    int signed_in;
+    int history_enabled;
+    int key_import_enabled;
+} JSTICloudSyncView;
+typedef void (*JSTICloudSyncCallback)(int action, int history_enabled, int key_import_enabled,
+                                      const char *passphrase, void *context);
+int jsti_window_set_cloud_sync(const JSTICloudSyncView *view, JSTICloudSyncCallback callback, void *context);
+void jsti_window_clear_cloud_sync(void);
+
+typedef struct JSTIAudioConversion JSTIAudioConversion;
+/* One completion on the dedicated conversion worker after start succeeds.
+ * status: 0 success, 1 cancelled, -1 failure. Duration/sample_count describe the
+ * actual canonical16kHz mono PCM16 output only on success. Error is borrowed
+ * until callback returns. Retain context until destroy succeeds; never destroy
+ * from this callback. The input is never changed. */
+typedef void (*JSTIAudioConversionCallback)(int status, double duration_seconds,
+                                           uint64_t sample_count, const char *error, void *context);
+/* Absolute local regular-file input; maximum25,000,000 input/output bytes.
+ * Output must not exist, and its parent must already have been prepared by
+ * jsti_private_directory_prepare. Conversion uses installed Media Foundation
+ * decoders; support for compressed formats depends on the Windows installation.
+ * Partial outputs are removed by their owned handle on failure/cancellation. */
+JSTIAudioConversion *jsti_audio_conversion_create(const char *input_path, const char *output_path,
+                                                  JSTIAudioConversionCallback callback, void *context,
+                                                  char *error, size_t error_capacity);
+int jsti_audio_conversion_start(JSTIAudioConversion *conversion, char *error, size_t error_capacity);
+/* Thread safe request. Pending sample reads are flushed on the worker;
+ * cancellation is checked between setup stages and output writes. */
+void jsti_audio_conversion_cancel(JSTIAudioConversion *conversion);
+/* Serialize against caller operations. Cancels and joins; zero frees the job.
+ * On failure retain the job/context and retry outside its callback thread. */
+int jsti_audio_conversion_destroy(JSTIAudioConversion *conversion, char *error, size_t error_capacity);
+/* Synthetic WAV decode/resample, bounds/collision/refusal/cancellation checks.
+ * No microphone, credentials, provider requests, or user recordings. */
+int jsti_audio_conversion_self_test(char *error, size_t error_capacity);
+
+typedef struct JSTIAudioPlayback JSTIAudioPlayback;
+/* Exactly one completion on the dedicated playback worker after start
+ * succeeds. status: 0 finished (every decoded frame was consumed by the audio
+ * engine), 1 cancelled, -1 failed. played_seconds is the source audio the
+ * engine actually consumed when playback ended, on every status; it is 0 when
+ * nothing was measured. error is borrowed until the callback returns and is
+ * empty on success. Retain context until destroy succeeds; never destroy from
+ * this callback. Never invoked under a native lock, never after destroy. */
+typedef void (*JSTIAudioPlaybackCallback)(int status, double played_seconds, const char *error, void *context);
+/* Absolute local regular-file input of 1 byte to 1 GiB (two hours of 24 kHz
+ * PCM16 history is about 346 MB). Creation opens the file read-only with
+ * write/delete sharing denied and refuses directories, non-disk files and a
+ * leaf reparse point; that pinned handle is the only stream Windows decodes
+ * from, so the source is never reopened by name or modified. Decoding uses the
+ * installed in-process Media Foundation codecs and converts straight to the
+ * default multimedia render endpoint's shared-mode mix format and rate; if the
+ * decoder cannot produce that format it decodes float at the source rate and
+ * the Windows audio engine converts. There is no forced transcription-rate
+ * conversion, custom resampler, external player or transcription step; the
+ * endpoint conversion may resample a high-rate source. Decoded audio is queued
+ * through a fixed two-second ring (at most 64 MiB, typically under 1 MiB) into
+ * an event-driven shared-mode WASAPI stream; each decoded sample is bounded to
+ * four seconds of output (1 MiB to 64 MiB) before it is coalesced; file and
+ * codec work never run on the render thread, which submits only real source
+ * frames (never synthesised silence) so the reported position is the source
+ * audio actually consumed. A missing Media Foundation (Windows N), a missing
+ * codec, an empty decode, no active render endpoint, an invalidated device or an
+ * engine that stops requesting audio all fail with a descriptive error; there
+ * is no silent fallback, and a render failure wakes a decoder stalled on a
+ * slow codec at once so the failure is reported promptly. Creation itself
+ * does not touch any device. */
+JSTIAudioPlayback *jsti_audio_playback_create(const char *input_path, JSTIAudioPlaybackCallback callback,
+                                              void *context, char *error, size_t error_capacity);
+/* Starts once. A cancelled or already started job is refused synchronously
+ * without any callback. Zero guarantees exactly one later completion, which
+ * may arrive before this call returns; serialize destroy after it returns. */
+int jsti_audio_playback_start(JSTIAudioPlayback *playback, char *error, size_t error_capacity);
+/* Thread safe, nonblocking commands handled by the render thread. Pause stops
+ * the engine and freezes both the queued audio and the reported position;
+ * resume starts it again from the same frames without re-decoding. A pause
+ * requested before rendering begins holds the first frame; a long pause never
+ * trips the no-render-event failure deadline and keeps the decoder bounded by
+ * the fixed queue. Returns 0 requested, 1 ignored because playback already
+ * ended, -1 no playback. Commands are idempotent. */
+int jsti_audio_playback_pause(JSTIAudioPlayback *playback);
+int jsti_audio_playback_resume(JSTIAudioPlayback *playback);
+typedef struct JSTIAudioPlaybackSnapshot {
+    int state;               /* 0 preparing, 1 playing, 2 paused, 3 ended (see the completion). */
+    double position_seconds; /* Source audio actually consumed by the engine so far. */
+    double duration_seconds; /* Container duration when the source reports one, otherwise -1. */
+    /* Output acknowledgement: 0 the engine was never started, 1 it was started
+     * (running or paused, so it may start again), 2 the render thread stopped
+     * the stream (or ended without ever starting it) and it can never start
+     * again. After cancel, 2 arrives as soon as the render thread has stopped
+     * the WASAPI stream, well before the decoder teardown that destroy joins;
+     * hosts wait for it before another audible playback or microphone capture
+     * and treat a bounded wait that expires as a failure, not as silence.
+     * After cancel has returned, 0 is also proof of quiet: each potential Start
+     * reserves state 1 before checking cancellation, so a later reservation
+     * cannot start an engine after the caller has observed 0. State 1 includes
+     * an in-flight Start; never interpret it as quiet. A failed Stop retains 1
+     * until the endpoint is released, rather than falsely acknowledging it. */
+    int output_state;
+} JSTIAudioPlaybackSnapshot;
+/* Cheap cached read of atomics; safe from any thread at any rate, never
+ * blocks. The position is stable while paused, monotonic while playing and
+ * never advanced by queued or silent frames. Returns -1 for a null playback. */
+int jsti_audio_playback_snapshot(const JSTIAudioPlayback *playback, JSTIAudioPlaybackSnapshot *snapshot);
+/* Thread safe request; stops rendering promptly and unblocks decoding. */
+void jsti_audio_playback_cancel(JSTIAudioPlayback *playback);
+/* Serialize against caller operations, after start has returned. Cancels and
+ * joins both native threads; zero frees the job and the pinned input handle.
+ * Refuses to join itself from the completion callback and keeps the job and
+ * context owned by the caller on any failure, so retry outside the callback
+ * thread. Codec teardown may take a few seconds; hosts stop audibly through
+ * cancel first and destroy off their UI/actor threads. */
+int jsti_audio_playback_destroy(JSTIAudioPlayback *playback, char *error, size_t error_capacity);
+/* Capability probe for callers and tests: 1 when Windows reports an active
+ * default multimedia render endpoint, 0 when there is none, -1 when Windows
+ * could not answer. Enumeration only; nothing is activated. A 1 does not
+ * promise that a later playback succeeds, and playback failures must never be
+ * reinterpreted as a missing endpoint. */
+int jsti_audio_playback_endpoint_available(char *error, size_t error_capacity);
+/* Deterministic checks on short low-amplitude synthetic WAV files in a unique
+ * temporary directory, without any endpoint: fixed queue, input pinning and
+ * limits, Media Foundation exact/converted decode, decoded-sample bound,
+ * duration, cancellation of a stalled read, and the production render loop
+ * driven by a synthetic engine: exact output bytes with no trailing silence,
+ * source-position accounting through pause/resume/cancel/drain, pause before
+ * start, event timeout, start failure, immediate completion, refused second
+ * start, callback self-destroy refusal, and release of the pinned source.
+ * Needs Media Foundation. Never uses recordings, credentials or a speaker. */
+int jsti_audio_playback_self_test(char *error, size_t error_capacity);
+
+/* Deterministic native checks: Unicode, 16/24 kHz frame boundaries, silence,
+ * fixed queue capacity, writer drain, capture creation and sample-rate
+ * validation, invalid insertion targets. Does not use microphone, clipboard or
+ * real credentials. */
+int jsti_native_self_test(char *error, size_t error_capacity);
+int jsti_audio_devices_self_test(char *error, size_t error_capacity);
+/* Call on the UI thread from READY in smoke-test mode. Verifies native control
+ * bounds, history updates/events, search/filter selection handling, transcript
+ * variant action identities, an invisible settings Apply round-trip and the Text
+ * output dialog: every choice through its controls, Cancel/Escape/Enter,
+ * keyboard order, minimum bounds and its modal loop blocking recording.
+ * Restores history and text output configuration afterwards; never uses
+ * microphone, clipboard or credentials. */
+int jsti_window_self_test(char *error, size_t error_capacity);
+/* Smoke-test diagnostics only: writes a 32-bit BMP of this application's client
+ * window and controls. Call on the UI thread after READY. Never captures the
+ * desktop or another app; caller provides a smoke-test state without secrets. */
+int jsti_window_save_snapshot(const char *path, char *error, size_t error_capacity);
+
+/* Streaming SHA-256 through Windows CNG (BCrypt). One object per digest;
+ * finish writes 64 lowercase hex characters plus a terminator and ends the
+ * object's use. destroy is always required. Never logs input bytes. */
+typedef struct JSTISHA256 JSTISHA256;
+JSTISHA256 *jsti_sha256_create(char *error, size_t error_capacity);
+int jsti_sha256_update(JSTISHA256 *hasher, const void *bytes, size_t count, char *error, size_t error_capacity);
+int jsti_sha256_finish(JSTISHA256 *hasher, char *hex, size_t hex_capacity, char *error, size_t error_capacity);
+void jsti_sha256_destroy(JSTISHA256 *hasher);
+
+/* On-device transcription through whisper.cpp, loaded at run time.
+ *
+ * open loads whisper.dll (and the ggml DLLs beside it) from an absolute
+ * directory with a restricted search path, checks the exact pinned
+ * whisper.cpp version and registers ggml's dynamic backends from that
+ * directory only: every CPU variant and, when allow_gpu is 1 and the system
+ * Vulkan loader exists, Vulkan. A missing Vulkan loader is not an error; the
+ * CPU runs instead. The runtime is process-wide and stays loaded once opened;
+ * a second open must name the same directory. Implicit Vulkan layers (overlay
+ * and capture hooks) are disabled for this process unless the user already
+ * configured VK_LOADER_LAYERS_DISABLE. Returns NULL with an error when the
+ * runtime is absent or does not match. */
+typedef struct JSTIWhisperRuntime JSTIWhisperRuntime;
+JSTIWhisperRuntime *jsti_whisper_runtime_open(const char *directory, int allow_gpu,
+                                              char *error, size_t error_capacity);
+/* Writes a short UTF-8 description such as "whisper.cpp 1.9.4; GPU: Vulkan0
+ * (NVIDIA ...); CPU" listing the registered devices. */
+int jsti_whisper_runtime_describe(JSTIWhisperRuntime *runtime, char *text, size_t capacity);
+/* 1 when a GPU device is registered and would be used, otherwise 0. */
+int jsti_whisper_runtime_uses_gpu(JSTIWhisperRuntime *runtime);
+
+/* A cancellation token for one transcription. cancel is thread safe and may
+ * be called before, during or after transcribe. */
+typedef struct JSTIWhisperJob JSTIWhisperJob;
+JSTIWhisperJob *jsti_whisper_job_create(void);
+void jsti_whisper_job_cancel(JSTIWhisperJob *job);
+void jsti_whisper_job_destroy(JSTIWhisperJob *job);
+
+enum JSTIWhisperResult {
+    JSTI_WHISPER_OK = 0,
+    JSTI_WHISPER_FAILED = -1,
+    JSTI_WHISPER_CANCELLED = 1,
+    JSTI_WHISPER_MODEL_MISMATCH = 2
+};
+/* Transcribes 16 kHz mono float samples with the model at model_path (UTF-8,
+ * absolute; read through a wide-character path), whose pinned SHA-256 is the
+ * 64 hex digits model_sha256. Loading hashes every byte as it hands it to
+ * whisper.cpp, through one open file, and a model whose bytes do not match is
+ * freed unused with JSTI_WHISPER_MODEL_MISMATCH, so no byte that was not
+ * verified is ever recognised with. The loaded model is cached for later calls
+ * with the same path and digest and released when another model is used or
+ * release_model is called. Calls are serialised. language is a Whisper code
+ * such as "en", or NULL/empty to detect it; an unknown code detects it.
+ * On success *text receives a heap UTF-8 string owned by the caller (free with
+ * jsti_whisper_free_text). Returns a JSTIWhisperResult. */
+int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *model_path, const char *model_sha256,
+                            const float *samples, size_t sample_count, const char *language, int threads,
+                            JSTIWhisperJob *job, char **text, char *error, size_t error_capacity);
+void jsti_whisper_free_text(char *text);
+/* Frees the cached model, waiting for a running transcription to finish. */
+void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime);
+/* Frees the cached model only if it was loaded from model_path (the path given
+ * to jsti_whisper_transcribe), waiting for a running transcription to finish.
+ * The check and the release are atomic with loading, so a model loaded in its
+ * place stays cached. The loaded model's file is closed once loaded, so it may
+ * already be deleted. Returns 1 when that model was freed, 0 when another model
+ * or none is cached, and -1 for an invalid argument. */
+int jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime, const char *model_path);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

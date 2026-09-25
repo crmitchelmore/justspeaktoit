@@ -9,27 +9,10 @@ import SpeakCore
 /// serving queue. Internal (not private) because the connection-handling code in
 /// `AutomationServer.swift` calls them across the file split.
 extension AutomationServer {
+    /// Writes one reply. An oversized reply becomes the shared bounded
+    /// size-limit failure (see `AutomationWireExchange.responseFrame(for:)`).
     nonisolated static func send(_ response: AutomationResponse, to client: Int32) {
-        guard let payload = try? AutomationCoding.encoder().encode(response) else { return }
-        let frame: Data
-        do {
-            frame = try AutomationFraming.frame(payload)
-        } catch {
-            // History and transcript text are user data and can exceed the wire
-            // bound. Return a small structured failure rather than closing the
-            // socket and making the client misdiagnose an app timeout.
-            let failure = AutomationResponse.failure(
-                id: response.id,
-                command: response.command,
-                error: AutomationError(
-                    code: .internalError,
-                    message: "Automation reply exceeds the size limit. Request less history or a smaller result."
-                )
-            )
-            guard let fallbackPayload = try? AutomationCoding.encoder().encode(failure),
-                  let fallbackFrame = try? AutomationFraming.frame(fallbackPayload) else { return }
-            frame = fallbackFrame
-        }
+        guard let frame = AutomationWireExchange.responseFrame(for: response) else { return }
         try? Self.write(descriptor: client, data: frame)
     }
 
@@ -84,6 +67,20 @@ extension AutomationServer {
                 throw AutomationError(code: .internalError, message: "Could not write the automation reply.")
             }
         }
+    }
+}
+
+/// An accepted client socket as the shared wire exchange reads it. Its deadlines
+/// are the ones `configureAcceptedSocket` applied.
+struct AcceptedSocketStream: AutomationByteStream {
+    let descriptor: Int32
+
+    func readExactly(_ count: Int) throws -> Data {
+        try AutomationServer.readExactly(descriptor: self.descriptor, count: count)
+    }
+
+    func writeAll(_ data: Data) throws {
+        try AutomationServer.write(descriptor: self.descriptor, data: data)
     }
 }
 #endif

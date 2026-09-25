@@ -165,8 +165,7 @@ final class InterruptionFinalisationTests: XCTestCase {
     func testForegroundInterruption_finalisesOwnerAndPreservesPartialOnRealFailure() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
-        let coordinator = TranscriberCoordinator(sharedState: harness.shared, historyManager: harness.history)
-        coordinator.makeSession = { harness.session }
+        let coordinator = harness.makeCoordinator()
         harness.session.finish = { throw TestFailure.drain }
         try await coordinator.start()
         harness.session.emitPartial("Foreground words")
@@ -186,8 +185,7 @@ final class InterruptionFinalisationTests: XCTestCase {
     func testForegroundSuccess_hasNoErrorAndIgnoresRetiredOwnerCallbacks() async throws {
         let harness = try Harness()
         defer { harness.cleanUp() }
-        let coordinator = TranscriberCoordinator(sharedState: harness.shared, historyManager: harness.history)
-        coordinator.makeSession = { harness.session }
+        let coordinator = harness.makeCoordinator()
         try await coordinator.start()
         let oldError = harness.session.onError
         let oldPartial = harness.session.onPartialResult
@@ -247,6 +245,15 @@ private final class Harness {
             hasPolishingKey: { polishing }, polish: { text, _, _ in "Polished \(text)" }
         )
         service.makeSession = { [session] in session }
+    }
+
+    func makeCoordinator() -> TranscriberCoordinator {
+        let coordinator = TranscriberCoordinator(
+            sharedState: shared, historyManager: history,
+            ensureKeysLoaded: {}, liveActivitiesEnabled: { false }, headlessState: { .idle }
+        )
+        coordinator.makeSession = { [session] in session }
+        return coordinator
     }
 
     func start(destination: HardwareTriggerDestination) async throws {

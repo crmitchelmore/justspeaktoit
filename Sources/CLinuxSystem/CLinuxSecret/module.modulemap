@@ -1,0 +1,4 @@
+module CLinuxSecret [system] {
+    header "shim.h"
+    export *
+}

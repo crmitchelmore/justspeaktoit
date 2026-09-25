@@ -35,14 +35,16 @@ public struct MCPRequestHandler {
               let message = object as? [String: Any] else {
             return Self.encode(Self.errorResponse(id: nil, code: -32700, message: "Parse error: invalid JSON."))
         }
+        // Rebuilt rather than echoed as parsed, so a numeric id is written back as
+        // the same number on every platform (see `MCPJSONValue`).
+        let identifier = message["id"].map(MCPJSONValue.jsonRPCID)
         guard let method = message["method"] as? String else {
             return Self.encode(Self.errorResponse(
-                id: message["id"],
+                id: identifier,
                 code: -32600,
                 message: "Invalid request: missing \"method\"."
             ))
         }
-        let identifier = message["id"]
         let params = message["params"] as? [String: Any] ?? [:]
 
         // A message without an id is a notification: acknowledge by staying silent.
@@ -150,6 +152,8 @@ public struct MCPRequestHandler {
         switch callID {
         case let text as String: raw = text
         case let number as Int: raw = String(number)
+        case let number as Int64: raw = String(number)
+        case let number as UInt64: raw = String(number)
         case let number as Double: raw = String(number)
         default: raw = UUID().uuidString
         }
@@ -178,12 +182,15 @@ public struct MCPRequestHandler {
         ]
     }
 
+    /// The CLI's `--json` `data` object. Decoded into `MCPJSONValue` rather than
+    /// `JSONSerialization` objects so a count of 1 stays a number on Windows.
     private static func structuredContent(for result: AutomationResult) -> [String: Any]? {
         guard let data = try? AutomationCoding.encoder().encode(result),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let value = try? JSONDecoder().decode(MCPJSONValue.self, from: data),
+              case .object = value else {
             return nil
         }
-        return object
+        return value.foundationValue as? [String: Any]
     }
 
     /// Names from `toolDefinitions`, derived rather than restated so the two

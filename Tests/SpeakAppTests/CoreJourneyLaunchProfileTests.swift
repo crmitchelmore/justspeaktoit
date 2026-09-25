@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import SpeakCore
 import XCTest
 @testable import SpeakApp
 
@@ -49,6 +50,10 @@ final class CoreJourneyLaunchProfileTests: XCTestCase {
         let options = profile.bootstrapOptions()
         XCTAssertTrue(options.settingsOverride === profile.settings)
         XCTAssertEqual(options.keychainServiceOverride, profile.suiteName)
+        XCTAssertEqual(options.credentialStorage.legacyServices, [])
+        XCTAssertFalse(options.startsCredentialKeySync(on: .appStore))
+        XCTAssertTrue(options.fileManager === profile.fileManager)
+        XCTAssertTrue(options.defaults === profile.defaults)
         XCTAssertFalse(options.sweepsStagedLeftovers)
         XCTAssertEqual(options.permissionsOverride?.status(for: .microphone), .denied)
         XCTAssertEqual(options.permissionsOverride?.status(for: .inputMonitoring), .denied)

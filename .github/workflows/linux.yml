@@ -1,0 +1,176 @@
+name: Linux Desktop
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakLinux/**
+      - Sources/SpeakLinuxPlatform/**
+      - Sources/SpeakLinuxWebSocket/**
+      - Sources/CLinuxSupport/**
+      - Sources/CLinuxSystem/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakTestSupport/**
+      - Tests/SpeakLinuxPlatformTests/**
+      - Tests/SpeakLinuxWebSocketTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakPortableTests/**
+      - scripts/linux-*
+      - scripts/linux-local-runtime/**
+      - scripts/windows-local-runtime/**
+      - Sources/CWindowsSupport/whisper-cpp/**
+      - scripts/typecheck-windows-swift.sh
+      - scripts/verify-portable-core-boundary.py
+      - packaging/linux/**
+      - .github/workflows/linux.yml
+      - .github/workflows/linux-local-runtime.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakLinux/**
+      - Sources/SpeakLinuxPlatform/**
+      - Sources/SpeakLinuxWebSocket/**
+      - Sources/CLinuxSupport/**
+      - Sources/CLinuxSystem/**
+      - Sources/SpeakWindows/**
+      - Sources/SpeakWindowsPlatform/**
+      - Tests/SpeakDesktopHostTests/**
+      - Tests/SpeakDesktopSyncTests/**
+      - Tests/SpeakSyncTests/**
+      - Tests/SpeakTestSupport/**
+      - Tests/SpeakLinuxPlatformTests/**
+      - Tests/SpeakLinuxWebSocketTests/**
+      - Tests/SpeakDesktopTests/**
+      - Tests/SpeakPortableTests/**
+      - scripts/linux-*
+      - scripts/linux-local-runtime/**
+      - scripts/windows-local-runtime/**
+      - Sources/CWindowsSupport/whisper-cpp/**
+      - scripts/typecheck-windows-swift.sh
+      - scripts/verify-portable-core-boundary.py
+      - packaging/linux/**
+      - .github/workflows/linux.yml
+      - .github/workflows/linux-local-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  local-runtime:
+    uses: ./.github/workflows/linux-local-runtime.yml
+
+  linux-desktop:
+    name: Linux desktop (GTK 4, Swift 6.2.3)
+    needs: local-runtime
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.2.3-noble@sha256:6dd90eb2359663a2cde8f03e9951f488b23134b3b8fce20e9dcb6cada75dd803
+    timeout-minutes: 30
+    env:
+      SPEAK_LINUX_TARGET: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install GTK 4, libadwaita, PipeWire, keyring and X11 test tools
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+            libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev libx11-dev libxtst-dev libssl-dev pkg-config \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            dbus dbus-x11 gnome-keyring pipewire pipewire-pulse wireplumber pulseaudio-utils \
+            xvfb openbox zenity xdotool weston python3 python3-gi gir1.2-glib-2.0 \
+            fonts-cantarell adwaita-icon-theme
+
+      - name: Verify portable source boundary
+        run: python3 scripts/verify-portable-core-boundary.py
+
+      # The pinned whisper.cpp runtime, its JFK sample and a cached model
+      # folder, so the on-device tests run the real runtime instead of skipping.
+      - uses: actions/download-artifact@v5
+        with:
+          name: linux-local-runtime
+          path: local-runtime
+
+      # The pinned tiny model is downloaded by the app's own installer on a
+      # miss and verified against its SHA-256 on every run.
+      - name: Restore pinned local models
+        uses: actions/cache@v6
+        with:
+          path: local-models
+          key: local-models-linux-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+
+      # github.workspace names the host path; inside the container only
+      # $GITHUB_WORKSPACE is right.
+      - name: Point the on-device checks at the runtime
+        run: |
+          echo "JSTI_WHISPER_RUNTIME_DIRECTORY=$GITHUB_WORKSPACE/local-runtime/runtime" >> "$GITHUB_ENV"
+          echo "JSTI_WHISPER_TEST_AUDIO=$GITHUB_WORKSPACE/local-runtime/fixtures/jfk.wav" >> "$GITHUB_ENV"
+          echo "JSTI_LOCAL_MODEL_DIRECTORY=$GITHUB_WORKSPACE/local-models" >> "$GITHUB_ENV"
+
+      # The root Package.resolved pins the Apple graph. The Linux graph (SwiftNIO)
+      # is pinned separately, and --force-resolved-versions fails the build
+      # rather than float if those pins stop satisfying Package.swift.
+      - name: Pin the Linux dependency graph
+        run: cp packaging/linux/Package.resolved Package.resolved
+
+      - name: Build the Linux app
+        run: |
+          swift --version
+          swift build --configuration release --product SpeakLinux --jobs 4 --force-resolved-versions
+          cmp packaging/linux/Package.resolved Package.resolved
+
+      - name: Test shared core, desktop host and Linux adapters
+        run: swift test --configuration release --jobs 4 --force-resolved-versions
+
+      - name: Self-test and GTK window smoke test
+        env:
+          JSTI_UI_SNAPSHOT_PATH: ${{ runner.temp }}/linux-window.png
+        run: scripts/linux-desktop-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+
+      - name: Transcribe the JFK sample on-device with the pinned tiny model
+        timeout-minutes: 8
+        run: |
+          "$(swift build --configuration release --show-bin-path)/SpeakLinux" --local-transcription-self-test \
+            "$JSTI_WHISPER_TEST_AUDIO" --expect 'ask not what your country can do for you'
+
+      - name: GTK window smoke test on headless Wayland (Weston)
+        run: scripts/linux-wayland-smoke.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+
+      - name: Keyring, PipeWire capture, portal and X11 paste integration
+        run: scripts/linux-integration-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
+
+      - name: Type-check the Windows Swift targets against the shared host
+        env:
+          SPEAK_LINUX_TARGET: ""
+        run: scripts/typecheck-windows-swift.sh --jobs 4
+
+      - name: Upload window snapshot
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: linux-window-snapshot
+          path: ${{ runner.temp }}/linux-window.png
+          if-no-files-found: ignore

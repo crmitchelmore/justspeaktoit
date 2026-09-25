@@ -172,7 +172,7 @@ private final class OverflowOwnerFixture {
                 self.socket = socket
                 let client = OpenAIRealtimeWebSocketClient(
                     apiKey: "synthetic-test-key", model: "gpt-live-transcribe", language: nil, sampleRate: 24_000,
-                    makeSocket: { _ in socket }
+                    makeConnection: { _ in socket }
                 )
                 self.client = client
                 return client

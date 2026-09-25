@@ -239,10 +239,12 @@ whisper.cpp 1.9.4 runtime and pinned GGML models as Windows
   through one open file, and frees the model unused unless the digest matches
   the pin, so a file replaced or rewritten at any moment cannot supply
   unverified bytes. The cached model is reused only for the same path and
-  digest; the host then deletes a refused file and its receipt. Only a
-  regular file is read (checked on the open descriptor; a FIFO or device is
-  refused without waiting), and cancelling a recording stops a load within
-  1 MiB of reading and caches nothing.
+  digest; the host then deletes a refused file and its receipt. The file is
+  read on a thread of its own (`LinuxModelStream.c`), never while the runtime
+  holds its lock, so a read that stalls (a hung network or FUSE mount, a FIFO)
+  cannot keep a cancelled recording, or the next one, waiting; a device is
+  refused without being read. Cancelling stops a load within 1 MiB and
+  caches nothing.
 - **Runtime.** `LinuxWhisper.c` opens `libggml-base.so.0`, `libggml.so.0` and
   `libwhisper.so.1` by absolute path, in dependency order, from the executable's
   directory or `JSTI_WHISPER_RUNTIME_DIRECTORY`, so their sonames resolve to

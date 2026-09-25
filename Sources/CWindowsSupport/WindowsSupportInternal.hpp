@@ -22,6 +22,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <limits>
 
@@ -83,5 +84,37 @@ template<class T> struct COM {
     COM() = default;
     COM(const COM &) = delete;
     COM &operator=(const COM &) = delete;
+};
+
+// A model file read on a thread of its own (WindowsModelStream.cpp). A read
+// from a network share or a pipe can stall indefinitely, so the speech
+// runtime, which holds its lock while whisper.cpp loads, never reads the file:
+// it waits only on the stream's buffers, and `cancelled(data)` ends every wait.
+enum class ModelStreamFailure { none, unopened, notAFile, readError };
+constexpr size_t modelStreamChunk = static_cast<size_t>(1) << 20;
+constexpr size_t modelStreamPrefix = static_cast<size_t>(2) << 20;
+struct ModelStreamState;
+class ModelStream {
+public:
+    using Cancelled = bool (*)(void *data);
+    ModelStream() = default;
+    ModelStream(const ModelStream &) = delete;
+    ModelStream &operator=(const ModelStream &) = delete;
+    // Stops the reader at its next step; a reader blocked in a read frees the
+    // stream once that read returns.
+    ~ModelStream();
+    // Starts reading `path`; false, with `error`, when no reader could start.
+    bool open(const std::wstring &path, std::string &error);
+    // Waits until `bytes` are buffered or the file ended or failed; false
+    // when cancelled first.
+    bool wait(size_t bytes, Cancelled cancelled, void *data);
+    // Copies up to `size` bytes in order, waiting for the reader. Stops short
+    // at the end of the file, on a read error, or, setting `wasCancelled`,
+    // when it would wait after cancellation.
+    size_t take(void *output, size_t size, Cancelled cancelled, void *data, bool &wasCancelled);
+    ModelStreamFailure failure() const;
+
+private:
+    std::shared_ptr<ModelStreamState> state;
 };
 } // namespace jsti

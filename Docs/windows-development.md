@@ -443,9 +443,11 @@ reused; its sherpa and bzip2 path is not.
   file, and frees the model unused unless the digest matches the pin, so a file
   replaced or rewritten at any moment cannot supply unverified bytes. The
   cached model is reused only for the same path and digest; the host then
-  deletes a refused file and its receipt. Only a file on disk is read (a pipe
-  or device handle is refused), and cancelling a recording stops a load within
-  1 MiB of reading and caches nothing.
+  deletes a refused file and its receipt. The file is read on a thread of its
+  own (`WindowsModelStream.cpp`), never while the runtime holds its lock, so a
+  read that stalls (a network share, a pipe) cannot keep a cancelled
+  recording, or the next one, waiting; a character device is refused without
+  being read. Cancelling stops a load within 1 MiB and caches nothing.
   Models live in `%LOCALAPPDATA%\JustSpeakToIt\LocalModels` with the owner-only ACL.
 - **Runtime.** `WindowsWhisper.cpp` loads `whisper.dll` from the application
   directory with a restricted search path, refuses any `whisper_version()` other

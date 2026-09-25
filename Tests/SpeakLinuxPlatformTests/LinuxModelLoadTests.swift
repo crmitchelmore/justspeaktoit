@@ -5,8 +5,8 @@ import SpeakDesktop
 import XCTest
 @testable import SpeakLinuxPlatform
 
-/// How the real runtime loads a model: only a regular file, only bytes that
-/// match the pinned digest, and never past a cancellation. Uses the fixture
+/// How the real runtime loads a model: never from a device, only bytes that
+/// match the pinned digest, and never past a cancellation, however its reads go. Uses the fixture
 /// and CI variables `LinuxLocalTranscriptionTests` documents.
 final class LinuxModelLoadTests: XCTestCase {
     /// Loading hashes the bytes whisper.cpp reads through one open file. A copy
@@ -41,31 +41,85 @@ final class LinuxModelLoadTests: XCTestCase {
         try await fixture.recognise(fixture.installed)
     }
 
-    /// A model path that reaches a FIFO or a device is refused before any
-    /// read: opening never waits for a writer, and nothing that could stall a
-    /// read, and cancellation behind it, is loaded.
-    func testAModelThatIsNotARegularFileIsRefusedWithoutReadingIt() async throws {
+    /// A device, which may never stop producing bytes, is refused before any
+    /// read, and nothing is cached.
+    func testADeviceIsNeverReadAsAModel() async throws {
         let fixture = try await LocalRuntimeFixture.make()
         defer { fixture.cleanUp() }
-        let fifo = fixture.scratch.appendingPathComponent("stalled.bin")
-        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
         let device = fixture.scratch.appendingPathComponent("device.bin")
         try FileManager.default.createSymbolicLink(at: device, withDestinationURL: URL(fileURLWithPath: "/dev/zero"))
-        for model in [fifo, device] {
-            let started = Date()
-            do {
-                _ = try await fixture.runtime.transcribe(
-                    samples: fixture.samples, modelFile: model, modelSHA256: fixture.spec.artifact.sha256,
+        do {
+            _ = try await fixture.runtime.transcribe(
+                samples: fixture.samples, modelFile: device, modelSHA256: fixture.spec.artifact.sha256, language: "en"
+            )
+            XCTFail("A device was loaded as a model")
+        } catch let error as LinuxLocalTranscriptionError {
+            XCTAssertTrue(error.message.contains("not a file"), error.message)
+        }
+        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: device))
+        try await fixture.recognise(fixture.installed)
+    }
+
+    /// A read of the model that stalls, as on a hung network or FUSE file
+    /// system, never holds the runtime. A FIFO whose writer stops stalls the
+    /// runtime's reads for real: before any byte, inside the header, and inside
+    /// the tiny model's token embedding. Cancelling ends each load promptly, and
+    /// the next recognition runs while the stalled read is still blocked.
+    func testCancellingEndsALoadWhoseReadsStall() async throws {
+        let fixture = try await LocalRuntimeFixture.make()
+        defer { fixture.cleanUp() }
+        signal(SIGPIPE, SIG_IGN)
+        let bytes = try Data(contentsOf: fixture.installed)
+        for (index, stallAt) in [0, 100, bytes.count / 10].enumerated() {
+            let fifo = fixture.scratch.appendingPathComponent("stalled-\(index).bin")
+            XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+            // A write end held open makes the runtime's reads wait instead of ending.
+            let writer = open(fifo.path, O_RDWR)
+            XCTAssertGreaterThanOrEqual(writer, 0)
+            defer { close(writer) }
+            let loading = Task {
+                try await fixture.runtime.transcribe(
+                    samples: fixture.samples, modelFile: fifo, modelSHA256: fixture.spec.artifact.sha256,
                     language: "en"
                 )
-                XCTFail("\(model.lastPathComponent) was loaded as a model")
-            } catch let error as LinuxLocalTranscriptionError {
-                XCTAssertTrue(error.message.contains("not a regular file"), error.message)
             }
-            XCTAssertLessThan(Date().timeIntervalSince(started), 5, "\(model.lastPathComponent) was waited on")
-            XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: model))
+            let fed = try await feed(bytes.prefix(stallAt), into: writer)
+            XCTAssertTrue(fed, "The runtime stopped reading before byte \(stallAt)")
+            let cancelled = Date()
+            loading.cancel()
+            do {
+                _ = try await loading.value
+                XCTFail("A load whose reads stalled completed")
+            } catch is CancellationError {}
+            XCTAssertLessThan(Date().timeIntervalSince(cancelled), 5, "Cancelling waited on a stalled read")
+            XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: fifo))
+            try await fixture.recognise(fixture.installed)
         }
-        try await fixture.recognise(fixture.installed)
+    }
+
+    /// Writes `bytes` into the FIFO behind `writer`, then waits until they have
+    /// all been read. False when that takes more than 30 seconds.
+    private func feed(_ bytes: Data, into writer: Int32) async throws -> Bool {
+        let written = Task.detached { () -> Bool in
+            bytes.withUnsafeBytes { buffer in
+                var offset = 0
+                while offset < buffer.count {
+                    let count = write(writer, buffer.baseAddress! + offset, buffer.count - offset)
+                    guard count > 0 else { return false }
+                    offset += count
+                }
+                return true
+            }
+        }
+        guard await written.value else { return false }
+        let deadline = Date().addingTimeInterval(30)
+        var unread: Int32 = 1
+        while Date() < deadline {
+            guard ioctl(writer, UInt(FIONREAD), &unread) == 0 else { return false }
+            if unread == 0 { return true }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
     }
 
     /// Cancelling while a model loads stops reading within a chunk, even in

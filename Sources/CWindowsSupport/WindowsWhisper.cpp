@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <io.h>
 #include <mutex>
 #include <new>
 #include <thread>
@@ -108,76 +107,92 @@ bool fileExists(const std::wstring &path) {
     return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-// Hands whisper.cpp the model file's bytes through one open file and hashes
-// each byte as it is handed over, so the digest describes exactly the bytes
-// the runtime loaded, whatever happens to the file on disk meanwhile.
+// Hands whisper.cpp the model's bytes from a stream read on its own thread
+// (WindowsModelStream.cpp) and hashes each byte as it is handed over, so the
+// digest describes exactly the bytes the runtime loaded, whatever happens to
+// the file meanwhile, and no wait for the file outlasts a cancellation.
 struct FileLoader {
-    FILE *file = nullptr;
+    jsti::ModelStream stream;
     JSTISHA256 *hasher = nullptr;
     JSTIWhisperJob *job = nullptr;
     bool failed = false;
     bool abandoned = false; // Cancelled part way through a read.
+    bool atEnd = false;     // A read came up short, as feof reports.
 
     ~FileLoader() {
         if (hasher) jsti_sha256_destroy(hasher);
-        if (file) std::fclose(file);
     }
+
+    static bool jobCancelled(void *data) {
+        return static_cast<JSTIWhisperJob *>(data)->cancelled.load(std::memory_order_relaxed);
+    }
+    bool cancelled() const { return jobCancelled(job); }
 
     void hash(const void *bytes, size_t count) {
         char ignored[8];
         if (count && jsti_sha256_update(hasher, bytes, count, ignored, sizeof ignored) != 0) failed = true;
     }
-    // Reads in chunks, so a cancelled load stops within one: the rest of that
-    // read is zero-filled, never hashed or used, and the load is cancelled.
-    // Only tensor data spans more than a chunk; headers and the vocabulary
-    // are always read in full, so whisper.cpp never parses a filled value.
+    // Reads in chunks, so a cancelled load stops within one, or at once when
+    // it is waiting for the file: the rest of that read is zero-filled, never
+    // hashed or used, and the load is cancelled. whisper.cpp starts only once
+    // the header, mel filters and vocabulary are buffered, so a filled value
+    // can only land in a tensor, which whisper.cpp stops at before using.
     static size_t read(void *context, void *output, size_t size) {
         auto *loader = static_cast<FileLoader *>(context);
         auto *bytes = static_cast<unsigned char *>(output);
         size_t done = 0;
         while (done < size) {
-            if (done > 0 && loader->cancelled()) {
+            bool stopped = done > 0 && loader->cancelled();
+            size_t count = 0;
+            const size_t chunk = (std::min)(size - done, jsti::modelStreamChunk);
+            if (!stopped) {
+                count = loader->stream.take(bytes + done, chunk, jobCancelled, loader->job, stopped);
+                loader->hash(bytes + done, count);
+                done += count;
+            }
+            if (stopped) {
                 std::memset(bytes + done, 0, size - done);
                 loader->abandoned = true;
                 return size;
             }
-            const size_t chunk = (std::min)(size - done, static_cast<size_t>(1) << 20);
-            const size_t count = std::fread(bytes + done, 1, chunk, loader->file);
-            loader->hash(bytes + done, count);
-            done += count;
-            if (count < chunk) break;
+            if (count < chunk) {
+                loader->atEnd = true;
+                break;
+            }
         }
         return done;
     }
-    bool cancelled() const { return job->cancelled.load(std::memory_order_relaxed); }
     // whisper.cpp asks for the end of the file before each tensor, so a
     // cancelled load reports it there: whisper.cpp stops with tensors missing
-    // and fails, having been handed only real bytes.
+    // and fails before using any filled value.
     static bool eof(void *context) {
         auto *loader = static_cast<FileLoader *>(context);
-        return loader->cancelled() || std::feof(loader->file) != 0;
+        return loader->abandoned || loader->cancelled() || loader->atEnd;
     }
-    // whisper.cpp closes its loader when it finishes; the file stays open so
-    // any bytes it did not read are hashed too.
+    // whisper.cpp closes its loader when it finishes; the stream stays open
+    // so any bytes it did not read are hashed too.
     static void close(void *) {}
 
     // Hashes what the runtime left unread, then compares the whole file's
     // digest with expected: JSTI_WHISPER_OK on a match,
-    // JSTI_WHISPER_MODEL_MISMATCH otherwise, or JSTI_WHISPER_CANCELLED when
-    // the job is cancelled meanwhile.
+    // JSTI_WHISPER_MODEL_MISMATCH otherwise, JSTI_WHISPER_CANCELLED when the
+    // job is cancelled meanwhile, or JSTI_WHISPER_FAILED when the file could
+    // not be read.
     int finish(const char *expected) {
         if (abandoned) return JSTI_WHISPER_CANCELLED;
         std::vector<unsigned char> buffer(1 << 16);
-        size_t count;
         bool stopped = false;
-        while (!stopped && (count = std::fread(buffer.data(), 1, buffer.size(), file)) > 0) {
+        size_t count;
+        do {
+            count = stream.take(buffer.data(), buffer.size(), jobCancelled, job, stopped);
             hash(buffer.data(), count);
-            stopped = cancelled();
-        }
+            stopped = stopped || cancelled();
+        } while (!stopped && count == buffer.size());
         if (stopped) return JSTI_WHISPER_CANCELLED;
+        if (stream.failure() != jsti::ModelStreamFailure::none) return JSTI_WHISPER_FAILED;
         char digest[65] = {};
         char ignored[8];
-        if (std::ferror(file) || failed || jsti_sha256_finish(hasher, digest, sizeof digest, ignored, sizeof ignored) ||
+        if (failed || jsti_sha256_finish(hasher, digest, sizeof digest, ignored, sizeof ignored) ||
             _stricmp(digest, expected) != 0) {
             return JSTI_WHISPER_MODEL_MISMATCH;
         }
@@ -397,24 +412,24 @@ extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *
     try {
         // Loads unless the cache already holds this path's bytes with this
         // digest. A model whose bytes do not match is freed, never cached or
-        // used. Cancelling the job stops loading and hashing.
+        // used. The file is read on a thread of its own, so cancelling the job
+        // ends the load promptly even when a read of the file stalls.
         const std::string sha256 = lowercase(modelSHA256);
         if (!runtime->context || _wcsicmp(runtime->contextPath.c_str(), path.c_str()) != 0 ||
             runtime->contextSHA256 != sha256) {
             releaseContext(*runtime);
             FileLoader file;
             file.job = job;
-            if (_wfopen_s(&file.file, path.c_str(), L"rb") != 0 || !file.file) {
-                file.file = nullptr;
-                jsti::fail("The downloaded model file could not be opened.", error, capacity);
+            std::string failure;
+            if (!file.stream.open(path, failure)) {
+                jsti::fail(failure, error, capacity);
                 return JSTI_WHISPER_FAILED;
             }
-            // Only a file on disk is read: a pipe or device the path might
-            // reach could stall a read indefinitely, and cancellation with it.
-            const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(file.file)));
-            if (handle == INVALID_HANDLE_VALUE || GetFileType(handle) != FILE_TYPE_DISK) {
-                jsti::fail("The downloaded model is not a regular file, so it was not read.", error, capacity);
-                return JSTI_WHISPER_FAILED;
+            // whisper.cpp starts once the header, mel filters and vocabulary
+            // (under 1 MiB for every Whisper model) are buffered, so it never
+            // waits for the file, or meets a filled value, while parsing them.
+            if (!file.stream.wait(jsti::modelStreamPrefix, FileLoader::jobCancelled, job)) {
+                return JSTI_WHISPER_CANCELLED;
             }
             file.hasher = jsti_sha256_create(error, capacity);
             if (!file.hasher) return JSTI_WHISPER_FAILED;
@@ -426,14 +441,24 @@ extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *
             whisper_context_params parameters = runtime->api.contextDefaults();
             parameters.use_gpu = runtime->hasGPU;
             parameters.gpu_device = 0;
-            whisper_context *context = runtime->api.initWithParams(&loader, parameters);
+            // A file that could not be opened, or is not one, is never parsed.
+            whisper_context *context = file.stream.failure() == jsti::ModelStreamFailure::none
+                ? runtime->api.initWithParams(&loader, parameters) : nullptr;
             int status = file.finish(sha256.c_str());
             // A load stopped by cancellation holds only part of the model.
             if (status == JSTI_WHISPER_OK && !context && file.cancelled()) status = JSTI_WHISPER_CANCELLED;
             if (status != JSTI_WHISPER_OK) {
                 if (context) runtime->api.free(context);
+                const auto why = file.stream.failure();
                 if (status == JSTI_WHISPER_MODEL_MISMATCH) {
                     jsti::fail("The downloaded model file does not match its pinned SHA-256.", error, capacity);
+                } else if (status == JSTI_WHISPER_FAILED) {
+                    jsti::fail(why == jsti::ModelStreamFailure::notAFile
+                                   ? "The downloaded model is not a file, so it was not read."
+                                   : why == jsti::ModelStreamFailure::unopened
+                                   ? "The downloaded model file could not be opened."
+                                   : "The downloaded model file could not be read.",
+                               error, capacity);
                 }
                 return status;
             }

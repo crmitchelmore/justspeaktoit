@@ -37,4 +37,34 @@ int32_t jsti_local_models_self_test(char *error, size_t capacity);
 void jsti_cloud_sync_build(gpointer page);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
 
+/* LinuxModelStream.c: a model file read on a thread of its own, so the speech
+ * runtime, which holds its lock while whisper.cpp loads, never waits on the
+ * file itself. `cancelled(data)` ends every wait early. */
+typedef struct JSTIModelStream JSTIModelStream;
+typedef gboolean (*jsti_stream_cancelled_fn)(gpointer data);
+enum { JSTI_MODEL_STREAM_CHUNK = 1 << 20, JSTI_MODEL_STREAM_PREFIX = 2 << 20 };
+/* Starts reading `path`; NULL (with `error`) when no reader could start. */
+JSTIModelStream *jsti_model_stream_open(const char *path, char *error, size_t capacity);
+/* Waits until `bytes` are buffered or the file ended or failed; FALSE when
+ * cancelled first. */
+gboolean jsti_model_stream_wait(JSTIModelStream *stream, size_t bytes, jsti_stream_cancelled_fn cancelled,
+                                gpointer data);
+/* Copies up to `size` bytes in order, waiting for the reader. Stops short at
+ * the end of the file, on a read error, or, setting `*was_cancelled`, when it
+ * would wait after cancellation. */
+size_t jsti_model_stream_take(JSTIModelStream *stream, void *output, size_t size, jsti_stream_cancelled_fn cancelled,
+                              gpointer data, gboolean *was_cancelled);
+/* Why the stream failed, if it has: it could not open the path, the path was
+ * a device or anything else that is neither a regular file nor a FIFO, or a
+ * read failed. */
+typedef enum {
+    JSTI_MODEL_STREAM_OK,
+    JSTI_MODEL_STREAM_UNOPENED,
+    JSTI_MODEL_STREAM_NOT_A_FILE,
+    JSTI_MODEL_STREAM_READ_ERROR
+} JSTIModelStreamFailure;
+JSTIModelStreamFailure jsti_model_stream_failure(JSTIModelStream *stream);
+/* Stops the reader at its next step and drops the caller's reference. */
+void jsti_model_stream_close(JSTIModelStream *stream);
+
 #endif

@@ -435,8 +435,11 @@ reused; its sherpa and bzip2 path is not.
 - **Download.** `LocalModelInstaller` (SpeakDesktop) downloads with HTTP Range
   into a `.partial` file, resumes after a dropped connection, hashes the whole
   file with CNG, then renames it atomically and writes a receipt. A tampered or
-  truncated file is deleted and never loaded. Models live in
-  `%LOCALAPPDATA%\JustSpeakToIt\LocalModels` with the owner-only ACL.
+  truncated file is deleted and never loaded: the shared host hashes the whole
+  file again, off the controller, before the runtime can load it (first use in
+  a process, after another model, or once its size, modification time or file
+  ID changed), and a transcript is discarded if the file changed while in use.
+  Models live in `%LOCALAPPDATA%\JustSpeakToIt\LocalModels` with the owner-only ACL.
 - **Runtime.** `WindowsWhisper.cpp` loads `whisper.dll` from the application
   directory with a restricted search path, refuses any `whisper_version()` other
   than the pinned one, and registers ggml backends from that directory only.

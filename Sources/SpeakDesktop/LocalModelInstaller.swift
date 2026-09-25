@@ -15,6 +15,8 @@ public enum LocalModelInstallError: LocalizedError, Equatable {
     case sizeMismatch(expected: Int64, actual: Int64)
     case notInstalled(String)
     case unsafeFileName(String)
+    /// The file changed on disk while its digest was being computed.
+    case changedDuringVerification(String)
 
     public var errorDescription: String? {
         switch self {
@@ -26,6 +28,9 @@ public enum LocalModelInstallError: LocalizedError, Equatable {
             return "\(name) is not downloaded. Open Local models to download it."
         case .unsafeFileName(let name):
             return "Refusing to install a model file with an unsafe name: \(name)"
+        case .changedDuringVerification(let name):
+            return "\(name) changed on disk while it was being checked against its pinned SHA-256, "
+                + "so it was not used. Try again."
         }
     }
 }
@@ -122,7 +127,9 @@ public struct LocalModelInstaller: Sendable {
     }
 
     /// The installed file, after checking its receipt and size. The full
-    /// digest was checked when the receipt was written; `verify(_:)` rehashes.
+    /// digest was checked when the receipt was written; `verify(_:)` and
+    /// `verifyForLoading(_:)` rehash, and a host must rehash before its speech
+    /// runtime loads the file (see `LocalModelLoadVerification`).
     public func verifiedFile(for item: Item) throws -> URL {
         let file = fileURL(for: item)
         guard let data = try? Data(contentsOf: receiptURL(for: item)),

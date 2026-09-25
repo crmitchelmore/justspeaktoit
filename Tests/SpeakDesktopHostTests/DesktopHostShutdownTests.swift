@@ -60,6 +60,26 @@ final class StallingCapture: DesktopRecordingCapture, @unchecked Sendable {
     func destroy() {}
 }
 
+/// A live provider session that reports one transcript and records when it ends.
+final class RecordingLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+    let finalShape = TranscriptFinalShape.standaloneSegments
+    let finalisationBudget: TimeInterval? = nil
+    private let lock = NSLock()
+    private var ended = false
+    var isEnded: Bool { lock.withLock { ended } }
+
+    func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        onTranscript("Words spoken before closing", true)
+    }
+    func sendAudio(_ audioData: Data) {}
+    func stop() { lock.withLock { ended = true } }
+    func cancel() { stop() }
+    func finishAndWait() async -> String? {
+        stop()
+        return nil
+    }
+}
+
 /// Transcription that ignores cancellation and answers once its latch opens.
 final class StubbornEffects: DesktopHostEffects, @unchecked Sendable {
     typealias Platform = FakePlatform
@@ -68,6 +88,12 @@ final class StubbornEffects: DesktopHostEffects, @unchecked Sendable {
     private var performed: [String] = []
     private var stalling: StallingCapture?
     private var stallsNextCapture = false
+    private var live: RecordingLiveClient?
+    /// Served to the next live recording, when set.
+    var liveClient: RecordingLiveClient? {
+        get { lock.withLock { live } }
+        set { lock.withLock { live = newValue } }
+    }
     var outputs: [String] { lock.withLock { performed } }
     /// The last capture made after `stallNextCapture()`.
     var stalledCapture: StallingCapture? { lock.withLock { stalling } }
@@ -87,7 +113,7 @@ final class StubbornEffects: DesktopHostEffects, @unchecked Sendable {
     }
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
-    ) -> (any FinalizingStreamingTranscriptionClient)? { nil }
+    ) -> (any FinalizingStreamingTranscriptionClient)? { liveClient }
     func transcribe(
         _ request: DesktopHostTranscriptionRequest, with controller: DesktopHostController<FakePlatform>
     ) async throws -> TranscriptionResult {
@@ -261,6 +287,37 @@ final class DesktopHostShutdownTests: XCTestCase {
         }
         let audio = history.appendingPathComponent(pending.audioFilename)
         XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
+    }
+
+    func testClosingEndsTheLiveSessionEvenWhenStoppingTheCaptureStalls() async throws {
+        DesktopHostModels.configure(streamingQualified: true)
+        let liveIndex = try XCTUnwrap(DesktopHostModels.all.firstIndex {
+            DesktopHostModels.isLive($0.id) && DesktopLiveTranscription.route(forID: $0.id)?.provider != .azure
+        })
+        let model = DesktopHostModels.all[liveIndex].id
+        let credential = try XCTUnwrap(DesktopHostModels.provider(for: model))
+        FakeLog.shared.setKey("synthetic-key", name: credential.apiKeyIdentifier)
+        let client = RecordingLiveClient()
+        effects.liveClient = client
+        effects.stallNextCapture()
+        await controller.toggle(
+            target: "editor", modelIndex: liveIndex, deviceID: "", targetExecutablePath: nil,
+            textOutput: FakeTextOutput()
+        )
+        let capture = try XCTUnwrap(effects.stalledCapture)
+        XCTAssertFalse(client.isEnded, "The live session is streaming")
+        guard let report = try await close(within: 5) else {
+            XCTFail("close() is still waiting for a recording whose capture never stops")
+            return capture.release()
+        }
+        XCTAssertFalse(report.recordingSaved)
+        XCTAssertTrue(client.isEnded, "The provider session outlived closing")
+
+        // The live text so far is saved once the stalled stop ends.
+        capture.release()
+        try await waitFor("the late stop to save the live text") {
+            try await self.records().first?.result?.text == "Words spoken before closing"
+        }
     }
 
     func testWorkFinishingAfterCloseNeverReachesTheWindowOrTheField() async throws {

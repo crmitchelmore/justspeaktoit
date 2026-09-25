@@ -141,14 +141,17 @@ extension DesktopHostController {
     }
 
     /// Hands the open recording over for closing to stop and save; the
-    /// controller keeps no reference to its capture.
+    /// controller keeps no reference to its capture. Its live session ends
+    /// here, keeping the text so far, so no provider session outlives
+    /// closing even when stopping the capture stalls; later frames are dropped.
     private func takeRecordingOnClose() -> DesktopHostClosingRecording? {
         guard let active = recording else { return nil }
         recording = nil
         liveUpdates?.cancel()
         liveUpdates = nil
         return DesktopHostClosingRecording(
-            capture: active.capture, file: active.context.file, live: active.live, record: active.record
+            capture: active.capture, file: active.context.file, liveText: active.live?.cancel().text,
+            record: active.record
         )
     }
 
@@ -179,7 +182,8 @@ extension DesktopHostController {
 struct DesktopHostClosingRecording: @unchecked Sendable {
     let capture: any DesktopRecordingCapture
     let file: PCMRecordingFile
-    let live: DesktopLiveSession?
+    /// The cancelled live session's text, for a live recording.
+    let liveText: String?
     let record: DesktopRecordingStore.Record
 
     /// Stops capture, finalises the WAV and saves the record with its audio
@@ -192,9 +196,9 @@ struct DesktopHostClosingRecording: @unchecked Sendable {
         do { duration = try DesktopHostRecordingStop.stop(capture, file: file) } catch {
             record.failure = "\(record.failure ?? "Recording stopped.") \(error.localizedDescription)"
         }
-        if let live {
+        if let liveText {
             record.result = DesktopHostRecordingStop.liveResult(
-                live.cancel().text, model: record.modelIdentifier, duration: duration
+                liveText, model: record.modelIdentifier, duration: duration
             )
         }
         do { try await store.save(record) } catch {

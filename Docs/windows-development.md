@@ -443,7 +443,8 @@ reused; its sherpa and bzip2 path is not.
   file, and frees the model unused unless the digest matches the pin, so a file
   replaced or rewritten at any moment cannot supply unverified bytes. The
   cached model is reused only for the same path and digest; the host then
-  deletes a refused file and its receipt.
+  deletes a refused file and its receipt. Cancelling a recording stops a load
+  within 1 MiB of reading and caches nothing.
   Models live in `%LOCALAPPDATA%\JustSpeakToIt\LocalModels` with the owner-only ACL.
 - **Runtime.** `WindowsWhisper.cpp` loads `whisper.dll` from the application
   directory with a restricted search path, refuses any `whisper_version()` other

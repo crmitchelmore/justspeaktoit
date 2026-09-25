@@ -104,7 +104,10 @@ credential identifier in Windows Credential Manager. The app stores settings and
 durable recording records under
 `%LOCALAPPDATA%\JustSpeakToIt`. A recorded file and pending history record exist
 before network transcription starts, so an interrupted request does not discard
-the source recording. The microphone selector persists either the Windows default
+the source recording. Closing the window cancels every request and waits at
+most `DesktopHostShutdown.grace` (5 s) for them; one that ignores cancellation
+is left behind, cannot reach the window, and its record is recovered with its
+audio at the next launch. The microphone selector persists either the Windows default
 or an exact endpoint identifier; an unavailable selected device is reported
 without silently switching microphones. A coalesced native subscription refreshes
 the device list after connections, removals, names and default-device changes.

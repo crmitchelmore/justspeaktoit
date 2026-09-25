@@ -66,10 +66,13 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     private var isReady = false
     package var busy = false
     package var closed = false
-    private var shutdownComplete = false
+    /// Set once `close()` stops waiting; later calls return it.
+    var shutdownReport: DesktopHostShutdownReport?
+    /// How long `close()` waits in all for cancelled work to end.
+    package nonisolated let shutdownGrace: Duration
     package var activeOperations = 0
-    private var operationWaiters: [CheckedContinuation<Void, Never>] = []
-    private var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
+    var operationWaiters: [CheckedContinuation<Void, Never>] = []
+    var shutdownWaiters: [CheckedContinuation<Void, Never>] = []
     package var transcript = ""
     package var hotKeySession = DesktopHostHotKeySessionState()
     package var readAloudState = Platform.makeReadAloudState()
@@ -97,9 +100,12 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     /// installed by preparePlayback once this actor exists.
     package let playback = Platform.makePlayback()
 
-    package init(directory: URL, effects: any DesktopHostEffects<Platform>) throws {
+    package init(
+        directory: URL, effects: any DesktopHostEffects<Platform>, shutdownGrace: Duration = DesktopHostShutdown.grace
+    ) throws {
         self.directory = directory
         self.effects = effects
+        self.shutdownGrace = shutdownGrace
         self.store = try DesktopRecordingStore(directory: directory.appendingPathComponent("History"))
         self.uploadStaging = Platform.uploadStaging(directory: directory.appendingPathComponent("Uploads"))
         let profileStore = DesktopDictationProfileStore(directory: directory)
@@ -247,53 +253,6 @@ extension DesktopHostController {
         } catch { update(error.localizedDescription, state: 0) }
     }
 
-}
-
-extension DesktopHostController {
-    package func close() async {
-        if closed {
-            if !shutdownComplete {
-                await withCheckedContinuation { shutdownWaiters.append($0) }
-            }
-            return
-        }
-        closed = true
-        modelDiscoveryTask?.cancel()
-        cancelOutput()
-        cancellationRequested = true
-        transcriptionTask?.cancel()
-        postProcessingTask?.cancel()
-        liveFinalisation?.cancel()
-        if var record = recording?.record {
-            let live = recording?.live
-            record.failure = "Recording stopped when the app closed. Audio retained."
-            var duration: TimeInterval = 0
-            do { duration = try stopCapture()?.duration ?? 0 } catch {
-                record.failure = "\(record.failure ?? "Recording stopped.") \(error.localizedDescription)"
-            }
-            if let live {
-                record.result = liveResult(live.cancel().text, record: record, duration: duration)
-            }
-            do { try await saveRecord(record) } catch {
-                FileHandle.standardError.write(Data("Could not persist recording on close.\n".utf8))
-            }
-        }
-        // Includes admitted opens and every background release attempt.
-        do { try await playback.close() } catch {
-            FileHandle.standardError.write(Data("Playback cleanup failed: \(error.localizedDescription)\n".utf8))
-        }
-        // The network task alone is insufficient: its owner must also finish
-        // success/failure persistence and release native/file resources.
-        if activeOperations > 0 {
-            await withCheckedContinuation { operationWaiters.append($0) }
-        }
-        await modelDiscoveryTask?.value
-        modelDiscoveryTask = nil
-        shutdownComplete = true
-        let waiters = shutdownWaiters
-        shutdownWaiters.removeAll()
-        waiters.forEach { $0.resume() }
-    }
 }
 
 extension DesktopHostController {

@@ -105,7 +105,10 @@ offline, so a submission must also list them as git sources.
 Policy carried over from Windows: the target and text-output choice are fixed
 when dictation starts; Record in the app's own window never pastes (the app
 has focus) and offers Copy; failures leave the transcript on the clipboard and
-in History; output never runs during shutdown. On Wayland the focused app is
+in History; output never runs during shutdown. Closing cancels every request
+and waits at most `DesktopHostShutdown.grace` (5 s); a request that ignores
+cancellation cannot reach the window, and its record is recovered with its
+audio at the next launch. On Wayland the focused app is
 not visible to clients, so the paste goes to whatever is focused at delivery,
 never to JustSpeakToIt's own window; focus re-verification and per-app
 profiles are X11-only.

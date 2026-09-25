@@ -173,4 +173,50 @@ final class CloudKitWebServicesClientTests: XCTestCase {
             )
         ) { XCTAssertEqual($0 as? CloudKitWebServicesConfigurationError, .invalidBaseURL) }
     }
+
+    func testCredentialBearingRequestsGoOnlyToCloudKitOrThisComputer() throws {
+        let accepted = [
+            "https://api.apple-cloudkit.com", "https://api.apple-cloudkit.com/", "https://API.Apple-CloudKit.com:443",
+            "http://127.0.0.1:8080", "https://127.0.0.1:8443", "http://localhost:1234", "http://[::1]:8080",
+            "https://[::1]"
+        ]
+        for text in accepted {
+            let url = try XCTUnwrap(URL(string: text))
+            XCTAssertNoThrow(
+                try CloudKitWebServicesConfiguration(
+                    containerIdentifier: CloudKitWebFixture.containerIdentifier, environment: .production,
+                    apiToken: "x", baseURL: url
+                ),
+                text
+            )
+        }
+        let refused = [
+            // Another HTTPS service, including look-alikes of the CloudKit host.
+            "https://api.example.invalid", "https://icloud.com", "https://api.apple-cloudkit.com.example.invalid",
+            "https://example.invalid/api.apple-cloudkit.com", "https://api.apple-cloudkit.com@example.invalid",
+            "https://127.0.0.1.example.invalid", "https://api-apple-cloudkit.com",
+            // The CloudKit host, but not its service endpoint.
+            "http://api.apple-cloudkit.com", "https://api.apple-cloudkit.com:8443", "https://api.apple-cloudkit.com/v2",
+            "https://user:secret@api.apple-cloudkit.com", "https://api.apple-cloudkit.com/?ckAPIToken=x",
+            "https://api.apple-cloudkit.com/#fragment",
+            // Loopback only by its exact names, and only over HTTP(S).
+            "ftp://127.0.0.1", "http://127.0.0.2", "http://user@127.0.0.1:8080", "http://127.0.0.1:8080/?x=1"
+        ]
+        for text in refused {
+            let url = try XCTUnwrap(URL(string: text), text)
+            XCTAssertThrowsError(
+                try CloudKitWebServicesConfiguration(
+                    containerIdentifier: CloudKitWebFixture.containerIdentifier, environment: .production,
+                    apiToken: "x", baseURL: url
+                ),
+                text
+            ) { XCTAssertEqual($0 as? CloudKitWebServicesConfigurationError, .invalidBaseURL, text) }
+        }
+        XCTAssertEqual(
+            try CloudKitWebServicesConfiguration(
+                family: .macOS, train: .stable, environment: .production, apiToken: "x"
+            ).baseURL,
+            CloudKitWebServicesConfiguration.defaultBaseURL
+        )
+    }
 }

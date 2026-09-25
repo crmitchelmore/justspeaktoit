@@ -22,6 +22,8 @@ public struct CloudKitWebServicesConfiguration: Equatable, Sendable {
     public let apiToken: String
     public let baseURL: URL
 
+    /// `baseURL` must be `defaultBaseURL`, or a loopback address for a local
+    /// fake server in tests; any other base throws `invalidBaseURL`.
     public init(
         containerIdentifier: String,
         environment: Environment,
@@ -58,17 +60,30 @@ public struct CloudKitWebServicesConfiguration: Equatable, Sendable {
         )
     }
 
-    /// HTTPS only, except plain HTTP to this machine's loopback address so a
-    /// native transport can be exercised against a local fake server. Tokens
-    /// never leave the machine over plain HTTP.
+    /// Every request carries the developer API token and, for private data,
+    /// the user's web auth token, so the base is CloudKit's own service
+    /// endpoint (`defaultBaseURL`) and nothing else. The one exception is this
+    /// computer's loopback address, over HTTP or HTTPS, so native transports
+    /// can be exercised against a local fake server; tokens sent there never
+    /// leave the machine. Credentials, queries and fragments in the base are
+    /// refused everywhere.
     static func isAllowedBaseURL(_ url: URL) -> Bool {
-        guard let host = url.host, !host.isEmpty, url.query == nil else { return false }
-        switch url.scheme?.lowercased() {
-        case "https": return true
-        case "http": return ["127.0.0.1", "localhost", "::1", "[::1]"].contains(host.lowercased())
-        default: return false
+        guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased(), !host.isEmpty,
+              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else {
+            return false
         }
+        if loopbackHosts.contains(host) {
+            return scheme == "http" || scheme == "https"
+        }
+        return scheme == "https" && host == serviceHost && (url.port == nil || url.port == 443)
+            && (url.path.isEmpty || url.path == "/")
     }
+
+    /// The host of `defaultBaseURL`, the only remote host requests may reach.
+    static let serviceHost = "api.apple-cloudkit.com"
+
+    /// This computer's loopback names, for local fake servers in tests.
+    static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
 
     /// Container identifiers begin with `iCloud.`, as the web service requires.
     static func isValidContainerIdentifier(_ identifier: String) -> Bool {
@@ -94,7 +109,8 @@ extension CloudKitWebServicesConfigurationError: LocalizedError {
         case .invalidContainerIdentifier(let identifier):
             return "“\(identifier)” is not a CloudKit container identifier."
         case .invalidBaseURL:
-            return "The CloudKit Web Services address must be an HTTPS URL without a query."
+            return "CloudKit Web Services requests go only to https://api.apple-cloudkit.com, "
+                + "or to this computer's loopback address for local tests."
         }
     }
 }

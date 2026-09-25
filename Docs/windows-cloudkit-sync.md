@@ -81,6 +81,13 @@ From Apple's
 - Requests go to
   `https://api.apple-cloudkit.com/database/1/<container>/<environment>/<database>/…`
   with `ckAPIToken` and, for private data, `ckWebAuthToken` in the query.
+  Because every request carries both tokens, `CloudKitWebServicesConfiguration`
+  accepts no other base URL: only `https://api.apple-cloudkit.com` (port 443,
+  no path), or `127.0.0.1`, `localhost` or `::1` over HTTP or HTTPS for the
+  local fake servers in tests. Credentials, a query or a fragment in the base
+  are refused too. Desktop builds never set a base; neither the build nor an
+  environment variable can move it. `CloudKitWebServicesClientTests` holds the
+  configuration to that, including look-alike hosts, other ports and paths.
 - Without a session the service answers `421 AUTHENTICATION_REQUIRED` with a
   `redirectURL`. After an Apple ID sign-in the browser is redirected to the API
   token's sign-in callback with `?ckWebAuthToken=…`. Each token is good for one

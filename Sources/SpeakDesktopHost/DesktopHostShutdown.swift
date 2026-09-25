@@ -113,8 +113,9 @@ extension DesktopHostController {
         postProcessingTask?.cancel()
         liveFinalisation?.cancel()
         var report = DesktopHostShutdownReport()
-        // Stopping capture and writing the WAV and record run off this actor,
-        // so a stalled device or file system cannot hold closing past its deadline.
+        // Ending the live session, stopping capture and writing the WAV and
+        // record run off this actor, so a provider, device or file system that
+        // stalls cannot hold closing past its deadline.
         if let open = takeRecordingOnClose() {
             let store = store
             report.recordingSaved = await DesktopHostShutdown.wait(until: deadline) { await open.save(in: store) }
@@ -140,18 +141,15 @@ extension DesktopHostController {
         return report
     }
 
-    /// Hands the open recording over for closing to stop and save; the
-    /// controller keeps no reference to its capture. Its live session ends
-    /// here, keeping the text so far, so no provider session outlives
-    /// closing even when stopping the capture stalls; later frames are dropped.
+    /// Hands the open recording over for closing to end, stop and save; the
+    /// controller keeps no reference to its capture or live session.
     private func takeRecordingOnClose() -> DesktopHostClosingRecording? {
         guard let active = recording else { return nil }
         recording = nil
         liveUpdates?.cancel()
         liveUpdates = nil
         return DesktopHostClosingRecording(
-            capture: active.capture, file: active.context.file, liveText: active.live?.cancel().text,
-            record: active.record
+            capture: active.capture, file: active.context.file, live: active.live, record: active.record
         )
     }
 
@@ -176,27 +174,30 @@ extension DesktopHostController {
 }
 
 /// The recording open when the controller closed. The controller hands over
-/// its only reference to the capture, and nothing else touches it afterwards,
-/// so stopping it on another thread keeps the serial start, stop and destroy
-/// order `DesktopRecordingCapture` requires.
+/// its only references to the capture and live session, and nothing else
+/// touches them afterwards, so stopping the capture on another thread keeps
+/// the serial start, stop and destroy order `DesktopRecordingCapture` requires.
 struct DesktopHostClosingRecording: @unchecked Sendable {
     let capture: any DesktopRecordingCapture
     let file: PCMRecordingFile
-    /// The cancelled live session's text, for a live recording.
-    let liveText: String?
+    let live: DesktopLiveSession?
     let record: DesktopRecordingStore.Record
 
-    /// Stops capture, finalises the WAV and saves the record with its audio
+    /// Ends the live session, keeping its text so far, while it stops capture
+    /// and finalises the WAV; neither waits for the other, so a stalled
+    /// capture cannot keep a provider session open and a provider slow to
+    /// cancel cannot keep the microphone. Then saves the record with its audio
     /// and any live text. If this outlives closing, the record saved when the
     /// recording began is recovered with its audio at the next launch.
     func save(in store: DesktopRecordingStore) async {
+        async let liveText = live?.cancel().text
         var record = record
         record.failure = "Recording stopped when the app closed. Audio retained."
         var duration: TimeInterval = 0
         do { duration = try DesktopHostRecordingStop.stop(capture, file: file) } catch {
             record.failure = "\(record.failure ?? "Recording stopped.") \(error.localizedDescription)"
         }
-        if let liveText {
+        if let liveText = await liveText {
             record.result = DesktopHostRecordingStop.liveResult(
                 liveText, model: record.modelIdentifier, duration: duration
             )

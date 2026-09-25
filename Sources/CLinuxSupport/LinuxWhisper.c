@@ -6,11 +6,13 @@
 
 #include <dirent.h>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /*
  * whisper.cpp loaded at run time from one directory. The struct layouts the
@@ -414,6 +416,27 @@ static int32_t reader_finish(HashingReader *reader, const char *expected) {
     return JSTI_WHISPER_OK;
 }
 
+/* Opens the model at `path` only if it is a regular file, checked on the open
+ * descriptor. Opening never waits (a FIFO would wait for a writer), and a
+ * FIFO, socket or device, whose reads could stall indefinitely, is refused
+ * before any read, so every read of a model makes progress and cancellation
+ * is never stuck behind one. Sets `*not_regular` when that refused it. */
+static FILE *open_regular_file(const char *path, gboolean *not_regular) {
+    *not_regular = FALSE;
+    int descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK);
+    if (descriptor < 0) return NULL;
+    struct stat info;
+    int flags = fcntl(descriptor, F_GETFL);
+    if (fstat(descriptor, &info) != 0 || !S_ISREG(info.st_mode)) {
+        *not_regular = TRUE;
+    } else if (flags != -1 && fcntl(descriptor, F_SETFL, flags & ~O_NONBLOCK) == 0) {
+        FILE *file = fdopen(descriptor, "rb");
+        if (file != NULL) return file;
+    }
+    close(descriptor);
+    return NULL;
+}
+
 static gboolean is_sha256_hex(const char *text) {
     if (text == NULL || strlen(text) != 64) return FALSE;
     for (const char *cursor = text; *cursor != '\0'; cursor++) {
@@ -439,9 +462,11 @@ static int32_t load_model(JSTIWhisperRuntime *runtime, const char *path, const c
         return JSTI_WHISPER_OK;
     }
     release_context(runtime);
-    HashingReader reader = { .file = fopen(path, "rbe"), .hasher = NULL, .job = job };
+    gboolean not_regular = FALSE;
+    HashingReader reader = { .file = open_regular_file(path, &not_regular), .hasher = NULL, .job = job };
     if (reader.file == NULL) {
-        jsti_set_error(error, capacity, "The downloaded model file could not be opened.");
+        jsti_set_error(error, capacity, not_regular ? "The downloaded model is not a regular file, so it was not read."
+                                                    : "The downloaded model file could not be opened.");
         return JSTI_WHISPER_FAILED;
     }
     reader.hasher = jsti_sha256_create(error, capacity);

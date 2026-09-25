@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <io.h>
 #include <mutex>
 #include <new>
 #include <thread>
@@ -406,6 +407,13 @@ extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *
             if (_wfopen_s(&file.file, path.c_str(), L"rb") != 0 || !file.file) {
                 file.file = nullptr;
                 jsti::fail("The downloaded model file could not be opened.", error, capacity);
+                return JSTI_WHISPER_FAILED;
+            }
+            // Only a file on disk is read: a pipe or device the path might
+            // reach could stall a read indefinitely, and cancellation with it.
+            const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(file.file)));
+            if (handle == INVALID_HANDLE_VALUE || GetFileType(handle) != FILE_TYPE_DISK) {
+                jsti::fail("The downloaded model is not a regular file, so it was not read.", error, capacity);
                 return JSTI_WHISPER_FAILED;
             }
             file.hasher = jsti_sha256_create(error, capacity);

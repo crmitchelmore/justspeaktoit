@@ -60,20 +60,31 @@ final class StallingCapture: DesktopRecordingCapture, @unchecked Sendable {
     func destroy() {}
 }
 
-/// A live provider session that reports one transcript and records when it ends.
+/// A live provider session that reports one transcript and records when it
+/// ends. With `blocksCancellation`, cancelling blocks its thread until
+/// `releaseCancellation()`, like a provider stuck tearing down its socket.
 final class RecordingLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     let finalShape = TranscriptFinalShape.standaloneSegments
     let finalisationBudget: TimeInterval? = nil
     private let lock = NSLock()
+    private let cancellationGate = DispatchSemaphore(value: 0)
+    private let blocksCancellation: Bool
     private var ended = false
     var isEnded: Bool { lock.withLock { ended } }
+
+    init(blocksCancellation: Bool = false) { self.blocksCancellation = blocksCancellation }
+
+    func releaseCancellation() { cancellationGate.signal() }
 
     func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         onTranscript("Words spoken before closing", true)
     }
     func sendAudio(_ audioData: Data) {}
     func stop() { lock.withLock { ended = true } }
-    func cancel() { stop() }
+    func cancel() {
+        if blocksCancellation { cancellationGate.wait() }
+        stop()
+    }
     func finishAndWait() async -> String? {
         stop()
         return nil
@@ -164,6 +175,7 @@ final class DesktopHostShutdownTests: XCTestCase {
     override func tearDown() async throws {
         effects.latch.open()
         effects.stalledCapture?.release()
+        effects.liveClient?.releaseCancellation()
         await controller.close()
         try? FileManager.default.removeItem(at: directory)
         DesktopHostModels.configure(streamingQualified: true)
@@ -289,7 +301,8 @@ final class DesktopHostShutdownTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
     }
 
-    func testClosingEndsTheLiveSessionEvenWhenStoppingTheCaptureStalls() async throws {
+    /// Starts a live recording with `client` on a model that needs no Azure resource.
+    private func startLiveRecording(with client: RecordingLiveClient) async throws {
         DesktopHostModels.configure(streamingQualified: true)
         let liveIndex = try XCTUnwrap(DesktopHostModels.all.firstIndex {
             DesktopHostModels.isLive($0.id) && DesktopLiveTranscription.route(forID: $0.id)?.provider != .azure
@@ -297,13 +310,35 @@ final class DesktopHostShutdownTests: XCTestCase {
         let model = DesktopHostModels.all[liveIndex].id
         let credential = try XCTUnwrap(DesktopHostModels.provider(for: model))
         FakeLog.shared.setKey("synthetic-key", name: credential.apiKeyIdentifier)
-        let client = RecordingLiveClient()
         effects.liveClient = client
-        effects.stallNextCapture()
         await controller.toggle(
             target: "editor", modelIndex: liveIndex, deviceID: "", targetExecutablePath: nil,
             textOutput: FakeTextOutput()
         )
+    }
+
+    func testCloseEndsAfterItsGraceWhenTheLiveProviderBlocksInCancellation() async throws {
+        let client = RecordingLiveClient(blocksCancellation: true)
+        try await startLiveRecording(with: client)
+        let started = ContinuousClock.now
+        guard let report = try await close(within: 5) else {
+            XCTFail("close() is still waiting for a provider that never finishes cancelling")
+            return client.releaseCancellation()
+        }
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(3))
+        XCTAssertFalse(report.recordingSaved)
+
+        // Once the provider lets go, the recording is saved with its audio and live text.
+        client.releaseCancellation()
+        try await waitFor("the late save of the live recording") {
+            try await self.records().first?.result?.text == "Words spoken before closing"
+        }
+    }
+
+    func testClosingEndsTheLiveSessionEvenWhenStoppingTheCaptureStalls() async throws {
+        let client = RecordingLiveClient()
+        effects.stallNextCapture()
+        try await startLiveRecording(with: client)
         let capture = try XCTUnwrap(effects.stalledCapture)
         XCTAssertFalse(client.isEnded, "The live session is streaming")
         guard let report = try await close(within: 5) else {

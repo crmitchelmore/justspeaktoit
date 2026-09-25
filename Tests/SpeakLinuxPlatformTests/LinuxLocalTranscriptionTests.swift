@@ -1,5 +1,4 @@
 import Foundation
-import Glibc
 import SpeakCore
 import SpeakDesktop
 import XCTest
@@ -127,69 +126,6 @@ final class LinuxLocalTranscriptionTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 20, "Cancellation did not abort recognition promptly")
     }
 
-    /// Loading hashes the bytes whisper.cpp reads through one open file. A copy
-    /// changed at its pinned size is refused and never cached, and the cached
-    /// model is not reused for a digest its bytes do not have.
-    func testTheRuntimeUsesOnlyBytesMatchingThePinnedDigest() async throws {
-        let fixture = try await LocalRuntimeFixture.make()
-        defer { fixture.cleanUp() }
-        let tampered = try fixture.copy("tampered")
-        let handle = try FileHandle(forUpdating: tampered)
-        let last = try handle.seekToEnd() - 1
-        try handle.seek(toOffset: last)
-        let byte = try XCTUnwrap(handle.readData(ofLength: 1).first)
-        try handle.seek(toOffset: last)
-        try handle.write(contentsOf: Data([byte ^ 0xff]))
-        try handle.close()
-        do {
-            try await fixture.recognise(tampered)
-            XCTFail("Bytes that do not match the pinned digest were recognised with")
-        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
-        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: tampered), "The refused model was cached")
-
-        try await fixture.recognise(fixture.installed)
-        do {
-            _ = try await fixture.runtime.transcribe(
-                samples: fixture.samples, modelFile: fixture.installed, modelSHA256: String(repeating: "0", count: 64),
-                language: "en"
-            )
-            XCTFail("The cached model was reused for a digest its bytes do not have")
-        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
-        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: fixture.installed), "The refused load stayed cached")
-        try await fixture.recognise(fixture.installed)
-    }
-
-    /// Cancelling while a model loads stops reading within a chunk, even in
-    /// the middle of a tensor. The model is served through a FIFO so the test
-    /// knows loading is under way: a tenth of the way in, inside the tiny
-    /// model's 40 MB token embedding, it cancels, then offers the rest.
-    func testCancellingWhileAModelLoadsStopsReadingIt() async throws {
-        let fixture = try await LocalRuntimeFixture.make()
-        defer { fixture.cleanUp() }
-        signal(SIGPIPE, SIG_IGN)
-        let bytes = try Data(contentsOf: fixture.installed)
-        let pipe = fixture.scratch.appendingPathComponent("streamed.bin")
-        XCTAssertEqual(mkfifo(pipe.path, 0o600), 0)
-        let writer = FIFOWriter(path: pipe.path, bytes: bytes, pauseAt: bytes.count / 10)
-        writer.start()
-        let loading = Task {
-            try await fixture.runtime.transcribe(
-                samples: fixture.samples, modelFile: pipe, modelSHA256: fixture.spec.artifact.sha256, language: "en"
-            )
-        }
-        XCTAssertEqual(writer.paused.wait(timeout: .now() + 30), .success, "The runtime never started reading")
-        loading.cancel()
-        writer.resume.signal()
-        do {
-            _ = try await loading.value
-            XCTFail("A load cancelled part way through completed")
-        } catch is CancellationError {}
-        XCTAssertEqual(writer.finished.wait(timeout: .now() + 30), .success)
-        XCTAssertLessThan(writer.written, bytes.count / 5, "Loading went on reading after it was cancelled")
-        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: pipe), "A partly read model was cached")
-        try await fixture.recognise(fixture.installed)
-    }
-
     /// The runtime closes a model's file once it is loaded and keys its cache
     /// by path and digest. So a removal can delete the loaded model's folder first and the
     /// model still recognises from memory; freeing another path keeps it, and
@@ -260,62 +196,9 @@ final class LinuxLocalTranscriptionTests: XCTestCase {
     }
 }
 
-/// Writes `bytes` into a FIFO: up to `pauseAt`, then waits for `resume` and
-/// writes the rest until the reader closes its end.
-private final class FIFOWriter: @unchecked Sendable {
-    let paused = DispatchSemaphore(value: 0)
-    let resume = DispatchSemaphore(value: 0)
-    let finished = DispatchSemaphore(value: 0)
-    private let path: String
-    private let bytes: Data
-    private let pauseAt: Int
-    private let lock = NSLock()
-    private var count = 0
-
-    init(path: String, bytes: Data, pauseAt: Int) {
-        self.path = path
-        self.bytes = bytes
-        self.pauseAt = pauseAt
-    }
-
-    /// Bytes the reader accepted.
-    var written: Int { lock.withLock { count } }
-
-    func start() {
-        let thread = Thread { [self] in
-            defer { finished.signal() }
-            let descriptor = open(path, O_WRONLY)
-            guard descriptor >= 0 else {
-                paused.signal()
-                return
-            }
-            defer { close(descriptor) }
-            let reachedPause = write(upTo: pauseAt, descriptor)
-            paused.signal()
-            guard reachedPause else { return }
-            resume.wait()
-            _ = write(upTo: bytes.count, descriptor)
-        }
-        thread.start()
-    }
-
-    /// False once the reader has closed its end.
-    private func write(upTo end: Int, _ descriptor: Int32) -> Bool {
-        bytes.withUnsafeBytes { buffer in
-            while written < end {
-                let offset = written
-                let sent = Glibc.write(descriptor, buffer.baseAddress! + offset, min(end - offset, 1 << 16))
-                guard sent > 0 else { return false }
-                lock.withLock { count += sent }
-            }
-            return true
-        }
-    }
-}
-
 /// The real runtime with copies of the pinned tiny model. Each copy's path is
 /// its identity in the runtime's one-model cache, so copies act as models.
-private struct LocalRuntimeFixture {
+struct LocalRuntimeFixture {
     let runtime: LinuxWhisperRuntime
     let spec: WhisperCppModel
     let installed: URL

@@ -25,6 +25,9 @@ package struct DesktopHostLocalModelsState<Runtime: DesktopHostLocalRuntime> {
     /// The models recordings and transcriptions use, and the downloads and
     /// removals that own model files.
     package var ownership = LocalModelOwnership()
+    /// The model file last rehashed for the runtime to load; any other, or a
+    /// changed one, is rehashed before recognition.
+    package var loadVerification = LocalModelLoadVerification()
     /// Deletes removed models and frees the runtime's cache off the actor.
     package let teardown = LocalModelTeardown()
     /// Set once the window can show Local models; nothing is presented before.

@@ -45,6 +45,7 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
 
     private func finishRemoval(_ spec: WhisperCppModel, failure: String?) {
         localModels.ownership.endRemoval(spec.catalogueID)
+        localModels.loadVerification.forget(localInstaller.fileURL(for: .init(spec)))
         if let failure {
             update("\(spec.displayName) could not be removed: \(failure)")
         } else {

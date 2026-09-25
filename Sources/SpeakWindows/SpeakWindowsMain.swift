@@ -1,6 +1,7 @@
 import Foundation
 import CWindowsSupport
 import SpeakDesktop
+import SpeakDesktopHost
 import SpeakWindowsPlatform
 
 final class WindowsEventContext {
@@ -380,8 +381,13 @@ enum SpeakWindowsMain {
         jsti_window_clear_azure_resource()
         await releaseServices(holder)
         await WindowsAutomationSwitch.shutDown(holder)
-        await holder.hotKeys.drain()
-        await controller.close()
+        // Closing first cancels a shortcut's transcription instead of waiting
+        // on its provider; queued shortcuts then find the controller closed.
+        let report = await controller.close()
+        let hotKeys = holder.hotKeys
+        await DesktopHostShutdown.wait(within: report.isComplete ? DesktopHostShutdown.grace : .zero) {
+            await hotKeys.drain()
+        }
         withExtendedLifetime(holder) {}
         if let windowFailure { throw windowFailure }
         if let smokeFailure = holder.smokeTestFailure { throw smokeFailure }

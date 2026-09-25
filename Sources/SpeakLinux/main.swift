@@ -80,8 +80,12 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         if !holder.smokeTest { holder.microphones.stop() }
         await holder.finishSettings()
         await LinuxCloudSync.shutDown(holder)
-        await holder.drainShortcuts()
-        await controller.close()
+        // Closing first cancels a shortcut's transcription instead of waiting
+        // on its provider; queued shortcuts then find the controller closed.
+        let report = await controller.close()
+        await DesktopHostShutdown.wait(within: report.isComplete ? DesktopHostShutdown.grace : .zero) {
+            await holder.drainShortcuts()
+        }
         LinuxPortal.stopRemoteDesktop()
     }
     withExtendedLifetime(holder) {}

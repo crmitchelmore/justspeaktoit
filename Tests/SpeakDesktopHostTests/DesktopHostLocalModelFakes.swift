@@ -17,6 +17,7 @@ final class FakeLocalState: @unchecked Sendable {
     private var missing: String?
     private var openFailure: String?
     private var digest = ""
+    private var hashes = 0
     private var transportValue: any LocalModelDownloadTransport = HeldTransport()
     let runtime = FakeRuntime()
 
@@ -28,6 +29,7 @@ final class FakeLocalState: @unchecked Sendable {
             missing = nil
             openFailure = nil
             digest = ""
+            hashes = 0
             transportValue = HeldTransport()
         }
         runtime.reset()
@@ -49,6 +51,9 @@ final class FakeLocalState: @unchecked Sendable {
         get { lock.withLock { digest } }
         set { lock.withLock { digest = newValue } }
     }
+    /// How many files the stand-in SHA-256 has hashed.
+    var hashCount: Int { lock.withLock { hashes } }
+    func countHash() { lock.withLock { hashes += 1 } }
     var transport: any LocalModelDownloadTransport {
         get { lock.withLock { transportValue } }
         set { lock.withLock { transportValue = newValue } }
@@ -111,12 +116,30 @@ struct FakeRecognizer: DesktopLocalRecognizer {
     }
 }
 
-/// Stands in for the platform SHA-256: reports the pinned digest it is given.
+/// Stands in for the platform SHA-256 over the zero bytes `HeldTransport`
+/// serves: reports the pinned digest it is given, or another one once it sees
+/// a byte that is not zero. Counts every file it hashes.
 private final class PinnedDigest: LocalModelSHA256Hasher {
     private let digest: String
+    private var tampered = false
     init(_ digest: String) { self.digest = digest }
-    func update(_ bytes: UnsafeRawBufferPointer) throws {}
-    func finish() throws -> String { digest }
+    private static let zeros = Data(count: 1 << 20)
+
+    func update(_ bytes: UnsafeRawBufferPointer) throws {
+        var offset = 0
+        while !tampered, offset < bytes.count, let base = bytes.baseAddress {
+            let count = min(bytes.count - offset, Self.zeros.count)
+            // Data equality compares memory at once, even in a debug build.
+            let chunk = Data(bytesNoCopy: UnsafeMutableRawPointer(mutating: base + offset), count: count,
+                             deallocator: .none)
+            tampered = chunk != Self.zeros.prefix(count)
+            offset += count
+        }
+    }
+    func finish() throws -> String {
+        FakeLocalState.shared.countHash()
+        return tampered ? String(repeating: "0", count: 64) : digest
+    }
 }
 
 /// Serves zero bytes like a range-capable server. After `pauseAfter` bytes it

@@ -301,6 +301,8 @@ extension DesktopHostController {
             switch change {
             case .saved(let id):
                 guard let record = await store.existingRecord(id: id) else { continue }
+                // Reading the record suspends; the window may have closed meanwhile.
+                guard !closed else { return }
                 indexHistory(record)
                 selectedChanged = selectedChanged || id == selectedHistoryID
             case .removed(let id):

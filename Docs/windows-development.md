@@ -104,7 +104,10 @@ credential identifier in Windows Credential Manager. The app stores settings and
 durable recording records under
 `%LOCALAPPDATA%\JustSpeakToIt`. A recorded file and pending history record exist
 before network transcription starts, so an interrupted request does not discard
-the source recording. The microphone selector persists either the Windows default
+the source recording. Closing the window cancels every request and waits at
+most `DesktopHostShutdown.grace` (5 s) for them; one that ignores cancellation
+is left behind, cannot reach the window, and its record is recovered with its
+audio at the next launch. The microphone selector persists either the Windows default
 or an exact endpoint identifier; an unavailable selected device is reported
 without silently switching microphones. A coalesced native subscription refreshes
 the device list after connections, removals, names and default-device changes.
@@ -435,8 +438,11 @@ reused; its sherpa and bzip2 path is not.
 - **Download.** `LocalModelInstaller` (SpeakDesktop) downloads with HTTP Range
   into a `.partial` file, resumes after a dropped connection, hashes the whole
   file with CNG, then renames it atomically and writes a receipt. A tampered or
-  truncated file is deleted and never loaded. Models live in
-  `%LOCALAPPDATA%\JustSpeakToIt\LocalModels` with the owner-only ACL.
+  truncated file is deleted and never loaded: the shared host hashes the whole
+  file again, off the controller, before the runtime can load it (first use in
+  a process, after another model, or once its size, modification time or file
+  ID changed), and a transcript is discarded if the file changed while in use.
+  Models live in `%LOCALAPPDATA%\JustSpeakToIt\LocalModels` with the owner-only ACL.
 - **Runtime.** `WindowsWhisper.cpp` loads `whisper.dll` from the application
   directory with a restricted search path, refuses any `whisper_version()` other
   than the pinned one, and registers ggml backends from that directory only.

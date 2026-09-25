@@ -34,6 +34,8 @@ extension DesktopHostController {
             }
             transcriptionTask = task
             defer { transcriptionTask = nil }
+            // A Cancel while the audio was being found had no request to cancel yet.
+            if cancellationRequested { task.cancel() }
             let result = try await task.value
             record.result = result
             record.failure = nil
@@ -59,7 +61,10 @@ extension DesktopHostController {
         }
     }
 
+    /// Shows a saved record. Work finishing after `close()` never reaches the
+    /// window: its record is already saved, and nothing is output.
     func present(_ record: DesktopRecordingStore.Record, output: DesktopHostRecordingOutput<Platform>?) {
+        guard !closed else { return }
         selectedHistoryID = record.id
         transcriptVariant = .processed
         refreshHistory(selectRecord: true)
@@ -68,7 +73,7 @@ extension DesktopHostController {
         if let failure = record.postProcessingFailure {
             status = "Original transcript saved; post-processing failed. \(failure)"
         }
-        if let output, !transcript.isEmpty, !closed, record.failure == nil, record.postProcessingFailure == nil,
+        if let output, !transcript.isEmpty, record.failure == nil, record.postProcessingFailure == nil,
            let started = beginOutput(transcript, output: output, recordID: record.id).status {
             status = started
         }

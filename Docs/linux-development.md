@@ -305,7 +305,14 @@ release build, `swift test` with `SPEAK_LINUX_TARGET=1`,
 the JFK sample, and the Windows Swift type-check. The reusable
 `linux-local-runtime.yml` first builds the pinned whisper.cpp runtime in the
 same image (cached by its pins); the desktop job downloads it and a cached
-tiny model, so the Linux platform tests run against the real runtime. It
-also runs on pushes to the consolidation branch
-`claude/windows-linux-migration-tyshm0`, which should be dropped when the
-branch merges.
+tiny model, so the Linux platform tests run against the real runtime. Like
+the Windows workflows it is advisory: it runs on pull requests and on `main`
+but is not a required check, and nothing else waits for it.
+
+## App ID
+
+The app ID is `com.justspeaktoit.JustSpeakToIt`, under the same
+`com.justspeaktoit` domain as the iOS bundle identifiers. It names the Flatpak,
+the desktop file, the metainfo, the D-Bus name, the GlobalShortcuts binding and
+the Flatpak data path. Treat it as fixed: changing it moves user data and
+shortcut bindings.

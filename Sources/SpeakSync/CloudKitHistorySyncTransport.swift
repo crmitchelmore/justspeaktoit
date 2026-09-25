@@ -94,8 +94,8 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
             recordZoneIDs: [SyncConfiguration.zoneID],
             configurationsByRecordZoneID: [SyncConfiguration.zoneID: config]
         )
-        // Consume one explicit page at a time. HistorySyncEngine advances the
-        // token only after every page has been reconciled locally.
+        // Consume one explicit page at a time. The shared coordinator saves
+        // each page's token only after that page has been committed locally.
         operation.fetchAllChanges = false
         return operation
     }

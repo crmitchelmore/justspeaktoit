@@ -71,7 +71,7 @@ holds it once; the native `CKRecord` mappers and the web transport both use it.
 | Compare Models | `ModelComparisonRound`, name `comparison-<UUID>`, flat fields and a JSON `payload`. A transport exists; Windows does not sync rounds yet. |
 | API keys | `EncryptedSecret`, name `secret-<unpadded base64url identifier>`, `ciphertext`/`nonce`/`tag` Bytes, `updatedAt` Date, `isDeleted` Int64; one `EncryptedSecretMetadata` record with the salt and verifier. The identifier list is `SyncSchema.EncryptedSecret.syncableIdentifiers`. |
 | Conflicts | History: a CloudKit copy at least as new as the local entry wins. Saves are conditional on the fetched record (`CONFLICT` and `EXISTS` stay pending and retry). |
-| Cursors | Each client keeps its own cursor and advances it only after its store commits. A native `CKServerChangeToken` is not a web `syncToken`, so Windows replays the zone once on first sync. |
+| Cursors | Each client keeps its own cursor and advances it one page at a time, each only after its store commits that page, so a pass holds one page and keeps what it committed. A native `CKServerChangeToken` is not a web `syncToken`, so Windows replays the zone once on first sync. |
 
 ## Protocol
 

@@ -268,7 +268,7 @@ final class FakeCloudKitServerSyncTests: XCTestCase {
         XCTAssertEqual(fields?["rawTranscription"]?.value as? String, "raw only")
     }
 
-    func testAManyPageFeedIsReadCompletelyBeforeTheCursorAdvances() async throws {
+    func testAManyPageFeedSavesTheCursorAsEachPageIsCommitted() async throws {
         try await signIn()
         server.setPageLimit(2)
         let ids = (0..<5).map { _ in UUID() }
@@ -284,9 +284,15 @@ final class FakeCloudKitServerSyncTests: XCTestCase {
         let received = await Set(store.received.map(\.id))
         XCTAssertEqual(received, Set(ids))
         let saves = await cursor.saves
-        XCTAssertEqual(saves.count, 1, "The cursor is saved once, after every page is committed")
+        XCTAssertEqual(saves.count, 3, "Each page's cursor is saved once that page is committed")
+        XCTAssertEqual(Set(saves).count, 3)
         let feeds = server.requestLog.filter { $0 == "private/changes/zone" }.count
         XCTAssertEqual(feeds, 3)
+
+        // The last saved cursor is the end of the feed: nothing is read again.
+        await host.sync(store: store)
+        let replayed = await store.received.count
+        XCTAssertEqual(replayed, ids.count)
     }
 
     func testDeletingAWindowsEntryLeavesATombstoneForTheMac() async throws {

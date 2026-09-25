@@ -52,6 +52,7 @@ actor FakeHistoryTransport: HistorySyncTransport {
     private(set) var deleted: [UUID] = []
     private var onFetch: (@Sendable () async -> Void)?
     private var deleteError: Error?
+    private var fetchLog: FakeHistoryStore?
 
     init(pages: [HistoryChangePage], uploads: [HistoryUploadResult] = []) {
         self.pages = pages
@@ -66,8 +67,14 @@ actor FakeHistoryTransport: HistorySyncTransport {
         deleteError = error
     }
 
+    /// Notes each fetch in `store`'s log, in order with what the store applies.
+    func logFetches(into store: FakeHistoryStore) {
+        fetchLog = store
+    }
+
     func fetchChanges(after tokenData: Data?) async throws -> HistoryChangePage {
         requestedTokens.append(tokenData)
+        await fetchLog?.note("fetch")
         if let action = onFetch {
             onFetch = nil
             await action()
@@ -107,6 +114,9 @@ actor FakeHistoryStore: HistorySyncStore {
     func failCommits(_ fails: Bool) {
         failsCommits = fails
     }
+
+    /// Entries the store holds now, whether or not they are acknowledged.
+    var storedIDs: Set<UUID> { Set(entriesByID.keys) }
 
     func pendingEntries() async -> [SyncableHistoryEntry] {
         entriesByID.values.filter { !acknowledgedIDs.contains($0.id) }.sorted { $0.id.uuidString < $1.id.uuidString }

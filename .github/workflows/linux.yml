@@ -12,6 +12,7 @@ on:
       - Sources/SpeakSync/**
       - Sources/SpeakLinux/**
       - Sources/SpeakLinuxPlatform/**
+      - Sources/SpeakLinuxWebSocket/**
       - Sources/CLinuxSupport/**
       - Sources/CLinuxSystem/**
       - Sources/SpeakWindows/**
@@ -21,6 +22,7 @@ on:
       - Tests/SpeakSyncTests/**
       - Tests/SpeakTestSupport/**
       - Tests/SpeakLinuxPlatformTests/**
+      - Tests/SpeakLinuxWebSocketTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
       - scripts/linux-*
@@ -43,6 +45,7 @@ on:
       - Sources/SpeakSync/**
       - Sources/SpeakLinux/**
       - Sources/SpeakLinuxPlatform/**
+      - Sources/SpeakLinuxWebSocket/**
       - Sources/CLinuxSupport/**
       - Sources/CLinuxSystem/**
       - Sources/SpeakWindows/**
@@ -52,6 +55,7 @@ on:
       - Tests/SpeakSyncTests/**
       - Tests/SpeakTestSupport/**
       - Tests/SpeakLinuxPlatformTests/**
+      - Tests/SpeakLinuxWebSocketTests/**
       - Tests/SpeakDesktopTests/**
       - Tests/SpeakPortableTests/**
       - scripts/linux-*

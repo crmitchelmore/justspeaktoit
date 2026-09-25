@@ -12,6 +12,7 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
       - Sources/SpeakDesktopSync/**
       - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
@@ -22,6 +23,7 @@ on:
       - Sources/SpeakCLI/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopHostTests/**
       - Tests/SpeakDesktopSyncTests/**
       - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**
@@ -42,6 +44,7 @@ on:
       - Package.swift
       - Sources/SpeakCore/**
       - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
       - Sources/SpeakDesktopSync/**
       - Sources/SpeakSync/**
       - Sources/SpeakWindows/**
@@ -52,6 +55,7 @@ on:
       - Sources/SpeakCLI/**
       - Tests/SpeakPortableTests/**
       - Tests/SpeakDesktopTests/**
+      - Tests/SpeakDesktopHostTests/**
       - Tests/SpeakDesktopSyncTests/**
       - Tests/SpeakSyncTests/**
       - Tests/SpeakWindowsPlatformTests/**

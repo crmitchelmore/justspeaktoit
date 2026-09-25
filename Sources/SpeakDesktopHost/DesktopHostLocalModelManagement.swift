@@ -63,20 +63,22 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
         // Checked and held together: no removal can start before recognition ends.
         let used = beginLocalUse(model)
         defer { endLocalUse(used) }
-        // The runtime reads the file only when it loads it, so its bytes are
-        // rehashed before any recognition that may load them.
-        let (file, identity) = try await localModelVerifiedForLoading(spec)
+        let file = try localInstaller.verifiedFile(for: .init(spec))
         let runtime = try await localRuntime()
         update(
             "Transcribing on \(Platform.localDeviceName) with \(spec.displayName)\u{2026} "
                 + "Your recording is saved locally.",
             state: 2
         )
-        let result = try await DesktopLocalTranscription.transcribe(
-            audioURL: audio, model: spec, modelFile: file, language: language, recognizer: runtime.recognizer
-        )
-        try await confirmLocalModelUnchanged(spec, file: file, identity: identity)
-        return result
+        // The runtime hashes the bytes it loads and uses them only when they
+        // match the pinned SHA-256, so the file is not hashed separately here.
+        do {
+            return try await DesktopLocalTranscription.transcribe(
+                audioURL: audio, model: spec, modelFile: file, language: language, recognizer: runtime.recognizer
+            )
+        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {
+            throw discardMismatchedModel(spec)
+        }
     }
 
     // MARK: - Local models
@@ -147,8 +149,6 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
 
     private func finishDownload(_ spec: WhisperCppModel, failure: String?) {
         localModels.ownership.endDownload(spec.catalogueID)
-        // New bytes are hashed again before the runtime loads them.
-        localModels.loadVerification.forget(localInstaller.fileURL(for: .init(spec)))
         localModels.downloads[spec.catalogueID] = nil
         localModels.progress[spec.catalogueID] = nil
         if let failure {

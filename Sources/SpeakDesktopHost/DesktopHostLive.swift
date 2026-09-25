@@ -66,11 +66,7 @@ extension DesktopHostController {
     func liveResult(
         _ text: String, record: DesktopRecordingStore.Record, duration: TimeInterval
     ) -> TranscriptionResult {
-        let cleaned = TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(text) ? "" : text
-        return TranscriptionResult(
-            text: cleaned, segments: [], confidence: nil, duration: duration,
-            modelIdentifier: record.modelIdentifier, cost: nil, rawPayload: nil, debugInfo: nil
-        )
+        DesktopHostRecordingStop.liveResult(text, model: record.modelIdentifier, duration: duration)
     }
 
     package func preferredModelIDs() -> DesktopHostModelPreferences {

@@ -5,6 +5,12 @@ import SpeakCore
 public protocol DesktopLocalRecognizer: Sendable {
     /// Returns the raw transcript. Throws `CancellationError` when the calling
     /// task is cancelled before or during recognition.
+    ///
+    /// Recognises only with bytes whose SHA-256 is `model.artifact.sha256`:
+    /// loading hashes the very bytes the runtime reads from `modelFile`, so a
+    /// file replaced or rewritten at any moment cannot supply unverified bytes.
+    /// Throws `DesktopLocalTranscriptionError.modelDoesNotMatchDigest` when
+    /// they differ, having used none of them.
     func transcribe(samples: [Float], modelFile: URL, model: WhisperCppModel, language: String?) async throws -> String
 }
 
@@ -12,6 +18,8 @@ public enum DesktopLocalTranscriptionError: LocalizedError, Equatable {
     case unsupportedAudio(String)
     case tooLong(maximumMinutes: Int)
     case runtimeUnavailable(String)
+    /// The bytes the runtime read do not match the model's pinned SHA-256.
+    case modelDoesNotMatchDigest
 
     public var errorDescription: String? {
         switch self {
@@ -21,6 +29,8 @@ public enum DesktopLocalTranscriptionError: LocalizedError, Equatable {
             return "Local transcription accepts recordings up to \(minutes) minutes."
         case .runtimeUnavailable(let detail):
             return "The on-device speech runtime is unavailable. \(detail)"
+        case .modelDoesNotMatchDigest:
+            return "The downloaded model does not match its pinned SHA-256, so it was not used."
         }
     }
 }

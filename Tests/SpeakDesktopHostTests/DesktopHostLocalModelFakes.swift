@@ -69,18 +69,26 @@ final class FakeLocalState: @unchecked Sendable {
 }
 
 /// Recognises with fixed text after an optional gate; records released paths.
+/// Loads as the platform runtimes do: it reads a model once per path and
+/// digest, checking the bytes it reads, and refuses bytes that do not match
+/// without recognising. Like `PinnedDigest`, it takes the zero bytes
+/// `HeldTransport` serves to match any pinned digest, and any other byte not to.
 final class FakeRuntime: DesktopHostLocalRuntime, @unchecked Sendable {
     let description = "fake whisper.cpp; CPU"
     private var gate = Gate(open: true)
     private let lock = NSLock()
     private var released: [String] = []
     private var arrivals = 0
+    private var loaded: (path: String, digest: String)?
+    private var loadCount = 0
 
     func reset() {
         lock.withLock {
             released = []
             arrivals = 0
             gate = Gate(open: true)
+            loaded = nil
+            loadCount = 0
         }
     }
 
@@ -88,11 +96,38 @@ final class FakeRuntime: DesktopHostLocalRuntime, @unchecked Sendable {
     func release() { lock.withLock { gate }.release() }
     var recognitions: Int { lock.withLock { arrivals } }
     var releasedPaths: [String] { lock.withLock { released } }
+    /// How many times a model file was read to load it.
+    var loads: Int { lock.withLock { loadCount } }
 
     var recognizer: any DesktopLocalRecognizer { FakeRecognizer(runtime: self) }
 
     func releaseModel(loadedFrom modelFile: URL) -> Bool {
-        lock.withLock { released.append(modelFile.path) }
+        lock.withLock {
+            released.append(modelFile.path)
+            if loaded?.path == modelFile.path { loaded = nil }
+        }
+        return true
+    }
+
+    fileprivate func load(_ file: URL, digest: String) throws {
+        let cached = lock.withLock { () -> Bool in
+            if loaded?.path == file.path, loaded?.digest == digest { return true }
+            loaded = nil
+            loadCount += 1
+            return false
+        }
+        if cached { return }
+        guard try Self.holdsOnlyZeros(file) else { throw DesktopLocalTranscriptionError.modelDoesNotMatchDigest }
+        lock.withLock { loaded = (file.path, digest) }
+    }
+
+    private static func holdsOnlyZeros(_ file: URL) throws -> Bool {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        let zeros = Data(count: 1 << 20)
+        while let chunk = try handle.read(upToCount: zeros.count), !chunk.isEmpty {
+            if chunk != zeros.prefix(chunk.count) { return false }
+        }
         return true
     }
 
@@ -110,6 +145,7 @@ struct FakeRecognizer: DesktopLocalRecognizer {
     func transcribe(
         samples: [Float], modelFile: URL, model: WhisperCppModel, language: String?
     ) async throws -> String {
+        try runtime.load(modelFile, digest: model.artifact.sha256)
         await runtime.arrive().pass()
         try Task.checkCancellation()
         return "  Local words   from \(model.displayName). "

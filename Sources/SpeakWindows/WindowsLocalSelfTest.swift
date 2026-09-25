@@ -117,10 +117,20 @@ enum WindowsLocalSelfTest {
         guard normalised(result.text).contains(normalised(expected)) else {
             throw WindowsNativeError(message: "Local transcription did not contain the expected phrase.")
         }
-        // Cancellation before recognition starts must not run the model.
+        try await checkCancellationAndDigest(runtime: runtime, spec: spec, file: file)
+        let timing = String(format: "%.2f s (audio %.2f s)", elapsed, result.duration)
+        print("Local transcription self-test passed in \(timing).")
+    }
+
+    /// Cancelling before recognition starts must not run the model, and the
+    /// runtime uses only bytes whose digest matches the one it is given.
+    private static func checkCancellationAndDigest(
+        runtime: WindowsWhisperRuntime, spec: WhisperCppModel, file: URL
+    ) async throws {
+        let samples = [Float](repeating: 0.1, count: 16_000)
         let cancelled = Task {
             try await runtime.transcribe(
-                samples: [Float](repeating: 0.1, count: 16_000), modelFile: file, language: nil
+                samples: samples, modelFile: file, modelSHA256: spec.artifact.sha256, language: nil
             )
         }
         cancelled.cancel()
@@ -128,8 +138,14 @@ enum WindowsLocalSelfTest {
             _ = try await cancelled.value
             throw WindowsNativeError(message: "A cancelled local transcription completed.")
         } catch is CancellationError {}
-        let timing = String(format: "%.2f s (audio %.2f s)", elapsed, result.duration)
-        print("Local transcription self-test passed in \(timing).")
+        // The runtime hashes the bytes it loads: the cached model is not reused
+        // for another digest, and bytes that do not match are never used.
+        do {
+            _ = try await runtime.transcribe(
+                samples: samples, modelFile: file, modelSHA256: String(repeating: "0", count: 64), language: nil
+            )
+            throw WindowsNativeError(message: "A model whose bytes do not match the digest was used.")
+        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
     }
 }
 

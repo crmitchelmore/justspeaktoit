@@ -2,8 +2,10 @@
 #include "WindowsSupportInternal.hpp"
 #include "whisper-cpp/whisper.h"
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <new>
@@ -78,6 +80,7 @@ struct JSTIWhisperRuntime {
     std::mutex mutex; // Serialises model use; whisper_full is not reentrant per context.
     whisper_context *context = nullptr;
     std::wstring contextPath;
+    std::string contextSHA256; // Lowercase SHA-256 of the bytes context was loaded from.
 };
 
 struct JSTIWhisperJob {
@@ -104,18 +107,62 @@ bool fileExists(const std::wstring &path) {
     return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+// Hands whisper.cpp the model file's bytes through one open file and hashes
+// each byte as it is handed over, so the digest describes exactly the bytes
+// the runtime loaded, whatever happens to the file on disk meanwhile.
 struct FileLoader {
     FILE *file = nullptr;
+    JSTISHA256 *hasher = nullptr;
+    bool failed = false;
+
+    ~FileLoader() {
+        if (hasher) jsti_sha256_destroy(hasher);
+        if (file) std::fclose(file);
+    }
+
+    void hash(const void *bytes, size_t count) {
+        char ignored[8];
+        if (count && jsti_sha256_update(hasher, bytes, count, ignored, sizeof ignored) != 0) failed = true;
+    }
     static size_t read(void *context, void *output, size_t size) {
-        return std::fread(output, 1, size, static_cast<FileLoader *>(context)->file);
+        auto *loader = static_cast<FileLoader *>(context);
+        const size_t count = std::fread(output, 1, size, loader->file);
+        loader->hash(output, count);
+        return count;
     }
     static bool eof(void *context) { return std::feof(static_cast<FileLoader *>(context)->file) != 0; }
-    static void close(void *context) {
-        auto *loader = static_cast<FileLoader *>(context);
-        if (loader->file) std::fclose(loader->file);
-        loader->file = nullptr;
+    // whisper.cpp closes its loader when it finishes; the file stays open so
+    // any bytes it did not read are hashed too.
+    static void close(void *) {}
+
+    // Hashes what the runtime left unread, then compares the whole file's
+    // digest with expected. Only a match returns true.
+    bool matches(const char *expected) {
+        std::vector<unsigned char> buffer(1 << 16);
+        size_t count;
+        while ((count = std::fread(buffer.data(), 1, buffer.size(), file)) > 0) hash(buffer.data(), count);
+        char digest[65] = {};
+        char ignored[8];
+        if (std::ferror(file) || failed || jsti_sha256_finish(hasher, digest, sizeof digest, ignored, sizeof ignored)) {
+            return false;
+        }
+        return _stricmp(digest, expected) == 0;
     }
 };
+
+bool isSHA256Hex(const char *text) {
+    if (!text || std::strlen(text) != 64) return false;
+    for (const char *cursor = text; *cursor; ++cursor) {
+        if (!std::isxdigit(static_cast<unsigned char>(*cursor))) return false;
+    }
+    return true;
+}
+
+std::string lowercase(const char *text) {
+    std::string result(text);
+    for (char &character : result) character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    return result;
+}
 
 bool abortRequested(void *data) {
     return static_cast<JSTIWhisperJob *>(data)->cancelled.load(std::memory_order_relaxed);
@@ -156,6 +203,7 @@ void releaseContext(JSTIWhisperRuntime &runtime) {
     if (runtime.context) runtime.api.free(runtime.context);
     runtime.context = nullptr;
     runtime.contextPath.clear();
+    runtime.contextSHA256.clear();
 }
 }
 
@@ -294,10 +342,10 @@ extern "C" int jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime
     return 1;
 }
 
-extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *modelPath, const float *samples,
-                                       size_t sampleCount, const char *language, int threads, JSTIWhisperJob *job,
-                                       char **text, char *error, size_t capacity) {
-    if (!runtime || !modelPath || !job || !text || (sampleCount && !samples) ||
+extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *modelPath, const char *modelSHA256,
+                                       const float *samples, size_t sampleCount, const char *language, int threads,
+                                       JSTIWhisperJob *job, char **text, char *error, size_t capacity) {
+    if (!runtime || !modelPath || !isSHA256Hex(modelSHA256) || !job || !text || (sampleCount && !samples) ||
         sampleCount > static_cast<size_t>((std::numeric_limits<int>::max)())) {
         jsti::fail("Invalid on-device transcription request.", error, capacity);
         return JSTI_WHISPER_FAILED;
@@ -312,13 +360,20 @@ extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *
     std::lock_guard<std::mutex> lock(runtime->mutex);
     if (job->cancelled.load()) return JSTI_WHISPER_CANCELLED;
     try {
-        if (!runtime->context || _wcsicmp(runtime->contextPath.c_str(), path.c_str()) != 0) {
+        // Loads unless the cache already holds this path's bytes with this
+        // digest. A model whose bytes do not match is freed, never cached or used.
+        const std::string sha256 = lowercase(modelSHA256);
+        if (!runtime->context || _wcsicmp(runtime->contextPath.c_str(), path.c_str()) != 0 ||
+            runtime->contextSHA256 != sha256) {
             releaseContext(*runtime);
             FileLoader file;
             if (_wfopen_s(&file.file, path.c_str(), L"rb") != 0 || !file.file) {
+                file.file = nullptr;
                 jsti::fail("The downloaded model file could not be opened.", error, capacity);
                 return JSTI_WHISPER_FAILED;
             }
+            file.hasher = jsti_sha256_create(error, capacity);
+            if (!file.hasher) return JSTI_WHISPER_FAILED;
             whisper_model_loader loader{};
             loader.context = &file;
             loader.read = FileLoader::read;
@@ -327,15 +382,21 @@ extern "C" int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *
             whisper_context_params parameters = runtime->api.contextDefaults();
             parameters.use_gpu = runtime->hasGPU;
             parameters.gpu_device = 0;
-            runtime->context = runtime->api.initWithParams(&loader, parameters);
-            FileLoader::close(&file);
-            if (!runtime->context) {
+            whisper_context *context = runtime->api.initWithParams(&loader, parameters);
+            if (!file.matches(sha256.c_str())) {
+                if (context) runtime->api.free(context);
+                jsti::fail("The downloaded model file does not match its pinned SHA-256.", error, capacity);
+                return JSTI_WHISPER_MODEL_MISMATCH;
+            }
+            if (!context) {
                 const std::string detail = logRing.last();
                 jsti::fail("The model could not be loaded" + (detail.empty() ? std::string(".") : ": " + detail),
                            error, capacity);
                 return JSTI_WHISPER_FAILED;
             }
+            runtime->context = context;
             runtime->contextPath = path;
+            runtime->contextSHA256 = sha256;
         }
         if (job->cancelled.load()) return JSTI_WHISPER_CANCELLED;
         whisper_full_params parameters = runtime->api.fullDefaults(WHISPER_SAMPLING_GREEDY);

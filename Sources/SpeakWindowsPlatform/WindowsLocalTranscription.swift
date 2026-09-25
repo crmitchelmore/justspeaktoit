@@ -106,14 +106,20 @@ public final class WindowsWhisperRuntime: @unchecked Sendable {
     }
 
     /// Runs whisper.cpp on a dedicated thread; task cancellation aborts it.
+    /// Loading hashes the bytes the runtime reads, and only bytes whose
+    /// SHA-256 is `modelSHA256` are used; otherwise it throws
+    /// `DesktopLocalTranscriptionError.modelDoesNotMatchDigest`.
     public func transcribe(
-        samples: [Float], modelFile: URL, language: String?, threads: Int = 0
+        samples: [Float], modelFile: URL, modelSHA256: String, language: String?, threads: Int = 0
     ) async throws -> String {
         let job = WhisperJob()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
-                let request = Request(samples: samples, modelFile: modelFile, language: language, threads: threads)
+                let request = Request(
+                    samples: samples, modelFile: modelFile, modelSHA256: modelSHA256, language: language,
+                    threads: threads
+                )
                 let thread = Thread { [self] in
                     continuation.resume(with: Self.run(native: native, job: job, request: request))
                 }
@@ -127,6 +133,7 @@ public final class WindowsWhisperRuntime: @unchecked Sendable {
     private struct Request: Sendable {
         let samples: [Float]
         let modelFile: URL
+        let modelSHA256: String
         let language: String?
         let threads: Int
     }
@@ -137,11 +144,13 @@ public final class WindowsWhisperRuntime: @unchecked Sendable {
         let path = request.modelFile.path
         let status = request.samples.withUnsafeBufferPointer { buffer in
             path.withCString { path in
-                withOptionalCString(request.language) { language in
-                    jsti_whisper_transcribe(
-                        native, path, buffer.baseAddress, buffer.count, language, Int32(request.threads), job.native,
-                        &text, &error, error.count
-                    )
+                request.modelSHA256.withCString { digest in
+                    withOptionalCString(request.language) { language in
+                        jsti_whisper_transcribe(
+                            native, path, digest, buffer.baseAddress, buffer.count, language, Int32(request.threads),
+                            job.native, &text, &error, error.count
+                        )
+                    }
                 }
             }
         }
@@ -151,6 +160,8 @@ public final class WindowsWhisperRuntime: @unchecked Sendable {
             return .success(text.map { String(cString: $0) } ?? "")
         case 1:
             return .failure(CancellationError())
+        case 2: // JSTI_WHISPER_MODEL_MISMATCH
+            return .failure(DesktopLocalTranscriptionError.modelDoesNotMatchDigest)
         default:
             return .failure(WindowsLocalTranscriptionError(String(cString: error)))
         }
@@ -184,6 +195,8 @@ public struct WindowsWhisperRecognizer: DesktopLocalRecognizer {
     public func transcribe(
         samples: [Float], modelFile: URL, model: WhisperCppModel, language: String?
     ) async throws -> String {
-        try await runtime.transcribe(samples: samples, modelFile: modelFile, language: language)
+        try await runtime.transcribe(
+            samples: samples, modelFile: modelFile, modelSHA256: model.artifact.sha256, language: language
+        )
     }
 }

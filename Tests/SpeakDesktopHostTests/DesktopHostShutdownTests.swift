@@ -39,18 +39,52 @@ final class StubbornLatch: @unchecked Sendable {
     }
 }
 
+/// A capture whose stop blocks its thread until released, like an audio
+/// device or file system that stalls.
+final class StallingCapture: DesktopRecordingCapture, @unchecked Sendable {
+    private let synthetic: SyntheticCapture
+    private let gate = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var stops = 0
+
+    init(context: DesktopCaptureContext) { synthetic = SyntheticCapture(context: context) }
+
+    var stopCalls: Int { lock.withLock { stops } }
+    func release() { gate.signal() }
+
+    func start() throws { try synthetic.start() }
+    func stop() throws {
+        lock.withLock { stops += 1 }
+        gate.wait()
+    }
+    func destroy() {}
+}
+
 /// Transcription that ignores cancellation and answers once its latch opens.
 final class StubbornEffects: DesktopHostEffects, @unchecked Sendable {
     typealias Platform = FakePlatform
     let latch = StubbornLatch()
     private let lock = NSLock()
     private var performed: [String] = []
+    private var stalling: StallingCapture?
+    private var stallsNextCapture = false
     var outputs: [String] { lock.withLock { performed } }
+    /// The last capture made after `stallNextCapture()`.
+    var stalledCapture: StallingCapture? { lock.withLock { stalling } }
+    func stallNextCapture() { lock.withLock { stallsNextCapture = true } }
 
     func apiKey(name: String) throws -> String { FakeLog.shared.key(name) }
     func makeCapture(
         context: DesktopCaptureContext, deviceID: String, sampleRate: Int, frameMilliseconds: Int
-    ) throws -> any DesktopRecordingCapture { SyntheticCapture(context: context) }
+    ) throws -> any DesktopRecordingCapture {
+        lock.withLock { () -> any DesktopRecordingCapture in
+            guard stallsNextCapture else { return SyntheticCapture(context: context) }
+            stallsNextCapture = false
+            let capture = StallingCapture(context: context)
+            stalling = capture
+            return capture
+        }
+    }
     func makeLiveClient(
         model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? { nil }
@@ -103,6 +137,7 @@ final class DesktopHostShutdownTests: XCTestCase {
 
     override func tearDown() async throws {
         effects.latch.open()
+        effects.stalledCapture?.release()
         await controller.close()
         try? FileManager.default.removeItem(at: directory)
         DesktopHostModels.configure(streamingQualified: true)
@@ -183,6 +218,49 @@ final class DesktopHostShutdownTests: XCTestCase {
         ))
         effects.latch.open()
         await stopping.value
+    }
+
+    func testCloseEndsAfterItsGraceWhenStoppingTheOpenRecordingStalls() async throws {
+        effects.stallNextCapture()
+        await controller.toggle(
+            target: "editor", modelIndex: batchIndex, deviceID: "", targetExecutablePath: nil,
+            textOutput: FakeTextOutput()
+        )
+        let capture = try XCTUnwrap(effects.stalledCapture)
+        let saved = try await records()
+        let pending = try XCTUnwrap(saved.first)
+        XCTAssertNil(pending.result, "The recording was saved when it began")
+        XCTAssertNil(pending.failure)
+        let started = ContinuousClock.now
+        guard let report = try await close(within: 5) else {
+            XCTFail("close() is still waiting for a recording whose capture never stops")
+            return capture.release()
+        }
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(3))
+        XCTAssertEqual(capture.stopCalls, 1)
+        XCTAssertFalse(report.recordingSaved)
+        XCTAssertEqual(report.unfinishedOperations, 0)
+        XCTAssertFalse(report.isComplete)
+
+        // Quitting now leaves the record saved when recording began; the next
+        // launch recovers it with the audio captured so far.
+        let nextLaunch = directory.appendingPathComponent("NextLaunch")
+        try FileManager.default.copyItem(at: history, to: nextLaunch)
+        let relaunched = try await DesktopRecordingStore(directory: nextLaunch).recoverInterruptedRecordings().records
+        let recovered = try XCTUnwrap(relaunched.first)
+        XCTAssertEqual(recovered.id, pending.id)
+        XCTAssertEqual(recovered.failure, "Recording was interrupted. Audio recovered for retry.")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: nextLaunch.appendingPathComponent(recovered.audioFilename).path
+        ))
+
+        // A stop that ends later still finalises the audio and saves the record.
+        capture.release()
+        try await waitFor("the late stop to save the recording") {
+            try await self.records().first?.failure == "Recording stopped when the app closed. Audio retained."
+        }
+        let audio = history.appendingPathComponent(pending.audioFilename)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
     }
 
     func testWorkFinishingAfterCloseNeverReachesTheWindowOrTheField() async throws {

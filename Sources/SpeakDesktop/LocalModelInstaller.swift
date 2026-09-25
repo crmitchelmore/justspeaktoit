@@ -15,8 +15,6 @@ public enum LocalModelInstallError: LocalizedError, Equatable {
     case sizeMismatch(expected: Int64, actual: Int64)
     case notInstalled(String)
     case unsafeFileName(String)
-    /// The file changed on disk while its digest was being computed.
-    case changedDuringVerification(String)
 
     public var errorDescription: String? {
         switch self {
@@ -28,9 +26,6 @@ public enum LocalModelInstallError: LocalizedError, Equatable {
             return "\(name) is not downloaded. Open Local models to download it."
         case .unsafeFileName(let name):
             return "Refusing to install a model file with an unsafe name: \(name)"
-        case .changedDuringVerification(let name):
-            return "\(name) changed on disk while it was being checked against its pinned SHA-256, "
-                + "so it was not used. Try again."
         }
     }
 }
@@ -127,9 +122,9 @@ public struct LocalModelInstaller: Sendable {
     }
 
     /// The installed file, after checking its receipt and size. The full
-    /// digest was checked when the receipt was written; `verify(_:)` and
-    /// `verifyForLoading(_:)` rehash, and a host must rehash before its speech
-    /// runtime loads the file (see `LocalModelLoadVerification`).
+    /// digest was checked when the receipt was written; `verify(_:)` rehashes,
+    /// and a host's speech runtime hashes the bytes it loads and uses them
+    /// only when they match (see `DesktopLocalRecognizer`).
     public func verifiedFile(for item: Item) throws -> URL {
         let file = fileURL(for: item)
         guard let data = try? Data(contentsOf: receiptURL(for: item)),
@@ -149,10 +144,16 @@ public struct LocalModelInstaller: Sendable {
     public func verify(_ item: Item) throws {
         let file = try verifiedFile(for: item)
         guard try digests.sha256(ofFileAt: file) == item.artifact.sha256 else {
-            try? FileManager.default.removeItem(at: receiptURL(for: item))
-            try? FileManager.default.removeItem(at: file)
+            discardMismatched(item)
             throw LocalModelInstallError.checksumMismatch
         }
+    }
+
+    /// Removes the installed file and its receipt once its bytes were found
+    /// not to match the pinned digest, so the model reads as not downloaded.
+    public func discardMismatched(_ item: Item) {
+        try? FileManager.default.removeItem(at: receiptURL(for: item))
+        try? FileManager.default.removeItem(at: fileURL(for: item))
     }
 
     /// Downloads (or resumes) and verifies `item`, returning the installed file.

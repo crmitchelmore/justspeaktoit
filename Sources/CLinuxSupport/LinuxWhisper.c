@@ -65,6 +65,7 @@ struct JSTIWhisperRuntime {
     GMutex mutex; /* Serialises model use; whisper_full is not reentrant per context. */
     struct whisper_context *context;
     gchar *context_path;
+    gchar *context_sha256; /* Lowercase SHA-256 of the bytes `context` was loaded from. */
 };
 
 struct JSTIWhisperJob {
@@ -191,6 +192,7 @@ static void release_context(JSTIWhisperRuntime *runtime) {
     if (runtime->context != NULL) runtime->api.free(runtime->context);
     runtime->context = NULL;
     g_clear_pointer(&runtime->context_path, g_free);
+    g_clear_pointer(&runtime->context_sha256, g_free);
 }
 
 JSTIWhisperRuntime *jsti_whisper_runtime_open(const char *directory, int32_t allow_gpu, char *error, size_t capacity) {
@@ -335,9 +337,56 @@ int32_t jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime, const
     return released;
 }
 
-static size_t loader_read(void *context, void *output, size_t size) { return fread(output, 1, size, context); }
-static bool loader_eof(void *context) { return feof((FILE *)context) != 0; }
+/* Hands whisper.cpp the model file's bytes through one open file and hashes
+ * each byte as it is handed over, so the digest describes exactly the bytes
+ * the runtime loaded, whatever happens to the file on disk meanwhile. */
+typedef struct HashingReader {
+    FILE *file;
+    JSTISHA256 *hasher;
+    gboolean failed;
+} HashingReader;
+
+static void reader_hash(HashingReader *reader, const void *bytes, size_t count) {
+    char ignored[8];
+    if (count > 0 && jsti_sha256_update(reader->hasher, bytes, count, ignored, sizeof ignored) != 0) {
+        reader->failed = TRUE;
+    }
+}
+
+static size_t loader_read(void *context, void *output, size_t size) {
+    HashingReader *reader = context;
+    size_t count = fread(output, 1, size, reader->file);
+    reader_hash(reader, output, count);
+    return count;
+}
+static bool loader_eof(void *context) { return feof(((HashingReader *)context)->file) != 0; }
+/* whisper.cpp closes its loader when it finishes; the file stays open so any
+ * bytes it did not read are hashed too. */
 static void loader_close(void *context) { (void)context; }
+
+/* Hashes what the runtime left unread, then compares the whole file's digest
+ * with `expected`. Only a match returns TRUE. */
+static gboolean reader_matches(HashingReader *reader, const char *expected) {
+    guchar *buffer = g_malloc(1 << 16);
+    size_t count;
+    while ((count = fread(buffer, 1, 1 << 16, reader->file)) > 0) reader_hash(reader, buffer, count);
+    g_free(buffer);
+    char digest[65] = { 0 };
+    char ignored[8];
+    if (ferror(reader->file) || reader->failed ||
+        jsti_sha256_finish(reader->hasher, digest, sizeof digest, ignored, sizeof ignored) != 0) {
+        return FALSE;
+    }
+    return g_ascii_strcasecmp(digest, expected) == 0;
+}
+
+static gboolean is_sha256_hex(const char *text) {
+    if (text == NULL || strlen(text) != 64) return FALSE;
+    for (const char *cursor = text; *cursor != '\0'; cursor++) {
+        if (!g_ascii_isxdigit(*cursor)) return FALSE;
+    }
+    return TRUE;
+}
 
 static bool abort_requested(void *data) { return g_atomic_int_get(&((JSTIWhisperJob *)data)->cancelled) != 0; }
 
@@ -346,37 +395,57 @@ static bool encoder_may_begin(struct whisper_context *context, struct whisper_st
     return !abort_requested(data);
 }
 
-/* Loads the model at `path` into the cache unless it is already there. The
- * file is closed once loaded, so a removal may delete it while it is cached. */
-static int32_t load_model(JSTIWhisperRuntime *runtime, const char *path, char *error, size_t capacity) {
-    if (runtime->context != NULL && g_strcmp0(runtime->context_path, path) == 0) return JSTI_WHISPER_OK;
+/* Loads the model at `path` into the cache unless it already holds the bytes
+ * of that path with digest `sha256`. The bytes are hashed as whisper.cpp reads
+ * them, and a model whose bytes do not match is freed, never cached or used.
+ * The file is closed once loaded, so a removal may delete it while cached. */
+static int32_t load_model(JSTIWhisperRuntime *runtime, const char *path, const char *sha256, char *error,
+                          size_t capacity) {
+    if (runtime->context != NULL && g_strcmp0(runtime->context_path, path) == 0 &&
+        g_ascii_strcasecmp(runtime->context_sha256, sha256) == 0) {
+        return JSTI_WHISPER_OK;
+    }
     release_context(runtime);
-    FILE *file = fopen(path, "rbe");
-    if (file == NULL) {
+    HashingReader reader = { .file = fopen(path, "rbe"), .hasher = NULL, .failed = FALSE };
+    if (reader.file == NULL) {
         jsti_set_error(error, capacity, "The downloaded model file could not be opened.");
         return JSTI_WHISPER_FAILED;
     }
-    whisper_model_loader loader = { .context = file, .read = loader_read, .eof = loader_eof, .close = loader_close };
+    reader.hasher = jsti_sha256_create(error, capacity);
+    if (reader.hasher == NULL) {
+        fclose(reader.file);
+        return JSTI_WHISPER_FAILED;
+    }
+    whisper_model_loader loader = { .context = &reader, .read = loader_read, .eof = loader_eof, .close = loader_close };
     struct whisper_context_params parameters = runtime->api.context_defaults();
     parameters.use_gpu = runtime->has_gpu;
     parameters.gpu_device = 0;
-    runtime->context = runtime->api.init_with_params(&loader, parameters);
-    fclose(file);
-    if (runtime->context == NULL) {
+    struct whisper_context *context = runtime->api.init_with_params(&loader, parameters);
+    gboolean matches = reader_matches(&reader, sha256);
+    jsti_sha256_destroy(reader.hasher);
+    fclose(reader.file);
+    if (!matches) {
+        if (context != NULL) runtime->api.free(context);
+        jsti_set_error(error, capacity, "The downloaded model file does not match its pinned SHA-256.");
+        return JSTI_WHISPER_MODEL_MISMATCH;
+    }
+    if (context == NULL) {
         gchar *detail = last_log_line();
         jsti_set_error(error, capacity, "The model could not be loaded%s%s", detail[0] != '\0' ? ": " : ".", detail);
         g_free(detail);
         return JSTI_WHISPER_FAILED;
     }
+    runtime->context = context;
     runtime->context_path = g_strdup(path);
+    runtime->context_sha256 = g_ascii_strdown(sha256, -1);
     return JSTI_WHISPER_OK;
 }
 
-static int32_t run_locked(JSTIWhisperRuntime *runtime, const char *model_path, const float *samples, size_t sample_count,
-                          const char *language, int32_t threads, JSTIWhisperJob *job, char **text, char *error,
-                          size_t capacity) {
+static int32_t run_locked(JSTIWhisperRuntime *runtime, const char *model_path, const char *model_sha256,
+                          const float *samples, size_t sample_count, const char *language, int32_t threads,
+                          JSTIWhisperJob *job, char **text, char *error, size_t capacity) {
     if (abort_requested(job)) return JSTI_WHISPER_CANCELLED;
-    int32_t loaded = load_model(runtime, model_path, error, capacity);
+    int32_t loaded = load_model(runtime, model_path, model_sha256, error, capacity);
     if (loaded != JSTI_WHISPER_OK) return loaded;
     if (abort_requested(job)) return JSTI_WHISPER_CANCELLED;
     struct whisper_full_params parameters = runtime->api.full_defaults(WHISPER_SAMPLING_GREEDY);
@@ -420,17 +489,19 @@ static int32_t run_locked(JSTIWhisperRuntime *runtime, const char *model_path, c
     return JSTI_WHISPER_OK;
 }
 
-int32_t jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *model_path, const float *samples,
-                                size_t sample_count, const char *language, int32_t threads, JSTIWhisperJob *job,
-                                char **text, char *error, size_t capacity) {
-    if (runtime == NULL || model_path == NULL || model_path[0] != '/' || job == NULL || text == NULL ||
+int32_t jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *model_path, const char *model_sha256,
+                                const float *samples, size_t sample_count, const char *language, int32_t threads,
+                                JSTIWhisperJob *job, char **text, char *error, size_t capacity) {
+    if (runtime == NULL || model_path == NULL || model_path[0] != '/' || !is_sha256_hex(model_sha256) || job == NULL ||
+        text == NULL ||
         (sample_count > 0 && samples == NULL) || sample_count > (size_t)INT_MAX) {
         jsti_set_error(error, capacity, "Invalid on-device transcription request.");
         return JSTI_WHISPER_FAILED;
     }
     *text = NULL;
     g_mutex_lock(&runtime->mutex);
-    int32_t status = run_locked(runtime, model_path, samples, sample_count, language, threads, job, text, error, capacity);
+    int32_t status = run_locked(runtime, model_path, model_sha256, samples, sample_count, language, threads, job, text,
+                                error, capacity);
     g_mutex_unlock(&runtime->mutex);
     return status;
 }

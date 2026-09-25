@@ -94,7 +94,9 @@ final class LinuxLocalTranscriptionTests: XCTestCase {
 
         let samples = [Float](repeating: 0.05, count: 32_000)
         let cancelled = Task {
-            try await fixture.runtime.transcribe(samples: samples, modelFile: fixture.installed, language: nil)
+            try await fixture.runtime.transcribe(
+                samples: samples, modelFile: fixture.installed, modelSHA256: fixture.spec.artifact.sha256, language: nil
+            )
         }
         cancelled.cancel()
         do {
@@ -111,7 +113,9 @@ final class LinuxLocalTranscriptionTests: XCTestCase {
         let long = Array(repeating: fixture.samples, count: 6).flatMap { $0 }
         let started = Date()
         let running = Task {
-            try await fixture.runtime.transcribe(samples: long, modelFile: fixture.installed, language: "en")
+            try await fixture.runtime.transcribe(
+                samples: long, modelFile: fixture.installed, modelSHA256: fixture.spec.artifact.sha256, language: "en"
+            )
         }
         try await Task.sleep(nanoseconds: 300_000_000)
         running.cancel()
@@ -122,8 +126,40 @@ final class LinuxLocalTranscriptionTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 20, "Cancellation did not abort recognition promptly")
     }
 
+    /// Loading hashes the bytes whisper.cpp reads through one open file. A copy
+    /// changed at its pinned size is refused and never cached, and the cached
+    /// model is not reused for a digest its bytes do not have.
+    func testTheRuntimeUsesOnlyBytesMatchingThePinnedDigest() async throws {
+        let fixture = try await LocalRuntimeFixture.make()
+        defer { fixture.cleanUp() }
+        let tampered = try fixture.copy("tampered")
+        let handle = try FileHandle(forUpdating: tampered)
+        let last = try handle.seekToEnd() - 1
+        try handle.seek(toOffset: last)
+        let byte = try XCTUnwrap(handle.readData(ofLength: 1).first)
+        try handle.seek(toOffset: last)
+        try handle.write(contentsOf: Data([byte ^ 0xff]))
+        try handle.close()
+        do {
+            try await fixture.recognise(tampered)
+            XCTFail("Bytes that do not match the pinned digest were recognised with")
+        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
+        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: tampered), "The refused model was cached")
+
+        try await fixture.recognise(fixture.installed)
+        do {
+            _ = try await fixture.runtime.transcribe(
+                samples: fixture.samples, modelFile: fixture.installed, modelSHA256: String(repeating: "0", count: 64),
+                language: "en"
+            )
+            XCTFail("The cached model was reused for a digest its bytes do not have")
+        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
+        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: fixture.installed), "The refused load stayed cached")
+        try await fixture.recognise(fixture.installed)
+    }
+
     /// The runtime closes a model's file once it is loaded and keys its cache
-    /// by path. So a removal can delete the loaded model's folder first and the
+    /// by path and digest. So a removal can delete the loaded model's folder first and the
     /// model still recognises from memory; freeing another path keeps it, and
     /// freeing its own path releases it.
     func testLoadedModelSurvivesDeletingItsFileUntilItsOwnPathIsReleased() async throws {
@@ -241,7 +277,9 @@ private struct LocalRuntimeFixture {
 
     /// Loads `model` unless the runtime already holds it, then recognises.
     func recognise(_ model: URL) async throws {
-        _ = try await runtime.transcribe(samples: samples, modelFile: model, language: "en")
+        _ = try await runtime.transcribe(
+            samples: samples, modelFile: model, modelSHA256: spec.artifact.sha256, language: "en"
+        )
     }
 
     /// Deletes the model's file if it is still there, then reports whether the

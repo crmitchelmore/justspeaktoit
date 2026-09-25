@@ -82,7 +82,11 @@ final class WindowsLocalTranscriptionTests: XCTestCase {
         XCTAssertEqual(silence.text, "")
 
         let samples = [Float](repeating: 0.05, count: 32_000)
-        let cancelled = Task { try await runtime.transcribe(samples: samples, modelFile: file, language: nil) }
+        let cancelled = Task {
+            try await runtime.transcribe(
+                samples: samples, modelFile: file, modelSHA256: spec.artifact.sha256, language: nil
+            )
+        }
         cancelled.cancel()
         do {
             _ = try await cancelled.value
@@ -90,8 +94,40 @@ final class WindowsLocalTranscriptionTests: XCTestCase {
         } catch is CancellationError {}
     }
 
+    /// Loading hashes the bytes whisper.cpp reads through one open file. A copy
+    /// changed at its pinned size is refused and never cached, and the cached
+    /// model is not reused for a digest its bytes do not have.
+    func testTheRuntimeUsesOnlyBytesMatchingThePinnedDigest() async throws {
+        let fixture = try await LocalRuntimeFixture.make()
+        defer { fixture.cleanUp() }
+        let tampered = try fixture.copy("tampered")
+        let handle = try FileHandle(forUpdating: tampered)
+        let last = try handle.seekToEnd() - 1
+        try handle.seek(toOffset: last)
+        let byte = try XCTUnwrap(handle.readData(ofLength: 1).first)
+        try handle.seek(toOffset: last)
+        try handle.write(contentsOf: Data([byte ^ 0xff]))
+        try handle.close()
+        do {
+            try await fixture.recognise(tampered)
+            XCTFail("Bytes that do not match the pinned digest were recognised with")
+        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
+        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: tampered), "The refused model was cached")
+
+        try await fixture.recognise(fixture.installed)
+        do {
+            _ = try await fixture.runtime.transcribe(
+                samples: fixture.samples, modelFile: fixture.installed, modelSHA256: String(repeating: "0", count: 64),
+                language: "en"
+            )
+            XCTFail("The cached model was reused for a digest its bytes do not have")
+        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
+        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: fixture.installed), "The refused load stayed cached")
+        try await fixture.recognise(fixture.installed)
+    }
+
     /// The runtime closes a model's file once it is loaded and keys its cache
-    /// by path. So on NTFS a removal can delete the loaded model's folder first
+    /// by path and digest. So on NTFS a removal can delete the loaded model's folder first
     /// and the model still recognises from memory; freeing another path keeps
     /// it, and freeing its own path releases it.
     func testLoadedModelSurvivesDeletingItsFileUntilItsOwnPathIsReleased() async throws {
@@ -168,6 +204,7 @@ final class WindowsLocalTranscriptionTests: XCTestCase {
 /// its identity in the runtime's one-model cache, so copies act as models.
 private struct LocalRuntimeFixture {
     let runtime: WindowsWhisperRuntime
+    let spec: WhisperCppModel
     let installed: URL
     let samples: [Float]
     let scratch: URL
@@ -195,7 +232,9 @@ private struct LocalRuntimeFixture {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("jsti-model-cache-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        return LocalRuntimeFixture(runtime: runtime, installed: installed, samples: samples, scratch: scratch)
+        return LocalRuntimeFixture(
+            runtime: runtime, spec: spec, installed: installed, samples: samples, scratch: scratch
+        )
     }
 
     func copy(_ name: String) throws -> URL {
@@ -208,7 +247,9 @@ private struct LocalRuntimeFixture {
 
     /// Loads `model` unless the runtime already holds it, then recognises.
     func recognise(_ model: URL) async throws {
-        _ = try await runtime.transcribe(samples: samples, modelFile: model, language: "en")
+        _ = try await runtime.transcribe(
+            samples: samples, modelFile: model, modelSHA256: spec.artifact.sha256, language: "en"
+        )
     }
 
     /// Deletes the model's file if it is still there, then reports whether the

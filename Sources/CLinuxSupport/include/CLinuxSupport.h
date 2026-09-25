@@ -351,16 +351,26 @@ JSTIWhisperJob *jsti_whisper_job_create(void);
 void jsti_whisper_job_cancel(JSTIWhisperJob *job);
 void jsti_whisper_job_destroy(JSTIWhisperJob *job);
 
-enum { JSTI_WHISPER_OK = 0, JSTI_WHISPER_FAILED = -1, JSTI_WHISPER_CANCELLED = 1 };
+enum {
+    JSTI_WHISPER_OK = 0,
+    JSTI_WHISPER_FAILED = -1,
+    JSTI_WHISPER_CANCELLED = 1,
+    JSTI_WHISPER_MODEL_MISMATCH = 2
+};
 /* Transcribes 16 kHz mono float samples with the model at the absolute
- * `model_path`. The loaded model is cached for later calls with the same path
- * and released when another model is used or release_model is called; its
- * file is closed once loaded. Calls are serialised. `language` is a Whisper
- * code such as "en"; NULL, empty or unknown detects it. On success `*text` is
- * a heap UTF-8 string for jsti_whisper_free_text. */
+ * `model_path`, whose pinned SHA-256 is the 64 hex digits `model_sha256`.
+ * Loading hashes every byte as it hands it to whisper.cpp, through one open
+ * file, and a model whose bytes do not match is freed unused with
+ * JSTI_WHISPER_MODEL_MISMATCH, so no byte that was not verified is ever
+ * recognised with. The loaded model is cached for later calls with the same
+ * path and digest and released when another model is used or release_model is
+ * called; its file is closed once loaded. Calls are serialised. `language` is
+ * a Whisper code such as "en"; NULL, empty or unknown detects it. On success
+ * `*text` is a heap UTF-8 string for jsti_whisper_free_text. */
 int32_t jsti_whisper_transcribe(
-    JSTIWhisperRuntime *runtime, const char *model_path, const float *samples, size_t sample_count,
-    const char *language, int32_t threads, JSTIWhisperJob *job, char **text, char *error, size_t error_capacity);
+    JSTIWhisperRuntime *runtime, const char *model_path, const char *model_sha256, const float *samples,
+    size_t sample_count, const char *language, int32_t threads, JSTIWhisperJob *job, char **text, char *error,
+    size_t error_capacity);
 void jsti_whisper_free_text(char *text);
 /* Frees the cached model, waiting for a running transcription to finish. */
 void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime);

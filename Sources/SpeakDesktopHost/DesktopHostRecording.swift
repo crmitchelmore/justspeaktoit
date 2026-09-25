@@ -69,15 +69,37 @@ extension DesktopHostController {
         recording = nil
         liveUpdates?.cancel()
         liveUpdates = nil
-        defer { active.capture.destroy() }
-        var stopFailure: Error?
-        do { try active.capture.stop() } catch { stopFailure = error }
         let duration: TimeInterval
-        do { duration = try active.context.file.finish() } catch { active.live?.cancel(); throw error }
-        if let stopFailure { active.live?.cancel(); throw stopFailure }
+        do { duration = try DesktopHostRecordingStop.stop(active.capture, file: active.context.file) } catch {
+            active.live?.cancel()
+            throw error
+        }
         return StoppedRecording(
-            record: active.record, duration: active.context.file.isDigitalSilence ? 0 : duration,
-            target: active.target, live: active.live, profile: active.profile, textOutput: active.textOutput
+            record: active.record, duration: duration, target: active.target, live: active.live,
+            profile: active.profile, textOutput: active.textOutput
+        )
+    }
+}
+
+/// Ends a recording's capture, shared by stopping and by closing.
+enum DesktopHostRecordingStop {
+    /// Stops `capture`, finalises its WAV and destroys the capture whatever
+    /// fails. Returns the audio's duration, zero when it is digital silence.
+    static func stop(_ capture: any DesktopRecordingCapture, file: PCMRecordingFile) throws -> TimeInterval {
+        defer { capture.destroy() }
+        var stopFailure: Error?
+        do { try capture.stop() } catch { stopFailure = error }
+        let duration = try file.finish()
+        if let stopFailure { throw stopFailure }
+        return file.isDigitalSilence ? 0 : duration
+    }
+
+    /// A live session's text as a saved result; effectively empty text is empty.
+    static func liveResult(_ text: String, model: String, duration: TimeInterval) -> TranscriptionResult {
+        let cleaned = TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(text) ? "" : text
+        return TranscriptionResult(
+            text: cleaned, segments: [], confidence: nil, duration: duration,
+            modelIdentifier: model, cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
 }

@@ -188,12 +188,24 @@ enum LinuxLocalSelfTest {
         )
         guard quiet.text.isEmpty else { throw DesktopHostError(message: "A silent recording produced text.") }
         let samples = [Float](repeating: 0.1, count: 16_000)
-        let cancelled = Task { try await runtime.transcribe(samples: samples, modelFile: file, language: nil) }
+        let cancelled = Task {
+            try await runtime.transcribe(
+                samples: samples, modelFile: file, modelSHA256: spec.artifact.sha256, language: nil
+            )
+        }
         cancelled.cancel()
         do {
             _ = try await cancelled.value
             throw DesktopHostError(message: "A cancelled local transcription completed.")
         } catch is CancellationError {}
+        // The runtime hashes the bytes it loads: the cached model is not reused
+        // for another digest, and bytes that do not match are never used.
+        do {
+            _ = try await runtime.transcribe(
+                samples: samples, modelFile: file, modelSHA256: String(repeating: "0", count: 64), language: nil
+            )
+            throw DesktopHostError(message: "A model whose bytes do not match the digest was used.")
+        } catch DesktopLocalTranscriptionError.modelDoesNotMatchDigest {}
     }
 
     private static func failure(_ message: String) -> DesktopHostError {

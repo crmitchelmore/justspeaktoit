@@ -34,8 +34,7 @@ on:
       - .github/workflows/windows-cross-proof.yml
       - .github/workflows/windows-local-runtime.yml
   push:
-    # The consolidation branch runs here until its PR exists; drop it before merging.
-    branches: [main, claude/windows-linux-migration-tyshm0]
+    branches: [main]
     paths:
       - Package.swift
       - Sources/SpeakCore/**

@@ -7,8 +7,7 @@ name: Windows ARM64
 # emulation; see Docs/windows-arm64.md.
 on:
   push:
-    # The consolidation branch runs here until its PR exists; drop it before merging.
-    branches: [main, claude/windows-linux-migration-tyshm0]
+    branches: [main]
     paths:
       - Package.swift
       - Sources/SpeakCore/**

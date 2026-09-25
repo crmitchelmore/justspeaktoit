@@ -576,6 +576,12 @@ It also runs release tests for the portable graph on macOS and
 Linux. The actions have read-only repository permissions and require no real
 provider keys.
 
+The Windows, Windows ARM64, macOS to Windows proof and Linux workflows are
+advisory: they run on pull requests and on `main`, but they are not required
+checks in the `main` ruleset, and nothing else waits for them. Alpha releases
+follow `CI` only. A red desktop workflow is still a regression to fix, but it
+never blocks an Apple merge or release.
+
 The native self-test checks UTF-8/UTF-16 round trips, invalid encoding, PCM frame
 boundaries, silent packets, stop flushing, bounded queue overflow/wrap/FIFO/drain
 behaviour, writer failure reporting and rejection of an invalid insertion

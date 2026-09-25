@@ -447,7 +447,9 @@ reused; its sherpa and bzip2 path is not.
   own (`WindowsModelStream.cpp`), never while the runtime holds its lock, so a
   read that stalls (a network share, a pipe) cannot keep a cancelled
   recording, or the next one, waiting; a character device is refused without
-  being read. Cancelling stops a load within 1 MiB and caches nothing.
+  being read. Cancelling stops a load within 1 MiB and caches nothing. At most
+  four readers live at once, so readers left blocked by a source that never
+  resumes cannot pile up: a load is refused until their reads return.
   Models live in `%LOCALAPPDATA%\JustSpeakToIt\LocalModels` with the owner-only ACL.
 - **Runtime.** `WindowsWhisper.cpp` loads `whisper.dll` from the application
   directory with a restricted search path, refuses any `whisper_version()` other

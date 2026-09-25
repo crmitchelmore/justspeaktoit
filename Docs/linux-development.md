@@ -244,7 +244,9 @@ whisper.cpp 1.9.4 runtime and pinned GGML models as Windows
   holds its lock, so a read that stalls (a hung network or FUSE mount, a FIFO)
   cannot keep a cancelled recording, or the next one, waiting; a device is
   refused without being read. Cancelling stops a load within 1 MiB and
-  caches nothing.
+  caches nothing. At most four readers live at once, so readers left blocked
+  by a source that never resumes cannot pile up: a load is refused until
+  their reads return.
 - **Runtime.** `LinuxWhisper.c` opens `libggml-base.so.0`, `libggml.so.0` and
   `libwhisper.so.1` by absolute path, in dependency order, from the executable's
   directory or `JSTI_WHISPER_RUNTIME_DIRECTORY`, so their sonames resolve to

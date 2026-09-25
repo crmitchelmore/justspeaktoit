@@ -97,6 +97,52 @@ final class LinuxModelLoadTests: XCTestCase {
         }
     }
 
+    /// Readers left blocked by cancelled loads are bounded: once the limit is
+    /// reached a load is refused at once instead of starting another reader,
+    /// and loads resume as soon as the stalled reads return.
+    func testReadersLeftByStalledLoadsAreBounded() async throws {
+        let fixture = try await LocalRuntimeFixture.make()
+        defer { fixture.cleanUp() }
+        var writers: [Int32] = []
+        defer { writers.forEach { close($0) } }
+        var refusal: String?
+        for index in 0..<8 where refusal == nil {
+            let fifo = fixture.scratch.appendingPathComponent("bounded-\(index).bin")
+            XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+            writers.append(open(fifo.path, O_RDWR))
+            let loading = Task {
+                try await fixture.runtime.transcribe(
+                    samples: fixture.samples, modelFile: fifo, modelSHA256: fixture.spec.artifact.sha256,
+                    language: "en"
+                )
+            }
+            try await Task.sleep(nanoseconds: 200_000_000)
+            loading.cancel()
+            do {
+                _ = try await loading.value
+                XCTFail("A load whose reads stalled completed")
+            } catch is CancellationError {
+            } catch let error as LinuxLocalTranscriptionError {
+                refusal = error.message
+            }
+        }
+        let message = try XCTUnwrap(refusal, "Readers left by stalled loads were never bounded")
+        XCTAssertTrue(message.contains("have not returned"), message)
+
+        writers.forEach { close($0) }
+        writers = []
+        let deadline = Date().addingTimeInterval(10)
+        while true {
+            do {
+                try await fixture.recognise(fixture.installed)
+                break
+            } catch let error as LinuxLocalTranscriptionError
+                        where error.message.contains("have not returned") && Date() < deadline {
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+    }
+
     /// Writes `bytes` into the FIFO behind `writer`, then waits until they have
     /// all been read. False when that takes more than 30 seconds.
     private func feed(_ bytes: Data, into writer: Int32) async throws -> Bool {

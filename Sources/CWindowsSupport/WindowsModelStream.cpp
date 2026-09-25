@@ -1,5 +1,6 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -17,6 +18,13 @@ namespace jsti {
 namespace {
 constexpr size_t slotCount = 4;
 constexpr auto pollInterval = std::chrono::milliseconds(50);
+
+// Readers alive in this process: the one serving the load under way and any
+// left blocked by cancelled loads whose reads have not returned. At the limit
+// a load is refused rather than start another, so a source that never resumes
+// holds at most maxLiveReaders threads, files and buffer sets.
+constexpr int maxLiveReaders = 4;
+std::atomic<int> liveReaders{0};
 }
 
 struct ModelStreamState {
@@ -87,6 +95,8 @@ void readModel(std::shared_ptr<ModelStreamState> state) {
     }
     lock.unlock();
     if (file) std::fclose(file);
+    state.reset();
+    liveReaders.fetch_sub(1);
 }
 }
 
@@ -101,9 +111,16 @@ bool ModelStream::open(const std::wstring &path, std::string &error) {
     auto created = std::make_shared<ModelStreamState>();
     created->path = path;
     for (auto &slot : created->slots) slot.resize(modelStreamChunk);
+    if (liveReaders.fetch_add(1) >= maxLiveReaders) {
+        liveReaders.fetch_sub(1);
+        error = "Earlier reads of a model file have not returned, so no model is read until they do. "
+                "Check the drive that holds your models.";
+        return false;
+    }
     try {
         std::thread(readModel, created).detach();
     } catch (const std::system_error &failure) {
+        liveReaders.fetch_sub(1);
         error = std::string("Could not start reading the model: ") + failure.what();
         return false;
     }

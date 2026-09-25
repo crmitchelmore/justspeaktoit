@@ -12,7 +12,13 @@
  * up whenever its job is cancelled. A reader left blocked in a read keeps only
  * its thread, descriptor and buffers, and frees them once that read returns. */
 
-enum { SLOT_COUNT = 4, POLL_MICROSECONDS = 50 * 1000 };
+enum { SLOT_COUNT = 4, POLL_MICROSECONDS = 50 * 1000, MAX_LIVE_READERS = 4 };
+
+/* Readers alive in this process: the one serving the load under way and any
+ * left blocked by cancelled loads whose reads have not returned. At the limit
+ * a load is refused rather than start another, so a source that never resumes
+ * holds at most MAX_LIVE_READERS threads, descriptors and buffer sets. */
+static gint live_readers;
 
 struct JSTIModelStream {
     gint references; /* The loader's and the reader's. */
@@ -109,10 +115,17 @@ static gpointer stream_read(gpointer data) {
     g_mutex_unlock(&stream->lock);
     if (descriptor >= 0) close(descriptor);
     stream_unref(stream);
+    g_atomic_int_add(&live_readers, -1);
     return NULL;
 }
 
 JSTIModelStream *jsti_model_stream_open(const char *path, char *error, size_t capacity) {
+    if (g_atomic_int_add(&live_readers, 1) >= MAX_LIVE_READERS) {
+        g_atomic_int_add(&live_readers, -1);
+        jsti_set_error(error, capacity, "Earlier reads of a model file have not returned, so no model is read until "
+                                        "they do. Check the drive that holds your models.");
+        return NULL;
+    }
     JSTIModelStream *stream = g_new0(JSTIModelStream, 1);
     stream->references = 2;
     g_mutex_init(&stream->lock);
@@ -127,6 +140,7 @@ JSTIModelStream *jsti_model_stream_open(const char *path, char *error, size_t ca
         g_clear_error(&failure);
         stream->references = 1;
         stream_unref(stream);
+        g_atomic_int_add(&live_readers, -1);
         return NULL;
     }
     g_thread_unref(thread);

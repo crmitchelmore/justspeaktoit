@@ -317,8 +317,7 @@ private final class DesktopLiveTestClient: FinalizingStreamingTranscriptionClien
     }
 }
 
-/// Leaves the handshake pending so the real shared client's admission bound is
-/// exercised without networking, provider credentials or a parallel PCM queue.
+/// Leaves the handshake pending, so the shared client's admission bound runs offline and keyless.
 private final class DesktopUnopenedSocket: StreamingWebSocketConnection, @unchecked Sendable {
     func resume(onOpen: @escaping @Sendable () -> Void) {}
     func send(_ message: StreamingWebSocketMessage, completion: @escaping @Sendable (Error?) -> Void) {

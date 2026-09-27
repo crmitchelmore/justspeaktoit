@@ -89,6 +89,9 @@ $dataDirectory = Join-Path $env:LOCALAPPDATA $settings.fileSystem.dataDirectoryN
 $packageDataDirectory = Join-Path $env:LOCALAPPDATA ('Packages\' + $base.packageFamilyName)
 $virtualisedDataDirectory = Join-Path $packageDataDirectory ('LocalCache\Local\' + $settings.fileSystem.dataDirectoryName)
 $aliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.executionAlias)
+# The speak CLI alias exists only when the runtime bundle carries speak.exe.
+$cliAliasPath = $null
+if ($base.commandLineAlias) { $cliAliasPath = Join-Path $env:LOCALAPPDATA ('Microsoft\WindowsApps\' + $base.commandLineAlias) }
 $systemRoot = $env:SystemRoot
 $isolatedPath = "$systemRoot\System32;$systemRoot;$systemRoot\System32\Wbem;$systemRoot\System32\WindowsPowerShell\v1.0"
 $readyPattern = '^(Enter and save the selected provider.s API key|Ready\. Ctrl\+Alt\+Space)'
@@ -331,6 +334,13 @@ function Assert-Installed([string] $Label, $Expected, [string] $Layout) {
     $entry = Wait-StartMenuEntry $true
     Assert-Check "$Label appears in the Start menu" ($entry.present -and $entry.name -eq $Expected.displayName) $entry
     Assert-Check "$Label registers its execution alias" (Wait-PathState $aliasPath $true 60) $aliasPath
+    if ($cliAliasPath) {
+        Assert-Check "$Label puts the speak CLI on PATH" (Wait-PathState $cliAliasPath $true 60) $cliAliasPath
+        $cli = Invoke-JstiTool -FilePath $cliAliasPath -Arguments @('--version') -TimeoutSeconds 60
+        Assert-Check "$Label runs speak --version through its alias" (
+            $cli.ExitCode -eq 0 -and $cli.StandardOutput -match '^speak ') ([ordered]@{
+                exitCode = $cli.ExitCode; output = $cli.StandardOutput; errors = $cli.StandardError })
+    }
     return $package
 }
 
@@ -344,6 +354,9 @@ function Assert-Removed([string] $Label, $Package) {
     $entry = Wait-StartMenuEntry $false
     Assert-Check "$Label removes its Start menu entry" (-not $entry.present) $entry
     Assert-Check "$Label removes its execution alias" (Wait-PathState $aliasPath $false 60) $aliasPath
+    if ($cliAliasPath) {
+        Assert-Check "$Label removes the speak CLI alias" (Wait-PathState $cliAliasPath $false 60) $cliAliasPath
+    }
     Assert-Check "$Label removes package-private app data" (Wait-PathState $packageDataDirectory $false 120) $packageDataDirectory
     Add-Check "$Label removes its installed files" (
         $installLocation -and (Wait-PathState $installLocation $false 120)) $installLocation

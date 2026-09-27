@@ -211,9 +211,12 @@ try {
     Write-Host "Negative control failed to start as expected (STATUS_DLL_NOT_FOUND)."
 
     # --- 5. Run the bundled production executable and record loaded modules -------
-    function Invoke-Bundled([string] $arguments, [string] $label, [int] $seconds) {
+    function Invoke-Bundled([string] $arguments, [string] $label, [int] $seconds,
+                            [string] $executable = 'SpeakWindows.exe', [bool] $requireStaticClosure = $true) {
+        # The static-closure check applies to the app, whose imports define the
+        # closure; the speak CLI imports a subset of it.
         $parameters = @{
-            FilePath = (Join-Path $bundle 'SpeakWindows.exe')
+            FilePath = (Join-Path $bundle $executable)
             ArgumentList = $arguments
             WorkingDirectory = $emptyWorkingDirectory
             PassThru = $true
@@ -268,7 +271,7 @@ try {
         foreach ($entry in $bundled.Values) {
             $static = @($entry.importedBy | Where-Object { $_.kind -eq 'static' }).Count -gt 0
             $observed = @($fromBundle | Where-Object { $_ -ieq $entry.name }).Count -gt 0
-            if ($static -and -not $observed) { $missing += $entry.name }
+            if ($requireStaticClosure -and $static -and -not $observed) { $missing += $entry.name }
             foreach ($path in $fromSystem + $foreign) {
                 if ([System.IO.Path]::GetFileName($path) -ieq $entry.name) { $foreign += "$path (bundled module loaded from outside the bundle)" }
             }
@@ -277,6 +280,7 @@ try {
             $EmulationModules -contains [System.IO.Path]::GetFileName($_).ToLowerInvariant() })
         $run = [ordered]@{
             label = $label
+            executable = $executable
             arguments = $arguments
             exitCode = $process.ExitCode
             processMachine = Format-Machine $processMachine
@@ -348,6 +352,17 @@ try {
         if (-not (Test-Path -LiteralPath $env:JSTI_UI_SNAPSHOT_PATH)) { throw 'Bundled native client snapshot missing.' }
         Write-Host "UI smoke test loaded $($run.modulesFromBundle.Count) modules from the bundle and $($run.modulesFromSystemRoot.Count) from Windows."
     } catch { $failures.Add($_.Exception.Message) }
+    if (Test-Path -LiteralPath (Join-Path $bundle 'speak.exe')) {
+        try {
+            # The automation CLI the MSIX puts on PATH runs from the same bundle
+            # runtime, with no Swift on PATH and nothing loaded from elsewhere.
+            $run = Invoke-Bundled '--version' 'speak-version' 30 'speak.exe' $false
+            if (-not (Select-String -LiteralPath (Join-Path $evidenceDirectory 'bundle-speak-version.log') -Pattern '^speak ' -Quiet)) {
+                throw 'Bundled speak.exe did not print its version.'
+            }
+            Write-Host "speak.exe loaded $($run.modulesFromBundle.Count) modules from the bundle."
+        } catch { $failures.Add($_.Exception.Message) }
+    }
     if ($LocalTranscriptionAudio) {
         try {
             # The runtime is loaded at run time, so the static-import check above

@@ -67,6 +67,18 @@ PACKAGE_NAME_PATTERN = re.compile(r"[-.A-Za-z0-9]{3,50}")  # ST_PackageName
 APPLICATION_ID_PATTERN = re.compile(r"([A-Za-z][A-Za-z0-9]*)(\.[A-Za-z][A-Za-z0-9]*)*")  # ST_AsciiWindowsId
 EXECUTABLE_PATTERN = re.compile(r"[^\\/]+\.[Ee][Xx][Ee]")  # ST_ExecutableNoPath, no directories
 FILE_NAME_FORBIDDEN = re.compile(r"[<>\":%|?*\x00-\x1f]")  # ST_FileNameCharSet
+# ST_Protocol_Name-compatible scheme: lower-case letter first, then letters,
+# digits, '+', '-' or '.', 2-39 characters.
+PROTOCOL_PATTERN = re.compile(r"[a-z][a-z0-9+.-]{1,38}")
+# The alias element Windows needs for the speak CLI, inserted only when the
+# runtime bundle carries it.
+COMMAND_LINE_ALIAS_EXTENSION = """
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="${commandLineExecutable}"
+          uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="${commandLineAlias}"/>
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>"""
 PUBLISHER_ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
 RESERVED_PACKAGE_FILES = {"appxmanifest.xml", "appxblockmap.xml", "[content_types].xml", "appxsignature.p7x"}
 RESERVED_PACKAGE_DIRECTORIES = ("appxmetadata/", "microsoft.system.package.metadata/")
@@ -133,6 +145,7 @@ def package_identity(identity, version, publisher, architecture="x64"):
             "applicationId": identity["application"]["id"],
             "appUserModelId": family + "!" + identity["application"]["id"],
             "executionAlias": identity["application"]["executionAlias"],
+            "protocol": identity["application"]["protocol"],
             "displayName": identity["presentation"]["displayName"]}
 
 
@@ -158,9 +171,16 @@ def load_identity(path=IDENTITY_PATH):
     application = data["application"]
     if not APPLICATION_ID_PATTERN.fullmatch(application["id"]) or len(application["id"]) > 64:
         raise PackageError("application id is not a valid ST_AsciiWindowsId")
-    for key in ("executable", "executionAlias"):
-        if not EXECUTABLE_PATTERN.fullmatch(application[key]):
+    for key in ("executable", "executionAlias", "commandLineExecutable", "commandLineAlias"):
+        if not EXECUTABLE_PATTERN.fullmatch(application.get(key) or ""):
             raise PackageError(key + " must be an .exe file name without a directory")
+    if application["commandLineExecutable"] not in BUNDLE.COMPANION_EXECUTABLES:
+        raise PackageError("commandLineExecutable must be an executable the runtime bundle may carry")
+    if len({application[key].lower() for key in ("executionAlias", "commandLineAlias", "executable")}) != 3:
+        raise PackageError("the app executable and both execution aliases must differ")
+    if not PROTOCOL_PATTERN.fullmatch(application.get("protocol") or ""):
+        raise PackageError("protocol must be a lower-case URL scheme")
+    _text(application.get("protocolDisplayName"), "protocolDisplayName", 256)
     family = data["targetDeviceFamily"]
     if family["name"] != "Windows.Desktop" or version_tuple(family["minVersion"]) > version_tuple(family["maxVersionTested"]):
         raise PackageError("target device family must be Windows.Desktop with minVersion <= maxVersionTested")
@@ -348,7 +368,10 @@ NAMESPACES = {
 }
 
 
-def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, architecture="x64"):
+def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, architecture="x64",
+                    command_line=False):
+    """The AppxManifest.xml bytes. ``command_line`` adds the speak.exe alias; pass
+    it only for a bundle that carries that executable."""
     presentation, application = identity["presentation"], identity["application"]
     family = identity["targetDeviceFamily"]
     values = {
@@ -360,14 +383,19 @@ def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, a
         "deviceFamily": family["name"], "minVersion": family["minVersion"],
         "maxVersionTested": family["maxVersionTested"], "applicationId": application["id"],
         "executable": application["executable"], "executionAlias": application["executionAlias"],
+        "commandLineExecutable": application["commandLineExecutable"],
+        "commandLineAlias": application["commandLineAlias"], "protocol": application["protocol"],
+        "protocolDisplayName": application["protocolDisplayName"],
     }
     escaped = {key: escape(value, {'"': "&quot;"}) for key, value in values.items()}
+    escaped["commandLineAliasExtension"] = (
+        string.Template(COMMAND_LINE_ALIAS_EXTENSION).substitute(escaped) if command_line else "")
     data = string.Template(pathlib.Path(template_path).read_text(encoding="utf-8")).substitute(escaped).encode("utf-8")
-    check_manifest(data, identity, version, publisher, architecture)
+    check_manifest(data, identity, version, publisher, architecture, command_line)
     return data
 
 
-def check_manifest(data, identity, version, publisher, architecture="x64"):
+def check_manifest(data, identity, version, publisher, architecture="x64", command_line=False):
     """Check the rendered manifest states exactly the reviewed identity and policy."""
     try:
         root = ET.fromstring(data)
@@ -392,9 +420,22 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
             or applications[0].get("{%s}TrustLevel" % ns["uap10"]) != "mediumIL"
             or applications[0].get("{%s}RuntimeBehavior" % ns["uap10"]) != "packagedClassicApp"):
         raise PackageError("manifest must declare exactly the full-trust packaged desktop application")
-    aliases = [element.get("Alias") for element in applications[0].iter("{%s}ExecutionAlias" % ns["desktop"])]
-    if aliases != [application["executionAlias"]]:
-        raise PackageError("manifest must declare exactly the reviewed execution alias")
+    aliases = [(extension.get("Executable"), element.get("Alias"))
+               for extension in applications[0].iter("{%s}Extension" % ns["uap3"])
+               if extension.get("Category") == "windows.appExecutionAlias"
+               for element in extension.iter("{%s}ExecutionAlias" % ns["desktop"])]
+    expected_aliases = [(application["executable"], application["executionAlias"])]
+    if command_line:
+        expected_aliases.append((application["commandLineExecutable"], application["commandLineAlias"]))
+    if aliases != expected_aliases or len(list(applications[0].iter("{%s}ExecutionAlias" % ns["desktop"]))) != len(
+            expected_aliases):
+        raise PackageError("manifest must declare exactly the reviewed execution aliases")
+    protocols = [(extension.get("Executable"), element.get("Name"), element.get("Parameters"))
+                 for extension in applications[0].iter("{%s}Extension" % ns["uap3"])
+                 if extension.get("Category") == "windows.protocol"
+                 for element in extension.iter("{%s}Protocol" % ns["uap3"])]
+    if protocols != [(application["executable"], application["protocol"], '"%1"')]:
+        raise PackageError("manifest must declare exactly the reviewed protocol, passing the link as the argument")
     capabilities = root.find("f:Capabilities", ns)
     names = [(element.tag, element.get("Name")) for element in capabilities]
     restricted = [name for tag, name in names if tag == "{%s}Capability" % ns["rescap"]]
@@ -510,6 +551,18 @@ def verify_bundle(bundle_dir, expected_commit=None):
     for module in image.imports() + image.delay_imports():
         if policy.classify(module) == BUNDLE.TEST_MODULE:
             raise PackageError("SpeakWindows.exe imports the test library " + module)
+    recorded = application.get("companionExecutables") or {}
+    companions = sorted(path for path in entries if path.lower().endswith(".exe") and path != BUNDLE.APPLICATION)
+    if companions != sorted(recorded) or any(name not in BUNDLE.COMPANION_EXECUTABLES for name in companions):
+        raise PackageError("bundle executables other than SpeakWindows.exe must be recorded companions: "
+                           + ", ".join(companions))
+    for name in companions:
+        companion = windows_pe.PEImage(entries[name], name)
+        if recorded[name] != sha256(entries[name]) or not companion.runs_natively_on(architecture) or companion.is_dll:
+            raise PackageError("%s is not the recorded native %s executable" % (name, architecture))
+        for module in companion.imports() + companion.delay_imports():
+            if policy.classify(module) == BUNDLE.TEST_MODULE:
+                raise PackageError(name + " imports the test library " + module)
     # Every image the package installs must load natively on the architecture it declares.
     for path, data in sorted(entries.items()):
         if path.lower().endswith(".dll") and not windows_pe.PEImage(data, path).runs_natively_on(architecture):
@@ -521,7 +574,8 @@ def verify_bundle(bundle_dir, expected_commit=None):
     return {"evidence": evidence, "manifest": manifest, "manifestSHA256": sha256(manifest_bytes),
             "entries": entries, "rows": rows, "commit": commit, "architecture": architecture,
             "archive": {"name": name, "sha256": archive_record["sha256"], "bytes": archive_record["bytes"]},
-            "executableSHA256": sha256(executable), "subsystem": pe_subsystem(executable)}
+            "executableSHA256": sha256(executable), "subsystem": pe_subsystem(executable),
+            "companions": companions}
 
 
 # --- layout ------------------------------------------------------------------------------------
@@ -554,8 +608,9 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
         if path.lower() in {existing.lower() for existing in files}:
             raise PackageError("generated asset collides with a bundle file: " + path)
         files[path] = (data, "generated-asset")
-    files[APPX_MANIFEST] = (render_manifest(identity, version, publisher, architecture=architecture),
-                            "generated-manifest")
+    command_line = identity["application"]["commandLineExecutable"] in bundle["companions"]
+    files[APPX_MANIFEST] = (render_manifest(identity, version, publisher, architecture=architecture,
+                                            command_line=command_line), "generated-manifest")
     for path in files:
         _check_package_path(path)
     try:
@@ -570,6 +625,7 @@ def build_layout(bundle_dir, output_dir, version, publisher=None, expected_commi
             row["bundleSource"] = bundle["rows"][path]["source"]
         rows.append(row)
     identity_record = package_identity(identity, version, publisher, architecture)
+    identity_record["commandLineAlias"] = identity["application"]["commandLineAlias"] if command_line else None
     package_manifest = {
         "schemaVersion": 1,
         "package": dict(identity_record, kind="unsigned Windows %s developer MSIX payload" % (
@@ -740,3 +796,94 @@ def verify_package(package_path, layout_dir, signed, unsigned_reference=None):
     return {"name": package_path.name, "sha256": sha256(data), "bytes": len(data), "signed": bool(signed),
             "payloadFiles": len(payload), "blockMapSHA256": sha256(blockmap_bytes),
             "packageManifestSHA256": layout_hashes[PACKAGE_MANIFEST], "identity": package_manifest["package"]}
+
+
+# --- MSIX bundle ------------------------------------------------------------------------------
+BUNDLE_NAMESPACE = "http://schemas.microsoft.com/appx/2013/bundle"
+BUNDLE_MANIFEST_PART = "AppxMetadata/AppxBundleManifest.xml"
+
+
+def read_package_identity(package_path):
+    """The Identity attributes of an .msix's AppxManifest.xml, without installing it."""
+    try:
+        with zipfile.ZipFile(package_path) as archive:
+            parts = _package_parts(archive)
+            if APPX_MANIFEST not in parts:
+                raise PackageError("%s has no AppxManifest.xml" % pathlib.Path(package_path).name)
+            root = ET.fromstring(archive.read(parts[APPX_MANIFEST]))
+    except (zipfile.BadZipFile, ET.ParseError) as error:
+        raise PackageError("package is unreadable: %s" % error)
+    identity = root.find("f:Identity", NAMESPACES)
+    if identity is None:
+        raise PackageError("package has no Identity")
+    return {key: identity.get(key) for key in ("Name", "Publisher", "Version", "ProcessorArchitecture")}
+
+
+def verify_msixbundle(bundle_path, packages, signed):
+    """Check an .msixbundle holds exactly ``packages`` (their bytes) under one identity.
+
+    MakeAppx builds the bundle; this reader proves every inner package is the
+    verified input byte for byte, that each architecture appears once, that the
+    bundle and every package share name, publisher and version, and that
+    signing added only the signature and its catalogue.
+    """
+    bundle_path = pathlib.Path(bundle_path)
+    inputs = {}
+    for package in packages:
+        package = pathlib.Path(package)
+        identity = read_package_identity(package)
+        if identity["ProcessorArchitecture"] in {value["identity"]["ProcessorArchitecture"] for value in inputs.values()}:
+            raise PackageError("two packages share the %s architecture" % identity["ProcessorArchitecture"])
+        inputs[package.name] = {"data": package.read_bytes(), "identity": identity}
+    if not inputs:
+        raise PackageError("a bundle needs at least one package")
+    identities = {(value["identity"]["Name"], value["identity"]["Publisher"], value["identity"]["Version"])
+                  for value in inputs.values()}
+    if len(identities) != 1:
+        raise PackageError("bundled packages must share one name, publisher and version")
+    name, publisher, version = identities.pop()
+    try:
+        with zipfile.ZipFile(bundle_path) as archive:
+            parts = _package_parts(archive)
+            for required in (BLOCKMAP_PART, CONTENT_TYPES_PART, BUNDLE_MANIFEST_PART):
+                if required not in parts:
+                    raise PackageError("bundle lacks " + required)
+            if (SIGNATURE_PART in parts) != bool(signed):
+                raise PackageError("bundle is %s but %s was expected" % (
+                    "signed" if SIGNATURE_PART in parts else "unsigned", "signed" if signed else "unsigned"))
+            signing = {SIGNATURE_PART, CODE_INTEGRITY_PART} if signed else {SIGNATURE_PART}
+            payload = set(parts) - {BLOCKMAP_PART, CONTENT_TYPES_PART, BUNDLE_MANIFEST_PART} - signing
+            if payload != set(inputs):
+                raise PackageError("bundle payload differs from the packages; missing %s, unexpected %s" % (
+                    sorted(set(inputs) - payload), sorted(payload - set(inputs))))
+            for part in sorted(payload):
+                if archive.read(parts[part]) != inputs[part]["data"]:
+                    raise PackageError("bundled package differs from its input: " + part)
+            root = ET.fromstring(archive.read(parts[BUNDLE_MANIFEST_PART]))
+    except (zipfile.BadZipFile, ET.ParseError, KeyError) as error:
+        raise PackageError("bundle is unreadable: %s" % error)
+    ns = {"b": BUNDLE_NAMESPACE}
+    if root.tag != "{%s}Bundle" % BUNDLE_NAMESPACE:
+        raise PackageError("bundle manifest root must be the 2013 Bundle element")
+    identity = root.find("b:Identity", ns)
+    if identity is None or (identity.get("Name"), identity.get("Publisher"), identity.get("Version")) != (
+            name, publisher, version):
+        raise PackageError("bundle identity differs from its packages")
+    listed = {}
+    for element in root.findall("b:Packages/b:Package", ns):
+        file_name = element.get("FileName")
+        if file_name in listed or element.get("Type") != "application":
+            raise PackageError("bundle manifest lists a repeated or non-application package: %r" % (file_name,))
+        listed[file_name] = element
+    if set(listed) != set(inputs):
+        raise PackageError("bundle manifest does not list exactly the bundled packages")
+    for file_name, element in sorted(listed.items()):
+        expected = inputs[file_name]["identity"]
+        if (element.get("Architecture"), element.get("Version")) != (expected["ProcessorArchitecture"], version):
+            raise PackageError("bundle manifest misdescribes " + file_name)
+    data = bundle_path.read_bytes()
+    return {"name": bundle_path.name, "sha256": sha256(data), "bytes": len(data), "signed": bool(signed),
+            "identity": {"name": name, "publisher": publisher, "version": version,
+                         "packageFamilyName": name + "_" + publisher_id(publisher)},
+            "packages": [{"name": file_name, "architecture": inputs[file_name]["identity"]["ProcessorArchitecture"],
+                          "sha256": sha256(inputs[file_name]["data"])} for file_name in sorted(inputs)]}

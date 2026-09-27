@@ -1,15 +1,18 @@
 <#
 .SYNOPSIS
-Signs a copy of an unsigned developer .msix with an externally supplied certificate.
+Signs a copy of an unsigned .msix or .msixbundle with a certificate in a Windows certificate store.
 
 .DESCRIPTION
 The certificate must already be in a Windows certificate store with its private
-key (a hardware token or key storage provider may hold the key). This script
-never creates, imports, exports or reads key material: it passes only the
-thumbprint to the pinned SignTool. The certificate subject must equal the
-manifest publisher exactly; rebuild the layout with --publisher otherwise. The
-unsigned input is never modified. Supply -TimestampUrl for anything that must
-stay valid after the certificate expires. Keep this file ASCII-only.
+key: a Certum SimplySign session or cryptographic card, another hardware token,
+or a key storage provider. This script never creates, imports, exports or reads
+key material: it passes only the thumbprint to the pinned SignTool. The
+certificate subject must equal the manifest publisher exactly; rebuild the
+layout with --publisher otherwise. The unsigned input is never modified.
+Supply -TimestampUrl (http://time.certum.pl for Certum) for anything that must
+stay valid after the certificate expires. -Layout verifies a signed .msix
+against its layout; -BundlePackages verifies a signed .msixbundle against its
+input packages. Keep this file ASCII-only.
 #>
 [CmdletBinding()]
 param(
@@ -20,6 +23,8 @@ param(
     [ValidateSet('CurrentUser', 'LocalMachine')] [string] $CertificateStoreLocation = 'CurrentUser',
     [string] $TimestampUrl,
     [string] $Layout,
+    [string[]] $BundlePackages,
+    [string] $Method = 'certificate store',
     [string] $Python = 'python'
 )
 
@@ -61,17 +66,28 @@ if ($sign.ExitCode -ne 0) {
     throw "SignTool failed with exit code $($sign.ExitCode); see $log"
 }
 if ((Get-JstiSha256 $package) -ne $unsignedDigest) { throw 'The unsigned input changed while signing.' }
+$signer = Get-JstiPackageSigner $output
+if ($signer.Thumbprint -ne $certificate.Thumbprint -or $signer.Subject -cne $identity.Publisher) {
+    throw "The signature read back names '$($signer.Subject)' ($($signer.Thumbprint)), not the requested certificate."
+}
 
 $verification = $null
+$evidencePath = Join-Path $directory "$stem.verification.json"
 if ($Layout) {
-    $evidencePath = Join-Path $directory "$stem.verification.json"
     Invoke-JstiPython -Python $Python -LogPath $log -Arguments @(
         (Join-Path $PSScriptRoot 'verify-windows-package.py'), '--package', $output, '--layout', $Layout,
         '--signed', '--unsigned-reference', $package, '--evidence', $evidencePath) | Out-Null
     $verification = Read-JstiJson $evidencePath
+} elseif ($BundlePackages) {
+    $arguments = @((Join-Path $PSScriptRoot 'verify-windows-msixbundle.py'), '--bundle', $output, '--signed',
+                   '--evidence', $evidencePath)
+    foreach ($inner in $BundlePackages) { $arguments += @('--package', (Resolve-Path -LiteralPath $inner).Path) }
+    Invoke-JstiPython -Python $Python -LogPath $log -Arguments $arguments | Out-Null
+    $verification = Read-JstiJson $evidencePath
 }
 $record = [ordered]@{
     schemaVersion = 1
+    method = $Method
     unsignedPackage = [ordered]@{ name = [System.IO.Path]::GetFileName($package); sha256 = $unsignedDigest }
     signedPackage = [ordered]@{ name = [System.IO.Path]::GetFileName($output); sha256 = Get-JstiSha256 $output }
     publisher = $identity.Publisher
@@ -80,6 +96,7 @@ $record = [ordered]@{
         notAfter = $certificate.NotAfter.ToUniversalTime().ToString('o'); store = "$CertificateStoreLocation\My"
     }
     timestamped = [bool] $TimestampUrl
+    timestampUrl = $TimestampUrl
     signTool = $tools.Evidence.tools['signtool.exe']
     verification = $verification
 }

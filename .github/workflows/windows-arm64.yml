@@ -30,11 +30,13 @@ on:
       - scripts/verify-portable-core-boundary.py
       - scripts/websocket-loopback-probe.py
       - scripts/windows-bundle/**
+      - scripts/windows-cloudkit/**
       - scripts/windows-cross/**
       - scripts/windows-local-runtime/**
       - scripts/windows-package/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-arm64.yml
+      - .github/workflows/windows-cross-proof.yml
       - .github/workflows/windows-local-runtime.yml
   pull_request:
     branches: [main]
@@ -60,11 +62,13 @@ on:
       - scripts/verify-portable-core-boundary.py
       - scripts/websocket-loopback-probe.py
       - scripts/windows-bundle/**
+      - scripts/windows-cloudkit/**
       - scripts/windows-cross/**
       - scripts/windows-local-runtime/**
       - scripts/windows-package/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-arm64.yml
+      - .github/workflows/windows-cross-proof.yml
       - .github/workflows/windows-local-runtime.yml
   workflow_dispatch:
 
@@ -143,6 +147,9 @@ jobs:
           swift --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           swift build --configuration release --product SpeakWindows --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The speak automation CLI ships in the bundle; the MSIX puts it on PATH.
+          swift build --configuration release --product speak --jobs 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # The test build recompiles the same modules with testable imports, so the

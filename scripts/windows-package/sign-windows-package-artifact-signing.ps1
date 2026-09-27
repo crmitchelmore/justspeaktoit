@@ -30,27 +30,6 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'WindowsPackageTools.ps1')
 
-function Get-JstiPackageSigner([string] $Path) {
-    # AppxSignature.p7x is 'PKCX' followed by a PKCS #7 SignedData blob.
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    Add-Type -AssemblyName System.Security
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
-    try {
-        $entry = $zip.GetEntry('AppxSignature.p7x')
-        if (-not $entry) { throw "$Path has no AppxSignature.p7x." }
-        $stream = New-Object System.IO.MemoryStream
-        $source = $entry.Open()
-        try { $source.CopyTo($stream) } finally { $source.Dispose() }
-        $bytes = $stream.ToArray()
-    } finally { $zip.Dispose() }
-    if ($bytes.Length -lt 5 -or [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne 'PKCX') {
-        throw 'AppxSignature.p7x does not start with PKCX.'
-    }
-    $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
-    $cms.Decode($bytes[4..($bytes.Length - 1)])
-    return $cms.SignerInfos[0].Certificate
-}
-
 $package = (Resolve-Path -LiteralPath $Package).Path
 $layout = (Resolve-Path -LiteralPath $Layout).Path
 $metadata = (Resolve-Path -LiteralPath $Metadata).Path

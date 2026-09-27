@@ -38,6 +38,14 @@
           <uap3:AppExecutionAlias>
             <desktop:ExecutionAlias Alias="${executionAlias}"/>
           </uap3:AppExecutionAlias>
+        </uap3:Extension>${commandLineAliasExtension}
+        <!-- justspeaktoit:// links, including the custom-scheme iCloud sign-in callback. The link is the
+             only argument; a second launch forwards it to the running window and exits. -->
+        <uap3:Extension Category="windows.protocol" Executable="${executable}"
+          uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
+          <uap3:Protocol Name="${protocol}" Parameters="&quot;%1&quot;">
+            <uap:DisplayName>${protocolDisplayName}</uap:DisplayName>
+          </uap3:Protocol>
         </uap3:Extension>
       </Extensions>
     </Application>

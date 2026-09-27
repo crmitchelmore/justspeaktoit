@@ -385,8 +385,8 @@ but must not be presented as the identical Apple-only engine or service.
 | Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |
 | Global shortcut | Configurable Ctrl/Alt combination with conflict refusal, and all four activation styles: press-to-toggle natively; hold, double-tap and both through the shared SpeakCore gesture machine and session policy. Local Windows cross-compilation and portable gesture/policy tests pass; the native dialog, registration and release polling are covered by the window smoke test with fake registration and key state | Windows CI for this revision, physical keyboard acceptance of hold/double-tap timing, user-adjustable timing, the macOS host adopting the shared machine (it keeps its own `GestureDetector`), hands-free arming and Escape cancel |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
-| On-device transcription | Local batch recording and file import through a run-time loaded whisper.cpp 1.9.4 (best CPU variant, or Vulkan on any vendor's GPU when a driver is present). Four canonical Whisper entries (tiny, base, small, large-v3-turbo) are projected from the shared catalogue with pinned GGML files, sizes and SHA-256; the native Local models dialog downloads (resumable, atomic, verified), cancels, removes and sets the GPU choice. Source picker: Remote or Local, then Batch or Live; Local offers Batch only, so the Mode picker hides for it. Runtime DLLs are built from the pinned commit in CI and shipped in the bundle and MSIX with licence and provenance; the native job and the self-contained bundle transcribe the JFK sample with the tiny model | Windows CI receipt for this revision, local streaming, Hugging Face import, real Vulkan hardware (the runners have no GPU), CPU/GPU throughput and memory on physical PCs, and local post-processing |
-| Post-processing | Opt-in shared OpenRouter execution, canonical model selection and custom prompt; original and processed text retained separately; empty transcripts stay empty | Final-head Windows/Linux CI, real OpenRouter receipts, local execution, live polish and full Apple settings parity |
+| On-device transcription | Local batch recording and file import through a run-time loaded whisper.cpp 1.9.4 (best CPU variant, or Vulkan on any vendor's GPU when a driver is present). Four canonical Whisper entries (tiny, base, small, large-v3-turbo) are projected from the shared catalogue with pinned GGML files, sizes and SHA-256. **Local live:** Source Local, Mode Live streams tiny and base (the only models qualified for it) through a shared sliding-window client with an energy voice-activity detector; text appears while speaking, pauses confirm segments and stopping decodes the tail without dropping shown words. Small and Large v3 Turbo stay batch-only. **Hugging Face import:** the Local models dialog adds a whisper.cpp `.bin` file by repository and path, pins it to the revision, byte count and SHA-256 that Hugging Face reports, verifies the download and shows its size; History shows its friendly name. Imports are batch-only. Runtime DLLs are built from the pinned commit in CI and shipped in the bundle and MSIX with licence and provenance; the native job transcribes and streams the JFK sample (tiny and base, real-time pace, CPU-only runner) | Windows CI receipt for this revision (first run of the live self-test), physical microphone latency and accuracy of live text, **GPU behaviour: unverified — the CI runners have no GPU, so only the Vulkan-absent CPU fallback is exercised**, CPU/GPU throughput and memory on physical PCs, live language hints per profile (profiles still offer Local batch only) |
+| Post-processing | Opt-in Off, Remote or Local. Remote: shared OpenRouter execution with canonical models and a custom prompt. Local: built-in rules cleanup (the dialog says it ignores the prompt and hides the editor), or a downloaded GGUF language model run through a bundled llama.cpp (build b10809) that shares whisper.cpp's ggml 0.23.0. The prompt editor stays visible for local language models, and the user's prompt is their system instruction (`LocalLanguageModelPrompt`). The three shared-catalogue GGUF entries are pinned by revision, size and SHA-256 (`LlamaCppModels`); `.gguf` files can be imported from Hugging Face the same way as Whisper files. Original and processed text are retained separately; empty or silent transcripts stay empty without running a model. The native job polishes a transcript with SmolLM2 360M on the CPU | Windows CI receipt for this revision (first llama.cpp build and run), real OpenRouter receipts, output quality of each local model, GPU offload (unverified, no GPU on CI), live polish, profile-level local choices (profiles pick remote polish models only) and full Apple settings parity |
 | Personal vocabulary | Shared correction/lexicon data models compile | Editing UI, correction learning and provider bias integration |
 | Profiles and settings | Native ordered per-app editor and shared validation; immutable recording overrides, model-specific live language hints and preserved unknown values | Final-head native UI, physical executable matching, remaining settings and lexicon overrides |
 | History | Native record selection, case/diacritic-insensitive search over original/processed text and friendly model names, original/processed transcript selection for copy and export, retry, text export, external audio opening and in-app playback with Play/Pause, Stop and elapsed/remaining through Media Foundation and WASAPI; durable original/processed results and interrupted-recording recovery | Final-head UI smoke and device acceptance, physical speaker/Bluetooth/USB playback, history import and retention controls |
@@ -450,8 +450,8 @@ reused; its sherpa and bzip2 path is not.
   under the lock it loads under, so a model loaded in its place stays warm.
   Deleting first is safe: the runtime closes a model's file once it is loaded.
 - **Controls.** The window's Source picker chooses Remote or Local above Batch or
-  Live (Local has no live models yet, so Mode hides for it); Remote Batch,
-  Remote Live and Local keep separate saved models. Local
+  Live. Remote Batch, Remote Live, Local Batch and Local Live keep separate
+  saved models. Local
   recordings skip API keys and the provider upload cap. Silent recordings stay
   empty. History and headers show the friendly name, for example "Whisper Tiny
   (on-device)". History Retry transcribes a local recording again with its own
@@ -470,8 +470,86 @@ reused; its sherpa and bzip2 path is not.
   `--local-transcription-self-test <wav> --expect <phrase>`
   downloads the pinned model into `JSTI_LOCAL_MODEL_DIRECTORY` and transcribes
   the WAV; CI runs it on the native build and from the self-contained bundle
-  with the JFK sample. `JSTI_WHISPER_RUNTIME_DIRECTORY` points a developer
+  with the JFK sample. `--local-live-self-test <wav> --expect <phrase> --model
+  local/streaming/whispercpp/{tiny,base}` is the live qualification above, and
+  `--local-post-processing-self-test --model <local/post-processing/...>`
+  polishes a transcript with a pinned GGUF model (SmolLM2 360M in CI), keeps an
+  empty transcript empty and cancels a generation. `JSTI_WHISPER_RUNTIME_DIRECTORY` points a developer
   build at runtime DLLs outside the executable directory.
+
+- **Local live.** `DesktopLocalLiveClient` (SpeakDesktop) is a
+  `FinalizingStreamingTranscriptionClient`, so Windows runs it through the same
+  `DesktopLiveSession`, capture framing and History path as the remote live
+  routes. Whisper has no incremental decoder, so the client keeps the audio
+  after the last confirmed segment and decodes that window again once a second
+  of new audio has arrived and the previous decode has finished; a slow PC
+  decodes less often instead of falling behind. Each decode replaces the shown
+  hypothesis. An energy voice-activity detector over 30 ms frames, with an
+  adaptive noise floor capped at about -36 dBFS, skips windows without speech
+  (Whisper invents text for silence) and confirms the hypothesis as a final
+  segment after 0.7 s of silence; a 20-second window without a pause is cut at
+  its quietest frame. Stopping decodes the unconfirmed tail once, and an empty
+  tail decode keeps the words already shown, as the Mac's WhisperKit live path
+  does. This is near-real-time re-decoding, not a streaming model: text lags
+  speech by roughly one step plus one decode.
+- **Live qualification.** Only models `WhisperCppModels` marks live-qualified
+  are offered live, under `local/streaming/whispercpp/<name>` identifiers that
+  share the batch model's download: tiny and base. The rule: a whole 30-second
+  whisper.cpp window must decode on a CPU well inside the one-second step. CI
+  runs `--local-live-self-test` for both on a CPU-only runner at real-time pace
+  and fails on a missing phrase, no text while streaming, or a decode slower
+  than 3 s. Small and Large v3 Turbo take several seconds per window on a CPU
+  and stay batch-only; imports are never live. A live recording's History
+  Retry transcribes its audio in batch with the same download.
+- **Local post-processing.** The Post-processing dialog chooses Off, Remote or
+  Local. Local offers the canonical built-in rules cleanup, which ignores the
+  prompt (the dialog hides the editor and says so), and every language model
+  the host can run: the shared `ModelCatalog.localPostProcessing` GGUF entries,
+  pinned by `LlamaCppModels` to a Hugging Face revision, byte count and
+  SHA-256, then imports. `LocalLanguageModelPrompt` (SpeakCore) builds the
+  prompt pair: the user's post-processing prompt, or the default cleanup
+  policy, is the system instruction, plus the output language and the Mac's
+  local-engine constraint; the transcript travels in the shared inert JSON user
+  message. `WindowsLlama.cpp` applies the model's chat template (ChatML when it
+  has none llama.cpp recognises), closes Qwen3's thinking block the way its
+  template does when thinking is off, samples with llama-cpp-python's defaults
+  (top-k 40, top-p 0.95, min-p 0.05) at the saved temperature and removes any
+  `<think>` block. Empty or silent transcripts stay empty and never run a
+  model; an empty reply fails rather than erasing the transcript.
+- **Why llama.cpp.** It is the engine Windows users already run GGUF models
+  with: [LM Studio](https://lmstudio.ai/docs/app) ships
+  llama.cpp runtimes, [Ollama](https://github.com/ollama/ollama) runs GGUF
+  through ggml, and [Jan](https://github.com/janhq/jan),
+  [GPT4All](https://github.com/nomic-ai/gpt4all) and
+  [KoboldCpp](https://github.com/LostRuins/koboldcpp) are llama.cpp-based;
+  upstream publishes Windows CPU, Vulkan and CUDA
+  [releases](https://github.com/ggml-org/llama.cpp/releases). The Mac already
+  runs the same GGUF catalogue through llama.cpp, so no second format or list
+  is needed. Build [b10809](https://github.com/ggml-org/llama.cpp/releases/tag/b10809)
+  carries a ggml tree byte-identical to whisper.cpp 1.9.4's (ggml 0.23.0), so
+  one set of ggml DLLs serves both runtimes; `llama.dll` binds to the copies
+  whisper.cpp loads and the app refuses any ggml other than 0.23.0. ONNX
+  Runtime GenAI and Windows ML were rejected: they need ONNX exports rather
+  than the shared GGUF catalogue, and Phi Silica needs a Copilot+ NPU.
+- **Hugging Face import.** The Local models dialog takes a repository and a
+  file path (a whisper.cpp `.bin` or a `.gguf`) and has a Browse button that
+  opens Hugging Face in the browser, as the Mac's does. `HuggingFaceModelResolver`
+  (SpeakDesktop) reads the public model API for the repository's current
+  revision and the file's Git LFS SHA-256 and size, and refuses a file without
+  LFS metadata, because nothing would verify it. The import is pinned to that
+  revision and downloads through the same resumable, verified installer;
+  `imported-local-models.json` keeps it. Speech imports join Source Local
+  (batch only); GGUF imports join Local post-processing. History and pickers
+  show the friendly name ("small.en q5 1 from ggerganov/whisper.cpp"), derived
+  from the identifier even when the store is gone. Removing a downloaded
+  import deletes the file and forgets it; one never downloaded is forgotten.
+- **GPU honesty.** One Use a GPU choice covers both runtimes: whisper.cpp and
+  llama.cpp offload to Vulkan when a driver and device exist, otherwise run on
+  the CPU. The GitHub runners have no GPU, so CI exercises only the fallback
+  (the Vulkan backend DLL is present, `vulkan-1.dll` or a device is not) and
+  the build-time Vulkan tests. GPU selection, offload, throughput and memory are
+  **unverified** until they run on physical Windows PCs with AMD, Intel and
+  NVIDIA GPUs.
 
 The runtime build, its pins and the bundle integration are described in
 [windows-runtime-bundle.md](windows-runtime-bundle.md#on-device-transcription-runtime).

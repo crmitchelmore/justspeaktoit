@@ -21,6 +21,7 @@ bundle, built from the native ARM64 build, is described in
 | 14 Swift runtime DLLs | Swift 6.2.3 runtime package `rtl.msi` from the pinned swift.org installer | Static import closure of the executable (see below) |
 | `msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | Microsoft's official `VC_redist.x64.exe` 14.51.36247.0, read as data | Static import closure; never taken from the Swift installer copy |
 | `whisper.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-vulkan.dll`, `ggml-cpu-*.dll` | whisper.cpp 1.9.4 built from its pinned commit by `scripts/windows-local-runtime` (`--local-runtime`) | On-device transcription; loaded at run time, never imported by the executable |
+| `llama.dll` | llama.cpp build b10809, built by the same script against the ggml above | On-device post-processing with GGUF language models; loaded at run time beside whisper.cpp |
 | `licenses/` | Swift, ICU, curl and zlib licences pinned to release-tag commits; the app's MIT licence; a Microsoft runtime notice | Redistribution terms and attribution |
 | `THIRD-PARTY-NOTICES.txt`, `README.txt` | Generated deterministically | Human-readable summary and usage |
 | `bundle-manifest.json` | Generated | Every file with size and SHA-256, the import graph, the sources and the policy used |
@@ -129,13 +130,35 @@ runner through the reusable `.github/workflows/windows-local-runtime.yml`:
   the compiler version and the pin file's digest, plus the JFK sample from the
   same commit (a CI fixture, never bundled).
 
+After whisper.cpp, the same script builds `llama.dll` from llama.cpp tag
+`b10809` (commit `5266f24da75dc449bd56cbed7addb9c8e4a6a73e`, MIT, pinned as
+`llamaCpp` in the same `dependencies.json`). It installs the whisper.cpp build
+into a private stage, checks out llama.cpp with the same verification, and
+fails unless the two `ggml/` trees are identical file for file apart from
+`.gitignore` (both are ggml 0.23.0). It then configures llama.cpp with
+`LLAMA_USE_SYSTEM_GGML=ON` against that stage, builds only the `llama`
+target and refuses a `llama.dll` that imports anything but `ggml-base.dll`,
+optionally `ggml.dll`, Windows and the Visual C++ runtime. If configuring
+against the stage fails, it falls back to llama.cpp's own copy of the
+identical tree with whisper.cpp's exact `GGML_*` switches and still ships only
+`llama.dll`; the manifest records which argument set ran. The ggml DLLs always
+come from the whisper.cpp build, so the process loads one ggml: `llama.dll`
+binds to the copies whisper.cpp loaded, and the app refuses any
+`ggml_version()` other than `0.23.0`. `runtime-manifest.json` gains a
+`llamaCpp` block (pin, CMake arguments used, ggml tree digest and version,
+licence), and the vendored headers in `Sources/CWindowsSupport/llama-cpp/`
+carry their own provenance and a test that their ggml headers equal the
+whisper.cpp copies byte for byte.
+
 The result is cached by the hash of the pins, the build script, the runtime
 policy and the PE reader, so an unchanged pin reuses the DLLs.
 `build-windows-bundle.py --local-runtime <dir>` then authenticates every DLL
 against the manifest and the repository pins (commit, CMake arguments, Vulkan
-SDK, pin digest), refuses extra or missing modules, and bundles them with
-`licenses/LICENSE-whisper.cpp.txt`, a notices entry and
-`sources.localInferenceRuntime` in `bundle-manifest.json`. Modules they import
+SDK, pin digest, and for `llama.dll` the llama.cpp pin and whichever argument
+set ran), refuses extra or missing modules, and bundles them with
+`licenses/LICENSE-whisper.cpp.txt`, `licenses/LICENSE-llama.cpp.txt`, notices
+entries and `sources.localInferenceRuntime` (with its `llamaCpp` entry) in
+`bundle-manifest.json`. Modules they import
 that the executable does not (for example `concrt140.dll`) are bundled from the
 pinned Microsoft redistributable and recorded as `runtime-static` or
 `runtime-delay` imports. `vulkan-1.dll` is part of the GPU driver and is never
@@ -145,8 +168,11 @@ bundled: without it `ggml-vulkan.dll` does not load and the CPU backend runs.
 executable's `--local-transcription-self-test` on the CPU against the JFK
 sample with the pinned tiny model (cached between runs, verified by SHA-256 on
 every run) and requires `whisper.dll`, `ggml.dll`, `ggml-base.dll` and a CPU
-variant to load from the bundle. The package layout carries the same files into
-the developer MSIX.
+variant to load from the bundle. `-LocalPostProcessing` runs
+`--local-post-processing-self-test` with the pinned SmolLM2 360M GGUF model on
+the CPU and requires `llama.dll`, `ggml.dll`, `ggml-base.dll` and a CPU variant
+to load from the bundle. The package layout carries the same files, including
+`llama.dll` and its licence, into the developer MSIX.
 
 ## Determinism
 

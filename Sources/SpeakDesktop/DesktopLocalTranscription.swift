@@ -61,12 +61,53 @@ public enum DesktopLocalTranscription {
     public static func model(for identifier: String, host: LocalModelHostSupport) -> WhisperCppModel? {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return models(host: host).first { $0.catalogueID == trimmed }
+            ?? DesktopLocalModelImports.registered.whisperModel(for: trimmed, host: host)
     }
 
-    /// The friendly name of a whisper.cpp selection, or `nil` for any other
-    /// identifier. History keeps showing it even if a host stops offering it.
+    /// Models the host may stream live: only those `WhisperCppModels`
+    /// qualifies for the sliding-window streamer, never an import.
+    public static func liveModels(host: LocalModelHostSupport) -> [WhisperCppModel] {
+        models(host: host).filter(\.liveQualified)
+    }
+
+    /// Live picker options, `local/streaming/whispercpp/<name>`, each naming
+    /// the same download as its batch entry.
+    public static func liveOptions(host: LocalModelHostSupport) -> [ModelCatalog.Option] {
+        liveModels(host: host).compactMap { model in
+            model.liveIdentifier.map { identifier in
+                ModelCatalog.Option(
+                    id: identifier,
+                    displayName: model.displayName + " (on-device, live)",
+                    description: model.summary + " Shows text while you speak.",
+                    latencyTier: .fast,
+                    tags: [.privacy]
+                )
+            }
+        }
+    }
+
+    /// The model behind a live identifier, when the host can stream it.
+    public static func liveModel(for identifier: String, host: LocalModelHostSupport) -> WhisperCppModel? {
+        guard let model = WhisperCppModels.model(forLiveIdentifier: identifier) else { return nil }
+        return liveModels(host: host).contains(model) ? model : nil
+    }
+
+    /// The downloaded model a batch or live on-device identifier uses.
+    public static func downloadedModel(for identifier: String, host: LocalModelHostSupport) -> WhisperCppModel? {
+        model(for: identifier, host: host) ?? liveModel(for: identifier, host: host)
+    }
+
+    /// The friendly name of a whisper.cpp selection (batch, live or an
+    /// import), or `nil` for any other identifier. History keeps showing it
+    /// even if a host stops offering the model.
     public static func displayName(for identifier: String) -> String? {
-        WhisperCppModels.model(forCatalogueID: identifier).map { $0.displayName + " (on-device)" }
+        if let model = WhisperCppModels.model(forCatalogueID: identifier) {
+            return model.displayName + " (on-device)"
+        }
+        if let model = WhisperCppModels.model(forLiveIdentifier: identifier) {
+            return model.displayName + " (on-device, live)"
+        }
+        return DesktopLocalModelImports.displayName(for: identifier)
     }
 
     /// Whisper takes a bare ISO 639 code. Region and script subtags are

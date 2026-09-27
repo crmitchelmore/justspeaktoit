@@ -26,8 +26,8 @@ finish-args:
   - --socket=pulseaudio
   - --device=dri
   # libsecret reaches the Secret portal from inside the sandbox; the
-  # GlobalShortcuts, RemoteDesktop, Clipboard and notification portals need no
-  # extra permissions.
+  # GlobalShortcuts, RemoteDesktop, Clipboard, Background (Launch at login) and
+  # notification portals need no extra permissions.
   # The status notifier (panel icon and menu) registers with the desktop's
   # watcher under the app's own bus name.
   - --talk-name=org.kde.StatusNotifierWatcher

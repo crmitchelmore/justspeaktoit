@@ -32,6 +32,7 @@ enum WindowsPresentation {
         let controller = holder.controller
         Task {
             await controller.ready()
+            await controller.refreshLoginItem()
             do {
                 try directory.withCString { path in
                     try WindowsNative.checked { jsti_window_screenshot_tour(path, $0, $1) }

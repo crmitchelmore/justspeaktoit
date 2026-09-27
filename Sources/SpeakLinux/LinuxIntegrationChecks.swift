@@ -266,5 +266,18 @@ enum LinuxIntegrationChecks {
         Thread.sleep(forTimeInterval: 0.3)
         LinuxPortal.stopRemoteDesktop()
         print("RemoteDesktop: pasted through the shared clipboard and resumed with the saved restore token.")
+        try backgroundPortal()
+    }
+
+    /// Launch at login inside Flatpak: the fake portal grants the first
+    /// request, removes the entry on the second and refuses the third, as a
+    /// desktop does once the user has said no.
+    private static func backgroundPortal() throws {
+        try require(LinuxLoginItem.portalAvailable, "Background is not offered")
+        let answers = try [true, false, true].map {
+            try LinuxLoginItem.requestThroughPortal($0, command: "justspeaktoit")
+        }
+        try require(answers == [.enabled, .disabled, .disabledBySystem], "the portal answered \(answers)")
+        print("Background: Launch at login was granted, removed, then refused as the desktop's own choice.")
     }
 }

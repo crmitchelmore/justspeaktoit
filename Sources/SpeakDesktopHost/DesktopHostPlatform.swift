@@ -119,6 +119,18 @@ package protocol DesktopHostPlatform: Sendable {
     static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
     static func endLocalUse(_ held: String, controller: isolated DesktopHostController<Self>)
 
+    // Launch at login. Hosts without it keep the defaults, and the switch
+    // reads unavailable.
+    /// Where the system's own startup settings live, for the switch's note.
+    static var loginItemSettingsName: String { get }
+    /// The system's registration. `recorded` is the state last reached, for
+    /// hosts that cannot read the registration back.
+    static func loginItemState(recorded: Bool?) async -> DesktopLoginItemState
+    /// Registers or removes the login item and returns the state reached.
+    static func setLoginItem(_ enabled: Bool) async throws -> DesktopLoginItemState
+    /// Shows the state on General's switch, with the note under it.
+    static func showLoginItem(_ state: DesktopLoginItemState, detail: String)
+
     // Shortcut text for the status line.
     static var defaultHotKey: HotKeySettings { get }
     /// Appended to the Ready status line.
@@ -133,4 +145,8 @@ package extension DesktopHostPlatform {
     static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {}
     /// Hosts without a HUD show dictation progress on the status line only.
     static func hud(_ state: DesktopHUDState) {}
+    static var loginItemSettingsName: String { "the system's startup settings" }
+    static func loginItemState(recorded: Bool?) async -> DesktopLoginItemState { .unavailable }
+    static func setLoginItem(_ enabled: Bool) async throws -> DesktopLoginItemState { .unavailable }
+    static func showLoginItem(_ state: DesktopLoginItemState, detail: String) {}
 }

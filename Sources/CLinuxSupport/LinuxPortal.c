@@ -13,7 +13,8 @@
  * one dedicated thread with its own GMainContext, so the portals work without
  * the GTK loop and never block it. Public calls marshal onto that thread and
  * wait. Portal requests that may show a consent dialog wait up to five
- * minutes; the user can always dismiss them.
+ * minutes; the user can always dismiss them. Inside Flatpak, the Background
+ * portal writes and removes the app's login item (see jsti_background_request).
  */
 
 #define PORTAL_BUS_NAME "org.freedesktop.portal.Desktop"
@@ -23,6 +24,7 @@
 #define SHORTCUTS_INTERFACE "org.freedesktop.portal.GlobalShortcuts"
 #define REMOTE_INTERFACE "org.freedesktop.portal.RemoteDesktop"
 #define CLIPBOARD_INTERFACE "org.freedesktop.portal.Clipboard"
+#define BACKGROUND_INTERFACE "org.freedesktop.portal.Background"
 #define DIALOG_TIMEOUT_MS (5 * 60 * 1000)
 #define CALL_TIMEOUT_MS 10000
 
@@ -189,11 +191,13 @@ static gchar *next_token(Portal *state) { return g_strdup_printf("jsti%u_%u", (g
  * Calls a portal method whose last argument is an a{sv} options dictionary
  * that takes a handle_token, then waits for the Request's Response. The
  * caller supplies the leading arguments already built into `arguments`, a
- * tuple builder left open for the options. Returns the results on success.
+ * tuple builder left open for the options. Returns the Response's results,
+ * whatever its `code` (0 success, 1 declined, 2 other), or NULL when no
+ * Response arrived.
  */
-static GVariant *portal_request(
+static GVariant *portal_request_response(
     Portal *state, const char *interface, const char *method, GVariantBuilder *arguments,
-    GVariantBuilder *options, guint timeout_ms, char *error, size_t capacity) {
+    GVariantBuilder *options, guint timeout_ms, guint32 *code, char *error, size_t capacity) {
     gchar *token = next_token(state);
     gchar *path = g_strdup_printf("%s/request/%s/%s", PORTAL_PATH, state->sender, token);
     g_variant_builder_add(options, "{sv}", "handle_token", g_variant_new_string(token));
@@ -233,12 +237,9 @@ static GVariant *portal_request(
     g_source_unref(timer);
     if (!response.received) {
         jsti_set_error(error, capacity, "The desktop did not answer %s in time.", method);
-    } else if (response.code == 1) {
-        jsti_set_error(error, capacity, "Permission was declined in the desktop dialog.");
-    } else if (response.code != 0) {
-        jsti_set_error(error, capacity, "The desktop portal could not complete %s.", method);
     } else {
-        results = response.results;
+        *code = response.code;
+        results = response.results != NULL ? response.results : g_variant_ref_sink(g_variant_new("a{sv}", NULL));
         response.results = NULL;
     }
 done:
@@ -247,6 +248,21 @@ done:
     g_free(path);
     g_free(token);
     return results;
+}
+
+/* portal_request_response for requests that must succeed: returns the
+ * results only when the Response's code is 0. */
+static GVariant *portal_request(
+    Portal *state, const char *interface, const char *method, GVariantBuilder *arguments,
+    GVariantBuilder *options, guint timeout_ms, char *error, size_t capacity) {
+    guint32 code = 0;
+    GVariant *results = portal_request_response(
+        state, interface, method, arguments, options, timeout_ms, &code, error, capacity);
+    if (results == NULL || code == 0) return results;
+    g_variant_unref(results);
+    if (code == 1) jsti_set_error(error, capacity, "Permission was declined in the desktop dialog.");
+    else jsti_set_error(error, capacity, "The desktop portal could not complete %s.", method);
+    return NULL;
 }
 
 static GVariant *portal_call(
@@ -680,4 +696,55 @@ void jsti_remote_desktop_stop(void) {
     if (!started) return;
     char error[128];
     portal_run(remote_stop_work, NULL, error, sizeof error);
+}
+
+/* -------------------------------------------------------------- Background */
+
+typedef struct BackgroundRequest {
+    gboolean autostart;
+    const char *reason;
+    const char *const *commandline;
+    int32_t reached;
+} BackgroundRequest;
+
+static int32_t background_work(Portal *state, gpointer data, char *error, size_t capacity) {
+    BackgroundRequest *request = data;
+    GVariantBuilder arguments, options;
+    g_variant_builder_init(&arguments, G_VARIANT_TYPE_TUPLE);
+    g_variant_builder_add(&arguments, "s", "");
+    g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+    g_variant_builder_add(&options, "{sv}", "reason", g_variant_new_string(request->reason));
+    g_variant_builder_add(&options, "{sv}", "autostart", g_variant_new_boolean(request->autostart));
+    g_variant_builder_add(&options, "{sv}", "commandline", g_variant_new_strv(request->commandline, -1));
+    g_variant_builder_add(&options, "{sv}", "dbus-activatable", g_variant_new_boolean(FALSE));
+    guint32 code = 0;
+    GVariant *results = portal_request_response(
+        state, BACKGROUND_INTERFACE, "RequestBackground", &arguments, &options, DIALOG_TIMEOUT_MS, &code, error,
+        capacity);
+    if (results == NULL) return -1;
+    gboolean autostart = FALSE, background = code == 0;
+    g_variant_lookup(results, "autostart", "b", &autostart);
+    g_variant_lookup(results, "background", "b", &background);
+    g_variant_unref(results);
+    if (code > 1) {
+        jsti_set_error(error, capacity, "The desktop portal could not complete RequestBackground.");
+        return -1;
+    }
+    /* A refusal is remembered by the desktop, which answers every later
+     * request the same way until the user allows it in its settings. */
+    request->reached = autostart ? 1 : (request->autostart && (code == 1 || !background)) ? 2 : 0;
+    return 0;
+}
+
+int32_t jsti_background_request(
+    int32_t autostart, const char *reason, const char *const *commandline, int32_t *reached, char *error,
+    size_t capacity) {
+    if (reason == NULL || commandline == NULL || commandline[0] == NULL || reached == NULL) {
+        jsti_set_error(error, capacity, "The background request is incomplete.");
+        return -1;
+    }
+    BackgroundRequest request = { .autostart = autostart != 0, .reason = reason, .commandline = commandline };
+    int32_t result = portal_run(background_work, &request, error, capacity);
+    if (result == 0) *reached = request.reached;
+    return result;
 }

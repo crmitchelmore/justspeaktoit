@@ -50,15 +50,22 @@ enum {
     JSTI_EVENT_AZURE_RESOURCE = 34
 };
 
-/* Read aloud. Linux-only numbers 40-44. */
+/* Read aloud, Appearance and Launch at login. Linux-only numbers 40-46. */
 enum {
     /* text: the selected record id; the displayed transcript is captured
      * with jsti_window_transcript_snapshot while this event runs. */
     JSTI_EVENT_READ_ALOUD = 40,
     JSTI_EVENT_VOICE_OUTPUT = 41, /* index: position in the voice list */
     /* General › Appearance. index: 0 system, 1 light, 2 dark. */
-    JSTI_EVENT_APPEARANCE = 45
+    JSTI_EVENT_APPEARANCE = 45,
+    /* General › Launch at login. index: 1 on, 0 off. The switch stays
+     * insensitive until jsti_window_set_login_item reports the state reached. */
+    JSTI_EVENT_LOGIN_ITEM = 46
 };
+
+/* The argument the login item starts the app with (the shared
+ * DesktopLoginItem.launchArgument): the window starts minimised. */
+#define JSTI_LOGIN_LAUNCH_ARGUMENT "--background"
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
@@ -133,6 +140,9 @@ int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const 
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
 /* Applies and shows the saved appearance, indexed as JSTI_EVENT_APPEARANCE. */
 int32_t jsti_window_set_appearance(int32_t appearance);
+/* General › Launch at login: the shared DesktopLoginItemState (0 off, 1 on,
+ * 2 off by the system, 3 on by policy, 4 unavailable) and the note under it. */
+int32_t jsti_window_set_login_item(int32_t state, const char *detail);
 /* The recording HUD. phase is the shared DesktopHUDState.Phase: 0 hidden,
  * 1 recording (level meter and live_text), 2 transcribing, 3 post-processing,
  * 4 delivering, 5 success (hides after 2.4 s), 6 failure (hides after 6 s);
@@ -476,6 +486,15 @@ int32_t jsti_remote_desktop_active(void);
  * compositor maps them for the active keyboard layout. */
 int32_t jsti_remote_desktop_paste(const char *text, int32_t shift, char *error, size_t error_capacity);
 void jsti_remote_desktop_stop(void);
+
+/* Background: asks the desktop to start the app at login with `commandline`
+ * (autostart 1) or no longer (0), inside Flatpak, where the sandbox cannot
+ * write the autostart entry itself. The desktop may ask the user first; this
+ * waits up to five minutes for the answer. `reached`: 0 off, 1 on, 2 refused
+ * by the user or the desktop, which keeps refusing until its settings allow it. */
+int32_t jsti_background_request(
+    int32_t autostart, const char *reason, const char *const *commandline, int32_t *reached, char *error,
+    size_t error_capacity);
 
 /* --------------------------------------------------------------- self-test */
 

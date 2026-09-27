@@ -325,7 +325,8 @@ window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
   Retry, Export and Open audio sit beside the list.
 - **Settings pages** group the existing controls into titled cards, keeping
   every control identifier and behaviour: General (microphone, text output,
-  Appearance, the local automation toggle), Transcription (source, mode, model,
+  and the Mac's App Behaviour card with Appearance, Launch at login and the
+  local automation toggle), Transcription (source, mode, model,
   refresh, local models, keys), Post-processing, Profiles, Keyboard (the
   shortcut), iCloud Sync and About.
 - Totals and row wording come from the shared `DesktopHistoryInsights` and
@@ -358,6 +359,23 @@ window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
   window of its own owns the icon and menu, so the menu never brings the main
   window forward, and the icon returns after Explorer restarts. Closing the
   window still quits the app.
+- **Launch at login** (`WindowsLoginItem.cpp`), General's switch, like the
+  Mac's login item. The portable app registers `"<exe>" --background` as
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\JustSpeakToIt`;
+  turning it off in Task Manager or Settings › Apps › Startup leaves an odd
+  first byte in Explorer's `StartupApproved\Run` entry, which reads as off,
+  and the app's own switch turning it back on removes that entry. The MSIX
+  app declares a `windows.startupTask` (off until the user turns it on, with
+  the same `--background` parameter), because a packaged app's registry writes
+  never reach Explorer, and reads and changes it through the WinRT
+  `StartupTask` API, loaded from `combase.dll` at run time so the bundle
+  imports nothing new. A task the user or a policy turned off (or a policy
+  keeps on) shows a disabled switch with the note under App behaviour. The
+  system's registration is the record, so the switch always shows what will
+  happen at the next sign-in. A login launch shows the window minimised
+  without activating it. `--self-test` exercises the registry path under a
+  value of its own, never the user's; inside the MSIX lifecycle it reads the
+  startup task and turns it on and off again while it is plainly off.
 
 `SpeakWindows.exe --ui-screenshots <dir>` seeds sample History into a
 throwaway data directory, visits every page, then Dashboard and History in dark
@@ -451,6 +469,7 @@ but must not be presented as the identical Apple-only engine or service.
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
 | Window and appearance | Mac layout: sidebar pages, brand hero, Dashboard insights and setup, History cards; light, dark or follow Windows; DPI-scaled owner drawing; the recording HUD (never activated, click-through, level meter and live words); a notification-area icon and menu like the Mac's menu bar extra; a CI screenshot tour | Physical review at 100–200% scaling and on several monitors, high contrast, Narrator over the owner-drawn cards and the HUD's announcements, the HUD over full-screen apps, the notification-area menu on Windows 10 and 11, and whether closing the window should keep the app in the notification area |
+| Launch at login | General's switch: the HKCU Run value for the portable app (honouring Task Manager's startup switch) and a declared `windows.startupTask` for the MSIX; a login launch starts minimised; shared state, wording and status (`DesktopHostLoginItem`, `DesktopLoginItem`). The window self-test checks the switch; `--self-test` round-trips a Run value of its own, and inside the MSIX lifecycle round-trips the startup task. Compiled against the pinned Windows SDK and run under Wine locally (the registry path and window only) | Windows CI receipt for this revision, including the packaged startup task; a physical sign-in that starts the app minimised from each; Task Manager's and Settings' switches on Windows 10 and 11 |
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
 | Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |

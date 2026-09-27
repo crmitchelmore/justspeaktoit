@@ -15,6 +15,7 @@
 
 #include "WindowsHUD.hpp"
 #include "WindowsTray.hpp"
+#include "WindowsLoginItem.hpp"
 #include "WindowsWindowChrome.hpp"
 
 bool jsti_postprocessing_available();
@@ -95,7 +96,8 @@ const PageInfo pageInfo[pageCount] = {
     {L"History", L"Search, replay and reuse past recordings and their transcripts.", 0xE81C, "history"},
     {L"Voice Output", L"Hear any History transcript read back in a Deepgram Aura voice, through your own Deepgram "
                       L"key.", 0xE767, "voice-output"},
-    {L"General", L"Choose the microphone, where finished text goes, and how the app looks.", 0xE713, "general"},
+    {L"General", L"Choose the microphone, where finished text goes, whether the app starts at login, and how it "
+                 L"looks.", 0xE713, "general"},
     {L"Transcription", L"Pick the speech model for new recordings, on this PC or with your own provider key.", 0xE720,
      "transcription"},
     {L"Post-processing", L"Optionally polish transcripts with an OpenRouter model. The original is always kept.", 0xE734,
@@ -115,7 +117,7 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 // Settings that were menu commands: the automation switch emits
 // AUTOMATION_TOGGLED; the others open the same dialogs as before.
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
-    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448;
+    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448, loginItemID = 449;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
 constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT_PTR tourTimerID = 90;
@@ -144,6 +146,14 @@ struct WindowState {
     HWND window = nullptr;
     bool running = false;
     bool automationEnabled = false, automationChanged = false;
+    // Launch at login: the shared DesktopLoginItemState, -1 until the host
+    // reports it; a click waits for the state reached.
+    int loginItem = -1;
+    bool loginItemPending = false;
+    std::wstring loginItemDetail;
+    // UI thread only: the note under App behaviour, shown when the system
+    // decides the switch.
+    std::wstring loginItemNote;
     bool posted = false;
     bool statusChanged = false;
     bool transcriptChanged = false;
@@ -535,6 +545,7 @@ unsigned pagesOf(int identifier) {
     case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
     case voiceSettingsID: return page(voicePage);
     case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
+    case loginItemID:
         return page(generalPage);
     case processingID: return page(postProcessingPage);
     case profilesID: return page(profilesPage);
@@ -569,7 +580,7 @@ Role roleOf(HWND window, int identifier) {
     case recordID: return Role::record;
     case copyID: case saveID: return Role::primary;
     case importID: return state.page == historyPage ? Role::heroButton : Role::button;
-    case automationID: return Role::toggle;
+    case automationID: case loginItemID: return Role::toggle;
     case statusID: return Role::status;
     case historyDetailID: case modelStatusID: case transcriptLabelID: return Role::caption;
     case playbackTimeID: case shortcutValueID: return Role::value;
@@ -818,8 +829,12 @@ void layoutSettings(HWND window, const RECT &content) {
             L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
         place(window, textOutputID, box(left, y, scale(window, 170), row));
         top = y + row + scale(window, 20) + gap;
-        y = layoutSettingsCard(window, top, content, 0xE790, L"Appearance and automation", L"", 2 * row + scale(window, 12));
+        // The Mac's App Behaviour card. The note appears only when the system
+        // decides Launch at login, so the page still fits the minimum height.
+        y = layoutSettingsCard(window, top, content, 0xE713, L"App behaviour", state.loginItemNote,
+                               2 * row + scale(window, 12));
         label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
+        place(window, loginItemID, RECT{left + scale(window, 188 + 220 + 24), y, right, y + row});
         place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
         break;
     }
@@ -1208,8 +1223,8 @@ void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
         break;
     }
     case Role::toggle: {
-        bool on;
-        { std::lock_guard<std::mutex> lock(state.mutex); on = state.automationEnabled; }
+        // updateSettingsButtons keeps each switch's state in its user data.
+        const bool on = GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) != 0;
         const RECT track = box(rect.right - s(46), rect.top + (heightOf(rect) - s(24)) / 2, s(44), s(24));
         chrome::fillRound(dc, track, s(12), on ? chrome::accentDeep : palette.fieldBorder);
         const RECT knob = box(on ? track.right - s(21) : track.left + s(3), track.top + s(3), s(18), s(18));
@@ -1475,6 +1490,7 @@ bool createControls(HWND window) {
         add(L"BUTTON", L"Text o&utput…", BS_PUSHBUTTON | WS_TABSTOP, textOutputID) &&
         add(L"STATIC", L"&Theme", 0, appearanceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
+        add(L"BUTTON", L"Launch at &login", BS_PUSHBUTTON | WS_TABSTOP, loginItemID) &&
         add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
         add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
         add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
@@ -1588,12 +1604,32 @@ void updateSettingsButtons(HWND window, int recording) {
     EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
     EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
     EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
-    bool automation;
-    { std::lock_guard<std::mutex> lock(state.mutex); automation = state.automationEnabled; }
-    HWND toggle = GetDlgItem(window, automationID);
-    if ((GetWindowLongPtrW(toggle, GWLP_USERDATA) != 0) != automation) {
-        SetWindowLongPtrW(toggle, GWLP_USERDATA, automation ? 1 : 0);
+    bool automation, loginPending;
+    int login;
+    std::wstring loginDetail;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        automation = state.automationEnabled;
+        login = state.loginItem;
+        loginPending = state.loginItemPending;
+        loginDetail = state.loginItemDetail;
+    }
+    auto show = [&](int identifier, bool on) {
+        HWND toggle = GetDlgItem(window, identifier);
+        if ((GetWindowLongPtrW(toggle, GWLP_USERDATA) != 0) == on) return;
+        SetWindowLongPtrW(toggle, GWLP_USERDATA, on ? 1 : 0);
         InvalidateRect(toggle, nullptr, FALSE);
+    };
+    show(automationID, automation);
+    // A pending click keeps showing the choice until the host reports.
+    if (!loginPending) show(loginItemID, login == jsti::login::on || login == jsti::login::onBySystem);
+    EnableWindow(GetDlgItem(window, loginItemID), login == jsti::login::off || login == jsti::login::on);
+    const bool decided = login == jsti::login::offBySystem || login == jsti::login::onBySystem ||
+                         login == jsti::login::unavailable;
+    std::wstring note = decided ? loginDetail : std::wstring();
+    if (note != state.loginItemNote) {
+        state.loginItemNote.swap(note);
+        if (state.page == generalPage) layout(window);
     }
 }
 
@@ -2012,6 +2048,23 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             emit(window, JSTI_EVENT_AUTOMATION_TOGGLED, enabled ? "0" : "1");
             return 0;
         }
+        case loginItemID: {
+            if (HIWORD(wparam) != BN_CLICKED) return 0;
+            bool requested;
+            {
+                std::lock_guard<std::mutex> lock(state.mutex);
+                const int login = state.loginItem;
+                if (state.loginItemPending || (login != jsti::login::off && login != jsti::login::on)) return 0;
+                state.loginItemPending = true;
+                requested = login == jsti::login::off;
+            }
+            // Shows the choice at once; the host's answer settles it.
+            HWND toggle = GetDlgItem(window, loginItemID);
+            SetWindowLongPtrW(toggle, GWLP_USERDATA, requested ? 1 : 0);
+            InvalidateRect(toggle, nullptr, FALSE);
+            emit(window, JSTI_EVENT_LOGIN_ITEM, requested ? "1" : "0");
+            return 0;
+        }
         case githubID: case issueID: case privacyID: {
             if (HIWORD(wparam) != BN_CLICKED) return 0;
             const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
@@ -2243,6 +2296,17 @@ int jsti_window_set_automation(int enabled) {
     return 0;
 }
 
+int jsti_window_set_login_item(int value, const char *detail) {
+    std::wstring note;
+    if (value < jsti::login::off || value > jsti::login::unavailable || !jsti::wide(detail, note)) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.loginItem = value;
+    state.loginItemPending = false;
+    state.loginItemDetail.swap(note);
+    if (state.window && !state.posted) state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+    return 0;
+}
+
 int jsti_window_recording_state() {
     std::lock_guard<std::mutex> lock(state.mutex);
     return state.recording;
@@ -2427,7 +2491,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     else {
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
-        ShowWindow(window, SW_SHOWDEFAULT);
+        // A login launch starts minimised and leaves the focus where it is.
+        ShowWindow(window, jsti::login::launchedAtLogin() ? SW_SHOWMINNOACTIVE : SW_SHOWDEFAULT);
         UpdateWindow(window);
         // Optional: without a notification area the app works the same.
         jsti::tray::add(window, smallIcon ? smallIcon : type.hIcon, recordingIcon);
@@ -2915,6 +2980,11 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     int originalPreferredModels[modeCount];
     std::copy(std::begin(state.preferredModels), std::end(state.preferredModels), originalPreferredModels);
     const int originalMode = state.activeMode;
+    std::pair<int, std::wstring> originalLogin;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        originalLogin = {state.loginItem, state.loginItemDetail};
+    }
     const auto originalCallback = state.callback;
     void *const originalContext = state.context;
     RECT originalBounds{};
@@ -3554,6 +3624,33 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             if (failure.empty()) failure = "The all-batch model catalogue lost legacy behaviour.";
             return false;
         }
+        // Launch at login shows what the host reports, cannot be changed while
+        // the system decides it, and reports one click until the host answers.
+        {
+            showPage(window, generalPage);
+            HWND toggle = GetDlgItem(window, loginItemID);
+            auto shows = [&](bool on) { return (GetWindowLongPtrW(toggle, GWLP_USERDATA) != 0) == on; };
+            jsti_window_set_login_item(jsti::login::offBySystem, "Turned off in Settings.");
+            applyUpdate(window);
+            const bool decided = !IsWindowEnabled(toggle) && shows(false) &&
+                                 state.loginItemNote == L"Turned off in Settings." && checkBounds();
+            jsti_window_set_login_item(jsti::login::off, "Start minimised.");
+            applyUpdate(window);
+            observed.event = 0;
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(loginItemID, BN_CLICKED), reinterpret_cast<LPARAM>(toggle));
+            const bool reported = observed.event == JSTI_EVENT_LOGIN_ITEM && observed.id == "1" && shows(true);
+            observed.event = 0;
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(loginItemID, BN_CLICKED), reinterpret_cast<LPARAM>(toggle));
+            const bool once = observed.event == 0;
+            jsti_window_set_login_item(jsti::login::on, "Start minimised.");
+            applyUpdate(window);
+            const bool settled = IsWindowEnabled(toggle) && shows(true) && state.loginItemNote.empty();
+            showPage(window, transcriptionPage);
+            if (!decided || !reported || !once || !settled) {
+                if (failure.empty()) failure = "Launch at login did not follow the state the host reported.";
+                return false;
+            }
+        }
         // App profiles has its own page; every page keeps its controls in bounds.
         for (int page = 0; page < pageCount; ++page) {
             showPage(window, page);
@@ -3683,6 +3780,9 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     state.context = originalContext;
     {
         std::lock_guard<std::mutex> lock(state.mutex);
+        state.loginItem = originalLogin.first;
+        state.loginItemDetail = originalLogin.second;
+        state.loginItemPending = false;
         state.pendingHistory = originalHistory;
         state.pendingHistorySelection = originalSelection;
         state.historySelectionProvided = true;

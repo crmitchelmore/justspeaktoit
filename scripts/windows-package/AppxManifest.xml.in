@@ -39,6 +39,11 @@
             <desktop:ExecutionAlias Alias="${executionAlias}"/>
           </uap3:AppExecutionAlias>
         </uap3:Extension>
+        <!-- General › Launch at login. Off until the user turns it on; a login launch starts minimised. -->
+        <desktop:Extension Category="windows.startupTask" Executable="${executable}"
+          EntryPoint="Windows.FullTrustApplication" uap10:Parameters="${startupTaskParameters}">
+          <desktop:StartupTask TaskId="${startupTaskId}" Enabled="false" DisplayName="${displayName}"/>
+        </desktop:Extension>
       </Extensions>
     </Application>
   </Applications>

@@ -27,6 +27,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         package var azureSpeechResourceEndpoint: String?
         /// General › Appearance; absent follows the system.
         package var appearance: DesktopAppearance?
+        /// General › Launch at login as last reached, under the Mac's key. Only
+        /// hosts that cannot read the system's registration back use it.
+        package var runAtLogin: Bool?
     }
 
     /// Target, profile and text output are fixed when recording starts; a

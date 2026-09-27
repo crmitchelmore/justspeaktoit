@@ -8,7 +8,8 @@
     "The package family name is derived from name and publisher. The default publisher is a placeholder for the unsigned developer package; an externally supplied signing certificate requires rebuilding with its exact subject as the publisher, which creates a different package family.",
     "The application keeps settings, history and recordings in the real %LOCALAPPDATA%\\JustSpeakToIt directory used by the portable bundle. File-system write virtualisation is disabled so packaged writes are neither redirected into package-private storage nor deleted on uninstall. This needs the unvirtualizedResources restricted capability, which sideloading permits without Store approval.",
     "maxVersionTested is the Windows build on which the lifecycle job actually executes (Windows Server 2022, build 20348). Raise it only with a receipt from a newer build.",
-    "Each package carries one processor architecture, taken from the verified runtime bundle it is built from: x64 or arm64. Both are the same developer identity; Windows installs only the package matching the PC, and a family may later move to an .msixbundle holding both but not back."
+    "Each package carries one processor architecture, taken from the verified runtime bundle it is built from: x64 or arm64. Both are the same developer identity; Windows installs only the package matching the PC, and a family may later move to an .msixbundle holding both but not back.",
+    "General › Launch at login uses the declared windows.startupTask, off until the user turns it on; packaged registry writes would not reach Explorer's Run key. Its id must match jsti::login::task::identifier (WindowsLoginItem.hpp) and its parameters the shared DesktopLoginItem.launchArgument, so a login launch starts minimised."
   ],
   "identity": {
     "name": "com.justspeaktoit.windows.developer",
@@ -25,7 +26,11 @@
     "id": "JustSpeakToIt",
     "executable": "SpeakWindows.exe",
     "executionAlias": "JustSpeakToItDeveloper.exe",
-    "windowClass": "JustSpeakToItWindows"
+    "windowClass": "JustSpeakToItWindows",
+    "startupTask": {
+      "id": "JustSpeakToIt",
+      "parameters": "--background"
+    }
   },
   "targetDeviceFamily": {
     "name": "Windows.Desktop",

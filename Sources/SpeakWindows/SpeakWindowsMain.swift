@@ -178,6 +178,8 @@ private func ready(_ holder: WindowsEventContext) {
             error.localizedDescription.withCString { _ = jsti_window_refresh_microphones(nil, 0, $0) }
         }
         Task { await holder.controller.ready() }
+        let controller = holder.controller
+        holder.enqueueSettings { await controller.refreshLoginItem() }
         return
     }
     do {
@@ -215,6 +217,10 @@ private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, hol
     if event == 24 { return readAloudEvent(value, holder: holder) }
     if event == 25 { return automationEvent(requested: value == "1", holder: holder) }
     if event == 26 { return WindowsPresentation.appearanceEvent(value, holder: holder) }
+    if event == 27 {
+        let controller = holder.controller
+        return holder.enqueueSettings { await controller.setLaunchAtLogin(value == "1") }
+    }
     otherWindowEvent(event, value: value, holder: holder)
 }
 

@@ -44,7 +44,10 @@ enum JSTIWindowEvent {
      * stop it. Report the state reached with jsti_window_set_automation. */
     JSTI_EVENT_AUTOMATION_TOGGLED = 25,
     /* General > Theme changed. text: "0" follow Windows, "1" light, "2" dark. */
-    JSTI_EVENT_APPEARANCE = 26
+    JSTI_EVENT_APPEARANCE = 26,
+    /* General's Launch at login switch: text "1" on, "0" off. The switch stays
+     * disabled until jsti_window_set_login_item reports the state reached. */
+    JSTI_EVENT_LOGIN_ITEM = 27
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -353,6 +356,24 @@ int jsti_window_set_local_models(const JSTILocalModelRow *rows, size_t count, co
 void jsti_window_clear_local_models(void);
 /* Thread safe: checks or clears the Settings menu's automation item. */
 int jsti_window_set_automation(int enabled);
+/* Thread safe: General's Launch at login switch shows the shared
+ * DesktopLoginItemState (0 off, 1 on, 2 off by the system, 3 on by policy,
+ * 4 unavailable); only 0 and 1 can be changed there. `detail` is the note. */
+int jsti_window_set_login_item(int state, const char *detail);
+
+/* Launch at login (WindowsLoginItem.cpp). The portable app registers
+ * `"<exe>" --background` under HKCU\...\Run and honours Task Manager's
+ * StartupApproved switch; the MSIX app uses its declared windows.startupTask.
+ * Both may block for a few seconds: never call them on the UI thread. state
+ * and `reached` are the shared DesktopLoginItemState. */
+int jsti_login_item_state(void);
+int jsti_login_item_set(int enabled, int *reached, char *error, size_t error_capacity);
+/* 1 when this process was started with the login argument (--background). */
+int jsti_login_item_launched(void);
+/* Portable: registers, disables as Task Manager does, re-enables and removes a
+ * Run value of its own, never the user's. Packaged: reads the startup task,
+ * and turns it on and off again only when it is plainly off. */
+int jsti_login_item_self_test(char *error, size_t error_capacity);
 /* The localised key name, for example "Ctrl+Alt+Space". */
 int jsti_hotkey_name(unsigned modifiers, unsigned virtual_key, char *name, size_t capacity);
 

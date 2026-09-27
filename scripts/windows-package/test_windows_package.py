@@ -137,6 +137,16 @@ class IdentityTests(unittest.TestCase):
             self.assertNotIn(value, claimed)
         self.assertIn("Not an Alpha or Stable release", identity["presentation"]["description"])
 
+    def test_startup_task_matches_the_native_login_item(self):
+        # The C++ adapter asks for this task id, and the shared host starts
+        # minimised on this argument; a rename on one side must fail here.
+        startup = windows_msix.load_identity()["application"]["startupTask"]
+        native = (windows_msix.REPOSITORY / "Sources/CWindowsSupport/WindowsLoginItem.hpp").read_text(encoding="utf-8")
+        shared = (windows_msix.REPOSITORY / "Sources/SpeakDesktop/DesktopLoginItem.swift").read_text(encoding="utf-8")
+        self.assertIn('constexpr wchar_t identifier[] = L"%s";' % startup["id"], native)
+        self.assertIn('constexpr wchar_t launchArgument[] = L"%s";' % startup["parameters"], native)
+        self.assertIn('public static let launchArgument = "%s"' % startup["parameters"], shared)
+
     def test_publisher_id_matches_windows_for_known_publishers(self):
         self.assertEqual(windows_msix.publisher_id(
             "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"), "8wekyb3d8bbwe")
@@ -176,6 +186,9 @@ class IdentityTests(unittest.TestCase):
             lambda data: data["identity"].update(processorArchitectures=["x64", "x64"]),
             lambda data: data["identity"].update(processorArchitectures="x64"),
             lambda data: data["application"].update(executionAlias="nested\\alias.exe"),
+            lambda data: data["application"]["startupTask"].update(parameters="--minimised"),
+            lambda data: data["application"]["startupTask"].update(id="bad id"),
+            lambda data: data["application"].pop("startupTask"),
         ]
         with tempfile.TemporaryDirectory() as scratch:
             for change in changes:
@@ -206,6 +219,11 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(application.get("{%s}TrustLevel" % ns["uap10"]), "mediumIL")
         alias = application.find(".//desktop:ExecutionAlias", ns)
         self.assertEqual(alias.get("Alias"), "JustSpeakToItDeveloper.exe")
+        startup = application.find("f:Extensions/desktop:Extension[@Category='windows.startupTask']", ns)
+        self.assertEqual((startup.get("Executable"), startup.get("{%s}Parameters" % ns["uap10"])),
+                         ("SpeakWindows.exe", "--background"))
+        self.assertEqual(startup.find("desktop:StartupTask", ns).attrib,
+                         {"TaskId": "JustSpeakToIt", "Enabled": "false", "DisplayName": "Just Speak to It Developer"})
         names = [element.get("Name") for element in root.find("f:Capabilities", ns)]
         self.assertEqual(names, ["runFullTrust", "unvirtualizedResources", "microphone"])
         family = root.find("f:Dependencies/f:TargetDeviceFamily", ns)
@@ -245,6 +263,14 @@ class ManifestTests(unittest.TestCase):
         ignorable = data.replace(b'IgnorableNamespaces="uap', b'IgnorableNamespaces="desktop6 uap')
         with self.assertRaises(windows_msix.PackageError):
             windows_msix.check_manifest(ignorable, self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+        # Launch at login stays off until the user turns it on, and starts minimised.
+        for original, changed in ((b'Enabled="false"', b'Enabled="true"'),
+                                  (b'uap10:Parameters="--background"', b'uap10:Parameters=""'),
+                                  (b'TaskId="JustSpeakToIt"', b'TaskId="Other"')):
+            self.assertIn(original, data)
+            with self.assertRaises(windows_msix.PackageError):
+                windows_msix.check_manifest(data.replace(original, changed), self.identity, "0.0.7.1",
+                                            "CN=Just Speak to It Developer")
 
 
 class AssetTests(unittest.TestCase):

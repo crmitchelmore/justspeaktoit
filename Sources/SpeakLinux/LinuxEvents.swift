@@ -235,11 +235,16 @@ private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: L
 
 /// Settings events, applied in order. Returns false for unknown events.
 /// General › Appearance: the window already shows the scheme; this keeps it.
+/// General › Launch at login: the switch waits for the state reached.
 private func linuxAppearanceEvent(_ event: Int, slot: Int, holder: LinuxEventContext) -> Bool {
-    guard event == Int(JSTI_EVENT_APPEARANCE) else { return false }
     let controller = holder.controller
-    if let appearance = DesktopAppearance(rawValue: slot) {
-        holder.enqueueSettings { await controller.saveAppearance(appearance) }
+    switch event {
+    case Int(JSTI_EVENT_APPEARANCE):
+        if let appearance = DesktopAppearance(rawValue: slot) {
+            holder.enqueueSettings { await controller.saveAppearance(appearance) }
+        }
+    case Int(JSTI_EVENT_LOGIN_ITEM): holder.enqueueSettings { await controller.setLaunchAtLogin(slot == 1) }
+    default: return false
     }
     return true
 }
@@ -304,6 +309,7 @@ private func linuxReady(_ holder: LinuxEventContext) {
         let controller = holder.controller
         Task {
             await controller.ready()
+            await controller.refreshLoginItem()
             do {
                 try directory.withCString { path in
                     try LinuxNative.call { jsti_window_screenshot_tour(path, $0, $1) }
@@ -319,6 +325,7 @@ private func linuxReady(_ holder: LinuxEventContext) {
         let controller = holder.controller
         let ready = Task { await controller.ready() }
         holder.markReady(ready)
+        holder.enqueueSettings { await controller.refreshLoginItem() }
         LinuxCloudSync.start(holder, after: ready)
         holder.shortcuts.start(holder)
         do { try holder.microphones.start() } catch {

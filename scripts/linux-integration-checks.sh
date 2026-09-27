@@ -66,7 +66,7 @@ if ! JSTI_TEST_SOURCE=jsti_test.monitor "$binary" --integration-test capture; th
     exit 1
 fi
 
-step "portals (fake GlobalShortcuts, RemoteDesktop and Clipboard)"
+step "portals (fake GlobalShortcuts, RemoteDesktop, Clipboard and Background)"
 "$python" "$repo/scripts/linux-fake-portal.py" "$work/portal.json" >"$work/portal.out" 2>&1 & pids+=($!)
 for _ in $(seq 1 100); do grep -q "fake portal ready" "$work/portal.out" 2>/dev/null && break; sleep 0.1; done
 "$binary" --integration-test portal
@@ -80,7 +80,11 @@ ctrl, shift, v = 0xFFE3, 0xFFE1, 0x76
 assert log["keysyms"] == [[ctrl, 1], [v, 1], [v, 0], [ctrl, 0],
                           [ctrl, 1], [shift, 1], [v, 1], [v, 0], [shift, 0], [ctrl, 0]], log["keysyms"]
 assert log["calls"].count("Session.Close") >= 3, log["calls"]
-print("Fake portal saw the expected sessions, restore tokens, selections and keysyms.")
+command = ["justspeaktoit", "--background"]
+assert log["background"] == [
+    {"reason": "Start Just Speak to It minimised when you sign in.", "autostart": autostart,
+     "commandline": command, "dbus-activatable": False} for autostart in (True, False, True)], log["background"]
+print("Fake portal saw the expected sessions, restore tokens, selections, keysyms and login-item requests.")
 PY
 
 step "X11 paste (Xvfb, Openbox, Zenity)"
@@ -111,6 +115,21 @@ wait "$zenity" || true
 pasted="$(cat "$work/zenity.out")"
 [ "$pasted" = "X11 dictation ✓" ] || { echo "The target received: '$pasted'" >&2; exit 1; }
 echo "The Zenity field received the dictated text."
+
+step "login launch (--background starts minimised)"
+"$binary" --background >"$work/background.out" 2>&1 & background=$!
+pids+=($background)
+window="$(timeout 30 xdotool search --sync --name '^Just Speak to It$' | head -1)"
+[ -n "$window" ] || { cat "$work/background.out" >&2; echo "The login launch never created its window." >&2; exit 1; }
+sleep 1
+# Openbox unmaps an iconified window, so a minimised window is not viewable.
+if xdotool search --onlyvisible --name '^Just Speak to It$' | grep -q .; then
+    echo "The login launch showed its window instead of starting minimised." >&2
+    exit 1
+fi
+kill "$background"
+wait "$background" 2>/dev/null || true
+echo "A login launch started with its window minimised."
 
 step "status notifier (fake StatusNotifierWatcher)"
 "$python" "$repo/scripts/linux-fake-watcher.py" "$work/watcher.json" >"$work/watcher.out" 2>&1 & watcher=$!

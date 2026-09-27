@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """A fake org.freedesktop.portal.Desktop for the Linux integration checks.
 
-Implements just enough of GlobalShortcuts, RemoteDesktop, Clipboard, Request
-and Session to exercise the app's D-Bus protocol handling: request/response
-paths, session handles, persist mode and restore tokens, keysym paste and the
-SelectionTransfer/SelectionWrite handshake. It records what it saw in the JSON
+Implements just enough of GlobalShortcuts, RemoteDesktop, Clipboard,
+Background, Request and Session to exercise the app's D-Bus protocol handling:
+request/response paths, session handles, persist mode and restore tokens,
+keysym paste, the SelectionTransfer/SelectionWrite handshake and login-item
+requests (the third is refused, as a desktop does after the user says no). It records what it saw in the JSON
 file named by its first argument and exits on SIGTERM. It checks the protocol,
 not a compositor: consent dialogs, indicators and real key delivery need a
 physical desktop.
@@ -54,6 +55,12 @@ XML = """
     <signal name="SelectionTransfer"><arg type="o"/><arg type="s"/><arg type="u"/></signal>
     <property name="version" type="u" access="read"/>
   </interface>
+  <interface name="org.freedesktop.portal.Background">
+    <method name="RequestBackground">
+      <arg type="s" direction="in"/><arg type="a{sv}" direction="in"/><arg type="o" direction="out"/>
+    </method>
+    <property name="version" type="u" access="read"/>
+  </interface>
 </node>
 """
 SESSION_XML = """
@@ -62,7 +69,7 @@ SESSION_XML = """
 </interface></node>
 """
 
-log = {"calls": [], "keysyms": [], "selections": [], "restore_tokens": [], "errors": []}
+log = {"calls": [], "keysyms": [], "selections": [], "restore_tokens": [], "background": [], "errors": []}
 state = {"sessions": {}, "pipes": {}, "tokens": 0}
 
 
@@ -75,10 +82,10 @@ def sender_path(sender, token):
     return f"{PATH}/request/{sender[1:].replace('.', '_')}/{token}"
 
 
-def respond(connection, request, results):
+def respond(connection, request, results, code=0):
     def emit():
         connection.emit_signal(None, request, "org.freedesktop.portal.Request", "Response",
-                               GLib.Variant("(ua{sv})", (0, results)))
+                               GLib.Variant("(ua{sv})", (code, results)))
         return False
     GLib.timeout_add(20, emit)
 
@@ -175,6 +182,17 @@ def handle(connection, sender, _path, interface, method, params, invocation):
             os.close(read_end)
             log["selections"].append({"text": data.decode("utf-8"), "success": success})
             invocation.return_value(None)
+        elif method == "RequestBackground":
+            _parent, options = args
+            log["background"].append({key: options.get(key) for key in
+                                      ("reason", "autostart", "commandline", "dbus-activatable")})
+            request = sender_path(sender, options["handle_token"])
+            invocation.return_value(GLib.Variant("(o)", (request,)))
+            refused = len(log["background"]) == 3
+            respond(connection, request, {
+                "background": GLib.Variant("b", not refused),
+                "autostart": GLib.Variant("b", bool(options.get("autostart")) and not refused),
+            }, code=1 if refused else 0)
         else:
             invocation.return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", method)
     except Exception as error:  # report, never hang the client

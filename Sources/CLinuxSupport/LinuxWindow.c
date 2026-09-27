@@ -24,6 +24,8 @@ typedef struct UI {
     gint32 flags;
     gboolean ready_sent;
     gboolean suppress;
+    /* Started by the login item (--background): the window starts minimised. */
+    gboolean start_minimized;
     /* Models: picker position -> global slot. */
     GtkStringList *model_names;
     GArray *model_slots;
@@ -100,6 +102,7 @@ typedef struct UI {
     GtkButton *voice_read;
     GtkButton *voice_stop;
     AdwComboRow *appearance_row;
+    AdwSwitchRow *login_row;
 } UI;
 
 static UI ui;
@@ -318,6 +321,15 @@ static void on_appearance(GObject *object, GParamSpec *spec, gpointer data) {
     guint appearance = adw_combo_row_get_selected(ui.appearance_row);
     apply_appearance(appearance);
     emit(JSTI_EVENT_APPEARANCE, "", (gint32)appearance);
+}
+
+/* Launch at login. The switch waits, insensitive, for the state the desktop
+ * reached, which jsti_window_set_login_item reports. */
+static void on_login_item(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)object; (void)spec; (void)data;
+    if (ui.suppress) return;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.login_row), FALSE);
+    emit(JSTI_EVENT_LOGIN_ITEM, "", adw_switch_row_get_active(ui.login_row) ? 1 : 0);
 }
 
 static void on_style(GObject *object, GParamSpec *spec, gpointer data) {
@@ -846,7 +858,8 @@ static GtkWidget *build_voice_output(void) {
 static GtkWidget *build_general(void) {
     GtkWidget *column, *page = jsti_page_new(&column);
     gtk_box_append(GTK_BOX(column), settings_hero(
-        "General", "Choose the microphone, where finished text goes, and how the app looks."));
+        "General", "Choose the microphone, where finished text goes, whether the app starts at login, and how "
+        "it looks."));
     GtkWidget *microphone = group("Microphone");
     ui.microphone_names = gtk_string_list_new(NULL);
     ui.microphone_ids = g_ptr_array_new_with_free_func(g_free);
@@ -874,6 +887,15 @@ static GtkWidget *build_general(void) {
     g_signal_connect(ui.restore_row, "notify::active", G_CALLBACK(on_text_output), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(output), GTK_WIDGET(ui.restore_row));
     gtk_box_append(GTK_BOX(column), output);
+
+    GtkWidget *startup = group("Startup");
+    ui.login_row = ADW_SWITCH_ROW(adw_switch_row_new());
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.login_row), "Launch at login");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.login_row), "Checking the desktop's startup settings…");
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.login_row), FALSE);
+    g_signal_connect(ui.login_row, "notify::active", G_CALLBACK(on_login_item), NULL);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(startup), GTK_WIDGET(ui.login_row));
+    gtk_box_append(GTK_BOX(column), startup);
 
     GtkWidget *appearance = group("Appearance");
     const char *schemes[] = { "Follow the system", "Light", "Dark", NULL };
@@ -1156,7 +1178,14 @@ static void on_activate(GApplication *application, gpointer data) {
     apply_models(initial_models.rows, initial_models.count, initial_models.selected);
     ui.suppress = FALSE;
     open_posts();
-    gtk_window_present(ui.window);
+    if (ui.start_minimized) {
+        /* Minimised before it is first shown, and shown without the focus
+         * request present() makes, so nothing is taken from the login session. */
+        gtk_window_minimize(ui.window);
+        gtk_widget_set_visible(GTK_WIDGET(ui.window), TRUE);
+    } else {
+        gtk_window_present(ui.window);
+    }
     if (!ui.ready_sent) {
         ui.ready_sent = TRUE;
         /* The smoke test inspects and captures a laid-out, drawn window. */
@@ -1169,17 +1198,22 @@ static int on_command_line(GApplication *application, GApplicationCommandLine *l
     (void)data;
     gint argc = 0;
     gchar **argv = g_application_command_line_get_arguments(line, &argc);
-    gboolean toggle = FALSE;
+    gboolean toggle = FALSE, background = FALSE;
     for (gint index = 1; index < argc; index++) {
         if (g_strcmp0(argv[index], "--toggle") == 0) toggle = TRUE;
+        if (g_strcmp0(argv[index], JSTI_LOGIN_LAUNCH_ARGUMENT) == 0) background = TRUE;
     }
     g_strfreev(argv);
     gboolean remote = g_application_command_line_get_is_remote(line);
-    if (!remote || ui.window == NULL) g_application_activate(application);
+    if (!remote || ui.window == NULL) {
+        if (ui.window == NULL) ui.start_minimized = background && !toggle;
+        g_application_activate(application);
+    }
     /* A remote --toggle drives the running app without raising its window, so
-     * focus stays on the field that should receive the text. */
+     * focus stays on the field that should receive the text; a second login
+     * launch leaves the running app as it is. */
     if (toggle) emit(JSTI_EVENT_COMMAND_TOGGLE, selected_microphone(), selected_model_slot());
-    else if (remote) gtk_window_present(ui.window);
+    else if (remote && !background) gtk_window_present(ui.window);
     return 0;
 }
 
@@ -1667,6 +1701,36 @@ int32_t jsti_window_set_appearance(int32_t appearance) {
     return post(appearance_apply, GINT_TO_POINTER(appearance), NULL);
 }
 
+typedef struct LoginItem {
+    gint32 state;
+    gchar *detail;
+} LoginItem;
+
+static void login_item_free(gpointer pointer) {
+    LoginItem *item = pointer;
+    g_free(item->detail);
+    g_free(item);
+}
+
+/* The shared DesktopLoginItemState: 0 off, 1 on, 2 off by the system,
+ * 3 on by policy, 4 unavailable. Only 0 and 1 can be changed here. */
+static void login_item_apply(gpointer pointer) {
+    LoginItem *item = pointer;
+    ui.suppress = TRUE;
+    adw_switch_row_set_active(ui.login_row, item->state == 1 || item->state == 3);
+    ui.suppress = FALSE;
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.login_row), item->state == 0 || item->state == 1);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(ui.login_row), item->detail);
+}
+
+int32_t jsti_window_set_login_item(int32_t state, const char *detail) {
+    if (state < 0 || state > 4 || detail == NULL || !g_utf8_validate(detail, -1, NULL)) return -1;
+    LoginItem *item = g_new0(LoginItem, 1);
+    item->state = state;
+    item->detail = g_strdup(detail);
+    return post(login_item_apply, item, login_item_free);
+}
+
 typedef struct HUD {
     gint32 phase;
     gchar *headline, *subheadline, *live;
@@ -2042,8 +2106,40 @@ static int32_t read_aloud_self_test(const char *record, char *error, size_t capa
     return 0;
 }
 
+/* Launch at login shows what the host reports, is fixed while the system
+ * decides it, and reports the user's switch once, then waits for the answer. */
+static int32_t login_item_self_test(char *error, size_t capacity) {
+    LoginItem blocked = { .state = 2, .detail = (gchar *)"Turned off in Settings." };
+    login_item_apply(&blocked);
+    if (adw_switch_row_get_active(ui.login_row) || gtk_widget_get_sensitive(GTK_WIDGET(ui.login_row))
+        || g_strcmp0(adw_action_row_get_subtitle(ADW_ACTION_ROW(ui.login_row)), blocked.detail) != 0) {
+        return fail(error, capacity, "Launch at login did not show a state the system decides");
+    }
+    LoginItem off = { .state = 0, .detail = (gchar *)"Start minimised." };
+    login_item_apply(&off);
+    jsti_window_event_fn callback = ui.callback;
+    ui.callback = observe_event;
+    observed.event = 0;
+    adw_switch_row_set_active(ui.login_row, TRUE);
+    gboolean reported = observed.event == JSTI_EVENT_LOGIN_ITEM && observed.index == 1;
+    gboolean waiting = !gtk_widget_get_sensitive(GTK_WIDGET(ui.login_row));
+    observed.event = 0;
+    LoginItem on = { .state = 1, .detail = (gchar *)"Start minimised." };
+    login_item_apply(&on);
+    gboolean quiet = observed.event == 0;
+    ui.callback = callback;
+    g_clear_pointer(&observed.text, g_free);
+    if (!reported || !waiting) return fail(error, capacity, "Launch at login did not report the switch");
+    if (!quiet || !adw_switch_row_get_active(ui.login_row) || !gtk_widget_get_sensitive(GTK_WIDGET(ui.login_row))) {
+        return fail(error, capacity, "Launch at login did not show the state reached");
+    }
+    login_item_apply(&off);
+    return 0;
+}
+
 int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.window == NULL) return fail(error, capacity, "the window was not created");
+    if (login_item_self_test(error, capacity) != 0) return -1;
     if (g_list_model_get_n_items(G_LIST_MODEL(ui.model_names)) == 0) {
         return fail(error, capacity, "no models are offered");
     }

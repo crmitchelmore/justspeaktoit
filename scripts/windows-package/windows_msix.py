@@ -66,6 +66,8 @@ PUBLISHER_PATTERN = re.compile(_RDN + r"(, " + _RDN + r")*")  # ST_Publisher_201
 PACKAGE_NAME_PATTERN = re.compile(r"[-.A-Za-z0-9]{3,50}")  # ST_PackageName
 APPLICATION_ID_PATTERN = re.compile(r"([A-Za-z][A-Za-z0-9]*)(\.[A-Za-z][A-Za-z0-9]*)*")  # ST_AsciiWindowsId
 EXECUTABLE_PATTERN = re.compile(r"[^\\/]+\.[Ee][Xx][Ee]")  # ST_ExecutableNoPath, no directories
+# DesktopLoginItem.launchArgument: a login launch starts the app minimised.
+LOGIN_LAUNCH_ARGUMENT = "--background"
 FILE_NAME_FORBIDDEN = re.compile(r"[<>\":%|?*\x00-\x1f]")  # ST_FileNameCharSet
 PUBLISHER_ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
 RESERVED_PACKAGE_FILES = {"appxmanifest.xml", "appxblockmap.xml", "[content_types].xml", "appxsignature.p7x"}
@@ -161,6 +163,12 @@ def load_identity(path=IDENTITY_PATH):
     for key in ("executable", "executionAlias"):
         if not EXECUTABLE_PATTERN.fullmatch(application[key]):
             raise PackageError(key + " must be an .exe file name without a directory")
+    startup = application.get("startupTask")
+    if (not isinstance(startup, dict) or set(startup) != {"id", "parameters"}
+            or not APPLICATION_ID_PATTERN.fullmatch(startup["id"]) or len(startup["id"]) > 64):
+        raise PackageError("startupTask must name one task id for Launch at login")
+    if startup["parameters"] != LOGIN_LAUNCH_ARGUMENT:
+        raise PackageError("the startup task must pass the shared login argument " + LOGIN_LAUNCH_ARGUMENT)
     family = data["targetDeviceFamily"]
     if family["name"] != "Windows.Desktop" or version_tuple(family["minVersion"]) > version_tuple(family["maxVersionTested"]):
         raise PackageError("target device family must be Windows.Desktop with minVersion <= maxVersionTested")
@@ -360,6 +368,8 @@ def render_manifest(identity, version, publisher, template_path=TEMPLATE_PATH, a
         "deviceFamily": family["name"], "minVersion": family["minVersion"],
         "maxVersionTested": family["maxVersionTested"], "applicationId": application["id"],
         "executable": application["executable"], "executionAlias": application["executionAlias"],
+        "startupTaskId": application["startupTask"]["id"],
+        "startupTaskParameters": application["startupTask"]["parameters"],
     }
     escaped = {key: escape(value, {'"': "&quot;"}) for key, value in values.items()}
     data = string.Template(pathlib.Path(template_path).read_text(encoding="utf-8")).substitute(escaped).encode("utf-8")
@@ -395,6 +405,15 @@ def check_manifest(data, identity, version, publisher, architecture="x64"):
     aliases = [element.get("Alias") for element in applications[0].iter("{%s}ExecutionAlias" % ns["desktop"])]
     if aliases != [application["executionAlias"]]:
         raise PackageError("manifest must declare exactly the reviewed execution alias")
+    tasks = [element for element in applications[0].iter("{%s}Extension" % ns["desktop"])
+             if element.get("Category") == "windows.startupTask"]
+    startup = application["startupTask"]
+    declared = [(element.get("Executable"), element.get("EntryPoint"), element.get("{%s}Parameters" % ns["uap10"]),
+                 [(task.get("TaskId"), task.get("Enabled")) for task in element.findall("desktop:StartupTask", ns)])
+                for element in tasks]
+    if declared != [(application["executable"], "Windows.FullTrustApplication", startup["parameters"],
+                     [(startup["id"], "false")])]:
+        raise PackageError("manifest must declare exactly the reviewed startup task, off until the user turns it on")
     capabilities = root.find("f:Capabilities", ns)
     names = [(element.tag, element.get("Name")) for element in capabilities]
     restricted = [name for tag, name in names if tag == "{%s}Capability" % ns["rescap"]]

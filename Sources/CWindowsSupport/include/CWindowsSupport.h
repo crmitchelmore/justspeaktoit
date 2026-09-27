@@ -40,9 +40,11 @@ enum JSTIWindowEvent {
     /* Carries the selected record ID; read the displayed transcript with
      * jsti_window_transcript_snapshot synchronously in the callback, as for Copy. */
     JSTI_EVENT_HISTORY_READ_ALOUD = 24,
-    /* The Settings menu's automation item: text is "1" to allow automation and
-     * "0" to stop it. Report the state reached with jsti_window_set_automation. */
-    JSTI_EVENT_AUTOMATION_TOGGLED = 25
+    /* General's automation switch: text is "1" to allow automation and "0" to
+     * stop it. Report the state reached with jsti_window_set_automation. */
+    JSTI_EVENT_AUTOMATION_TOGGLED = 25,
+    /* General > Theme changed. text: "0" follow Windows, "1" light, "2" dark. */
+    JSTI_EVENT_APPEARANCE = 26
 };
 
 /* Runs on the UI thread. text is borrowed until callback returns. model_index
@@ -131,7 +133,45 @@ typedef struct JSTIHistoryRow {
     const char *id;
     const char *title;
     const char *detail;
+    /* The History card, worded by the shared DesktopHistoryRowSummary. Each may
+     * be null or empty, which hides its badge. tone: 0 transcribed, 1 failed,
+     * 2 not yet transcribed. */
+    const char *created;
+    const char *audio_length;
+    const char *cost;
+    const char *preview;
+    const char *models;
+    const char *context;
+    int tone;
 } JSTIHistoryRow;
+
+/* Preformatted History totals, as the Mac dashboard shows them. */
+typedef struct JSTIInsights {
+    const char *sessions;
+    const char *errors;
+    const char *recording_time;
+    const char *average_length;
+    const char *spend;
+} JSTIInsights;
+/* The dashboard totals (`all` saved records) and the History header totals
+ * (`visible`, the records the search shows). Thread safe; coalesced. */
+int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
+
+/* The window's pages, in sidebar order. */
+enum {
+    JSTI_PAGE_DASHBOARD = 0, JSTI_PAGE_HISTORY, JSTI_PAGE_VOICE_OUTPUT, JSTI_PAGE_GENERAL, JSTI_PAGE_TRANSCRIPTION,
+    JSTI_PAGE_POST_PROCESSING, JSTI_PAGE_PROFILES, JSTI_PAGE_KEYBOARD, JSTI_PAGE_CLOUD_SYNC, JSTI_PAGE_ABOUT,
+    JSTI_PAGE_COUNT
+};
+/* Shows a JSTI_PAGE_* page, as its sidebar button does. Thread safe. */
+int jsti_window_show_page(int page);
+/* General > Theme: 0 follows Windows, 1 light, 2 dark. Safe before or while
+ * the window runs; a user choice emits JSTI_EVENT_APPEARANCE with "0"-"2". */
+int jsti_window_set_appearance(int appearance);
+/* Shows every page, then the dashboard and History in dark mode, then the
+ * dashboard while recording, saving each as `directory`\NN-name.bmp once
+ * drawn, then closes the window. Thread safe. */
+int jsti_window_screenshot_tour(const char *directory, char *error, size_t error_capacity);
 /* Atomically replaces history; synchronously deep-copies all UTF-8 strings.
  * selected_id: null preserves the current selection if it still exists, an
  * empty string clears it. A user selection made after enqueue takes precedence.

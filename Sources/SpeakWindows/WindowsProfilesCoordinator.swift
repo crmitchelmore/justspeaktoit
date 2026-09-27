@@ -117,3 +117,17 @@ func profilesEvent(
         return -1
     }
 }
+
+extension WindowsEventContext {
+    /// App profiles: opens the editor with the saved profiles, in settings order.
+    func openProfiles() {
+        let editor = profiles
+        guard editor.begin() else { return }
+        enqueueSettings {
+            do { try editor.show(await self.controller.profileSnapshot()) } catch {
+                editor.cancel()
+                WindowsNative.update(error.localizedDescription)
+            }
+        }
+    }
+}

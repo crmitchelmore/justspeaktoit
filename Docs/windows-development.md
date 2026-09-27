@@ -303,6 +303,50 @@ gate passed 160 tests. Soniox disconnects, server errors and missing terminal
 responses now retain confirmed text for recovery and report failure before
 finalisation returns. Physical provider acceptance remains separate.
 
+## Window
+
+The window follows the Mac app's layout and look, drawn natively with Win32,
+GDI+ and GDI (no web view). A sidebar lists **Speak** (Dashboard, History,
+Voice Output) and **Settings** (General, Transcription, Post-processing,
+Profiles, Keyboard, iCloud Sync, About); Ctrl+1 to Ctrl+0 select them in that
+order. The header carries the page title with the selected model, Import audio
+and Record, and the status line sits at the bottom of every page. The minimum
+window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
+
+- **Dashboard**: the brand-gradient hero with Start Recording and Sessions,
+  Recording Time and Spend; the displayed transcript with Copy; Insights
+  (Sessions, Recording Time, Average Length, Spend) and a Setup card echoing
+  the microphone, model, shortcut and text output.
+- **History**: search and Import in the hero with Sessions, Errors, Average
+  Length and Spend for the recordings the search shows. Each recording is an
+  owner-drawn card with Created, Audio, Cost and Context badges, the transcript
+  preview and the models used; failed and pending recordings are tinted. The
+  selected recording's transcript, version, Play/Pause, Stop, Copy, Read aloud,
+  Retry, Export and Open audio sit beside the list.
+- **Settings pages** group the existing controls into titled cards, keeping
+  every control identifier and behaviour: General (microphone, text output,
+  Appearance, the local automation toggle), Transcription (source, mode, model,
+  refresh, local models, keys), Post-processing, Profiles, Keyboard (the
+  shortcut), iCloud Sync and About.
+- Totals and row wording come from the shared `DesktopHistoryInsights` and
+  `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
+  counts them, so Windows, Linux and the Mac show the same figures.
+- Colours are the brand tokens in `SpeakCore/BrandColors.swift`
+  (`WindowsWindowChrome.cpp`). The window follows Windows' app mode
+  (`AppsUseLightTheme`) with a dark title bar and dark common controls;
+  **General › Appearance** overrides it (Follow Windows, Light, Dark), saved as
+  `appearance` in `settings.json` and shared with Linux. Icons come from Segoe
+  Fluent Icons on Windows 11 and Segoe MDL2 Assets on Windows 10.
+- Common Controls v6 are activated from a private manifest at start-up, so the
+  unpackaged executable, the bundle and the MSIX all draw themed controls.
+
+`SpeakWindows.exe --ui-screenshots <dir>` seeds sample History into a
+throwaway data directory, visits every page, then Dashboard and History in dark
+mode and a recording, and saves each as `NN-name.bmp` through `PrintWindow`.
+The Windows workflow runs it after the smoke test and uploads the images as the
+`windows-ui-screenshots-<sha>` artifact, so each revision's real rendering can
+be reviewed without a Windows machine.
+
 ## Architecture and ownership
 
 ```mermaid
@@ -386,6 +430,7 @@ but must not be presented as the identical Apple-only engine or service.
 
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
+| Window and appearance | Mac layout: sidebar pages, brand hero, Dashboard insights and setup, History cards; light, dark or follow Windows; DPI-scaled owner drawing and a CI screenshot tour | Physical review at 100–200% scaling, high contrast, Narrator over the owner-drawn cards, the recording HUD and a notification-area icon like the Mac menu bar extra |
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
 | Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |
@@ -401,8 +446,8 @@ but must not be presented as the identical Apple-only engine or service.
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
 | Sync and Apple companion flows | History syncs with the Mac App Store build's CloudKit container (`iCloud.com.justspeaktoit`) through CloudKit Web Services: Settings, iCloud sync signs in with an Apple ID in the browser (loopback callback), shows Mac History as audio-less synced copies and uploads Windows History in the Mac's record format. Opt-in, read-only import of the API keys the Mac syncs, unlocked with the Mac's key-sync passphrase. Native WinHTTP transport, CNG envelope, Credential Manager for the rotating token. Portable tests and Windows loopback tests run against a fake CloudKit server; see [iCloud sync](#icloud-sync) | The CloudKit Console steps below, then a live receipt: Mac to Windows and Windows to Mac History create, edit and delete, key import, account switch and token expiry. Settings do not sync (the Mac uses the iCloud key-value store, which has no web API); Compare Models rounds, iPhone History (a separate container) and Handoff are not wired |
-| Automation and integrations | Opt-in `speak` CLI and MCP server over an owner-only local named pipe: status, history, file transcription, and start/stop dictation. It shares the protocol, framing, dispatch and replay with the Mac socket transport. Loopback client/server, CLI path resolution and MCP tests pass under a local Windows ABI runner. The native pipe self-test (runs in `--self-test` and CI) needs real Windows, because the local runner does not enforce first-instance ownership | Windows CI for this revision, a physical check of the Settings menu toggle and of `speak` against a running app, packaging `speak.exe` onto PATH in the MSIX, OpenClaw, deep links, AppleScript/Shortcuts-equivalent surfaces |
-| Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
+| Automation and integrations | Opt-in `speak` CLI and MCP server over an owner-only local named pipe: status, history, file transcription, and start/stop dictation. It shares the protocol, framing, dispatch and replay with the Mac socket transport. Loopback client/server, CLI path resolution and MCP tests pass under a local Windows ABI runner. The native pipe self-test (runs in `--self-test` and CI) needs real Windows, because the local runner does not enforce first-instance ownership | Windows CI for this revision, a physical check of the General page toggle and of `speak` against a running app, packaging `speak.exe` onto PATH in the MSIX, OpenClaw, deep links, AppleScript/Shortcuts-equivalent surfaces |
+| Diagnostics and insights | Dashboard and History show Sessions, Errors, Recording Time, Average Length and Spend from the shared `DesktopHistoryInsights`; shared timing and comparison data available | Timing diagnostics UI, telemetry consent/redaction and end-to-end diagnostic receipts |
 | Distribution and updates | Unsigned developer executable, self-contained runtime bundle (including the on-device runtime), and an unsigned x64 developer MSIX with a CI install/upgrade/uninstall lifecycle job that keeps user data in the portable data directory. A CI `sign` job signs a copy with Azure Artifact Signing through GitHub OIDC once its secrets and variables exist, and otherwise logs that the unsigned package is kept ([windows-installer.md](windows-installer.md#signing)) | First Windows receipt for that job, the owner's Artifact Signing identity validation and a first signed receipt, clean physical Windows 10/11 installs, ARM64, update channel and Alpha/Stable Windows identities |
 
 Apple-specific UI surfaces such as Siri, Live Activities, the iOS keyboard and

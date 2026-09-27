@@ -81,18 +81,18 @@ enum WindowsNative {
             strings.append(pointer)
             return UnsafePointer(pointer)
         }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
         let rows = records.map { record in
-            // The same canonical friendly name that search matches against.
+            // The card wording is shared with Linux; the title and detail stay
+            // the list's accessible text and the selected row's summary.
+            let summary = DesktopHistoryRowSummary(record)
             let model = DesktopHistorySearch.modelDisplayName(for: record.modelIdentifier)
                 + (record.isSyncedCopy ? " · from \(originName(record.originPlatform))" : "")
-            let detail = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
-                ?? record.displayText ?? "Recording saved; awaiting transcription."
             return JSTIHistoryRow(
-                id: owned(record.id.uuidString), title: owned("\(formatter.string(from: record.createdAt)) · \(model)"),
-                detail: owned(String(detail.prefix(180)).replacingOccurrences(of: "\n", with: " "))
+                id: owned(record.id.uuidString), title: owned("\(summary.created) · \(model)"),
+                detail: owned(String(summary.preview.prefix(180))), created: owned(summary.created),
+                audio_length: owned(summary.audioLength ?? ""), cost: owned(summary.cost ?? ""),
+                preview: owned(summary.preview), models: owned(summary.models), context: owned(summary.context ?? ""),
+                tone: summary.tone.rawValue
             )
         }
         let result = rows.withUnsafeBufferPointer { rows in
@@ -104,6 +104,30 @@ enum WindowsNative {
             return jsti_window_set_history(rows.baseAddress, rows.count, nil)
         }
         if result != 0 { update("The history list could not be refreshed. Saved recordings remain on disk.") }
+    }
+
+    /// Dashboard and History header totals, formatted as the Mac formats them.
+    static func insights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {
+        var strings: [UnsafeMutablePointer<CChar>] = []
+        defer { strings.forEach { $0.deallocate() } }
+        func owned(_ value: String) -> UnsafePointer<CChar> {
+            let bytes = Array(value.utf8CString)
+            let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
+            pointer.initialize(from: bytes, count: bytes.count)
+            strings.append(pointer)
+            return UnsafePointer(pointer)
+        }
+        func row(_ insights: DesktopHistoryInsights) -> JSTIInsights {
+            JSTIInsights(
+                sessions: owned(String(insights.sessions)), errors: owned(String(insights.sessionsWithErrors)),
+                recording_time: owned(DesktopHistoryFormat.totalDuration(insights.recordingDuration)),
+                average_length: owned(DesktopHistoryFormat.totalDuration(insights.averageSessionLength)),
+                spend: owned(DesktopHistoryFormat.spend(insights.spend))
+            )
+        }
+        var all = row(all)
+        var visible = row(visible)
+        _ = jsti_window_set_insights(&all, &visible)
     }
 
     static func historyPresentation(

@@ -1,10 +1,19 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include <commctrl.h>
 #include <commdlg.h>
+#include <cstdio>
+#include <objbase.h>
 #include <shellapi.h>
+#include <dwmapi.h>
+#include <uxtheme.h>
 #include <mutex>
+#include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include "WindowsWindowChrome.hpp"
 
 bool jsti_postprocessing_available();
 void jsti_show_postprocessing(HWND owner);
@@ -65,10 +74,6 @@ constexpr int transcriptLabelID = 92;
 // Read aloud emits an event; Voice… opens the native Voice output dialog.
 constexpr int readAloudID = 172;
 constexpr int voiceSettingsID = 173;
-// Settings menu commands. They open the same dialogs as their buttons; the
-// automation item emits AUTOMATION_TOGGLED with the requested state.
-constexpr int menuShortcutID = 180, menuTextOutputID = 181, menuVoiceID = 182, menuPostProcessingID = 183,
-    menuAutomationID = 184, menuCloudSyncID = 185, menuLocalModelsID = 186, menuAzureResourceID = 187;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
@@ -78,10 +83,49 @@ constexpr int sourceID = 175;
 constexpr int modeCount = 4;
 constexpr int playbackIdle = 0, playbackPreparing = 1, playbackPlaying = 2, playbackPaused = 3;
 const wchar_t *const playbackIdleText = L"00:00.00 / --:--";
+// Pages, in sidebar order, as on the Mac: Speak, then Settings.
+enum Page { dashboardPage, historyPage, voicePage, generalPage, transcriptionPage, postProcessingPage,
+            profilesPage, keyboardPage, cloudSyncPage, aboutPage, pageCount };
+struct PageInfo { const wchar_t *title; const wchar_t *subtitle; wchar_t glyph; const char *name; };
+const PageInfo pageInfo[pageCount] = {
+    {L"Dashboard", L"Ready to capture ideas instantly. Check your setup, follow your usage, and pick up your latest "
+                   L"session.", 0xE80F, "dashboard"},
+    {L"History", L"Search, replay and reuse past recordings and their transcripts.", 0xE81C, "history"},
+    {L"Voice Output", L"Hear any History transcript read back in a Deepgram Aura voice, through your own Deepgram "
+                      L"key.", 0xE767, "voice-output"},
+    {L"General", L"Choose the microphone, where finished text goes, and how the app looks.", 0xE713, "general"},
+    {L"Transcription", L"Pick the speech model for new recordings, on this PC or with your own provider key.", 0xE720,
+     "transcription"},
+    {L"Post-processing", L"Optionally polish transcripts with an OpenRouter model. The original is always kept.", 0xE734,
+     "post-processing"},
+    {L"Profiles", L"Give specific apps their own model, language and clean-up prompt.", 0xE77B, "profiles"},
+    {L"Keyboard", L"Start and stop dictation from anywhere with a global shortcut.", 0xE765, "keyboard"},
+    {L"iCloud Sync", L"Keep History in step with your Mac, through your own iCloud account.", 0xE753, "icloud-sync"},
+    {L"About", L"Voice-to-text made simple. Windows developer preview.", 0xE946, "about"},
+};
+// Sidebar buttons are navBaseID + page. The values in the heroes, Insights and
+// Setup are owner-drawn static controls, so screen readers read them.
+constexpr int navBaseID = 300;
+constexpr int chipSessionsID = 401, chipTimeID = 402, chipSpendID = 403;
+constexpr int insightSessionsID = 411, insightTimeID = 412, insightAverageID = 413, insightSpendID = 414;
+constexpr int historySessionsID = 421, historyErrorsID = 422, historyAverageID = 423, historySpendID = 424;
+constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433, setupOutputID = 434;
+// Settings that were menu commands: the automation switch emits
+// AUTOMATION_TOGGLED; the others open the same dialogs as before.
+constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
+    shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448;
+constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
+constexpr UINT_PTR tourTimerID = 90;
+// How each owner-drawn control is drawn.
+enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
+                  heroButton, nav, toggle, link };
 struct HistoryRow {
     std::string id;
     std::wstring title;
     std::wstring detail;
+    // The card: the shared DesktopHistoryRowSummary's wording.
+    std::wstring created, audio, cost, preview, models, context;
+    int tone = 0;
 };
 struct HistoryPresentation {
     std::string record;
@@ -151,6 +195,17 @@ struct WindowState {
     int preferredModels[modeCount] = {-1, -1, -1, -1};
     int activeMode = 0;
     std::wstring remoteModelStatus;
+    // Pages and presentation (UI thread).
+    int page = dashboardPage;
+    std::unordered_map<int, bool> wanted;
+    std::wstring headerSubtitle;
+    int displayedRecording = 0;
+    // Totals: [all, visible][sessions, errors, recording time, average, spend].
+    std::wstring insights[2][5];
+    bool insightsChanged = false;
+    // The screenshot tour (UI thread).
+    std::wstring tourDirectory;
+    int tourStep = -1;
 } state;
 
 int selection(HWND window) {
@@ -177,12 +232,16 @@ bool liveSelection(HWND window) {
         state.modelModes[selected] % 2 == 1;
 }
 
+void setShown(HWND window, int identifier, bool shown);
+void layout(HWND window);
+void invalidateBackdrop(HWND window);
+
 // Remote shows OpenRouter discovery and Refresh models; Local shows the
 // on-device runtime and the Local models dialog.
 void updateSourceControls(HWND window) {
     const bool local = activeSource() == 1;
-    ShowWindow(GetDlgItem(window, modelRefreshID), local ? SW_HIDE : SW_SHOW);
-    ShowWindow(GetDlgItem(window, localModelsID), local ? SW_SHOW : SW_HIDE);
+    setShown(window, modelRefreshID, !local);
+    setShown(window, localModelsID, local);
     const std::wstring text = local ? jsti_local_models_summary() : state.remoteModelStatus;
     wchar_t shown[1100] = {};
     GetDlgItemTextW(window, modelStatusID, shown, 1100);
@@ -236,12 +295,14 @@ bool populateModels(HWND window) {
     SendMessageW(combo, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(combo, nullptr, TRUE);
     const bool choice = hasModeChoice();
-    ShowWindow(GetDlgItem(window, modeID), choice ? SW_SHOW : SW_HIDE);
-    ShowWindow(GetDlgItem(window, 95), choice ? SW_SHOW : SW_HIDE);
+    const bool relayout = state.page == transcriptionPage &&
+        (state.wanted.count(modeID) == 0 || state.wanted[modeID] != choice || state.wanted[sourceID] != hasSourceChoice());
+    setShown(window, modeID, choice);
+    setShown(window, 95, choice);
     SendDlgItemMessageW(window, modeID, CB_SETCURSEL, state.activeMode % 2, 0);
     const bool sources = hasSourceChoice();
-    ShowWindow(GetDlgItem(window, sourceID), sources ? SW_SHOW : SW_HIDE);
-    ShowWindow(GetDlgItem(window, sourceLabelID), sources ? SW_SHOW : SW_HIDE);
+    setShown(window, sourceID, sources);
+    setShown(window, sourceLabelID, sources);
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, activeSource(), 0);
     const wchar_t *label = activeSource() == 1 ? L"On-device &transcription model"
         : (!choice && state.activeMode == 1 ? L"Live &transcription model" : L"&Transcription model");
@@ -250,6 +311,8 @@ bool populateModels(HWND window) {
     int recording;
     { std::lock_guard<std::mutex> lock(state.mutex); recording = state.recording; }
     updateModelAvailability(window, recording);
+    // The Model card grows or shrinks with the Source and Mode rows.
+    if (relayout) layout(window);
     return success;
 }
 
@@ -429,146 +492,839 @@ void clearSearch(HWND window) {
 
 int scale(HWND window, int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(window)), 96); }
 
-// The client layout needs 684 DIPs of window height below the Settings menu bar.
-int minimumWindowHeight(HWND window) {
-    const int menu = GetMenu(window) ? GetSystemMetricsForDpi(SM_CYMENU, GetDpiForWindow(window)) : 0;
-    return scale(window, 724) + menu;
-}
+// The smallest window every page fits in without scrolling, as the Mac's
+// 960 × 640 main window minimum, plus the sidebar and status line.
+int minimumWindowWidth(HWND window) { return scale(window, 980); }
+int minimumWindowHeight(HWND window) { return scale(window, 760); }
 
-// Dialog commands follow their buttons' idle rules; automation can change at any time.
-void updateSettingsMenu(HWND window, int recording) {
-    const HMENU menu = GetMenu(window);
-    if (!menu) return;
-    auto enable = [&](int id, bool enabled) { EnableMenuItem(menu, id, MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED)); };
-    enable(menuShortcutID, recording == 0 && jsti_hotkey_available());
-    enable(menuTextOutputID, recording == 0 && jsti_text_output_available());
-    enable(menuVoiceID, recording == 0 && jsti_voice_output_available());
-    enable(menuPostProcessingID, recording == 0 && jsti_postprocessing_available());
-    enable(menuLocalModelsID, recording == 0 && jsti_local_models_available());
-    enable(menuCloudSyncID, recording == 0 && jsti_cloud_sync_available());
-    enable(menuAzureResourceID, recording == 0 && jsti_azure_resource_available());
-    bool automation;
-    { std::lock_guard<std::mutex> lock(state.mutex); automation = state.automationEnabled; }
-    CheckMenuItem(menu, menuAutomationID, MF_BYCOMMAND | (automation ? MF_CHECKED : MF_UNCHECKED));
-}
+// ------------------------------------------------------------------ pages
 
-HMENU createSettingsMenu() {
-    HMENU bar = CreateMenu();
-    HMENU settings = CreatePopupMenu();
-    if (!bar || !settings ||
-        !AppendMenuW(settings, MF_STRING, menuShortcutID, L"&Keyboard shortcut\u2026") ||
-        !AppendMenuW(settings, MF_STRING, menuTextOutputID, L"&Text output\u2026") ||
-        !AppendMenuW(settings, MF_STRING, menuVoiceID, L"&Voice\u2026") ||
-        !AppendMenuW(settings, MF_STRING, menuPostProcessingID, L"&Post-processing\u2026") ||
-        !AppendMenuW(settings, MF_STRING, menuLocalModelsID, L"&Local models\u2026") ||
-        !AppendMenuW(settings, MF_STRING, menuCloudSyncID, L"i&Cloud sync\u2026") ||
-        !AppendMenuW(settings, MF_STRING, menuAzureResourceID, L"A&zure Speech resource\u2026") ||
-        !AppendMenuW(settings, MF_SEPARATOR, 0, nullptr) ||
-        !AppendMenuW(settings, MF_STRING, menuAutomationID, L"Allow &automation (speak command)") ||
-        !AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(settings), L"Setti&ngs")) {
-        if (settings) DestroyMenu(settings);
-        if (bar) DestroyMenu(bar);
-        return nullptr;
+// Which pages show a control. Controls outside this list belong to Transcription.
+unsigned pagesOf(int identifier) {
+    constexpr unsigned all = (1u << pageCount) - 1;
+    auto page = [](int value) { return 1u << value; };
+    if (identifier >= navBaseID && identifier < navBaseID + pageCount) return all;
+    switch (identifier) {
+    case statusID: case recordID: case importID: return all;
+    case transcriptID: case copyID: return page(dashboardPage) | page(historyPage);
+    case transcriptLabelID: case chipSessionsID: case chipTimeID: case chipSpendID:
+    case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID:
+    case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID:
+        return page(dashboardPage);
+    case searchLabelID: case searchID: case clearSearchID: case 93: case historyID: case historyDetailID:
+    case variantLabelID: case variantID: case retryID: case exportID: case openAudioID: case playbackLabelID:
+    case playbackTimeID: case playPauseID: case historySessionsID: case historyErrorsID: case historyAverageID:
+    case historySpendID:
+        return page(historyPage);
+    case readAloudID: case stopPlaybackID: return page(historyPage) | page(voicePage);
+    case voiceSettingsID: return page(voicePage);
+    case 94: case microphoneID: case textOutputID: case appearanceLabelID: case appearanceID: case automationID:
+        return page(generalPage);
+    case processingID: return page(postProcessingPage);
+    case profilesID: return page(profilesPage);
+    case shortcutValueID: case shortcutID: return page(keyboardPage);
+    case cloudSyncID: return page(cloudSyncPage);
+    case githubID: case issueID: case privacyID: return page(aboutPage);
+    default: return page(transcriptionPage);
     }
-    return bar;
+}
+
+bool onPage(int identifier, int page) { return (pagesOf(identifier) & (1u << page)) != 0; }
+
+// Feature visibility (Mode, Source, Refresh or Local models) is remembered
+// here and combined with the current page, so a hidden page never shows them.
+void setShown(HWND window, int identifier, bool shown) {
+    state.wanted[identifier] = shown;
+    ShowWindow(GetDlgItem(window, identifier), shown && onPage(identifier, state.page) ? SW_SHOWNA : SW_HIDE);
+}
+
+void applyVisibility(HWND window) {
+    for (HWND control : state.controls) {
+        const int identifier = GetDlgCtrlID(control);
+        const auto found = state.wanted.find(identifier);
+        const bool shown = (found == state.wanted.end() || found->second) && onPage(identifier, state.page);
+        if ((IsWindowVisible(control) != FALSE) != shown) ShowWindow(control, shown ? SW_SHOWNA : SW_HIDE);
+    }
+}
+
+Role roleOf(HWND window, int identifier) {
+    if (identifier >= navBaseID && identifier < navBaseID + pageCount) return Role::nav;
+    switch (identifier) {
+    case recordID: return Role::record;
+    case copyID: case saveID: return Role::primary;
+    case importID: return state.page == historyPage ? Role::heroButton : Role::button;
+    case automationID: return Role::toggle;
+    case statusID: return Role::status;
+    case historyDetailID: case modelStatusID: case transcriptLabelID: return Role::caption;
+    case playbackTimeID: case shortcutValueID: return Role::value;
+    case chipSessionsID: case chipTimeID: case chipSpendID: case historySessionsID: case historyErrorsID:
+    case historyAverageID: case historySpendID: return Role::chipValue;
+    case insightSessionsID: case insightTimeID: case insightAverageID: case insightSpendID: return Role::statValue;
+    case setupMicrophoneID: case setupModelID: case setupShortcutID: case setupOutputID: return Role::tileValue;
+    default: break;
+    }
+    wchar_t kind[16] = {};
+    GetClassNameW(GetDlgItem(window, identifier), kind, 16);
+    return _wcsicmp(kind, L"STATIC") == 0 ? Role::label : Role::button;
+}
+
+// ----------------------------------------------------------------- frame
+
+// What WM_PAINT draws behind the controls, laid out with them.
+struct Card { RECT rect; wchar_t glyph; std::wstring title; };
+struct Chip { RECT rect; std::wstring label; };
+struct Paragraph { RECT rect; std::wstring text; jsti::chrome::Font font; bool secondary; };
+struct Frame {
+    RECT sidebar{}, header{}, status{}, hero{}, speakHeading{}, settingsHeading{}, icon{};
+    jsti::chrome::Gradient gradient = jsti::chrome::Gradient::brand;
+    std::wstring heroTitle, heroSubtitle;
+    std::vector<Chip> chips;
+    std::vector<Card> cards;
+    std::vector<Chip> stats;
+    std::vector<Card> tiles;
+    std::vector<RECT> fields;
+    std::vector<Paragraph> paragraphs;
+} frame;
+
+RECT box(int x, int y, int width, int height) { return RECT{x, y, x + width, y + height}; }
+int widthOf(const RECT &rect) { return rect.right - rect.left; }
+int heightOf(const RECT &rect) { return rect.bottom - rect.top; }
+
+// Every control's client-area rectangle, as placed, for its painted backdrop.
+std::unordered_map<int, RECT> placed;
+
+void place(HWND window, int identifier, const RECT &rect) {
+    placed[identifier] = rect;
+    MoveWindow(GetDlgItem(window, identifier), rect.left, rect.top, widthOf(rect), heightOf(rect), FALSE);
+}
+
+// A text field: the control sits inside a painted rounded field.
+void placeField(HWND window, int identifier, RECT rect, bool multiline = false) {
+    frame.fields.push_back(rect);
+    const int horizontal = scale(window, 10);
+    const int vertical = multiline ? scale(window, 8) : std::max(0, (heightOf(rect) - scale(window, 20)) / 2);
+    InflateRect(&rect, -horizontal, -vertical);
+    place(window, identifier, rect);
+}
+
+std::wstring heroTitle(int page) {
+    switch (page) {
+    case dashboardPage: return L"Speak Dashboard";
+    case historyPage: return L"Session History";
+    default: return pageInfo[page].title;
+    }
+}
+
+// A hero across the top of the content. Returns its bottom.
+int layoutHero(HWND window, const RECT &content, int height, jsti::chrome::Gradient gradient) {
+    frame.hero = box(content.left, content.top, widthOf(content), height);
+    frame.gradient = gradient;
+    frame.heroTitle = heroTitle(state.page);
+    frame.heroSubtitle = pageInfo[state.page].subtitle;
+    return frame.hero.bottom;
+}
+
+// Chips along the hero's bottom edge; each value is the static `ids[index]`.
+void layoutChips(HWND window, const std::vector<std::pair<int, std::wstring>> &chips) {
+    const int inset = scale(window, 26), spacing = scale(window, 12), height = scale(window, 62);
+    const int available = widthOf(frame.hero) - 2 * inset - spacing * static_cast<int>(chips.size() - 1);
+    const int width = std::min(scale(window, 190), available / static_cast<int>(chips.size()));
+    const int top = frame.hero.bottom - inset - height;
+    for (size_t index = 0; index < chips.size(); ++index) {
+        const RECT chip = box(frame.hero.left + inset + static_cast<int>(index) * (width + spacing), top, width, height);
+        frame.chips.push_back({chip, chips[index].second});
+        place(window, chips[index].first, box(chip.left + scale(window, 14), chip.top + scale(window, 26),
+                                              width - scale(window, 28), scale(window, 28)));
+    }
+}
+
+Card &addCard(RECT rect, wchar_t glyph, const std::wstring &title) {
+    frame.cards.push_back({rect, glyph, title});
+    return frame.cards.back();
+}
+
+// The card's content area below its title row.
+RECT cardBody(HWND window, const RECT &card) {
+    return RECT{card.left + scale(window, 22), card.top + scale(window, 66), card.right - scale(window, 22),
+                card.bottom - scale(window, 20)};
+}
+
+void layoutDashboard(HWND window, const RECT &content) {
+    const int gap = scale(window, 18);
+    const int heroBottom = layoutHero(window, content, scale(window, 200), jsti::chrome::Gradient::brand);
+    place(window, recordID, box(frame.hero.right - scale(window, 26) - scale(window, 196), frame.hero.top + scale(window, 26),
+                                scale(window, 196), scale(window, 50)));
+    layoutChips(window, {{chipSessionsID, L"Sessions"}, {chipTimeID, L"Recording Time"}, {chipSpendID, L"Spend"}});
+    const int rowHeight = scale(window, 190);
+    const RECT transcript{content.left, heroBottom + gap, content.right, content.bottom - rowHeight - gap};
+    addCard(transcript, 0xE70F, L"Transcript");
+    place(window, transcriptLabelID, RECT{transcript.left + widthOf(transcript) / 3, transcript.top + scale(window, 26),
+                                          transcript.right - scale(window, 22), transcript.top + scale(window, 46)});
+    const RECT body = cardBody(window, transcript);
+    const int buttonHeight = scale(window, 34);
+    placeField(window, transcriptID, RECT{body.left, body.top, body.right, body.bottom - buttonHeight - scale(window, 12)}, true);
+    place(window, copyID, box(body.right - scale(window, 156), body.bottom - buttonHeight, scale(window, 156), buttonHeight));
+    const int half = (widthOf(content) - gap) / 2;
+    const RECT insights = box(content.left, content.bottom - rowHeight, half, rowHeight);
+    const RECT setup = box(content.left + half + gap, content.bottom - rowHeight, widthOf(content) - half - gap, rowHeight);
+    addCard(insights, 0xE9D2, L"Insights");
+    addCard(setup, 0xE713, L"Setup");
+    auto grid = [&](const RECT &card, int index) {
+        const RECT inner = cardBody(window, card);
+        const int spacing = scale(window, 10);
+        const int width = (widthOf(inner) - spacing) / 2, height = (heightOf(inner) - spacing) / 2;
+        return box(inner.left + (index % 2) * (width + spacing), inner.top + (index / 2) * (height + spacing), width, height);
+    };
+    const std::pair<int, const wchar_t *> stats[] = {
+        {insightSessionsID, L"Sessions"}, {insightTimeID, L"Recording Time"},
+        {insightAverageID, L"Average Length"}, {insightSpendID, L"Spend"}};
+    for (int index = 0; index < 4; ++index) {
+        const RECT tile = grid(insights, index);
+        frame.stats.push_back({tile, stats[index].second});
+        place(window, stats[index].first, RECT{tile.left + scale(window, 14), tile.bottom - scale(window, 30),
+                                               tile.right - scale(window, 10), tile.bottom - scale(window, 6)});
+    }
+    const std::tuple<int, wchar_t, const wchar_t *> tiles[] = {
+        {setupMicrophoneID, 0xE720, L"Microphone"}, {setupModelID, 0xE70F, L"Model"},
+        {setupShortcutID, 0xE765, L"Shortcut"}, {setupOutputID, 0xE8C8, L"Text output"}};
+    for (int index = 0; index < 4; ++index) {
+        const RECT tile = grid(setup, index);
+        frame.tiles.push_back({tile, std::get<1>(tiles[index]), std::get<2>(tiles[index])});
+        place(window, std::get<0>(tiles[index]), RECT{tile.left + scale(window, 12), tile.top + scale(window, 28),
+                                                      tile.right - scale(window, 8), tile.bottom - scale(window, 4)});
+    }
+}
+
+void layoutHistory(HWND window, const RECT &content) {
+    const int gap = scale(window, 18), row = scale(window, 34);
+    const int heroBottom = layoutHero(window, content, scale(window, 168), jsti::chrome::Gradient::brand);
+    place(window, importID, box(frame.hero.right - scale(window, 26) - scale(window, 124), frame.hero.top + scale(window, 24),
+                                scale(window, 124), row));
+    layoutChips(window, {{historySessionsID, L"Sessions"}, {historyErrorsID, L"Errors"},
+                         {historyAverageID, L"Average Length"}, {historySpendID, L"Spend"}});
+    const int searchTop = heroBottom + scale(window, 14);
+    place(window, searchLabelID, box(content.left, searchTop + scale(window, 8), scale(window, 112), scale(window, 20)));
+    placeField(window, searchID, RECT{content.left + scale(window, 116), searchTop,
+                                      content.right - scale(window, 88), searchTop + row});
+    place(window, clearSearchID, box(content.right - scale(window, 80), searchTop, scale(window, 80), row));
+    const int top = searchTop + row + scale(window, 14);
+    const int listWidth = (widthOf(content) - gap) * 13 / 25;
+    place(window, 93, box(content.left, top, listWidth, scale(window, 20)));
+    place(window, historyID, RECT{content.left, top + scale(window, 22), content.left + listWidth, content.bottom});
+    const RECT detail{content.left + listWidth + gap, top, content.right, content.bottom};
+    addCard(detail, 0xE8A5, L"Selected recording");
+    const int inset = scale(window, 20);
+    const int left = detail.left + inset, right = detail.right - inset;
+    int y = detail.top + scale(window, 58);
+    place(window, historyDetailID, RECT{left, y, right, y + scale(window, 34)});
+    y += scale(window, 40);
+    place(window, variantLabelID, box(left, y + scale(window, 7), scale(window, 128), scale(window, 20)));
+    place(window, variantID, RECT{left + scale(window, 132), y, right, y + scale(window, 200)});
+    y += row + scale(window, 10);
+    const int actionsHeight = 3 * row + 2 * scale(window, 8) + scale(window, 26);
+    placeField(window, transcriptID, RECT{left, y, right, detail.bottom - inset - actionsHeight - scale(window, 10)}, true);
+    int actions = detail.bottom - inset - actionsHeight;
+    place(window, playbackLabelID, box(left, actions, scale(window, 80), scale(window, 20)));
+    place(window, playbackTimeID, RECT{left + scale(window, 84), actions, right, actions + scale(window, 20)});
+    actions += scale(window, 26);
+    auto cell = [&](int index, int top, int columns) {
+        const int width = (right - left - (columns - 1) * scale(window, 8)) / columns;
+        return box(left + index * (width + scale(window, 8)), top, width, row);
+    };
+    place(window, playPauseID, cell(0, actions, 3));
+    place(window, stopPlaybackID, cell(1, actions, 3));
+    place(window, copyID, cell(2, actions, 3));
+    actions += row + scale(window, 8);
+    place(window, readAloudID, cell(0, actions, 2));
+    place(window, retryID, cell(1, actions, 2));
+    actions += row + scale(window, 8);
+    place(window, exportID, cell(0, actions, 2));
+    place(window, openAudioID, cell(1, actions, 2));
+}
+
+// A settings card: `rows` controls, top to bottom, with a description.
+int layoutSettingsCard(HWND window, int top, const RECT &content, wchar_t glyph, const std::wstring &title,
+                       const std::wstring &description, int contentHeight) {
+    const int inset = scale(window, 22);
+    HDC dc = GetDC(window);
+    const int textHeight = description.empty() ? 0 : jsti::chrome::measure(dc, description,
+        widthOf(content) - 2 * inset, jsti::chrome::Font::body, GetDpiForWindow(window));
+    ReleaseDC(window, dc);
+    const int height = scale(window, 66) + textHeight + (textHeight ? scale(window, 12) : 0) + contentHeight + scale(window, 20);
+    const RECT card = box(content.left, top, widthOf(content), height);
+    addCard(card, glyph, title);
+    if (!description.empty()) {
+        frame.paragraphs.push_back({box(card.left + inset, card.top + scale(window, 64), widthOf(card) - 2 * inset,
+                                        textHeight), description, jsti::chrome::Font::body, true});
+    }
+    return card.top + scale(window, 66) + textHeight + (textHeight ? scale(window, 12) : 0);
+}
+
+void layoutSettings(HWND window, const RECT &content) {
+    const int gap = scale(window, 18), row = scale(window, 34), inset = scale(window, 22);
+    const bool voice = state.page == voicePage;
+    int top = layoutHero(window, content, scale(window, voice ? 132 : 120),
+                         voice ? jsti::chrome::Gradient::voice : jsti::chrome::Gradient::settings) + gap;
+    const int left = content.left + inset, right = content.right - inset;
+    auto label = [&](int identifier, int y) { place(window, identifier, box(left, y + scale(window, 7), scale(window, 180), scale(window, 20))); };
+    auto control = [&](int identifier, int y, int width = 0) {
+        place(window, identifier, RECT{left + scale(window, 188), y, width ? left + scale(window, 188) + width : right,
+                                       y + (identifier == modelID || identifier == microphoneID || identifier == sourceID ||
+                                            identifier == modeID || identifier == appearanceID ? scale(window, 240) : row)});
+    };
+    auto button = [&](int identifier, int y, int width) { place(window, identifier, box(right - width, y, width, row)); };
+    switch (state.page) {
+    case voicePage: {
+        int y = layoutSettingsCard(window, top, content, 0xE767, L"Read aloud",
+            L"Choose a recording in History, then read its transcript aloud here or from History. Recording, choosing "
+            L"another recording or Stop ends it. Read aloud uses the Deepgram key saved under Transcription.", row);
+        place(window, voiceSettingsID, box(left, y, scale(window, 150), row));
+        button(readAloudID, y, scale(window, 196));
+        place(window, stopPlaybackID, box(right - scale(window, 196) - scale(window, 8) - scale(window, 96), y,
+                                          scale(window, 96), row));
+        break;
+    }
+    case generalPage: {
+        int y = layoutSettingsCard(window, top, content, 0xE720, L"Microphone", L"", row);
+        label(94, y); control(microphoneID, y);
+        top = y + row + scale(window, 20) + gap;
+        y = layoutSettingsCard(window, top, content, 0xE8C8, L"Output",
+            L"Finished text goes back into the app you were in when dictation started, or to the clipboard.", row);
+        place(window, textOutputID, box(left, y, scale(window, 170), row));
+        top = y + row + scale(window, 20) + gap;
+        y = layoutSettingsCard(window, top, content, 0xE790, L"Appearance and automation", L"", 2 * row + scale(window, 12));
+        label(appearanceLabelID, y); control(appearanceID, y, scale(window, 220));
+        place(window, automationID, RECT{left, y + row + scale(window, 12), right, y + 2 * row + scale(window, 12)});
+        break;
+    }
+    case transcriptionPage: {
+        auto shown = [](int identifier) { const auto found = state.wanted.find(identifier);
+                                          return found == state.wanted.end() || found->second; };
+        const bool source = shown(sourceID), mode = shown(modeID);
+        const int rows = 4 + (source ? 1 : 0) + (mode ? 1 : 0);
+        int y = layoutSettingsCard(window, top, content, 0xE720, L"Model", L"",
+                                   rows * row + (rows - 1) * scale(window, 12) + scale(window, 12));
+        if (source) { label(sourceLabelID, y); control(sourceID, y); y += row + scale(window, 12); }
+        else place(window, sourceLabelID, box(left, y, 1, 1));
+        if (mode) { label(95, y); control(modeID, y); y += row + scale(window, 12); }
+        label(90, y); control(modelID, y); y += row + scale(window, 12);
+        place(window, modelStatusID, RECT{left, y, right - scale(window, 180), y + row + scale(window, 12)});
+        button(modelRefreshID, y, scale(window, 168)); button(localModelsID, y, scale(window, 168));
+        y += row + scale(window, 24);
+        label(91, y);
+        placeField(window, keyID, RECT{left + scale(window, 188), y, right - scale(window, 124), y + row});
+        button(saveID, y, scale(window, 112));
+        y += row + scale(window, 12);
+        place(window, azureID, box(left + scale(window, 188), y, scale(window, 240), row));
+        break;
+    }
+    case postProcessingPage: {
+        const int y = layoutSettingsCard(window, top, content, 0xE734, L"Clean-up",
+            L"Send finished transcripts to an OpenRouter model to fix punctuation and filler, or follow your own "
+            L"instructions. Empty recordings stay empty, and History keeps the original beside the result.", row);
+        place(window, processingID, box(left, y, scale(window, 230), row));
+        break;
+    }
+    case profilesPage: {
+        const int y = layoutSettingsCard(window, top, content, 0xE77B, L"Per-app profiles",
+            L"A profile applies its model, language and clean-up prompt when you dictate into the apps it lists. "
+            L"The recording keeps the profile it started with.", row);
+        place(window, profilesID, box(left, y, scale(window, 190), row));
+        break;
+    }
+    case keyboardPage: {
+        const int y = layoutSettingsCard(window, top, content, 0xE765, L"Shortcut",
+            L"The shortcut works while another app is in front. Hold, double-tap or press to toggle, as you choose.",
+            row + scale(window, 40));
+        place(window, shortcutValueID, RECT{left, y, right, y + scale(window, 28)});
+        place(window, shortcutID, box(left, y + scale(window, 40), scale(window, 200), row));
+        break;
+    }
+    case cloudSyncPage: {
+        const int y = layoutSettingsCard(window, top, content, 0xE753, L"iCloud",
+            L"Sign in with your Apple ID to sync History with your Mac. Only transcripts sync; audio stays on the "
+            L"device that recorded it. API keys can be imported from your Mac with its key-sync passphrase.", row);
+        place(window, cloudSyncID, box(left, y, scale(window, 220), row));
+        break;
+    }
+    default: break;
+    }
+}
+
+void layoutAbout(HWND window, const RECT &content) {
+    const int inset = scale(window, 22), row = scale(window, 34);
+    const std::wstring note = L"Open source under the MIT licence. Your audio goes only to the provider you choose, "
+        L"or stays on this PC with an on-device model.";
+    int y = layoutSettingsCard(window, content.top, content, 0xE946, L"About", L"", scale(window, 96) + row +
+        scale(window, 60));
+    frame.icon = box(content.left + inset, y, scale(window, 72), scale(window, 72));
+    frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 8), scale(window, 480),
+                                    scale(window, 30)), L"Just Speak to It", jsti::chrome::Font::title, false});
+    frame.paragraphs.push_back({box(frame.icon.right + scale(window, 18), y + scale(window, 38), scale(window, 480),
+                                    scale(window, 22)), pageInfo[aboutPage].subtitle, jsti::chrome::Font::body, true});
+    y += scale(window, 88);
+    frame.paragraphs.push_back({box(content.left + inset, y, widthOf(content) - 2 * inset, scale(window, 44)), note,
+                                jsti::chrome::Font::body, false});
+    y += scale(window, 52);
+    place(window, githubID, box(content.left + inset, y, scale(window, 150), row));
+    place(window, issueID, box(content.left + inset + scale(window, 158), y, scale(window, 150), row));
+    place(window, privacyID, box(content.left + inset + scale(window, 316), y, scale(window, 150), row));
 }
 
 void layout(HWND window) {
-    RECT bounds{};
-    GetClientRect(window, &bounds);
-    const int margin = scale(window, 20);
-    const int gap = scale(window, 12);
-    const int row = scale(window, 34);
-    const int availableWidth = std::max(scale(window, 740), static_cast<int>(bounds.right) - 2 * margin);
-    const int historyWidth = std::min(scale(window, 300), std::max(scale(window, 240), availableWidth / 3));
-    const int contentLeft = margin + historyWidth + margin;
-    const int width = availableWidth - historyWidth - margin;
-    const int saveWidth = scale(window, 112);
-    auto move = [&](int id, int x, int y, int w, int h) { MoveWindow(GetDlgItem(window, id), x, y, w, h, TRUE); };
-    // The App profiles action always occupies the top row, beside Source.
-    // Mode has its own row below, so the choice reads Source, then Mode.
-    const int selectorRow = row + scale(window, 6);
-    const int modelTop = margin + row + selectorRow;
-    const int profilesWidth = scale(window, 118);
-    const int shortcutWidth = scale(window, 148);
-    const int selectorWidth = width - scale(window, 70) - profilesWidth - shortcutWidth - 2 * gap;
-    move(sourceLabelID, contentLeft, margin + scale(window, 3), scale(window, 64), scale(window, 22));
-    move(sourceID, contentLeft + scale(window, 70), margin, selectorWidth, scale(window, 160));
-    move(95, contentLeft, margin + selectorRow + scale(window, 3), scale(window, 64), scale(window, 22));
-    move(modeID, contentLeft + scale(window, 70), margin + selectorRow, selectorWidth, scale(window, 160));
-    move(shortcutID, contentLeft + width - profilesWidth - gap - shortcutWidth, margin, shortcutWidth, row);
-    move(profilesID, contentLeft + width - profilesWidth, margin, profilesWidth, row);
-    move(90, contentLeft, modelTop, width, scale(window, 22));
-    const int settingsWidth = scale(window, 148);
-    move(modelID, contentLeft, modelTop + scale(window, 26), width - settingsWidth - gap, scale(window, 260));
-    move(processingID, contentLeft + width - settingsWidth, modelTop + scale(window, 26), settingsWidth, row);
-    const int discoveryTop = modelTop + scale(window, 70);
-    move(modelStatusID, contentLeft, discoveryTop, width - settingsWidth - gap, scale(window, 46));
-    move(modelRefreshID, contentLeft + width - settingsWidth, discoveryTop, settingsWidth, row);
-    move(localModelsID, contentLeft + width - settingsWidth, discoveryTop, settingsWidth, row);
-    move(91, contentLeft, modelTop + scale(window, 120), width, scale(window, 22));
-    const int keyTop = modelTop + scale(window, 146);
-    move(keyID, contentLeft, keyTop, width - saveWidth - gap, row);
-    move(saveID, contentLeft + width - saveWidth, keyTop, saveWidth, row);
-    const int microphoneTop = keyTop + row + gap;
-    move(94, contentLeft, microphoneTop, width, scale(window, 22));
-    move(microphoneID, contentLeft, microphoneTop + scale(window, 26), width - settingsWidth - gap, scale(window, 260));
-    move(textOutputID, contentLeft + width - settingsWidth, microphoneTop + scale(window, 26), settingsWidth, row);
-    const int actionsTop = microphoneTop + scale(window, 26) + row + gap;
-    const int actionWidth = (width - 2 * gap) / 3;
-    move(recordID, contentLeft, actionsTop, actionWidth, row);
-    move(importID, contentLeft + actionWidth + gap, actionsTop, actionWidth, row);
-    move(copyID, contentLeft + 2 * (actionWidth + gap), actionsTop, actionWidth, row);
-    move(92, contentLeft, actionsTop + row + gap, width, scale(window, 22));
-    const int transcriptTop = actionsTop + row + scale(window, 38);
-    const int statusHeight = scale(window, 64);
-    const int transcriptHeight = std::max(scale(window, 80), static_cast<int>(bounds.bottom) - transcriptTop - statusHeight - 2 * margin);
-    move(transcriptID, contentLeft, transcriptTop, width, transcriptHeight);
-    move(statusID, contentLeft, transcriptTop + transcriptHeight + gap, width, statusHeight);
-    move(searchLabelID, margin, margin, historyWidth, scale(window, 22));
-    const int searchTop = margin + scale(window, 26);
-    const int clearWidth = scale(window, 64);
-    move(searchID, margin, searchTop, historyWidth - clearWidth - gap, row);
-    move(clearSearchID, margin + historyWidth - clearWidth, searchTop, clearWidth, row);
-    const int historyLabelTop = searchTop + row + gap;
-    move(93, margin, historyLabelTop, historyWidth, scale(window, 22));
-    const int historyTop = historyLabelTop + scale(window, 26);
-    const int detailHeight = scale(window, 72);
-    // Below the list: detail, version label+combo, two action rows, the
-    // playback label/time row and the Play/Pause + Stop row.
-    const int historyHeight = std::max(scale(window, 120), static_cast<int>(bounds.bottom) - historyTop -
-        detailHeight - scale(window, 52) - 4 * row - 5 * gap - margin);
-    move(historyID, margin, historyTop, historyWidth, historyHeight);
-    const int detailTop = historyTop + historyHeight + gap;
-    move(historyDetailID, margin, detailTop, historyWidth, detailHeight);
-    const int variantLabelTop = detailTop + detailHeight + gap;
-    move(variantLabelID, margin, variantLabelTop, historyWidth, scale(window, 22));
-    move(variantID, margin, variantLabelTop + scale(window, 26), historyWidth, scale(window, 120));
-    const int buttonsTop = variantLabelTop + scale(window, 26) + row + gap;
-    const int buttonWidth = (historyWidth - gap) / 2;
-    move(retryID, margin, buttonsTop, buttonWidth, row);
-    move(exportID, margin + buttonWidth + gap, buttonsTop, buttonWidth, row);
-    move(openAudioID, margin, buttonsTop + row + gap, buttonWidth, row);
-    move(readAloudID, margin + buttonWidth + gap, buttonsTop + row + gap, buttonWidth, row);
-    const int playbackLabelTop = buttonsTop + 2 * (row + gap);
-    const int playbackLabelWidth = scale(window, 84);
-    move(playbackLabelID, margin, playbackLabelTop, playbackLabelWidth, scale(window, 22));
-    move(playbackTimeID, margin + playbackLabelWidth, playbackLabelTop, historyWidth - playbackLabelWidth, scale(window, 22));
-    const int playbackTop = playbackLabelTop + scale(window, 26);
-    const int playbackWidth = (historyWidth - 2 * gap) / 3;
-    move(playPauseID, margin, playbackTop, playbackWidth, row);
-    move(stopPlaybackID, margin + playbackWidth + gap, playbackTop, playbackWidth, row);
-    move(voiceSettingsID, margin + 2 * (playbackWidth + gap), playbackTop, historyWidth - 2 * (playbackWidth + gap), row);
+    RECT client{};
+    GetClientRect(window, &client);
+    frame = Frame{};
+    const int sidebarWidth = scale(window, 232), headerHeight = scale(window, 64), statusHeight = scale(window, 44);
+    const int padding = scale(window, 24);
+    frame.sidebar = RECT{0, 0, sidebarWidth, client.bottom};
+    frame.header = RECT{sidebarWidth, 0, client.right, headerHeight};
+    frame.status = RECT{sidebarWidth, client.bottom - statusHeight, client.right, client.bottom};
+    // Sidebar: Speak, then Settings, as on the Mac.
+    int y = scale(window, 70);
+    frame.speakHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
+    y += scale(window, 24);
+    for (int page = 0; page < pageCount; ++page) {
+        if (page == generalPage) {
+            y += scale(window, 10);
+            frame.settingsHeading = box(scale(window, 22), y, sidebarWidth - scale(window, 44), scale(window, 20));
+            y += scale(window, 24);
+        }
+        place(window, navBaseID + page, box(scale(window, 10), y, sidebarWidth - scale(window, 20), scale(window, 36)));
+        y += scale(window, 38);
+    }
+    // Header: Import and Record on every page but those that carry their own.
+    const int buttonTop = (headerHeight - scale(window, 36)) / 2;
+    if (state.page != dashboardPage) {
+        place(window, recordID, box(client.right - padding - scale(window, 124), buttonTop, scale(window, 124), scale(window, 36)));
+    }
+    if (state.page != historyPage) {
+        // Beside Record, or at the edge where the dashboard's hero carries Record.
+        const int right = state.page == dashboardPage ? client.right - padding
+                                                      : client.right - padding - scale(window, 124) - scale(window, 10);
+        place(window, importID, box(right - scale(window, 140), buttonTop, scale(window, 140), scale(window, 36)));
+    }
+    place(window, statusID, RECT{sidebarWidth + padding, frame.status.top + scale(window, 12), client.right - padding,
+                                 client.bottom - scale(window, 8)});
+    const RECT content{sidebarWidth + padding, headerHeight + scale(window, 4), client.right - padding,
+                       client.bottom - statusHeight - scale(window, 18)};
+    switch (state.page) {
+    case dashboardPage: layoutDashboard(window, content); break;
+    case historyPage: layoutHistory(window, content); break;
+    case aboutPage: layoutAbout(window, content); break;
+    default: layoutSettings(window, content); break;
+    }
+    applyVisibility(window);
+    invalidateBackdrop(window);
+}
+
+// ------------------------------------------------------------- painting
+
+void paintFrame(HWND window, HDC dc) {
+    namespace chrome = jsti::chrome;
+    const auto &palette = chrome::palette();
+    const UINT dpi = GetDpiForWindow(window);
+    auto s = [&](int value) { return scale(window, value); };
+    RECT client{};
+    GetClientRect(window, &client);
+    RECT clip{};
+    GetClipBox(dc, &clip);
+    auto visible = [&](const RECT &rect) { RECT overlap{}; return IntersectRect(&overlap, &rect, &clip) != FALSE; };
+    auto solid = [&](const RECT &rect, COLORREF color) {
+        HBRUSH brush = CreateSolidBrush(color);
+        FillRect(dc, &rect, brush);
+        DeleteObject(brush);
+    };
+    solid(client, palette.window);
+    if (visible(frame.sidebar)) {
+        solid(frame.sidebar, palette.sidebar);
+        solid(RECT{frame.sidebar.right - 1, 0, frame.sidebar.right, client.bottom}, palette.fieldBorder);
+        chrome::brandIcon(dc, box(s(20), s(20), s(28), s(28)));
+        chrome::text(dc, L"Just Speak to It", box(s(58), s(20), s(170), s(28)), chrome::Font::title, dpi, palette.text,
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        chrome::text(dc, L"Speak", frame.speakHeading, chrome::Font::caption, dpi, palette.secondary,
+                     DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+        chrome::text(dc, L"Settings", frame.settingsHeading, chrome::Font::caption, dpi, palette.secondary,
+                     DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    if (visible(frame.header)) {
+        const RECT title{frame.header.left + s(24), s(10), frame.header.right - s(300), s(36)};
+        chrome::text(dc, pageInfo[state.page].title, title, chrome::Font::pageTitle, dpi, palette.text,
+                     DT_LEFT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
+        chrome::text(dc, state.headerSubtitle, RECT{title.left, s(36), title.right, s(56)}, chrome::Font::caption, dpi,
+                     palette.secondary, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+    solid(RECT{frame.status.left, frame.status.top, frame.status.right, frame.status.top + 1}, palette.fieldBorder);
+    if (frame.hero.right > frame.hero.left && visible(frame.hero)) {
+        const COLORREF tint = frame.gradient == chrome::Gradient::voice ? chrome::green : chrome::accentDeep;
+        chrome::shadow(dc, frame.hero, s(28), tint, s(14));
+        chrome::fillGradient(dc, frame.hero, s(28), frame.gradient);
+        const int reserved = state.page == dashboardPage ? s(250) : state.page == historyPage ? s(170) : s(28);
+        chrome::text(dc, frame.heroTitle, RECT{frame.hero.left + s(26), frame.hero.top + s(20), frame.hero.right - reserved,
+                     frame.hero.top + s(58)}, chrome::Font::heroTitle, dpi, RGB(255, 255, 255),
+                     DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        chrome::text(dc, frame.heroSubtitle, RECT{frame.hero.left + s(26), frame.hero.top + s(60), frame.hero.right - reserved,
+                     frame.hero.top + s(100)}, chrome::Font::heroSubtitle, dpi, RGB(0xFF, 0xF4, 0xEE),
+                     DT_LEFT | DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
+        for (const auto &chip : frame.chips) {
+            chrome::fillRound(dc, chip.rect, s(18), RGB(255, 255, 255), 44);
+            std::wstring upper = chip.label;
+            CharUpperBuffW(&upper[0], static_cast<DWORD>(upper.size()));
+            chrome::text(dc, upper, RECT{chip.rect.left + s(14), chip.rect.top + s(9), chip.rect.right - s(8),
+                         chip.rect.top + s(26)}, chrome::Font::smallBold, dpi, RGB(0xFF, 0xEE, 0xE6),
+                         DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+        }
+    }
+    for (const auto &card : frame.cards) {
+        if (!visible(card.rect)) continue;
+        chrome::shadow(dc, card.rect, s(24), chrome::accentDeep, s(10));
+        chrome::fillRound(dc, card.rect, s(24), palette.card);
+        chrome::strokeRound(dc, card.rect, s(24), chrome::accentDeep, chrome::dark() ? 70 : 40, 1.0f);
+        const RECT tile = box(card.rect.left + s(20), card.rect.top + s(18), s(36), s(36));
+        chrome::fillRound(dc, tile, s(12), chrome::accent, chrome::dark() ? 60 : 38);
+        chrome::glyph(dc, card.glyph, tile, chrome::dark() ? RGB(0xFF, 0x8A, 0x5C) : chrome::accentDeep, dpi);
+        chrome::text(dc, card.title, RECT{tile.right + s(12), tile.top, card.rect.right - s(20), tile.bottom},
+                     chrome::Font::title, dpi, palette.text, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    for (const auto &stat : frame.stats) {
+        chrome::fillRound(dc, stat.rect, s(16), chrome::accent, chrome::dark() ? 34 : 22);
+        chrome::text(dc, stat.label, RECT{stat.rect.left + s(14), stat.rect.top + s(8), stat.rect.right - s(8),
+                     stat.rect.top + s(28)}, chrome::Font::caption, dpi, palette.secondary,
+                     DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    for (const auto &tile : frame.tiles) {
+        chrome::fillRound(dc, tile.rect, s(16), palette.field);
+        chrome::strokeRound(dc, tile.rect, s(16), chrome::green, 110, 1.0f);
+        chrome::glyph(dc, tile.glyph, box(tile.rect.left + s(8), tile.rect.top + s(6), s(22), s(22)), chrome::accentDeep, dpi);
+        chrome::text(dc, tile.title, RECT{tile.rect.left + s(34), tile.rect.top + s(6), tile.rect.right - s(8),
+                     tile.rect.top + s(28)}, chrome::Font::bodySemibold, dpi, palette.text,
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    for (const auto &field : frame.fields) {
+        chrome::fillRound(dc, field, s(10), palette.field);
+        chrome::strokeRound(dc, field, s(10), palette.fieldBorder, 255, 1.0f);
+    }
+    for (const auto &paragraph : frame.paragraphs) {
+        chrome::text(dc, paragraph.text, paragraph.rect, paragraph.font, dpi,
+                     paragraph.secondary ? palette.secondary : palette.text, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+    }
+    if (frame.icon.right > frame.icon.left) chrome::brandIcon(dc, frame.icon);
+}
+
+// The painted window, rendered once per change and copied from: WM_PAINT,
+// WM_PRINTCLIENT and every owner-drawn control's background come from it, so
+// GDI+ only ever draws on a memory DC with no viewport offset.
+struct Backdrop {
+    HDC dc = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ previous = nullptr;
+    int width = 0, height = 0;
+    bool dirty = true;
+    void release() {
+        if (dc && previous) SelectObject(dc, previous);
+        if (bitmap) DeleteObject(bitmap);
+        if (dc) DeleteDC(dc);
+        *this = Backdrop{};
+    }
+} backdrop;
+
+// Controls draw their own backgrounds from the backdrop, so a new backdrop
+// repaints them too.
+void invalidateBackdrop(HWND window) {
+    backdrop.dirty = true;
+    RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+}
+
+HDC backdropDC(HWND window) {
+    RECT client{};
+    GetClientRect(window, &client);
+    const int width = std::max<int>(client.right, 1), height = std::max<int>(client.bottom, 1);
+    if (!backdrop.dc || backdrop.width != width || backdrop.height != height) {
+        backdrop.release();
+        HDC screen = GetDC(window);
+        backdrop.dc = CreateCompatibleDC(screen);
+        backdrop.bitmap = CreateCompatibleBitmap(screen, width, height);
+        ReleaseDC(window, screen);
+        if (!backdrop.dc || !backdrop.bitmap) { backdrop.release(); return nullptr; }
+        backdrop.previous = SelectObject(backdrop.dc, backdrop.bitmap);
+        backdrop.width = width;
+        backdrop.height = height;
+        backdrop.dirty = true;
+    }
+    if (backdrop.dirty) {
+        paintFrame(window, backdrop.dc);
+        backdrop.dirty = false;
+    }
+    return backdrop.dc;
+}
+
+// Copies what lies behind `control` to (0, 0) of `target`.
+void copyBackdrop(HWND window, HDC target, HWND control, int width, int height) {
+    const auto found = placed.find(GetDlgCtrlID(control));
+    RECT rect{};
+    if (found != placed.end()) rect = found->second;
+    else {
+        GetWindowRect(control, &rect);
+        MapWindowPoints(nullptr, window, reinterpret_cast<POINT *>(&rect), 2);
+    }
+    HDC source = backdropDC(window);
+    if (source) BitBlt(target, 0, 0, width, height, source, rect.left, rect.top, SRCCOPY);
+}
+
+// A memory bitmap the size of an owner-drawn item, copied to it when done.
+struct Canvas {
+    HDC target, dc = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ previous = nullptr;
+    RECT item;
+    Canvas(HDC target, const RECT &item) : target(target), item(item) {
+        dc = CreateCompatibleDC(target);
+        bitmap = CreateCompatibleBitmap(target, std::max<int>(widthOf(item), 1), std::max<int>(heightOf(item), 1));
+        if (dc && bitmap) previous = SelectObject(dc, bitmap);
+    }
+    ~Canvas() {
+        if (dc && bitmap) BitBlt(target, item.left, item.top, widthOf(item), heightOf(item), dc, 0, 0, SRCCOPY);
+        if (previous) SelectObject(dc, previous);
+        if (bitmap) DeleteObject(bitmap);
+        if (dc) DeleteDC(dc);
+    }
+    RECT bounds() const { return RECT{0, 0, widthOf(item), heightOf(item)}; }
+    bool ready() const { return dc && bitmap; }
+};
+
+// ------------------------------------------------------ owner-drawn controls
+
+std::wstring controlText(HWND control) {
+    const int length = std::max(GetWindowTextLengthW(control), 0);
+    std::wstring value(static_cast<size_t>(length) + 1, 0);
+    GetWindowTextW(control, &value[0], length + 1);
+    value.resize(static_cast<size_t>(length));
+    return value;
+}
+
+COLORREF navTint(int page) {
+    switch (page) {
+    case dashboardPage: return jsti::chrome::lagoon;
+    case historyPage: return jsti::chrome::accentDeep;
+    case voicePage: return jsti::chrome::green;
+    default: return RGB(0xF0, 0x8A, 0x2C);
+    }
+}
+
+void drawControl(HWND window, const DRAWITEMSTRUCT &item) {
+    namespace chrome = jsti::chrome;
+    const auto &palette = chrome::palette();
+    const UINT dpi = GetDpiForWindow(window);
+    auto s = [&](int value) { return scale(window, value); };
+    Canvas canvas(item.hDC, item.rcItem);
+    if (!canvas.ready()) return;
+    HDC dc = canvas.dc;
+    RECT rect = canvas.bounds();
+    copyBackdrop(window, dc, item.hwndItem, widthOf(rect), heightOf(rect));
+    const int identifier = static_cast<int>(item.CtlID);
+    const std::wstring label = controlText(item.hwndItem);
+    const bool disabled = (item.itemState & ODS_DISABLED) != 0;
+    const bool pressed = (item.itemState & ODS_SELECTED) != 0;
+    const bool focused = (item.itemState & ODS_FOCUS) != 0 && (item.itemState & ODS_NOFOCUSRECT) == 0;
+    const UINT centred = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
+    const Role role = roleOf(window, identifier);
+    const int recording = state.displayedRecording;
+    switch (role) {
+    case Role::nav: {
+        const int page = identifier - navBaseID;
+        const bool selected = page == state.page;
+        if (selected) chrome::fillRound(dc, rect, s(10), chrome::accent, chrome::dark() ? 58 : 40);
+        else if (pressed) chrome::fillRound(dc, rect, s(10), palette.text, 20);
+        chrome::glyph(dc, pageInfo[page].glyph, box(rect.left + s(8), rect.top, s(28), heightOf(rect)), navTint(page), dpi);
+        chrome::text(dc, label, RECT{rect.left + s(42), rect.top, rect.right - s(8), rect.bottom},
+                     selected ? chrome::Font::bodySemibold : chrome::Font::body, dpi, palette.text,
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        break;
+    }
+    case Role::record: {
+        const bool live = recording == 1;
+        if (disabled) chrome::fillRound(dc, rect, heightOf(rect) / 2, palette.secondary, 90);
+        else chrome::fillGradient(dc, rect, heightOf(rect) / 2, live ? chrome::Gradient::recording : chrome::Gradient::record);
+        if (pressed) chrome::fillRound(dc, rect, heightOf(rect) / 2, RGB(0, 0, 0), 30);
+        const bool large = heightOf(rect) > s(44);
+        const std::wstring shown = recording == 1 ? (large ? L"Stop Recording" : L"Stop")
+            : recording == 2 ? (large ? L"Cancel Transcription" : L"Cancel") : (large ? L"Start Recording" : L"Record");
+        HGDIOBJ previous = SelectObject(dc, chrome::font(chrome::Font::bodySemibold, dpi));
+        SIZE extent{};
+        GetTextExtentPoint32W(dc, shown.c_str(), static_cast<int>(shown.size()), &extent);
+        SelectObject(dc, previous);
+        const int icon = s(20), spacing = s(8);
+        const int start = rect.left + (widthOf(rect) - icon - spacing - extent.cx) / 2;
+        chrome::glyph(dc, recording == 1 ? 0xE71A : 0xE720, box(start, rect.top, icon, heightOf(rect)), RGB(255, 255, 255), dpi);
+        chrome::text(dc, shown, RECT{start + icon + spacing, rect.top, rect.right, rect.bottom}, chrome::Font::bodySemibold,
+                     dpi, RGB(255, 255, 255), DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        break;
+    }
+    case Role::primary:
+    case Role::button:
+    case Role::heroButton: {
+        const int radius = s(9);
+        COLORREF ink = palette.text;
+        if (role == Role::primary) {
+            chrome::fillRound(dc, rect, radius, disabled ? chrome::mix(palette.window, chrome::accentDeep, 90) : chrome::accentDeep);
+            ink = RGB(255, 255, 255);
+        } else if (role == Role::heroButton) {
+            chrome::fillRound(dc, rect, radius, RGB(255, 255, 255), disabled ? 30 : 56);
+            ink = RGB(255, 255, 255);
+        } else {
+            chrome::fillRound(dc, rect, radius, palette.field);
+            chrome::strokeRound(dc, rect, radius, palette.fieldBorder, 255, 1.0f);
+            if (disabled) ink = chrome::mix(palette.field, palette.secondary, 150);
+        }
+        if (pressed) chrome::fillRound(dc, rect, radius, RGB(0, 0, 0), 26);
+        chrome::text(dc, label, RECT{rect.left + s(6), rect.top, rect.right - s(6), rect.bottom}, chrome::Font::bodySemibold,
+                     dpi, ink, centred);
+        break;
+    }
+    case Role::toggle: {
+        bool on;
+        { std::lock_guard<std::mutex> lock(state.mutex); on = state.automationEnabled; }
+        const RECT track = box(rect.right - s(46), rect.top + (heightOf(rect) - s(24)) / 2, s(44), s(24));
+        chrome::fillRound(dc, track, s(12), on ? chrome::accentDeep : palette.fieldBorder);
+        const RECT knob = box(on ? track.right - s(21) : track.left + s(3), track.top + s(3), s(18), s(18));
+        chrome::fillRound(dc, knob, s(9), RGB(255, 255, 255));
+        chrome::text(dc, label, RECT{rect.left, rect.top, track.left - s(12), rect.bottom}, chrome::Font::body, dpi,
+                     disabled ? palette.secondary : palette.text, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        break;
+    }
+    case Role::link: break;
+    case Role::chipValue:
+        chrome::text(dc, label, rect, chrome::Font::chipValue, dpi, RGB(255, 255, 255),
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        return;
+    case Role::statValue:
+        chrome::text(dc, label, rect, chrome::Font::chipValue, dpi, palette.text,
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        return;
+    case Role::tileValue:
+        chrome::text(dc, label, rect, chrome::Font::caption, dpi, palette.secondary,
+                     DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        return;
+    case Role::value:
+        chrome::text(dc, label, rect, chrome::Font::title, dpi, palette.text,
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        return;
+    case Role::caption: {
+        // The shortcut hint repeats the card's "Transcript" title; show only the shortcut.
+        std::wstring shown = label;
+        const std::wstring prefix = L"Transcript \u2014 ";
+        if (identifier == transcriptLabelID && shown.compare(0, prefix.size(), prefix) == 0) shown.erase(0, prefix.size());
+        chrome::text(dc, shown, rect, chrome::Font::caption, dpi, palette.secondary,
+                     (identifier == transcriptLabelID ? DT_RIGHT | DT_SINGLELINE : DT_LEFT | DT_WORDBREAK) |
+                     DT_END_ELLIPSIS | DT_NOPREFIX);
+        return;
+    }
+    case Role::status:
+        chrome::text(dc, label, rect, chrome::Font::body, dpi, palette.text, DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX);
+        return;
+    case Role::label:
+    case Role::detail:
+        chrome::text(dc, label, rect, chrome::Font::bodySemibold, dpi, palette.text, DT_LEFT | DT_WORDBREAK);
+        return;
+    }
+    if (focused) {
+        RECT ring = rect;
+        chrome::strokeRound(dc, ring, role == Role::record ? heightOf(rect) / 2 : s(10), chrome::accent, 220, 2.0f);
+    }
+}
+
+// One History card: badges, the preview and the models line.
+void drawHistoryItem(HWND window, const DRAWITEMSTRUCT &item) {
+    namespace chrome = jsti::chrome;
+    const auto &palette = chrome::palette();
+    const UINT dpi = GetDpiForWindow(window);
+    auto s = [&](int value) { return scale(window, value); };
+    Canvas canvas(item.hDC, item.rcItem);
+    if (!canvas.ready()) return;
+    HDC dc = canvas.dc;
+    RECT area = canvas.bounds();
+    HBRUSH background = CreateSolidBrush(palette.window);
+    FillRect(dc, &area, background);
+    DeleteObject(background);
+    if (item.itemID == static_cast<UINT>(-1) || item.itemID >= state.displayedHistory.size()) return;
+    const HistoryRow &row = state.displayedHistory[item.itemID];
+    RECT card{area.left + s(2), area.top + s(5), area.right - s(4), area.bottom - s(5)};
+    const bool selected = (item.itemState & ODS_SELECTED) != 0;
+    chrome::fillRound(dc, card, s(20), palette.card);
+    const COLORREF edge = row.tone == 1 ? chrome::orange : chrome::accentDeep;
+    chrome::strokeRound(dc, card, s(20), edge, selected ? 230 : (row.tone == 1 ? 120 : 50), selected ? 2.0f : 1.0f);
+    int x = card.left + s(16);
+    const int top = card.top + s(12);
+    auto badge = [&](const std::wstring &title, const std::wstring &value, COLORREF tint) {
+        if (value.empty()) return;
+        HGDIOBJ previous = SelectObject(dc, chrome::font(chrome::Font::caption, dpi));
+        SIZE extent{};
+        GetTextExtentPoint32W(dc, value.c_str(), static_cast<int>(value.size()), &extent);
+        SelectObject(dc, previous);
+        const int width = std::min<int>(std::max<int>(extent.cx, s(52)) + s(20), card.right - s(16) - x);
+        if (width < s(48)) return;
+        const RECT shape = box(x, top, width, s(40));
+        chrome::fillRound(dc, shape, s(10), tint, chrome::dark() ? 52 : 32);
+        std::wstring upper = title;
+        CharUpperBuffW(&upper[0], static_cast<DWORD>(upper.size()));
+        chrome::text(dc, upper, RECT{shape.left + s(10), shape.top + s(4), shape.right - s(6), shape.top + s(18)},
+                     chrome::Font::smallBold, dpi, tint, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+        chrome::text(dc, value, RECT{shape.left + s(10), shape.top + s(18), shape.right - s(6), shape.bottom - s(3)},
+                     chrome::Font::caption, dpi, tint, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        x = shape.right + s(8);
+    };
+    badge(L"Created", row.created, chrome::blue);
+    badge(L"Audio", row.audio, chrome::blue);
+    badge(L"Cost", row.cost, chrome::green);
+    badge(L"Context", row.context, chrome::lagoon);
+    if (row.tone == 1) badge(L"Error", L"Needs attention", chrome::orange);
+    else if (row.tone == 2) badge(L"Status", L"Not transcribed", chrome::orange);
+    const RECT preview{card.left + s(16), top + s(48), card.right - s(16), card.bottom - s(28)};
+    chrome::text(dc, row.preview.empty() ? row.detail : row.preview, preview, chrome::Font::body, dpi, palette.text,
+                 DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS | DT_NOPREFIX | DT_EDITCONTROL);
+    chrome::glyph(dc, 0xE713, box(card.left + s(14), card.bottom - s(26), s(18), s(18)), palette.secondary, dpi);
+    chrome::text(dc, row.models.empty() ? row.title : row.models, RECT{card.left + s(36), card.bottom - s(28),
+                 card.right - s(16), card.bottom - s(8)}, chrome::Font::caption, dpi, palette.secondary,
+                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+}
+
+// ------------------------------------------------------------ appearance
+
+HBRUSH brushFor(COLORREF color) {
+    static std::unordered_map<COLORREF, HBRUSH> brushes;
+    const auto found = brushes.find(color);
+    if (found != brushes.end()) return found->second;
+    HBRUSH created = CreateSolidBrush(color);
+    brushes[color] = created;
+    return created;
+}
+
+// Dark or light native controls, title bar and repaint, after the choice or
+// Windows' own setting changes.
+void applyTheme(HWND window) {
+    const BOOL dark = jsti::chrome::dark() ? TRUE : FALSE;
+    constexpr DWORD immersiveDarkMode = 20;
+    DwmSetWindowAttribute(window, immersiveDarkMode, &dark, sizeof(dark));
+    for (HWND control : state.controls) {
+        wchar_t kind[16] = {};
+        GetClassNameW(control, kind, 16);
+        if (_wcsicmp(kind, L"COMBOBOX") == 0) SetWindowTheme(control, dark ? L"DarkMode_CFD" : nullptr, nullptr);
+        else if (_wcsicmp(kind, L"EDIT") == 0 || _wcsicmp(kind, L"LISTBOX") == 0) {
+            SetWindowTheme(control, dark ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+        }
+    }
+    backdrop.dirty = true;
+    RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
 }
 
 void refreshFont(HWND window) {
-    HFONT replacement = CreateFontW(-MulDiv(10, static_cast<int>(GetDpiForWindow(window)), 72),
-        0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    if (!replacement) return;
-    for (HWND control : state.controls) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(replacement), TRUE);
-    if (state.font) DeleteObject(state.font);
-    state.font = replacement;
+    const UINT dpi = GetDpiForWindow(window);
+    for (HWND control : state.controls) {
+        const HFONT chosen = GetDlgCtrlID(control) == transcriptID
+            ? jsti::chrome::font(jsti::chrome::Font::mono, dpi) : jsti::chrome::font(jsti::chrome::Font::body, dpi);
+        SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(chosen), TRUE);
+    }
+    SendDlgItemMessageW(window, historyID, LB_SETITEMHEIGHT, 0, scale(window, 132));
 }
 
 void updateModelLayout(HWND window) {
@@ -582,22 +1338,81 @@ void updateModelLayout(HWND window) {
     layout(window);
 }
 
+void showPage(HWND window, int page) {
+    if (page < 0 || page >= pageCount) return;
+    const int previous = state.page;
+    state.page = page;
+    // A control on the page being left keeps no keyboard focus.
+    HWND focus = GetFocus();
+    layout(window);
+    if (focus && IsChild(window, focus) && !IsWindowVisible(focus)) SetFocus(GetDlgItem(window, navBaseID + page));
+    for (int index : {previous, page}) InvalidateRect(GetDlgItem(window, navBaseID + index), nullptr, TRUE);
+    RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+}
+
+// The dashboard's Setup card and the header subtitle echo the settings.
+void refreshSetup(HWND window) {
+    auto comboText = [&](int identifier) {
+        HWND combo = GetDlgItem(window, identifier);
+        const LRESULT index = SendMessageW(combo, CB_GETCURSEL, 0, 0);
+        if (index == CB_ERR) return std::wstring();
+        const LRESULT length = SendMessageW(combo, CB_GETLBTEXTLEN, static_cast<WPARAM>(index), 0);
+        if (length == CB_ERR) return std::wstring();
+        std::wstring text(static_cast<size_t>(length) + 1, 0);
+        SendMessageW(combo, CB_GETLBTEXT, static_cast<WPARAM>(index), reinterpret_cast<LPARAM>(&text[0]));
+        text.resize(static_cast<size_t>(length));
+        return text;
+    };
+    auto set = [&](int identifier, const std::wstring &text) {
+        if (controlText(GetDlgItem(window, identifier)) != text) SetDlgItemTextW(window, identifier, text.c_str());
+    };
+    const std::wstring model = comboText(modelID);
+    set(setupMicrophoneID, comboText(microphoneID));
+    set(setupModelID, model.empty() ? L"No model selected" : model);
+    std::wstring shortcut = jsti_hotkey_label();
+    const std::wstring prefix = L"Transcript — ";
+    if (shortcut.compare(0, prefix.size(), prefix) == 0) shortcut.erase(0, prefix.size());
+    set(setupShortcutID, shortcut);
+    set(shortcutValueID, shortcut);
+    int method = 0, insertion = 0, restore = 1;
+    std::wstring output = L"Paste into the app you started in";
+    if (jsti_window_text_output(&method, &insertion, &restore) == 0) {
+        output = method == JSTI_TEXT_OUTPUT_CLIPBOARD_ONLY ? L"Copy to the clipboard"
+            : method == JSTI_TEXT_OUTPUT_DIRECT_ONLY ? L"Type into the field only" : L"Smart: insert, then paste";
+    }
+    set(setupOutputID, output);
+    if (state.headerSubtitle != model) {
+        state.headerSubtitle = model;
+        invalidateBackdrop(window);
+    }
+}
+
 bool createControls(HWND window) {
     auto add = [&](const wchar_t *kind, const wchar_t *label, DWORD style, int identifier) {
-        HWND control = CreateWindowExW(wcscmp(kind, L"EDIT") == 0 || wcscmp(kind, L"LISTBOX") == 0 ? WS_EX_CLIENTEDGE : 0, kind, label,
-            WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, window,
+        const bool field = wcscmp(kind, L"EDIT") == 0;
+        if (wcscmp(kind, L"STATIC") == 0) style = SS_OWNERDRAW | SS_NOPREFIX;
+        if (wcscmp(kind, L"BUTTON") == 0 && (style & BS_TYPEMASK) == BS_PUSHBUTTON) style = (style & ~BS_TYPEMASK) | BS_OWNERDRAW;
+        HWND control = CreateWindowExW(0, kind, label, WS_CHILD | WS_VISIBLE | style | (field ? 0 : 0), 0, 0, 10, 10, window,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(identifier)), GetModuleHandleW(nullptr), nullptr);
         if (control) state.controls.push_back(control);
         return control != nullptr;
     };
-    // Each STATIC label immediately precedes its control so assistive
-    // technology and Alt mnemonics resolve the intended target.
-    const bool okay = add(L"STATIC", L"&Find in history", 0, searchLabelID) &&
+    bool okay = true;
+    for (int page = 0; page < pageCount && okay; ++page) {
+        okay = add(L"BUTTON", pageInfo[page].title, BS_PUSHBUTTON | WS_TABSTOP, navBaseID + page);
+    }
+    // Each label immediately precedes its control so assistive technology and
+    // Alt mnemonics resolve the intended target. Labels are owner-drawn static
+    // controls, so their text stays the accessible name.
+    okay = okay && add(L"BUTTON", L"&Record", BS_PUSHBUTTON | WS_TABSTOP, recordID) &&
+        add(L"BUTTON", L"&Import audio", BS_PUSHBUTTON | WS_TABSTOP, importID) &&
+        add(L"STATIC", L"&Find in history", 0, searchLabelID) &&
         add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, searchID) &&
         add(L"BUTTON", L"C&lear", BS_PUSHBUTTON | WS_TABSTOP, clearSearchID) &&
         add(L"STATIC", L"&History", 0, 93) &&
-        add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP, historyID) &&
-        add(L"STATIC", L"Your saved recordings will appear here.", SS_LEFT, historyDetailID) &&
+        add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP,
+            historyID) &&
+        add(L"STATIC", L"Your saved recordings will appear here.", 0, historyDetailID) &&
         add(L"STATIC", L"Transcript &version", 0, variantLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, variantID) &&
         add(L"BUTTON", L"Retr&y", BS_PUSHBUTTON | WS_TABSTOP, retryID) &&
@@ -607,34 +1422,46 @@ bool createControls(HWND window) {
         // The label carries the mnemonic and precedes Play/Pause, so Alt+B
         // and assistive technology reach the playback controls.
         add(L"STATIC", L"Play&back", 0, playbackLabelID) &&
-        add(L"STATIC", playbackIdleText, SS_RIGHT, playbackTimeID) &&
+        add(L"STATIC", playbackIdleText, 0, playbackTimeID) &&
         add(L"BUTTON", L"Play", BS_PUSHBUTTON | WS_TABSTOP, playPauseID) &&
         add(L"BUTTON", L"Stop", BS_PUSHBUTTON | WS_TABSTOP, stopPlaybackID) &&
-        add(L"BUTTON", L"Voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
-        add(L"BUTTON", L"App &profiles", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
+        add(L"BUTTON", L"Choose &voice…", BS_PUSHBUTTON | WS_TABSTOP, voiceSettingsID) &&
+        add(L"BUTTON", L"Edit app &profiles…", BS_PUSHBUTTON | WS_TABSTOP, profilesID) &&
         add(L"STATIC", L"&Source", 0, sourceLabelID) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, sourceID) &&
         add(L"STATIC", L"&Mode", 0, 95) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, modeID) &&
-        add(L"BUTTON", L"&Keyboard shortcut…", BS_PUSHBUTTON | WS_TABSTOP, shortcutID) &&
+        add(L"STATIC", L"", 0, shortcutValueID) &&
+        add(L"BUTTON", L"Change &keyboard shortcut…", BS_PUSHBUTTON | WS_TABSTOP, shortcutID) &&
         add(L"STATIC", L"&Transcription model", 0, 90) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, modelID) &&
-        add(L"BUTTON", L"&Post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
-        add(L"STATIC", L"OpenRouter discovery not loaded.", SS_LEFT, modelStatusID) &&
+        add(L"BUTTON", L"Configure &post-processing…", BS_PUSHBUTTON | WS_TABSTOP, processingID) &&
+        add(L"STATIC", L"OpenRouter discovery not loaded.", 0, modelStatusID) &&
         add(L"BUTTON", L"Refresh &models", BS_PUSHBUTTON | WS_TABSTOP, modelRefreshID) &&
-        add(L"BUTTON", L"Local mo&dels\u2026", BS_PUSHBUTTON | WS_TABSTOP, localModelsID) &&
+        add(L"BUTTON", L"Local mo&dels…", BS_PUSHBUTTON | WS_TABSTOP, localModelsID) &&
         add(L"STATIC", L"&API key (Windows Credential Manager)", 0, 91) &&
         add(L"EDIT", L"", ES_PASSWORD | ES_AUTOHSCROLL | WS_TABSTOP, keyID) &&
         add(L"BUTTON", L"&Save key", BS_PUSHBUTTON | WS_TABSTOP, saveID) &&
+        add(L"BUTTON", L"A&zure Speech resource…", BS_PUSHBUTTON | WS_TABSTOP, azureID) &&
         add(L"STATIC", L"&Microphone", 0, 94) &&
         add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, microphoneID) &&
         add(L"BUTTON", L"Text o&utput…", BS_PUSHBUTTON | WS_TABSTOP, textOutputID) &&
-        add(L"BUTTON", L"&Record", BS_PUSHBUTTON | WS_TABSTOP, recordID) &&
-        add(L"BUTTON", L"&Import audio", BS_PUSHBUTTON | WS_TABSTOP, importID) &&
-        add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID) &&
+        add(L"STATIC", L"&Theme", 0, appearanceLabelID) &&
+        add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP, appearanceID) &&
+        add(L"BUTTON", L"Allow &automation (speak command and MCP)", BS_PUSHBUTTON | WS_TABSTOP, automationID) &&
+        add(L"BUTTON", L"i&Cloud sync settings…", BS_PUSHBUTTON | WS_TABSTOP, cloudSyncID) &&
+        add(L"BUTTON", L"View on &GitHub", BS_PUSHBUTTON | WS_TABSTOP, githubID) &&
+        add(L"BUTTON", L"Report an iss&ue", BS_PUSHBUTTON | WS_TABSTOP, issueID) &&
+        add(L"BUTTON", L"Pri&vacy policy", BS_PUSHBUTTON | WS_TABSTOP, privacyID) &&
         add(L"STATIC", jsti_hotkey_label().c_str(), 0, transcriptLabelID) &&
         add(L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, transcriptID) &&
-        add(L"STATIC", L"Ready. Choose a model and save its API key to begin.", SS_LEFT, statusID);
+        add(L"BUTTON", L"&Copy transcript", BS_PUSHBUTTON | WS_TABSTOP, copyID);
+    for (int identifier : {chipSessionsID, chipTimeID, chipSpendID, insightSessionsID, insightTimeID, insightAverageID,
+                           insightSpendID, historySessionsID, historyErrorsID, historyAverageID, historySpendID,
+                           setupMicrophoneID, setupModelID, setupShortcutID, setupOutputID}) {
+        okay = okay && add(L"STATIC", L"—", 0, identifier);
+    }
+    okay = okay && add(L"STATIC", L"Ready. Choose a model and save its API key to begin.", 0, statusID);
     LRESULT selectedDevice = 0;
     for (size_t i = 0; i < state.microphones.size(); ++i) {
         const auto &device = state.microphones[i];
@@ -646,6 +1473,8 @@ bool createControls(HWND window) {
     SendDlgItemMessageW(window, microphoneID, CB_SETCURSEL, selectedDevice, 0);
     SendDlgItemMessageW(window, keyID, EM_LIMITTEXT, 2048, 0);
     SendDlgItemMessageW(window, searchID, EM_LIMITTEXT, 512, 0);
+    SendDlgItemMessageW(window, searchID, EM_SETCUEBANNER, TRUE,
+                        reinterpret_cast<LPARAM>(L"Search transcripts, models and profiles"));
     SendDlgItemMessageW(window, transcriptID, EM_LIMITTEXT, 4 * 1024 * 1024, 0);
     refreshFont(window);
     if (SendDlgItemMessageW(window, sourceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Remote (API providers)")) < 0 ||
@@ -654,7 +1483,11 @@ bool createControls(HWND window) {
         SendDlgItemMessageW(window, modeID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Live")) < 0 ||
         SendDlgItemMessageW(window, variantID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Processed transcript")) < 0 ||
         SendDlgItemMessageW(window, variantID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Original transcript")) < 0 ||
+        SendDlgItemMessageW(window, appearanceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Follow Windows")) < 0 ||
+        SendDlgItemMessageW(window, appearanceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Light")) < 0 ||
+        SendDlgItemMessageW(window, appearanceID, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Dark")) < 0 ||
         !populateModels(window)) return false;
+    SendDlgItemMessageW(window, appearanceID, CB_SETCURSEL, jsti::chrome::appearance(), 0);
     applyVariant(window, -1, false, 0);
     updateHistoryControls(window, 0);
     EnableWindow(GetDlgItem(window, processingID), jsti_postprocessing_available());
@@ -670,6 +1503,9 @@ bool createControls(HWND window) {
     state.remoteModelStatus = modelStatus;
     updateSourceControls(window);
     EnableWindow(GetDlgItem(window, modelRefreshID), !refreshing);
+    applyTheme(window);
+    refreshSetup(window);
+    layout(window);
     return okay;
 }
 
@@ -716,6 +1552,39 @@ bool applyMicrophones(HWND window, std::vector<MicrophoneRow> rows) {
     state.microphones = std::move(previous);
     populateMicrophones(window);
     return false;
+}
+
+// Settings that were menu commands follow their dialogs' idle rules; the
+// automation switch shows the state the host reported.
+void updateSettingsButtons(HWND window, int recording) {
+    EnableWindow(GetDlgItem(window, voiceSettingsID), recording == 0 && jsti_voice_output_available());
+    EnableWindow(GetDlgItem(window, localModelsID), recording == 0 && jsti_local_models_available());
+    EnableWindow(GetDlgItem(window, cloudSyncID), recording == 0 && jsti_cloud_sync_available());
+    EnableWindow(GetDlgItem(window, azureID), recording == 0 && jsti_azure_resource_available());
+    bool automation;
+    { std::lock_guard<std::mutex> lock(state.mutex); automation = state.automationEnabled; }
+    HWND toggle = GetDlgItem(window, automationID);
+    if ((GetWindowLongPtrW(toggle, GWLP_USERDATA) != 0) != automation) {
+        SetWindowLongPtrW(toggle, GWLP_USERDATA, automation ? 1 : 0);
+        InvalidateRect(toggle, nullptr, FALSE);
+    }
+}
+
+// History totals from jsti_window_set_insights, shown only when they change.
+void applyInsights(HWND window) {
+    std::wstring values[2][5];
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (!state.insightsChanged) return;
+        state.insightsChanged = false;
+        for (int group = 0; group < 2; ++group) for (int index = 0; index < 5; ++index) values[group][index] = state.insights[group][index];
+    }
+    const std::pair<int, const std::wstring *> targets[] = {
+        {chipSessionsID, &values[0][0]}, {chipTimeID, &values[0][2]}, {chipSpendID, &values[0][4]},
+        {insightSessionsID, &values[0][0]}, {insightTimeID, &values[0][2]}, {insightAverageID, &values[0][3]},
+        {insightSpendID, &values[0][4]}, {historySessionsID, &values[1][0]}, {historyErrorsID, &values[1][1]},
+        {historyAverageID, &values[1][3]}, {historySpendID, &values[1][4]}};
+    for (const auto &target : targets) SetDlgItemTextW(window, target.first, target.second->c_str());
 }
 
 void applyUpdate(HWND window) {
@@ -786,15 +1655,20 @@ void applyUpdate(HWND window) {
     }
     updateSourceControls(window);
     if (statusChanged) SetDlgItemTextW(window, statusID, status.c_str());
+    applyInsights(window);
 
     SetDlgItemTextW(window, recordID, recording == 1 ? L"&Stop recording" : (recording == 2 ? L"&Cancel transcription" : L"&Record"));
     EnableWindow(GetDlgItem(window, recordID), TRUE);
+    if (state.displayedRecording != recording) {
+        state.displayedRecording = recording;
+        InvalidateRect(GetDlgItem(window, recordID), nullptr, FALSE);
+    }
     for (int id : {keyID, saveID, microphoneID, profilesID}) EnableWindow(GetDlgItem(window, id), recording == 0);
     updateModelAvailability(window, recording);
     EnableWindow(GetDlgItem(window, processingID), recording == 0 && jsti_postprocessing_available());
     EnableWindow(GetDlgItem(window, textOutputID), recording == 0 && jsti_text_output_available());
     EnableWindow(GetDlgItem(window, shortcutID), recording == 0 && jsti_hotkey_available());
-    updateSettingsMenu(window, recording);
+    updateSettingsButtons(window, recording);
     {
         // The shortcut can change through its dialog; avoid repainting an unchanged label.
         const std::wstring label = jsti_hotkey_label();
@@ -876,6 +1750,7 @@ void applyUpdate(HWND window) {
         else if (playbackRecord == nowSelected) applyPlayback(window, playback, playbackText, true, recording);
     }
     updateHistoryControls(window, recording);
+    refreshSetup(window);
 }
 
 void importAudio(HWND window) {
@@ -897,13 +1772,58 @@ void importAudio(HWND window) {
     }
 }
 
+// The screenshot tour: every page, then the dashboard and History in dark
+// mode, then the dashboard while recording. Each step is shown, drawn, then
+// saved as NN-name.bmp beside the others; the window closes afterwards.
+constexpr int tourSteps = pageCount + 3;
+
+std::string tourName(int step) {
+    if (step < pageCount) return pageInfo[step].name;
+    return step == pageCount ? "dashboard-dark" : step == pageCount + 1 ? "history-dark" : "dashboard-recording";
+}
+
+void tourShow(HWND window, int step) {
+    if (step < pageCount) {
+        showPage(window, step);
+    } else if (step == pageCount) {
+        jsti::chrome::setAppearance(2);
+        SendDlgItemMessageW(window, appearanceID, CB_SETCURSEL, 2, 0);
+        applyTheme(window);
+        showPage(window, dashboardPage);
+    } else if (step == pageCount + 1) {
+        showPage(window, historyPage);
+    } else {
+        // Last, because it replaces the displayed transcript.
+        state.displayedRecording = 1;
+        SetDlgItemTextW(window, transcriptID, L"Could we move the catch-up to Friday? That gives us a little");
+        SetDlgItemTextW(window, statusID, L"Recording… Press Ctrl+Alt+Space again to stop.");
+        showPage(window, dashboardPage);
+    }
+    UpdateWindow(window);
+    SetTimer(window, tourTimerID, 700, nullptr);
+}
+
+void tourStep(HWND window) {
+    if (state.tourStep < 0 || state.tourStep >= tourSteps) return;
+    char name[64];
+    snprintf(name, sizeof name, "%02d-%s.bmp", state.tourStep + 1, tourName(state.tourStep).c_str());
+    const std::string path = jsti::utf8(state.tourDirectory) + "\\" + name;
+    char error[512] = {};
+    if (jsti_window_save_snapshot(path.c_str(), error, sizeof error) != 0) {
+        emit(window, JSTI_EVENT_ERROR, error);
+    }
+    ++state.tourStep;
+    if (state.tourStep < tourSteps) tourShow(window, state.tourStep);
+    else PostMessageW(window, WM_CLOSE, 0, 0);
+}
+
 LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case WM_CREATE:
         return createControls(window) ? 0 : -1;
     case WM_GETMINMAXINFO: {
         auto info = reinterpret_cast<MINMAXINFO *>(lparam);
-        info->ptMinTrackSize = {scale(window, 820), minimumWindowHeight(window)};
+        info->ptMinTrackSize = {minimumWindowWidth(window), minimumWindowHeight(window)};
         return 0;
     }
     case WM_SIZE:
@@ -914,6 +1834,52 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             bounds->bottom - bounds->top, SWP_NOZORDER | SWP_NOACTIVATE);
         refreshFont(window); layout(window); return 0;
     }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT paint{};
+        HDC target = BeginPaint(window, &paint);
+        HDC source = backdropDC(window);
+        if (source) {
+            BitBlt(target, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right - paint.rcPaint.left,
+                   paint.rcPaint.bottom - paint.rcPaint.top, source, paint.rcPaint.left, paint.rcPaint.top, SRCCOPY);
+        }
+        EndPaint(window, &paint);
+        return 0;
+    }
+    case WM_PRINTCLIENT: {
+        HDC source = backdropDC(window);
+        if (source) BitBlt(reinterpret_cast<HDC>(wparam), 0, 0, backdrop.width, backdrop.height, source, 0, 0, SRCCOPY);
+        return 0;
+    }
+    case WM_MEASUREITEM: {
+        auto item = reinterpret_cast<MEASUREITEMSTRUCT *>(lparam);
+        if (item->CtlType == ODT_LISTBOX) item->itemHeight = static_cast<UINT>(scale(window, 132));
+        return TRUE;
+    }
+    case WM_DRAWITEM: {
+        const auto &item = *reinterpret_cast<const DRAWITEMSTRUCT *>(lparam);
+        if (item.CtlType == ODT_LISTBOX) drawHistoryItem(window, item);
+        else drawControl(window, item);
+        return TRUE;
+    }
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORLISTBOX: {
+        // Edits and the read-only transcript sit on painted fields; the
+        // History list and drop-downs on the window's surface.
+        const auto &palette = jsti::chrome::palette();
+        HDC dc = reinterpret_cast<HDC>(wparam);
+        const int identifier = GetDlgCtrlID(reinterpret_cast<HWND>(lparam));
+        const COLORREF surface = message == WM_CTLCOLORLISTBOX && identifier == historyID ? palette.window : palette.field;
+        SetTextColor(dc, palette.text);
+        SetBkColor(dc, surface);
+        return reinterpret_cast<LRESULT>(brushFor(surface));
+    }
+    case WM_SETTINGCHANGE:
+        if (lparam && jsti::chrome::appearance() == 0 &&
+            wcscmp(reinterpret_cast<const wchar_t *>(lparam), L"ImmersiveColorSet") == 0) applyTheme(window);
+        break;
     case profilesMessage:
         if (idleControl(window, profilesID) && IsWindowEnabled(window)) jsti_show_profiles(window);
         else jsti_cancel_profiles_request();
@@ -924,9 +1890,29 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         jsti_hotkey_message(window, message, wparam);
         return 0;
     case WM_TIMER:
+        if (wparam == tourTimerID) { KillTimer(window, tourTimerID); tourStep(window); return 0; }
         if (jsti_hotkey_message(window, message, wparam)) return 0;
         break;
+    case tourMessage: {
+        std::unique_ptr<std::wstring> directory(reinterpret_cast<std::wstring *>(lparam));
+        if (!directory || state.tourStep >= 0) return 0;
+        state.tourDirectory = *directory;
+        state.tourStep = 0;
+        tourShow(window, 0);
+        return 0;
+    }
+    case appearanceMessage:
+        SendDlgItemMessageW(window, appearanceID, CB_SETCURSEL, jsti::chrome::appearance(), 0);
+        applyTheme(window);
+        return 0;
+    case pageMessage:
+        showPage(window, static_cast<int>(wparam));
+        return 0;
     case WM_COMMAND:
+        if (LOWORD(wparam) >= navBaseID && LOWORD(wparam) < navBaseID + pageCount) {
+            if (HIWORD(wparam) == BN_CLICKED) showPage(window, LOWORD(wparam) - navBaseID);
+            return 0;
+        }
         switch (LOWORD(wparam)) {
         case profilesID:
             if (idleControl(window, profilesID)) emit(window, 17);
@@ -942,46 +1928,53 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
             return 0;
         }
         case processingID: jsti_show_postprocessing(window); return 0;
-        case menuShortcutID: case menuTextOutputID: case menuVoiceID: case menuPostProcessingID:
-        case menuLocalModelsID: case menuCloudSyncID: case menuAzureResourceID: {
-            const int recording = jsti_window_recording_state();
-            const HMENU menu = GetMenu(window);
-            if (!menu || recording != 0 || !IsWindowEnabled(window) ||
-                (GetMenuState(menu, LOWORD(wparam), MF_BYCOMMAND) & MF_GRAYED)) return 0;
-            if (LOWORD(wparam) == menuShortcutID) {
-                jsti_show_hotkey_settings(window);
-                SetDlgItemTextW(window, transcriptLabelID, jsti_hotkey_label().c_str());
-            } else if (LOWORD(wparam) == menuTextOutputID) {
-                jsti_show_text_output(window);
-            } else if (LOWORD(wparam) == menuVoiceID) {
-                jsti_show_voice_settings(window);
-            } else if (LOWORD(wparam) == menuLocalModelsID) {
-                jsti_show_local_models(window);
-            } else if (LOWORD(wparam) == menuCloudSyncID) {
-                jsti_show_cloud_sync_settings(window);
-            } else if (LOWORD(wparam) == menuAzureResourceID) {
+        case azureID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, azureID) && IsWindowEnabled(window)) {
                 jsti_show_azure_resource_settings(window);
-            } else {
-                jsti_show_postprocessing(window);
             }
             return 0;
-        }
-        case menuAutomationID: {
+        case cloudSyncID:
+            if (HIWORD(wparam) == BN_CLICKED && idleControl(window, cloudSyncID) && IsWindowEnabled(window)) {
+                jsti_show_cloud_sync_settings(window);
+            }
+            return 0;
+        case automationID: {
+            if (HIWORD(wparam) != BN_CLICKED) return 0;
             bool enabled;
             { std::lock_guard<std::mutex> lock(state.mutex); enabled = state.automationEnabled; }
             emit(window, JSTI_EVENT_AUTOMATION_TOGGLED, enabled ? "0" : "1");
             return 0;
         }
+        case githubID: case issueID: case privacyID: {
+            if (HIWORD(wparam) != BN_CLICKED) return 0;
+            const wchar_t *address = LOWORD(wparam) == githubID ? L"https://github.com/crmitchelmore/justspeaktoit"
+                : LOWORD(wparam) == issueID ? L"https://github.com/crmitchelmore/justspeaktoit/issues/new"
+                : L"https://justspeaktoit.com/privacy";
+            ShellExecuteW(window, L"open", address, nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
+        }
+        case appearanceID:
+            if (HIWORD(wparam) == CBN_SELCHANGE) {
+                const LRESULT chosen = SendDlgItemMessageW(window, appearanceID, CB_GETCURSEL, 0, 0);
+                if (chosen < 0 || chosen > 2) return 0;
+                jsti::chrome::setAppearance(static_cast<int>(chosen));
+                applyTheme(window);
+                const char value[2] = {static_cast<char>('0' + chosen), 0};
+                emit(window, JSTI_EVENT_APPEARANCE, value);
+            }
+            return 0;
         case textOutputID:
             // Only while idle and not already behind another modal editor.
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, textOutputID) && IsWindowEnabled(window)) {
                 jsti_show_text_output(window);
+                refreshSetup(window);
             }
             return 0;
         case shortcutID:
             if (HIWORD(wparam) == BN_CLICKED && idleControl(window, shortcutID) && IsWindowEnabled(window)) {
                 jsti_show_hotkey_settings(window);
                 SetDlgItemTextW(window, transcriptLabelID, jsti_hotkey_label().c_str());
+                refreshSetup(window);
             }
             return 0;
         case retryID: emitHistory(window, JSTI_EVENT_HISTORY_RETRY); return 0;
@@ -1058,6 +2051,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 const std::string device = selectedMicrophone(window);
                 state.microphoneSelection = device;
                 emit(window, JSTI_EVENT_MICROPHONE_CHANGED, device.c_str());
+                refreshSetup(window);
             }
             return 0;
         case modelRefreshID:
@@ -1079,6 +2073,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 state.preferredModels[state.activeMode] = selected;
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
+                refreshSetup(window);
             }
             return 0;
         case localModelsID:
@@ -1105,6 +2100,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 if (!populateModels(window)) { showFailure(window, "Windows could not display this source's models."); return 0; }
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
+                refreshSetup(window);
             }
             return 0;
         case modeID:
@@ -1121,6 +2117,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 if (!populateModels(window)) { showFailure(window, "Windows could not display this mode's models."); return 0; }
                 SetDlgItemTextW(window, keyID, L"");
                 emit(window, JSTI_EVENT_MODEL_CHANGED);
+                refreshSetup(window);
             }
             return 0;
         case saveID: {
@@ -1142,6 +2139,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
+        backdrop.release();
         jsti_hotkey_stop(window);
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = nullptr; state.posted = false; }
         PostQuitMessage(0); return 0;
@@ -1181,6 +2179,79 @@ int jsti_window_recording_state() {
     std::lock_guard<std::mutex> lock(state.mutex);
     return state.recording;
 }
+
+namespace {
+// Common Controls 6 gives the native edits, lists and drop-downs the current
+// Windows look. The executable carries no manifest, so an activation context
+// is created from one in a private temporary file for this thread.
+ULONG_PTR activateVisualStyles() {
+    static const char manifest[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\"><dependency>"
+        "<dependentAssembly><assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" "
+        "version=\"6.0.0.0\" processorArchitecture=\"*\" publicKeyToken=\"6595b64144ccf1df\" language=\"*\"/>"
+        "</dependentAssembly></dependency></assembly>";
+    wchar_t folder[MAX_PATH + 1] = {};
+    const DWORD length = GetTempPathW(MAX_PATH, folder);
+    if (length == 0 || length > MAX_PATH) return 0;
+    wchar_t unique[40] = {};
+    GUID identifier{};
+    if (FAILED(CoCreateGuid(&identifier)) || !StringFromGUID2(identifier, unique, 40)) return 0;
+    const std::wstring path = std::wstring(folder) + L"JustSpeakToIt-" + unique + L".manifest";
+    std::string failure;
+    HANDLE file = jsti::createPrivateFileHandle(jsti::utf8(path).c_str(), failure);
+    if (file == INVALID_HANDLE_VALUE) return 0;
+    DWORD written = 0;
+    const bool saved = WriteFile(file, manifest, sizeof(manifest) - 1, &written, nullptr) &&
+        written == sizeof(manifest) - 1;
+    CloseHandle(file);
+    ULONG_PTR cookie = 0;
+    if (saved) {
+        ACTCTXW context{};
+        context.cbSize = sizeof(context);
+        context.lpSource = path.c_str();
+        HANDLE activation = CreateActCtxW(&context);
+        if (activation != INVALID_HANDLE_VALUE) {
+            if (!ActivateActCtx(activation, &cookie)) cookie = 0;
+            ReleaseActCtx(activation);
+        }
+    }
+    DeleteFileW(path.c_str());
+    // Controls created from here on load Common Controls 6.
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES};
+    InitCommonControlsEx(&controls);
+    return cookie;
+}
+
+// The app icon at `size` pixels, drawn from the brand geometry.
+HICON brandIcon(int size) {
+    if (size <= 0 || !jsti::chrome::startup()) return nullptr;
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void *pixels = nullptr;
+    HDC screen = GetDC(nullptr);
+    HBITMAP colour = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    ReleaseDC(nullptr, screen);
+    if (!colour || !pixels) return nullptr;
+    std::memset(pixels, 0, static_cast<size_t>(size) * size * 4);
+    HDC dc = CreateCompatibleDC(nullptr);
+    HGDIOBJ previous = SelectObject(dc, colour);
+    jsti::chrome::brandIcon(dc, RECT{0, 0, size, size});
+    SelectObject(dc, previous);
+    DeleteDC(dc);
+    HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
+    ICONINFO parts{TRUE, 0, 0, mask, colour};
+    HICON icon = CreateIconIndirect(&parts);
+    DeleteObject(mask);
+    DeleteObject(colour);
+    return icon;
+}
+} // namespace
 
 int jsti_window_run(const char *const *models, size_t count, int selected,
                     JSTIWindowCallback callback, void *context, char *error, size_t capacity) {
@@ -1260,18 +2331,22 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     state.suppressSearchEvents = false;
     // The process may already have a manifest-defined awareness context.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    const ULONG_PTR visualStyles = activateVisualStyles();
+    jsti::chrome::startup();
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSW type{};
     type.lpfnWndProc = procedure;
     type.hInstance = instance;
     type.lpszClassName = L"JustSpeakToItWindows";
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    type.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-    type.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    type.hbrBackground = nullptr;
+    HICON icon = brandIcon(GetSystemMetrics(SM_CXICON)), smallIcon = brandIcon(GetSystemMetrics(SM_CXSMICON));
+    type.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
-        L"Just Speak to It — Windows Preview", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        1100, 804, nullptr, createSettingsMenu(), instance, nullptr) : nullptr;
+        L"Just Speak to It", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
+        1180, 820, nullptr, nullptr, instance, nullptr) : nullptr;
+    if (window && smallIcon) SendMessageW(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
     int outcome = 0;
     if (!window) outcome = jsti::fail(jsti::systemError("Creating native desktop window"), error, capacity);
     else {
@@ -1284,6 +2359,15 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         MSG message{};
         BOOL result;
         while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+            // Ctrl+1 to Ctrl+0 open the pages in sidebar order, as the Mac's
+            // Command shortcuts do.
+            if (message.message == WM_KEYDOWN && (GetKeyState(VK_CONTROL) & 0x8000) &&
+                !(GetKeyState(VK_MENU) & 0x8000) && message.wParam >= '0' && message.wParam <= '9' &&
+                (message.hwnd == window || IsChild(window, message.hwnd)) && IsWindowEnabled(window)) {
+                const int digit = static_cast<int>(message.wParam - '0');
+                showPage(window, digit == 0 ? pageCount - 1 : digit - 1);
+                continue;
+            }
             if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
         }
         if (result < 0) {
@@ -1291,8 +2375,11 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             DestroyWindow(window);
         }
     }
-    if (state.font) { DeleteObject(state.font); state.font = nullptr; }
+    state.font = nullptr;
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
+    if (icon) DestroyIcon(icon);
+    if (smallIcon) DestroyIcon(smallIcon);
+    if (visualStyles) DeactivateActCtx(0, visualStyles);
     state.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
     { std::lock_guard<std::mutex> lock(state.mutex); state.running = false; state.window = nullptr; }
@@ -1466,6 +2553,15 @@ int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char
             if (!jsti::wide(rows[i].id, identifier) || identifier.empty() || identifier.size() > 128 ||
                 !jsti::wide(rows[i].title, row.title) || !jsti::wide(rows[i].detail, row.detail)) return -1;
             if (row.title.size() > 4096 || row.detail.size() > 16384) return -1;
+            // The card fields are optional; absent ones hide their badge.
+            auto optional = [](const char *value, std::wstring &target) {
+                return !value || (jsti::wide(value, target) && target.size() <= 4096);
+            };
+            if (!optional(rows[i].created, row.created) || !optional(rows[i].audio_length, row.audio) ||
+                !optional(rows[i].cost, row.cost) || !optional(rows[i].preview, row.preview) ||
+                !optional(rows[i].models, row.models) || !optional(rows[i].context, row.context) ||
+                rows[i].tone < 0 || rows[i].tone > 2) return -1;
+            row.tone = rows[i].tone;
             row.id = rows[i].id;
             if (!identifiers.insert(row.id).second) return -1;
             copied.push_back(std::move(row));
@@ -1487,6 +2583,64 @@ int jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char
     } catch (const std::exception &) {
         return -1;
     }
+}
+
+int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible) {
+    if (!all || !visible) return -1;
+    try {
+        std::wstring values[2][5];
+        const JSTIInsights *groups[2] = {all, visible};
+        for (int group = 0; group < 2; ++group) {
+            const char *fields[5] = {groups[group]->sessions, groups[group]->errors, groups[group]->recording_time,
+                                     groups[group]->average_length, groups[group]->spend};
+            for (int index = 0; index < 5; ++index) {
+                if (!fields[index] || !jsti::wide(fields[index], values[group][index]) ||
+                    values[group][index].size() > 64) return -1;
+            }
+        }
+        std::lock_guard<std::mutex> lock(state.mutex);
+        if (!state.window) return -1;
+        for (int group = 0; group < 2; ++group) {
+            for (int index = 0; index < 5; ++index) state.insights[group][index] = std::move(values[group][index]);
+        }
+        state.insightsChanged = true;
+        if (!state.posted) {
+            state.posted = PostMessageW(state.window, updateMessage, 0, 0) != 0;
+            if (!state.posted) return -1;
+        }
+        return 0;
+    } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_appearance(int appearance) {
+    if (appearance < 0 || appearance > 2) return -1;
+    jsti::chrome::setAppearance(appearance);
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.window) PostMessageW(state.window, appearanceMessage, 0, 0);
+    return 0;
+}
+
+int jsti_window_show_page(int page) {
+    if (page < 0 || page >= pageCount) return -1;
+    std::lock_guard<std::mutex> lock(state.mutex);
+    return state.window && PostMessageW(state.window, pageMessage, static_cast<WPARAM>(page), 0) ? 0 : -1;
+}
+
+int jsti_window_screenshot_tour(const char *directory, char *error, size_t capacity) {
+    std::wstring folder;
+    if (!directory || !jsti::wide(directory, folder) || folder.empty()) {
+        return jsti::fail("No screenshot folder supplied.", error, capacity);
+    }
+    if (!CreateDirectoryW(folder.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        return jsti::fail(jsti::systemError("Creating the screenshot folder"), error, capacity);
+    }
+    auto owned = std::make_unique<std::wstring>(std::move(folder));
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.window || !PostMessageW(state.window, tourMessage, 0, reinterpret_cast<LPARAM>(owned.get()))) {
+        return jsti::fail("The window is not running.", error, capacity);
+    }
+    owned.release();
+    return 0;
 }
 
 int jsti_window_set_transcript_variant(const char *recordID, int selected, int canSwitch) {
@@ -1672,6 +2826,9 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     void *const originalContext = state.context;
     RECT originalBounds{};
     GetWindowRect(window, &originalBounds);
+    // The model, source and mode checks read the Transcription page's controls.
+    const int originalPage = state.page;
+    showPage(window, transcriptionPage);
     struct Event { int event = 0; std::string id; int model = -1; } observed;
     state.callback = [](int event, const char *id, int model, void *context) {
         auto &observed = *static_cast<Event *>(context);
@@ -1680,7 +2837,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     state.context = &observed;
     std::string failure;
     auto checkBounds = [&]() -> bool {
-        SetWindowPos(window, nullptr, 0, 0, scale(window, 820), minimumWindowHeight(window),
+        SetWindowPos(window, nullptr, 0, 0, minimumWindowWidth(window), minimumWindowHeight(window),
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         layout(window);
         RECT client{};
@@ -2304,12 +3461,18 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
             if (failure.empty()) failure = "The all-batch model catalogue lost legacy behaviour.";
             return false;
         }
-        RECT profileButton{}, modelLabel{};
-        GetWindowRect(GetDlgItem(window, profilesID), &profileButton);
-        GetWindowRect(GetDlgItem(window, 90), &modelLabel);
-        if (!IsWindowVisible(GetDlgItem(window, profilesID)) || profileButton.bottom > modelLabel.top) {
-            failure = "The all-batch catalogue overlapped App profiles and the model label."; return false;
+        // App profiles has its own page; every page keeps its controls in bounds.
+        for (int page = 0; page < pageCount; ++page) {
+            showPage(window, page);
+            if (!checkBounds()) return false;
+            if (page == profilesPage && !IsWindowVisible(GetDlgItem(window, profilesID))) {
+                failure = "The Profiles page did not show App profiles."; return false;
+            }
+            if (page != transcriptionPage && IsWindowVisible(GetDlgItem(window, modelID))) {
+                failure = "A page showed another page's controls."; return false;
+            }
         }
+        showPage(window, transcriptionPage);
         // A host initially exposing only batch can add its first live route
         // without restarting or changing the current batch preference.
         {
@@ -2441,6 +3604,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
     SetWindowPos(window, nullptr, originalBounds.left, originalBounds.top,
         originalBounds.right - originalBounds.left, originalBounds.bottom - originalBounds.top,
         SWP_NOZORDER | SWP_NOACTIVATE);
+    showPage(window, originalPage);
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
 

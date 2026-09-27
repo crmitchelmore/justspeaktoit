@@ -210,6 +210,40 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Native window smoke test failed: $($process.ExitCode); $nativeFailure" }
           if ($nativeFailure) { throw $nativeFailure }
 
+      - name: Save every window page with sample History
+        id: page-screenshots
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        timeout-minutes: 3
+        run: |
+          $bin = swift build --configuration release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $folder = Join-Path $env:GITHUB_WORKSPACE 'windows-ui-screenshots'
+          $process = Start-Process -FilePath (Join-Path $bin.Trim() 'SpeakWindows.exe') `
+            -ArgumentList '--ui-screenshots', $folder -PassThru -NoNewWindow `
+            -RedirectStandardOutput windows-ui-screenshots.log -RedirectStandardError windows-ui-screenshots-errors.log
+          if (-not $process.WaitForExit(90000)) {
+            $process.Kill()
+            throw 'The screenshot tour did not finish within 90 seconds.'
+          }
+          Get-Content windows-ui-screenshots.log
+          Get-Content windows-ui-screenshots-errors.log
+          if ($process.ExitCode -ne 0) { throw "The screenshot tour failed: $($process.ExitCode)" }
+          $expected = 'dashboard', 'history', 'voice-output', 'general', 'transcription', 'post-processing',
+            'profiles', 'keyboard', 'icloud-sync', 'about', 'dashboard-dark', 'history-dark', 'dashboard-recording'
+          for ($index = 0; $index -lt $expected.Count; $index++) {
+            $file = Join-Path $folder ('{0:D2}-{1}.bmp' -f ($index + 1), $expected[$index])
+            if (-not (Test-Path $file)) { throw "Missing screenshot $file" }
+          }
+
+      - name: Upload page screenshots
+        if: ${{ !cancelled() && steps.page-screenshots.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-ui-screenshots-${{ github.sha }}
+          path: windows-ui-screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Transcribe the JFK sample on-device with the pinned tiny model
         id: local-transcription
         if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}

@@ -8,6 +8,7 @@ final class WindowsEventContext {
     let controller: WindowsAppController
     let smokeTest: Bool
     var smokeTestFailure: Error?
+    var screenshotDirectory: String?
     var microphoneMonitor: WindowsMicrophoneMonitor?
     var cloudSync: WindowsCloudSync?
     let search: WindowsSearchCoalescer
@@ -144,17 +145,6 @@ func toggleRecording(
     }
 }
 
-private func openProfiles(_ holder: WindowsEventContext) {
-    let editor = holder.profiles
-    guard editor.begin() else { return }
-    holder.enqueueSettings {
-        do { try editor.show(await holder.controller.profileSnapshot()) } catch {
-            editor.cancel()
-            WindowsNative.update(error.localizedDescription)
-        }
-    }
-}
-
 // Copy and version events read the displayed version here, on the UI thread,
 // so it is paired with the record ID the same event carries. Playback events
 // carry the selected record ID for the same reason, in the selection order.
@@ -179,6 +169,7 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
 }
 
 private func ready(_ holder: WindowsEventContext) {
+    if WindowsPresentation.startScreenshotTour(holder) { return }
     guard holder.smokeTest else {
         WindowsInsertionTarget.prepare()
         do {
@@ -223,13 +214,14 @@ private func secondaryWindowEvent(_ event: Int32, value: String, index: Int, hol
     if (21...23).contains(event) { return hotKeyWindowEvent(event, value: value, index: index, holder: holder) }
     if event == 24 { return readAloudEvent(value, holder: holder) }
     if event == 25 { return automationEvent(requested: value == "1", holder: holder) }
+    if event == 26 { return WindowsPresentation.appearanceEvent(value, holder: holder) }
     otherWindowEvent(event, value: value, holder: holder)
 }
 
 private func otherWindowEvent(_ event: Int32, value: String, holder: WindowsEventContext) {
     let controller = holder.controller
     switch event {
-    case 17: openProfiles(holder)
+    case 17: holder.openProfiles()
     case 9: holder.selectHistory(value)
     case 10: Task { await controller.retryHistory(value) }
     case 11:
@@ -276,7 +268,8 @@ enum SpeakWindowsMain {
                 print("Native Windows adapter and canonical model self-test passed.")
                 return
             }
-            let smokeTest = CommandLine.arguments.contains("--ui-smoke-test")
+            let screenshots = WindowsPresentation.screenshotDirectory(CommandLine.arguments)
+            let smokeTest = CommandLine.arguments.contains("--ui-smoke-test") || screenshots != nil
             let directory: URL
             if smokeTest {
                 directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -287,10 +280,12 @@ enum SpeakWindowsMain {
                 directory = URL(fileURLWithPath: local).appendingPathComponent("JustSpeakToIt")
             }
             defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
+            if screenshots != nil { try await DesktopHostSampleHistory.seed(directory: directory) }
             let controller = try await Task.detached {
                 try WindowsAppController(directory: directory)
             }.value
             let holder = WindowsEventContext(controller: controller, smokeTest: smokeTest)
+            holder.screenshotDirectory = screenshots
             try await runWindow(controller: controller, holder: holder)
             if smokeTest { print("Native window creation and shutdown passed.") }
         } catch {
@@ -346,6 +341,7 @@ enum SpeakWindowsMain {
         await restoreServices(holder)
         try await configureModelPickers(controller, holder: holder)
         try await controller.configureModelCatalog()
+        await WindowsPresentation.configureAppearance(controller)
     }
 
     private static func runWindow(controller: WindowsAppController, holder: WindowsEventContext) async throws {

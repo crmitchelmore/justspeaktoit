@@ -37,6 +37,10 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         WindowsNative.history(records, selected: selected, selectRecord: selectRecord)
     }
 
+    package static func historyInsights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {
+        WindowsNative.insights(all: all, visible: visible)
+    }
+
     package static func historyPresentation(
         _ record: DesktopRecordingStore.Record, variant: DesktopTranscriptVariant, status: String
     ) {

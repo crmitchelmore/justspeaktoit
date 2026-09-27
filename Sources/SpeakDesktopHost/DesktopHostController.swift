@@ -25,6 +25,9 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         /// The Azure Speech resource dialog, under the Apple apps' key for the same
         /// device-local value; absent means none, and recorded audio uses the region.
         package var azureSpeechResourceEndpoint: String?
+        /// Start at login, on hosts that manage it through a desktop service
+        /// whose state the app cannot read back (the Linux Background portal).
+        package var startAtLogin: Bool?
     }
 
     /// Target, profile and text output are fixed when recording starts; a
@@ -141,7 +144,7 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             // off this actor. Busy prevents another capture during suspension.
             try await playback.stopAndWait()
             guard !closed else { return }
-            let profile = resolvedProfile(executablePath: targetExecutablePath)
+            let profile = resolvedProfile(target: target, executablePath: targetExecutablePath)
             if let limitation = profile.blockingLimitation { throw DesktopHostError(message: limitation.message) }
             try await startRecording(
                 target: target, deviceID: deviceID, profile: profile, textOutput: textOutput, trigger: trigger

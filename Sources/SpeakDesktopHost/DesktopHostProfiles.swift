@@ -9,6 +9,17 @@ package struct DesktopHostProfilesSnapshot: Sendable {
     package let notice: String
 }
 
+// Windows matches the captured application's full executable path.
+package extension DesktopHostPlatform {
+    static var profileMatchers: DesktopProfileEditing.MatcherPlatform { .windows }
+
+    static func profile(
+        in resolver: ProfileResolver, target: InsertionTarget?, executablePath: String?
+    ) -> DictationProfile? {
+        resolver.profile(forWindowsExecutablePath: executablePath)
+    }
+}
+
 extension DesktopHostController {
     func profileRecord(id: UUID, filename: String, profile: DesktopProfileSession) -> DesktopRecordingStore.Record {
         var record = DesktopRecordingStore.Record(
@@ -20,9 +31,11 @@ extension DesktopHostController {
         return record
     }
 
-    func resolvedProfile(executablePath: String?) -> DesktopProfileSession {
+    func resolvedProfile(target: Platform.InsertionTarget?, executablePath: String?) -> DesktopProfileSession {
         DesktopProfileSessionResolver.resolve(
-            profile: ProfileResolver(profiles: profiles).profile(forWindowsExecutablePath: executablePath),
+            profile: Platform.profile(
+                in: ProfileResolver(profiles: profiles), target: target, executablePath: executablePath
+            ),
             defaultModel: settings.model, defaultPostProcessing: settings.postProcessing ?? .init(),
             capabilities: profileCapabilities
         )
@@ -58,7 +71,9 @@ extension DesktopHostController {
         }
         return DesktopHostProfilesSnapshot(
             profiles: profiles,
-            catalogue: DesktopProfileEditing.Catalogue(capabilities: profileCapabilities),
+            catalogue: DesktopProfileEditing.Catalogue(
+                capabilities: profileCapabilities, matchers: Platform.profileMatchers
+            ),
             notice: profileWarning ?? "Overrides apply to one recording; your normal app settings stay unchanged."
         )
     }

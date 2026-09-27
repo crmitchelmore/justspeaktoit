@@ -111,6 +111,14 @@ package protocol DesktopHostPlatform: Sendable {
     static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
     static func endLocalUse(_ model: String?, controller: isolated DesktopHostController<Self>)
 
+    // App profiles.
+    /// Which application matchers the profile editor shows.
+    static var profileMatchers: DesktopProfileEditing.MatcherPlatform { get }
+    /// The first profile matching the application captured at the shortcut.
+    static func profile(
+        in resolver: ProfileResolver, target: InsertionTarget?, executablePath: String?
+    ) -> DictationProfile?
+
     // Shortcut text for the status line.
     static var defaultHotKey: HotKeySettings { get }
     /// Appended to the Ready status line.

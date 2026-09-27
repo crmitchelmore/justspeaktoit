@@ -188,7 +188,7 @@ let portablePackage = Package(
         .target(name: "SpeakDesktop", dependencies: ["SpeakCore"]),
         // Recording, History, output and settings orchestration shared by the
         // Windows and Linux hosts behind DesktopHostPlatform.
-        .target(name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop"]),
+        .target(name: "SpeakDesktopHost", dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopSync"]),
         .target(
             name: "SpeakSync",
             dependencies: ["SpeakCore"],

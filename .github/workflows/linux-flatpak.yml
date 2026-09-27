@@ -1,0 +1,176 @@
+name: Linux Packages
+
+# Builds the Flatpak the Flathub way (sources fetched first, then an offline
+# build) and a .deb, runs the app's self-test inside each, and uploads the
+# bundles. See Docs/linux-packaging.md.
+
+on:
+  # TEMPORARY: iteration trigger for the packaging branch. Drop this push
+  # block before merging to main.
+  push:
+    branches: [claude/linux-port-packaging]
+  pull_request:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Sources/SpeakCore/**
+      - Sources/SpeakDesktop/**
+      - Sources/SpeakDesktopHost/**
+      - Sources/SpeakDesktopSync/**
+      - Sources/SpeakSync/**
+      - Sources/SpeakLinux/**
+      - Sources/SpeakLinuxPlatform/**
+      - Sources/SpeakLinuxWebSocket/**
+      - Sources/CLinuxSupport/**
+      - Sources/CLinuxSystem/**
+      - Resources/Brand/**
+      - packaging/linux/**
+      - scripts/linux-*
+      - scripts/windows-local-runtime/dependencies.json
+      - .github/workflows/linux-flatpak.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  flatpak:
+    name: Flatpak (GNOME 50, offline build)
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50@sha256:1de59efef01a946d9f28f1ec3458bf6f61dcee3507d7fecdd473f8134da4ec77
+      options: --privileged
+    timeout-minutes: 90
+    env:
+      MANIFEST: packaging/linux/com.justspeaktoit.JustSpeakToIt.yml
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Vendored SwiftPM sources match the Linux resolved file
+        run: |
+          python3 packaging/linux/generate-swiftpm-sources.py --check
+          # The build must not ask for network access (Flathub builds offline).
+          if grep -n -- '--share=network' "$MANIFEST" | grep -v '^[0-9]*:  - --share=network$'; then
+            echo "only finish-args may share the network" >&2; exit 1
+          fi
+          if grep -n 'build-args' "$MANIFEST"; then
+            echo "build-args are not allowed: the build runs offline" >&2; exit 1
+          fi
+
+      - name: Install the Swift SDK extension
+        run: |
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub org.freedesktop.Sdk.Extension.swift6//25.08
+          flatpak info --user org.freedesktop.Sdk.Extension.swift6//25.08
+
+      - name: Fetch sources
+        run: >-
+          flatpak-builder --download-only --force-clean
+          --state-dir "$RUNNER_TEMP/flatpak-state" "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+
+      - name: Build offline
+        run: >-
+          flatpak-builder --disable-download --force-clean --disable-rofiles-fuse
+          --state-dir "$RUNNER_TEMP/flatpak-state" --repo "$RUNNER_TEMP/flatpak-repo"
+          "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+
+      - name: Self-test, whisper.cpp runtime and window smoke test inside the Flatpak
+        run: scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+
+      - name: Bundle
+        run: >-
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          "$RUNNER_TEMP/flatpak-repo" "$RUNNER_TEMP/JustSpeakToIt-x86_64.flatpak" com.justspeaktoit.JustSpeakToIt
+
+      - name: Upload the Flatpak bundle
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: justspeaktoit-flatpak-x86_64
+          path: ${{ runner.temp }}/JustSpeakToIt-x86_64.flatpak
+          if-no-files-found: error
+
+  deb:
+    name: .deb (Ubuntu 24.04, Swift 6.2.3)
+    runs-on: ubuntu-24.04
+    container:
+      image: swift:6.2.3-noble@sha256:6dd90eb2359663a2cde8f03e9951f488b23134b3b8fce20e9dcb6cada75dd803
+    timeout-minutes: 45
+    env:
+      SPEAK_LINUX_TARGET: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install build packages
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+            libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev libx11-dev libxtst-dev pkg-config \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgnutls28-dev \
+            cmake ninja-build dpkg-dev file python3
+
+      - name: Build the app with the Linux resolved file
+        run: |
+          cp packaging/linux/Package.resolved Package.resolved
+          swift build --force-resolved-versions --configuration release --product SpeakLinux \
+            --static-swift-stdlib --jobs 4
+
+      - name: Build the whisper.cpp runtime
+        run: scripts/linux-build-whisper.sh "$RUNNER_TEMP/whisper" "$RUNNER_TEMP/whisper-work"
+
+      - name: Package
+        run: |
+          mkdir -p "$RUNNER_TEMP/deb"
+          scripts/linux-package-deb.sh --bin-dir "$(swift build --configuration release --show-bin-path)" \
+            --whisper-dir "$RUNNER_TEMP/whisper" --output "$RUNNER_TEMP/deb"
+
+      - name: Upload the .deb
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: justspeaktoit-deb-amd64
+          path: ${{ runner.temp }}/deb/*.deb
+          if-no-files-found: error
+
+  deb-install:
+    name: Install the .deb on a clean Ubuntu 24.04
+    needs: deb
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: justspeaktoit-deb-amd64
+          path: deb
+
+      - name: apt install
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q ./deb/*.deb python3
+
+      - name: Self-test the installed app
+        run: |
+          test "$(readlink -f "$(command -v justspeaktoit)")" = /usr/lib/justspeaktoit/bin/justspeaktoit
+          justspeaktoit --self-test
+
+      - name: The bundled whisper.cpp runtime loads
+        run: |
+          python3 - <<'PY'
+          import ctypes
+          d = "/usr/lib/justspeaktoit/lib/justspeaktoit/"
+          ctypes.CDLL(d + "libwhisper.so.1")
+          ggml = ctypes.CDLL(d + "libggml.so.0")
+          ggml.ggml_backend_load_all_from_path(d.encode())
+          ggml.ggml_backend_dev_count.restype = ctypes.c_size_t
+          count = ggml.ggml_backend_dev_count()
+          print("ggml devices:", count)
+          assert count >= 1, "no ggml backend loaded"
+          PY

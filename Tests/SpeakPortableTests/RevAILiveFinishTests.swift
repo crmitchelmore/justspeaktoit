@@ -106,9 +106,14 @@ final class RevAILiveFinishTests: XCTestCase {
         let frames = [RevAILiveFixture.frame(1), RevAILiveFixture.frame(2)]
         frames.forEach(fixture.client.sendAudio)
         let endOfStream = fixture.expectEndOfStream(self)
+        let budget = fixture.deadlines.armed.count
         let finish = fixture.finish()
         await fixture.waitForFinishes(1)
-        XCTAssertEqual(fixture.clock.pending(RevAILiveClient.finishReadyBudget), 1)
+        // The finish arms its deadlines on its caller's task just after it registers.
+        await fixture.waitForDeadlines(budget + 2)
+        XCTAssertEqual(Array(fixture.deadlines.armed.dropFirst(budget)),
+                       [RevAIStreaming.finishBudget, RevAILiveClient.finishReadyBudget],
+                       "Before connected the finish also bounds the wait for readiness")
         fixture.socket.open()
         XCTAssertTrue(fixture.socket.sent.isEmpty)
         fixture.socket.revAIConnected()

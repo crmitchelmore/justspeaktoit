@@ -14,6 +14,8 @@ final class LinuxEventContext: @unchecked Sendable {
     var smokeTestFailure: Error?
     /// Runs off the GTK thread once the window is ready, then closes it.
     var windowCheck: (@Sendable () throws -> Void)?
+    /// With --ui-screenshots: loads the sample History, then saves every page here.
+    var screenshotDirectory: String?
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let searches: DesktopEventDispatcher<String>
     private let copies: DesktopTranscriptCopyDispatcher
@@ -171,6 +173,7 @@ func linuxWindowEvent(
     if linuxReadAloudEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxLocalModelEvent(event, slot: slot, holder: holder) { return }
     if linuxCloudSyncEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxAppearanceEvent(event, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
 }
 
@@ -231,6 +234,16 @@ private func linuxHistoryEvent(_ event: Int, value: String, slot: Int, holder: L
 }
 
 /// Settings events, applied in order. Returns false for unknown events.
+/// General › Appearance: the window already shows the scheme; this keeps it.
+private func linuxAppearanceEvent(_ event: Int, slot: Int, holder: LinuxEventContext) -> Bool {
+    guard event == Int(JSTI_EVENT_APPEARANCE) else { return false }
+    let controller = holder.controller
+    if let appearance = DesktopAppearance(rawValue: slot) {
+        holder.enqueueSettings { await controller.saveAppearance(appearance) }
+    }
+    return true
+}
+
 private func linuxSettingsEvent(_ event: Int, value: String, slot: Int, holder: LinuxEventContext) -> Bool {
     let controller = holder.controller
     switch event {
@@ -284,6 +297,21 @@ private func linuxReady(_ holder: LinuxEventContext) {
         Thread.detachNewThread {
             do { try check() } catch { holder.smokeTestFailure = error }
             jsti_window_request_close()
+        }
+        return
+    }
+    if let directory = holder.screenshotDirectory {
+        let controller = holder.controller
+        Task {
+            await controller.ready()
+            do {
+                try directory.withCString { path in
+                    try LinuxNative.call { jsti_window_screenshot_tour(path, $0, $1) }
+                }
+            } catch {
+                holder.smokeTestFailure = error
+                jsti_window_request_close()
+            }
         }
         return
     }

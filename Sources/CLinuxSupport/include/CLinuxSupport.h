@@ -55,7 +55,9 @@ enum {
     /* text: the selected record id; the displayed transcript is captured
      * with jsti_window_transcript_snapshot while this event runs. */
     JSTI_EVENT_READ_ALOUD = 40,
-    JSTI_EVENT_VOICE_OUTPUT = 41 /* index: position in the voice list */
+    JSTI_EVENT_VOICE_OUTPUT = 41, /* index: position in the voice list */
+    /* General › Appearance. index: 0 system, 1 light, 2 dark. */
+    JSTI_EVENT_APPEARANCE = 45
 };
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
@@ -71,11 +73,42 @@ typedef struct JSTIModelRow {
     int32_t display_order;
 } JSTIModelRow;
 
+/* One History card, worded by the shared DesktopHistoryRowSummary. Empty
+ * strings hide their badge. tone: 0 transcribed, 1 failed, 2 not yet
+ * transcribed. */
 typedef struct JSTIHistoryRow {
     const char *id;
-    const char *title;
-    const char *detail;
+    const char *created;
+    const char *audio_length;
+    const char *cost;
+    const char *preview;
+    const char *models;
+    const char *context;
+    int32_t tone;
 } JSTIHistoryRow;
+
+/* Preformatted History totals, as the Mac dashboard shows them. */
+typedef struct JSTIInsights {
+    const char *sessions;
+    const char *errors;
+    const char *recording_time;
+    const char *average_length;
+    const char *spend;
+} JSTIInsights;
+
+/* The window's pages, in sidebar order. */
+enum {
+    JSTI_PAGE_DASHBOARD = 0,
+    JSTI_PAGE_HISTORY,
+    JSTI_PAGE_VOICE_OUTPUT,
+    JSTI_PAGE_GENERAL,
+    JSTI_PAGE_TRANSCRIPTION,
+    JSTI_PAGE_POST_PROCESSING,
+    JSTI_PAGE_KEYBOARD,
+    JSTI_PAGE_CLOUD_SYNC,
+    JSTI_PAGE_ABOUT,
+    JSTI_PAGE_COUNT
+};
 
 enum { JSTI_WINDOW_SMOKE_TEST = 1 };
 
@@ -95,6 +128,13 @@ int32_t jsti_window_set_model_catalog(
 int32_t jsti_window_set_microphones(
     const char *const *ids, const char *const *names, size_t count, const char *selected);
 int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const char *selected_id);
+/* The dashboard totals (`all` saved records) and the History header totals
+ * (`visible`, the records the search shows). */
+int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
+/* Applies and shows the saved appearance, indexed as JSTI_EVENT_APPEARANCE. */
+int32_t jsti_window_set_appearance(int32_t appearance);
+/* Shows a JSTI_PAGE_* page, as choosing it in the sidebar does. */
+int32_t jsti_window_show_page(int32_t page);
 /* variant: 0 processed, 1 original, -1 none. */
 int32_t jsti_window_set_history_presentation(
     const char *record_id, int32_t variant, int32_t switchable, const char *text, const char *status);
@@ -123,6 +163,10 @@ void jsti_notify(const char *title, const char *body);
 int32_t jsti_window_self_test(char *error, size_t error_capacity);
 /* Main thread only: renders the window to a PNG for visual review. */
 int32_t jsti_window_save_snapshot(const char *path, char *error, size_t error_capacity);
+/* Shows every page in turn (then a recording, then dark mode), saves each as
+ * `directory`/NN-name.png once it has been drawn, then closes the window.
+ * Safe from any thread. */
+int32_t jsti_window_screenshot_tour(const char *directory, char *error, size_t error_capacity);
 
 /* --------------------------------------------------------------- clipboard */
 

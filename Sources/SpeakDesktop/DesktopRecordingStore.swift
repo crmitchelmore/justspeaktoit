@@ -47,9 +47,9 @@ public actor DesktopRecordingStore {
             }
         }
 
-        public init(id: UUID, audioFilename: String, modelIdentifier: String) {
+        public init(id: UUID, audioFilename: String, modelIdentifier: String, createdAt: Date = Date()) {
             self.id = id
-            self.createdAt = Date()
+            self.createdAt = createdAt
             self.audioFilename = audioFilename
             self.modelIdentifier = modelIdentifier
         }

@@ -32,10 +32,34 @@ void jsti_window_emit(gint32 event, const char *text, gint32 index);
 struct _GtkWidget *jsti_local_models_group_new(void);
 int32_t jsti_local_models_self_test(char *error, size_t capacity);
 
-/* The iCloud sync group (LinuxCloudSync.c): added to the window's preferences
- * page, and exercised by the window self-test. */
-void jsti_cloud_sync_build(gpointer page);
+/* The iCloud sync group (LinuxCloudSync.c): built once for the window's
+ * iCloud sync page, and exercised by the window self-test. */
+struct _GtkWidget *jsti_cloud_sync_group_new(void);
 int32_t jsti_cloud_sync_self_test(char *error, size_t capacity);
+
+struct _GtkWidget;
+struct _GtkLabel;
+
+/* LinuxWindowStyle.c: the app's look, shared by every page. Colours follow
+ * the Mac app's brand tokens and switch with the desktop's light or dark
+ * style. Each builder returns a new floating widget. */
+void jsti_style_install(void);
+/* The app icon, drawn rather than loaded so it needs no image loader. */
+struct _GtkWidget *jsti_brand_icon_new(int size);
+/* A scrolling page with centred content; `*content` receives its column. */
+struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
+/* A gradient header. `variant` is NULL (brand), "voice" or "settings".
+ * `*chips` receives the row for jsti_chip_new; `*trailing` the top-right slot. */
+struct _GtkWidget *jsti_hero_new(const char *variant, const char *title, const char *subtitle,
+                                 struct _GtkWidget **chips, struct _GtkWidget **trailing);
+/* An uppercase caption over a bold value, for a hero. */
+struct _GtkWidget *jsti_chip_new(const char *label, struct _GtkLabel **value);
+/* A rounded card with an icon tile and title; `*body` receives its content. */
+struct _GtkWidget *jsti_card_new(const char *icon, const char *title, struct _GtkWidget **body);
+/* A tinted statistic tile inside a card. */
+struct _GtkWidget *jsti_stat_new(const char *label, struct _GtkLabel **value);
+/* A History badge: `kind` is "created", "audio", "cost", "error" or "context". */
+struct _GtkWidget *jsti_badge_new(const char *kind, const char *icon, const char *title, const char *value);
 
 /* LinuxModelStream.c: a model file read on a thread of its own, so the speech
  * runtime, which holds its lock while whisper.cpp loads, never waits on the

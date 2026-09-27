@@ -102,7 +102,7 @@ static GtkButton *cloud_button(const char *label, gint32 event) {
     return button;
 }
 
-void jsti_cloud_sync_build(gpointer page) {
+struct _GtkWidget *jsti_cloud_sync_group_new(void) {
     GtkWidget *group = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group), "iCloud sync");
     adw_preferences_group_set_description(
@@ -145,8 +145,8 @@ void jsti_cloud_sync_build(gpointer page) {
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(cloud.sync_now));
     gtk_box_append(GTK_BOX(actions), GTK_WIDGET(cloud.apply));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), actions);
-    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group));
     reset_cloud();
+    return group;
 }
 
 static void cloud_view_free(gpointer pointer) {

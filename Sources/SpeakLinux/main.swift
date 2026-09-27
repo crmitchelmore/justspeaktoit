@@ -52,6 +52,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
         _ = jsti_window_set_azure_resource(await controller.azureResourceEndpoint())
         LinuxWindow.voiceOutput(await controller.voiceOutputSettings())
+        _ = jsti_window_set_appearance(Int32(await controller.appearance().rawValue))
         await controller.configureLocalModels()
         return await controller.selectedIndex()
     }
@@ -128,8 +129,12 @@ case nil, "x11": break
 default: fail(DesktopHostError(message: "Unknown integration check \(integrationCheck ?? "")."))
 }
 
-// The X11 check runs inside a throwaway window like the smoke test.
-let smokeTest = arguments.contains("--ui-smoke-test") || integrationCheck == "x11"
+// Saves a picture of every page, with sample History, for visual review.
+let screenshotDirectory = arguments.firstIndex(of: "--ui-screenshots").flatMap {
+    arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+}
+// The X11 check and the screenshot tour run inside a throwaway window like the smoke test.
+let smokeTest = arguments.contains("--ui-smoke-test") || integrationCheck == "x11" || screenshotDirectory != nil
 let session = LinuxDesktopSession()
 let directory = smokeTest
     ? FileManager.default.temporaryDirectory.appendingPathComponent("jsti-smoke-\(UUID().uuidString)")
@@ -141,12 +146,20 @@ LinuxHostPlatform.configure(session: session, remoteDesktopAvailable: remoteDesk
 
 do {
     try LinuxFiles.preparePrivateDirectory(directory)
+    if screenshotDirectory != nil {
+        try blocking { try await DesktopHostSampleHistory.seed(directory: directory) }
+    }
     let controller = try LinuxAppController(directory: directory, effects: LinuxNativeEffects())
     let holder = LinuxEventContext(controller: controller, smokeTest: smokeTest)
+    holder.screenshotDirectory = screenshotDirectory
     if integrationCheck == "x11" { holder.windowCheck = { try LinuxIntegrationChecks.x11() } }
     defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
     try runWindow(controller: controller, holder: holder)
-    if smokeTest && integrationCheck == nil { print("Native window creation and shutdown passed.") }
+    if let screenshotDirectory {
+        print("Saved the window's pages to \(screenshotDirectory).")
+    } else if smokeTest && integrationCheck == nil {
+        print("Native window creation and shutdown passed.")
+    }
 } catch {
     fail(error)
 }

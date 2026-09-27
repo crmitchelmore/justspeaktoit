@@ -145,9 +145,10 @@ jobs:
       - name: Test shared core, desktop host and Linux adapters
         run: swift test --configuration release --jobs 4 --force-resolved-versions
 
-      - name: Self-test and GTK window smoke test
+      - name: Self-test, GTK window smoke test and page screenshots
         env:
           JSTI_UI_SNAPSHOT_PATH: ${{ runner.temp }}/linux-window.png
+          JSTI_UI_SCREENSHOT_DIR: ${{ runner.temp }}/linux-ui-screenshots
         run: scripts/linux-desktop-checks.sh "$(swift build --configuration release --show-bin-path)/SpeakLinux"
 
       - name: Transcribe the JFK sample on-device with the pinned tiny model
@@ -173,4 +174,12 @@ jobs:
         with:
           name: linux-window-snapshot
           path: ${{ runner.temp }}/linux-window.png
+          if-no-files-found: ignore
+
+      - name: Upload page screenshots
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: linux-ui-screenshots
+          path: ${{ runner.temp }}/linux-ui-screenshots
           if-no-files-found: ignore

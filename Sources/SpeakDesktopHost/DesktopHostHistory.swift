@@ -18,6 +18,9 @@ extension DesktopHostController {
     package func refreshHistory(selectRecord: Bool = false) {
         guard !closed else { return }
         let visible = visibleHistory()
+        Platform.historyInsights(
+            all: DesktopHistoryInsights(records: history.values), visible: DesktopHistoryInsights(records: visible)
+        )
         if let selected = selectedHistoryID, !visible.contains(where: { $0.id == selected }) {
             // The displayed record no longer matches the search. Drop the stale
             // text and action target rather than acting on a hidden record.

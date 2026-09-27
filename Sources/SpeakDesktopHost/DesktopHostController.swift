@@ -25,6 +25,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
         /// The Azure Speech resource dialog, under the Apple apps' key for the same
         /// device-local value; absent means none, and recorded audio uses the region.
         package var azureSpeechResourceEndpoint: String?
+        /// General › Appearance; absent follows the system.
+        package var appearance: DesktopAppearance?
     }
 
     /// Target, profile and text output are fixed when recording starts; a

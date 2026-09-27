@@ -23,17 +23,13 @@ enum LinuxWindow {
 
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool) {
         let strings = Strings()
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
         let rows = records.map { record in
-            let model = DesktopHistorySearch.modelDisplayName(for: record.modelIdentifier)
-            let detail = record.failure ?? record.postProcessingFailure.map { "Post-processing failed: \($0)" }
-                ?? record.displayText ?? "Recording saved; awaiting transcription."
+            let summary = DesktopHistoryRowSummary(record)
             return JSTIHistoryRow(
-                id: strings.add(record.id.uuidString),
-                title: strings.add("\(formatter.string(from: record.createdAt)) · \(model)"),
-                detail: strings.add(String(detail.prefix(180)).replacingOccurrences(of: "\n", with: " "))
+                id: strings.add(record.id.uuidString), created: strings.add(summary.created),
+                audio_length: strings.add(summary.audioLength ?? ""), cost: strings.add(summary.cost ?? ""),
+                preview: strings.add(summary.preview), models: strings.add(summary.models),
+                context: strings.add(summary.context ?? ""), tone: summary.tone.rawValue
             )
         }
         let result = withExtendedLifetime(strings) {
@@ -48,6 +44,23 @@ enum LinuxWindow {
         if result != 0 {
             _ = jsti_window_update("The history list could not be refreshed. Saved recordings remain on disk.", nil, -1)
         }
+    }
+
+    /// Dashboard and History header totals, formatted as the Mac formats them.
+    static func insights(all: DesktopHistoryInsights, visible: DesktopHistoryInsights) {
+        let strings = Strings()
+        func row(_ insights: DesktopHistoryInsights) -> JSTIInsights {
+            JSTIInsights(
+                sessions: strings.add(String(insights.sessions)),
+                errors: strings.add(String(insights.sessionsWithErrors)),
+                recording_time: strings.add(DesktopHistoryFormat.totalDuration(insights.recordingDuration)),
+                average_length: strings.add(DesktopHistoryFormat.totalDuration(insights.averageSessionLength)),
+                spend: strings.add(DesktopHistoryFormat.spend(insights.spend))
+            )
+        }
+        var all = row(all)
+        var visible = row(visible)
+        withExtendedLifetime(strings) { _ = jsti_window_set_insights(&all, &visible) }
     }
 
     /// Model rows in global slot order, with each visible slot's picker position.

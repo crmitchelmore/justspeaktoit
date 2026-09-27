@@ -101,4 +101,19 @@ extension DesktopHostController {
     }
 
     package func hotKeySettings() -> Platform.HotKeySettings { settings.hotKey ?? Platform.defaultHotKey }
+
+    package func appearance() -> DesktopAppearance { settings.appearance ?? .system }
+
+    /// The window applies the scheme itself when it is chosen; this keeps it.
+    package func saveAppearance(_ appearance: DesktopAppearance) {
+        guard !closed else { return }
+        var changed = settings
+        changed.appearance = appearance == .system ? nil : appearance
+        do {
+            try effects.writeSettings(
+                JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
+            )
+            settings = changed
+        } catch { update("Could not save the appearance: \(error.localizedDescription)") }
+    }
 }

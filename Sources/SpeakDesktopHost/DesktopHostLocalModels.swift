@@ -24,13 +24,7 @@ package struct DesktopHostSyncHooks: Sendable {
 package enum DesktopHostSync {
     /// A friendly name for the device a synced transcript came from.
     package static func originName(_ platform: String?) -> String {
-        switch platform {
-        case "macos": return "your Mac"
-        case "ios": return "your iPhone"
-        case "windows": return "another PC"
-        case "linux": return "a Linux computer"
-        default: return "another device"
-        }
+        DesktopRecordingStore.Record.originName(platform)
     }
 }
 

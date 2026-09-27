@@ -43,6 +43,40 @@ The smoke test needs `xvfb` and `dbus`; the integration checks also need
 zenity xdotool python3-gi`. Set `JSTI_UI_SNAPSHOT_PATH=/tmp/window.png` to save
 a picture of the smoke-test window.
 
+`SpeakLinux --ui-screenshots <folder>` opens a throwaway window over the shared
+sample History (`DesktopHostSampleHistory`, the transcripts the Mac's website
+screenshots use), visits every page and saves each one twice, as the visible
+window and as the whole scrolled page (`NN-name.png`, `NN-name-full.png`),
+then the dashboard and History in dark mode and the dashboard while recording.
+`scripts/linux-desktop-checks.sh` runs it when `JSTI_UI_SCREENSHOT_DIR` is set,
+and CI uploads the pictures as `linux-ui-screenshots`.
+
+## Window
+
+The window follows the Mac app's layout and look. A sidebar lists **Speak**
+(Dashboard, History, Voice Output) and **Settings** (General, Transcription,
+Post-processing, Keyboard, iCloud Sync, About), and collapses to one pane below
+640 px. The header carries Import audio, the page title with the selected model,
+and Record; the status line sits at the bottom of every page.
+
+- **Dashboard**: the brand-gradient hero with Start Recording, the words
+  arriving while recording, and Sessions, Recording Time and Spend; the
+  displayed transcript with Copy (and Cancel while transcribing); Insights
+  (Sessions, Recording Time, Average Length, Spend) and a Setup card echoing the
+  microphone, model, shortcut and text output.
+- **History**: search and Import in the hero with Sessions, Errors, Average
+  Length and Spend for the recordings the search shows; each recording is a card
+  with Created, Audio, Cost and Context badges, the transcript preview and the
+  models used. The selected card expands with its transcript, version, Play,
+  Stop, Copy, Read aloud, Retry, Export and Open audio.
+- Totals and row wording come from the shared `DesktopHistoryInsights` and
+  `DesktopHistoryRowSummary` (SpeakDesktop), counted and formatted as the Mac
+  counts them, so Windows shows the same figures.
+- Colours are the brand tokens in `SpeakCore/BrandColors.swift`; everything else
+  follows libadwaita, so the window honours the desktop's light or dark style.
+  **General › Appearance** overrides it (Follow the system, Light, Dark), saved
+  as `appearance` in `settings.json` and shared with Windows.
+
 A second invocation with `--toggle` starts or stops dictation in the running
 app without raising its window (GApplication forwards the command line), so it
 can be bound to a key in any desktop. The `app.toggle-recording` action does
@@ -172,6 +206,7 @@ proven on a physical desktop.
 | Shared host controller (record, stop, transcribe, cancel, close, output slot, History) | Verified | `SpeakDesktopHostTests` with a fake platform; Windows Swift type-checks against it (`scripts/typecheck-windows-swift.sh`) |
 | All 31 batch models, OpenRouter discovery, post-processing | Shared code, verified by the portable tests | `swift test` (portable suite) |
 | GTK window, events, record-bound History presentation | Verified headless on X11 and Wayland | `--ui-smoke-test` under Xvfb and headless Weston (`scripts/linux-wayland-smoke.sh`), window self-test, snapshot |
+| Mac layout: sidebar pages, dashboard, History cards, totals, appearance | Verified headless on X11 | Window self-test (every page shown from the sidebar, the selected card holds its transcript, totals shown); `DesktopHistoryPresentationTests`; `--ui-screenshots` pictures of every page in light, dark and recording states (CI artifact). Real desktops and HiDPI **unverified** |
 | Microphone capture (libpulse via PipeWire) | Verified with a virtual source | integration check: exact 100 ms frames, non-silent test tone; physical USB/Bluetooth microphones **unverified** |
 | Microphone list and hotplug | Verified (monitors excluded; a new source triggers a refresh) | integration check; the saved choice keeps an "unavailable" row; physical hotplug **unverified** |
 | Secret Service keys | Verified with GNOME Keyring | integration check; KWallet and the Flatpak Secret portal **unverified** |

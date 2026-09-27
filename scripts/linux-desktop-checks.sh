@@ -4,7 +4,9 @@
 #
 #   scripts/linux-desktop-checks.sh [path/to/SpeakLinux]
 #
-# Set JSTI_UI_SNAPSHOT_PATH to also save a PNG of the smoke-test window.
+# Set JSTI_UI_SNAPSHOT_PATH to also save a PNG of the smoke-test window, and
+# JSTI_UI_SCREENSHOT_DIR to save every page (light, dark and recording) with
+# sample History through --ui-screenshots.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,3 +30,14 @@ for _ in $(seq 1 50); do
 done
 DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
     timeout 120 dbus-run-session -- "$binary" --ui-smoke-test
+
+if [ -n "${JSTI_UI_SCREENSHOT_DIR:-}" ]; then
+    echo "== screenshot tour (sample History, every page)"
+    DISPLAY="$display" GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
+        timeout 180 dbus-run-session -- "$binary" --ui-screenshots "$JSTI_UI_SCREENSHOT_DIR"
+    expected=(01-dashboard 02-history 03-voice-output 04-general 05-transcription 06-post-processing
+              07-keyboard 08-icloud-sync 09-about 10-dashboard-dark 11-history-dark 12-dashboard-recording)
+    for name in "${expected[@]}"; do
+        [ -s "$JSTI_UI_SCREENSHOT_DIR/$name.png" ] || { echo "Missing screenshot $name.png" >&2; exit 1; }
+    done
+fi

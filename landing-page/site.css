@@ -165,7 +165,7 @@ em { font-style: italic; }
 
 .site-nav a:hover { color: var(--text); }
 
-@media (max-width: 860px) {
+@media (max-width: 1080px) {
   .site-nav { display: none; }
   .site-header { justify-content: space-between; }
 }
@@ -597,6 +597,32 @@ kbd {
 }
 
 .provider-group > p { margin-top: .9rem; font-size: .88rem; color: var(--text-faint); }
+
+.platform-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: .6rem;
+  font-size: .95rem;
+  color: var(--text-dim);
+}
+
+.platform-list li {
+  position: relative;
+  padding-left: 1.2rem;
+}
+
+.platform-list li::before {
+  content: "";
+  position: absolute;
+  left: .15rem;
+  top: .62em;
+  width: .42rem;
+  height: .42rem;
+  border-radius: 50%;
+  background: var(--lagoon);
+}
 
 .provider-foot {
   margin-top: 1.8rem;

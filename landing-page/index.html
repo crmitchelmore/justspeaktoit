@@ -35,6 +35,7 @@
       <a href="#own">Your data</a>
       <a href="#models">Models</a>
       <a href="#mobile">iPhone &amp; iPad</a>
+      <a href="#desktop">Windows &amp; Linux</a>
       <a href="#automate">Automation</a>
     </nav>
     <a class="button button-small" href="#get">Download</a>
@@ -238,6 +239,42 @@
       </div>
     </section>
 
+    <!-- ---------------- Windows & Linux ---------------- -->
+    <section class="section wrap" id="desktop" aria-labelledby="desktop-title">
+      <div class="section-head">
+        <p class="eyebrow eyebrow--lagoon">In progress</p>
+        <h2 id="desktop-title">Windows and Linux are on the way.</h2>
+        <p>Native apps for both, built on the same shared Swift core as the Mac, not a web page in a window. They are developer previews: they build and pass their checks on every change, but they do not match the Mac yet and there is nothing to download.</p>
+      </div>
+      <div class="provider-groups">
+        <article class="card provider-group platform-card">
+          <h3>Windows <span class="count">Developer preview</span></h3>
+          <ul class="platform-list">
+            <li>A native app for x64 PCs, with an ARM64 build in testing.</li>
+            <li>A global shortcut you choose, with the same hold, double-tap and toggle styles, and the text typed back into the field you started in.</li>
+            <li>The same 31 recorded-audio models from seventeen providers, and live dictation through twelve of them.</li>
+            <li>Whisper on your own PC through whisper.cpp: no key, and no network once the model is downloaded.</li>
+            <li>Searchable History with playback, retry and read aloud.</li>
+          </ul>
+        </article>
+        <article class="card provider-group platform-card">
+          <h3>Linux <span class="count">Developer preview</span></h3>
+          <ul class="platform-list">
+            <li>A GTK 4 and libadwaita app for X11 and Wayland, with a Flatpak manifest.</li>
+            <li>Ctrl+Alt+Space on X11, the desktop's own shortcut portal on GNOME and KDE, or bind <code>justspeaktoit --toggle</code> in any desktop.</li>
+            <li>Pasting into the focused app on X11 and through the desktop portal on Wayland, falling back to the clipboard.</li>
+            <li>The same models, live providers and on-device Whisper as Windows.</li>
+            <li>API keys in the system keyring, and the microphone through PipeWire.</li>
+          </ul>
+        </article>
+      </div>
+      <p class="note">Not there yet on either: a signed installer, hands-free dictation, and editing corrections and pronunciations. History sync with your Mac through iCloud is built on both and waiting for a live check. Each platform's development guide lists exactly what is verified and what is not.</p>
+      <p class="provider-foot">
+        <a class="quiet-link" href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/windows-development.md">Windows progress →</a>
+        <a class="quiet-link" href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/linux-development.md">Linux progress →</a>
+      </p>
+    </section>
+
     <!-- ---------------- Automation ---------------- -->
     <section class="section automate" id="automate" aria-labelledby="automate-title">
       <div class="wrap">
@@ -355,6 +392,7 @@
           <a class="button" href="/download/mac-intel" data-auto-mac-download>Download for Mac <span aria-hidden="true">↓</span></a>
           <p>macOS 14+ · <a href="/download/mac">Apple Silicon</a> or <a href="/download/mac-intel">Intel (universal)</a></p>
           <p><a href="https://github.com/crmitchelmore/justspeaktoit/blob/main/Docs/ios-testflight-release.md">How to get it on iPhone and iPad ↗</a></p>
+          <p><a href="#desktop">Windows and Linux: in progress</a></p>
         </div>
       </div>
     </section>

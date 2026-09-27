@@ -24,6 +24,13 @@
 #include <cstring>
 #include <string>
 #include <limits>
+#include <atomic>
+
+// A cancellation token shared by the on-device runtimes (whisper.cpp and
+// llama.cpp); declared opaquely in CWindowsSupport.h.
+struct JSTIWhisperJob {
+    std::atomic<bool> cancelled{false};
+};
 
 namespace jsti {
 // Exclusive private staging file, opened read/write with DELETE access so a
@@ -84,4 +91,9 @@ template<class T> struct COM {
     COM(const COM &) = delete;
     COM &operator=(const COM &) = delete;
 };
+// Registers ggml's dynamic backends (CPU variants and, when present, Vulkan)
+// from the runtime directory once per process. whisper.cpp and llama.cpp share
+// one ggml, so whichever runtime opens first registers them for both; a second
+// registration would list every device twice.
+void loadGgmlBackendsOnce(void (*load)(const char *), const std::string &directory);
 } // namespace jsti

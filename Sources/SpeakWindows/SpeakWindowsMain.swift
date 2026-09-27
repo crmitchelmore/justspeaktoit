@@ -200,7 +200,7 @@ private func ready(_ holder: WindowsEventContext) {
 }
 
 func postProcessingEvent(
-    _ enabled: Int32, _ index: Int32, _ prompt: UnsafePointer<CChar>?,
+    _ mode: Int32, _ index: Int32, _ prompt: UnsafePointer<CChar>?,
     _ newKey: UnsafePointer<CChar>?, _ context: UnsafeMutableRawPointer?
 ) {
     guard let context else { return }
@@ -208,12 +208,11 @@ func postProcessingEvent(
     let prompt = prompt.map(String.init(cString:)) ?? ""
     let key = newKey.map(String.init(cString:)) ?? ""
     holder.enqueueSettings {
-        await holder.controller.savePostProcessing(
-            enabled: enabled != 0, modelIndex: Int(index), prompt: prompt, key: key
-        )
-        let saved = await holder.controller.postProcessingOptions()
+        await holder.controller.savePostProcessing(mode: Int(mode), modelIndex: Int(index), prompt: prompt, key: key)
         do {
-            try WindowsNative.configurePostProcessing(saved, context: Unmanaged.passUnretained(holder).toOpaque())
+            try await holder.controller.configurePostProcessingControls(
+                context: Unmanaged.passUnretained(holder).toOpaque()
+            )
         } catch { WindowsNative.update(error.localizedDescription) }
     }
 }
@@ -332,10 +331,7 @@ enum SpeakWindowsMain {
             try WindowsNative.configureMicrophones(selected: microphone, smokeTest: smokeTest)
         }.value
         await controller.setMicrophoneWarning(warning)
-        let processing = await controller.postProcessingOptions()
-        try WindowsNative.configurePostProcessing(
-            processing, context: Unmanaged.passUnretained(holder).toOpaque()
-        )
+        try await controller.configurePostProcessingControls(context: Unmanaged.passUnretained(holder).toOpaque())
         let textOutput = await controller.textOutputOptions()
         try WindowsNative.configureTextOutput(textOutput, context: Unmanaged.passUnretained(holder).toOpaque())
         try await configureHotKey(holder)

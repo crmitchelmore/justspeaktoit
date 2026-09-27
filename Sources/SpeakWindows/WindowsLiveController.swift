@@ -5,7 +5,18 @@ import SpeakWindowsPlatform
 import CWindowsSupport
 
 extension WindowsAppController {
-    func makeLiveSession(model: String, key: String, id: UUID, language: String? = nil) -> DesktopLiveSession? {
+    func makeLiveSession(
+        for profile: DesktopProfileSession, key: String, id: UUID
+    ) async throws -> DesktopLiveSession? {
+        try await makeLiveSession(model: profile.modelIdentifier, key: key, id: id, language: profile.language)
+    }
+
+    func makeLiveSession(
+        model: String, key: String, id: UUID, language: String? = nil
+    ) async throws -> DesktopLiveSession? {
+        if WindowsModels.isLocalLive(model) {
+            return try await makeLocalLiveSession(model: model, id: id, language: language)
+        }
         guard WindowsModels.isLive(model), let client = effects.makeLiveClient(
             model: model, key: key, language: language, azureEndpoint: azureResourceEndpoint()
         ) else { return nil }
@@ -32,7 +43,9 @@ extension WindowsAppController {
                 guard revision != snapshot.revision else { continue }
                 revision = snapshot.revision
                 transcript = snapshot.text
-                let status = "Live transcription… " + hotKeySettings().finishHint(for: recording?.trigger ?? .other)
+                let place = WindowsModels.isLocalLive(recording?.record.modelIdentifier ?? "") ? " on this PC" : ""
+                let status = "Live transcription\(place)… "
+                    + hotKeySettings().finishHint(for: recording?.trigger ?? .other)
                     + (recording.map { profileContext($0.record) } ?? "")
                 update(status, transcript: snapshot.text, state: 1)
             }
@@ -42,6 +55,9 @@ extension WindowsAppController {
     func finishLive(_ stopped: StoppedRecording, session: DesktopLiveSession) async {
         var record = stopped.record
         cancellationRequested = false
+        // An on-device live model decodes the tail after capture ends; keep it.
+        let localModel = beginLocalUse(record.modelIdentifier)
+        defer { endLocalUse(localModel) }
         liveFinalisation = session
         defer { liveFinalisation = nil }
         let options = stopped.profile.postProcessing
@@ -75,6 +91,9 @@ extension WindowsAppController {
     }
 
     func preferredModelIDs() -> WindowsModelPreferences {
-        WindowsModelPreferences(batch: settings.batchModel, live: settings.liveModel, local: settings.localModel)
+        WindowsModelPreferences(
+            batch: settings.batchModel, live: settings.liveModel, local: settings.localModel,
+            localLive: settings.localLiveModel
+        )
     }
 }

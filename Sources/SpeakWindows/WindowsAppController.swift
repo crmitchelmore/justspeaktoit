@@ -18,6 +18,7 @@ actor WindowsAppController {
         var voiceOutput: WindowsVoiceOutputSettings? // The Voice dialog; absent uses the catalogue default.
         var automationEnabled: Bool? // Settings menu; `speak` is refused until allowed.
         var localModel: String? // The last on-device model chosen under Source: Local.
+        var localLiveModel: String? // The last on-device live model (Source: Local, Mode: Live).
         var localUseGPU: Bool? // Local models dialog; absent lets whisper.cpp use Vulkan when available.
         /// The Azure Speech resource dialog, under the Apple apps' key for the same
         /// device-local value; absent means none, and recorded audio uses the region.
@@ -106,6 +107,8 @@ actor WindowsAppController {
         let loadedProfiles = try Self.loadProfiles(from: profileStore)
         self.profiles = loadedProfiles.profiles
         self.profileWarning = loadedProfiles.warning
+        // Imported models are registered before the model pickers read them.
+        DesktopLocalModelImports.register(DesktopLocalModelImports.load(from: directory))
         let settingsURL = directory.appendingPathComponent("settings.json")
         var loadedSettings: Settings
         if FileManager.default.fileExists(atPath: settingsURL.path) {

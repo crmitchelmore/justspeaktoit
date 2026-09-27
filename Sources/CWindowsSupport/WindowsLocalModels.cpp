@@ -1,21 +1,26 @@
 #include "include/CWindowsSupport.h"
 #include "WindowsSupportInternal.hpp"
+#include <commctrl.h>
+#include <shellapi.h>
 #include <mutex>
 #include <vector>
 
 // Native Local models dialog: downloads, resumes, cancels and removes the
-// on-device models the host projects from the shared catalogue, and chooses
-// whether whisper.cpp may use a Vulkan GPU. The host owns every file and
-// network operation; this dialog only shows rows and reports actions.
+// on-device speech and language models the host projects from the shared
+// catalogue, imports files from Hugging Face, and chooses whether the local
+// runtimes may use a Vulkan GPU. The host owns every file and network
+// operation; this dialog only shows rows and reports actions.
 
 namespace {
 enum Control {
-    introID = 1000, listLabelID, listID, aboutID, downloadID, cancelDownloadID, removeID, gpuID, runtimeID
+    introID = 1000, listLabelID, listID, aboutID, downloadID, cancelDownloadID, removeID, gpuID, runtimeID,
+    importLabelID, repositoryID, fileID, importID, browseID
 };
+constexpr const wchar_t *browseAddress = L"https://huggingface.co/models?library=gguf&sort=downloads";
 constexpr UINT refreshMessage = WM_APP + 41;
 constexpr DWORD windowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD windowExStyle = WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT;
-constexpr int minimumClientWidth = 560, minimumClientHeight = 440;
+constexpr int minimumClientWidth = 560, minimumClientHeight = 540;
 
 struct Row {
     std::wstring name, detail, about;
@@ -33,6 +38,8 @@ struct Configuration {
 std::mutex configurationMutex;
 Configuration configuration;
 HWND openDialog = nullptr; // Guarded by configurationMutex; at most one dialog.
+// The import fields, readable only while the callback for an import runs.
+thread_local std::string pendingRepository, pendingFile;
 
 struct Dialog {
     Configuration config;
@@ -60,7 +67,8 @@ void layout(HWND window) {
     move(introID, margin, at(14), width, at(40));
     move(listLabelID, margin, at(58), width, at(22));
     const int listTop = at(82);
-    const int actionsTop = bottom - button - gap - at(44) - gap - at(24) - gap - button;
+    const int importTop = bottom - button - gap - at(44) - gap - at(24) - gap - button;
+    const int actionsTop = importTop - gap - at(22) - gap - button;
     const int aboutHeight = at(64);
     const int listHeight = std::max(at(96), actionsTop - gap - aboutHeight - gap - listTop);
     move(listID, margin, listTop, width, listHeight);
@@ -69,8 +77,15 @@ void layout(HWND window) {
     move(downloadID, margin, actionsTop, actionWidth, button);
     move(cancelDownloadID, margin + actionWidth + gap, actionsTop, actionWidth, button);
     move(removeID, margin + 2 * (actionWidth + gap), actionsTop, width - 2 * (actionWidth + gap), button);
-    move(gpuID, margin, actionsTop + button + gap, width, at(24));
-    move(runtimeID, margin, actionsTop + button + gap + at(24) + gap, width, at(44));
+    move(importLabelID, margin, actionsTop + button + gap, width, at(22));
+    const int addWidth = at(90);
+    const int fieldWidth = (width - addWidth - 2 * gap) / 2;
+    move(repositoryID, margin, importTop, fieldWidth, button);
+    move(fileID, margin + fieldWidth + gap, importTop, fieldWidth, button);
+    move(importID, margin + 2 * (fieldWidth + gap), importTop, width - 2 * (fieldWidth + gap), button);
+    move(gpuID, margin, importTop + button + gap, width, at(24));
+    move(runtimeID, margin, importTop + button + gap + at(24) + gap, width, at(44));
+    move(browseID, margin, bottom - button, at(190), button);
     move(IDCANCEL, static_cast<int>(bounds.right) - margin - at(100), bottom - button, at(100), button);
 }
 
@@ -118,26 +133,37 @@ bool populate(HWND window, Dialog &dialog) {
 
 bool createControls(HWND window, Dialog &dialog) {
     auto add = [&](const wchar_t *kind, const wchar_t *text, DWORD style, int id) {
-        HWND control = CreateWindowExW(wcscmp(kind, L"LISTBOX") == 0 ? WS_EX_CLIENTEDGE : 0, kind, text,
+        const bool edged = wcscmp(kind, L"LISTBOX") == 0 || wcscmp(kind, L"EDIT") == 0;
+        HWND control = CreateWindowExW(edged ? WS_EX_CLIENTEDGE : 0, kind, text,
             WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, window,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
         if (control) dialog.controls.push_back(control);
         return control != nullptr;
     };
     const bool okay =
-        add(L"STATIC", L"Local models transcribe on this PC: audio never leaves it. Download a model once, then choose "
-            L"Source: Local in the main window.", SS_LEFT, introID) &&
+        add(L"STATIC", L"Local models run on this PC: audio and text never leave it. Download a speech model, then "
+            L"choose Source: Local; download a language model for Local post-processing.", SS_LEFT, introID) &&
         add(L"STATIC", L"&Models", 0, listLabelID) &&
         add(L"LISTBOX", L"", LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP, listID) &&
         add(L"STATIC", L"", SS_LEFT, aboutID) &&
         add(L"BUTTON", L"&Download", BS_PUSHBUTTON | WS_TABSTOP, downloadID) &&
         add(L"BUTTON", L"&Cancel download", BS_PUSHBUTTON | WS_TABSTOP, cancelDownloadID) &&
         add(L"BUTTON", L"Re&move", BS_PUSHBUTTON | WS_TABSTOP, removeID) &&
+        add(L"STATIC", L"Add from Hugging Face: &repository (owner/name) and file (a whisper.cpp .bin or a .gguf model)",
+            0, importLabelID) &&
+        add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, repositoryID) &&
+        add(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, fileID) &&
+        add(L"BUTTON", L"&Add", BS_PUSHBUTTON | WS_TABSTOP, importID) &&
+        add(L"BUTTON", L"Browse Hugging &Face\u2026", BS_PUSHBUTTON | WS_TABSTOP, browseID) &&
         add(L"BUTTON", L"Use a &GPU through Vulkan when available (takes effect after restarting the app)",
             BS_AUTOCHECKBOX | WS_TABSTOP, gpuID) &&
         add(L"STATIC", L"", SS_LEFT, runtimeID) &&
         add(L"BUTTON", L"Close", BS_DEFPUSHBUTTON | WS_TABSTOP, IDCANCEL);
     if (!okay) return false;
+    SendDlgItemMessageW(window, repositoryID, EM_LIMITTEXT, 200, 0);
+    SendDlgItemMessageW(window, fileID, EM_LIMITTEXT, 512, 0);
+    SendDlgItemMessageW(window, repositoryID, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"ggerganov/whisper.cpp"));
+    SendDlgItemMessageW(window, fileID, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"ggml-small.en.bin"));
     refreshFont(window, dialog);
     layout(window);
     return populate(window, dialog);
@@ -151,6 +177,31 @@ void close(HWND window) {
     const HWND owner = GetWindow(window, GW_OWNER);
     if (owner) EnableWindow(owner, TRUE);
     DestroyWindow(window);
+}
+
+std::wstring fieldText(HWND window, int id) {
+    const HWND control = GetDlgItem(window, id);
+    const int length = GetWindowTextLengthW(control);
+    std::wstring text(static_cast<size_t>(std::max(length, 0)) + 1, 0);
+    const int copied = GetWindowTextW(control, &text[0], length + 1);
+    text.resize(static_cast<size_t>(std::max(copied, 0)));
+    return text;
+}
+
+// The host validates the fields, resolves the file and reports the outcome in
+// the status line; the file field is cleared once the request is handed over.
+void requestImport(HWND window, Dialog &dialog) {
+    if (!dialog.config.callback) return;
+    pendingRepository = jsti::utf8(fieldText(window, repositoryID));
+    pendingFile = jsti::utf8(fieldText(window, fileID));
+    if (pendingRepository.empty() || pendingFile.empty()) {
+        SetDlgItemTextW(window, runtimeID, L"Enter the Hugging Face repository and the file to add.");
+    } else {
+        dialog.config.callback(JSTI_LOCAL_MODEL_IMPORT, -1, dialog.config.context);
+        SetDlgItemTextW(window, fileID, L"");
+    }
+    pendingRepository.clear();
+    pendingFile.clear();
 }
 
 void act(Dialog &dialog, int action) {
@@ -207,6 +258,10 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         case downloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_DOWNLOAD); return 0;
         case cancelDownloadID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_CANCEL); return 0;
         case removeID: if (HIWORD(wparam) == BN_CLICKED) act(*dialog, JSTI_LOCAL_MODEL_REMOVE); return 0;
+        case importID: if (HIWORD(wparam) == BN_CLICKED) requestImport(window, *dialog); return 0;
+        case browseID:
+            if (HIWORD(wparam) == BN_CLICKED) ShellExecuteW(window, L"open", browseAddress, nullptr, nullptr, SW_SHOWNORMAL);
+            return 0;
         case gpuID:
             if (HIWORD(wparam) == BN_CLICKED) {
                 act(*dialog, IsDlgButtonChecked(window, gpuID) == BST_CHECKED ? JSTI_LOCAL_MODEL_GPU_ON
@@ -247,6 +302,14 @@ HWND createDialog(HWND owner, Dialog &dialog) {
     return window;
 }
 } // namespace
+
+int jsti_local_models_import_fields(char *repository, size_t repositoryCapacity, char *file, size_t fileCapacity) {
+    if (!repository || !file || pendingRepository.empty() || pendingFile.empty() ||
+        pendingRepository.size() >= repositoryCapacity || pendingFile.size() >= fileCapacity) return -1;
+    std::memcpy(repository, pendingRepository.c_str(), pendingRepository.size() + 1);
+    std::memcpy(file, pendingFile.c_str(), pendingFile.size() + 1);
+    return 0;
+}
 
 bool jsti_local_models_available() {
     std::lock_guard<std::mutex> lock(configurationMutex);
@@ -320,9 +383,17 @@ void jsti_window_clear_local_models(void) {
 // ---- self-test -------------------------------------------------------------
 
 namespace {
-struct Actions { std::vector<std::pair<int, int>> calls; };
+struct Actions { std::vector<std::pair<int, int>> calls; std::string repository, file; };
 void recordAction(int action, int index, void *context) {
-    static_cast<Actions *>(context)->calls.emplace_back(action, index);
+    auto *actions = static_cast<Actions *>(context);
+    actions->calls.emplace_back(action, index);
+    if (action == JSTI_LOCAL_MODEL_IMPORT) {
+        char repository[256] = {}, file[600] = {};
+        if (jsti_local_models_import_fields(repository, sizeof(repository), file, sizeof(file)) == 0) {
+            actions->repository = repository;
+            actions->file = file;
+        }
+    }
 }
 } // namespace
 
@@ -378,15 +449,24 @@ bool jsti_local_models_self_test(HWND owner, std::string &error) {
                 click(cancelDownloadID);
                 CheckDlgButton(window, gpuID, BST_CHECKED);
                 click(gpuID);
+                const size_t beforeEmptyImport = actions.calls.size();
+                click(importID); // Nothing entered: nothing is requested.
+                const bool emptyIgnored = actions.calls.size() == beforeEmptyImport;
+                SetDlgItemTextW(window, repositoryID, L"ggerganov/whisper.cpp");
+                SetDlgItemTextW(window, fileID, L"ggml-small.en-q5_1.bin");
+                click(importID);
+                const bool imported = emptyIgnored && actions.repository == "ggerganov/whisper.cpp" &&
+                    actions.file == "ggml-small.en-q5_1.bin" && GetWindowTextLengthW(GetDlgItem(window, fileID)) == 0 &&
+                    GetWindowTextLengthW(GetDlgItem(window, repositoryID)) > 0;
                 const size_t beforeClose = actions.calls.size();
                 click(IDCANCEL);
                 const bool closed = !IsWindow(window) && actions.calls.size() == beforeClose;
                 if (IsWindow(window)) DestroyWindow(window);
                 const std::vector<std::pair<int, int>> expected = {
                     {JSTI_LOCAL_MODEL_DOWNLOAD, 0}, {JSTI_LOCAL_MODEL_REMOVE, 1}, {JSTI_LOCAL_MODEL_CANCEL, 2},
-                    {JSTI_LOCAL_MODEL_GPU_ON, -1}
+                    {JSTI_LOCAL_MODEL_GPU_ON, -1}, {JSTI_LOCAL_MODEL_IMPORT, -1}
                 };
-                passed = listed && notInstalled && installed && partial && downloading && closed &&
+                passed = listed && notInstalled && installed && partial && downloading && closed && imported &&
                     actions.calls == expected;
                 if (!passed) error = "The Local models dialog did not match its row states or reported the wrong action.";
             }

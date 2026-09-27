@@ -80,9 +80,6 @@ struct JSTIWhisperRuntime {
     std::wstring contextPath;
 };
 
-struct JSTIWhisperJob {
-    std::atomic<bool> cancelled{false};
-};
 
 namespace {
 std::mutex openMutex;
@@ -158,6 +155,15 @@ void releaseContext(JSTIWhisperRuntime &runtime) {
     runtime.contextPath.clear();
 }
 }
+
+namespace jsti {
+void loadGgmlBackendsOnce(void (*load)(const char *), const std::string &directory) {
+    static std::once_flag once;
+    std::call_once(once, [&] {
+        try { if (load) load(directory.c_str()); } catch (...) {}
+    });
+}
+} // namespace jsti
 
 extern "C" JSTIWhisperRuntime *jsti_whisper_runtime_open(const char *directory, int allowGPU, char *error,
                                                          size_t capacity) {
@@ -239,8 +245,7 @@ extern "C" JSTIWhisperRuntime *jsti_whisper_runtime_open(const char *directory, 
     api.logSet(logCallback, nullptr);
     // Registers the best CPU variant and, when its loader and a driver exist,
     // Vulkan, from this directory only.
-    const std::string backendDirectory = jsti::utf8(folder);
-    try { api.loadBackends(backendDirectory.c_str()); } catch (...) {}
+    jsti::loadGgmlBackendsOnce(api.loadBackends, jsti::utf8(folder));
     SetThreadErrorMode(previousMode, nullptr);
     describeDevices(*runtime);
     if (runtime->description.find("CPU") == std::string::npos) {

@@ -9,15 +9,20 @@ struct WindowsModelPreferences: Sendable {
     let batch: String?
     let live: String?
     let local: String?
+    let localLive: String?
 }
 
 /// The controller's Local models state: running downloads, their progress and
-/// the whisper.cpp runtime once loaded.
+/// the whisper.cpp and llama.cpp runtimes once loaded.
 struct WindowsLocalModelsState {
     var downloads: [String: Task<Void, Never>] = [:]
     var progress: [String: Int64] = [:]
     var runtime: WindowsWhisperRuntime?
     var runtimeFailure: String?
+    var languageRuntime: WindowsLlamaRuntime?
+    var languageRuntimeFailure: String?
+    /// A Hugging Face import being resolved; one at a time.
+    var importing = false
     var context: UnsafeMutableRawPointer?
     /// The models recordings and transcriptions use, and the downloads and
     /// removals that own model files.
@@ -91,7 +96,9 @@ extension WindowsAppController {
     /// The live, on-device or remote batch slot restores this model when the
     /// user switches Source or Mode again.
     func rememberModelSlot() {
-        if WindowsModels.isLive(settings.model) {
+        if WindowsModels.isLocalLive(settings.model) {
+            settings.localLiveModel = settings.model
+        } else if WindowsModels.isLive(settings.model) {
             settings.liveModel = settings.model
         } else if WindowsModels.isLocal(settings.model) {
             settings.localModel = settings.model
@@ -110,9 +117,9 @@ extension WindowsAppController {
             : "Ready. \(hotKeySettings().readyHint) \(savedRecordings) saved recordings."
     }
 
-    /// Why an on-device model cannot run now, or nil when it can.
+    /// Why an on-device model (batch, live or imported) cannot run now, or nil when it can.
     func localReadiness(_ model: String) -> String? {
-        guard let spec = DesktopLocalTranscription.model(for: model, host: .windows) else {
+        guard let spec = DesktopLocalTranscription.downloadedModel(for: model, host: .windows) else {
             return "This on-device model is not available in this Windows build."
         }
         if localModels.ownership.isRemoving(spec.catalogueID) {
@@ -145,7 +152,8 @@ extension WindowsAppController {
     }
 
     func transcribeLocally(_ audio: URL, model: String, language: String?) async throws -> TranscriptionResult {
-        guard let spec = DesktopLocalTranscription.model(for: model, host: .windows) else {
+        // A live recording's retry transcribes its audio with the same download.
+        guard let spec = DesktopLocalTranscription.downloadedModel(for: model, host: .windows) else {
             throw DesktopTranscriptionError.unsupportedModel
         }
         if let problem = localReadiness(model) { throw WindowsNativeError(message: problem) }
@@ -168,10 +176,23 @@ extension WindowsAppController {
         publishLocalModels()
     }
 
-    func localModelAction(_ action: Int32, index: Int) {
+    /// Every row of the Local models dialog, in dialog order: catalogue speech
+    /// models first (so their positions never move), speech imports, then
+    /// language models and their imports.
+    var localEntries: [WindowsLocalModelEntry] {
+        let speech = DesktopLocalTranscription.models(host: .windows)
+            + DesktopLocalModelImports.registered.whisperModels
+        return speech.map(WindowsLocalModelEntry.speech)
+            + DesktopLocalPostProcessing.models(host: .windows).map(WindowsLocalModelEntry.language)
+    }
+
+    func localModelAction(_ action: Int32, index: Int, repository: String = "", file: String = "") {
         guard !closed else { return }
-        let models = DesktopLocalTranscription.models(host: .windows)
+        let models = localEntries
         switch action {
+        case Int32(JSTI_LOCAL_MODEL_IMPORT.rawValue):
+            importLocalModel(repository: repository, file: file)
+            return
         case Int32(JSTI_LOCAL_MODEL_GPU_ON.rawValue), Int32(JSTI_LOCAL_MODEL_GPU_OFF.rawValue):
             settings.localUseGPU = action == Int32(JSTI_LOCAL_MODEL_GPU_ON.rawValue)
             saveSettingsQuietly()
@@ -182,22 +203,22 @@ extension WindowsAppController {
         default: break
         }
         guard models.indices.contains(index) else { return }
-        let spec = models[index]
+        let entry = models[index]
         switch action {
-        case Int32(JSTI_LOCAL_MODEL_DOWNLOAD.rawValue): startDownload(spec)
+        case Int32(JSTI_LOCAL_MODEL_DOWNLOAD.rawValue): startDownload(entry)
         case Int32(JSTI_LOCAL_MODEL_CANCEL.rawValue):
-            localModels.downloads[spec.catalogueID]?.cancel()
-        case Int32(JSTI_LOCAL_MODEL_REMOVE.rawValue): removeLocalModel(spec)
+            localModels.downloads[entry.identifier]?.cancel()
+        case Int32(JSTI_LOCAL_MODEL_REMOVE.rawValue): removeLocalModel(entry)
         default: break
         }
     }
 
-    private func startDownload(_ spec: WindowsModelSpec) {
+    private func startDownload(_ spec: WindowsLocalModelEntry) {
         // A download or a removal already running for this model owns its files.
-        guard localModels.ownership.beginDownload(spec.catalogueID) else { return }
+        guard localModels.ownership.beginDownload(spec.identifier) else { return }
         let installer = localInstaller
-        let identifier = spec.catalogueID
-        let item = LocalModelInstaller.Item(spec)
+        let identifier = spec.identifier
+        let item = spec.item
         localModels.progress[identifier] = 0
         localModels.downloads[identifier] = Task { [self] in
             do {
@@ -217,7 +238,7 @@ extension WindowsAppController {
 
     private func localProgress(_ identifier: String, received: Int64) {
         guard localModels.downloads[identifier] != nil else { return }
-        let total = DesktopLocalTranscription.model(for: identifier, host: .windows)?.artifact.byteCount ?? 1
+        let total = localEntries.first { $0.identifier == identifier }?.artifact.byteCount ?? 1
         let previous = localModels.progress[identifier] ?? 0
         // Progress hops arrive as separate tasks; never move backwards.
         guard received > previous else { return }
@@ -226,19 +247,22 @@ extension WindowsAppController {
         if received * 100 / max(total, 1) != previous * 100 / max(total, 1) { publishLocalModels() }
     }
 
-    private func finishDownload(_ spec: WindowsModelSpec, failure: String?) {
-        localModels.ownership.endDownload(spec.catalogueID)
-        localModels.downloads[spec.catalogueID] = nil
-        localModels.progress[spec.catalogueID] = nil
+    private func finishDownload(_ spec: WindowsLocalModelEntry, failure: String?) {
+        localModels.ownership.endDownload(spec.identifier)
+        localModels.downloads[spec.identifier] = nil
+        localModels.progress[spec.identifier] = nil
         if let failure {
             update("\(spec.displayName): \(failure)")
+        } else if case .language = spec {
+            update("\(spec.displayName) downloaded and verified. Choose it in Post-processing, Local.")
         } else {
             update("\(spec.displayName) downloaded and verified. Choose it under Source: Local.")
         }
         publishLocalModels()
+        configurePostProcessingControls()
     }
 
-    private func saveSettingsQuietly() {
+    func saveSettingsQuietly() {
         do {
             let url = directory.appendingPathComponent("settings.json")
             try effects.writeSettings(JSONEncoder().encode(settings), to: url)
@@ -247,17 +271,19 @@ extension WindowsAppController {
 
     /// The runtime line shown in the dialog and under the model picker.
     var localRuntimeStatus: String {
-        let models = DesktopLocalTranscription.models(host: .windows)
+        let models = localEntries
         let installer = localInstaller
-        let downloaded = models.filter { installer.state(of: .init($0)) == .installed }.count
-        let counts = "\(downloaded) of \(models.count) on-device models downloaded."
+        let downloaded = models.filter { installer.state(of: $0.item) == .installed }.count
+        var counts = "\(downloaded) of \(models.count) on-device models downloaded."
+        if let failure = localModels.languageRuntimeFailure { counts += " " + failure }
         if let failure = localModels.runtimeFailure { return failure + " " + counts }
         guard localRuntimeBundled else {
             return "The on-device speech runtime (whisper.cpp) is not included in this build. " + counts
         }
         if let runtime = localModels.runtime { return "On-device: \(runtime.description). " + counts }
         let gpu = localUseGPU ? "a Vulkan GPU when available, otherwise the CPU" : "the CPU"
-        return "On-device with whisper.cpp 1.9.4 using \(gpu). Audio stays on this PC. " + counts
+        let language = WindowsLlamaRuntime.isBundled() ? " and llama.cpp" : ""
+        return "On-device with whisper.cpp 1.9.4\(language) using \(gpu). Audio stays on this PC. " + counts
     }
 
     func publishLocalModels() {
@@ -265,10 +291,12 @@ extension WindowsAppController {
         let installer = localInstaller
         var labels: [String: String] = [:]
         var rows: [WindowsLocalModelRow] = []
-        for spec in DesktopLocalTranscription.models(host: .windows) {
-            let (row, label) = localModelRow(spec, installer: installer)
+        for entry in localEntries {
+            let (row, label) = localModelRow(entry, installer: installer)
             rows.append(row)
-            labels[spec.catalogueID] = label
+            labels[entry.identifier] = label
+            // A live picker entry shares its batch model's download.
+            if case .speech(let model) = entry, let live = model.liveIdentifier { labels[live] = label }
         }
         WindowsModels.setLocalLabels(labels)
         publishModelCatalog(modelCatalog.snapshot)
@@ -292,23 +320,23 @@ extension WindowsAppController {
     /// One model's row in the Local models dialog, and the state shown after
     /// its name in the model picker unless it is simply downloaded.
     private func localModelRow(
-        _ spec: WindowsModelSpec, installer: LocalModelInstaller
+        _ spec: WindowsLocalModelEntry, installer: LocalModelInstaller
     ) -> (row: WindowsLocalModelRow, label: String?) {
         let size = Self.megabytes(spec.artifact.byteCount)
         let state: Int32
         let detail: String
         var label: String?
-        if let received = localModels.progress[spec.catalogueID], localModels.downloads[spec.catalogueID] != nil {
+        if let received = localModels.progress[spec.identifier], localModels.downloads[spec.identifier] != nil {
             state = Int32(JSTI_LOCAL_MODEL_DOWNLOADING.rawValue)
             detail = "Downloading \(received * 100 / max(spec.artifact.byteCount, 1))% of \(size)"
             label = "downloading"
-        } else if localModels.ownership.isRemoving(spec.catalogueID) {
+        } else if localModels.ownership.isRemoving(spec.identifier) {
             // Only Remove stays enabled, and it is ignored until this removal finishes.
             state = Int32(JSTI_LOCAL_MODEL_INSTALLED.rawValue)
             detail = "\(size) \u{00B7} Removing\u{2026}"
             label = "removing"
         } else {
-            switch installer.state(of: .init(spec)) {
+            switch installer.state(of: spec.item) {
             case .installed:
                 state = Int32(JSTI_LOCAL_MODEL_INSTALLED.rawValue)
                 detail = "\(size) \u{00B7} Downloaded and verified"
@@ -322,10 +350,24 @@ extension WindowsAppController {
                 label = "download in Local models"
             }
         }
-        let about = "\(spec.summary) Whisper weights (\(spec.quantization), \(spec.artifact.license) licence) "
-            + "from huggingface.co/\(WhisperCppModels.repository), pinned by SHA-256 "
-            + "\(spec.artifact.sha256.prefix(12))\u{2026} and verified after download."
-        return (WindowsLocalModelRow(name: spec.displayName, detail: detail, about: about, state: state), label)
+        let pin = "pinned by SHA-256 \(spec.artifact.sha256.prefix(12))\u{2026} and verified after download."
+        let name: String
+        let about: String
+        switch spec {
+        case .speech(let model) where spec.isImport:
+            name = model.displayName + " (speech, imported)"
+            about = "\(model.summary) Batch transcription only: imports are not qualified for live use. "
+                + "Licence: \(model.artifact.license)."
+        case .speech(let model):
+            name = model.displayName + (model.liveQualified ? " (speech, batch and live)" : " (speech, batch)")
+            about = "\(model.summary) Whisper weights (\(model.quantization), \(model.artifact.license) licence) "
+                + "from huggingface.co/\(WhisperCppModels.repository), " + pin
+        case .language(let model):
+            name = model.displayName + (spec.isImport ? " (post-processing, imported)" : " (post-processing)")
+            about = "\(model.summary) Runs through llama.cpp for Local post-processing. "
+                + "Licence: \(model.artifact.license); \(model.artifact.provenance), " + pin
+        }
+        return (WindowsLocalModelRow(name: name, detail: detail, about: about, state: state), label)
     }
 
     static func megabytes(_ bytes: Int64) -> String {
@@ -339,33 +381,10 @@ extension SpeakWindowsMain {
     /// Source and Mode pickers, then the Local models dialog.
     static func configureModelPickers(_ controller: WindowsAppController, holder: WindowsEventContext) async throws {
         let preferences = await controller.preferredModelIDs()
-        try WindowsModels.configureModes(batch: preferences.batch, live: preferences.live, local: preferences.local)
+        try WindowsModels.configureModes(
+            batch: preferences.batch, live: preferences.live, local: preferences.local,
+            localLive: preferences.localLive
+        )
         await controller.configureLocalModels(context: Unmanaged.passUnretained(holder).toOpaque())
     }
-}
-
-struct WindowsLocalModelRow {
-    let name: String
-    let detail: String
-    let about: String
-    let state: Int32
-}
-
-/// Borrowed NUL-terminated copies of `strings`, valid only inside `body`.
-func withCStrings<Result>(_ strings: [String], _ body: ([UnsafePointer<CChar>?]) -> Result) -> Result {
-    let owned = strings.map { string -> UnsafeMutablePointer<CChar> in
-        let chars = Array(string.utf8CString)
-        let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: chars.count)
-        pointer.initialize(from: chars, count: chars.count)
-        return pointer
-    }
-    defer { owned.forEach { $0.deallocate() } }
-    return body(owned.map { UnsafePointer($0) })
-}
-
-/// An action from the native Local models dialog, on the UI thread.
-func localModelEvent(_ action: Int32, _ index: Int32, _ context: UnsafeMutableRawPointer?) {
-    guard let context else { return }
-    let holder = Unmanaged<WindowsEventContext>.fromOpaque(context).takeUnretainedValue()
-    holder.enqueueSettings { await holder.controller.localModelAction(action, index: Int(index)) }
 }

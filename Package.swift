@@ -222,9 +222,9 @@ if windowsTargetBuild {
     portablePackage.targets.append(contentsOf: [
         .target(
             name: "CWindowsSupport",
-            // Vendored whisper.cpp headers are compile-time declarations only;
+            // Vendored whisper.cpp and llama.cpp headers are compile-time declarations only;
             // their licence and provenance travel with them.
-            exclude: ["whisper-cpp/LICENSE", "whisper-cpp/PROVENANCE.md"],
+            exclude: ["whisper-cpp/LICENSE", "whisper-cpp/PROVENANCE.md", "llama-cpp/LICENSE", "llama-cpp/PROVENANCE.md"],
             publicHeadersPath: "include",
             cxxSettings: windowsCxxSettings,
             linkerSettings: [

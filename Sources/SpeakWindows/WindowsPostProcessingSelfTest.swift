@@ -26,6 +26,7 @@ enum WindowsPostProcessingSelfTest {
         try await checkAppliesKeepTheirOrder(PostProcessingBench.make(root, "Order"))
         try await checkFailedSavesChangeNoChoice(PostProcessingBench.make(root, "Failures"))
         try await checkClosingDuringTheKeySave(PostProcessingBench.make(root, "Closing"))
+        try await checkLocalChoices(PostProcessingBench.make(root, "Local"))
         print("Post-processing key and settings checks passed.")
     }
 
@@ -94,6 +95,39 @@ enum WindowsPostProcessingSelfTest {
         await bench.close()
     }
 
+    /// Local choices: built-in rules and every pinned language model are
+    /// offered, a Local Apply saves the choice and prompt but never a key,
+    /// built-in rules clean up without a runtime, and a language model that
+    /// is not downloaded fails with the reason and keeps the original.
+    private static func checkLocalChoices(_ bench: PostProcessingBench) async throws {
+        let choices = await bench.controller.localPostProcessingChoices
+        let rulesFirst = choices.first?.id == DesktopLocalPostProcessing.builtInRulesID
+        try require(rulesFirst && choices.first?.usesPrompt == false,
+                    "built-in rules are not the first Local choice or claim to follow the prompt")
+        try require(choices.dropFirst().map(\.id) == LlamaCppModels.all.map(\.identifier)
+                        && choices.dropFirst().allSatisfy(\.usesPrompt),
+                    "the Local choices are not the pinned language models, each following the prompt")
+        bench.applyLocal(index: 0, prompt: "Ignored by rules.", key: "synthetic-local-key")
+        await bench.settle()
+        let rules = await bench.controller.postProcessingOptions()
+        try require(rules.mode == .local && rules.modelIdentifier == DesktopLocalPostProcessing.builtInRulesID
+                        && rules.customPrompt == "Ignored by rules.", "the Local Apply was not saved")
+        try require(bench.hook.savedValues.isEmpty, "a Local Apply saved an API key")
+        let cleaned = try await bench.controller.processLocally("hello  world .", options: rules)
+        try require(cleaned.processedText == TranscriptPostProcessingPolicy.processLocally("hello  world ."),
+                    "built-in rules did not clean up locally")
+        let empty = try await bench.controller.processLocally("  ", options: rules)
+        try require(empty.processedText.isEmpty, "an empty transcript did not stay empty")
+        bench.applyLocal(index: 1, prompt: "One full stop after each word.", key: "")
+        await bench.settle()
+        let language = await bench.controller.postProcessingOptions()
+        do {
+            _ = try await bench.controller.processLocally("hello world", options: language)
+            throw failure("a language model that is not downloaded ran")
+        } catch let error as WindowsNativeError where error.message.contains("not") {}
+        await bench.close()
+    }
+
     /// Shutdown drains the settings queue before closing; if the controller
     /// closes first anyway, an Apply resuming from its key save writes nothing.
     private static func checkClosingDuringTheKeySave(_ bench: PostProcessingBench) async throws {
@@ -139,11 +173,19 @@ private final class PostProcessingBench: @unchecked Sendable {
         return bench
     }
 
+    /// A Local Apply: `index` names a Local choice (0 is the built-in rules).
+    func applyLocal(index: Int, prompt: String, key: String) {
+        let controller = controller
+        holder.enqueueSettings {
+            await controller.savePostProcessing(mode: 2, modelIndex: index, prompt: prompt, key: key)
+        }
+    }
+
     /// Queues an Apply the way the dialog's native callback does.
     func apply(enabled: Bool, prompt: String, key: String) {
         let controller = controller
         holder.enqueueSettings {
-            await controller.savePostProcessing(enabled: enabled, modelIndex: 0, prompt: prompt, key: key)
+            await controller.savePostProcessing(mode: enabled ? 1 : 0, modelIndex: 0, prompt: prompt, key: key)
         }
     }
 

@@ -6,18 +6,24 @@ extension WindowsAppController {
     static func prepareModelCatalog(directory: URL, settings: inout Settings) throws -> OpenRouterAudioCatalogStore {
         // Remote batch, live and on-device choices keep separate slots, so
         // switching Source restores each one's last model.
-        let isLocal = WindowsModels.isLocal
-        let remoteBatch = settings.batchModel.flatMap { isLocal($0) ? nil : $0 }
+        // On-device live keeps its own slot and stays out of the remote live one.
+        let isLocal = WindowsModels.isLocalBatch
+        let isLocalLive = WindowsModels.isLocalLive
+        let activeLocalLive = isLocalLive(settings.model) ? settings.model : nil
+        settings.localLiveModel = activeLocalLive ?? settings.localLiveModel.flatMap { isLocalLive($0) ? $0 : nil }
+        let remoteBatch = settings.batchModel.flatMap { isLocal($0) || isLocalLive($0) ? nil : $0 }
         let selection = DesktopModelSelection.migrated(
-            model: settings.model, batchModel: remoteBatch, liveModel: settings.liveModel,
-            isLive: WindowsModels.isLive, isBatch: { DesktopTranscription.provider(for: $0) != nil || isLocal($0) }
+            model: activeLocalLive == nil ? settings.model : nil, batchModel: remoteBatch,
+            liveModel: settings.liveModel.flatMap { isLocalLive($0) ? nil : $0 },
+            isLive: WindowsModels.isRemoteLive,
+            isBatch: { DesktopTranscription.provider(for: $0) != nil || isLocal($0) }
         )
-        settings.model = selection.model
+        settings.model = activeLocalLive ?? selection.model
         settings.liveModel = selection.liveModel
         if let chosen = selection.batchModel, isLocal(chosen) {
             settings.localModel = chosen
             settings.batchModel = DesktopModelSelection.migrated(
-                model: remoteBatch, batchModel: remoteBatch, liveModel: nil, isLive: WindowsModels.isLive,
+                model: remoteBatch, batchModel: remoteBatch, liveModel: nil, isLive: WindowsModels.isRemoteLive,
                 isBatch: { DesktopTranscription.provider(for: $0) != nil }
             ).batchModel
         } else {

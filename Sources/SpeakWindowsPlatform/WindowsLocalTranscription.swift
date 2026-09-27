@@ -187,3 +187,121 @@ public struct WindowsWhisperRecognizer: DesktopLocalRecognizer {
         try await runtime.transcribe(samples: samples, modelFile: modelFile, language: language)
     }
 }
+
+/// The process-wide llama.cpp runtime shipped beside the executable, sharing
+/// whisper.cpp's directory and ggml.
+public final class WindowsLlamaRuntime: @unchecked Sendable {
+    private let native: OpaquePointer
+    public let directory: URL
+    public let description: String
+
+    private init(native: OpaquePointer, directory: URL) {
+        self.native = native
+        self.directory = directory
+        var text = [CChar](repeating: 0, count: 1_024)
+        jsti_llama_runtime_describe(native, &text, text.count)
+        description = String(cString: text)
+    }
+
+    private static let lock = NSLock()
+    private static var opened: WindowsLlamaRuntime?
+
+    /// Whether `llama.dll` is present in `directory`.
+    public static func isBundled(in directory: URL = WindowsWhisperRuntime.defaultDirectory) -> Bool {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent("llama.dll").path)
+    }
+
+    /// Loads the runtime once, off the UI thread.
+    public static func open(
+        directory: URL = WindowsWhisperRuntime.defaultDirectory, allowGPU: Bool
+    ) throws -> WindowsLlamaRuntime {
+        try lock.withLock {
+            let requested = directory.standardizedFileURL.path
+            if let existing = opened, existing.directory.standardizedFileURL.path == requested { return existing }
+            var error = [CChar](repeating: 0, count: 1_024)
+            let opened = directory.path.withCString {
+                jsti_llama_runtime_open($0, allowGPU ? 1 : 0, &error, error.count)
+            }
+            guard let native = opened else { throw WindowsLocalTranscriptionError(String(cString: error)) }
+            let runtime = WindowsLlamaRuntime(native: native, directory: directory)
+            Self.opened = runtime
+            return runtime
+        }
+    }
+
+    public func releaseModel() { jsti_llama_runtime_release_model(native) }
+
+    @discardableResult
+    public func releaseModel(loadedFrom modelFile: URL) -> Bool {
+        modelFile.path.withCString { jsti_llama_runtime_release_model_at(native, $0) } == 1
+    }
+
+    /// One prompt pair and its limits.
+    public struct Generation: Sendable {
+        public let systemPrompt: String
+        public let userMessage: String
+        public let temperature: Double
+        public let maximumTokens: Int
+        public let modelFile: URL
+        public var threads = 0
+
+        public init(
+            systemPrompt: String, userMessage: String, temperature: Double, maximumTokens: Int, modelFile: URL
+        ) {
+            self.systemPrompt = systemPrompt
+            self.userMessage = userMessage
+            self.temperature = temperature
+            self.maximumTokens = maximumTokens
+            self.modelFile = modelFile
+        }
+    }
+
+    /// Generates on a dedicated thread; task cancellation aborts it.
+    public func generate(_ request: Generation) async throws -> String {
+        let job = WhisperJob()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                let thread = Thread { [self] in
+                    var error = [CChar](repeating: 0, count: 1_024)
+                    var text: UnsafeMutablePointer<CChar>?
+                    let status = request.modelFile.path.withCString { path in
+                        request.systemPrompt.withCString { system in
+                            request.userMessage.withCString { user in
+                                jsti_llama_generate(
+                                    native, path, system, user, request.temperature, Int32(request.maximumTokens),
+                                    Int32(request.threads), job.native, &text, &error, error.count
+                                )
+                            }
+                        }
+                    }
+                    defer { jsti_whisper_free_text(text) }
+                    switch status {
+                    case 0: continuation.resume(returning: text.map { String(cString: $0) } ?? "")
+                    case 1: continuation.resume(throwing: CancellationError())
+                    default: continuation.resume(throwing: WindowsLocalTranscriptionError(String(cString: error)))
+                    }
+                }
+                thread.name = "JustSpeakToIt local language model"
+                thread.stackSize = 8 << 20
+                thread.start()
+            }
+        } onCancel: { job.cancel() }
+    }
+}
+
+/// `DesktopLocalLanguageModel` over the bundled llama.cpp runtime.
+public struct WindowsLlamaLanguageModel: DesktopLocalLanguageModel {
+    private let runtime: WindowsLlamaRuntime
+
+    public init(runtime: WindowsLlamaRuntime) { self.runtime = runtime }
+
+    public func generate(
+        _ request: DesktopLocalGeneration, model: LlamaCppModel, modelFile: URL
+    ) async throws -> String {
+        try await runtime.generate(.init(
+            systemPrompt: request.systemPrompt, userMessage: request.userMessage, temperature: request.temperature,
+            maximumTokens: request.maximumTokens, modelFile: modelFile
+        ))
+    }
+}

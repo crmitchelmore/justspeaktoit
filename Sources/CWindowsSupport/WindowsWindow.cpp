@@ -128,7 +128,7 @@ struct WindowState {
     std::vector<MicrophoneRow> microphones;
     std::string microphoneSelection;
     std::vector<int> configuredModelModes;
-    int configuredPreferredModels[3] = {-1, -1, -1}; // Global remote batch, remote live and local batch rows.
+    int configuredPreferredModels[4] = {-1, -1, -1, -1}; // Remote batch, remote live, local batch and local live rows.
     std::vector<HistoryRow> pendingHistory;
     std::string pendingHistorySelection;
     std::string selectedHistoryID;
@@ -243,7 +243,8 @@ bool populateModels(HWND window) {
     ShowWindow(GetDlgItem(window, sourceID), sources ? SW_SHOW : SW_HIDE);
     ShowWindow(GetDlgItem(window, sourceLabelID), sources ? SW_SHOW : SW_HIDE);
     SendDlgItemMessageW(window, sourceID, CB_SETCURSEL, activeSource(), 0);
-    const wchar_t *label = activeSource() == 1 ? L"On-device &transcription model"
+    const wchar_t *label = state.activeMode == 3 ? L"On-device live &transcription model"
+        : activeSource() == 1 ? L"On-device &transcription model"
         : (!choice && state.activeMode == 1 ? L"Live &transcription model" : L"&Transcription model");
     SetDlgItemTextW(window, 90, label);
     updateSourceControls(window);
@@ -1300,14 +1301,14 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
 }
 
 int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferredBatch, int preferredLive,
-                                int preferredLocal) {
+                                int preferredLocal, int preferredLocalLive) {
     if (count > 10000 || (count && !rowModes)) return -1;
     try {
         std::vector<int> modes;
         if (count) modes.assign(rowModes, rowModes + count);
         if (std::any_of(modes.begin(), modes.end(), [](int mode) { return mode < 0 || mode >= modeCount; })) return -1;
-        const int preferred[] = {preferredBatch, preferredLive, preferredLocal};
-        for (int mode = 0; mode < 3; ++mode) {
+        const int preferred[] = {preferredBatch, preferredLive, preferredLocal, preferredLocalLive};
+        for (int mode = 0; mode < 4; ++mode) {
             const int index = preferred[mode];
             if (index < -1 || (index >= 0 && (static_cast<size_t>(index) >= count || modes[index] != mode))) return -1;
         }
@@ -1317,6 +1318,7 @@ int jsti_window_set_model_modes(const int *rowModes, size_t count, int preferred
         state.configuredPreferredModels[0] = preferredBatch;
         state.configuredPreferredModels[1] = preferredLive;
         state.configuredPreferredModels[2] = preferredLocal;
+        state.configuredPreferredModels[3] = preferredLocalLive;
         return 0;
     } catch (const std::exception &) { return -1; }
 }
@@ -2373,6 +2375,25 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         if (!remoteShown || !localChosen || !sourceLocked || !changeSource(0, 0) || !changeMode(1, 1) ||
             !changeSource(1, 2) || !changeSource(0, 0)) {
             failure = "The Source picker lost a source preference, its controls or the global model identity."; return false;
+        }
+        // An on-device live model gives Local a Mode picker; live never imports.
+        state.modelNames = {L"Remote Batch", L"Remote Live", L"Local Batch", L"Local Live"};
+        state.modelModes = {0, 1, 2, 3};
+        state.modelOrder = {0, 1, 2, 3};
+        {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.knownModelIdentities = {{"remote-batch", 0}, {"remote-live", 1}, {"local-batch", 2}, {"local-live", 3}};
+        }
+        state.preferredModels[3] = 3;
+        state.activeMode = 0;
+        wchar_t liveLabel[64] = {};
+        const bool localLive = populateModels(window) && changeSource(1, 2) &&
+            IsWindowVisible(GetDlgItem(window, modeID)) && changeMode(1, 3) &&
+            !IsWindowEnabled(GetDlgItem(window, importID)) && checkBounds() &&
+            GetDlgItemTextW(window, 90, liveLabel, 64) > 0 && std::wstring(liveLabel).find(L"On-device live") == 0 &&
+            changeSource(0, 1) && changeSource(1, 3) && changeMode(0, 2);
+        if (!localLive) {
+            failure = "Local live did not get its own Mode, preference or import lock."; return false;
         }
         // The Text output modal must block both background recording paths.
         auto setRecording = [](HWND owner, int recording) {

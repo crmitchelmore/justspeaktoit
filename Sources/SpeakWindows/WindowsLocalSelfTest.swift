@@ -68,11 +68,156 @@ enum WindowsLocalSelfTest {
         }
     }
 
-    /// Runs `--local-transcription-self-test` when requested; false otherwise.
+    /// Runs `--local-transcription-self-test`, `--local-live-self-test` or
+    /// `--local-post-processing-self-test` when requested; false otherwise.
     static func handle(_ arguments: [String]) async throws -> Bool {
+        if arguments.contains("--local-live-self-test") {
+            try await streamLive(arguments: arguments)
+            return true
+        }
+        if arguments.contains("--local-post-processing-self-test") {
+            try await polish(arguments: arguments)
+            return true
+        }
         guard arguments.contains("--local-transcription-self-test") else { return false }
         try await transcribe(arguments: arguments)
         return true
+    }
+
+    private static func value(after flag: String, in arguments: [String]) -> String? {
+        arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+    }
+
+    private static func modelInstaller() throws -> LocalModelInstaller {
+        let environment = ProcessInfo.processInfo.environment
+        let root = environment["JSTI_LOCAL_MODEL_DIRECTORY"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("jsti-local-models")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return LocalModelInstaller(
+            root: root, digests: WindowsSHA256Hasher.provider, transport: LocalModelURLSessionTransport()
+        )
+    }
+
+    private static func normalised(_ text: String) -> String {
+        text.lowercased().unicodeScalars.filter { CharacterSet.letters.contains($0) || $0 == " " }
+            .reduce(into: "") { $0.unicodeScalars.append($1) }
+    }
+
+    /// The live qualification. `--local-live-self-test <wav> --expect <phrase>
+    /// --model <local/streaming/whispercpp/...>` streams the WAV through the
+    /// sliding-window client in 100 ms chunks at real-time pace on the CPU,
+    /// requires text while it streams, the phrase in the final transcript and
+    /// every decode to finish within the qualification bound.
+    static func streamLive(arguments: [String]) async throws {
+        guard let audio = value(after: "--local-live-self-test", in: arguments),
+              let expected = value(after: "--expect", in: arguments) else {
+            throw WindowsNativeError(message: "Usage: --local-live-self-test <wav> --expect <phrase> --model <id>")
+        }
+        let identifier = value(after: "--model", in: arguments) ?? "local/streaming/whispercpp/tiny"
+        guard let spec = DesktopLocalTranscription.liveModel(for: identifier, host: .windows) else {
+            throw WindowsNativeError(message: "\(identifier) is not a live-qualified Windows on-device model.")
+        }
+        let installer = try modelInstaller()
+        let file = try await installer.install(.init(spec))
+        try installer.verify(.init(spec))
+        let allowGPU = ProcessInfo.processInfo.environment["JSTI_WHISPER_CPU_ONLY"] != "1"
+        let runtime = try WindowsWhisperRuntime.open(allowGPU: allowGPU)
+        let samples = try DesktopLocalAudio.read(URL(fileURLWithPath: audio), maximumBytes: 50_000_000).samples
+        let client = DesktopLocalLiveClient(
+            model: spec, modelFile: file, language: "en", recognizer: WindowsWhisperRecognizer(runtime: runtime)
+        )
+        let session = DesktopLiveSession(client: client)
+        session.start()
+        let started = ContinuousClock.now
+        var interim = Set<String>()
+        var index = 0
+        while index < samples.count {
+            let end = min(samples.count, index + 1_600)
+            let pcm = samples[index..<end].map { Int16(max(-1, min(1, $0)) * 32_767) }
+            session.sendAudio(pcm.withUnsafeBufferPointer { Data(buffer: $0) })
+            index = end
+            let text = session.snapshot().text
+            if !text.isEmpty { interim.insert(text) }
+            // Real-time pace: chunk n is due n * 100 ms after the start.
+            try await Task.sleep(until: started + .milliseconds(index / 16), clock: .continuous)
+        }
+        let streamed = ContinuousClock.now - started
+        let final = await session.finish()
+        let finishing = ContinuousClock.now - started - streamed
+        print("Runtime: \(runtime.description)")
+        print("Hypotheses shown while streaming: \(interim.count)")
+        print("Transcript: \(final.text)")
+        print(String(format: "Decodes: %d, slowest %.2f s; stop to final transcript %.2f s",
+                     client.decodeCount, client.slowestDecode,
+                     Double(finishing.components.seconds) + Double(finishing.components.attoseconds) / 1e18))
+        if let error = final.error { throw WindowsNativeError(message: "Local live transcription failed: \(error)") }
+        guard !interim.isEmpty else { throw WindowsNativeError(message: "No text appeared while streaming.") }
+        guard normalised(final.text).contains(normalised(expected)) else {
+            throw WindowsNativeError(message: "Local live transcription did not contain the expected phrase.")
+        }
+        // Qualification bound: a decode slower than three steps means the
+        // model cannot keep the displayed text near real time on this CPU.
+        guard client.slowestDecode <= 3 else {
+            throw WindowsNativeError(message: "A live decode took longer than the 3 s qualification bound.")
+        }
+        print("Local live transcription self-test passed.")
+    }
+
+    /// `--local-post-processing-self-test [--model <local/post-processing/...>]`:
+    /// downloads (or reuses) the pinned GGUF model, loads the bundled llama.cpp
+    /// beside whisper.cpp and polishes a transcript with a custom prompt as the
+    /// system instruction; an empty transcript must stay empty without running
+    /// the model, and a cancelled generation must not complete.
+    static func polish(arguments: [String]) async throws {
+        let identifier = value(after: "--model", in: arguments) ?? "local/post-processing/smollm2-360m-instruct-q4"
+        guard let model = DesktopLocalPostProcessing.model(for: identifier, host: .windows) else {
+            throw WindowsNativeError(message: "\(identifier) is not a Windows local post-processing model.")
+        }
+        let item = WindowsLocalModelEntry.language(model).item
+        let installer = try modelInstaller()
+        let file = try await installer.install(item)
+        try installer.verify(item)
+        let allowGPU = ProcessInfo.processInfo.environment["JSTI_WHISPER_CPU_ONLY"] != "1"
+        // Whisper first, as the app does after a recording, so both share one ggml.
+        let speech = try WindowsWhisperRuntime.open(allowGPU: allowGPU)
+        let runtime = try WindowsLlamaRuntime.open(allowGPU: allowGPU)
+        let generator = WindowsLlamaLanguageModel(runtime: runtime)
+        let options = DesktopPostProcessing.Options(
+            mode: .local, modelIdentifier: model.identifier,
+            customPrompt: "You fix dictated text. Reply with the corrected sentence only.", temperature: 0
+        )
+        let raw = "um so the meeting is on tuesday at three pm in the main office"
+        let started = Date()
+        let outcome = try await DesktopPostProcessing.processLocally(
+            rawText: raw, options: options, model: model, modelFile: file, languageModel: generator
+        )
+        let elapsed = Date().timeIntervalSince(started)
+        print("Runtimes: \(speech.description) | \(runtime.description)")
+        print("Polished: \(outcome.processedText)")
+        guard outcome.systemPrompt?.hasPrefix(options.customPrompt ?? "") == true else {
+            throw WindowsNativeError(message: "The custom prompt was not the system instruction.")
+        }
+        guard normalised(outcome.processedText).contains("tuesday") else {
+            throw WindowsNativeError(message: "The local model's reply lost the transcript's content.")
+        }
+        let empty = try await DesktopPostProcessing.processLocally(
+            rawText: " [BLANK_AUDIO] ", options: options, model: model, modelFile: file, languageModel: generator
+        )
+        guard empty.processedText.isEmpty else {
+            throw WindowsNativeError(message: "An empty transcript did not stay empty.")
+        }
+        let cancelled = Task {
+            try await runtime.generate(.init(
+                systemPrompt: "Count.", userMessage: "Count to one thousand.", temperature: 0, maximumTokens: 512,
+                modelFile: file
+            ))
+        }
+        cancelled.cancel()
+        do {
+            _ = try await cancelled.value
+            throw WindowsNativeError(message: "A cancelled generation completed.")
+        } catch is CancellationError {}
+        print(String(format: "Local post-processing self-test passed in %.2f s.", elapsed))
     }
 
     /// `--local-transcription-self-test <wav> --expect <phrase> [--model <catalogue id>]`:

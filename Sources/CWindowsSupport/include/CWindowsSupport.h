@@ -62,13 +62,14 @@ int jsti_window_run(const char *const *model_names, size_t model_count, int sele
  * or 3 local live: bit 0 is live, bit 1 is local. The window shows a Source
  * picker (Remote, Local) when both sources have models, then a Mode picker
  * (Batch, Live) when the selected source has both. Preferences are global
- * indices of a remote batch, a remote live and a local batch row; -1 chooses
- * that mode's first model. Null/count0 restores the legacy all-batch
+ * indices of a remote batch, a remote live, a local batch and a local live
+ * row; -1 chooses that mode's first model. Null/count0 restores the legacy all-batch
  * catalogue. Inputs are copied. window_run's selected_index overrides that
  * mode's preference. Every callback continues to report a global model index,
  * never a filtered combo row. */
 int jsti_window_set_model_modes(const int *modes, size_t count, int preferred_batch_index,
-                                int preferred_live_index, int preferred_local_index);
+                                int preferred_live_index, int preferred_local_index,
+                                int preferred_local_live_index);
 typedef struct JSTIModelRow {
     const char *id;
     const char *name;
@@ -185,16 +186,25 @@ int jsti_window_choose_export_path(const char *suggested_filename, char *path, s
  * arbitrary imported file. Shell activation errors are returned. */
 int jsti_shell_open_file(const char *path, char *error, size_t error_capacity);
 
-/* Atomic Apply callback from the native settings dialog, on the UI thread.
- * prompt/new_key are borrowed until return. Empty new_key means keep the saved
- * credential; no saved credential is read back into the password field. */
-typedef void (*JSTIPostProcessingCallback)(int enabled, int model_index, const char *prompt,
+/* Atomic Apply callback from the native post-processing dialog, on the UI
+ * thread. mode is 0 off, 1 remote or 2 local; model_index indexes the remote
+ * list for 1 (and is the remembered remote choice for 0) and the local list
+ * for 2. prompt/new_key are borrowed until return. Empty new_key means keep
+ * the saved credential; no saved credential is read back into the password
+ * field, and new_key is always empty for local. */
+typedef void (*JSTIPostProcessingCallback)(int mode, int model_index, const char *prompt,
                                           const char *new_key, void *context);
 /* Thread safe; deep-copies model labels and persisted settings. Remote
  * processing remains unavailable until configured, and defaults disabled. */
 int jsti_window_set_postprocessing(const char *const *model_names, size_t model_count,
                                    int selected_index, int enabled, const char *prompt,
                                    JSTIPostProcessingCallback callback, void *context);
+/* Thread safe: the Local choices, in order, and for each whether it follows
+ * the prompt (1 for a language model, 0 for built-in rules, which the dialog
+ * explains instead of showing the prompt editor). enabled 1 selects Local.
+ * An empty list hides the Local choice. */
+int jsti_window_set_local_postprocessing(const char *const *model_names, const int *uses_prompt, size_t count,
+                                         int selected_index, int enabled);
 
 /* Stable text output choices across the native boundary. restore_clipboard is
  * 0/1 and only affects a Smart paste at the cursor; the dialog keeps every
@@ -292,7 +302,9 @@ enum JSTILocalModelAction {
     JSTI_LOCAL_MODEL_CANCEL = 2,
     JSTI_LOCAL_MODEL_REMOVE = 3,
     JSTI_LOCAL_MODEL_GPU_ON = 4,
-    JSTI_LOCAL_MODEL_GPU_OFF = 5
+    JSTI_LOCAL_MODEL_GPU_OFF = 5,
+    /* Add from Hugging Face; read the fields with jsti_local_models_import_fields. */
+    JSTI_LOCAL_MODEL_IMPORT = 6
 };
 typedef struct JSTILocalModelRow {
     const char *name;
@@ -304,6 +316,11 @@ typedef void (*JSTILocalModelCallback)(int action, int model_index, void *contex
 int jsti_window_set_local_models(const JSTILocalModelRow *rows, size_t count, const char *runtime_status,
                                  int use_gpu, JSTILocalModelCallback callback, void *context);
 void jsti_window_clear_local_models(void);
+/* Only inside the callback for JSTI_LOCAL_MODEL_IMPORT, on the UI thread:
+ * copies the typed repository and file as UTF-8. -1 when called elsewhere or
+ * a buffer is too small. */
+int jsti_local_models_import_fields(char *repository, size_t repository_capacity, char *file,
+                                    size_t file_capacity);
 /* Thread safe: checks or clears the Settings menu's automation item. */
 int jsti_window_set_automation(int enabled);
 /* The localised key name, for example "Ctrl+Alt+Space". */
@@ -870,6 +887,32 @@ void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime);
  * already be deleted. Returns 1 when that model was freed, 0 when another model
  * or none is cached, and -1 for an invalid argument. */
 int jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime, const char *model_path);
+
+/* On-device language models through llama.cpp, loaded at run time from the
+ * same directory as whisper.cpp. llama.dll binds to the ggml DLLs beside it,
+ * which whisper.cpp also uses; open refuses any ggml other than the pinned
+ * version and registers ggml's backends once per process (shared with
+ * whisper.cpp). Process-wide; a second open must name the same directory. */
+typedef struct JSTILlamaRuntime JSTILlamaRuntime;
+JSTILlamaRuntime *jsti_llama_runtime_open(const char *directory, int allow_gpu,
+                                          char *error, size_t error_capacity);
+/* Writes a short UTF-8 description such as "llama.cpp (ggml 0.23.0); CPU". */
+int jsti_llama_runtime_describe(JSTILlamaRuntime *runtime, char *text, size_t capacity);
+/* Runs one system/user prompt pair through the GGUF model at model_path
+ * (UTF-8, absolute) with the model's chat template, generating at most
+ * maximum_tokens tokens. temperature 0 samples greedily. The loaded model is
+ * cached (read into memory, so its file is closed) until another model is used
+ * or a release call frees it. Calls are serialised; job cancels like a
+ * transcription's. On success *text receives a heap UTF-8 string owned by the
+ * caller (free with jsti_whisper_free_text). Returns a JSTIWhisperResult. */
+int jsti_llama_generate(JSTILlamaRuntime *runtime, const char *model_path, const char *system_prompt,
+                        const char *user_message, double temperature, int maximum_tokens, int threads,
+                        JSTIWhisperJob *job, char **text, char *error, size_t error_capacity);
+/* Frees the cached model, waiting for a running generation to finish. */
+void jsti_llama_runtime_release_model(JSTILlamaRuntime *runtime);
+/* Frees the cached model only if it was loaded from model_path; 1 when freed,
+ * 0 when another model or none is cached, -1 for an invalid argument. */
+int jsti_llama_runtime_release_model_at(JSTILlamaRuntime *runtime, const char *model_path);
 
 #ifdef __cplusplus
 }

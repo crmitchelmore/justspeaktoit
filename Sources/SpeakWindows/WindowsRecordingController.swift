@@ -28,7 +28,7 @@ extension WindowsAppController {
             // so shutdown cannot return while startup is suspended here.
             try await saveRecord(record)
             guard !closed else { throw CancellationError() }
-            live = makeLiveSession(model: profile.modelIdentifier, key: key, id: id, language: profile.language)
+            live = try await makeLiveSession(for: profile, key: key, id: id)
             live?.start()
             let context = WindowsCaptureContext(file: file, live: live) { message in
                 Task { await self.captureFailed(message, recordingID: id) }

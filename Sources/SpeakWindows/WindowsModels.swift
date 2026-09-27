@@ -7,12 +7,26 @@ enum WindowsModels {
     // Native WinHTTP passed all five Windows runtime probes in run 35718564307.
     static let streamingQualified = true
     static var live: [ModelCatalog.Option] { streamingQualified ? DesktopLiveTranscription.liveModels : [] }
-    /// Catalogue entries the bundled whisper.cpp runtime is qualified to serve.
+    /// Catalogue entries the bundled whisper.cpp runtime is qualified to serve,
+    /// then the Hugging Face imports registered before the window opened.
+    /// Imports added later join through `addLocal`.
     static let local = DesktopLocalTranscription.options(host: .windows)
+        + DesktopLocalModelImports.registered.whisperModels.map(WindowsModels.option(for:))
+    /// On-device models qualified for live transcription (Source: Local, Mode: Live).
+    static let localLive = DesktopLocalTranscription.liveOptions(host: .windows)
+
+    static func option(for model: WhisperCppModel) -> ModelCatalog.Option {
+        ModelCatalog.Option(
+            id: model.catalogueID, displayName: model.displayName + " (on-device)", description: model.summary,
+            latencyTier: .medium, tags: [.privacy]
+        )
+    }
 
     private final class Storage: @unchecked Sendable {
         let lock = NSLock()
-        var slots = DesktopModelSlots(live: WindowsModels.live, local: WindowsModels.local)
+        var slots = DesktopModelSlots(
+            live: WindowsModels.live, local: WindowsModels.local, localLive: WindowsModels.localLive
+        )
         /// Install state shown after each local model's name.
         var localLabels: [String: String] = [:]
     }
@@ -33,9 +47,29 @@ enum WindowsModels {
         DesktopTranscription.provider(for: model) ?? DesktopLiveTranscription.provider(forID: model)
     }
 
-    static func isLive(_ model: String) -> Bool { live.contains { $0.id == model } }
+    /// Live mode: a remote streaming route or an on-device live model.
+    static func isLive(_ model: String) -> Bool { isRemoteLive(model) || isLocalLive(model) }
 
-    static func isLocal(_ model: String) -> Bool { local.contains { $0.id == model } }
+    static func isRemoteLive(_ model: String) -> Bool { live.contains { $0.id == model } }
+
+    static func isLocalLive(_ model: String) -> Bool { localLive.contains { $0.id == model } }
+
+    /// Runs on this PC (batch, live or an import); needs no API key.
+    static func isLocal(_ model: String) -> Bool {
+        DesktopLocalTranscription.downloadedModel(for: model, host: .windows) != nil
+    }
+
+    static func isLocalBatch(_ model: String) -> Bool { isLocal(model) && !isLocalLive(model) }
+
+    /// Gives an imported model a picker slot; false when the window is full.
+    @discardableResult
+    static func addLocal(_ option: ModelCatalog.Option) -> Bool {
+        storage.lock.withLock { storage.slots.appendLocal(option) }
+    }
+
+    static func hideLocal(_ identifier: String) {
+        storage.lock.withLock { storage.slots.hideLocal(identifier) }
+    }
 
     /// Remote models need their provider's key; on-device models need none.
     static func requiresKey(_ model: String) -> Bool { !isLocal(model) }
@@ -43,7 +77,7 @@ enum WindowsModels {
     /// Bit 0 is live, bit 1 is on-device, matching the native Source and Mode pickers.
     static func mode(of model: String) -> Int32 { (isLive(model) ? 1 : 0) + (isLocal(model) ? 2 : 0) }
 
-    static func configureModes(batch: String?, live: String?, local: String?) throws {
+    static func configureModes(batch: String?, live: String?, local: String?, localLive: String?) throws {
         let models = all
         let modes: [Int32] = models.map { mode(of: $0.id) }
         func index(_ identifier: String?, mode: Int32) -> Int32 {
@@ -52,7 +86,8 @@ enum WindowsModels {
         }
         let result = modes.withUnsafeBufferPointer {
             jsti_window_set_model_modes(
-                $0.baseAddress, $0.count, index(batch, mode: 0), index(live, mode: 1), index(local, mode: 2)
+                $0.baseAddress, $0.count, index(batch, mode: 0), index(live, mode: 1), index(local, mode: 2),
+                index(localLive, mode: 3)
             )
         }
         guard result == 0 else { throw WindowsNativeError(message: "Could not configure transcription modes.") }

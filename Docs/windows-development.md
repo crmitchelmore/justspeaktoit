@@ -350,6 +350,14 @@ window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
   show it, and a late output can never finish a newer dictation's HUD.
   `--self-test` checks its styles, that the foreground window is unchanged and
   that it sits at the bottom centre of the work area.
+- **Notification-area icon** (`WindowsTray.cpp`), like the Mac's menu bar
+  extra: the brand icon, with a red dot while recording. Its menu shows Ready,
+  Recording or Transcribing and the dashboard's Sessions, Recording Time and
+  Spend, and offers Start or Stop Recording (Cancel Transcription while
+  busy), Open, Settings and Quit; clicking the icon opens the window. A hidden
+  window of its own owns the icon and menu, so the menu never brings the main
+  window forward, and the icon returns after Explorer restarts. Closing the
+  window still quits the app.
 
 `SpeakWindows.exe --ui-screenshots <dir>` seeds sample History into a
 throwaway data directory, visits every page, then Dashboard and History in dark
@@ -442,7 +450,7 @@ but must not be presented as the identical Apple-only engine or service.
 
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
-| Window and appearance | Mac layout: sidebar pages, brand hero, Dashboard insights and setup, History cards; light, dark or follow Windows; DPI-scaled owner drawing; the recording HUD (never activated, click-through, level meter and live words); a CI screenshot tour | Physical review at 100–200% scaling and on several monitors, high contrast, Narrator over the owner-drawn cards and the HUD's announcements, the HUD over full-screen apps, and a notification-area icon like the Mac menu bar extra |
+| Window and appearance | Mac layout: sidebar pages, brand hero, Dashboard insights and setup, History cards; light, dark or follow Windows; DPI-scaled owner drawing; the recording HUD (never activated, click-through, level meter and live words); a notification-area icon and menu like the Mac's menu bar extra; a CI screenshot tour | Physical review at 100–200% scaling and on several monitors, high contrast, Narrator over the owner-drawn cards and the HUD's announcements, the HUD over full-screen apps, the notification-area menu on Windows 10 and 11, and whether closing the window should keep the app in the notification area |
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
 | Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |

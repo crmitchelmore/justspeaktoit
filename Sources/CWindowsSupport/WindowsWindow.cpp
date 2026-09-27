@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "WindowsHUD.hpp"
+#include "WindowsTray.hpp"
 #include "WindowsWindowChrome.hpp"
 
 bool jsti_postprocessing_available();
@@ -202,6 +203,7 @@ struct WindowState {
     std::unordered_map<int, bool> wanted;
     std::wstring headerSubtitle;
     int displayedRecording = 0;
+    std::wstring traySummary;
     // Totals: [all, visible][sessions, errors, recording time, average, spend].
     std::wstring insights[2][5];
     bool insightsChanged = false;
@@ -378,6 +380,18 @@ void emitRecording(HWND window) {
     if (recording == 2) { emit(window, JSTI_EVENT_CANCEL_TRANSCRIPTION); return; }
     const std::string device = selectedMicrophone(window);
     emit(window, JSTI_EVENT_TOGGLE_RECORDING, device.c_str());
+}
+
+void showPage(HWND window, int page);
+
+// A command chosen from the notification area's menu, or its icon clicked.
+void trayCommand(HWND window, UINT command) {
+    if (command == jsti::tray::toggle) { emitRecording(window); return; }
+    if (command == jsti::tray::quit) { PostMessageW(window, WM_CLOSE, 0, 0); return; }
+    if (command != jsti::tray::open && command != jsti::tray::settings) return;
+    ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(window);
+    if (command == jsti::tray::settings) showPage(window, generalPage);
 }
 
 void showFailure(HWND window, const std::string &message) {
@@ -1588,6 +1602,15 @@ void applyInsights(HWND window) {
         {insightSpendID, &values[0][4]}, {historySessionsID, &values[1][0]}, {historyErrorsID, &values[1][1]},
         {historyAverageID, &values[1][3]}, {historySpendID, &values[1][4]}};
     for (const auto &target : targets) SetDlgItemTextW(window, target.first, target.second->c_str());
+    // The notification area's menu shows the same totals as the Mac's menu bar extra.
+    std::wstring summary;
+    if (!values[0][0].empty()) {
+        summary = values[0][0] + (values[0][0] == L"1" ? L" session" : L" sessions");
+        if (!values[0][2].empty()) summary += L" · " + values[0][2];
+        if (!values[0][4].empty()) summary += L" · " + values[0][4];
+    }
+    state.traySummary = summary;
+    jsti::tray::setState(state.displayedRecording, state.traySummary);
 }
 
 void applyUpdate(HWND window) {
@@ -1665,6 +1688,7 @@ void applyUpdate(HWND window) {
     if (state.displayedRecording != recording) {
         state.displayedRecording = recording;
         InvalidateRect(GetDlgItem(window, recordID), nullptr, FALSE);
+        jsti::tray::setState(recording, state.traySummary);
     }
     for (int id : {keyID, saveID, microphoneID, profilesID}) EnableWindow(GetDlgItem(window, id), recording == 0);
     updateModelAvailability(window, recording);
@@ -1930,6 +1954,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     case hudMessage:
         jsti::hud::apply();
         return 0;
+    case jsti::tray::commandMessage:
+        trayCommand(window, static_cast<UINT>(wparam));
+        return 0;
     case WM_COMMAND:
         if (LOWORD(wparam) >= navBaseID && LOWORD(wparam) < navBaseID + pageCount) {
             if (HIWORD(wparam) == BN_CLICKED) showPage(window, LOWORD(wparam) - navBaseID);
@@ -2161,6 +2188,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         emit(window, JSTI_EVENT_CLOSING);
         DestroyWindow(window); return 0;
     case WM_DESTROY:
+        jsti::tray::remove();
         backdrop.release();
         jsti_hotkey_stop(window);
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = nullptr; state.posted = false; }
@@ -2246,7 +2274,8 @@ ULONG_PTR activateVisualStyles() {
 }
 
 // The app icon at `size` pixels, drawn from the brand geometry.
-HICON brandIcon(int size) {
+// `recording` adds a red dot, as the Mac's menu bar icon shows while recording.
+HICON brandIcon(int size, bool recording = false) {
     if (size <= 0 || !jsti::chrome::startup()) return nullptr;
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -2264,6 +2293,12 @@ HICON brandIcon(int size) {
     HDC dc = CreateCompatibleDC(nullptr);
     HGDIOBJ previous = SelectObject(dc, colour);
     jsti::chrome::brandIcon(dc, RECT{0, 0, size, size});
+    if (recording) {
+        const int dot = std::max(6, size * 7 / 16);
+        jsti::chrome::fillRound(dc, RECT{size - dot, size - dot, size, size}, dot / 2, RGB(0xFF, 0xFF, 0xFF));
+        jsti::chrome::fillRound(dc, RECT{size - dot + 1, size - dot + 1, size - 1, size - 1}, dot / 2 - 1,
+                                jsti::chrome::red);
+    }
     SelectObject(dc, previous);
     DeleteDC(dc);
     HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
@@ -2363,6 +2398,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     type.hbrBackground = nullptr;
     HICON icon = brandIcon(GetSystemMetrics(SM_CXICON)), smallIcon = brandIcon(GetSystemMetrics(SM_CXSMICON));
+    HICON recordingIcon = brandIcon(GetSystemMetrics(SM_CXSMICON), true);
     type.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
     const ATOM registered = RegisterClassW(&type);
     HWND window = registered ? CreateWindowExW(WS_EX_CONTROLPARENT, type.lpszClassName,
@@ -2375,6 +2411,8 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
         { std::lock_guard<std::mutex> lock(state.mutex); state.window = window; }
         ShowWindow(window, SW_SHOWDEFAULT);
         UpdateWindow(window);
+        // Optional: without a notification area the app works the same.
+        jsti::tray::add(window, smallIcon ? smallIcon : type.hIcon, recordingIcon);
         emit(window, JSTI_EVENT_READY);
         std::string shortcutFailure;
         if (IsWindow(window) && !jsti_hotkey_start(window, shortcutFailure)) showFailure(window, shortcutFailure);
@@ -2402,6 +2440,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
     if (icon) DestroyIcon(icon);
     if (smallIcon) DestroyIcon(smallIcon);
+    if (recordingIcon) DestroyIcon(recordingIcon);
     if (visualStyles) DeactivateActCtx(0, visualStyles);
     state.displayedHistory.clear();
     if (registered) UnregisterClassW(type.lpszClassName, instance);
@@ -3642,6 +3681,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         SWP_NOZORDER | SWP_NOACTIVATE);
     showPage(window, originalPage);
     if (passed) passed = jsti::hud::selfTest(failure);
+    if (passed) passed = jsti::tray::selfTest(failure);
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
 

@@ -97,10 +97,12 @@ wait "$grab"
 
 zenity --entry --title "JSTI target" --text "Paste here" >"$work/zenity.out" 2>/dev/null & zenity=$!
 pids+=($zenity)
-target="$(xdotool search --sync --name 'JSTI target' | head -1)"
+target="$(timeout 30 xdotool search --sync --name 'JSTI target' | head -1)"
+[ -n "$target" ] || { echo "The Zenity target window never appeared." >&2; exit 1; }
 JSTI_TEST_TARGET_WINDOW="$target" "$binary" --integration-test x11 & app=$!
 # Raise the target once the app's own window has taken focus.
-xdotool search --sync --name '^JustSpeakToIt$' >/dev/null
+timeout 30 xdotool search --sync --name '^Just Speak to It$' >/dev/null ||
+    { echo "The app window never appeared." >&2; exit 1; }
 sleep 0.3
 xdotool windowactivate --sync "$target"
 wait "$app"

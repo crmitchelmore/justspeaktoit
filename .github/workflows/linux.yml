@@ -84,9 +84,15 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
             libgtk-4-dev libadwaita-1-dev libpulse-dev libsecret-1-dev libx11-dev libxtst-dev pkg-config \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            libgnutls28-dev \
             dbus dbus-x11 gnome-keyring pipewire pipewire-pulse wireplumber pulseaudio-utils \
             xvfb openbox zenity xdotool weston python3 python3-gi gir1.2-glib-2.0 \
             fonts-cantarell adwaita-icon-theme
+
+      - name: Check and use the Linux resolved file
+        run: |
+          scripts/linux-check-resolved.sh
+          cp packaging/linux/Package.resolved Package.resolved
 
       - name: Verify portable source boundary
         run: python3 scripts/verify-portable-core-boundary.py

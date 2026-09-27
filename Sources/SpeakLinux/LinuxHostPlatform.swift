@@ -26,6 +26,7 @@ struct LinuxHotKeySettings: Codable, Equatable, Sendable {
 enum LinuxHostPlatform: DesktopHostPlatform {
     typealias VoiceOutputSettings = LinuxVoiceOutputSettings
     typealias ReadAloudState = LinuxReadAloudState
+    typealias LocalModelsState = LinuxLocalModelsState
 
     package static let displayName = "Linux"
     package static let credentialStoreName = "the desktop keyring (Secret Service)"
@@ -144,6 +145,40 @@ enum LinuxHostPlatform: DesktopHostPlatform {
     }
 
     package static func isReadingAloud(_ state: LinuxReadAloudState) -> Bool { state.task != nil }
+
+    // MARK: On-device models
+
+    package static func makeLocalModelsState() -> LinuxLocalModelsState { LinuxLocalModelsState() }
+
+    package static func localReadiness(_ model: String, controller: isolated LinuxAppController) -> String? {
+        controller.localReadiness(model)
+    }
+
+    package static func transcribeLocally(
+        _ audio: URL, model: String, language: String?, controller: isolated LinuxAppController
+    ) async throws -> TranscriptionResult {
+        try await controller.transcribeLocally(audio, model: model, language: language)
+    }
+
+    package static func beginLocalUse(_ model: String, controller: isolated LinuxAppController) -> String? {
+        controller.holdLocalModel(model)
+    }
+
+    package static func endLocalUse(_ model: String?, controller: isolated LinuxAppController) {
+        controller.releaseLocalModel(model)
+    }
+
+    // MARK: App profiles
+
+    package static var profileMatchers: DesktopProfileEditing.MatcherPlatform { .linux }
+
+    /// X11 reports the focused window's executable and class; Wayland reports
+    /// neither, so the app's normal settings apply there.
+    package static func profile(
+        in resolver: ProfileResolver, target: LinuxInsertionTarget?, executablePath: String?
+    ) -> DictationProfile? {
+        resolver.profile(forLinuxExecutablePath: executablePath, windowClass: target?.windowClass)
+    }
 
     // MARK: Shortcut text
 

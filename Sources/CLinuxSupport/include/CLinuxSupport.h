@@ -35,18 +35,33 @@ enum {
     JSTI_EVENT_CANCEL = 14,
     JSTI_EVENT_SEARCH_HISTORY = 15,  /* text: query */
     JSTI_EVENT_TRANSCRIPT_VERSION = 16, /* text: record id */
+    JSTI_EVENT_OPEN_PROFILES = 17,
     JSTI_EVENT_PLAYBACK_TOGGLE = 18, /* text: record id */
     JSTI_EVENT_PLAYBACK_STOP = 19,
     JSTI_EVENT_REFRESH_MODELS = 20,
     JSTI_EVENT_SHORTCUT_PRESSED = 21,  /* text: microphone id, index: model slot */
     JSTI_EVENT_SHORTCUT_RELEASED = 22,
+    JSTI_EVENT_READ_ALOUD = 24,        /* text: record id; Swift reads the displayed transcript */
     JSTI_EVENT_TEXT_OUTPUT = 30,       /* index: method, text: "restore" or "" */
     JSTI_EVENT_COMMAND_TOGGLE = 31,    /* --toggle from another process or action */
     JSTI_EVENT_SHORTCUT_STYLE = 32,    /* index: 0 press, 1 hold, 2 double-tap, 3 hold and double-tap */
     /* Apply in Post-processing. index: model index, or -1 - index when
      * disabled; text: prompt, U+001F, then a new OpenRouter key or nothing. */
-    JSTI_EVENT_POST_PROCESSING = 33
+    JSTI_EVENT_POST_PROCESSING = 33,
+    JSTI_EVENT_VOICE = 34,             /* index: Read aloud voice */
+    JSTI_EVENT_AZURE_RESOURCE = 35,    /* text: the entered Azure Speech resource endpoint */
+    /* iCloud sync. index: action (1 apply, 2 sign in, 3 sign out, 4 sync now)
+     * | JSTI_CLOUD_SYNC_HISTORY | JSTI_CLOUD_SYNC_KEYS; text: the passphrase
+     * typed for key import (the field is cleared once read). */
+    JSTI_EVENT_CLOUD_SYNC = 36,
+    JSTI_EVENT_AUTOSTART = 37,         /* index: 1 start at login, 0 do not */
+    /* On-device models. index: model row; text: "download", "remove" or
+     * "cancel"; JSTI_EVENT_LOCAL_GPU carries index 1 to use a GPU, 0 CPU only. */
+    JSTI_EVENT_LOCAL_MODEL = 39,
+    JSTI_EVENT_LOCAL_GPU = 40
 };
+
+enum { JSTI_CLOUD_SYNC_HISTORY = 0x10, JSTI_CLOUD_SYNC_KEYS = 0x20 };
 
 /* Recording state for jsti_window_update: -1 keeps the current state. */
 enum { JSTI_STATE_IDLE = 0, JSTI_STATE_RECORDING = 1, JSTI_STATE_WORKING = 2 };
@@ -59,6 +74,8 @@ typedef struct JSTIModelRow {
     int32_t is_live;
     /* Position in the picker, or -1 when hidden. */
     int32_t display_order;
+    /* An on-device model. */
+    int32_t is_local;
 } JSTIModelRow;
 
 typedef struct JSTIHistoryRow {
@@ -96,6 +113,39 @@ int32_t jsti_window_set_post_processing(
     const char *const *models, size_t count, int32_t enabled, int32_t selected, const char *prompt);
 /* The shortcut behaviour picker, indexed as JSTI_EVENT_SHORTCUT_STYLE. */
 int32_t jsti_window_set_shortcut_style(int32_t index);
+/* The Read aloud voice picker. */
+int32_t jsti_window_set_voices(const char *const *names, size_t count, int32_t selected);
+/* The saved Azure Speech resource endpoint ("" for none). */
+int32_t jsti_window_set_azure_resource(const char *endpoint);
+/* The iCloud sync group. `available` is 0 when this build cannot sync, and
+ * `status` then says why. */
+int32_t jsti_window_set_cloud_sync(
+    const char *status, int32_t available, int32_t signed_in, int32_t history_enabled, int32_t key_import_enabled);
+/* Start at login: 1 on, 0 off, -1 unavailable (with `note` saying why). */
+int32_t jsti_window_set_autostart(int32_t state, const char *note);
+
+/* App profiles. A draft mirrors DesktopProfileEditing.Draft: transcription,
+ * polish_model and language index their name lists, -1 means the app
+ * setting and -2 keeps a stored value the lists cannot show. polish_mode: 0
+ * app setting, 1 off, 2 on. paths holds one application per line. */
+typedef struct JSTIProfileDraft {
+    const char *id, *name, *paths, *prompt, *output_language, *notes;
+    int32_t transcription, polish_mode, polish_model, language;
+} JSTIProfileDraft;
+/* GTK-thread callback from the editor. Action 1 saves `drafts` (return -1
+ * with a readable error to keep the editor open); action 0 cancels. The
+ * pointers expire when it returns; it must not wait for Swift actors. */
+typedef int32_t (*jsti_profiles_fn)(
+    int32_t action, const JSTIProfileDraft *drafts, size_t count, void *context, char *error, size_t error_capacity);
+/* Opens the profile editor with these drafts and choices. Everything is copied. */
+int32_t jsti_window_set_profiles(
+    const JSTIProfileDraft *drafts, size_t count, const char *const *transcription_names, size_t transcription_count,
+    const char *const *polish_names, size_t polish_count, const char *const *language_names, size_t language_count,
+    const char *notice, jsti_profiles_fn callback, void *context);
+/* The App profiles group's explanation, e.g. what Wayland allows. */
+int32_t jsti_window_set_profiles_note(const char *note);
+/* Main thread only: the editor's save path with the drafts it shows, for the self-test. */
+int32_t jsti_window_profiles_save_for_test(char *error, size_t error_capacity);
 /* Main thread only: the transcript and version the window displays now. */
 int32_t jsti_window_transcript_snapshot(char *buffer, size_t capacity, size_t *required);
 int32_t jsti_window_transcript_variant(void);
@@ -237,6 +287,78 @@ int32_t jsti_remote_desktop_active(void);
  * compositor maps them for the active keyboard layout. */
 int32_t jsti_remote_desktop_paste(const char *text, int32_t shift, char *error, size_t error_capacity);
 void jsti_remote_desktop_stop(void);
+
+/* Background portal: asks the desktop to start `command` (NULL keeps the
+ * app's own) at login when `autostart` is 1, or stops doing so when 0.
+ * `*granted` reports whether autostart is now on. The first request may show
+ * a dialog. Outside Flatpak, apps use an XDG autostart entry instead. */
+int32_t jsti_background_request(
+    int32_t autostart, const char *reason, const char *const *command, int32_t *granted, char *error,
+    size_t error_capacity);
+
+/* ----------------------------------------------------------- local models */
+
+/* The On-device models group. state: JSTI_LOCAL_MODEL_*. */
+enum {
+    JSTI_LOCAL_MODEL_NOT_INSTALLED = 0,
+    JSTI_LOCAL_MODEL_PARTIAL = 1,
+    JSTI_LOCAL_MODEL_DOWNLOADING = 2,
+    JSTI_LOCAL_MODEL_INSTALLED = 3
+};
+typedef struct JSTILocalModelRow {
+    const char *name, *detail, *about;
+    int32_t state;
+} JSTILocalModelRow;
+int32_t jsti_window_set_local_models(
+    const JSTILocalModelRow *rows, size_t count, const char *status, int32_t use_gpu);
+
+/* whisper.cpp loaded with dlopen from `directory` (libwhisper.so.1 and its
+ * ggml libraries and backends). One runtime per process; opening another
+ * directory fails. Transcription is serialised and runs on the calling thread. */
+typedef struct jsti_whisper_runtime jsti_whisper_runtime;
+typedef struct jsti_whisper_job jsti_whisper_job;
+enum { JSTI_WHISPER_OK = 0, JSTI_WHISPER_FAILED = -1, JSTI_WHISPER_CANCELLED = 1 };
+jsti_whisper_runtime *jsti_whisper_runtime_open(const char *directory, int32_t allow_gpu, char *error, size_t error_capacity);
+int32_t jsti_whisper_runtime_describe(jsti_whisper_runtime *runtime, char *text, size_t capacity);
+int32_t jsti_whisper_runtime_uses_gpu(jsti_whisper_runtime *runtime);
+void jsti_whisper_runtime_release_model(jsti_whisper_runtime *runtime);
+/* 1 when the cached model was loaded from `model_path` and was freed. */
+int32_t jsti_whisper_runtime_release_model_at(jsti_whisper_runtime *runtime, const char *model_path);
+jsti_whisper_job *jsti_whisper_job_create(void);
+void jsti_whisper_job_cancel(jsti_whisper_job *job);
+void jsti_whisper_job_destroy(jsti_whisper_job *job);
+/* 16 kHz mono float samples. `*text` is freed with jsti_whisper_free_text. */
+int32_t jsti_whisper_transcribe(
+    jsti_whisper_runtime *runtime, const char *model_path, const float *samples, size_t sample_count,
+    const char *language, int32_t threads, jsti_whisper_job *job, char **text, char *error, size_t error_capacity);
+void jsti_whisper_free_text(char *text);
+
+/* SHA-256 (GLib) for verifying downloaded models; `hex` needs 65 bytes. */
+typedef struct jsti_sha256 jsti_sha256;
+jsti_sha256 *jsti_sha256_create(char *error, size_t error_capacity);
+int32_t jsti_sha256_update(jsti_sha256 *hasher, const void *bytes, size_t count, char *error, size_t error_capacity);
+int32_t jsti_sha256_finish(jsti_sha256 *hasher, char *hex, size_t hex_capacity, char *error, size_t error_capacity);
+void jsti_sha256_destroy(jsti_sha256 *hasher);
+
+/* ------------------------------------------------------------------ crypto */
+
+/* GnuTLS primitives for the API-key sync envelope (the same parameters as the
+ * Apple and Windows apps). The nonce is 12 bytes and the tag 16; the
+ * ciphertext excludes the tag and has the plaintext's length. */
+int32_t jsti_crypto_pbkdf2_sha256(
+    const uint8_t *password, size_t password_count, const uint8_t *salt, size_t salt_count, uint64_t iterations,
+    uint8_t *key, size_t key_count, char *error, size_t error_capacity);
+int32_t jsti_crypto_random(uint8_t *bytes, size_t count, char *error, size_t error_capacity);
+int32_t jsti_crypto_aes_gcm_seal(
+    const uint8_t *key, size_t key_count, const uint8_t *plaintext, size_t plaintext_count, uint8_t *nonce,
+    uint8_t *ciphertext, uint8_t *tag, char *error, size_t error_capacity);
+/* Fails without writing a plaintext when the key, nonce or tag do not match. */
+int32_t jsti_crypto_aes_gcm_open(
+    const uint8_t *key, size_t key_count, const uint8_t *nonce, const uint8_t *ciphertext, size_t ciphertext_count,
+    const uint8_t *tag, uint8_t *plaintext, char *error, size_t error_capacity);
+
+/* Opens an http(s) URL in the user's browser (the OpenURI portal in Flatpak). */
+int32_t jsti_open_uri(const char *uri, char *error, size_t error_capacity);
 
 /* --------------------------------------------------------------- self-test */
 

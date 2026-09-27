@@ -1,0 +1,4 @@
+module CLinuxGnuTLS [system] {
+    header "shim.h"
+    export *
+}

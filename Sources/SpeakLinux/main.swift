@@ -49,6 +49,8 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
         try await controller.configureModelCatalog()
         holder.applyShortcutStyle(await controller.hotKeySettings())
         LinuxWindow.postProcessing(await controller.postProcessingOptions())
+        await LinuxServices.configure(holder)
+        await LinuxCloudSync.configure(holder)
         return await controller.selectedIndex()
     }
     let strings = LinuxWindow.Strings()
@@ -73,6 +75,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
     try blocking {
         holder.shortcuts.stop()
         if !holder.smokeTest { holder.microphones.stop() }
+        await LinuxCloudSync.shutDown(holder)
         await holder.finishSettings()
         await holder.drainShortcuts()
         await controller.close()
@@ -84,7 +87,7 @@ func runWindow(controller: LinuxAppController, holder: LinuxEventContext) throws
 }
 
 let arguments = CommandLine.arguments
-DesktopHostModels.configure(streamingQualified: LinuxLiveTransport.qualified)
+DesktopHostModels.configure(streamingQualified: LinuxLiveTransport.qualified, local: LinuxLocalModels.options)
 if arguments.contains("--version") {
     print("JustSpeakToIt for Linux (developer preview)")
     exit(0)

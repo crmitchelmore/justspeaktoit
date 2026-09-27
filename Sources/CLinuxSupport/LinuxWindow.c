@@ -1,4 +1,5 @@
 #include "LinuxSupportInternal.h"
+#include "LinuxWindowInternal.h"
 
 #include <adwaita.h>
 #include <string.h>
@@ -68,10 +69,15 @@ typedef struct UI {
     GtkButton *import_button;
     GtkButton *play;
     GtkButton *stop_play;
+    GtkButton *read_aloud;
     GtkLabel *playback_label;
     gint32 playback_state;
     /* Export in progress: the text and version captured at the click. */
     gchar *export_text;
+    gchar *app_id;
+    /* Quit from the tray: closing the window really closes it. */
+    gboolean quitting;
+    gboolean told_about_tray;
 } UI;
 
 static UI ui;
@@ -131,10 +137,12 @@ static void refresh_actions(void) {
     gtk_widget_set_sensitive(GTK_WIDGET(ui.open_audio), has_record);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.play), has_record && (idle || ui.playback_state != 0));
     gtk_widget_set_sensitive(GTK_WIDGET(ui.stop_play), has_record && ui.playback_state != 0);
+    gtk_widget_set_sensitive(GTK_WIDGET(ui.read_aloud), idle && presented && has_text);
     gtk_button_set_label(ui.play, ui.playback_state == 1 ? "Pause" : "Play");
     gtk_widget_set_sensitive(GTK_WIDGET(ui.import_button), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.model_row), idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.microphone_row), idle);
+    jsti_window_panels_refresh(idle);
     gtk_widget_set_sensitive(GTK_WIDGET(ui.version), presented && ui.presented_switchable && idle);
     gtk_widget_set_visible(GTK_WIDGET(ui.version), presented && ui.presented_switchable);
 }
@@ -250,6 +258,12 @@ static void on_stop_play(GtkButton *button, gpointer data) {
     emit(JSTI_EVENT_PLAYBACK_STOP, ui.selected_id, 0);
 }
 
+static void on_read_aloud(GtkButton *button, gpointer data) {
+    (void)button; (void)data;
+    /* Swift reads the displayed transcript inside this event, paired with the record. */
+    if (ui.selected_id != NULL) emit(JSTI_EVENT_READ_ALOUD, ui.selected_id, 0);
+}
+
 static void on_open_audio(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     if (ui.selected_id != NULL) emit(JSTI_EVENT_OPEN_AUDIO, ui.selected_id, 0);
@@ -311,6 +325,20 @@ static void on_import(GtkButton *button, gpointer data) {
 
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
+    /* With a tray icon, closing the window keeps dictation available; Quit
+     * in the tray menu ends the app. */
+    if (jsti_tray_registered() && !ui.quitting) {
+        gtk_widget_set_visible(GTK_WIDGET(ui.window), FALSE);
+        if (!ui.told_about_tray) {
+            ui.told_about_tray = TRUE;
+            GNotification *notification = g_notification_new("Just Speak to It is still running");
+            g_notification_set_body(notification, "Dictate with your shortcut, or use the tray icon to show the window or quit.");
+            g_application_send_notification(G_APPLICATION(ui.application), "tray", notification);
+            g_object_unref(notification);
+        }
+        return TRUE;
+    }
+    jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
     return FALSE;
@@ -338,8 +366,22 @@ static void build_window(void) {
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), GTK_WIDGET(ui.import_button));
     g_signal_connect(ui.import_button, "clicked", G_CALLBACK(on_import), NULL);
 
+    /* Two pages: dictation with History, and every setting. */
+    GtkWidget *stack = adw_view_stack_new();
     GtkWidget *page = adw_preferences_page_new();
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), page);
+    GtkWidget *settings_page = adw_preferences_page_new();
+    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(stack), page, "dictate", "Dictate", "audio-input-microphone-symbolic");
+    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(stack), settings_page, "settings", "Settings",
+                                        "preferences-system-symbolic");
+    GtkWidget *switcher = adw_view_switcher_new();
+    adw_view_switcher_set_stack(ADW_VIEW_SWITCHER(switcher), ADW_VIEW_STACK(stack));
+    adw_view_switcher_set_policy(ADW_VIEW_SWITCHER(switcher), ADW_VIEW_SWITCHER_POLICY_WIDE);
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), switcher);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), stack);
+    /* Smoke tests may open the Settings page for its snapshot. */
+    if (g_strcmp0(g_getenv("JSTI_UI_PAGE"), "settings") == 0) {
+        adw_view_stack_set_visible_child_name(ADW_VIEW_STACK(stack), "settings");
+    }
     adw_application_window_set_content(ADW_APPLICATION_WINDOW(window), toolbar);
 
     /* Dictation */
@@ -391,7 +433,7 @@ static void build_window(void) {
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(dictation));
 
     /* Settings */
-    GtkWidget *settings = group("Settings");
+    GtkWidget *settings = group("Model, microphone and output");
     ui.model_names = gtk_string_list_new(NULL);
     ui.model_row = ADW_COMBO_ROW(adw_combo_row_new());
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(ui.model_row), "Transcription model");
@@ -476,7 +518,7 @@ static void build_window(void) {
     gtk_widget_set_margin_top(polish_apply, 6);
     g_signal_connect(polish_apply, "clicked", G_CALLBACK(on_polish_apply), NULL);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(polish), polish_apply);
-    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(polish));
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(settings_page), ADW_PREFERENCES_GROUP(polish));
 
     /* History */
     GtkWidget *history = group("History");
@@ -507,16 +549,31 @@ static void build_window(void) {
     ui.stop_play = GTK_BUTTON(gtk_button_new_with_label("Stop"));
     g_signal_connect(ui.play, "clicked", G_CALLBACK(on_play), NULL);
     g_signal_connect(ui.stop_play, "clicked", G_CALLBACK(on_stop_play), NULL);
+    ui.read_aloud = GTK_BUTTON(gtk_button_new_with_label("Read aloud"));
+    gtk_widget_set_tooltip_text(GTK_WIDGET(ui.read_aloud), "Speak the displayed transcript with the Read aloud voice");
+    g_signal_connect(ui.read_aloud, "clicked", G_CALLBACK(on_read_aloud), NULL);
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.playback_label));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.play));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.stop_play));
+    gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.read_aloud));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.retry));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.export_button));
     gtk_box_append(GTK_BOX(history_actions), GTK_WIDGET(ui.open_audio));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(history), history_actions);
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(history));
+    jsti_window_panels_build(ADW_PREFERENCES_PAGE(settings_page));
     refresh_actions();
 }
+
+/* ------------------------------------------- helpers for other panels */
+
+void jsti_window_emit(gint32 event, const char *text, gint32 index) { emit(event, text, index); }
+
+GtkWidget *jsti_window_group(const char *title) { return group(title); }
+
+GtkWindow *jsti_window_main(void) { return ui.window; }
+
+void jsti_window_set_suppressed(gboolean suppressed) { ui.suppress = suppressed; }
 
 /* -------------------------------------------------------- application */
 
@@ -530,6 +587,24 @@ static RunModels initial_models;
 
 static void apply_models(const JSTIModelRow *rows, size_t count, gint32 selected);
 
+static void tray_action(gint action) {
+    switch (action) {
+    case JSTI_TRAY_SHOW:
+        if (ui.window != NULL) gtk_window_present(ui.window);
+        break;
+    case JSTI_TRAY_TOGGLE:
+        emit(JSTI_EVENT_COMMAND_TOGGLE, selected_microphone(), selected_model_slot());
+        break;
+    case JSTI_TRAY_QUIT:
+        ui.quitting = TRUE;
+        if (ui.window != NULL) gtk_window_close(ui.window);
+        break;
+    case JSTI_TRAY_AVAILABLE: jsti_window_panels_tray(TRUE); break;
+    case JSTI_TRAY_UNAVAILABLE: jsti_window_panels_tray(FALSE); break;
+    default: break;
+    }
+}
+
 static void on_toggle_action(GSimpleAction *action, GVariant *parameter, gpointer data) {
     (void)action; (void)parameter; (void)data;
     emit(JSTI_EVENT_COMMAND_TOGGLE, selected_microphone(), selected_model_slot());
@@ -540,6 +615,10 @@ static gboolean emit_ready(gpointer data) {
     emit(JSTI_EVENT_READY, "", 0);
     return G_SOURCE_REMOVE;
 }
+
+/* Set by --hidden (start at login): the first activation builds the window
+ * without showing it; launching the app again shows it. */
+static gboolean start_hidden;
 
 static void on_activate(GApplication *application, gpointer data) {
     (void)application; (void)data;
@@ -552,7 +631,12 @@ static void on_activate(GApplication *application, gpointer data) {
     apply_models(initial_models.rows, initial_models.count, initial_models.selected);
     ui.suppress = FALSE;
     open_posts();
-    gtk_window_present(ui.window);
+    if (!(ui.flags & JSTI_WINDOW_SMOKE_TEST)) {
+        char tray_error[256];
+        if (jsti_tray_start(ui.app_id, tray_action, tray_error, sizeof tray_error) != 0) jsti_window_panels_tray(FALSE);
+    }
+    if (!start_hidden) gtk_window_present(ui.window);
+    start_hidden = FALSE;
     if (!ui.ready_sent) {
         ui.ready_sent = TRUE;
         /* The smoke test inspects and captures a laid-out, drawn window. */
@@ -565,12 +649,14 @@ static int on_command_line(GApplication *application, GApplicationCommandLine *l
     (void)data;
     gint argc = 0;
     gchar **argv = g_application_command_line_get_arguments(line, &argc);
-    gboolean toggle = FALSE;
+    gboolean toggle = FALSE, hidden = FALSE;
     for (gint index = 1; index < argc; index++) {
         if (g_strcmp0(argv[index], "--toggle") == 0) toggle = TRUE;
+        if (g_strcmp0(argv[index], "--hidden") == 0) hidden = TRUE;
     }
     g_strfreev(argv);
     gboolean remote = g_application_command_line_get_is_remote(line);
+    if (!remote && hidden && ui.window == NULL) start_hidden = TRUE;
     if (!remote || ui.window == NULL) g_application_activate(application);
     /* A remote --toggle drives the running app without raising its window, so
      * focus stays on the field that should receive the text. */
@@ -597,6 +683,7 @@ int32_t jsti_window_run(
     ui.callback = callback;
     ui.context = context;
     ui.flags = flags;
+    ui.app_id = g_strdup(app_id);
     ui.presented_variant = -1;
     initial_models = (RunModels){ .rows = models, .count = model_count, .selected = selected_model };
     GSimpleAction *toggle = g_simple_action_new("toggle-recording", NULL);
@@ -606,6 +693,7 @@ int32_t jsti_window_run(
     g_signal_connect(ui.application, "activate", G_CALLBACK(on_activate), NULL);
     g_signal_connect(ui.application, "command-line", G_CALLBACK(on_command_line), NULL);
     int status = g_application_run(G_APPLICATION(ui.application), argc, argv);
+    jsti_tray_stop();
     close_posts();
     ui.callback = NULL;
     g_clear_object(&ui.application);
@@ -670,6 +758,10 @@ static int32_t post(apply_fn apply, gpointer data, GDestroyNotify destroy) {
     return 0;
 }
 
+int32_t jsti_window_post(jsti_apply_fn apply, gpointer data, GDestroyNotify destroy) {
+    return post(apply, data, destroy);
+}
+
 static void open_posts(void) {
     g_mutex_lock(&post_lock);
     g_atomic_int_set(&loop_running, 1);
@@ -710,6 +802,7 @@ static void update_apply(gpointer pointer) {
         g_clear_pointer(&ui.presented_id, g_free);
     }
     if (update->state >= 0) ui.state = update->state;
+    jsti_tray_set_recording(ui.state == JSTI_STATE_RECORDING);
     refresh_actions();
 }
 
@@ -751,7 +844,9 @@ static Models *models_copy(const JSTIModelRow *rows, size_t count, gint32 select
     g_array_sort_with_data(models->slots, compare_order, orders);
     for (guint index = 0; index < models->slots->len; index++) {
         const JSTIModelRow *row = &rows[g_array_index(models->slots, Slot, index).global];
-        g_ptr_array_add(models->names, row->is_live ? g_strdup_printf("Live · %s", row->name) : g_strdup(row->name));
+        gchar *name = row->is_live ? g_strdup_printf("Live · %s", row->name)
+            : row->is_local ? g_strdup_printf("On this computer · %s", row->name) : g_strdup(row->name);
+        g_ptr_array_add(models->names, name);
     }
     g_array_unref(orders);
     return models;
@@ -1200,10 +1295,11 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     Update clear = { .status = (gchar *)"Self-test complete.", .transcript = (gchar *)"", .has_transcript = TRUE,
                      .state = JSTI_STATE_IDLE };
     update_apply(&clear);
-    if (ui.selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(ui.copy))) {
+    if (ui.selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(ui.copy)) ||
+        gtk_widget_get_sensitive(GTK_WIDGET(ui.read_aloud))) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
-    return 0;
+    return jsti_window_panels_self_test(error, capacity);
 }
 
 /* Renders the window to a PNG for visual review in smoke tests. */

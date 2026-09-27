@@ -314,17 +314,24 @@ if linuxTargetBuild {
         linuxSystemLibrary(
             "CLinuxGStreamer", "gstreamer-app-1.0", apt: ["libgstreamer1.0-dev", "libgstreamer-plugins-base1.0-dev"]
         ),
+        // PBKDF2 and AES-GCM for the iCloud API-key envelope.
+        linuxSystemLibrary("CLinuxGnuTLS", "gnutls", apt: ["libgnutls28-dev"]),
         .target(
             name: "CLinuxSupport",
             dependencies: [
-                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer"
+                "CLinuxAdwaita", "CLinuxGio", "CLinuxPulse", "CLinuxSecret", "CLinuxXTest", "CLinuxGStreamer",
+                "CLinuxGnuTLS"
             ],
             publicHeadersPath: "include",
             cSettings: [.define("_GNU_SOURCE")],
-            // xtst.pc links only libXtst; the core Xlib calls need libX11.
-            linkerSettings: [.linkedLibrary("X11")]
+            // xtst.pc links only libXtst; the core Xlib calls need libX11. whisper.cpp
+            // is opened with dlopen at run time, never linked.
+            linkerSettings: [.linkedLibrary("X11"), .linkedLibrary("dl")]
         ),
-        .target(name: "SpeakLinuxPlatform", dependencies: ["SpeakCore", "CLinuxSupport"]),
+        .target(
+            name: "SpeakLinuxPlatform",
+            dependencies: ["SpeakCore", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync", "CLinuxSupport"]
+        ),
         .target(
             name: "SpeakLinuxWebSocket",
             dependencies: [
@@ -339,13 +346,16 @@ if linuxTargetBuild {
         .executableTarget(
             name: "SpeakLinux",
             dependencies: [
-                "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakLinuxPlatform", "SpeakLinuxWebSocket",
-                "CLinuxSupport"
+                "SpeakCore", "SpeakDesktop", "SpeakDesktopHost", "SpeakDesktopSync", "SpeakSync",
+                "SpeakLinuxPlatform", "SpeakLinuxWebSocket", "CLinuxSupport"
             ]
         ),
         .testTarget(
             name: "SpeakLinuxPlatformTests",
-            dependencies: ["SpeakCore", "SpeakLinuxPlatform", "CLinuxSupport", "SpeakTestSupport"]
+            dependencies: [
+                "SpeakCore", "SpeakDesktop", "SpeakDesktopSync", "SpeakSync", "SpeakLinuxPlatform", "CLinuxSupport",
+                "SpeakTestSupport"
+            ]
         ),
         .testTarget(
             name: "SpeakLinuxWebSocketTests",

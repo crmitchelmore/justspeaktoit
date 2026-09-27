@@ -24,6 +24,13 @@ final class LinuxEventContext: @unchecked Sendable {
     let shortcuts: LinuxShortcuts
     private(set) var gestures: LinuxShortcutGestures!
     lazy var microphones = LinuxMicrophoneMonitor(controller: controller)
+    /// iCloud sync, once configured for a running (not smoke-test) window.
+    var cloudSync: LinuxCloudSync?
+    lazy var profiles = LinuxProfilesCoordinator { [weak self] profiles in
+        guard let self else { return }
+        let controller = self.controller
+        self.enqueueSettings { await controller.saveProfiles(profiles) }
+    }
 
     init(controller: LinuxAppController, smokeTest: Bool) {
         self.controller = controller
@@ -166,6 +173,7 @@ func linuxWindowEvent(
     let event = Int(event)
     if linuxSessionEvent(event, value: value, slot: slot, holder: holder) { return }
     if linuxHistoryEvent(event, value: value, slot: slot, holder: holder) { return }
+    if linuxServiceEvent(event, value: value, slot: slot, holder: holder) { return }
     _ = linuxSettingsEvent(event, value: value, slot: slot, holder: holder)
 }
 

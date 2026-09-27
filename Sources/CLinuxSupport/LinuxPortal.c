@@ -681,3 +681,42 @@ void jsti_remote_desktop_stop(void) {
     char error[128];
     portal_run(remote_stop_work, NULL, error, sizeof error);
 }
+
+/* -------------------------------------------------------------- Background */
+
+typedef struct BackgroundRequest {
+    gboolean autostart;
+    const char *reason;
+    const char *const *command;
+    gboolean granted_autostart;
+} BackgroundRequest;
+
+static int32_t background_work(Portal *state, gpointer data, char *error, size_t capacity) {
+    BackgroundRequest *request = data;
+    GVariantBuilder arguments, options;
+    g_variant_builder_init(&arguments, G_VARIANT_TYPE_TUPLE);
+    g_variant_builder_add(&arguments, "s", "");
+    g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+    g_variant_builder_add(&options, "{sv}", "reason", g_variant_new_string(request->reason != NULL ? request->reason : ""));
+    g_variant_builder_add(&options, "{sv}", "autostart", g_variant_new_boolean(request->autostart));
+    if (request->command != NULL && request->command[0] != NULL) {
+        g_variant_builder_add(&options, "{sv}", "commandline", g_variant_new_strv(request->command, -1));
+    }
+    GVariant *results = portal_request(
+        state, "org.freedesktop.portal.Background", "RequestBackground", &arguments, &options, DIALOG_TIMEOUT_MS,
+        error, capacity);
+    if (results == NULL) return -1;
+    gboolean autostart = FALSE;
+    g_variant_lookup(results, "autostart", "b", &autostart);
+    request->granted_autostart = autostart;
+    g_variant_unref(results);
+    return 0;
+}
+
+int32_t jsti_background_request(
+    int32_t autostart, const char *reason, const char *const *command, int32_t *granted, char *error, size_t capacity) {
+    BackgroundRequest request = { .autostart = autostart != 0, .reason = reason, .command = command };
+    int32_t result = portal_run(background_work, &request, error, capacity);
+    if (result == 0 && granted != NULL) *granted = request.granted_autostart ? 1 : 0;
+    return result;
+}

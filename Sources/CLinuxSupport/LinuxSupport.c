@@ -163,6 +163,21 @@ int32_t jsti_open_path(const char *path, char *error, size_t capacity) {
     return 0;
 }
 
+int32_t jsti_open_uri(const char *uri, char *error, size_t capacity) {
+    if (uri == NULL || !(g_str_has_prefix(uri, "https://") || g_str_has_prefix(uri, "http://"))) {
+        jsti_set_error(error, capacity, "Only web addresses can be opened.");
+        return -1;
+    }
+    GError *failure = NULL;
+    if (!g_app_info_launch_default_for_uri(uri, NULL, &failure)) {
+        jsti_set_error(error, capacity, "Could not open your browser: %s",
+                       failure != NULL ? failure->message : "no browser is set");
+        g_clear_error(&failure);
+        return -1;
+    }
+    return 0;
+}
+
 /* -------------------------------------------------------------- self-test */
 
 int32_t jsti_native_self_test(char *error, size_t capacity) {

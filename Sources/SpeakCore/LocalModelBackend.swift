@@ -116,6 +116,9 @@ public struct LocalModelHostSupport: Equatable, Sendable {
     /// it; sherpa-onnx, llama.cpp and Core ML artefacts stay unavailable.
     /// Whether the runtime DLLs are present is a separate runtime check.
     public static let windows = LocalModelHostSupport(backends: [.whisperCppGGML])
+    /// Linux runs the same whisper.cpp GGML models, loaded from the app's
+    /// bundled runtime (Flatpak, or a package that installs it).
+    public static let linux = LocalModelHostSupport(backends: [.whisperCppGGML])
 
     /// macOS runs WhisperKit's Core ML models in process on every channel.
     /// sherpa-onnx and llama.cpp install or spawn executables, which only

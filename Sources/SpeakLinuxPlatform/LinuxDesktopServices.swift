@@ -75,6 +75,7 @@ public enum LinuxPortal {
     public static let globalShortcuts = "org.freedesktop.portal.GlobalShortcuts"
     public static let remoteDesktop = "org.freedesktop.portal.RemoteDesktop"
     public static let clipboard = "org.freedesktop.portal.Clipboard"
+    public static let background = "org.freedesktop.portal.Background"
 
     /// The interface's version when the desktop portal offers it.
     public static func version(of interface: String) -> UInt32? {

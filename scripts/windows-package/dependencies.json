@@ -18,7 +18,8 @@
     "The SHA-512 and byte count are the packageHash and packageSize published in the nuget.org catalog entry above, converted from base64 to hex; the download is rejected on any mismatch.",
     "Only the x64 tool directory is extracted, into a private job directory. The tools are used to build and sign packages; no SDK file is shipped in any package or artifact.",
     "makeappx.exe and signtool.exe must additionally carry valid Microsoft Authenticode signatures on the Windows runner.",
-    "Microsoft.ArtifactSigning.Client is Microsoft's NuGet distribution of the Azure Artifact Signing SignTool dlib (Azure.CodeSigning.Dlib.dll and its .NET dependencies). Its SHA-512 and size are the nuget.org catalog packageHash and packageSize; only bin/x64 is extracted, only by the signing job, and the dlib must carry a valid Microsoft signature. It is never shipped in a package."
+    "Microsoft.ArtifactSigning.Client is Microsoft's NuGet distribution of the Azure Artifact Signing SignTool dlib (Azure.CodeSigning.Dlib.dll and its .NET dependencies). Its SHA-512 and size are the nuget.org catalog packageHash and packageSize; only bin/x64 is extracted, only by the signing job, and the dlib must carry a valid Microsoft signature. It is never shipped in a package.",
+    "SimplySign Desktop is Certum's Windows client for its SimplySign cloud HSM; the Certum signing job installs it on the disposable runner to expose the Open Source Code Signing certificate to SignTool. The MSI is pinned by SHA-256 and size, computed from the official download on 27 September 2026, and must also carry a valid Authenticode signature. It is never shipped in a package."
   ],
   "artifactSigningClient": {
     "name": "microsoft.artifactsigning.client.1.0.128.nupkg",
@@ -29,5 +30,14 @@
     "toolDirectory": "bin/x64/",
     "dlib": "Azure.CodeSigning.Dlib.dll",
     "license": "LICENSE.md inside the package (Microsoft software licence terms)"
+  },
+  "simplySignDesktop": {
+    "name": "SimplySignDesktop-9.4.4.92-64-bit-en.msi",
+    "url": "https://files.certum.eu/software/SimplySignDesktop/Windows/9.4.4.92/SimplySignDesktop-9.4.4.92-64-bit-en.msi",
+    "sha256": "8ec420fc27798b86078b7bd02fe7152097e1b3005bab51820eaca8e57df84da3",
+    "bytes": 273982464,
+    "version": "9.4.4.92",
+    "executable": "C:\\Program Files\\Certum\\SimplySign Desktop\\SimplySignDesktop.exe",
+    "license": "Certum SimplySign terms of use (https://www.certum.eu/en/simplysign/)"
   }
 }

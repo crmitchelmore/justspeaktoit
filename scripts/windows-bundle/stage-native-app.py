@@ -7,7 +7,8 @@ with testable imports. The output has the layout ``build-windows-app.py``
 produces on the Mac: ``SpeakWindows.exe``, its SwiftPM resource directories
 and ``app-build-metadata.json``, so the bundle builder authenticates either.
 The executable must be an image a native process of the architecture loads
-and must not import a test library.
+and must not import a test library. When ``swift build --product speak`` also
+ran, ``speak.exe`` (the automation CLI) is staged and checked the same way.
 """
 import argparse
 import hashlib
@@ -27,6 +28,7 @@ import windows_pe  # noqa: E402
 import windows_targets  # noqa: E402
 
 APPLICATION = "SpeakWindows.exe"
+COMPANION_EXECUTABLES = ("speak.exe",)
 TEST_MODULES = {"xctest.dll", "testing.dll"}
 
 
@@ -43,6 +45,16 @@ def tool_version(command):
     return (result.stdout or result.stderr).strip() or None
 
 
+def check_executable(data, name, architecture):
+    image = windows_pe.PEImage(data, name)
+    if not image.runs_natively_on(architecture) or image.is_dll:
+        raise StageError("%s is a %s image, not a native %s executable" % (name, image.architecture, architecture))
+    tests = sorted(module for module in image.imports() + image.delay_imports() if module.lower() in TEST_MODULES)
+    if tests:
+        raise StageError(name + " imports " + ", ".join(tests) + "; stage it before building tests")
+    return image
+
+
 def stage(bin_path, output, architecture, commit, versions=None):
     target = windows_targets.target(architecture)
     bin_path, output = pathlib.Path(bin_path).resolve(), pathlib.Path(output).resolve()
@@ -55,14 +67,15 @@ def stage(bin_path, output, architecture, commit, versions=None):
         raise StageError("the staging directory must be new or empty")
     executable = bin_path / APPLICATION
     data = executable.read_bytes()
-    image = windows_pe.PEImage(data, APPLICATION)
-    if not image.runs_natively_on(architecture) or image.is_dll:
-        raise StageError("%s is a %s image, not a native %s executable" % (APPLICATION, image.architecture, architecture))
-    tests = sorted(name for name in image.imports() + image.delay_imports() if name.lower() in TEST_MODULES)
-    if tests:
-        raise StageError(APPLICATION + " imports " + ", ".join(tests) + "; stage it before building tests")
+    image = check_executable(data, APPLICATION, architecture)
+    staged = {APPLICATION: data}
+    for name in COMPANION_EXECUTABLES:
+        if (bin_path / name).is_file():
+            staged[name] = (bin_path / name).read_bytes()
+            check_executable(staged[name], name, architecture)
     output.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(executable, output / APPLICATION)
+    for name in staged:
+        shutil.copy2(bin_path / name, output / name)
     resources = []
     for directory in sorted(bin_path.glob("*.resources")):
         if not directory.is_dir() or directory.is_symlink() or directory.name[:-len(".resources")].endswith("Tests"):
@@ -76,7 +89,8 @@ def stage(bin_path, output, architecture, commit, versions=None):
                 "build": "native Windows SwiftPM build, staged before any test build",
                 "imageArchitecture": image.architecture,
                 "swiftCompiler": versions["swiftCompiler"], "nativeCompiler": versions["nativeCompiler"],
-                "executables": {APPLICATION: hashlib.sha256(data).hexdigest()}, "resources": resources,
+                "executables": {name: hashlib.sha256(content).hexdigest() for name, content in staged.items()},
+                "resources": resources,
                 "runtimeStatus": "Windows execution evidence is recorded separately"}
     (output / "app-build-metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     return metadata

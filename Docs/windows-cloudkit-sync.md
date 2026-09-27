@@ -123,9 +123,15 @@ From Apple's
   `Sources/CWindowsSupport/WindowsHTTP.cpp`, `WindowsLoopback.cpp` and
   `WindowsCrypto.cpp`: the WinHTTP transport, the 127.0.0.1 listener and the
   CNG envelope primitives.
-- `Sources/SpeakWindows/WindowsCloudSync.swift` and
+- `Sources/SpeakWindows/WindowsCloudSync.swift`,
+  `Sources/SpeakWindows/WindowsCloudSyncSignIn.swift` and
   `Sources/CWindowsSupport/WindowsCloudSyncSettings.cpp`: the dialog, sign-in
-  and History updates in the window.
+  (loopback listener or custom-scheme callback) and History updates in the
+  window. The custom-scheme callback arrives through
+  `Sources/SpeakWindows/WindowsActivation.swift` and
+  `Sources/SpeakWindowsPlatform/WindowsActivationChannel.swift`, and waits in
+  `DesktopSignInCallbackInbox` (SpeakDesktopSync), which accepts a token only
+  while a sign-in is waiting.
 
 ## Tests
 
@@ -187,7 +193,7 @@ review. Current behaviour, by kind of record:
 |---|---|
 | Change notifications | Not available to web clients for these subscriptions; Windows polls every five minutes and after each saved transcript. |
 | Expired cursor | No documented error code identifies an expired `syncToken`; it surfaces as a sync error. |
-| Loopback callback | Unverified until the API token is created. If CloudKit Console refuses `http://127.0.0.1:47823/cloudkit-sign-in`, a custom URI scheme through the MSIX manifest is needed instead. |
+| Sign-in callback | Two build-time modes (`CLOUDKIT_WEB_SIGN_IN_CALLBACK`): `loopback` (default) registers `http://127.0.0.1:47823/cloudkit-sign-in`; `custom-scheme` registers `justspeaktoit://cloudkit-sign-in`, delivered by MSIX protocol activation and forwarded to the running window. Both are unverified against CloudKit Console until the API token is created. Portable tests cover both modes' URLs and token parsing and the custom-scheme inbox; Windows loopback tests cover the listener and the activation pipe. |
 | Token size | Credential Manager holds up to 2,560 bytes per credential. A longer web auth token would fail to save and ask for sign-in again. |
 | Keys typed by hand | The "saved by hand" mark is saved before the key. If the sync state cannot be saved, the key is not saved and the error is shown. If Credential Manager then refuses the key, or the app stops between the two, the key saved before stays and counts as typed: a deletion on the Mac no longer removes it, though a newer key from the Mac still replaces it. |
 | Compare Models, iPhone History, settings, Handoff | Not wired on Windows. |

@@ -430,6 +430,18 @@ class ClosureTests(unittest.TestCase):
         self.assertEqual([entry["importer"] for entry in closure["system"]["kernel32.dll"]["importedBy"]],
                          ["swiftCore.dll", "vcruntime140.dll", "_FoundationICU.dll"])
 
+    def test_companion_executables_join_the_same_closure(self):
+        graph = dict(self.GRAPH, **{"speak.exe": (["KERNEL32.dll", "swiftCore.dll", "swiftWinSDK.dll"], []),
+                                    "swiftWinSDK.dll": (["swiftCore.dll"], [])})
+        closure = BUILD.resolve_closure("SpeakWindows.exe", self.read(graph), self.policy, companions=["speak.exe"])
+        self.assertIn("swiftwinsdk.dll", closure["bundled"], "a module only the CLI imports is bundled")
+        self.assertEqual(closure["bundled"]["swiftwinsdk.dll"]["importedBy"], [{"importer": "speak.exe", "kind": "static"}])
+        self.assertIn({"importer": "speak.exe", "kind": "static"}, closure["bundled"]["swiftcore.dll"]["importedBy"])
+        self.assertNotIn("speak.exe", closure["bundled"])
+        tested = dict(graph, **{"speak.exe": (["KERNEL32.dll"], ["XCTest.dll"])})
+        with self.assertRaisesRegex(BUILD.BundleError, "speak.exe imports the test library"):
+            BUILD.resolve_closure("SpeakWindows.exe", self.read(tested), self.policy, companions=["speak.exe"])
+
     def test_unknown_non_system_module_is_refused_with_its_importer(self):
         graph = dict(self.GRAPH)
         graph["swiftCore.dll"] = (["KERNEL32.dll", "libcurl.dll"], [])
@@ -543,6 +555,35 @@ class ApplicationInputTests(unittest.TestCase):
         self.metadata["executables"]["SpeakWindows.exe"] = hashlib.sha256(tested).hexdigest()
         self.write_metadata()
         with self.assertRaisesRegex(BUILD.BundleError, "test-enabled"):
+            BUILD.load_application(self.app, self.policy)
+
+    def test_a_recorded_speak_cli_is_loaded_and_checked_like_the_app(self):
+        self.assertEqual(BUILD.load_application(self.app, self.policy)["companions"], {},
+                         "a build that recorded no CLI bundles none")
+        cli = build_pe(["KERNEL32.dll", "swiftCore.dll"])
+        (self.app / "speak.exe").write_bytes(cli)
+        self.assertEqual(BUILD.load_application(self.app, self.policy)["companions"], {},
+                         "an unrecorded file is never picked up")
+        self.metadata["executables"]["speak.exe"] = hashlib.sha256(cli).hexdigest()
+        self.write_metadata()
+        self.assertEqual(BUILD.load_application(self.app, self.policy)["companions"], {"speak.exe": cli})
+        (self.app / "speak.exe").write_bytes(build_pe(["KERNEL32.dll"]))
+        with self.assertRaisesRegex(BUILD.BundleError, "speak.exe does not match"):
+            BUILD.load_application(self.app, self.policy)
+        tested = build_pe(["KERNEL32.dll"], ["XCTest.dll"])
+        (self.app / "speak.exe").write_bytes(tested)
+        self.metadata["executables"]["speak.exe"] = hashlib.sha256(tested).hexdigest()
+        self.write_metadata()
+        with self.assertRaisesRegex(BUILD.BundleError, "speak.exe imports XCTest.dll"):
+            BUILD.load_application(self.app, self.policy)
+        arm = build_pe(["KERNEL32.dll"], machine=PE.IMAGE_FILE_MACHINE_ARM64)
+        (self.app / "speak.exe").write_bytes(arm)
+        self.metadata["executables"]["speak.exe"] = hashlib.sha256(arm).hexdigest()
+        self.write_metadata()
+        with self.assertRaisesRegex(BUILD.BundleError, "speak.exe is not a Windows x64 executable"):
+            BUILD.load_application(self.app, self.policy)
+        (self.app / "speak.exe").unlink()
+        with self.assertRaisesRegex(BUILD.BundleError, "recorded speak.exe but it is missing"):
             BUILD.load_application(self.app, self.policy)
 
     def test_symlinked_resource_is_refused(self):

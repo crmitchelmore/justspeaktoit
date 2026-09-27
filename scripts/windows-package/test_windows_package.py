@@ -40,8 +40,10 @@ def sha256(data):
 
 
 def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.dll", "KERNEL32.dll"),
-                architecture="x64", extra_sources=None):
-    """Write a bundle directory shaped exactly like build-windows-bundle.py output."""
+                architecture="x64", cli=False, extra_sources=None):
+    """Write a bundle directory shaped exactly like build-windows-bundle.py output.
+
+    ``cli`` adds the speak.exe companion the way the builder records it."""
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     target = windows_msix.windows_targets.target(architecture)
@@ -57,14 +59,18 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
         "README.txt": b"Developer bundle\n",
     }
     sources = {"SpeakWindows.exe": "application", "swiftCore.dll": "swift-runtime", "README.txt": "generated",
-               "licenses/LICENSE-JustSpeakToIt.txt": "application-license"}
+               "licenses/LICENSE-JustSpeakToIt.txt": "application-license", "speak.exe": "application-companion"}
     sources.update(extra_sources or {})
+    companions = {}
+    if cli:
+        entries["speak.exe"] = BUNDLE_TESTS.build_pe(imports=["swiftCore.dll", "KERNEL32.dll"], machine=machine)
+        companions["speak.exe"] = sha256(entries["speak.exe"])
     manifest = {
         "schemaVersion": 1,
         "bundle": {"kind": "unsigned Windows %s developer runtime bundle" % target["displayName"],
                    "architecture": target["bundleArchitecture"], "notInstaller": True, "codeSigned": False},
         "application": {"sourceCommit": commit, "configuration": "release", "appBuiltForTesting": False,
-                        "executableSHA256": sha256(executable)},
+                        "executableSHA256": sha256(executable), "companionExecutables": companions},
         "dependencies": {"bundled": {"swiftcore.dll": {"name": "swiftCore.dll", "source": "swift-runtime",
                                                        "importedBy": [{"importer": "SpeakWindows.exe",
                                                                        "kind": "static"}]}},
@@ -177,6 +183,10 @@ class IdentityTests(unittest.TestCase):
             lambda data: data["identity"].update(processorArchitectures=["x64", "x64"]),
             lambda data: data["identity"].update(processorArchitectures="x64"),
             lambda data: data["application"].update(executionAlias="nested\\alias.exe"),
+            lambda data: data["application"].update(commandLineAlias="JustSpeakToItDeveloper.exe"),
+            lambda data: data["application"].update(commandLineExecutable="other.exe"),
+            lambda data: data["application"].update(protocol="Just Speak"),
+            lambda data: data["application"].pop("protocol"),
         ]
         with tempfile.TemporaryDirectory() as scratch:
             for change in changes:
@@ -235,6 +245,42 @@ class ManifestTests(unittest.TestCase):
         root = ET.fromstring(data)
         self.assertEqual(root.findtext("f:Properties/f:DisplayName", namespaces=windows_msix.NAMESPACES),
                          'Speak <It> & "Quote"')
+
+    def test_links_open_the_app_through_the_release_trains_scheme(self):
+        trains = json.loads((windows_msix.REPOSITORY / "Sources/SpeakCore/Resources/ReleaseTrains.json").read_text(
+            encoding="utf-8"))
+        # Windows builds resolve the Stable train, whose scheme the app parses.
+        self.assertEqual(self.identity["application"]["protocol"], trains["stable"]["urlScheme"])
+        data = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+        ns = windows_msix.NAMESPACES
+        application = ET.fromstring(data).find("f:Applications/f:Application", ns)
+        protocol = application.find(".//uap3:Protocol", ns)
+        self.assertEqual((protocol.get("Name"), protocol.get("Parameters")), ("justspeaktoit", '"%1"'))
+        self.assertEqual(protocol.findtext("uap:DisplayName", namespaces=ns), "Just Speak to It link")
+        for weakened in (data.replace(b'Parameters="&quot;%1&quot;"', b'Parameters="%1 --other"'),
+                         data.replace(b'Name="justspeaktoit"', b'Name="justspeaktoit-alpha"')):
+            with self.assertRaisesRegex(windows_msix.PackageError, "protocol"):
+                windows_msix.check_manifest(weakened, self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+
+    def test_the_speak_alias_is_declared_only_for_a_bundle_carrying_the_cli(self):
+        ns = windows_msix.NAMESPACES
+
+        def aliases(data):
+            return [(extension.get("Executable"), alias.get("Alias"))
+                    for extension in ET.fromstring(data).iter("{%s}Extension" % ns["uap3"])
+                    for alias in extension.iter("{%s}ExecutionAlias" % ns["desktop"])]
+
+        plain = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+        self.assertEqual(aliases(plain), [("SpeakWindows.exe", "JustSpeakToItDeveloper.exe")])
+        with_cli = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer",
+                                                command_line=True)
+        self.assertEqual(aliases(with_cli), [("SpeakWindows.exe", "JustSpeakToItDeveloper.exe"),
+                                             ("speak.exe", "speak.exe")])
+        with self.assertRaisesRegex(windows_msix.PackageError, "execution aliases"):
+            windows_msix.check_manifest(with_cli, self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+        with self.assertRaisesRegex(windows_msix.PackageError, "execution aliases"):
+            windows_msix.check_manifest(plain, self.identity, "0.0.7.1", "CN=Just Speak to It Developer",
+                                        command_line=True)
 
     def test_manifest_that_differs_from_the_request_is_refused(self):
         data = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
@@ -362,6 +408,33 @@ class LayoutTests(unittest.TestCase):
             self.assertEqual((layout / path).read_bytes(), b"MIT License\n" + path.encode())
             self.assertEqual(rows[path]["bundleSource"], "license")
         self.assertEqual(hashes["llama.dll"], sha256((layout / "llama.dll").read_bytes()))
+
+    def test_a_bundle_with_the_speak_cli_puts_it_on_path(self):
+        bundle = make_bundle(self.root / "bundle", cli=True)
+        self.build(bundle, expected_commit=COMMIT)
+        layout = self.root / "out/layout"
+        package_manifest, hashes = windows_msix.verify_layout(layout)
+        self.assertIn("speak.exe", hashes)
+        self.assertEqual(package_manifest["package"]["commandLineAlias"], "speak.exe")
+        self.assertIn(b'Alias="speak.exe"', (layout / "AppxManifest.xml").read_bytes())
+        plain = self.build(make_bundle(self.root / "plain"), output="plain-out")
+        self.assertIsNone(plain["package"]["commandLineAlias"])
+
+    def test_an_unrecorded_or_changed_executable_is_refused(self):
+        def smuggle(entries, manifest):
+            entries["helper.exe"] = BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"])
+        with self.assertRaisesRegex(windows_msix.PackageError, "recorded companions"):
+            self.build(make_bundle(self.root / "smuggled", mutate=smuggle))
+
+        def unrecorded(entries, manifest):
+            entries["speak.exe"] = BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"])
+        with self.assertRaisesRegex(windows_msix.PackageError, "recorded companions"):
+            self.build(make_bundle(self.root / "unrecorded", mutate=unrecorded), output="out-2")
+
+        def swapped(entries, manifest):
+            entries["speak.exe"] = BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll", "USER32.dll"])
+        with self.assertRaisesRegex(windows_msix.PackageError, "recorded native x64"):
+            self.build(make_bundle(self.root / "swapped", mutate=swapped, cli=True), output="out-3")
 
     def test_arm64_bundle_becomes_an_arm64_package_of_the_same_identity(self):
         bundle = make_bundle(self.root / "bundle", architecture="arm64")
@@ -779,7 +852,8 @@ class SigningConfigurationTests(unittest.TestCase):
             self.assertEqual(signing_configuration.main(["--github-output", str(output),
                                                          "--metadata", str(metadata)]), 0)
         self.assertEqual(output.read_text(encoding="utf-8"),
-                         "enabled=true\npublisher=" + SIGNING["WINDOWS_MSIX_PUBLISHER"] + "\n")
+                         "enabled=true\nmethod=azure\npublisher=" + SIGNING["WINDOWS_MSIX_PUBLISHER"]
+                         + "\ntimestamp-url=http://timestamp.acs.microsoft.com\n")
         self.assertEqual(json.loads(metadata.read_text(encoding="utf-8")), decision["metadata"])
         for secret in signing_configuration.SECRETS:
             self.assertNotIn(SIGNING[secret], metadata.read_text(encoding="utf-8") + output.read_text(encoding="utf-8"))

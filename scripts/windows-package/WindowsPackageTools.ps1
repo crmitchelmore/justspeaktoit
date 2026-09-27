@@ -171,13 +171,14 @@ function Get-JstiPackagingTools {
 }
 
 function Read-JstiPackageIdentity([string] $Package) {
-    # Reads the Identity element of the manifest inside an .msix without
-    # installing or unpacking it.
+    # Reads the Identity element of the manifest inside an .msix, or of the
+    # bundle manifest inside an .msixbundle, without installing or unpacking it.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead($Package)
     try {
         $entry = $zip.GetEntry('AppxManifest.xml')
-        if (-not $entry) { throw "$Package has no AppxManifest.xml." }
+        if (-not $entry) { $entry = $zip.GetEntry('AppxMetadata/AppxBundleManifest.xml') }
+        if (-not $entry) { throw "$Package has no AppxManifest.xml or AppxBundleManifest.xml." }
         $reader = New-Object System.IO.StreamReader($entry.Open(), [System.Text.Encoding]::UTF8)
         try { [xml] $manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
     } finally { $zip.Dispose() }
@@ -212,4 +213,26 @@ function Get-JstiArtifactSigningClient {
                                fileVersion = (Get-Item -LiteralPath $dlib).VersionInfo.FileVersion; signer = $signer }
         }
     }
+}
+
+function Get-JstiPackageSigner([string] $Path) {
+    # The signer certificate of an .msix or .msixbundle, read back from
+    # AppxSignature.p7x ('PKCX' followed by a PKCS #7 SignedData blob).
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Add-Type -AssemblyName System.Security
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $entry = $zip.GetEntry('AppxSignature.p7x')
+        if (-not $entry) { throw "$Path has no AppxSignature.p7x." }
+        $stream = New-Object System.IO.MemoryStream
+        $source = $entry.Open()
+        try { $source.CopyTo($stream) } finally { $source.Dispose() }
+        $bytes = $stream.ToArray()
+    } finally { $zip.Dispose() }
+    if ($bytes.Length -lt 5 -or [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4) -ne 'PKCX') {
+        throw 'AppxSignature.p7x does not start with PKCX.'
+    }
+    $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
+    $cms.Decode($bytes[4..($bytes.Length - 1)])
+    return $cms.SignerInfos[0].Certificate
 }

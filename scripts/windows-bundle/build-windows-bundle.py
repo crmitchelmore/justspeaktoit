@@ -7,9 +7,10 @@ installer provenance). For ARM64 they are the native Windows ARM64 build
 staged by ``stage-native-app.py`` and the runtime that ``pin-swift-runtime.py``
 extracted from the pinned ARM64 installer, with its lock. Both use pinned
 official downloads (Microsoft's Visual C++ runtime and licence texts). The
-output is a deterministic ZIP holding the production ``SpeakWindows.exe``, its
-SwiftPM resources, only the runtime DLLs reached from the executable's static
-and delay-load import closure, licence notices and a manifest of hashes and
+output is a deterministic ZIP holding the production ``SpeakWindows.exe``, the
+``speak.exe`` automation CLI when the build recorded one, their SwiftPM
+resources, only the runtime DLLs reached from the executables' static and
+delay-load import closure, licence notices and a manifest of hashes and
 provenance. Every executable and DLL must be an image a native process of the
 bundle's architecture loads. Compiler, SDK, header, import-library, symbol,
 installer and test files are refused.
@@ -41,6 +42,10 @@ import windows_targets  # noqa: E402
 
 LOCAL_RUNTIME_PINS = HERE.parent / "windows-local-runtime" / "dependencies.json"
 APPLICATION = "SpeakWindows.exe"
+# Production executables shipped beside the app when the build records them:
+# the `speak` automation CLI, which the MSIX exposes on PATH as an execution
+# alias. It shares the app's runtime DLLs.
+COMPANION_EXECUTABLES = ("speak.exe",)
 # The build that supplies each architecture's production executable: the Mac
 # cross-build for x64, the native Windows build for ARM64.
 APPLICATION_HOSTS = {"x64": "Darwin", "arm64": "Windows"}
@@ -132,8 +137,11 @@ class Policy:
 
 
 # --- dependency closure -----------------------------------------------------------
-def resolve_closure(root, read_imports, policy, loaded_at_run_time=()):
+def resolve_closure(root, read_imports, policy, loaded_at_run_time=(), companions=()):
     """Walk static and delay-load imports from ``root`` until only system modules remain.
+
+    ``companions`` are further production executables (``speak.exe``) whose
+    imports join the same closure, read with category ``"application"``.
 
     ``read_imports(name, category)`` returns ``(static, delayed)`` module name lists
     for the application (category ``"application"``) or a runtime module. The
@@ -148,7 +156,8 @@ def resolve_closure(root, read_imports, policy, loaded_at_run_time=()):
     expected to show them.
     """
     bundled, system, queue = {}, {}, [(root, "application", False)]
-    seen = {root.lower()}
+    queue += [(name, "application", False) for name in companions]
+    seen = {root.lower()} | {name.lower() for name in companions}
     for name in policy.additional:
         lower = name.lower()
         bundled[lower] = {"name": policy.canonical(name), "source": policy.classify(name),
@@ -294,6 +303,24 @@ def load_application(app_dir, policy, architecture="x64"):
     for module in image.imports() + image.delay_imports():
         if policy.classify(module) == TEST_MODULE:
             raise BundleError("SpeakWindows.exe imports " + module + "; refusing a test-enabled build")
+    companions = {}
+    for name in COMPANION_EXECUTABLES:
+        if name not in metadata.get("executables", {}):
+            continue
+        path = app_dir / name
+        if not path.is_file() or path.is_symlink():
+            raise BundleError("the build recorded %s but it is missing from %s" % (name, app_dir))
+        companion = path.read_bytes()
+        if sha256(companion) != metadata["executables"][name]:
+            raise BundleError(name + " does not match the hash recorded by the build")
+        companion_image = windows_pe.PEImage(companion, name)
+        if not companion_image.runs_natively_on(architecture) or companion_image.is_dll:
+            raise BundleError("%s is not a Windows %s executable (it is %s)" % (
+                name, target["displayName"], companion_image.architecture))
+        for module in companion_image.imports() + companion_image.delay_imports():
+            if policy.classify(module) == TEST_MODULE:
+                raise BundleError(name + " imports " + module + "; refusing a test-enabled build")
+        companions[name] = companion
     resources = {}
     for directory in sorted(app_dir.iterdir()):
         if not directory.name.endswith(".resources") or directory.is_symlink() or not directory.is_dir():
@@ -309,7 +336,7 @@ def load_application(app_dir, policy, architecture="x64"):
             if not path.is_file():
                 raise BundleError("unsupported file type in resources: " + relative)
             resources[check_bundle_path(relative)] = path.read_bytes()
-    return {"metadata": metadata, "executable": data, "resources": resources}
+    return {"metadata": metadata, "executable": data, "companions": companions, "resources": resources}
 
 
 # --- Swift runtime source ---------------------------------------------------------------
@@ -717,9 +744,16 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
     if local_modules and set(policy.local) != set(local_modules):
         raise BundleError("the runtime policy was not loaded with the local runtime modules")
 
+    companions = application.get("companions", {})
+    for name, data in companions.items():
+        companion_image = windows_pe.PEImage(data, name)
+        if not companion_image.runs_natively_on(architecture) or companion_image.is_dll:
+            raise BundleError("%s is not a Windows %s executable (it is %s)" % (
+                name, target["displayName"], companion_image.architecture))
+
     def read_imports(name, category):
         if category == "application":
-            image = windows_pe.PEImage(executable, name)
+            image = windows_pe.PEImage(executable if name == APPLICATION else companions[name], name)
         elif category == SWIFT_RUNTIME:
             image = windows_pe.PEImage(read_swift_module(swift, name)[0], name)
         elif category == MICROSOFT_RUNTIME:
@@ -735,10 +769,14 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
         return image.imports(), image.delay_imports()
 
     closure = resolve_closure(APPLICATION, read_imports, policy,
-                              sorted(module["name"] for module in local_modules.values()))
+                              sorted(module["name"] for module in local_modules.values()), sorted(companions))
     entries = {APPLICATION: executable}
     files = [{"path": APPLICATION, "bytes": len(executable), "sha256": sha256(executable), "source": "application",
               "imageArchitecture": application_image.architecture}]
+    for name, data in sorted(companions.items()):
+        entries[name] = data
+        files.append({"path": name, "bytes": len(data), "sha256": sha256(data), "source": "application-companion",
+                      "imageArchitecture": images[name].architecture})
     for relative, data in sorted(application["resources"].items()):
         entries[relative] = data
         files.append({"path": relative, "bytes": len(data), "sha256": sha256(data), "source": "application-resources"})
@@ -764,7 +802,7 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
                       "fileVersion": version.get("fileVersion"), "imageArchitecture": image.architecture,
                       "provenance": provenance})
     if cross_check is not None:
-        for name in [APPLICATION] + swift_files + microsoft_files + local_files:
+        for name in [APPLICATION] + sorted(companions) + swift_files + microsoft_files + local_files:
             cross_check_with_llvm(cross_check, name, entries[name], images.get(name) or windows_pe.PEImage(entries[name], name), log)
     license_names = []
     for entry in licenses:
@@ -810,7 +848,8 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
                         "target": metadata.get("target"), "appBuiltForTesting": metadata.get("appBuiltForTesting"),
                         "executableSHA256": sha256(executable), "swiftCompiler": metadata.get("swiftCompiler"),
                         "nativeCompiler": metadata.get("nativeCompiler"), "buildHost": metadata.get("host"),
-                        "imageArchitecture": application_image.architecture},
+                        "imageArchitecture": application_image.architecture,
+                        "companionExecutables": {name: sha256(data) for name, data in sorted(companions.items())}},
         "files": files,
         "dependencies": {"bundled": closure["bundled"], "system": closure["system"],
                          "additionalRuntimeModules": policy.additional},

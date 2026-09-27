@@ -23,6 +23,8 @@ on:
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - scripts/websocket-loopback-probe.py
       - scripts/windows-cross/**
       - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
@@ -30,6 +32,7 @@ on:
       - scripts/windows-local-runtime/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
+      - .github/workflows/windows-arm64.yml
       - .github/workflows/windows-local-runtime.yml
   push:
     branches: [main]
@@ -52,6 +55,8 @@ on:
       - Tests/SpeakWindowsPlatformTests/**
       - Tests/SpeakAutomationKitTests/**
       - Tests/SpeakTestSupport/**
+      - scripts/verify-portable-core-boundary.py
+      - scripts/websocket-loopback-probe.py
       - scripts/windows-cross/**
       - scripts/windows-cloudkit/**
       - scripts/windows-bundle/**
@@ -59,6 +64,7 @@ on:
       - scripts/windows-local-runtime/**
       - Resources/AppIcon.iconset/**
       - .github/workflows/windows-cross-proof.yml
+      - .github/workflows/windows-arm64.yml
       - .github/workflows/windows-local-runtime.yml
 
 permissions:
@@ -106,6 +112,8 @@ jobs:
         shell: bash
         env:
           CLOUDKIT_WEB_API_TOKEN: ${{ secrets.CLOUDKIT_WEB_API_TOKEN }}
+          # loopback (default) or custom-scheme; must match the token's Sign in Callback.
+          CLOUDKIT_WEB_SIGN_IN_CALLBACK: ${{ vars.CLOUDKIT_WEB_SIGN_IN_CALLBACK }}
         run: python3 -B scripts/windows-cloudkit/configure-cloudkit-web.py
       - name: Cross-build the Windows app and test suite
         shell: bash
@@ -432,89 +440,218 @@ jobs:
       - name: Report the signing route
         shell: pwsh
         env:
+          WINDOWS_SIGNING_METHOD: ${{ vars.WINDOWS_SIGNING_METHOD }}
+          WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
           SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
         run: |
-          if ($env:SIGNING_ACCOUNT) {
-            Write-Host 'Azure Artifact Signing variables are set: the sign job signs a copy of this package on pushes to main and manual runs.'
+          if ($env:WINDOWS_SIGNING_METHOD -or $env:WINDOWS_MSIX_PUBLISHER -or $env:SIGNING_ACCOUNT) {
+            Write-Host 'Windows signing variables are set: the sign job signs (or prepares for local signing) on pushes to main and manual runs.'
           } else {
-            Write-Host 'Azure Artifact Signing is not configured; this run publishes only the unsigned developer MSIX (windows-developer-msix-unsigned).'
+            Write-Host 'Windows signing is not configured; this run publishes only unsigned developer packages (windows-developer-msix-unsigned, windows-developer-msixbundle-unsigned).'
           }
 
-  # Signs a separately built layout whose publisher is the certificate subject
-  # from WINDOWS_MSIX_PUBLISHER. Runs only in the protected `windows-signing`
-  # environment, never for pull requests, and does nothing but log when the
-  # signing secrets and variables are absent. No key, certificate or client
-  # secret exists in the repository or on the runner: GitHub OIDC signs in to
-  # Entra ID and the key stays in Artifact Signing's HSMs.
-  sign:
-    name: Sign the developer MSIX with Azure Artifact Signing
+  # One .msixbundle for x64 and ARM64. The x64 runtime bundle comes from this
+  # run's Mac cross-build, the ARM64 one from windows-arm64.yml for the same
+  # commit (the two workflows' path filters name each other). The bundle is
+  # unsigned; a test-signed copy is installed on this disposable runner to
+  # show Windows chooses the x64 package from it. The App Installer file and
+  # winget template are previews: nothing is published.
+  package-bundle:
+    name: Bundle x64 and ARM64 into one developer .msixbundle
     needs: compile
+    runs-on: windows-2022
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      actions: read
+    env:
+      BUNDLE_VERSION: 0.0.${{ github.run_number }}.4
+    outputs:
+      arm64-run-id: ${{ steps.arm64.outputs.run-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: windows-runtime-bundle
+          path: bundle-x64
+      - name: Wait for and download the ARM64 runtime bundle of this commit
+        id: arm64
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          ./scripts/windows-package/download-arm64-runtime-bundle.ps1 -HeadSha $env:HEAD_SHA `
+            -Destination (Join-Path $env:GITHUB_WORKSPACE 'bundle-arm64')
+      - name: Build both packages, the bundle and the update-channel preview
+        shell: powershell
+        run: |
+          ./scripts/windows-package/build-windows-release-packages.ps1 -Bundles bundle-x64, bundle-arm64 `
+            -Version $env:BUNDLE_VERSION -ExpectedCommit $env:GITHUB_SHA `
+            -Output (Join-Path $env:RUNNER_TEMP 'release') -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+      - name: Install a test-signed copy and check Windows picks the x64 package
+        shell: powershell
+        run: |
+          $release = Join-Path $env:RUNNER_TEMP 'release'
+          ./scripts/windows-package/test-windows-bundle-install.ps1 `
+            -Bundle (Join-Path $release "JustSpeakToIt-Developer_$($env:BUNDLE_VERSION)_unsigned.msixbundle") `
+            -Packages (Get-ChildItem -LiteralPath $release -Filter '*_unsigned.msix').FullName `
+            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools') `
+            -Evidence (Join-Path $env:RUNNER_TEMP 'bundle-install')
+      - name: Upload the unsigned developer bundle and its update-channel preview
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-developer-msixbundle-unsigned
+          path: |
+            ${{ runner.temp }}/release/*.msixbundle
+            ${{ runner.temp }}/release/*.msix
+            ${{ runner.temp }}/release/*.json
+            ${{ runner.temp }}/release/*.log
+            ${{ runner.temp }}/release/update-channel/
+            ${{ runner.temp }}/bundle-install/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Signs packages built for the certificate subject in WINDOWS_MSIX_PUBLISHER.
+  # Runs only in the protected `windows-signing` environment, never for pull
+  # requests, and only logs when no signing setting exists. The method comes
+  # from signing_configuration.py: Certum SimplySign (primary; the key stays in
+  # Certum's cloud HSM), Certum local signing (CI builds the unsigned packages
+  # the owner signs on their own PC), or Azure Artifact Signing (alternative).
+  # No key or certificate file exists in the repository or on the runner.
+  # Holds signing credentials, so every action is pinned to a reviewed commit.
+  sign:
+    name: Sign the developer packages (Certum or Azure Artifact Signing)
+    needs: [compile, package-bundle]
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: windows-2022
-    timeout-minutes: 30
+    timeout-minutes: 45
     environment: windows-signing
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
       SIGNED_VERSION: 0.0.${{ github.run_number }}.3
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Read the signing configuration
         id: config
         shell: pwsh
         env:
+          WINDOWS_SIGNING_METHOD: ${{ vars.WINDOWS_SIGNING_METHOD }}
+          WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
+          CERTUM_SIMPLYSIGN_USERNAME: ${{ secrets.CERTUM_SIMPLYSIGN_USERNAME }}
+          CERTUM_SIMPLYSIGN_OTP_URI: ${{ secrets.CERTUM_SIMPLYSIGN_OTP_URI }}
+          CERTUM_CERTIFICATE_THUMBPRINT: ${{ vars.CERTUM_CERTIFICATE_THUMBPRINT }}
           AZURE_ARTIFACT_SIGNING_CLIENT_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
           AZURE_ARTIFACT_SIGNING_TENANT_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
           AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID: ${{ secrets.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
           AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
-          WINDOWS_MSIX_PUBLISHER: ${{ vars.WINDOWS_MSIX_PUBLISHER }}
         run: |
           python -B scripts/windows-package/signing_configuration.py --github-output $env:GITHUB_OUTPUT `
             --metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Sign in to Azure with GitHub OIDC
-        if: ${{ steps.config.outputs.enabled == 'true' }}
+        if: ${{ steps.config.outputs.method == 'azure' }}
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         if: ${{ steps.config.outputs.enabled == 'true' }}
         with:
           name: windows-runtime-bundle
-          path: bundle
-      - name: Build, pack and sign a layout for the certificate subject
+          path: bundle-x64
+      - name: Download the ARM64 runtime bundle the bundle job used
         if: ${{ steps.config.outputs.enabled == 'true' }}
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
+          ARM64_RUN: ${{ needs.package-bundle.outputs.arm64-run-id }}
+        run: |
+          gh run download $env:ARM64_RUN --repo $env:GITHUB_REPOSITORY --name windows-runtime-bundle-arm64 --dir bundle-arm64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build both packages and the bundle for the certificate subject
+        if: ${{ steps.config.outputs.enabled == 'true' }}
+        shell: powershell
+        env:
           WINDOWS_MSIX_PUBLISHER: ${{ steps.config.outputs.publisher }}
         run: |
-          $root = Join-Path $env:RUNNER_TEMP 'package-signed'
-          python -B scripts/windows-package/build-windows-package-layout.py --bundle bundle `
-            --expected-commit $env:GITHUB_SHA --version $env:SIGNED_VERSION --publisher $env:WINDOWS_MSIX_PUBLISHER `
-            --output $root
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $unsigned = Join-Path $root "JustSpeakToIt-Developer_$($env:SIGNED_VERSION)_x64_unsigned.msix"
-          ./scripts/windows-package/pack-windows-package.ps1 -Layout (Join-Path $root 'layout') -Output $unsigned `
+          ./scripts/windows-package/build-windows-release-packages.ps1 -Bundles bundle-x64, bundle-arm64 `
+            -Version $env:SIGNED_VERSION -ExpectedCommit $env:GITHUB_SHA -Publisher $env:WINDOWS_MSIX_PUBLISHER `
+            -Output (Join-Path $env:RUNNER_TEMP 'signing') -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
+      - name: Log in to Certum SimplySign
+        id: certum
+        if: ${{ steps.config.outputs.method == 'certum' }}
+        shell: pwsh
+        env:
+          CERTUM_SIMPLYSIGN_USERNAME: ${{ secrets.CERTUM_SIMPLYSIGN_USERNAME }}
+          CERTUM_SIMPLYSIGN_OTP_URI: ${{ secrets.CERTUM_SIMPLYSIGN_OTP_URI }}
+          WINDOWS_MSIX_PUBLISHER: ${{ steps.config.outputs.publisher }}
+          CERTUM_CERTIFICATE_THUMBPRINT: ${{ steps.config.outputs.thumbprint }}
+        run: |
+          ./scripts/windows-package/connect-certum-simplysign.ps1 -Publisher $env:WINDOWS_MSIX_PUBLISHER `
+            -Thumbprint "$env:CERTUM_CERTIFICATE_THUMBPRINT"
+      - name: Sign with the Certum certificate and its RFC 3161 timestamp
+        if: ${{ steps.config.outputs.method == 'certum' }}
+        shell: powershell
+        env:
+          THUMBPRINT: ${{ steps.certum.outputs.thumbprint }}
+          TIMESTAMP_URL: ${{ steps.config.outputs.timestamp-url }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'signing'
+          $tools = Join-Path $env:RUNNER_TEMP 'packaging-tools'
+          $signed = Join-Path $env:RUNNER_TEMP 'signed'
+          $packages = @(Get-ChildItem -LiteralPath $root -Filter '*_unsigned.msix')
+          foreach ($package in $packages) {
+            $layout = Join-Path $root ($package.BaseName -replace '_unsigned$', '') | Join-Path -ChildPath 'layout'
+            ./scripts/windows-package/sign-windows-package.ps1 -Package $package.FullName `
+              -Output (Join-Path $signed ($package.Name -replace '_unsigned\.msix$', '.msix')) -Layout $layout `
+              -ToolCache $tools -CertificateThumbprint $env:THUMBPRINT -TimestampUrl $env:TIMESTAMP_URL -Method 'Certum SimplySign'
+          }
+          $bundle = Get-ChildItem -LiteralPath $root -Filter '*_unsigned.msixbundle' | Select-Object -First 1
+          ./scripts/windows-package/sign-windows-package.ps1 -Package $bundle.FullName `
+            -Output (Join-Path $signed ($bundle.Name -replace '_unsigned\.msixbundle$', '.msixbundle')) `
+            -BundlePackages $packages.FullName -ToolCache $tools -CertificateThumbprint $env:THUMBPRINT `
+            -TimestampUrl $env:TIMESTAMP_URL -Method 'Certum SimplySign'
+      - name: End the SimplySign session
+        if: ${{ always() && steps.config.outputs.method == 'certum' }}
+        shell: pwsh
+        run: ./scripts/windows-package/connect-certum-simplysign.ps1 -Disconnect
+      - name: Sign the x64 package with Azure Artifact Signing
+        if: ${{ steps.config.outputs.method == 'azure' }}
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'signing'
+          $name = "JustSpeakToIt-Developer_$($env:SIGNED_VERSION)_x64"
+          ./scripts/windows-package/sign-windows-package-artifact-signing.ps1 `
+            -Package (Join-Path $root "${name}_unsigned.msix") -Output (Join-Path $env:RUNNER_TEMP "signed/$name.msix") `
+            -Layout (Join-Path $root "$name/layout") -Metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json') `
             -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
-          ./scripts/windows-package/sign-windows-package-artifact-signing.ps1 -Package $unsigned `
-            -Output (Join-Path $root "JustSpeakToIt-Developer_$($env:SIGNED_VERSION)_x64.msix") `
-            -Layout (Join-Path $root 'layout') -Metadata (Join-Path $env:RUNNER_TEMP 'artifact-signing-metadata.json') `
-            -ToolCache (Join-Path $env:RUNNER_TEMP 'packaging-tools')
-      - name: Upload the signed developer package
-        if: ${{ steps.config.outputs.enabled == 'true' }}
-        uses: actions/upload-artifact@v7.0.1
+      - name: Upload the signed developer packages
+        if: ${{ steps.config.outputs.method == 'certum' || steps.config.outputs.method == 'azure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-developer-msix-signed
           path: |
-            ${{ runner.temp }}/package-signed/*_x64.msix
-            ${{ runner.temp }}/package-signed/*.json
-            ${{ runner.temp }}/package-signed/*.log
+            ${{ runner.temp }}/signed/
+            ${{ runner.temp }}/signing/update-channel/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload the packages for signing on your own PC
+        if: ${{ steps.config.outputs.method == 'certum-local' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-msix-for-local-signing
+          path: ${{ runner.temp }}/signing/
           if-no-files-found: error
           retention-days: 14

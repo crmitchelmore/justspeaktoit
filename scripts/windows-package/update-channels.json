@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "notes": [
+    "Windows update channels for App Installer (.appinstaller) and winget. Nothing here publishes anything: the files are generated as workflow artifacts, and a channel reaches users only when its files are uploaded to the locations below by a publication step that does not exist yet.",
+    "developer is the only identity CI builds today (package-identity.json). Its App Installer file is a preview: it points at a release asset that is never created, so it documents the shape without offering updates.",
+    "alpha and stable reserve the Windows identities of the release trains in Docs/alpha-stable-release-trains.md. commissioned stays false until the owner adds a Windows surface to the release-train manifest; building them also needs train-specific data directories in the app (every Windows build uses %LOCALAPPDATA%\\JustSpeakToIt today). Stable publication is never automatic: only the owner's Publish Stable run may upload the stable channel's files.",
+    "feedBase is the GitHub Releases base. Stable's App Installer file lives at feedBase/latest/download/<file>, which only the Stable GitHub Latest release answers; Alpha is never GitHub Latest, so its App Installer file needs its own mutable URL (the WINDOWS_ALPHA_APPINSTALLER_URL variable), as the Mac Alpha appcast resolves the alpha-latest pointer. Package files are immutable versioned release assets.",
+    "WINDOWS_UPDATE_FEED_BASE overrides feedBase for forks and staging."
+  ],
+  "feedBase": "https://github.com/crmitchelmore/justspeaktoit/releases",
+  "hoursBetweenUpdateChecks": 12,
+  "winget": {
+    "packageIdentifier": "crmitchelmore.JustSpeakToIt",
+    "publisher": "Chris Mitchelmore",
+    "packageName": "Just Speak to It",
+    "license": "MIT",
+    "licenseUrl": "https://github.com/crmitchelmore/justspeaktoit/blob/main/LICENSE",
+    "packageUrl": "https://justspeaktoit.com",
+    "publisherUrl": "https://github.com/crmitchelmore",
+    "shortDescription": "Dictation and transcription with your choice of speech models.",
+    "manifestVersion": "1.10.0",
+    "defaultLocale": "en-GB"
+  },
+  "channels": {
+    "developer": {
+      "releaseTrain": null,
+      "commissioned": true,
+      "packageName": "com.justspeaktoit.windows.developer",
+      "fileStem": "JustSpeakToIt-Developer",
+      "appInstaller": "JustSpeakToIt-Developer.appinstaller",
+      "appInstallerLocation": "release-asset",
+      "tagPattern": "windows-developer-{version}",
+      "winget": false
+    },
+    "alpha": {
+      "releaseTrain": "alpha",
+      "commissioned": false,
+      "packageName": "com.justspeaktoit.windows.alpha",
+      "fileStem": "JustSpeakToIt-Alpha",
+      "appInstaller": "JustSpeakToIt-Alpha.appinstaller",
+      "appInstallerLocation": "variable:WINDOWS_ALPHA_APPINSTALLER_URL",
+      "tagPattern": "alpha-build-{build}",
+      "winget": false
+    },
+    "stable": {
+      "releaseTrain": "stable",
+      "commissioned": false,
+      "packageName": "com.justspeaktoit.windows",
+      "fileStem": "JustSpeakToIt",
+      "appInstaller": "JustSpeakToIt.appinstaller",
+      "appInstallerLocation": "github-latest",
+      "tagPattern": "windows-v{version}",
+      "winget": true
+    }
+  }
+}

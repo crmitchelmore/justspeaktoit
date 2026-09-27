@@ -41,6 +41,7 @@ int jsti_window_recording_state();
 namespace {
 constexpr UINT updateMessage = WM_APP + 1;
 constexpr UINT profilesMessage = WM_APP + 17;
+constexpr UINT foregroundMessage = WM_APP + 18;
 constexpr int hotkeyID = 1;
 constexpr int modelRefreshID = 140;
 constexpr int modelStatusID = 141;
@@ -919,6 +920,12 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         if (idleControl(window, profilesID) && IsWindowEnabled(window)) jsti_show_profiles(window);
         else jsti_cancel_profiles_request();
         return 0;
+    case foregroundMessage:
+        // A forwarded link (a second launch) asks the running window forward.
+        if (IsIconic(window)) ShowWindow(window, SW_RESTORE);
+        else ShowWindow(window, SW_SHOW);
+        SetForegroundWindow(window);
+        return 0;
     case updateMessage:
         applyUpdate(window); return 0;
     case WM_HOTKEY:
@@ -1445,6 +1452,17 @@ int jsti_window_update(const char *status, const char *transcript, int recording
 void jsti_window_request_close(void) {
     std::lock_guard<std::mutex> lock(state.mutex);
     if (state.window) PostMessageW(state.window, WM_CLOSE, 0, 0);
+}
+
+void jsti_window_request_foreground(void) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (state.window) PostMessageW(state.window, foregroundMessage, 0, 0);
+}
+
+void jsti_allow_foreground_handoff(void) {
+    // The forwarding launch was started by the foreground browser, so it may
+    // let the running window take the foreground when it shows itself.
+    AllowSetForegroundWindow(ASFW_ANY);
 }
 
 void jsti_window_request_profiles(void) {

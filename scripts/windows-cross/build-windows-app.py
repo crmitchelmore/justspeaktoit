@@ -181,6 +181,10 @@ def main():
     # not change the app artifact's optimisation or internal symbol visibility.
     artifacts = {"SpeakWindows.exe": copy_executable(
         built / "SpeakWindows.exe", output / "SpeakWindows.exe", clang, log)}
+    # The `speak` automation CLI ships beside the app; the MSIX puts it on PATH.
+    print("Cross-building the optimised speak automation CLI", flush=True)
+    run_package_build(command + ["--product", "speak"], environment, log, HERE.parent.parent)
+    artifacts["speak.exe"] = copy_executable(built / "speak.exe", output / "speak.exe", clang, log)
     print("Cross-building optimised tests with testable imports", flush=True)
     run_package_build(command + ["--build-tests", "-Xswiftc", "-enable-testing"],
                       environment, log, HERE.parent.parent)

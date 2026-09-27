@@ -23,6 +23,17 @@ class ConfigureCloudKitWebTests(unittest.TestCase):
         self.assertIn('static let environment = "development"', source)
         self.assertNotIn("= nil", source)
 
+    def test_the_sign_in_callback_defaults_to_loopback_and_can_be_the_custom_scheme(self):
+        self.assertIn('static let signInCallback = "loopback"', self.committed())
+        default = CONFIGURE.configured_source(self.committed(), "synthetic0token0value0abcdef", "production")
+        self.assertIn('static let signInCallback = "loopback"', default)
+        custom = CONFIGURE.configured_source(self.committed(), "synthetic0token0value0abcdef", "production",
+                                             "custom-scheme")
+        self.assertIn('static let signInCallback = "custom-scheme"', custom)
+        for callback in ["https", "Loopback", 'loopback"; exit(1); //', ""]:
+            with self.assertRaises(ValueError):
+                CONFIGURE.configured_source(self.committed(), "synthetic0token0value0abcdef", "production", callback)
+
     def test_values_that_could_break_out_of_a_string_are_refused(self):
         for token in ['abc"; exit(1); //', "short", "has space in it 1234567", "back\\slash\\1234567890"]:
             with self.assertRaises(ValueError):

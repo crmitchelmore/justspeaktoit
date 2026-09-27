@@ -98,7 +98,18 @@ UNIX-socket transport. It offers `status`, `history`, `transcribe`, `listen`,
 `stop` and `mcp`. Automation transcription uses the remembered batch model and
 never adds a History entry. Automation dictation runs the Record pipeline with
 no captured field. `SPEAK_AUTOMATION_PIPE` overrides the pipe name for both
-sides. Save the
+sides. The MSIX puts `speak.exe` on PATH through an execution alias when the
+runtime bundle carries it, which the cross-build and the ARM64 build now
+ensure. `justspeaktoit://` links (the iPhone app's `start`, `stop`, `toggle`
+and `transcribe` vocabulary, plus the iCloud sign-in callback) reach the app
+through MSIX protocol activation; a second launch forwards its link to the
+running window over a per-user activation pipe and exits. See
+[Links, the speak command and single-instance forwarding](windows-installer.md#links-the-speak-command-and-single-instance-forwarding).
+The OpenClaw integration is not ported: it is an iPhone-only feature (the
+macOS app, the parity target, has none), its client is bound to
+`URLSessionWebSocketTask` and the iPhone's conversation UI, and a Windows port
+would mean a new WinHTTP transport and chat surface; `justspeaktoit://openclaw`
+is refused with that reason. Save the
 selected provider's key through the application; each provider uses its canonical
 credential identifier in Windows Credential Manager. The app stores settings and
 durable recording records under
@@ -394,10 +405,10 @@ but must not be presented as the identical Apple-only engine or service.
 | Voice output | Read aloud speaks the displayed History transcript (the version shown) with a canonical Deepgram Aura or Flux voice chosen in a native Voice dialog. Transcripts longer than Deepgram's 2,000-character request limit are spoken as consecutive sentence-bounded segments (shared `SpeechTextSegmenter`). Speech plays through the same `WindowsAudioPlaybackController` as History playback, so only one is ever audible; Play/Pause and Stop act on it, and recording, import, selecting another row, History playback and close stop it, including a segment still being synthesized. The shared Deepgram engine keeps its bounded WAV validation, exclusive private staging and owned-file cleanup. Normal speed only. Cross-compiled locally; awaited-playback controller tests pass under a local Windows ABI runner | Windows CI for this revision, a real Deepgram receipt (including Flux linear16/WAV), physical speaker acceptance, speed control, system voices, other providers, pronunciation editing, clipboard and selected-text sources, and removal of staged files left by an earlier launch |
 | Hands-free dictation | Domain seams exist; no Windows workflow | Native VAD, pre-roll, endpointing and recovery |
 | Credentials | Windows Credential Manager uses canonical identifiers for the seventeen transcription provider families | Physical credential lifecycle acceptance, credential removal UI and remaining providers |
-| Sync and Apple companion flows | History syncs with the Mac App Store build's CloudKit container (`iCloud.com.justspeaktoit`) through CloudKit Web Services: Settings, iCloud sync signs in with an Apple ID in the browser (loopback callback), shows Mac History as audio-less synced copies and uploads Windows History in the Mac's record format. Opt-in, read-only import of the API keys the Mac syncs, unlocked with the Mac's key-sync passphrase. Native WinHTTP transport, CNG envelope, Credential Manager for the rotating token. Portable tests and Windows loopback tests run against a fake CloudKit server; see [iCloud sync](#icloud-sync) | The CloudKit Console steps below, then a live receipt: Mac to Windows and Windows to Mac History create, edit and delete, key import, account switch and token expiry. Settings do not sync (the Mac uses the iCloud key-value store, which has no web API); Compare Models rounds, iPhone History (a separate container) and Handoff are not wired |
-| Automation and integrations | Opt-in `speak` CLI and MCP server over an owner-only local named pipe: status, history, file transcription, and start/stop dictation. It shares the protocol, framing, dispatch and replay with the Mac socket transport. Loopback client/server, CLI path resolution and MCP tests pass under a local Windows ABI runner. The native pipe self-test (runs in `--self-test` and CI) needs real Windows, because the local runner does not enforce first-instance ownership | Windows CI for this revision, a physical check of the Settings menu toggle and of `speak` against a running app, packaging `speak.exe` onto PATH in the MSIX, OpenClaw, deep links, AppleScript/Shortcuts-equivalent surfaces |
+| Sync and Apple companion flows | History syncs with the Mac App Store build's CloudKit container (`iCloud.com.justspeaktoit`) through CloudKit Web Services: Settings, iCloud sync signs in with an Apple ID in the browser (loopback callback by default, or the `justspeaktoit://cloudkit-sign-in` custom-scheme callback through MSIX protocol activation and single-instance forwarding, chosen at build time), shows Mac History as audio-less synced copies and uploads Windows History in the Mac's record format. Opt-in, read-only import of the API keys the Mac syncs, unlocked with the Mac's key-sync passphrase. Native WinHTTP transport, CNG envelope, Credential Manager for the rotating token. Portable tests and Windows loopback tests run against a fake CloudKit server; see [iCloud sync](#icloud-sync) | The CloudKit Console steps below (neither callback form has been tried against Console yet), then a live receipt: Mac to Windows and Windows to Mac History create, edit and delete, key import, account switch and token expiry. Settings do not sync (the Mac uses the iCloud key-value store, which has no web API); Compare Models rounds, iPhone History (a separate container) and Handoff are not wired |
+| Automation and integrations | Opt-in `speak` CLI and MCP server over an owner-only local named pipe: status, history, file transcription, and start/stop dictation. It shares the protocol, framing, dispatch and replay with the Mac socket transport. Loopback client/server, CLI path resolution and MCP tests pass under a local Windows ABI runner. The native pipe self-test (runs in `--self-test` and CI) needs real Windows, because the local runner does not enforce first-instance ownership | Windows CI for this revision, a physical check of the Settings menu toggle and of `speak` against a running app, a browser opening `justspeaktoit://` links on a physical PC, AppleScript/Shortcuts-equivalent surfaces. `speak.exe` is on PATH through an MSIX alias and `justspeaktoit://` links (start, stop, toggle, show, iCloud sign-in callback) reach the running window through protocol activation and a per-user activation pipe, with loopback pipe tests in the platform suite; the bundle job runs `speak --version` through the installed alias. OpenClaw is not ported: it is iPhone-only (not a macOS feature) and bound to `URLSessionWebSocketTask`; its links are refused with that reason |
 | Diagnostics and insights | Shared timing/history/comparison data available | Windows UI, telemetry consent/redaction and end-to-end diagnostic receipts |
-| Distribution and updates | Unsigned developer executable, self-contained runtime bundle (including the on-device runtime), and an unsigned x64 developer MSIX with a CI install/upgrade/uninstall lifecycle job that keeps user data in the portable data directory. A CI `sign` job signs a copy with Azure Artifact Signing through GitHub OIDC once its secrets and variables exist, and otherwise logs that the unsigned package is kept ([windows-installer.md](windows-installer.md#signing)) | First Windows receipt for that job, the owner's Artifact Signing identity validation and a first signed receipt, clean physical Windows 10/11 installs, ARM64, update channel and Alpha/Stable Windows identities |
+| Distribution and updates | Unsigned developer executable, self-contained runtime bundles for x64 and ARM64 (including the on-device runtime and `speak.exe`), unsigned x64 and ARM64 developer MSIX packages with CI install/upgrade/uninstall lifecycle jobs that keep user data in the portable data directory, and one x64+ARM64 `.msixbundle` whose test-signed copy CI installs. The `sign` job signs with a Certum Open Source certificate (SimplySign cloud, timestamped at `time.certum.pl`), builds packages for signing on the owner's PC (`certum-local`), or signs x64 with Azure Artifact Signing, and otherwise keeps the unsigned packages. App Installer files and a winget template are generated for a developer preview and reserved Alpha/Stable channels without publishing anything ([windows-installer.md](windows-installer.md#signing)) | First Windows receipts for the bundle and signing jobs, the owner's Certum purchase, identity validation and a first signed receipt, a real SimplySign login in CI (unverified automation), clean physical Windows 10/11 installs, a hosted App Installer feed, and commissioning Alpha/Stable Windows identities with their own data directories |
 
 Apple-specific UI surfaces such as Siri, Live Activities, the iOS keyboard and
 Apple Watch are not Windows operating-system APIs. Their relevant user journeys
@@ -566,11 +577,15 @@ separate container. The formats, protocol evidence and limits are in
 What the Windows app does:
 
 - **Settings > iCloud sync** opens the dialog. **Sign in** asks CloudKit for
-  Apple's sign-in page, opens it in the default browser (only `https` pages on
-  `apple.com` or `icloud.com`), and listens on
-  `http://127.0.0.1:47823/cloudkit-sign-in` for the redirect carrying
-  `ckWebAuthToken`. The listener runs only during sign-in, for at most ten
-  minutes. The token rotates on every response and is kept in Credential
+  Apple's sign-in page and opens it in the default browser (only `https` pages
+  on `apple.com` or `icloud.com`). The redirect carrying `ckWebAuthToken`
+  returns one of two ways, chosen at build time by
+  `CLOUDKIT_WEB_SIGN_IN_CALLBACK` beside the token: **loopback** (the default)
+  listens on `http://127.0.0.1:47823/cloudkit-sign-in`; **custom-scheme**
+  waits for `justspeaktoit://cloudkit-sign-in`, which the browser hands to the
+  app through the package's protocol activation and a second launch forwards
+  to the running window. Either waits only during sign-in, for at most ten
+  minutes, and a callback with no sign-in waiting is refused. The token rotates on every response and is kept in Credential
   Manager as `com.justspeaktoit/cloudkit.webAuthToken`.
 - **Sync History with my Mac** turns on History sync. The app syncs at launch,
   every five minutes, after each saved transcript, and on **Sync now**.
@@ -622,22 +637,36 @@ to use the Development environment) before starting the app.
    **API Access** in older Console layouts), then **Tokens & Keys**, and add a
    new **API Token**:
    - Name: `Just Speak to It for Windows`.
-   - **Sign in Callback**: choose **URL Redirect** and enter exactly
-     `http://127.0.0.1:47823/cloudkit-sign-in`.
+   - **Sign in Callback**: choose **URL Redirect** and enter exactly the URL
+     for the mode the build uses:
+
+     | `CLOUDKIT_WEB_SIGN_IN_CALLBACK` | URL to register |
+     |---|---|
+     | `loopback` (default, or unset) | `http://127.0.0.1:47823/cloudkit-sign-in` |
+     | `custom-scheme` | `justspeaktoit://cloudkit-sign-in` |
+
+     (An Alpha identity, when one exists, would use
+     `justspeaktoit-alpha://cloudkit-sign-in`.)
    - Allowed origins: leave the default. The Windows client is not a browser
      and sends no `Origin` header.
    - Save it and copy the token value.
 3. **Add the CI secret.** In GitHub, open **crmitchelmore/justspeaktoit >
    Settings > Secrets and variables > Actions > New repository secret**, name
-   it `CLOUDKIT_WEB_API_TOKEN`, and paste the token. The macOS to Windows Swift
-   Proof workflow writes it into the build with
+   it `CLOUDKIT_WEB_API_TOKEN`, and paste the token. For the custom-scheme
+   callback also add the repository variable `CLOUDKIT_WEB_SIGN_IN_CALLBACK`
+   with the value `custom-scheme` (leave it unset for loopback). The macOS to
+   Windows Swift Proof workflow writes both into the build with
    `scripts/windows-cloudkit/configure-cloudkit-web.py` on pushes to `main` and
-   manual runs. Pull request builds never receive it.
+   manual runs. Pull request builds never receive the token.
 4. **Check the callback once.** Install a build made with the secret, sign in
-   from Settings > iCloud sync, and confirm the browser lands on "Signed in".
-   If Console refuses a plain `http://127.0.0.1` callback, record that in issue
-   #1157: the client would then need a custom URI scheme activation through
-   the MSIX manifest, which is not implemented.
+   from Settings > iCloud sync, and confirm the browser lands on "Signed in"
+   (loopback) or offers to open Just Speak to It and the app reports "Signed in
+   to iCloud" (custom-scheme). If Console refuses the plain
+   `http://127.0.0.1` callback, switch the token to the custom-scheme URL and
+   set the variable; if it refuses both, record that in issue #1157. Neither
+   form has been tried against CloudKit Console yet. For local development,
+   `JSTI_CLOUDKIT_WEB_SIGN_IN_CALLBACK=custom-scheme` overrides the build's
+   mode at run time.
 
 ## Verification and performance thresholds
 

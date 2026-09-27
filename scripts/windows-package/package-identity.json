@@ -8,12 +8,17 @@
     "The package family name is derived from name and publisher. The default publisher is a placeholder for the unsigned developer package; an externally supplied signing certificate requires rebuilding with its exact subject as the publisher, which creates a different package family.",
     "The application keeps settings, history and recordings in the real %LOCALAPPDATA%\\JustSpeakToIt directory used by the portable bundle. File-system write virtualisation is disabled so packaged writes are neither redirected into package-private storage nor deleted on uninstall. This needs the unvirtualizedResources restricted capability, which sideloading permits without Store approval.",
     "maxVersionTested is the Windows build on which the lifecycle job actually executes (Windows Server 2022, build 20348). Raise it only with a receipt from a newer build.",
-    "Each package carries one processor architecture, taken from the verified runtime bundle it is built from: x64 or arm64. Both are the same developer identity; Windows installs only the package matching the PC, and a family may later move to an .msixbundle holding both but not back."
+    "Each package carries one processor architecture, taken from the verified runtime bundle it is built from: x64 or arm64. Both are the same developer identity; Windows installs only the package matching the PC, and a family may later move to an .msixbundle holding both but not back.",
+    "application.protocol is the release train's URL scheme that the app answers (ReleaseTrain.current resolves Stable on Windows): MSIX protocol activation passes a justspeaktoit:// link, including the custom-scheme iCloud sign-in callback, to SpeakWindows.exe as its argument, and a second launch forwards it to the running window.",
+    "application.commandLineAlias puts the speak automation CLI on PATH when the runtime bundle carries speak.exe; a bundle without it gets no such alias."
   ],
   "identity": {
     "name": "com.justspeaktoit.windows.developer",
     "developerPublisher": "CN=Just Speak to It Developer",
-    "processorArchitectures": ["x64", "arm64"]
+    "processorArchitectures": [
+      "x64",
+      "arm64"
+    ]
   },
   "presentation": {
     "displayName": "Just Speak to It Developer",
@@ -25,6 +30,10 @@
     "id": "JustSpeakToIt",
     "executable": "SpeakWindows.exe",
     "executionAlias": "JustSpeakToItDeveloper.exe",
+    "commandLineExecutable": "speak.exe",
+    "commandLineAlias": "speak.exe",
+    "protocol": "justspeaktoit",
+    "protocolDisplayName": "Just Speak to It link",
     "windowClass": "JustSpeakToItWindows"
   },
   "targetDeviceFamily": {
@@ -33,8 +42,13 @@
     "maxVersionTested": "10.0.20348.0"
   },
   "capabilities": {
-    "restricted": ["runFullTrust", "unvirtualizedResources"],
-    "device": ["microphone"]
+    "restricted": [
+      "runFullTrust",
+      "unvirtualizedResources"
+    ],
+    "device": [
+      "microphone"
+    ]
   },
   "fileSystem": {
     "writeVirtualization": "disabled",

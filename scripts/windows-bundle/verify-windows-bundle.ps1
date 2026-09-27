@@ -7,8 +7,10 @@ Verifies the ZIP and every extracted file against the hashes recorded on the Mac
 isolates PATH to the Windows system directories, proves the runner cannot satisfy
 the executable's runtime on its own (a copy without the bundled DLLs must fail to
 start), then runs the production executable's self-test and native window smoke
-test while sampling the process’s loaded module paths. Any non-system module must
-come from the bundle directory. Evidence is written even when a check fails, and
+test while sampling the process’s loaded module paths. Any module outside
+%SystemRoot% and Microsoft's own Store packages (Media Foundation codec
+extensions) must come from the bundle directory, and no bundled module may load
+from anywhere else. Evidence is written even when a check fails, and
 every failure is reported before the script exits non-zero. With
 -LocalTranscriptionAudio it also transcribes that WAV on the CPU through the
 bundled whisper.cpp runtime and requires its DLLs to load from the bundle. With
@@ -52,6 +54,18 @@ function Get-ProcessMachine([System.Diagnostics.Process] $process) {
     $information = New-Object byte[] 8
     if (-not $ProcessMachineApi::GetProcessInformation($process.Handle, 9, $information, 8)) { return $null }
     return [int][System.BitConverter]::ToUInt16($information, 0)
+}
+
+# Media Foundation can load codecs Microsoft ships as Store packages, such as
+# Web Media Extensions, from %ProgramFiles%\WindowsApps. Only the package
+# deployment service writes there, after checking the package signature, and
+# 8wekyb3d8bbwe is Microsoft's publisher ID, so such a module is part of Windows
+# rather than something the runner or a toolchain supplied.
+$MicrosoftPackageRoot = Join-Path ([System.Environment]::GetFolderPath('ProgramFiles')) 'WindowsApps'
+function Test-MicrosoftPackageModule([string] $path) {
+    if (-not $path.StartsWith("$MicrosoftPackageRoot\", [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $package = $path.Substring($MicrosoftPackageRoot.Length + 1).Split('\')[0]
+    return $package -match '^Microsoft\.[A-Za-z0-9.]+_[0-9.]+_(x86|x64|arm|arm64|neutral)_[^_\\]*_8wekyb3d8bbwe$'
 }
 
 function Format-Machine($value) {
@@ -217,9 +231,12 @@ try {
     Write-Host "Negative control failed to start as expected (STATUS_DLL_NOT_FOUND)."
 
     # --- 5. Run the bundled production executable and record loaded modules -------
-    function Invoke-Bundled([string] $arguments, [string] $label, [int] $seconds) {
+    function Invoke-Bundled([string] $arguments, [string] $label, [int] $seconds,
+                            [string] $executable = 'SpeakWindows.exe', [bool] $requireStaticClosure = $true) {
+        # The static-closure check applies to the app, whose imports define the
+        # closure; the speak CLI imports a subset of it.
         $parameters = @{
-            FilePath = (Join-Path $bundle 'SpeakWindows.exe')
+            FilePath = (Join-Path $bundle $executable)
             ArgumentList = $arguments
             WorkingDirectory = $emptyWorkingDirectory
             PassThru = $true
@@ -259,13 +276,15 @@ try {
         # Write-Host keeps the log text out of this function's return value.
         Get-Content -LiteralPath (Join-Path $evidenceDirectory "bundle-$label.log") | ForEach-Object { Write-Host $_ }
         Get-Content -LiteralPath (Join-Path $evidenceDirectory "bundle-$label-errors.log") | ForEach-Object { Write-Host $_ }
-        $fromBundle = @(); $fromSystem = @(); $foreign = @()
+        $fromBundle = @(); $fromSystem = @(); $fromPackages = @(); $foreign = @()
         foreach ($path in ($loaded.Values | Sort-Object)) {
             if ($path.StartsWith("$bundle\", [System.StringComparison]::OrdinalIgnoreCase)) {
                 $relative = $path.Substring($bundle.Length + 1).Replace('\', '/')
                 if (-not $expected.ContainsKey($relative.ToLowerInvariant())) { $foreign += $path } else { $fromBundle += $relative }
             } elseif ($path.StartsWith("$systemRoot\", [System.StringComparison]::OrdinalIgnoreCase)) {
                 $fromSystem += $path
+            } elseif (Test-MicrosoftPackageModule $path) {
+                $fromPackages += $path
             } else {
                 $foreign += $path
             }
@@ -274,21 +293,23 @@ try {
         foreach ($entry in $bundled.Values) {
             $static = @($entry.importedBy | Where-Object { $_.kind -eq 'static' }).Count -gt 0
             $observed = @($fromBundle | Where-Object { $_ -ieq $entry.name }).Count -gt 0
-            if ($static -and -not $observed) { $missing += $entry.name }
-            foreach ($path in $fromSystem + $foreign) {
+            if ($requireStaticClosure -and $static -and -not $observed) { $missing += $entry.name }
+            foreach ($path in $fromSystem + $fromPackages + $foreign) {
                 if ([System.IO.Path]::GetFileName($path) -ieq $entry.name) { $foreign += "$path (bundled module loaded from outside the bundle)" }
             }
         }
-        $emulation = @($fromSystem + $foreign | Where-Object {
+        $emulation = @($fromSystem + $fromPackages + $foreign | Where-Object {
             $EmulationModules -contains [System.IO.Path]::GetFileName($_).ToLowerInvariant() })
         $run = [ordered]@{
             label = $label
+            executable = $executable
             arguments = $arguments
             exitCode = $process.ExitCode
             processMachine = Format-Machine $processMachine
             emulationModules = $emulation
             modulesFromBundle = $fromBundle
             modulesFromSystemRoot = $fromSystem
+            modulesFromMicrosoftPackages = $fromPackages
             modulesFromElsewhere = $foreign
             staticallyImportedModulesNotObserved = $missing
         }
@@ -354,6 +375,17 @@ try {
         if (-not (Test-Path -LiteralPath $env:JSTI_UI_SNAPSHOT_PATH)) { throw 'Bundled native client snapshot missing.' }
         Write-Host "UI smoke test loaded $($run.modulesFromBundle.Count) modules from the bundle and $($run.modulesFromSystemRoot.Count) from Windows."
     } catch { $failures.Add($_.Exception.Message) }
+    if (Test-Path -LiteralPath (Join-Path $bundle 'speak.exe')) {
+        try {
+            # The automation CLI the MSIX puts on PATH runs from the same bundle
+            # runtime, with no Swift on PATH and nothing loaded from elsewhere.
+            $run = Invoke-Bundled '--version' 'speak-version' 30 'speak.exe' $false
+            if (-not (Select-String -LiteralPath (Join-Path $evidenceDirectory 'bundle-speak-version.log') -Pattern '^speak ' -Quiet)) {
+                throw 'Bundled speak.exe did not print its version.'
+            }
+            Write-Host "speak.exe loaded $($run.modulesFromBundle.Count) modules from the bundle."
+        } catch { $failures.Add($_.Exception.Message) }
+    }
     if ($LocalTranscriptionAudio) {
         try {
             # The runtime is loaded at run time, so the static-import check above

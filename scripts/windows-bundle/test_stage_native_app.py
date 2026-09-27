@@ -54,6 +54,23 @@ class StageTests(unittest.TestCase):
         written = json.loads((self.output / "app-build-metadata.json").read_text(encoding="utf-8"))
         self.assertEqual(written, metadata)
 
+    def test_a_built_speak_cli_is_staged_and_recorded_beside_the_app(self):
+        cli = BUNDLE_TESTS.build_pe(["KERNEL32.dll", "swiftCore.dll"], machine=ARM64)
+        (self.bin / "speak.exe").write_bytes(cli)
+        metadata = self.stage()
+        self.assertEqual((self.output / "speak.exe").read_bytes(), cli)
+        self.assertEqual(metadata["executables"], {"SpeakWindows.exe": hashlib.sha256(self.executable).hexdigest(),
+                                                   "speak.exe": hashlib.sha256(cli).hexdigest()})
+
+    def test_a_foreign_or_test_enabled_speak_cli_is_refused(self):
+        (self.bin / "speak.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"]))
+        with self.assertRaisesRegex(STAGE.StageError, "speak.exe is a x64 image"):
+            self.stage()
+        (self.bin / "speak.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], ["XCTest.dll"], machine=ARM64))
+        with self.assertRaisesRegex(STAGE.StageError, "speak.exe imports XCTest.dll"):
+            self.stage()
+        self.assertFalse(self.output.exists(), "nothing is staged when a check fails")
+
     def test_foreign_test_enabled_or_misplaced_builds_are_refused(self):
         (self.bin / "SpeakWindows.exe").write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"]))
         with self.assertRaisesRegex(STAGE.StageError, "x64 image, not a native arm64 executable"):

@@ -90,6 +90,12 @@ int jsti_window_set_model_catalog(const JSTIModelRow *rows, size_t count,
  * recording: -1 retains current value, 0 idle, 1 recording, 2 busy (disable controls). */
 int jsti_window_update(const char *status, const char *transcript, int recording);
 void jsti_window_request_close(void);
+/* Thread safe. Restores and raises the running window, for a link a second
+ * launch forwarded. Windows may still flash the taskbar button instead. */
+void jsti_window_request_foreground(void);
+/* Called by a launch that forwards a link before it exits: lets the running
+ * window take the foreground this launch was given. */
+void jsti_allow_foreground_handoff(void);
 /* Copies IDs/names before return; also valid before window_run. Caller may
  * include a synthetic default row with an empty ID. Selection updates are
  * programmatic; a user change emits MICROPHONE_CHANGED with its device ID. */

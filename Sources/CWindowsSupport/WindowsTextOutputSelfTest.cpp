@@ -487,6 +487,10 @@ std::string checkNativePaths(Fixture &state) {
     if (LOWORD(selection) != 10 || HIWORD(selection) != 10) return describe("native caret", "the caret did not follow the insertion");
 
     // 2. Replace a selection with text containing a surrogate pair (RichEdit).
+    // RichEdit binds a fallback font the first time it meets an emoji, which
+    // on a cold machine can outlast the insertion's one-second timeout; bind
+    // it once, untimed, so the step measures insertion rather than font load.
+    setText(host.richEdit, L"\xD83C\xDF99 caf\x00E9");
     setText(host.richEdit, L"\x03B1\x03B2\x03B3");
     if (!host.focus(host.richEdit)) return describe("surrogates", "could not focus the synthetic RichEdit control");
     select(host.richEdit, 1, 2);

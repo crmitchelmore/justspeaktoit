@@ -45,7 +45,7 @@ void shadow(HDC dc, const RECT &rect, int radius, COLORREF color, int spread);
 
 // Fonts, cached per DPI. Glyphs come from Segoe Fluent Icons (Windows 11)
 // or Segoe MDL2 Assets (Windows 10).
-enum class Font { body, bodySemibold, caption, small, smallBold, title, heroTitle, heroSubtitle, chipValue,
+enum class Font { body, bodySemibold, caption, footnote, smallBold, title, heroTitle, heroSubtitle, chipValue,
                   pageTitle, mono, icon, iconLarge };
 HFONT font(Font role, UINT dpi);
 void text(HDC dc, const std::wstring &value, RECT rect, Font role, UINT dpi, COLORREF color, UINT format);

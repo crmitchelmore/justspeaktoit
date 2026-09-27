@@ -181,7 +181,7 @@ HFONT font(Font role, UINT dpi) {
     case Font::body: break;
     case Font::bodySemibold: weight = FW_SEMIBOLD; break;
     case Font::caption: points = 9; break;
-    case Font::small: points = 8; break;
+    case Font::footnote: points = 8; break;
     case Font::smallBold: points = 7; weight = FW_BOLD; break;
     case Font::title: points = 12; weight = FW_SEMIBOLD; break;
     case Font::heroTitle: points = 21; weight = FW_BOLD; break;

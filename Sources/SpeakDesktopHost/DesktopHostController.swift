@@ -93,6 +93,8 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     var cancellationRequested = false
     var liveUpdates: Task<Void, Never>?
     var liveFinalisation: DesktopLiveSession?
+    /// The recording the HUD follows, from Record until its result.
+    var hudRecording: UUID?
     package var outputSlot = DesktopHostOutputState<Platform>()
     // Installed once iCloud sync is configured.
     package var cloudSync = DesktopHostSyncHooks()
@@ -154,7 +156,10 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
             try await startRecording(
                 target: target, deviceID: deviceID, profile: profile, textOutput: textOutput, trigger: trigger
             )
-        } catch { update(error.localizedDescription, state: 0) }
+        } catch {
+            update(error.localizedDescription, state: 0)
+            failHUDStart(error.localizedDescription)
+        }
     }
 
     /// Self-test only: startup without model discovery, which could reach the
@@ -173,7 +178,7 @@ extension DesktopHostController {
                 var empty = stopped.record
                 empty.failure = "No audio was captured."
                 try await saveRecord(empty)
-                update("No audio was captured.", state: 0)
+                reportFailure("No audio was captured.", for: empty.id, headline: "Nothing was recorded")
                 return
             }
             if let live = stopped.live {
@@ -217,7 +222,7 @@ extension DesktopHostController {
             return
         }
         if let record { present(record, output: nil) } else {
-            update("Recording stopped and retained: \(message)", state: 0)
+            reportFailure("Recording stopped and retained: \(message)", for: recordingID, headline: "Recording stopped")
         }
     }
 

@@ -21,12 +21,19 @@
 #endif
 #include <windows.h>
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <limits>
 
 namespace jsti {
+// The latest microphone frame's loudness for the recording HUD's meter: 0 at
+// or below -50 dBFS, 1 at full scale. The capture thread publishes it with one
+// relaxed atomic store per frame; the UI thread reads it while drawing.
+void publishCaptureLevel(const int16_t *samples, size_t count) noexcept;
+float captureLevel() noexcept;
+
 // Exclusive private staging file, opened read/write with DELETE access so a
 // failed producer can remove its own file by handle rather than following a
 // mutable pathname. The caller owns the handle; INVALID_HANDLE_VALUE fails.

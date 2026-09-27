@@ -34,6 +34,7 @@ extension DesktopHostController {
                 let status = "Live transcription… " + hint
                     + (recording.map { profileContext($0.record) } ?? "")
                 update(status, transcript: snapshot.text, state: 1)
+                hud(snapshot.id, .recording(profile: recording?.profile.profileName, liveText: snapshot.text))
             }
         }
     }
@@ -45,6 +46,7 @@ extension DesktopHostController {
         defer { liveFinalisation = nil }
         let options = stopped.profile.postProcessing
         update("Finishing live transcript… Audio is saved locally.", state: 2)
+        hud(record.id, .transcribing(live: true))
         let snapshot = await session.finish()
         record.result = liveResult(snapshot.text, record: record, duration: stopped.duration)
         record.failure = snapshot.error
@@ -59,7 +61,9 @@ extension DesktopHostController {
             try await saveRecord(record)
             if !closed { present(record, output: stopped.output) }
         } catch {
-            update("Live recording retained; history could not be saved: \(error.localizedDescription)", state: 0)
+            reportFailure(
+                "Live recording retained; history could not be saved: \(error.localizedDescription)", for: record.id
+            )
         }
     }
 

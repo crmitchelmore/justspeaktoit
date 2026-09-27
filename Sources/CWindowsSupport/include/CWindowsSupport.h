@@ -168,6 +168,13 @@ int jsti_window_show_page(int page);
 /* General > Theme: 0 follows Windows, 1 light, 2 dark. Safe before or while
  * the window runs; a user choice emits JSTI_EVENT_APPEARANCE with "0"-"2". */
 int jsti_window_set_appearance(int appearance);
+/* The recording HUD: a topmost, click-through card at the bottom centre of the
+ * foreground window's screen that never takes focus. phase is the shared
+ * DesktopHUDState.Phase: 0 hidden, 1 recording (level meter and live_text),
+ * 2 transcribing, 3 post-processing, 4 delivering, 5 success (hides after
+ * 2.4 s), 6 failure (hides after 6 s). Each new phase restarts its clock.
+ * Thread safe and latest-only; -1 for invalid UTF-8, phase or length. */
+int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text);
 /* Shows every page, then the dashboard and History in dark mode, then the
  * dashboard while recording, saving each as `directory`\NN-name.bmp once
  * drawn, then closes the window. Thread safe. */

@@ -41,6 +41,10 @@ enum WindowsHostPlatform: DesktopHostReadAloudPlatform, DesktopHostLocalModelPla
         WindowsNative.insights(all: all, visible: visible)
     }
 
+    package static func hud(_ state: DesktopHUDState) {
+        _ = jsti_window_set_hud(state.phase.rawValue, state.headline, state.subheadline, state.liveText)
+    }
+
     package static func historyPresentation(
         _ record: DesktopRecordingStore.Record, variant: DesktopTranscriptVariant, status: String
     ) {

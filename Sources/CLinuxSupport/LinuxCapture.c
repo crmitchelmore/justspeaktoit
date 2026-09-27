@@ -1,5 +1,6 @@
 #include "LinuxSupportInternal.h"
 
+#include <math.h>
 #include <pulse/pulseaudio.h>
 #include <string.h>
 
@@ -121,11 +122,25 @@ static void capture_emit(jsti_capture *capture, const uint8_t *bytes, size_t len
         capture->filled += take;
         count -= take;
         if (capture->filled == capture->frame_samples) {
+            jsti_capture_publish_level(capture->frame, capture->filled);
             capture->audio(capture->frame, capture->filled, capture->context);
             capture->filled = 0;
         }
     }
 }
+
+static gint latest_level; /* thousandths */
+
+void jsti_capture_publish_level(const int16_t *samples, size_t count) {
+    if (samples == NULL || count == 0) return;
+    double sum = 0;
+    for (size_t index = 0; index < count; ++index) sum += (double)samples[index] * samples[index];
+    const double rms = sqrt(sum / (double)count) / 32768.0;
+    const double decibels = rms > 0 ? 20.0 * log10(rms) : -100.0;
+    g_atomic_int_set(&latest_level, (gint)(CLAMP((decibels + 50.0) / 50.0, 0.0, 1.0) * 1000.0));
+}
+
+double jsti_capture_level(void) { return g_atomic_int_get(&latest_level) / 1000.0; }
 
 static void stream_read(pa_stream *stream, size_t available, void *userdata) {
     (void)available;

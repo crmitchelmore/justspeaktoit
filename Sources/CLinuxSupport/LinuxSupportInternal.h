@@ -61,6 +61,23 @@ struct _GtkWidget *jsti_stat_new(const char *label, struct _GtkLabel **value);
 /* A History badge: `kind` is "created", "audio", "cost", "error" or "context". */
 struct _GtkWidget *jsti_badge_new(const char *kind, const char *icon, const char *title, const char *value);
 
+/* LinuxCapture.c: the latest microphone frame's loudness for the recording
+ * HUD's meter, 0 at or below -50 dBFS to 1 at full scale. The pulse thread
+ * publishes it with one atomic store per frame. */
+void jsti_capture_publish_level(const int16_t *samples, size_t count);
+double jsti_capture_level(void);
+
+/* LinuxHUD.c: the recording HUD, on the main thread. `phase` is the shared
+ * DesktopHUDState.Phase; `live` shows while recording. */
+void jsti_hud_show(int phase, const char *headline, const char *subheadline, const char *live);
+/* Redraws after a light or dark change; destroys the HUD with the window. */
+void jsti_hud_destroy(void);
+/* The HUD's card and shadow, when on screen, for snapshots; NULL otherwise. */
+struct _GtkWidget *jsti_hud_card(void);
+/* Checks the HUD never takes focus, sits at the bottom centre of the work
+ * area on X11 and hides again. On Wayland it only checks nothing is shown. */
+int32_t jsti_hud_self_test(char *error, size_t capacity);
+
 /* LinuxModelStream.c: a model file read on a thread of its own, so the speech
  * runtime, which holds its lock while whisper.cpp loads, never waits on the
  * file itself. `cancelled(data)` ends every wait early. */

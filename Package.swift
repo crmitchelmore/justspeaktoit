@@ -256,9 +256,11 @@ if windowsTargetBuild {
                 .linkedLibrary("oleaut32"), .linkedLibrary("oleacc"),
                 // The Keyboard shortcut dialog's native hotkey control.
                 .linkedLibrary("comctl32"),
-                // The window's drawing (GDI+), dark title bar (DWM) and
-                // dark-mode control themes (UxTheme).
+                // The window's drawing (GDI+), dark title bar (DWM),
+                // dark-mode control themes (UxTheme) and the recording HUD's
+                // per-monitor DPI (Shcore).
                 .linkedLibrary("gdiplus"), .linkedLibrary("dwmapi"), .linkedLibrary("uxtheme"),
+                .linkedLibrary("shcore"),
                 // CNG SHA-256 for downloaded local models.
                 .linkedLibrary("bcrypt")
             ]

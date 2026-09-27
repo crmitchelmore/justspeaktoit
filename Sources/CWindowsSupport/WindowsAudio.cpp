@@ -4,6 +4,7 @@
 #include <mmdeviceapi.h>
 #include <avrt.h>
 #include <array>
+#include <cmath>
 #include <atomic>
 #include <future>
 #include <mutex>
@@ -13,6 +14,22 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+
+namespace {
+std::atomic<float> latestCaptureLevel{0.0f};
+}
+
+void jsti::publishCaptureLevel(const int16_t *samples, size_t count) noexcept {
+    if (!samples || !count) return;
+    double sum = 0;
+    for (size_t index = 0; index < count; ++index) sum += static_cast<double>(samples[index]) * samples[index];
+    const double rms = std::sqrt(sum / static_cast<double>(count)) / 32768.0;
+    const double decibels = rms > 0 ? 20.0 * std::log10(rms) : -100.0;
+    latestCaptureLevel.store(static_cast<float>(std::clamp((decibels + 50.0) / 50.0, 0.0, 1.0)),
+                             std::memory_order_relaxed);
+}
+
+float jsti::captureLevel() noexcept { return latestCaptureLevel.load(std::memory_order_relaxed); }
 
 namespace {
 // Identifies callbacks on both capture and writer threads without shared mutable
@@ -200,7 +217,11 @@ public:
         }
     }
     void flush() {
-        if (used) { callback(samples.data(), used, context); used = 0; }
+        if (used) {
+            jsti::publishCaptureLevel(samples.data(), used);
+            callback(samples.data(), used, context);
+            used = 0;
+        }
     }
 };
 

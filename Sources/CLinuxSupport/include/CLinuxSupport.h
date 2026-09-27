@@ -133,6 +133,14 @@ int32_t jsti_window_set_history(const JSTIHistoryRow *rows, size_t count, const 
 int32_t jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visible);
 /* Applies and shows the saved appearance, indexed as JSTI_EVENT_APPEARANCE. */
 int32_t jsti_window_set_appearance(int32_t appearance);
+/* The recording HUD. phase is the shared DesktopHUDState.Phase: 0 hidden,
+ * 1 recording (level meter and live_text), 2 transcribing, 3 post-processing,
+ * 4 delivering, 5 success (hides after 2.4 s), 6 failure (hides after 6 s);
+ * each new phase restarts its clock. On X11 a click-through card above other
+ * windows at the bottom centre of the active monitor that never takes focus;
+ * on Wayland the result only, as a notification while the window is inactive.
+ * Thread safe; -1 for an invalid phase or UTF-8. */
+int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text);
 /* Shows a JSTI_PAGE_* page, as choosing it in the sidebar does. */
 int32_t jsti_window_show_page(int32_t page);
 /* variant: 0 processed, 1 original, -1 none. */

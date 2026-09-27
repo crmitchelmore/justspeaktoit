@@ -77,6 +77,19 @@ and Record; the status line sits at the bottom of every page.
   **General › Appearance** overrides it (Follow the system, Light, Dark), saved
   as `appearance` in `settings.json` and shared with Windows.
 
+The **recording HUD** (`LinuxHUD.c`) follows each dictation with the phases,
+wording, clock and display times of the shared `DesktopHUDState`, as the Mac's
+bottom-centre card does. On X11 it is an undecorated
+`_NET_WM_WINDOW_TYPE_NOTIFICATION` window kept above others at the bottom
+centre of the active window's monitor, with an empty input region, no input
+focus (`WM_HINTS`) and a zero user time, so a paste still reaches the field
+focused at the shortcut; it shows the microphone level and the latest live
+words. Wayland lets no client place or raise its own window, and a new window
+could take focus from that field, so there the HUD shows nothing while working
+and a desktop notification reports the result when the app window is not
+active. The window self-test checks the X11 properties and placement; the
+screenshot tour saves `13-hud-recording.png` and `14-hud-completed.png`.
+
 A second invocation with `--toggle` starts or stops dictation in the running
 app without raising its window (GApplication forwards the command line), so it
 can be bound to a key in any desktop. The `app.toggle-recording` action does
@@ -207,6 +220,7 @@ proven on a physical desktop.
 | All 31 batch models, OpenRouter discovery, post-processing | Shared code, verified by the portable tests | `swift test` (portable suite) |
 | GTK window, events, record-bound History presentation | Verified headless on X11 and Wayland | `--ui-smoke-test` under Xvfb and headless Weston (`scripts/linux-wayland-smoke.sh`), window self-test, snapshot |
 | Mac layout: sidebar pages, dashboard, History cards, totals, appearance | Verified headless on X11 | Window self-test (every page shown from the sidebar, the selected card holds its transcript, totals shown); `DesktopHistoryPresentationTests`; `--ui-screenshots` pictures of every page in light, dark and recording states (CI artifact). Real desktops and HiDPI **unverified** |
+| Recording HUD | X11: verified headless (window type, no input focus, bottom-centre placement) and under Xvfb + Openbox, where a Zenity field kept focus while it showed; Wayland: result notifications only | Window self-test and screenshot tour; real GNOME/KDE X11 sessions, multiple monitors, fractional scaling and Wayland notifications **unverified** |
 | Microphone capture (libpulse via PipeWire) | Verified with a virtual source | integration check: exact 100 ms frames, non-silent test tone; physical USB/Bluetooth microphones **unverified** |
 | Microphone list and hotplug | Verified (monitors excluded; a new source triggers a refresh) | integration check; the saved choice keeps an "unavailable" row; physical hotplug **unverified** |
 | Secret Service keys | Verified with GNOME Keyring | integration check; KWallet and the Flatpak Secret portal **unverified** |

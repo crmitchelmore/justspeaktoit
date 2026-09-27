@@ -462,6 +462,7 @@ static void on_import(GtkButton *button, gpointer data) {
 
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
+    jsti_hud_destroy();
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
     return FALSE;
@@ -1638,6 +1639,38 @@ int32_t jsti_window_set_appearance(int32_t appearance) {
     return post(appearance_apply, GINT_TO_POINTER(appearance), NULL);
 }
 
+typedef struct HUD {
+    gint32 phase;
+    gchar *headline, *subheadline, *live;
+} HUD;
+
+static void hud_free(gpointer pointer) {
+    HUD *state = pointer;
+    g_free(state->headline);
+    g_free(state->subheadline);
+    g_free(state->live);
+    g_free(state);
+}
+
+static void hud_apply(gpointer pointer) {
+    HUD *state = pointer;
+    jsti_hud_show(state->phase, state->headline, state->subheadline, state->live);
+}
+
+int32_t jsti_window_set_hud(int32_t phase, const char *headline, const char *subheadline, const char *live_text) {
+    if (phase < 0 || phase > 6) return -1;
+    const char *texts[] = { headline, subheadline, live_text };
+    for (size_t index = 0; index < G_N_ELEMENTS(texts); ++index) {
+        if (texts[index] != NULL && !g_utf8_validate(texts[index], -1, NULL)) return -1;
+    }
+    HUD *state = g_new0(HUD, 1);
+    state->phase = phase;
+    state->headline = g_strdup(headline != NULL ? headline : "");
+    state->subheadline = g_strdup(subheadline != NULL ? subheadline : "");
+    state->live = g_strdup(live_text != NULL ? live_text : "");
+    return post(hud_apply, state, hud_free);
+}
+
 static void page_apply(gpointer data) { show_page(GPOINTER_TO_INT(data)); }
 
 int32_t jsti_window_show_page(int32_t page) {
@@ -2083,7 +2116,7 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(ui.copy))) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
-    return 0;
+    return jsti_hud_self_test(error, capacity);
 }
 
 /* ------------------------------------------------------ screenshot tour */
@@ -2120,7 +2153,8 @@ typedef struct Tour {
     gint32 step;
 } Tour;
 
-enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_DONE };
+enum { TOUR_DARK_DASHBOARD = JSTI_PAGE_COUNT, TOUR_DARK_HISTORY, TOUR_RECORDING, TOUR_HUD_RECORDING,
+       TOUR_HUD_COMPLETED, TOUR_DONE };
 
 static gboolean tour_capture(gpointer data);
 
@@ -2132,8 +2166,13 @@ static void tour_show(Tour *tour) {
         show_page(JSTI_PAGE_DASHBOARD);
     } else if (tour->step == TOUR_DARK_HISTORY) {
         show_page(JSTI_PAGE_HISTORY);
+    } else if (tour->step == TOUR_HUD_RECORDING) {
+        jsti_hud_show(1, "Recording", "Capturing audio",
+                      "Could we move the catch-up to Friday? That gives us a little more time");
+    } else if (tour->step == TOUR_HUD_COMPLETED) {
+        jsti_hud_show(5, "Completed", "Saved. Pasted into the original window.", "");
     } else {
-        /* Last, because it replaces the displayed transcript. */
+        /* Late, because it replaces the displayed transcript. */
         Update recording = { .transcript = (gchar *)"Could we move the catch-up to Friday? That gives us a little",
                              .has_transcript = TRUE, .state = JSTI_STATE_RECORDING,
                              .status = (gchar *)"Recording… Press Ctrl+Alt+Space again to stop." };
@@ -2146,6 +2185,8 @@ static void tour_show(Tour *tour) {
 static const char *tour_name(gint32 step) {
     switch (step) {
     case TOUR_RECORDING: return "dashboard-recording";
+    case TOUR_HUD_RECORDING: return "hud-recording";
+    case TOUR_HUD_COMPLETED: return "hud-completed";
     case TOUR_DARK_DASHBOARD: return "dashboard-dark";
     case TOUR_DARK_HISTORY: return "history-dark";
     default: return page_info[step].name;
@@ -2162,6 +2203,22 @@ static gboolean tour_capture(gpointer data) {
     gchar *file = g_strdup_printf("%02d-%s.png", tour->step + 1, tour_name(tour->step));
     gchar *path = g_build_filename(tour->directory, file, NULL);
     char message[256] = { 0 };
+    if (tour->step == TOUR_HUD_RECORDING || tour->step == TOUR_HUD_COMPLETED) {
+        /* The HUD is its own window; X11 only. */
+        GtkWidget *card = jsti_hud_card();
+        if (card != NULL && save_widget_png(card, path, TRUE) != 0) g_printerr("The HUD %s could not be saved.\n", file);
+        g_free(path);
+        g_free(file);
+        tour->step++;
+        if (tour->step < TOUR_DONE) {
+            tour_show(tour);
+        } else {
+            g_free(tour->directory);
+            g_free(tour);
+            gtk_window_close(ui.window);
+        }
+        return G_SOURCE_REMOVE;
+    }
     if (jsti_window_save_snapshot(path, message, sizeof message) != 0) g_printerr("%s\n", message);
     g_free(path);
     g_free(file);

@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "WindowsHUD.hpp"
 #include "WindowsWindowChrome.hpp"
 
 bool jsti_postprocessing_available();
@@ -115,6 +116,7 @@ constexpr int setupMicrophoneID = 431, setupModelID = 432, setupShortcutID = 433
 constexpr int appearanceLabelID = 440, appearanceID = 441, automationID = 442, azureID = 443, cloudSyncID = 444,
     shortcutValueID = 445, githubID = 446, issueID = 447, privacyID = 448;
 constexpr UINT tourMessage = WM_APP + 18, appearanceMessage = WM_APP + 19, pageMessage = WM_APP + 20;
+constexpr UINT hudMessage = WM_APP + 21;
 constexpr UINT_PTR tourTimerID = 90;
 // How each owner-drawn control is drawn.
 enum class Role { label, caption, status, detail, chipValue, statValue, tileValue, value, button, primary, record,
@@ -1315,6 +1317,7 @@ void applyTheme(HWND window) {
     }
     backdrop.dirty = true;
     RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+    jsti::hud::refresh();
 }
 
 void refreshFont(HWND window) {
@@ -1775,11 +1778,13 @@ void importAudio(HWND window) {
 // The screenshot tour: every page, then the dashboard and History in dark
 // mode, then the dashboard while recording. Each step is shown, drawn, then
 // saved as NN-name.bmp beside the others; the window closes afterwards.
-constexpr int tourSteps = pageCount + 3;
+constexpr int tourSteps = pageCount + 5;
 
 std::string tourName(int step) {
     if (step < pageCount) return pageInfo[step].name;
-    return step == pageCount ? "dashboard-dark" : step == pageCount + 1 ? "history-dark" : "dashboard-recording";
+    const char *const extra[] = {"dashboard-dark", "history-dark", "dashboard-recording", "hud-recording",
+                                 "hud-completed"};
+    return extra[step - pageCount];
 }
 
 void tourShow(HWND window, int step) {
@@ -1792,8 +1797,15 @@ void tourShow(HWND window, int step) {
         showPage(window, dashboardPage);
     } else if (step == pageCount + 1) {
         showPage(window, historyPage);
+    } else if (step == pageCount + 3) {
+        jsti::hud::stage(1, L"Recording", L"Capturing audio",
+                         L"Could we move the catch-up to Friday? That gives us a little more time");
+        jsti::hud::apply();
+    } else if (step == pageCount + 4) {
+        jsti::hud::stage(5, L"Completed", L"Saved. Inserted into the original text field.", L"");
+        jsti::hud::apply();
     } else {
-        // Last, because it replaces the displayed transcript.
+        // Late, because it replaces the displayed transcript.
         state.displayedRecording = 1;
         SetDlgItemTextW(window, transcriptID, L"Could we move the catch-up to Friday? That gives us a little");
         SetDlgItemTextW(window, statusID, L"Recording… Press Ctrl+Alt+Space again to stop.");
@@ -1809,7 +1821,14 @@ void tourStep(HWND window) {
     snprintf(name, sizeof name, "%02d-%s.bmp", state.tourStep + 1, tourName(state.tourStep).c_str());
     const std::string path = jsti::utf8(state.tourDirectory) + "\\" + name;
     char error[512] = {};
-    if (jsti_window_save_snapshot(path.c_str(), error, sizeof error) != 0) {
+    std::string hudError;
+    std::wstring widePath;
+    if (state.tourStep >= pageCount + 3) {
+        // The HUD is its own layered window; it is drawn straight to the file.
+        if (!jsti::wide(path.c_str(), widePath) || !jsti::hud::saveSnapshot(widePath, hudError)) {
+            emit(window, JSTI_EVENT_ERROR, hudError.empty() ? "The HUD snapshot path is invalid." : hudError.c_str());
+        }
+    } else if (jsti_window_save_snapshot(path.c_str(), error, sizeof error) != 0) {
         emit(window, JSTI_EVENT_ERROR, error);
     }
     ++state.tourStep;
@@ -1907,6 +1926,9 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     case pageMessage:
         showPage(window, static_cast<int>(wparam));
+        return 0;
+    case hudMessage:
+        jsti::hud::apply();
         return 0;
     case WM_COMMAND:
         if (LOWORD(wparam) >= navBaseID && LOWORD(wparam) < navBaseID + pageCount) {
@@ -2375,6 +2397,7 @@ int jsti_window_run(const char *const *models, size_t count, int selected,
             DestroyWindow(window);
         }
     }
+    jsti::hud::destroy();
     state.font = nullptr;
     state.controls.clear(); state.callback = nullptr; state.context = nullptr;
     if (icon) DestroyIcon(icon);
@@ -2609,6 +2632,19 @@ int jsti_window_set_insights(const JSTIInsights *all, const JSTIInsights *visibl
             if (!state.posted) return -1;
         }
         return 0;
+    } catch (const std::exception &) { return -1; }
+}
+
+int jsti_window_set_hud(int phase, const char *headline, const char *subheadline, const char *live_text) {
+    try {
+        std::wstring title, detail, live;
+        if (!jsti::wide(headline ? headline : "", title) || !jsti::wide(subheadline ? subheadline : "", detail) ||
+            !jsti::wide(live_text ? live_text : "", live) ||
+            !jsti::hud::stage(phase, std::move(title), std::move(detail), std::move(live))) {
+            return -1;
+        }
+        std::lock_guard<std::mutex> lock(state.mutex);
+        return state.window && PostMessageW(state.window, hudMessage, 0, 0) ? 0 : -1;
     } catch (const std::exception &) { return -1; }
 }
 
@@ -3605,6 +3641,7 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         originalBounds.right - originalBounds.left, originalBounds.bottom - originalBounds.top,
         SWP_NOZORDER | SWP_NOACTIVATE);
     showPage(window, originalPage);
+    if (passed) passed = jsti::hud::selfTest(failure);
     return passed ? 0 : jsti::fail(failure, error, errorCapacity);
 }
 

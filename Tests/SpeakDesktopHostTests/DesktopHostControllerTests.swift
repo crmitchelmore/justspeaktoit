@@ -37,9 +37,12 @@ final class FakeLog: @unchecked Sendable {
     private let lock = NSLock()
     private var statuses: [String] = []
     private var clipboard: [String] = []
+    private var hudStates: [DesktopHUDState] = []
     var keys: [String: String] = [:]
 
-    func reset() { lock.withLock { statuses = []; clipboard = []; keys = [:] } }
+    func reset() { lock.withLock { statuses = []; clipboard = []; hudStates = []; keys = [:] } }
+    func hud(_ state: DesktopHUDState) { lock.withLock { hudStates.append(state) } }
+    var huds: [DesktopHUDState] { lock.withLock { hudStates } }
     func status(_ text: String) { lock.withLock { statuses.append(text) } }
     func copy(_ text: String) { lock.withLock { clipboard.append(text) } }
     var allStatuses: [String] { lock.withLock { statuses } }
@@ -55,6 +58,7 @@ enum FakePlatform: DesktopHostPlatform {
 
     static func update(_ status: String, transcript: String?, state: Int32) { FakeLog.shared.status(status) }
     static func recordingState(_ state: Int32) {}
+    static func hud(_ state: DesktopHUDState) { FakeLog.shared.hud(state) }
     static func history(_ records: [DesktopRecordingStore.Record], selected: UUID?, selectRecord: Bool) {}
     static func historyPresentation(
         _ record: DesktopRecordingStore.Record, variant: DesktopTranscriptVariant, status: String

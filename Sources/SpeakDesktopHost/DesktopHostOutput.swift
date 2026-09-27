@@ -68,6 +68,8 @@ extension DesktopHostController {
             }
             if outputSlot.id == identifier { outputSlot = DesktopHostOutputState<Platform>() }
             defer { finishOperation() }
+            // A newer dictation owns the HUD by now if one started; this finishes only its own.
+            finishHUD(recordID, .success(status))
             guard !Task.isCancelled, !closed, recording == nil, selectedHistoryID == recordID else { return }
             update(status, state: 0)
         }

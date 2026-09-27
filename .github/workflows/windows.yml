@@ -229,7 +229,8 @@ jobs:
           Get-Content windows-ui-screenshots-errors.log
           if ($process.ExitCode -ne 0) { throw "The screenshot tour failed: $($process.ExitCode)" }
           $expected = 'dashboard', 'history', 'voice-output', 'general', 'transcription', 'post-processing',
-            'profiles', 'keyboard', 'icloud-sync', 'about', 'dashboard-dark', 'history-dark', 'dashboard-recording'
+            'profiles', 'keyboard', 'icloud-sync', 'about', 'dashboard-dark', 'history-dark', 'dashboard-recording',
+            'hud-recording', 'hud-completed'
           for ($index = 0; $index -lt $expected.Count; $index++) {
             $file = Join-Path $folder ('{0:D2}-{1}.bmp' -f ($index + 1), $expected[$index])
             if (-not (Test-Path $file)) { throw "Missing screenshot $file" }

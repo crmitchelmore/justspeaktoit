@@ -48,6 +48,9 @@ void shadow(HDC dc, const RECT &rect, int radius, COLORREF color, int spread);
 enum class Font { body, bodySemibold, caption, footnote, smallBold, title, heroTitle, heroSubtitle, chipValue,
                   pageTitle, mono, icon, iconLarge };
 HFONT font(Font role, UINT dpi);
+// Segoe UI Variable Text or Segoe UI; Segoe Fluent Icons or Segoe MDL2 Assets.
+const wchar_t *textFace();
+const wchar_t *iconFace();
 void text(HDC dc, const std::wstring &value, RECT rect, Font role, UINT dpi, COLORREF color, UINT format);
 // Height `value` needs at `width`, for wrapped text.
 int measure(HDC dc, const std::wstring &value, int width, Font role, UINT dpi);

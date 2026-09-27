@@ -61,7 +61,7 @@ extension DesktopHostController {
             }
             throw startupFailure
         }
-        update(profileRecordingStatus(profile, trigger: trigger), state: 1)
+        announceRecording(id, profile: profile, trigger: trigger)
     }
 
     func stopCapture() throws -> StoppedRecording? {

@@ -64,6 +64,8 @@ struct Canvas {
     }
 };
 
+} // namespace
+
 const wchar_t *iconFace() {
     static const wchar_t *face = [] {
         HDC screen = GetDC(nullptr);
@@ -97,8 +99,6 @@ const wchar_t *textFace() {
     }();
     return face;
 }
-
-} // namespace
 
 bool startup() {
     if (gdiplusToken) return true;

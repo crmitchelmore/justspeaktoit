@@ -54,6 +54,7 @@ extension DesktopHostController {
                 name: postProcessingCredential(for: options.modelIdentifier)
             )
             update("Polishing transcript… The original is saved in History.", state: 2)
+            hud(record.id, .postProcessing)
             let task = Task {
                 try Task.checkCancellation()
                 return try await DesktopPostProcessing.process(rawText: result.text, options: options, apiKey: key)

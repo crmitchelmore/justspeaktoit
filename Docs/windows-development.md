@@ -339,10 +339,22 @@ window is 980 × 760 at 96 DPI and scales with the monitor's DPI.
   Fluent Icons on Windows 11 and Segoe MDL2 Assets on Windows 10.
 - Common Controls v6 are activated from a private manifest at start-up, so the
   unpackaged executable, the bundle and the MSIX all draw themed controls.
+- **Recording HUD** (`WindowsHUD.cpp`): the Mac's bottom-centre dictation
+  card, with the phases, wording, per-phase clock and display times of the
+  shared `DesktopHUDState` (Recording, Transcribing, Post-processing,
+  Delivering, then Completed for 2.4 s or a failure for 6 s). It is a layered,
+  topmost, click-through tool window that never activates, so insertion still
+  reaches the captured field, drawn with GDI+ at the DPI of the foreground
+  window's monitor. While recording it shows the microphone level (one atomic
+  store per WASAPI frame) and the latest live words. Imports and retries never
+  show it, and a late output can never finish a newer dictation's HUD.
+  `--self-test` checks its styles, that the foreground window is unchanged and
+  that it sits at the bottom centre of the work area.
 
 `SpeakWindows.exe --ui-screenshots <dir>` seeds sample History into a
 throwaway data directory, visits every page, then Dashboard and History in dark
-mode and a recording, and saves each as `NN-name.bmp` through `PrintWindow`.
+mode and a recording, and saves each as `NN-name.bmp` through `PrintWindow`;
+the recording and completed HUD are drawn straight to `hud-*.bmp`.
 The Windows workflow runs it after the smoke test and uploads the images as the
 `windows-ui-screenshots-<sha>` artifact, so each revision's real rendering can
 be reviewed without a Windows machine.
@@ -430,7 +442,7 @@ but must not be presented as the identical Apple-only engine or service.
 
 | Feature | Windows state in this change | Remaining acceptance work |
 |---|---|---|
-| Window and appearance | Mac layout: sidebar pages, brand hero, Dashboard insights and setup, History cards; light, dark or follow Windows; DPI-scaled owner drawing and a CI screenshot tour | Physical review at 100–200% scaling, high contrast, Narrator over the owner-drawn cards, the recording HUD and a notification-area icon like the Mac menu bar extra |
+| Window and appearance | Mac layout: sidebar pages, brand hero, Dashboard insights and setup, History cards; light, dark or follow Windows; DPI-scaled owner drawing; the recording HUD (never activated, click-through, level meter and live words); a CI screenshot tour | Physical review at 100–200% scaling and on several monitors, high contrast, Narrator over the owner-drawn cards and the HUD's announcements, the HUD over full-screen apps, and a notification-area icon like the Mac menu bar extra |
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
 | Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |

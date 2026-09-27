@@ -24,6 +24,7 @@ extension DesktopHostController {
             guard !closed else { throw CancellationError() }
             try checkUploadSize(audio, model: record.modelIdentifier)
             update(transcribingStatus(for: record.modelIdentifier), state: 2)
+            hud(record.id, .transcribing())
             let request = DesktopHostTranscriptionRequest(
                 audio: audio, model: record.modelIdentifier, key: key, duration: duration, language: session.language
             )
@@ -54,10 +55,11 @@ extension DesktopHostController {
             record.failure = cancellationRequested
                 ? "Transcription cancelled. Audio retained." : error.localizedDescription
             do { try await saveRecord(record) } catch {
-                update("History could not be saved: \(error.localizedDescription)", state: 0)
+                reportFailure("History could not be saved: \(error.localizedDescription)", for: record.id)
                 return
             }
-            update(record.failure ?? "Audio retained in History.", state: 0)
+            let failure = record.failure ?? "Audio retained in History."
+            reportFailure(failure, for: record.id, headline: "Transcription failed")
         }
     }
 
@@ -73,10 +75,12 @@ extension DesktopHostController {
         if let failure = record.postProcessingFailure {
             status = "Original transcript saved; post-processing failed. \(failure)"
         }
-        if let output, !transcript.isEmpty, record.failure == nil, record.postProcessingFailure == nil,
-           let started = beginOutput(transcript, output: output, recordID: record.id).status {
-            status = started
+        var start = DesktopHostOutputStart.unavailable
+        if let output, !transcript.isEmpty, record.failure == nil, record.postProcessingFailure == nil {
+            start = beginOutput(transcript, output: output, recordID: record.id)
+            if let started = start.status { status = started }
         }
+        presentHUD(record, status: status, output: start)
         if selectedHistoryID == record.id {
             Platform.recordingState(0)
             Platform.historyPresentation(record, variant: .processed, status: status + profileContext(record))

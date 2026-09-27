@@ -7,7 +7,8 @@ import Foundation
 /// that executes it, and a host exposes only what
 /// `LocalModelHostSupport.executableModels(in:)` admits. Every entry here needs
 /// an installable runtime (sherpa-onnx or llama.cpp): macOS offers them only in
-/// Developer ID builds, and no Windows local runtime exists yet.
+/// Developer ID builds. Windows bundles llama.cpp and offers the GGUF entries
+/// `LlamaCppModels` pins to verified bytes; it has no sherpa-onnx runtime.
 public extension ModelCatalog {
     /// Downloadable sherpa-onnx streaming sources: Parakeet v3 first, then
     /// Nemotron, then lightweight Zipformer models. WhisperKit live models come

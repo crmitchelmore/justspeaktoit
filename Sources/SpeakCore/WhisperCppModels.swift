@@ -34,7 +34,9 @@ public struct LocalModelFileArtifact: Hashable, Sendable {
     }
 }
 
-/// A catalogue Whisper entry that whisper.cpp is qualified to serve.
+/// A catalogue Whisper entry that whisper.cpp is qualified to serve, or a
+/// GGML file the user imported from Hugging Face (then `catalogueID` is its
+/// `local/whispercpp/huggingface/...` identifier and it is never live).
 ///
 /// This is not a second model list. Every entry names an existing
 /// `ModelCatalog.localTranscription` identifier (the one saved in settings,
@@ -52,8 +54,33 @@ public struct WhisperCppModel: Hashable, Sendable {
     public let quantization: String
     public let multilingual: Bool
     public let artifact: LocalModelFileArtifact
+    /// Whether this model is qualified for local live transcription through
+    /// the sliding-window streamer (`WhisperCppModels.liveQualification`).
+    /// A model that is not qualified is never offered for live use.
+    public let liveQualified: Bool
+
+    public init(
+        catalogueID: String, displayName: String, summary: String, quantization: String, multilingual: Bool,
+        artifact: LocalModelFileArtifact, liveQualified: Bool = false
+    ) {
+        self.catalogueID = catalogueID
+        self.displayName = displayName
+        self.summary = summary
+        self.quantization = quantization
+        self.multilingual = multilingual
+        self.artifact = artifact
+        self.liveQualified = liveQualified
+    }
 
     public var backend: LocalModelBackend { .whisperCppGGML }
+
+    /// The live picker identifier, `local/streaming/whispercpp/<name>`, for a
+    /// qualified model; `nil` otherwise. It names the same downloaded file as
+    /// `catalogueID`, so one download serves both modes.
+    public var liveIdentifier: String? {
+        guard liveQualified, let name = catalogueID.split(separator: "/").last else { return nil }
+        return WhisperCppModels.liveIdentifierPrefix + name
+    }
 }
 
 /// Pinned GGML weights for the catalogue Whisper entries whisper.cpp serves.
@@ -77,6 +104,20 @@ public enum WhisperCppModels {
     /// are admitted with their subdomains (a leading dot).
     static let huggingFaceHosts: Set<String> = ["huggingface.co", ".huggingface.co", ".hf.co"]
 
+    /// Live identifiers share the `local/streaming/` namespace the Apple apps
+    /// use for streaming sources, so they never collide with a batch entry.
+    public static let liveIdentifierPrefix = "local/streaming/whispercpp/"
+
+    /// Live qualification rule: the sliding-window streamer re-decodes the
+    /// unconfirmed audio about once a second, so a model qualifies only when
+    /// a whole 30-second whisper.cpp window decodes on a CPU well inside that
+    /// step. The Windows CI job streams the JFK sample through tiny and base
+    /// at real-time pace on a GPU-less runner and fails on a missing phrase
+    /// or a decode slower than the stream. Small and Large v3 Turbo take
+    /// several seconds per window on a CPU, so they stay batch-only; a
+    /// promotion needs a receipt from that job.
+    public static let liveQualification = "Qualified by the Windows CI local live self-test on a CPU-only runner."
+
     static let provenance = "OpenAI Whisper weights converted to GGML by the whisper.cpp project "
         + "(huggingface.co/\(repository) at revision \(revision))"
 
@@ -85,13 +126,13 @@ public enum WhisperCppModels {
         model(
             Pin(catalogueID: "local/whisperkit/tiny", displayName: "Whisper Tiny", file: "ggml-tiny.bin",
                 quantization: "f16", bytes: 77_691_713,
-                sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"),
+                sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21", live: true),
             summary: "Smallest on-device Whisper model: fastest, lowest accuracy."
         ),
         model(
             Pin(catalogueID: "local/whisperkit/base", displayName: "Whisper Base", file: "ggml-base.bin",
                 quantization: "f16", bytes: 147_951_465,
-                sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"),
+                sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe", live: true),
             summary: "Balanced on-device Whisper model for everyday dictation."
         ),
         model(
@@ -113,6 +154,16 @@ public enum WhisperCppModels {
         return all.first { $0.catalogueID == lowered }
     }
 
+    /// The live-qualified model behind a `local/streaming/whispercpp/...`
+    /// identifier; `nil` for anything else, including an unqualified model.
+    public static func model(forLiveIdentifier identifier: String) -> WhisperCppModel? {
+        let lowered = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return all.first { $0.liveIdentifier == lowered }
+    }
+
+    /// Live-qualified models, in catalogue order.
+    public static var live: [WhisperCppModel] { all.filter(\.liveQualified) }
+
     private struct Pin {
         let catalogueID: String
         let displayName: String
@@ -120,6 +171,7 @@ public enum WhisperCppModels {
         let quantization: String
         let bytes: Int64
         let sha256: String
+        var live = false
     }
 
     private static func model(_ pin: Pin, summary: String) -> WhisperCppModel {
@@ -131,7 +183,8 @@ public enum WhisperCppModels {
             artifact: LocalModelFileArtifact(
                 url: url, filename: pin.file, byteCount: pin.bytes, sha256: pin.sha256, license: "MIT",
                 provenance: provenance
-            )
+            ),
+            liveQualified: pin.live
         )
     }
 }

@@ -30,7 +30,7 @@ final class LocalModelHostSupportTests: XCTestCase {
     func testWindowsExposesOnlyWhisperCppQualifiedCatalogueEntries() throws {
         let windows = LocalModelHostSupport.windows
 
-        XCTAssertEqual(windows.backends, [.whisperCppGGML])
+        XCTAssertEqual(windows.backends, [.whisperCppGGML, .llamaCppGGUF])
         let qualified = Set(WhisperCppModels.all.map(\.catalogueID))
         XCTAssertEqual(
             windows.executableModels(in: transcription).map(\.id),
@@ -38,13 +38,20 @@ final class LocalModelHostSupportTests: XCTestCase {
             "Catalogue order, and only entries with pinned GGML weights"
         )
         XCTAssertTrue(windows.executableModels(in: streaming).isEmpty)
-        XCTAssertTrue(windows.executableModels(in: postProcessing).isEmpty)
+        // GGUF cleanup models run through the bundled llama.cpp; the desktop
+        // projection further requires a `LlamaCppModels` pin for each.
+        XCTAssertEqual(windows.executableModels(in: postProcessing), postProcessing)
+        XCTAssertEqual(
+            postProcessing.map(\.id).filter { LlamaCppModels.model(for: $0) != nil },
+            LlamaCppModels.all.map(\.identifier)
+        )
         // Imported Core ML records decode everywhere; they never gain a
         // whisper.cpp route by sharing a name with a catalogue entry.
         XCTAssertTrue(windows.executableModels(in: try Self.importedTranscriptionModels()).isEmpty)
-        for backend in [LocalModelBackend.whisperKitCoreML, .sherpaOnnx, .llamaCppGGUF] {
+        for backend in [LocalModelBackend.whisperKitCoreML, .sherpaOnnx] {
             XCTAssertFalse(windows.canExecute(backend))
         }
+        XCTAssertTrue(windows.canExecute(.llamaCppGGUF))
         for model in windows.executableModels(in: transcription) {
             XCTAssertEqual(windows.preferredBackend(for: model), .whisperCppGGML)
         }

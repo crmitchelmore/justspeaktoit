@@ -480,27 +480,12 @@ final class LocalPostProcessingModelManager: ObservableObject {
     """
   }
 
-  nonisolated private static let localEngineConstraint =
-    "Local engine constraint: never enter thinking mode, emit <think> tags, include reasoning, or ask questions."
+  // The constraint and output sanitiser are canonical in SpeakCore, shared
+  // with the Windows llama.cpp host.
+  nonisolated private static let localEngineConstraint = LocalLanguageModelPrompt.localEngineConstraint
 
   nonisolated static func sanitizedModelOutput(_ output: String) -> String {
-    output
-      .replacingOccurrences(
-        of: #"(?is)<think\b[^>]*>.*?</think>"#,
-        with: "",
-        options: .regularExpression
-      )
-      .replacingOccurrences(
-        of: #"(?is)<think\b[^>]*>.*"#,
-        with: "",
-        options: .regularExpression
-      )
-      .replacingOccurrences(
-        of: #"(?i)</think>"#,
-        with: "",
-        options: .regularExpression
-      )
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    LocalLanguageModelPrompt.sanitizedOutput(output)
   }
 
   #if !APP_STORE

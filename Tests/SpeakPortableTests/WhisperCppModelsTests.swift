@@ -69,4 +69,26 @@ final class WhisperCppModelsTests: XCTestCase {
         XCTAssertEqual(WhisperCppModels.model(forCatalogueID: " LOCAL/WhisperKit/Base ")?.displayName, "Whisper Base")
         XCTAssertNil(WhisperCppModels.model(forCatalogueID: "local/whisperkit/huggingface/x/y"))
     }
+
+    func testOnlyQualifiedModelsHaveLiveIdentifiers() {
+        // Promoting a model to live needs a CI receipt from the local live
+        // self-test; this list changes only with that evidence.
+        XCTAssertEqual(WhisperCppModels.live.map(\.catalogueID), ["local/whisperkit/tiny", "local/whisperkit/base"])
+        XCTAssertEqual(
+            WhisperCppModels.live.compactMap(\.liveIdentifier),
+            ["local/streaming/whispercpp/tiny", "local/streaming/whispercpp/base"]
+        )
+        for model in WhisperCppModels.all where !model.liveQualified {
+            XCTAssertNil(model.liveIdentifier, model.catalogueID)
+        }
+        XCTAssertEqual(
+            WhisperCppModels.model(forLiveIdentifier: " Local/Streaming/WhisperCpp/Base ")?.catalogueID,
+            "local/whisperkit/base"
+        )
+        XCTAssertNil(WhisperCppModels.model(forLiveIdentifier: "local/streaming/whispercpp/small"))
+        XCTAssertNil(WhisperCppModels.model(forLiveIdentifier: "local/whisperkit/tiny"))
+        // Live identifiers never collide with a catalogue or streaming source.
+        let existing = Set(ModelCatalog.localTranscription.map(\.id) + ModelCatalog.localStreamingSources.map(\.id))
+        XCTAssertTrue(existing.isDisjoint(with: WhisperCppModels.live.compactMap(\.liveIdentifier)))
+    }
 }

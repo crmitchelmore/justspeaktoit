@@ -935,8 +935,20 @@ class AssemblyTests(unittest.TestCase):
             self.assertEqual(row["source"], BUILD.LOCAL_RUNTIME)
         self.assertIn("concrt140.dll", entries)
         self.assertIn("licenses/LICENSE-whisper.cpp.txt", entries)
+        self.assertEqual(entries["licenses/LICENSE-llama.cpp.txt"], b"MIT llama licence fixture")
         notices = entries["THIRD-PARTY-NOTICES.txt"].decode()
         self.assertIn("whisper.cpp " + LOCAL_PINS["whisperCpp"]["version"], notices)
+        self.assertIn("llama.cpp " + LOCAL_PINS["llamaCpp"]["tag"] + " (commit " + LOCAL_PINS["llamaCpp"]["commit"]
+                      + "): llama.dll", notices)
+        self.assertIn("licenses/LICENSE-llama.cpp.txt", notices)
+        whisper_line = next(line for line in notices.splitlines() if line.startswith("whisper.cpp "))
+        self.assertNotIn("llama.dll", whisper_line)
+        self.assertIn("On-device post-processing: llama.cpp " + LOCAL_PINS["llamaCpp"]["tag"],
+                      entries["README.txt"].decode())
+        llama = manifest["sources"]["localInferenceRuntime"]["llamaCpp"]
+        self.assertEqual((llama["commit"], llama["tag"], llama["ggmlVersion"]),
+                         (LOCAL_PINS["llamaCpp"]["commit"], LOCAL_PINS["llamaCpp"]["tag"], "0.23.0"))
+        self.assertIn("llama.dll", manifest["sources"]["localInferenceRuntime"]["modules"])
         self.assertIn("vulkan-1.dll is not redistributed", notices)
         self.assertEqual(manifest["sources"]["localInferenceRuntime"]["commit"], LOCAL_PINS["whisperCpp"]["commit"])
         self.assertNotIn("vulkan-1.dll", entries)
@@ -1050,6 +1062,7 @@ LOCAL_GRAPH = {
     "ggml-cpu-sse42.dll": (["ggml-base.dll"], []),
     "ggml-cpu-haswell.dll": (["ggml-base.dll"], []),
     "ggml-cpu-icelake.dll": (["ggml-base.dll"], []),
+    "llama.dll": (["ggml.dll", "ggml-base.dll", "KERNEL32.dll", "MSVCP140.dll", "VCRUNTIME140.dll"], []),
 }
 # The ARM64 build has one CPU backend and no Vulkan backend.
 LOCAL_ARM64_GRAPH = {
@@ -1057,12 +1070,25 @@ LOCAL_ARM64_GRAPH = {
     "ggml.dll": (["ggml-base.dll", "KERNEL32.dll"], []),
     "ggml-base.dll": (["KERNEL32.dll", "msvcp140.dll"], []),
     "ggml-cpu.dll": (["ggml-base.dll", "KERNEL32.dll"], []),
+    "llama.dll": (["ggml.dll", "ggml-base.dll", "KERNEL32.dll", "MSVCP140.dll", "VCRUNTIME140.dll"], []),
 }
 MACHINES = {"x64": PE.IMAGE_FILE_MACHINE_AMD64, "arm64": PE.IMAGE_FILE_MACHINE_ARM64}
 
 
+def llama_manifest(pins, architecture, **overrides):
+    """The llamaCpp block build-whisper-runtime.py records for a system-ggml build."""
+    llama = pins["llamaCpp"]
+    block = {"repository": llama["repository"], "tag": llama["tag"], "commit": llama["commit"],
+             "cmakeArguments": pins["architectures"][architecture]["llamaCmakeArguments"],
+             "ggmlSource": "whisper.cpp build (LLAMA_USE_SYSTEM_GGML)", "ggmlTreeSHA256": "a" * 64,
+             "ggmlVersion": llama["ggmlVersion"],
+             "license": {"name": "LICENSE-llama.cpp.txt", "sha256": llama["licenseSHA256"], "spdx": "MIT"}}
+    block.update(overrides)
+    return block
+
+
 def write_local_runtime(root, graph=LOCAL_GRAPH, pins=LOCAL_PINS, architecture="x64", machine=None,
-                        **manifest_overrides):
+                        llama=None, llama_licence=b"MIT llama licence fixture", **manifest_overrides):
     runtime = root / "runtime"
     runtime.mkdir(parents=True)
     files = []
@@ -1073,18 +1099,22 @@ def write_local_runtime(root, graph=LOCAL_GRAPH, pins=LOCAL_PINS, architecture="
                       "imports": static, "delayImports": delayed})
     licence = b"MIT licence fixture"
     (runtime / "LICENSE-whisper.cpp.txt").write_bytes(licence)
+    if llama_licence is not None:
+        (runtime / "LICENSE-llama.cpp.txt").write_bytes(llama_licence)
     pins = json.loads(json.dumps(pins))
     pins["whisperCpp"]["licenseSHA256"] = hashlib.sha256(licence).hexdigest()
+    pins["llamaCpp"]["licenseSHA256"] = hashlib.sha256(b"MIT llama licence fixture").hexdigest()
     pins_path = root / "pins.json"
     pins_path.write_text(json.dumps(pins), encoding="utf-8")
     target = pins["architectures"][architecture]
     sdk = target["vulkanSdk"]
-    manifest = {"schemaVersion": 2, "runtime": "whisper.cpp", "architecture": architecture,
+    manifest = {"schemaVersion": 3, "runtime": "whisper.cpp", "architecture": architecture,
                 "version": pins["whisperCpp"]["version"],
                 "commit": pins["whisperCpp"]["commit"], "repository": pins["whisperCpp"]["repository"],
                 "cmakeArguments": target["cmakeArguments"], "compiler": "MSVC 19.44" if sdk else "Clang 22.1.8",
                 "vulkanSdk": None if sdk is None else {key: sdk[key] for key in ("version", "sha256", "bytes")},
-                "files": files, "pinsSHA256": hashlib.sha256(pins_path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
+                "files": files, "llamaCpp": llama_manifest(pins, architecture, **(llama or {})),
+                "pinsSHA256": hashlib.sha256(pins_path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
     manifest.update(manifest_overrides)
     (root / "runtime-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return pins_path
@@ -1123,6 +1153,39 @@ class LocalRuntimeTests(unittest.TestCase):
             pins = write_local_runtime(pathlib.Path(other), graph=graph)
             with self.assertRaisesRegex(BUILD.BundleError, "incomplete: ggml-vulkan.dll"):
                 BUILD.load_local_runtime(pathlib.Path(other), pins)
+
+    def test_llama_is_authenticated_like_the_whisper_dlls(self):
+        pins = write_local_runtime(self.root)
+        runtime = BUILD.load_local_runtime(self.root, pins)
+        llama = runtime["modules"]["llama.dll"]["provenance"]
+        self.assertEqual((llama["runtime"], llama["commit"], llama["version"]),
+                         ("llama.cpp", LOCAL_PINS["llamaCpp"]["commit"], LOCAL_PINS["llamaCpp"]["tag"]))
+        self.assertEqual(runtime["modules"]["whisper.dll"]["provenance"]["runtime"], "whisper.cpp")
+        fallback = LOCAL_PINS["architectures"]["x64"]["llamaFallbackCmakeArguments"]
+        cases = [
+            ({"llama": {"commit": "0" * 40}}, "llamaCpp commit"),
+            ({"llama": {"tag": "b1"}}, "llamaCpp tag"),
+            ({"llama": {"ggmlVersion": "0.22.0"}}, "llamaCpp ggmlVersion"),
+            ({"llama": {"cmakeArguments": ["-DLLAMA_USE_SYSTEM_GGML=OFF"]}}, "not a pinned llama.cpp configuration"),
+            ({"llama": {"ggmlTreeSHA256": None}}, "shared ggml tree digest"),
+            ({"llama_licence": b"changed"}, "llama.cpp licence is missing or differs"),
+            ({"llama_licence": None}, "llama.cpp licence is missing or differs"),
+            ({"graph": {name: value for name, value in LOCAL_GRAPH.items() if name != "llama.dll"}},
+             "incomplete: llama.dll"),
+            ({"llamaCpp": None}, "does not record its llama.cpp build"),
+        ]
+        for overrides, message in cases:
+            with self.subTest(overrides=sorted(overrides)), tempfile.TemporaryDirectory() as other:
+                pins = write_local_runtime(pathlib.Path(other), **overrides)
+                with self.assertRaisesRegex(BUILD.BundleError, message):
+                    BUILD.load_local_runtime(pathlib.Path(other), pins)
+        # The fallback configuration (llama.cpp's own, identical ggml) is accepted and recorded.
+        with tempfile.TemporaryDirectory() as other:
+            pins = write_local_runtime(pathlib.Path(other), llama={
+                "cmakeArguments": fallback, "ggmlSource": "llama.cpp tree identical to whisper.cpp's"})
+            runtime = BUILD.load_local_runtime(pathlib.Path(other), pins)
+            self.assertEqual(runtime["modules"]["llama.dll"]["provenance"]["ggmlSource"],
+                             "llama.cpp tree identical to whisper.cpp's")
 
     def test_arm64_runtime_is_one_native_cpu_backend_without_vulkan(self):
         pins = write_local_runtime(self.root, graph=LOCAL_ARM64_GRAPH, architecture="arm64")

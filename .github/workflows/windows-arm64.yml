@@ -135,7 +135,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: local-models
-          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift', 'Sources/SpeakCore/LlamaCppModels.swift') }}
 
       - name: Build native Windows ARM64 executable
         id: native-build
@@ -258,6 +258,32 @@ jobs:
             -- $exe --local-transcription-self-test $env:JSTI_WHISPER_TEST_AUDIO --expect $pins.whisperCpp.fixture.expectedPhrase
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Stream the JFK sample through local live transcription natively
+        id: local-live-transcription
+        if: ${{ !cancelled() && steps.production.outcome == 'success' }}
+        timeout-minutes: 10
+        run: |
+          $exe = (Resolve-Path windows-arm64-app/SpeakWindows.exe).Path
+          $pins = Get-Content scripts/windows-local-runtime/dependencies.json -Raw | ConvertFrom-Json
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            run --label local-live-transcription --timeout 480 --stdout windows-arm64-local-live-tiny.log `
+            --stderr windows-arm64-local-live-tiny-errors.log --expect-output 'Local live transcription self-test passed' `
+            -- $exe --local-live-self-test $env:JSTI_WHISPER_TEST_AUDIO --expect $pins.whisperCpp.fixture.expectedPhrase `
+            --model local/streaming/whispercpp/tiny
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Polish a transcript natively with the pinned local LLM
+        id: local-post-processing
+        if: ${{ !cancelled() && steps.production.outcome == 'success' }}
+        timeout-minutes: 12
+        run: |
+          $exe = (Resolve-Path windows-arm64-app/SpeakWindows.exe).Path
+          python -B scripts/windows-bundle/verify-native-execution.py --architecture arm64 --evidence $env:NATIVE_EVIDENCE `
+            run --label local-post-processing --timeout 600 --stdout windows-arm64-local-post-processing.log `
+            --stderr windows-arm64-local-post-processing-errors.log --expect-output 'Local post-processing self-test passed' `
+            -- $exe --local-post-processing-self-test --model local/post-processing/smollm2-360m-instruct-q4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Stage developer executable with provenance
         id: developer-stage
         if: ${{ !cancelled() && steps.native-tests.outcome == 'success' && steps.websocket-probe.outcome == 'success' && steps.native-smoke.outcome == 'success' }}
@@ -274,6 +300,8 @@ jobs:
             nativeExecution = 'windows-arm64-native-execution.json'
             webSocketRuntimeProbe = '${{ steps.websocket-probe.outcome }}'
             localTranscription = '${{ steps.local-transcription.outcome }}'
+            localLiveTranscription = '${{ steps.local-live-transcription.outcome }}'
+            localPostProcessing = '${{ steps.local-post-processing.outcome }}'
           } | ConvertTo-Json | Set-Content (Join-Path $destination 'build-metadata.json') -Encoding utf8
           @"
           Just Speak to It - Windows ARM64 developer build
@@ -328,6 +356,8 @@ jobs:
             windows-arm64-websocket-tests.xml
             windows-arm64-websocket-*.log
             windows-arm64-local-transcription*.log
+            windows-arm64-local-live-*.log
+            windows-arm64-local-post-processing*.log
           if-no-files-found: ignore
           retention-days: 14
 
@@ -416,7 +446,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: local-models
-          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift', 'Sources/SpeakCore/LlamaCppModels.swift') }}
       # No Swift setup action runs in this job. The script isolates PATH, proves
       # the executable cannot start without the bundled DLLs, records loaded
       # modules and requires every run to be a native ARM64 process.
@@ -429,7 +459,7 @@ jobs:
             -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `
             -LocalTranscriptionAudio local-runtime/fixtures/jfk.wav `
             -LocalTranscriptionPhrase $pins.whisperCpp.fixture.expectedPhrase `
-            -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models')
+            -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models') -LocalPostProcessing
       - name: Upload bundle execution evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1

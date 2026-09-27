@@ -11,8 +11,10 @@ test while sampling the process’s loaded module paths. Any non-system module m
 come from the bundle directory. Evidence is written even when a check fails, and
 every failure is reported before the script exits non-zero. With
 -LocalTranscriptionAudio it also transcribes that WAV on the CPU through the
-bundled whisper.cpp runtime and requires its DLLs to load from the bundle.
-Every run records the machine Windows reports for the process; an ARM64 bundle
+bundled whisper.cpp runtime and requires its DLLs to load from the bundle. With
+-LocalPostProcessing it also polishes a transcript on the CPU with the pinned
+local LLM through the bundled llama.cpp runtime and requires llama.dll and the
+shared ggml DLLs to load from the bundle. Every run records the machine Windows reports for the process; an ARM64 bundle
 must run as a native ARM64 process with no x64 emulation module loaded.
 #>
 [CmdletBinding()]
@@ -24,7 +26,11 @@ param(
     # transcribe, the phrase it must contain and a model cache folder.
     [string] $LocalTranscriptionAudio,
     [string] $LocalTranscriptionPhrase,
-    [string] $LocalModelDirectory
+    [string] $LocalModelDirectory,
+    # Optional on-device post-processing check through the bundled llama.cpp
+    # runtime, with the catalogue model it downloads into LocalModelDirectory.
+    [switch] $LocalPostProcessing,
+    [string] $LocalPostProcessingModel = 'local/post-processing/smollm2-360m-instruct-q4'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -366,6 +372,23 @@ try {
             if (-not @($run.modulesFromBundle | Where-Object { $_ -like 'ggml-cpu*.dll' }).Count) { $absent += 'a ggml-cpu backend' }
             if ($absent.Count) { throw "On-device transcription did not load $($absent -join ', ') from the bundle." }
             Write-Host "On-device transcription loaded $($run.modulesFromBundle.Count) modules from the bundle."
+        } catch { $failures.Add($_.Exception.Message) }
+    }
+    if ($LocalPostProcessing) {
+        try {
+            # llama.dll is loaded at run time too: require it and the shared ggml from the bundle.
+            Remove-Item Env:JSTI_WHISPER_RUNTIME_DIRECTORY -ErrorAction SilentlyContinue
+            if ($LocalModelDirectory) { $env:JSTI_LOCAL_MODEL_DIRECTORY = $LocalModelDirectory }
+            $env:JSTI_WHISPER_CPU_ONLY = '1'
+            $run = Invoke-Bundled "--local-post-processing-self-test --model `"$LocalPostProcessingModel`"" 'local-post-processing' 600
+            if (-not (Select-String -LiteralPath (Join-Path $evidenceDirectory 'bundle-local-post-processing.log') -Pattern 'Local post-processing self-test passed' -Quiet)) {
+                throw 'Bundled on-device post-processing success marker missing.'
+            }
+            $runtimeModules = @('llama.dll', 'ggml.dll', 'ggml-base.dll')
+            $absent = @($runtimeModules | Where-Object { $name = $_; -not @($run.modulesFromBundle | Where-Object { $_ -ieq $name }).Count })
+            if (-not @($run.modulesFromBundle | Where-Object { $_ -like 'ggml-cpu*.dll' }).Count) { $absent += 'a ggml-cpu backend' }
+            if ($absent.Count) { throw "On-device post-processing did not load $($absent -join ', ') from the bundle." }
+            Write-Host "On-device post-processing loaded $($run.modulesFromBundle.Count) modules from the bundle."
         } catch { $failures.Add($_.Exception.Message) }
     }
 } catch {

@@ -49,7 +49,7 @@ RESERVED_NAMES = {"con", "prn", "aux", "nul"} | {"com%d" % n for n in range(1, 1
 ALLOWED_DOWNLOAD_HOSTS = {"download.visualstudio.microsoft.com", "raw.githubusercontent.com"}
 SYSTEM_MODULE, SWIFT_RUNTIME, MICROSOFT_RUNTIME, TEST_MODULE, UNKNOWN_MODULE = (
     "system", "swift-runtime", "microsoft-runtime", "test", "unknown")
-# whisper.cpp DLLs the app loads at run time for on-device transcription.
+# whisper.cpp and llama.cpp DLLs the app loads at run time for on-device transcription and post-processing.
 LOCAL_RUNTIME = "local-inference-runtime"
 
 
@@ -444,14 +444,41 @@ def load_microsoft_runtime(bundle_path, lock, log, architecture="x64"):
             "productName": properties.get("ProductName"), "skipped": skipped}
 
 
-# --- local inference runtime (whisper.cpp) -------------------------------------------------
+# --- local inference runtime (whisper.cpp and llama.cpp) ----------------------------------
+LLAMA_MODULE = "llama.dll"
+
+
+def check_llama_identity(manifest, pins, target):
+    """The manifest's llama.cpp build must be the pinned commit, built one of the two pinned ways.
+
+    ``llamaCmakeArguments`` links llama.dll against the whisper.cpp build's
+    ggml; ``llamaFallbackCmakeArguments`` configures llama.cpp's own ggml tree,
+    which the runtime build has proven identical. Either way the ggml DLLs
+    shipped are the whisper.cpp build's.
+    """
+    llama, recorded = pins.get("llamaCpp"), manifest.get("llamaCpp")
+    if llama is None:
+        raise BundleError("no llama.cpp runtime is pinned")
+    if not isinstance(recorded, dict):
+        raise BundleError("the local runtime manifest does not record its llama.cpp build")
+    for key in ("repository", "tag", "commit", "ggmlVersion"):
+        if recorded.get(key) != llama[key]:
+            raise BundleError("local runtime manifest llamaCpp %s is %r; expected %r" % (key, recorded.get(key), llama[key]))
+    allowed = [target["llamaCmakeArguments"], target["llamaFallbackCmakeArguments"]]
+    if recorded.get("cmakeArguments") not in allowed:
+        raise BundleError("local runtime manifest llamaCpp cmakeArguments are not a pinned llama.cpp configuration")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(recorded.get("ggmlTreeSHA256"))):
+        raise BundleError("local runtime manifest llamaCpp does not record the shared ggml tree digest")
+    return recorded
+
+
 def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS, architecture="x64"):
-    """Authenticate a whisper.cpp runtime build against its manifest and the repository pins.
+    """Authenticate a whisper.cpp and llama.cpp runtime build against its manifest and the repository pins.
 
     The DLLs are built on Windows by scripts/windows-local-runtime/build-whisper-runtime.py.
     Every file must match the manifest's size and SHA-256 and be a native DLL
     for ``architecture``, and the manifest must name exactly that
-    architecture's pinned commit, CMake arguments, Vulkan SDK (or none) and pin file.
+    architecture's pinned commits, CMake arguments, Vulkan SDK (or none) and pin file.
     """
     directory = pathlib.Path(directory)
     pins_bytes = pins_path.read_bytes()
@@ -471,6 +498,7 @@ def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS, architecture="x6
     for key, value in expectations.items():
         if manifest.get(key) != value:
             raise BundleError("local runtime manifest %s is %r; expected %r" % (key, manifest.get(key), value))
+    llama = check_llama_identity(manifest, pins, target)
     variant = re.compile(target["cpuVariantPattern"]) if target["cpuVariantPattern"] else None
 
     def is_variant(name):
@@ -491,18 +519,28 @@ def load_local_runtime(directory, pins_path=LOCAL_RUNTIME_PINS, architecture="x6
         image = windows_pe.PEImage(data, name)
         if not image.runs_natively_on(architecture) or not image.is_dll:
             raise BundleError("%s is not a native %s DLL (it is %s)" % (name, architecture, image.architecture))
-        modules[name.lower()] = {"name": name, "bytes": data, "provenance": {
-            "runtime": "whisper.cpp", "version": manifest["version"], "commit": manifest["commit"],
-            "compiler": manifest.get("compiler"), "vulkanSdk": manifest["vulkanSdk"]["version"] if sdk else None,
-            "builtBy": "scripts/windows-local-runtime/build-whisper-runtime.py"}}
+        if name.lower() == LLAMA_MODULE:
+            provenance = {"runtime": "llama.cpp", "version": llama["tag"], "commit": llama["commit"],
+                          "compiler": manifest.get("compiler"), "vulkanSdk": None,
+                          "ggmlSource": llama.get("ggmlSource"), "ggmlTreeSHA256": llama["ggmlTreeSHA256"],
+                          "builtBy": "scripts/windows-local-runtime/build-whisper-runtime.py"}
+        else:
+            provenance = {"runtime": "whisper.cpp", "version": manifest["version"], "commit": manifest["commit"],
+                          "compiler": manifest.get("compiler"),
+                          "vulkanSdk": manifest["vulkanSdk"]["version"] if sdk else None,
+                          "builtBy": "scripts/windows-local-runtime/build-whisper-runtime.py"}
+        modules[name.lower()] = {"name": name, "bytes": data, "provenance": provenance}
     missing = sorted(set(name.lower() for name in target["requiredModules"]) - set(modules))
     if missing or sum(1 for name in modules if is_variant(name)) < target["minimumCpuVariants"]:
         raise BundleError("the local runtime is incomplete: " + (", ".join(missing) or "too few CPU variants"))
     licence = directory / "runtime" / "LICENSE-whisper.cpp.txt"
     if not licence.is_file() or digest_file(licence) != whisper["licenseSHA256"]:
         raise BundleError("the whisper.cpp licence is missing or differs from its pin")
-    return {"modules": modules, "license": licence.read_bytes(), "manifest": manifest,
-            "manifestSHA256": sha256((directory / "runtime-manifest.json").read_bytes())}
+    llama_licence = directory / "runtime" / "LICENSE-llama.cpp.txt"
+    if not llama_licence.is_file() or digest_file(llama_licence) != pins["llamaCpp"]["licenseSHA256"]:
+        raise BundleError("the llama.cpp licence is missing or differs from its pin")
+    return {"modules": modules, "license": licence.read_bytes(), "llamaLicense": llama_licence.read_bytes(),
+            "manifest": manifest, "manifestSHA256": sha256((directory / "runtime-manifest.json").read_bytes())}
 
 
 # --- llvm-readobj cross-check ---------------------------------------------------------------
@@ -582,10 +620,16 @@ def readme_text(metadata, closure_names, microsoft, local_runtime=None, architec
         "ggml DLLs). It uses a Vulkan GPU when the graphics driver provides vulkan-1.dll",
         "and the CPU otherwise. Models are downloaded in the app (Settings > Local models).",
         "",
+        "On-device post-processing: llama.cpp " + local_runtime["manifest"]["llamaCpp"]["tag"] + " (llama.dll), built",
+        "against the same ggml DLLs. It runs downloaded GGUF language models on the CPU.",
+        "",
     ] if local_runtime and local_runtime["manifest"]["vulkanSdk"] else [
         "On-device transcription: whisper.cpp " + local_runtime["manifest"]["version"] + " (whisper.dll and the",
         "ggml DLLs). It runs on the CPU; this build has no GPU backend. Models are",
         "downloaded in the app (Settings > Local models).",
+        "",
+        "On-device post-processing: llama.cpp " + local_runtime["manifest"]["llamaCpp"]["tag"] + " (llama.dll), built",
+        "against the same ggml DLLs. It runs downloaded GGUF language models on the CPU.",
         "",
     ] if local_runtime else []) + [
         "bundle-manifest.json lists every file with its SHA-256 and origin;",
@@ -624,13 +668,20 @@ def notices_text(app_license_name, swift_files, microsoft_files, microsoft, lock
         built = "  Built from source by scripts/windows-local-runtime/build-whisper-runtime.py with " + str(
             manifest.get("compiler"))
         lines += ["whisper.cpp " + manifest["version"] + " (commit " + manifest["commit"] + "), including ggml: "
-                  + ", ".join(sorted(module["name"] for module in local_runtime["modules"].values())),
+                  + ", ".join(sorted(module["name"] for key, module in local_runtime["modules"].items()
+                                     if key != LLAMA_MODULE)),
                   "  Licence: MIT (licenses/LICENSE-whisper.cpp.txt)"]
         if manifest["vulkanSdk"]:
             lines += [built + "; the Vulkan SDK " + manifest["vulkanSdk"]["version"] + " was used at build time only.",
                       "  vulkan-1.dll is not redistributed: it comes from the graphics driver when present.", ""]
         else:
             lines += [built + "; CPU backend only, no GPU backend.", ""]
+        llama = manifest["llamaCpp"]
+        lines += ["llama.cpp " + llama["tag"] + " (commit " + llama["commit"] + "): " + LLAMA_MODULE,
+                  "  Licence: MIT (licenses/LICENSE-llama.cpp.txt)",
+                  "  Built from source by scripts/windows-local-runtime/build-whisper-runtime.py against the ggml "
+                  + llama["ggmlVersion"] + " DLLs above; its ggml tree is identical to whisper.cpp's (SHA-256 "
+                  + llama["ggmlTreeSHA256"] + ").", ""]
     lines += ["Windows operating-system modules (kernel32, user32, the Universal CRT and other API sets) are not redistributed.", ""]
     return "\n".join(lines)
 
@@ -728,6 +779,11 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
                       "sha256": sha256(local_runtime["license"]), "source": "license",
                       "provenance": {"url": local_runtime["manifest"]["repository"], "license": "MIT",
                                      "covers": "whisper.cpp and ggml runtime DLLs"}})
+        entries["licenses/LICENSE-llama.cpp.txt"] = local_runtime["llamaLicense"]
+        files.append({"path": "licenses/LICENSE-llama.cpp.txt", "bytes": len(local_runtime["llamaLicense"]),
+                      "sha256": sha256(local_runtime["llamaLicense"]), "source": "license",
+                      "provenance": {"url": local_runtime["manifest"]["llamaCpp"]["repository"], "license": "MIT",
+                                     "covers": "llama.cpp runtime DLL (llama.dll)"}})
     app_license_name = "LICENSE-JustSpeakToIt.txt"
     generated = {
         "licenses/" + app_license_name: app_license,
@@ -772,7 +828,10 @@ def assemble(application, swift, microsoft, licenses, app_license, policy, lock,
                 key: local_runtime["manifest"].get(key)
                 for key in ("runtime", "architecture", "version", "commit", "repository", "cmakeArguments", "compiler",
                             "vulkanSdk")
-            } | {"manifestSHA256": local_runtime["manifestSHA256"], "modules": sorted(local_files)},
+            } | {"manifestSHA256": local_runtime["manifestSHA256"], "modules": sorted(local_files),
+                 "llamaCpp": {key: local_runtime["manifest"]["llamaCpp"].get(key)
+                              for key in ("repository", "tag", "commit", "cmakeArguments", "ggmlSource",
+                                          "ggmlTreeSHA256", "ggmlVersion")}},
         },
         "policy": policy.data,
         "verification": {"importReader": "windows_pe.py static and delay-load import directories",
@@ -818,7 +877,7 @@ def main():
     parser.add_argument("--source-root", type=pathlib.Path, default=HERE.parent.parent)
     parser.add_argument("--llvm-readobj", type=pathlib.Path, help="cross-check import tables with llvm-readobj")
     parser.add_argument("--local-runtime", type=pathlib.Path,
-                        help="whisper.cpp runtime build (build-whisper-runtime.py output) to bundle for on-device transcription")
+                        help="whisper.cpp and llama.cpp runtime build (build-whisper-runtime.py output) to bundle for on-device transcription and post-processing")
     args = parser.parse_args()
     architecture = args.architecture
     runtime_directory, lock_path = swift_runtime_inputs(args, architecture)

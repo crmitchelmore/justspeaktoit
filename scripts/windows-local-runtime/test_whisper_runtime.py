@@ -1,4 +1,4 @@
-"""Checks that the whisper.cpp pins, vendored headers and adapter agree."""
+"""Checks that the whisper.cpp and llama.cpp pins, vendored headers and adapter agree."""
 import contextlib
 import hashlib
 import importlib.util
@@ -16,6 +16,8 @@ from unittest import mock
 HERE = pathlib.Path(__file__).resolve().parent
 REPOSITORY = HERE.parent.parent
 VENDORED = REPOSITORY / "Sources" / "CWindowsSupport" / "whisper-cpp"
+VENDORED_LLAMA = REPOSITORY / "Sources" / "CWindowsSupport" / "llama-cpp"
+SHARED_GGML_HEADERS = ["ggml.h", "ggml-cpu.h", "ggml-backend.h", "ggml-alloc.h"]
 sys.dont_write_bytecode = True
 
 
@@ -45,6 +47,54 @@ class PinTests(unittest.TestCase):
         for name, digest in rows:
             self.assertEqual(hashlib.sha256((VENDORED / name).read_bytes()).hexdigest(), digest, name)
         self.assertEqual(dict(rows)["LICENSE"], whisper["licenseSHA256"])
+
+    def test_vendored_llama_headers_match_their_provenance_and_the_runtime_pin(self):
+        provenance = (VENDORED_LLAMA / "PROVENANCE.md").read_text(encoding="utf-8")
+        llama = self.pins["llamaCpp"]
+        self.assertIn(llama["commit"], provenance)
+        self.assertIn("`" + llama["tag"] + "`", provenance)
+        self.assertIn('`ggml_version()` is not `%s`' % llama["ggmlVersion"], provenance)
+        rows = re.findall(r"\| `([^`]+)` \| `[^`]+` \| `([0-9a-f]{64})` \|", provenance)
+        self.assertEqual({name for name, _ in rows}, {"llama.h", "ggml.h", "ggml-cpu.h", "ggml-backend.h",
+                                                       "ggml-alloc.h", "ggml-opt.h", "gguf.h", "LICENSE"})
+        self.assertEqual(sorted(path.name for path in VENDORED_LLAMA.iterdir()),
+                         sorted([name for name, _ in rows] + ["PROVENANCE.md"]))
+        for name, digest in rows:
+            self.assertEqual(hashlib.sha256((VENDORED_LLAMA / name).read_bytes()).hexdigest(), digest, name)
+        self.assertEqual(dict(rows)["LICENSE"], llama["licenseSHA256"])
+
+    def test_both_runtimes_vendor_the_same_ggml_headers(self):
+        # One ggml serves whisper.dll and llama.dll, so their declarations must be the same bytes.
+        for name in SHARED_GGML_HEADERS:
+            self.assertEqual((VENDORED / name).read_bytes(), (VENDORED_LLAMA / name).read_bytes(), name)
+
+    def test_llama_is_pinned_beside_whisper_for_every_architecture(self):
+        llama = self.pins["llamaCpp"]
+        self.assertEqual(llama["repository"], "https://github.com/ggml-org/llama.cpp")
+        self.assertRegex(llama["commit"], "^[0-9a-f]{40}$")
+        self.assertRegex(llama["tag"], "^b[0-9]+$")
+        self.assertRegex(llama["licenseSHA256"], "^[0-9a-f]{64}$")
+        self.assertEqual((llama["license"], llama["module"], llama["ggmlVersion"]), ("MIT", "llama.dll", "0.23.0"))
+        for architecture in ("x64", "arm64"):
+            target = RUNTIME.architecture_pins(self.pins, architecture)
+            self.assertEqual(target["requiredModules"][-1], "llama.dll")
+            arguments, fallback, whisper = (target["llamaCmakeArguments"], target["llamaFallbackCmakeArguments"],
+                                            target["cmakeArguments"])
+            for required in ["-DLLAMA_USE_SYSTEM_GGML=ON", "-DBUILD_SHARED_LIBS=ON", "-DLLAMA_BUILD_IS_DEV=OFF",
+                             "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL", "-DLLAMA_BUILD_COMMON=OFF",
+                             "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_TOOLS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF",
+                             "-DLLAMA_BUILD_SERVER=OFF", "-DLLAMA_BUILD_APP=OFF", "-DLLAMA_OPENSSL=OFF"]:
+                self.assertIn(required, arguments)
+            # Same generator and compilers as that architecture's whisper.cpp build.
+            self.assertEqual(arguments[:2], whisper[:2])
+            self.assertEqual([value for value in arguments if "COMPILER" in value],
+                             [value for value in whisper if "COMPILER" in value])
+            self.assertFalse([value for value in arguments if value.startswith("-DGGML_")])
+            # The fallback configures llama.cpp's identical ggml exactly as whisper.cpp configured its own.
+            self.assertEqual([value for value in fallback if value.startswith("-DGGML_")],
+                             [value for value in whisper if value.startswith("-DGGML_")])
+            self.assertEqual([value for value in fallback if not value.startswith("-DGGML_")],
+                             [value.replace("SYSTEM_GGML=ON", "SYSTEM_GGML=OFF") for value in arguments])
 
     def test_adapter_refuses_every_version_but_the_pinned_one(self):
         adapter = (REPOSITORY / "Sources" / "CWindowsSupport" / "WindowsWhisper.cpp").read_text(encoding="utf-8")
@@ -86,7 +136,8 @@ class PinTests(unittest.TestCase):
         self.assertEqual([value for value in arguments if value.startswith("-D") and value not in specific
                           and "COMPILER" not in value], shared)
         self.assertIsNone(arm64["vulkanSdk"])
-        self.assertEqual(arm64["requiredModules"], ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"])
+        self.assertEqual(arm64["requiredModules"],
+                         ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll", "llama.dll"])
         self.assertIsNone(arm64["cpuVariantPattern"])
         self.assertIn(arm64["developerEnvironment"], RUNTIME.DEVELOPER_COMPONENTS)
         with self.assertRaisesRegex(RUNTIME.RuntimeError_, "no whisper.cpp runtime is pinned"):
@@ -147,6 +198,39 @@ class ImportPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(RUNTIME.RuntimeError_, "did not produce ggml-vulkan.dll"):
                 RUNTIME.collect(target, self.policy, binaries)
 
+    def test_collection_searches_several_build_directories_in_order(self):
+        target = RUNTIME.architecture_pins(self.pins, "arm64")
+        arm64 = BUNDLE_TESTS.PE.IMAGE_FILE_MACHINE_ARM64
+        with tempfile.TemporaryDirectory() as directory:
+            whisper, llama = pathlib.Path(directory) / "whisper", pathlib.Path(directory) / "llama"
+            whisper.mkdir()
+            llama.mkdir()
+            for name in target["requiredModules"][:-1]:
+                (whisper / name).write_bytes(BUNDLE_TESTS.build_pe(["KERNEL32.dll"], dll=True, machine=arm64))
+            # A second ggml.dll in the later directory is never taken.
+            (llama / "ggml.dll").write_bytes(BUNDLE_TESTS.build_pe(["USER32.dll"], dll=True, machine=arm64))
+            with self.assertRaisesRegex(RUNTIME.RuntimeError_, "did not produce llama.dll"):
+                RUNTIME.collect(target, self.policy, [whisper, llama], "arm64")
+            (llama / "llama.dll").write_bytes(BUNDLE_TESTS.build_pe(["ggml.dll", "ggml-base.dll"], dll=True,
+                                                                    machine=arm64))
+            files = RUNTIME.collect(target, self.policy, [whisper, llama], "arm64")
+            paths = {row["name"]: row["path"] for row in files}
+            self.assertEqual(paths["ggml.dll"], whisper / "ggml.dll")
+            self.assertEqual(paths["llama.dll"], llama / "llama.dll")
+            RUNTIME.check_llama_imports(files)
+
+    def test_llama_must_import_the_shared_ggml(self):
+        def row(imports, delayed=()):
+            return [{"name": "llama.dll", "imports": list(imports), "delayImports": list(delayed)}]
+        RUNTIME.check_llama_imports(row(["ggml.dll", "ggml-base.dll", "KERNEL32.dll"]))
+        RUNTIME.check_llama_imports(row(["ggml-base.dll"], ["ggml.dll"]))
+        for imports, message in [(["KERNEL32.dll"], "no ggml module"), (["ggml.dll"], "imports ggml.dll;"),
+                                 (["ggml-base.dll", "ggml-cpu.dll"], "ggml-cpu.dll")]:
+            with self.assertRaisesRegex(RUNTIME.RuntimeError_, message):
+                RUNTIME.check_llama_imports(row(imports))
+        with self.assertRaisesRegex(RUNTIME.RuntimeError_, "did not produce llama.dll"):
+            RUNTIME.check_llama_imports([])
+
     def test_arm64_collection_takes_the_single_cpu_backend(self):
         target = RUNTIME.architecture_pins(self.pins, "arm64")
         arm64 = BUNDLE_TESTS.PE.IMAGE_FILE_MACHINE_ARM64
@@ -164,6 +248,53 @@ class ImportPolicyTests(unittest.TestCase):
             (binaries / "ggml-cpu.dll").unlink()
             with self.assertRaisesRegex(RUNTIME.RuntimeError_, "did not produce ggml-cpu.dll"):
                 RUNTIME.collect(target, self.policy, binaries, "arm64")
+
+
+class GGMLTreeTests(unittest.TestCase):
+    """The shared-ggml check on synthetic trees."""
+
+    def tree(self, root, files):
+        for name, data in files.items():
+            path = pathlib.Path(root) / "ggml" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return pathlib.Path(root)
+
+    def test_identical_trees_share_one_digest_and_ignore_gitignore(self):
+        files = {"CMakeLists.txt": b"project(ggml)\n", "include/ggml.h": b"#pragma once\n", "src/ggml.c": b"int x;\n"}
+        with tempfile.TemporaryDirectory() as directory:
+            whisper = self.tree(pathlib.Path(directory) / "whisper", dict(files, **{".gitignore": b"build\n"}))
+            llama = self.tree(pathlib.Path(directory) / "llama", dict(files, **{".gitignore": b"other\n"}))
+            digest = RUNTIME.shared_ggml_digest(whisper, llama)
+            self.assertEqual(digest, RUNTIME.tree_digest(RUNTIME.ggml_tree(whisper / "ggml")))
+            self.assertRegex(digest, "^[0-9a-f]{64}$")
+            self.assertNotIn(".gitignore", RUNTIME.ggml_tree(llama / "ggml"))
+
+    def test_any_changed_added_or_removed_file_is_refused(self):
+        files = {"include/ggml.h": b"#pragma once\n", "src/ggml.c": b"int x;\n"}
+        variants = [dict(files, **{"src/ggml.c": b"int y;\n"}), dict(files, **{"src/extra.c": b""}),
+                    {"include/ggml.h": files["include/ggml.h"]}, dict(files, **{"src/.gitignore": b"x"})]
+        for index, variant in enumerate(variants):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as directory:
+                whisper = self.tree(pathlib.Path(directory) / "whisper", files)
+                llama = self.tree(pathlib.Path(directory) / "llama", variant)
+                with self.assertRaisesRegex(RUNTIME.RuntimeError_, "ggml tree differs from whisper.cpp's in 1 files"):
+                    RUNTIME.shared_ggml_digest(whisper, llama)
+
+    def test_missing_or_empty_trees_are_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RUNTIME.RuntimeError_, "no ggml tree"):
+                RUNTIME.ggml_tree(pathlib.Path(directory) / "ggml")
+            (pathlib.Path(directory) / "ggml").mkdir()
+            with self.assertRaisesRegex(RUNTIME.RuntimeError_, "is empty"):
+                RUNTIME.ggml_tree(pathlib.Path(directory) / "ggml")
+
+    def test_the_research_copies_share_ggml_when_available(self):
+        research = pathlib.Path("/Volumes/Memory/cache/jsti-llama-research")
+        whisper, llama = research / "whisper.cpp-1.9.4", research / "llama.cpp-b10809"
+        if not (whisper / "ggml").is_dir() or not (llama / "ggml").is_dir():
+            self.skipTest("upstream source trees are not available on this host")
+        RUNTIME.shared_ggml_digest(whisper, llama)
 
 
 class DeveloperEnvironmentTests(unittest.TestCase):
@@ -199,9 +330,18 @@ class FakeBuildHost:
     manifest code. Every command is recorded with the environment it received.
     """
 
-    def __init__(self, root, architecture, head, licence, fixture, machine, vcvars_target=None):
+    GGML = {"CMakeLists.txt": b"project(ggml)\n", "include/ggml.h": b"#pragma once\n", "src/ggml.c": b"int x;\n"}
+
+    def __init__(self, root, architecture, head, licence, fixture, machine, vcvars_target=None, llama_head=None,
+                 llama_licence=None, llama_ggml=None, llama_imports=None, system_ggml_fails=False):
         self.root, self.architecture, self.head = root, architecture, head
         self.licence, self.fixture = licence, fixture
+        self.llama_head = llama_head or RUNTIME.load_pins()["llamaCpp"]["commit"]
+        self.llama_licence = licence if llama_licence is None else llama_licence
+        self.llama_ggml = self.GGML if llama_ggml is None else llama_ggml
+        self.llama_imports = llama_imports or ["ggml.dll", "ggml-base.dll", "KERNEL32.dll", "MSVCP140.dll"]
+        self.system_ggml_fails = system_ggml_fails
+        self.machine = machine
         self.modules = {name: machine for name in (ARM64_MODULES if architecture == "arm64" else X64_MODULES)}
         self.vcvars_target = vcvars_target or architecture
         self.commands, self.downloads = [], []
@@ -220,9 +360,28 @@ class FakeBuildHost:
         self.commands.append((argv, kwargs.get("env")))
         if argv[0] == "git" and argv[3:4] == ["checkout"]:
             source = pathlib.Path(argv[2])
-            (source / "LICENSE").write_bytes(self.licence)
-            (source / "samples").mkdir(parents=True, exist_ok=True)
-            (source / "samples" / "jfk.wav").write_bytes(self.fixture)
+            llama = source.name == "llama.cpp"
+            (source / "LICENSE").write_bytes(self.llama_licence if llama else self.licence)
+            ggml = self.llama_ggml if llama else self.GGML
+            for name, data in dict(ggml, **{".gitignore": b"llama\n" if llama else b"whisper\n"}).items():
+                (source / "ggml" / name).parent.mkdir(parents=True, exist_ok=True)
+                (source / "ggml" / name).write_bytes(data)
+            if not llama:
+                (source / "samples").mkdir(parents=True, exist_ok=True)
+                (source / "samples" / "jfk.wav").write_bytes(self.fixture)
+        elif argv[:2] == ["cmake", "--install"]:
+            (pathlib.Path(argv[6]) / "lib" / "cmake" / "ggml").mkdir(parents=True)
+        elif argv[:2] == ["cmake", "-S"] and pathlib.Path(argv[2]).name == "llama.cpp":
+            if self.system_ggml_fails and "-DLLAMA_USE_SYSTEM_GGML=ON" in argv:
+                pathlib.Path(argv[4]).mkdir(parents=True, exist_ok=True)
+                raise subprocess.CalledProcessError(1, argv)
+        elif argv[:2] == ["cmake", "--build"] and "llama" in argv:
+            binaries = pathlib.Path(argv[2]) / "bin" / "Release"
+            binaries.mkdir(parents=True)
+            (binaries / "llama.dll").write_bytes(BUNDLE_TESTS.build_pe(self.llama_imports, dll=True,
+                                                                       machine=self.machine))
+            # llama.cpp's own ggml (fallback) must never replace the whisper.cpp build's.
+            (binaries / "ggml.dll").write_bytes(BUNDLE_TESTS.build_pe(["USER32.dll"], dll=True, machine=self.machine))
         elif argv[:2] == ["cmake", "-S"]:
             compiler = (("Clang", "22.1.8", "C:/Program Files/LLVM/bin/clang++.exe") if self.architecture == "arm64"
                         else ("MSVC", "19.44.35222.0", "C:/VS/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe"))
@@ -258,7 +417,8 @@ class FakeBuildHost:
         if argv[0].endswith("vswhere.exe"):
             return subprocess.CompletedProcess(argv, 0, stdout=str(self.installation) + "\n", stderr="")
         if argv[0] == "git" and argv[-2:] == ["rev-parse", "HEAD"]:
-            return subprocess.CompletedProcess(argv, 0, stdout=self.head + "\n", stderr="")
+            head = self.llama_head if pathlib.Path(argv[2]).name == "llama.cpp" else self.head
+            return subprocess.CompletedProcess(argv, 0, stdout=head + "\n", stderr="")
         raise AssertionError("unexpected external command %r" % (argv,))
 
     def download(self, entry, directory):
@@ -313,14 +473,25 @@ class MainExecutionTests(unittest.TestCase):
                          (architecture, whisper["commit"], whisper["repository"], whisper["version"]))
         self.assertEqual(manifest["cmakeArguments"], target["cmakeArguments"])
         self.assertEqual(manifest["pinsSHA256"], RUNTIME.pins_digest(RUNTIME.HERE / "dependencies.json"))
+        modules = modules + ["llama.dll"]
         self.assertEqual([row["name"] for row in manifest["files"]], sorted(modules))
         self.assertEqual({row["architecture"] for row in manifest["files"]}, {architecture})
         self.assertEqual(sorted(path.name for path in (output / "runtime").iterdir()),
-                         sorted(modules + ["LICENSE-whisper.cpp.txt"]))
+                         sorted(modules + ["LICENSE-whisper.cpp.txt", "LICENSE-llama.cpp.txt"]))
+        # The shipped ggml.dll is the whisper.cpp build's, not the one beside llama.dll.
+        ggml = next(row for row in manifest["files"] if row["name"] == "ggml.dll")
+        self.assertEqual(ggml["imports"], ["ggml-base.dll", "KERNEL32.dll", "MSVCP140.dll", "VCRUNTIME140.dll"])
+        llama, pins = manifest["llamaCpp"], self.real["llamaCpp"]
+        self.assertEqual((llama["commit"], llama["tag"], llama["repository"], llama["ggmlVersion"]),
+                         (pins["commit"], pins["tag"], pins["repository"], pins["ggmlVersion"]))
+        self.assertEqual(llama["ggmlTreeSHA256"], RUNTIME.tree_digest(
+            {name: hashlib.sha256(data).hexdigest() for name, data in FakeBuildHost.GGML.items()}))
+        self.assertEqual(manifest["schemaVersion"], 3)
         self.assertEqual((output / "fixtures" / "jfk.wav").read_bytes(), self.fixture)
         # The bundle builder authenticates exactly this output against the real pins.
         runtime = BUNDLE_TESTS.BUILD.load_local_runtime(output, RUNTIME.HERE / "dependencies.json", architecture)
         self.assertEqual(sorted(runtime["modules"]), sorted(name.lower() for name in modules))
+        self.assertEqual(runtime["modules"]["llama.dll"]["provenance"]["runtime"], "llama.cpp")
         return manifest
 
     def check_source_commands(self, host, work):
@@ -330,18 +501,36 @@ class MainExecutionTests(unittest.TestCase):
         self.assertEqual(host.command(["git", "-C", source, "fetch"]),
                          [["git", "-C", source, "fetch", "-q", "--depth", "1", "origin", whisper["commit"]]])
         # git subcommands follow "-C <source>" except for init; cmake's mode is its first argument.
+        llama, pins = str(work / "llama.cpp"), self.real["llamaCpp"]
+        self.assertEqual(host.command(["git", "-C", llama, "fetch"]),
+                         [["git", "-C", llama, "fetch", "-q", "--depth", "1", "origin", pins["commit"]]])
+        self.assertEqual(host.command(["git", "-C", llama, "config"]),
+                         [["git", "-C", llama, "config", "core.autocrlf", "false"]])
         order = [argv[3] if argv[:2] == ["git", "-C"] else argv[1] for argv, _ in host.commands
                  if isinstance(argv, list) and argv[0] in ("git", "cmake")]
-        self.assertEqual(order, ["init", "remote", "config", "fetch", "checkout", "rev-parse", "-S", "--build"])
+        checkout = ["init", "remote", "config", "fetch", "checkout", "rev-parse"]
+        self.assertEqual(order, checkout + ["-S", "--build"] + checkout + ["--install", "-S", "--build"])
+        (install, _), = [(argv, env) for argv, env in host.commands
+                         if isinstance(argv, list) and argv[:2] == ["cmake", "--install"]]
+        self.assertEqual(install, ["cmake", "--install", str(work / "build"), "--config", "Release", "--prefix",
+                                   str(work / "ggml-stage")])
 
     def configured(self, host, work):
-        (configure, environment), = [(argv, env) for argv, env in host.commands
-                                     if isinstance(argv, list) and argv[:2] == ["cmake", "-S"]]
+        configures = [(argv, env) for argv, env in host.commands
+                      if isinstance(argv, list) and argv[:2] == ["cmake", "-S"]]
+        (configure, environment), (llama_configure, llama_environment) = configures
         self.assertEqual(configure[:5], ["cmake", "-S", str(work / "whisper.cpp"), "-B", str(work / "build")])
-        (build, build_environment), = [(argv, env) for argv, env in host.commands
-                                       if isinstance(argv, list) and argv[:2] == ["cmake", "--build"]]
+        builds = [(argv, env) for argv, env in host.commands if isinstance(argv, list) and argv[:2] == ["cmake", "--build"]]
+        (build, build_environment), (llama_build, llama_build_environment) = builds
         self.assertEqual(build, ["cmake", "--build", str(work / "build"), "--config", "Release", "--parallel", "3"])
         self.assertIs(build_environment, environment)
+        target = self.real["architectures"][host.architecture]
+        self.assertEqual(llama_configure, ["cmake", "-S", str(work / "llama.cpp"), "-B", str(work / "llama-build")]
+                         + target["llamaCmakeArguments"] + ["-DCMAKE_PREFIX_PATH=" + (work / "ggml-stage").as_posix()])
+        self.assertEqual(llama_build, ["cmake", "--build", str(work / "llama-build"), "--config", "Release",
+                                       "--target", "llama", "--parallel", "3"])
+        self.assertIs(llama_environment, environment)
+        self.assertIs(llama_build_environment, environment)
         return configure[5:], environment
 
     def test_x64_builds_with_the_pinned_vulkan_sdk_and_msvc(self):
@@ -388,6 +577,12 @@ class MainExecutionTests(unittest.TestCase):
             ("arm64", {"fixture": b"another sample"}, "JFK fixture differs from its pin", False),
             ("arm64", {"vcvars_target": "x64"}, "did not enter the arm64 developer environment", False),
             ("arm64", {"machine": AMD64}, "is not a native arm64 DLL \\(it is x64\\)", True),
+            ("x64", {"llama_head": "1" * 40}, "llama.cpp checkout is 1{40}, not the pinned", True),
+            ("arm64", {"llama_licence": b"another licence"}, "llama.cpp licence differs", True),
+            ("arm64", {"llama_ggml": dict(FakeBuildHost.GGML, **{"src/ggml.c": b"int y;\n"})},
+             "ggml tree differs from whisper.cpp's in 1 files \\(first: src/ggml.c\\)", True),
+            ("x64", {"llama_imports": ["ggml-base.dll", "ggml-vulkan.dll", "KERNEL32.dll"]},
+             "llama.dll imports ggml-base.dll, ggml-vulkan.dll", True),
         ]
         for index, (architecture, options, message, built) in enumerate(cases):
             with self.subTest(architecture=architecture, fault=sorted(options)):
@@ -396,6 +591,18 @@ class MainExecutionTests(unittest.TestCase):
                     self.execute(host)
                 self.assertEqual(bool(host.command(["cmake"])), built)
                 self.assertFalse((host.root / "output" / "runtime-manifest.json").exists())
+
+    def test_llama_falls_back_to_its_identical_ggml_tree_when_cmake_cannot_find_the_installed_one(self):
+        host = self.host("x64", system_ggml_fails=True)
+        output, work = self.execute(host)
+        target = self.real["architectures"]["x64"]
+        configures = [argv for argv, _ in host.commands if isinstance(argv, list) and argv[:2] == ["cmake", "-S"]
+                      and argv[2] == str(work / "llama.cpp")]
+        self.assertEqual(configures[1], ["cmake", "-S", str(work / "llama.cpp"), "-B", str(work / "llama-build")]
+                         + target["llamaFallbackCmakeArguments"])
+        manifest = self.check_output(output, "x64", X64_MODULES)
+        self.assertEqual(manifest["llamaCpp"]["cmakeArguments"], target["llamaFallbackCmakeArguments"])
+        self.assertEqual(manifest["llamaCpp"]["ggmlSource"], "llama.cpp tree identical to whisper.cpp's")
 
     def test_non_windows_hosts_are_refused_before_any_command(self):
         host = self.host("x64")

@@ -312,7 +312,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: local-models
-          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift') }}
+          key: local-models-${{ hashFiles('Sources/SpeakCore/WhisperCppModels.swift', 'Sources/SpeakCore/LlamaCppModels.swift') }}
       # No Swift setup action runs in this job. The script additionally isolates
       # PATH to the Windows system directories, proves the executable cannot
       # start without the bundled DLLs, and records sampled loaded modules's path.
@@ -325,7 +325,7 @@ jobs:
             -Workspace (Join-Path $env:RUNNER_TEMP 'bundle-run') -ExpectedCommit $env:GITHUB_SHA `
             -LocalTranscriptionAudio local-runtime/fixtures/jfk.wav `
             -LocalTranscriptionPhrase $pins.whisperCpp.fixture.expectedPhrase `
-            -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models')
+            -LocalModelDirectory (Join-Path $env:GITHUB_WORKSPACE 'local-models') -LocalPostProcessing
       - name: Upload bundle execution evidence
         if: always()
         uses: actions/upload-artifact@v7.0.1

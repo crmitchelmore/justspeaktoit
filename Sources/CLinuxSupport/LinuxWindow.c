@@ -56,6 +56,7 @@ typedef struct UI {
     GtkButton *copy;
     GtkDropDown *version;
     gint32 state;
+    gchar *tray_summary; /* Sessions, Recording Time and Spend for the status notifier */
     /* History */
     GtkSearchEntry *search;
     GtkListBox *history;
@@ -229,6 +230,22 @@ static void refresh_actions(void) {
 static void on_record(GtkButton *button, gpointer data) {
     (void)button; (void)data;
     emit(JSTI_EVENT_TOGGLE_RECORDING, selected_microphone(), selected_model_slot());
+}
+
+static void show_page(gint32 page);
+
+/* A command from the status notifier's menu (LinuxTray.c). */
+void jsti_window_tray_command(int command) {
+    if (ui.window == NULL) return;
+    switch (command) {
+    case 1:
+        if (ui.state == JSTI_STATE_WORKING) emit(JSTI_EVENT_CANCEL, "", 0);
+        else emit(JSTI_EVENT_TOGGLE_RECORDING, selected_microphone(), selected_model_slot());
+        break;
+    case 3: show_page(JSTI_PAGE_GENERAL); gtk_window_present(ui.window); break;
+    case 4: gtk_window_close(ui.window); break;
+    default: gtk_window_present(ui.window); break;
+    }
 }
 
 static void on_cancel(GtkButton *button, gpointer data) {
@@ -463,6 +480,7 @@ static void on_import(GtkButton *button, gpointer data) {
 static gboolean on_close_request(GtkWindow *window, gpointer data) {
     (void)window; (void)data;
     jsti_hud_destroy();
+    jsti_tray_stop();
     emit(JSTI_EVENT_CLOSING, "", 0);
     close_posts();
     return FALSE;
@@ -1133,6 +1151,7 @@ static void on_activate(GApplication *application, gpointer data) {
         return;
     }
     build_window();
+    jsti_tray_start();
     ui.suppress = TRUE;
     apply_models(initial_models.rows, initial_models.count, initial_models.selected);
     ui.suppress = FALSE;
@@ -1302,6 +1321,7 @@ static void update_apply(gpointer pointer) {
     }
     if (update->state >= 0) ui.state = update->state;
     refresh_actions();
+    jsti_tray_set_state(ui.state, ui.tray_summary);
 }
 
 int32_t jsti_window_update(const char *status, const char *transcript, int32_t state) {
@@ -1606,6 +1626,14 @@ static void insights_apply(gpointer pointer) {
     gtk_label_set_text(ui.history_errors, insights->visible[1]);
     gtk_label_set_text(ui.history_average, insights->visible[3]);
     gtk_label_set_text(ui.history_spend, insights->visible[4]);
+    /* The status notifier's menu shows the dashboard's totals, as the Mac's menu bar extra does. */
+    g_free(ui.tray_summary);
+    ui.tray_summary = g_strcmp0(insights->all[0], "0") == 0
+        ? g_strdup("No sessions yet")
+        : g_strdup_printf("%s %s · %s · %s", insights->all[0],
+                          g_strcmp0(insights->all[0], "1") == 0 ? "session" : "sessions", insights->all[2],
+                          insights->all[4]);
+    jsti_tray_set_state(ui.state, ui.tray_summary);
 }
 
 static void insights_copy(gchar **target, const JSTIInsights *source) {
@@ -2116,7 +2144,8 @@ int32_t jsti_window_self_test(char *error, size_t capacity) {
     if (ui.selected_id != NULL || gtk_widget_get_sensitive(GTK_WIDGET(ui.copy))) {
         return fail(error, capacity, "clearing History left record actions enabled");
     }
-    return jsti_hud_self_test(error, capacity);
+    if (jsti_hud_self_test(error, capacity) != 0) return -1;
+    return jsti_tray_self_test(error, capacity);
 }
 
 /* ------------------------------------------------------ screenshot tour */

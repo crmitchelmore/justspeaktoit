@@ -90,6 +90,17 @@ and a desktop notification reports the result when the app window is not
 active. The window self-test checks the X11 properties and placement; the
 screenshot tour saves `13-hud-recording.png` and `14-hud-completed.png`.
 
+Where the desktop has a StatusNotifierWatcher (KDE Plasma, Ubuntu's GNOME
+through the AppIndicator extension, Cinnamon, XFCE, Budgie and most panels),
+a **status notifier** (`LinuxTray.c`) puts the brand icon in the panel, with a
+red dot while recording, like the Mac's menu bar extra. Its
+`com.canonical.dbusmenu` menu shows Ready, Recording or Transcribing and the
+dashboard's Sessions, Recording Time and Spend, and offers Start or Stop
+Recording (Cancel Transcription while working), Open, Settings and Quit;
+activating the icon opens the window. It registers under the app's own bus
+connection, so the Flatpak needs only `--talk-name=org.kde.StatusNotifierWatcher`.
+Plain GNOME has no watcher, and then nothing is registered.
+
 A second invocation with `--toggle` starts or stops dictation in the running
 app without raising its window (GApplication forwards the command line), so it
 can be bound to a key in any desktop. The `app.toggle-recording` action does
@@ -239,7 +250,8 @@ proven on a physical desktop.
 | App profiles | Controller support shared; **no Linux editor** | The X11 target's `/proc/<pid>/exe` path reaches the shared resolver, whose matcher is written for Windows paths: **unverified** |
 | Read aloud | Verified with a stubbed Deepgram response, a device-free player and a virtual sink. Read aloud in History speaks the displayed transcript (the version shown) with a canonical Deepgram Aura or Flux voice chosen in the Read aloud group, in sentence-bounded segments within Deepgram's 2,000-character limit, through the History player: Play/Pause and Stop act on it, and recording, import, another row, History playback and close end it. The controller is shared with Windows (`DesktopHostReadAloud`). Synthesized WAVs are staged in `VoiceOutput/` (0700, files 0600) only while they play; leftovers from an earlier run are removed | `DesktopHostReadAloudTests` (segments, voice, missing key, Stop, supersession, persistence); `LinuxAudioPlaybackSpeechTests` (speech state, pause between segments, refused segments after Stop); `LinuxVoiceOutputTests` (private staging, a stubbed Deepgram WAV through the engine and speech mode); the window self-test (the button follows the presented record and reports its id, the picker reports the voice); the integration check (a 24 kHz segment plays to the end through PipeWire). A real Deepgram receipt (including Flux linear16/WAV), audible output on a physical desktop, speed control and other providers **unverified** |
 | On-device transcription (whisper.cpp 1.9.4, the four pinned Whisper models) | Verified in a container with the CPU runtime built from the pin | `--local-transcription-self-test` downloaded the pinned tiny model through the app's installer and transcribed the JFK sample; `LinuxLocalTranscriptionTests` (GChecksum vectors; with the runtime: JFK, silence, cancellation before and during recognition, cache release by path, held removal); `DesktopHostLocalModelsTests` (download, pause and resume, readiness, removal ownership, a keyless local recording); `DesktopHostLocalModelVerificationTests` (a same-size tampered model the runtime refuses is deleted and yields no transcript; no separate rehash before loading); with the runtime, a same-size tampered copy and a digest the cached model's bytes lack are refused; `--self-test` (installer cycle, loader refusals); window self-test (Local models rows, events, no key row). Linux CI receipt for this revision, Vulkan (not built), aarch64 (not pinned), large models' speed and memory, and the group on real desktops **unverified**; no Flatpak runtime module |
-| IBus insertion, tray, autostart | **Not implemented** | Later phases |
+| Status notifier (panel icon and menu, like the Mac's menu bar extra) | Verified against a fake `org.kde.StatusNotifierWatcher`: registration, icon pixmaps, tooltip, menu layout and a Quit click that closes the app | Integration check; how KDE Plasma, the GNOME AppIndicator extension (Ubuntu) and other panels draw it **unverified** |
+| IBus insertion, autostart | **Not implemented** | Later phases |
 | Flatpak | Built with `flatpak-builder` (GNOME 50, Swift 6.3.3); self-test and window smoke test pass in its environment | Installed `flatpak run`, portals from inside the sandbox and Flathub offline build **unverified** |
 
 ### Needs a physical desktop

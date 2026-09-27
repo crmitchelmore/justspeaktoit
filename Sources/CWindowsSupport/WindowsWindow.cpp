@@ -1604,7 +1604,9 @@ void applyInsights(HWND window) {
     for (const auto &target : targets) SetDlgItemTextW(window, target.first, target.second->c_str());
     // The notification area's menu shows the same totals as the Mac's menu bar extra.
     std::wstring summary;
-    if (!values[0][0].empty()) {
+    if (values[0][0] == L"0") {
+        summary = L"No sessions yet";
+    } else if (!values[0][0].empty()) {
         summary = values[0][0] + (values[0][0] == L"1" ? L" session" : L" sessions");
         if (!values[0][2].empty()) summary += L" · " + values[0][2];
         if (!values[0][4].empty()) summary += L" · " + values[0][4];

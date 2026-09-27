@@ -112,4 +112,33 @@ pasted="$(cat "$work/zenity.out")"
 [ "$pasted" = "X11 dictation ✓" ] || { echo "The target received: '$pasted'" >&2; exit 1; }
 echo "The Zenity field received the dictated text."
 
+step "status notifier (fake StatusNotifierWatcher)"
+"$python" "$repo/scripts/linux-fake-watcher.py" "$work/watcher.json" >"$work/watcher.out" 2>&1 & watcher=$!
+pids+=($watcher)
+for _ in $(seq 1 100); do grep -q "fake watcher ready" "$work/watcher.out" 2>/dev/null && break; sleep 0.1; done
+# The app runs until the watcher clicks Quit in its menu.
+if ! timeout 60 "$binary" >"$work/tray-app.out" 2>&1; then
+    cat "$work/tray-app.out" "$work/watcher.out" >&2
+    echo "The app did not quit from its status notifier menu." >&2
+    exit 1
+fi
+kill "$watcher" 2>/dev/null || true
+wait "$watcher" 2>/dev/null || true
+"$python" - "$work/watcher.json" <<'PY'
+import json
+import sys
+
+seen = json.load(open(sys.argv[1], encoding="utf-8"))
+item, menu = seen["item"], seen["menu"]
+assert seen["registered"], "the app never registered its status notifier"
+assert item["Id"] == "com.justspeaktoit.JustSpeakToIt" and item["Title"] == "Just Speak to It", item
+assert [size[:2] for size in item["IconPixmap"]] == [[22, 22], [32, 32], [48, 48]], item["IconPixmap"]
+assert all(size[2] == size[0] * size[1] * 4 for size in item["IconPixmap"]), item["IconPixmap"]
+labels = [entry["label"] for entry in menu if entry["type"] != "separator"]
+assert labels == ["Ready to dictate", "No sessions yet", "Start Recording", "Open Just Speak to It", "Settings…",
+                  "Quit Just Speak to It"], labels
+assert not menu[0]["enabled"] and seen["clicked"], menu
+print("Status notifier: registered, icon, tooltip and menu read, and Quit closed the app.")
+PY
+
 step "all Linux integration checks passed"

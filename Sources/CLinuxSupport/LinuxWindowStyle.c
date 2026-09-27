@@ -148,9 +148,14 @@ static void rounded_rectangle(cairo_t *cr, double x, double y, double width, dou
  * five dark bars. */
 static void draw_brand_icon(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data) {
     (void)area; (void)data;
-    double size = MIN(width, height), scale = size / 1024.0;
+    double size = MIN(width, height);
     cairo_translate(cr, (width - size) / 2, (height - size) / 2);
-    cairo_scale(cr, scale, scale);
+    jsti_brand_icon_paint(cr, size);
+}
+
+void jsti_brand_icon_paint(cairo_t *cr, double size) {
+    cairo_save(cr);
+    cairo_scale(cr, size / 1024.0, size / 1024.0);
     cairo_pattern_t *surface = cairo_pattern_create_linear(0, 0, 0, 1024);
     cairo_pattern_add_color_stop_rgb(surface, 0, 1.0, 0.42, 0.24);
     cairo_pattern_add_color_stop_rgb(surface, 1, 1.0, 0.61, 0.29);
@@ -165,6 +170,7 @@ static void draw_brand_icon(GtkDrawingArea *area, cairo_t *cr, int width, int he
         rounded_rectangle(cr, bars[index][0], top, 80, 1024 - 2 * top, 40);
         cairo_fill(cr);
     }
+    cairo_restore(cr);
 }
 
 GtkWidget *jsti_brand_icon_new(int size) {

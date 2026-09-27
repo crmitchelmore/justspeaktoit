@@ -28,6 +28,9 @@ finish-args:
   # libsecret reaches the Secret portal from inside the sandbox; the
   # GlobalShortcuts, RemoteDesktop, Clipboard and notification portals need no
   # extra permissions.
+  # The status notifier (panel icon and menu) registers with the desktop's
+  # watcher under the app's own bus name.
+  - --talk-name=org.kde.StatusNotifierWatcher
 build-options:
   append-path: /usr/lib/sdk/swift6/bin
   prepend-ld-library-path: /usr/lib/sdk/swift6/lib

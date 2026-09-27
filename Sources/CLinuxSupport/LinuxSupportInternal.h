@@ -46,6 +46,9 @@ struct _GtkLabel;
 void jsti_style_install(void);
 /* The app icon, drawn rather than loaded so it needs no image loader. */
 struct _GtkWidget *jsti_brand_icon_new(int size);
+/* Paints the app icon into a size x size square at the origin. */
+struct _cairo;
+void jsti_brand_icon_paint(struct _cairo *cr, double size);
 /* A scrolling page with centred content; `*content` receives its column. */
 struct _GtkWidget *jsti_page_new(struct _GtkWidget **content);
 /* A gradient header. `variant` is NULL (brand), "voice" or "settings".
@@ -77,6 +80,18 @@ struct _GtkWidget *jsti_hud_card(void);
 /* Checks the HUD never takes focus, sits at the bottom centre of the work
  * area on X11 and hides again. On Wayland it only checks nothing is shown. */
 int32_t jsti_hud_self_test(char *error, size_t capacity);
+
+/* LinuxTray.c: the StatusNotifierItem, like the Mac's menu bar extra, where
+ * the desktop has a StatusNotifierWatcher (KDE, Ubuntu's GNOME, most others).
+ * Main thread. `state` is JSTI_STATE_*; `summary` the Sessions, Recording
+ * Time and Spend line. */
+void jsti_tray_start(void);
+/* LinuxWindow.c: 1 Start or Stop Recording (Cancel while working), 2 Open,
+ * 3 Settings, 4 Quit. */
+void jsti_window_tray_command(int command);
+void jsti_tray_set_state(int32_t state, const char *summary);
+void jsti_tray_stop(void);
+int32_t jsti_tray_self_test(char *error, size_t capacity);
 
 /* LinuxModelStream.c: a model file read on a thread of its own, so the speech
  * runtime, which holds its lock while whisper.cpp loads, never waits on the

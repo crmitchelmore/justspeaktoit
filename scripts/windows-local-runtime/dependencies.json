@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "whisperCpp": {
     "repository": "https://github.com/ggml-org/whisper.cpp",
     "tag": "v1.9.4",
@@ -15,6 +15,16 @@
       "note": "Public-domain speech sample from the pinned whisper.cpp source; used only by CI, never bundled."
     }
   },
+  "llamaCpp": {
+    "repository": "https://github.com/ggml-org/llama.cpp",
+    "tag": "b10809",
+    "commit": "5266f24da75dc449bd56cbed7addb9c8e4a6a73e",
+    "license": "MIT",
+    "licenseSHA256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+    "ggmlVersion": "0.23.0",
+    "module": "llama.dll",
+    "note": "The ggml/ tree at this commit is byte-identical to whisper.cpp v1.9.4's apart from ggml/.gitignore (both carry ggml 0.23.0, synced from ggml-org/ggml on 2026-09-04), so llama.dll is built against the ggml that the whisper.cpp build produced and shares its DLLs. The build refuses to link it if the two trees differ."
+  },
   "architectures": {
     "x64": {
       "runner": "windows-2022",
@@ -28,7 +38,10 @@
       },
       "developerEnvironment": null,
       "cmakeArguments": [
-        "-G", "Visual Studio 17 2022", "-A", "x64",
+        "-G",
+        "Visual Studio 17 2022",
+        "-A",
+        "x64",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DWHISPER_BUILD_IS_DEV=OFF",
         "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
@@ -45,7 +58,55 @@
         "-DWHISPER_SDL2=OFF",
         "-DWHISPER_CURL=OFF"
       ],
-      "requiredModules": ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll"],
+      "llamaCmakeArguments": [
+        "-G",
+        "Visual Studio 17 2022",
+        "-A",
+        "x64",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DLLAMA_BUILD_IS_DEV=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DLLAMA_USE_SYSTEM_GGML=ON",
+        "-DLLAMA_BUILD_COMMON=OFF",
+        "-DLLAMA_BUILD_TESTS=OFF",
+        "-DLLAMA_BUILD_TOOLS=OFF",
+        "-DLLAMA_BUILD_EXAMPLES=OFF",
+        "-DLLAMA_BUILD_SERVER=OFF",
+        "-DLLAMA_BUILD_APP=OFF",
+        "-DLLAMA_OPENSSL=OFF"
+      ],
+      "llamaFallbackCmakeArguments": [
+        "-G",
+        "Visual Studio 17 2022",
+        "-A",
+        "x64",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DLLAMA_BUILD_IS_DEV=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DLLAMA_USE_SYSTEM_GGML=OFF",
+        "-DLLAMA_BUILD_COMMON=OFF",
+        "-DLLAMA_BUILD_TESTS=OFF",
+        "-DLLAMA_BUILD_TOOLS=OFF",
+        "-DLLAMA_BUILD_EXAMPLES=OFF",
+        "-DLLAMA_BUILD_SERVER=OFF",
+        "-DLLAMA_BUILD_APP=OFF",
+        "-DLLAMA_OPENSSL=OFF",
+        "-DGGML_NATIVE=OFF",
+        "-DGGML_BACKEND_DL=ON",
+        "-DGGML_CPU_ALL_VARIANTS=ON",
+        "-DGGML_VULKAN=ON",
+        "-DGGML_OPENMP=OFF",
+        "-DGGML_CCACHE=OFF"
+      ],
+      "requiredModules": [
+        "whisper.dll",
+        "ggml.dll",
+        "ggml-base.dll",
+        "ggml-vulkan.dll",
+        "llama.dll"
+      ],
       "cpuVariantPattern": "^ggml-cpu-[a-z0-9]+\\.dll$",
       "minimumCpuVariants": 4
     },
@@ -54,7 +115,8 @@
       "vulkanSdk": null,
       "developerEnvironment": "arm64",
       "cmakeArguments": [
-        "-G", "Ninja Multi-Config",
+        "-G",
+        "Ninja Multi-Config",
         "-DCMAKE_C_COMPILER=clang",
         "-DCMAKE_CXX_COMPILER=clang++",
         "-DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc",
@@ -76,7 +138,60 @@
         "-DWHISPER_SDL2=OFF",
         "-DWHISPER_CURL=OFF"
       ],
-      "requiredModules": ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"],
+      "llamaCmakeArguments": [
+        "-G",
+        "Ninja Multi-Config",
+        "-DCMAKE_C_COMPILER=clang",
+        "-DCMAKE_CXX_COMPILER=clang++",
+        "-DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc",
+        "-DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DLLAMA_BUILD_IS_DEV=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DLLAMA_USE_SYSTEM_GGML=ON",
+        "-DLLAMA_BUILD_COMMON=OFF",
+        "-DLLAMA_BUILD_TESTS=OFF",
+        "-DLLAMA_BUILD_TOOLS=OFF",
+        "-DLLAMA_BUILD_EXAMPLES=OFF",
+        "-DLLAMA_BUILD_SERVER=OFF",
+        "-DLLAMA_BUILD_APP=OFF",
+        "-DLLAMA_OPENSSL=OFF"
+      ],
+      "llamaFallbackCmakeArguments": [
+        "-G",
+        "Ninja Multi-Config",
+        "-DCMAKE_C_COMPILER=clang",
+        "-DCMAKE_CXX_COMPILER=clang++",
+        "-DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc",
+        "-DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DLLAMA_BUILD_IS_DEV=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DLLAMA_USE_SYSTEM_GGML=OFF",
+        "-DLLAMA_BUILD_COMMON=OFF",
+        "-DLLAMA_BUILD_TESTS=OFF",
+        "-DLLAMA_BUILD_TOOLS=OFF",
+        "-DLLAMA_BUILD_EXAMPLES=OFF",
+        "-DLLAMA_BUILD_SERVER=OFF",
+        "-DLLAMA_BUILD_APP=OFF",
+        "-DLLAMA_OPENSSL=OFF",
+        "-DGGML_NATIVE=OFF",
+        "-DGGML_CPU_ARM_ARCH=armv8-a",
+        "-DGGML_BACKEND_DL=ON",
+        "-DGGML_CPU_ALL_VARIANTS=OFF",
+        "-DGGML_VULKAN=OFF",
+        "-DGGML_OPENMP=OFF",
+        "-DGGML_CCACHE=OFF"
+      ],
+      "requiredModules": [
+        "whisper.dll",
+        "ggml.dll",
+        "ggml-base.dll",
+        "ggml-cpu.dll",
+        "llama.dll"
+      ],
       "cpuVariantPattern": null,
       "minimumCpuVariants": 0
     }
@@ -88,6 +203,9 @@
     "The Vulkan SDK installer is pinned by URL, byte count and the SHA-256 LunarG publishes (https://vulkan.lunarg.com/sdk/sha/1.4.357.0/windows/vulkansdk-windows-X64-1.4.357.0.exe.json), which matched the downloaded bytes on 2026-09-23.",
     "The ARM64 DLLs are built natively on a GitHub windows-11-arm runner inside that image's Visual Studio ARM64 developer environment. ggml refuses MSVC for ARM (\"MSVC is not supported for ARM, use clang\"), so the image's clang targets arm64-pc-windows-msvc with Ninja, following upstream's cmake/arm64-windows-llvm.cmake, and links the same shared Visual C++ runtime.",
     "ARM64 is CPU only. GGML_CPU_ALL_VARIANTS stops with \"Unsupported ARM target OS\" for Windows in this ggml, so ARM64 ships one ggml-cpu.dll instead of run-time selected variants. GGML_CPU_ARM_ARCH=armv8-a keeps it to the base ARMv8-A instruction set every Windows ARM64 PC runs; upstream's toolchain file uses armv8.7-a and fast floating-point math, which would stop older PCs and change numerics. No Vulkan backend is built: upstream publishes Windows ARM64 CPU, OpenCL (Adreno) and CUDA builds but no Vulkan build, LunarG's ARM64 SDK (https://vulkan.lunarg.com/sdk/sha/1.4.357.0/warm/vulkansdk-windows-ARM64-1.4.357.0.exe.json) is not pinned here, and the hosted ARM64 runners have no GPU to test one.",
-    "Output DLL hashes depend on the runner's compiler, so each build records them in runtime-manifest.json with the compiler version; the bundle and package authenticate the DLLs against that manifest and the manifest's pins against this file."
+    "Output DLL hashes depend on the runner's compiler, so each build records them in runtime-manifest.json with the compiler version; the bundle and package authenticate the DLLs against that manifest and the manifest's pins against this file.",
+    "llama.cpp runs downloaded GGUF language models for on-device post-processing. It is the engine Windows users already run local models through: LM Studio (https://lmstudio.ai/docs/app/advanced/runtimes, llama.cpp runtimes), Ollama (https://github.com/ollama/ollama, ggml/llama.cpp), Jan (https://github.com/janhq/jan, llama.cpp engine), GPT4All (https://github.com/nomic-ai/gpt4all, llama.cpp backend) and KoboldCpp (https://github.com/LostRuins/koboldcpp) all load GGUF through it, and upstream publishes Windows CPU, Vulkan and CUDA builds in its releases (https://github.com/ggml-org/llama.cpp/releases). The Mac app already runs the same shared GGUF catalogue through llama.cpp.",
+    "llama.cpp is pinned to the build tag whose ggml tree equals whisper.cpp v1.9.4's, so one set of ggml DLLs (ggml.dll, ggml-base.dll and the backend DLLs) serves both runtimes: no second, incompatible ggml.dll is loaded into the process under the same module name. llama.dll is configured with LLAMA_USE_SYSTEM_GGML against a private install of the whisper.cpp build and only its llama target is built. If CMake cannot find that ggml, the build falls back to llama.cpp's own ggml tree (verified identical, configured with the same GGML switches), ships only llama.dll and records ggmlSource in runtime-manifest.json; the ggml DLLs shipped are always the whisper.cpp build's.",
+    "OpenSSL, the common library, tools, examples and the server are off: the app calls the C API in llama.h directly and downloads models itself."
   ]
 }

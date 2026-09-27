@@ -40,7 +40,7 @@ def sha256(data):
 
 
 def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.dll", "KERNEL32.dll"),
-                architecture="x64"):
+                architecture="x64", extra_sources=None):
     """Write a bundle directory shaped exactly like build-windows-bundle.py output."""
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -58,6 +58,7 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
     }
     sources = {"SpeakWindows.exe": "application", "swiftCore.dll": "swift-runtime", "README.txt": "generated",
                "licenses/LICENSE-JustSpeakToIt.txt": "application-license"}
+    sources.update(extra_sources or {})
     manifest = {
         "schemaVersion": 1,
         "bundle": {"kind": "unsigned Windows %s developer runtime bundle" % target["displayName"],
@@ -331,6 +332,36 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(package_manifest["bundle"]["runtimeModules"], ["swiftCore.dll"])
         self.assertEqual(package_manifest["executable"]["subsystem"], "console")
         self.assertEqual(evidence["layout"]["files"], len(hashes))
+
+    def test_local_inference_runtime_and_its_licences_are_carried_into_the_package(self):
+        # The on-device runtime is run-time loaded: whisper.cpp, the shared ggml and llama.cpp.
+        runtime = ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu-x64.dll", "llama.dll"]
+        licences = ["licenses/LICENSE-whisper.cpp.txt", "licenses/LICENSE-llama.cpp.txt"]
+
+        def add_runtime(entries, manifest):
+            for name in runtime:
+                imports = ["ggml.dll", "ggml-base.dll", "KERNEL32.dll"] if name in ("whisper.dll", "llama.dll") \
+                    else ["KERNEL32.dll"]
+                entries[name] = BUNDLE_TESTS.build_pe(imports=imports, dll=True)
+                manifest["dependencies"]["bundled"][name.lower()] = {
+                    "name": name, "source": BUILD.LOCAL_RUNTIME,
+                    "importedBy": [{"importer": "SpeakWindows.exe", "kind": "runtime-loaded"}]}
+            for path in licences:
+                entries[path] = b"MIT License\n" + path.encode()
+
+        sources = dict({name: BUILD.LOCAL_RUNTIME for name in runtime}, **{path: "license" for path in licences})
+        bundle = make_bundle(self.root / "bundle", mutate=add_runtime, extra_sources=sources)
+        self.build(bundle, expected_commit=COMMIT)
+        layout = self.root / "out/layout"
+        package_manifest, hashes = windows_msix.verify_layout(layout)
+        rows = {row["path"]: row for row in package_manifest["files"]}
+        for name in runtime:
+            self.assertEqual(rows[name]["bundleSource"], BUILD.LOCAL_RUNTIME, name)
+            self.assertIn(name, package_manifest["bundle"]["runtimeModules"])
+        for path in licences:
+            self.assertEqual((layout / path).read_bytes(), b"MIT License\n" + path.encode())
+            self.assertEqual(rows[path]["bundleSource"], "license")
+        self.assertEqual(hashes["llama.dll"], sha256((layout / "llama.dll").read_bytes()))
 
     def test_arm64_bundle_becomes_an_arm64_package_of_the_same_identity(self):
         bundle = make_bundle(self.root / "bundle", architecture="arm64")

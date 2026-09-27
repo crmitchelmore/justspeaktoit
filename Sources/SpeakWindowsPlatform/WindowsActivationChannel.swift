@@ -18,6 +18,11 @@ public final class WindowsActivationServer: @unchecked Sendable {
     /// Links are tiny; a client that has not sent one within this is dropped.
     static let readTimeout: UInt32 = 5_000
     static let replyTimeout: UInt32 = 5_000
+    /// Two instances, so one keeps listening while a connection is served;
+    /// the accept thread still handles links one at a time, in order.
+    static let maxInstances: UInt32 = 2
+    /// Short retries across the gap before the next listening instance exists.
+    static let connectRetries = 10
 
     public typealias Handler = @Sendable (String) async -> DesktopActivationFrame.Reply
 
@@ -42,7 +47,7 @@ public final class WindowsActivationServer: @unchecked Sendable {
             guard listener == nil else { return .listening }
             var created: OpaquePointer?
             var error = [CChar](repeating: 0, count: 512)
-            let status = jsti_automation_pipe_listen(pipeName, 1, &created, &error, error.count)
+            let status = jsti_automation_pipe_listen(pipeName, Self.maxInstances, &created, &error, error.count)
             if status == JSTI_AUTOMATION_PIPE_IN_USE.rawValue { return .anotherInstanceIsRunning }
             guard status == JSTI_AUTOMATION_PIPE_OK.rawValue, let created else {
                 throw WindowsActivationError(message: "Could not listen for links: \(String(cString: error))")
@@ -143,7 +148,14 @@ public final class WindowsActivationServer: @unchecked Sendable {
         let frame = try DesktopActivationFrame.encode(link)
         var connection: OpaquePointer?
         var error = [CChar](repeating: 0, count: 512)
-        let status = jsti_automation_pipe_connect(pipeName, timeoutMilliseconds, &connection, &error, error.count)
+        var status = jsti_automation_pipe_connect(pipeName, timeoutMilliseconds, &connection, &error, error.count)
+        // Between one client's disconnect and the next listening instance there
+        // can be a moment with no instance; retry briefly before reporting that
+        // nothing runs.
+        for _ in 0..<Self.connectRetries where status == JSTI_AUTOMATION_PIPE_NOT_FOUND.rawValue {
+            Thread.sleep(forTimeInterval: 0.05)
+            status = jsti_automation_pipe_connect(pipeName, timeoutMilliseconds, &connection, &error, error.count)
+        }
         guard status == JSTI_AUTOMATION_PIPE_OK.rawValue, let connection else {
             throw WindowsActivationError(status: status, detail: String(cString: error))
         }

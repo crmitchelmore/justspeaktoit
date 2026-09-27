@@ -90,9 +90,15 @@ extension DesktopHostController {
 }
 
 extension DesktopHostController {
-    /// Ends Read aloud: the current segment stops through the shared playback
-    /// controller and no later segment is synthesized.
-    package func stopReadAloud() { Platform.stopReadAloud(&readAloudState) }
+    /// Ends Read aloud and every other playback request: the current segment
+    /// stops through the shared controller, the segment being synthesized is
+    /// cancelled and no later one is admitted, and a History start still
+    /// resolving its audio never starts. The ended request reports nothing,
+    /// because whatever ended it owns the status.
+    package func stopReadAloud() {
+        playbackRequests.end()
+        Platform.stopReadAloud(&readAloudState, playback: playback)
+    }
 
     package func hotKeySettings() -> Platform.HotKeySettings { settings.hotKey ?? Platform.defaultHotKey }
 }

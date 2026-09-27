@@ -1,4 +1,5 @@
 {
+  "architecture": "x64",
   "bootstrapManifestSHA256": "0c3bf2bd08c6a87e321c9ed59b25fe3da1e8b47e22bbaf95202aae6786bf785f",
   "files": [
     {

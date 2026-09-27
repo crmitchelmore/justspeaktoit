@@ -105,12 +105,11 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
 }
 
 final class CartesiaLiveTranscriber: @unchecked Sendable {
-  static let apiVersion = "2026-03-01"
+  /// The Ink-2 stream's pinned version, owned by SpeakCore so this controller
+  /// and the shared client can never send different ones.
+  static let apiVersion = CartesiaLiveClient.apiVersion
   static let preferredChunkBytes = 3_200
   static let minimumChunkBytes = 1_600
-
-  private static let host = "api.cartesia.ai"
-  private static let path = "/stt/turns/websocket"
 
   private let apiKey: String
   private let model: String
@@ -210,17 +209,13 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
   }
 
   nonisolated static func webSocketURL(model: String, sampleRate: Int) -> URL? {
-    var components = URLComponents()
-    components.scheme = "wss"
-    components.host = host
-    components.path = path
-    components.queryItems = [
-      URLQueryItem(name: "model", value: model),
-      URLQueryItem(name: "encoding", value: "pcm_s16le"),
-      URLQueryItem(name: "sample_rate", value: String(sampleRate)),
-      URLQueryItem(name: "cartesia_version", value: apiVersion)
-    ]
-    return components.url
+    CartesiaLiveClient.webSocketURL(model: model, sampleRate: sampleRate)
+  }
+
+  /// The canonical handshake the shared client also opens: bearer key and the
+  /// pinned version, built once in SpeakCore.
+  nonisolated static func webSocketRequest(apiKey: String, model: String, sampleRate: Int) -> URLRequest? {
+    CartesiaLiveClient.webSocketRequest(apiKey: apiKey, model: model, sampleRate: sampleRate)
   }
 
   nonisolated static func transcriptEvent(from json: String) -> (text: String, isFinal: Bool)? {
@@ -237,14 +232,10 @@ final class CartesiaLiveTranscriber: @unchecked Sendable {
   }
 
   private func connectWebSocket() {
-    guard let url = Self.webSocketURL(model: model, sampleRate: sampleRate) else {
+    guard let request = Self.webSocketRequest(apiKey: apiKey, model: model, sampleRate: sampleRate) else {
       currentOnError()?(CartesiaLiveError.invalidURLComponents)
       return
     }
-
-    var request = URLRequest(url: url)
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    request.setValue(Self.apiVersion, forHTTPHeaderField: "Cartesia-Version")
 
     let task = session.webSocketTask(with: request)
     let proceed = withStateLock { () -> Bool in

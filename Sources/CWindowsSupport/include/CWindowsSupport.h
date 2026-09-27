@@ -263,6 +263,17 @@ typedef void (*JSTIVoiceOutputCallback)(int voice, void *context);
 int jsti_window_set_voice_output(const char *const *voice_names, size_t voice_count, int selected,
                                  JSTIVoiceOutputCallback callback, void *context);
 void jsti_window_clear_voice_output(void);
+/* Azure Speech resource dialog: the HTTPS endpoint of the user's Azure Speech
+ * or Foundry resource, shown and edited as UTF-8 text (empty when none is
+ * saved). Azure live transcription connects only to that resource; recorded
+ * audio uses it when set. The callback runs on the UI thread once per Apply
+ * with the entered text. It validates synchronously, never waiting for a Swift
+ * actor, and returns 0 to accept, which closes the dialog, or -1 after writing
+ * a readable reason into error, which the dialog shows while it stays open.
+ * Thread safe; the context is borrowed like the voice dialog's. */
+typedef int (*JSTIAzureResourceCallback)(const char *endpoint, void *context, char *error, size_t error_capacity);
+int jsti_window_set_azure_resource(const char *endpoint, JSTIAzureResourceCallback callback, void *context);
+void jsti_window_clear_azure_resource(void);
 /* Local models dialog: rows of the on-device models the host offers, in the
  * host's order, with their install state. Thread safe; an open dialog refreshes
  * in place. The callback runs on the UI thread with one action and the row
@@ -852,6 +863,13 @@ int jsti_whisper_transcribe(JSTIWhisperRuntime *runtime, const char *model_path,
 void jsti_whisper_free_text(char *text);
 /* Frees the cached model, waiting for a running transcription to finish. */
 void jsti_whisper_runtime_release_model(JSTIWhisperRuntime *runtime);
+/* Frees the cached model only if it was loaded from model_path (the path given
+ * to jsti_whisper_transcribe), waiting for a running transcription to finish.
+ * The check and the release are atomic with loading, so a model loaded in its
+ * place stays cached. The loaded model's file is closed once loaded, so it may
+ * already be deleted. Returns 1 when that model was freed, 0 when another model
+ * or none is cached, and -1 for an invalid argument. */
+int jsti_whisper_runtime_release_model_at(JSTIWhisperRuntime *runtime, const char *model_path);
 
 #ifdef __cplusplus
 }

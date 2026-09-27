@@ -38,6 +38,28 @@ final class CartesiaTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(query["cartesia_version"], CartesiaLiveTranscriber.apiVersion)
   }
 
+  /// The macOS controller opens the one canonical handshake the shared client
+  /// opens: the trimmed key as a bearer token and the pinned version.
+  func testLiveRequest_isTheCanonicalSharedRequest() throws {
+    let request = try XCTUnwrap(CartesiaLiveTranscriber.webSocketRequest(
+      apiKey: " synthetic-key \n", model: "ink-2", sampleRate: 16_000
+    ))
+    let canonical = try XCTUnwrap(CartesiaLiveClient.webSocketRequest(
+      apiKey: "synthetic-key", model: "ink-2", sampleRate: 16_000
+    ))
+
+    XCTAssertEqual(request.url, canonical.url)
+    XCTAssertEqual(
+      request.url?.absoluteString,
+      "wss://api.cartesia.ai/stt/turns/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000"
+        + "&cartesia_version=2026-03-01"
+    )
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic-key")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Cartesia-Version"), "2026-03-01")
+    XCTAssertEqual(request.allHTTPHeaderFields, canonical.allHTTPHeaderFields)
+    XCTAssertEqual(CartesiaLiveTranscriber.apiVersion, CartesiaLiveClient.apiVersion)
+  }
+
   func testTranscriptEvent_turnUpdateProducesPartial() {
     let json = """
     {"type":"turn.update","results":[{"transcript":"book a table"}]}

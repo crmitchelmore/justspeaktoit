@@ -9,41 +9,6 @@ import XCTest
 final class DesktopCloudSyncKeyTests: DesktopCloudSyncTestCase {
     // MARK: - API keys
 
-    private func seedMacKeys(passphrase: String, keys: [String: String], deleted: [String] = []) throws {
-        let envelope = EncryptedSecretEnvelope(cryptography: ToyCryptography())
-        let created = try envelope.makeMetadata(passphrase: passphrase)
-        let name = "api-key-sync-metadata"
-        server.seedRecord(zone: syncZone, recordName: name, recordType: "EncryptedSecretMetadata", fields: [
-            "salt": (created.metadata.salt.base64EncodedString(), "BYTES"),
-            "verifierNonce": (created.metadata.verifierNonce.base64EncodedString(), "BYTES"),
-            "verifierCiphertext": (created.metadata.verifierCiphertext.base64EncodedString(), "BYTES"),
-            "verifierTag": (created.metadata.verifierTag.base64EncodedString(), "BYTES"),
-            "updatedAt": (milliseconds(fixtureDate(0)), "TIMESTAMP")
-        ])
-        try seedSecrets(keys, deleted: deleted, key: created.key, at: fixtureDate(100))
-    }
-
-    private func seedSecrets(_ keys: [String: String], deleted: [String] = [], key: Data? = nil, at date: Date) throws {
-        let envelope = EncryptedSecretEnvelope(cryptography: ToyCryptography())
-        let stored = try vault.readCredential(DesktopCloudSyncCredential.apiKeySyncKey)
-        let key = try key ?? XCTUnwrap(stored.flatMap { Data(base64Encoded: $0) })
-        let entries = keys.map { ($0.key, $0.value, false) } + deleted.map { ($0, "", true) }
-        for (identifier, value, isDeleted) in entries {
-            let secret = try envelope.seal(
-                identifier: identifier, value: value, updatedAt: date, key: key, isDeleted: isDeleted
-            )
-            server.seedRecord(zone: syncZone, recordName: SyncSchema.EncryptedSecret.recordName(for: identifier),
-                              recordType: "EncryptedSecret", fields: [
-                "identifier": (identifier, "STRING"),
-                "ciphertext": (secret.ciphertext.base64EncodedString(), "BYTES"),
-                "nonce": (secret.nonce.base64EncodedString(), "BYTES"),
-                "tag": (secret.tag.base64EncodedString(), "BYTES"),
-                "updatedAt": (milliseconds(date), "TIMESTAMP"),
-                "isDeleted": (isDeleted ? 1 : 0, "INT64")
-            ])
-        }
-    }
-
     func testKeyImportIsOptInAndKeepsOnlyTheDerivedKey() async throws {
         let passphrase = "correct horse battery staple"
         try seedMacKeys(

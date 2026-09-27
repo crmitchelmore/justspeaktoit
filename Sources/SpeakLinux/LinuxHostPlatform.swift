@@ -21,13 +21,11 @@ struct LinuxHotKeySettings: Codable, Equatable, Sendable {
     }
 }
 
-/// Read aloud is not implemented on Linux yet; the setting stays absent.
-struct LinuxVoiceOutputSettings: Codable, Equatable, Sendable {}
-
 /// GTK 4/libadwaita, the Secret Service, libpulse and the X11 or portal
 /// output paths behind the shared desktop host.
 enum LinuxHostPlatform: DesktopHostPlatform {
     typealias VoiceOutputSettings = LinuxVoiceOutputSettings
+    typealias ReadAloudState = LinuxReadAloudState
 
     package static let displayName = "Linux"
     package static let credentialStoreName = "the desktop keyring (Secret Service)"
@@ -139,9 +137,13 @@ enum LinuxHostPlatform: DesktopHostPlatform {
 
     package static func makePlayback() -> LinuxAudioPlayback { LinuxAudioPlayback() }
 
-    package static func makeReadAloudState() {}
+    package static func makeReadAloudState() -> LinuxReadAloudState { LinuxReadAloudState() }
 
-    package static func stopReadAloud(_ state: inout Void) {}
+    package static func stopReadAloud(_ state: inout LinuxReadAloudState, playback: LinuxAudioPlayback) {
+        state.stop()
+    }
+
+    package static func isReadingAloud(_ state: LinuxReadAloudState) -> Bool { state.task != nil }
 
     // MARK: Shortcut text
 

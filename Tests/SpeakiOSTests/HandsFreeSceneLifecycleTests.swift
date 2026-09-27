@@ -112,7 +112,7 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
                 configuring.fulfill()
             }
         }
-        await harness.coordinator.toggle()
+        let retiredStart = await harness.beginArming()
         await fulfillment(of: [configuring], timeout: 2)
         await harness.coordinator.sceneActivityChanged(isActive: false)?.value
         let deactivations = harness.deactivations
@@ -122,7 +122,7 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
             await harness.arm()
         }
         configured?.resume()
-        await Task { @MainActor in }.value
+        await retiredStart?.value
         XCTAssertEqual(harness.deactivations, deactivations + (rearm ? 0 : 1))
         XCTAssertEqual(harness.coordinator.state, rearm ? .armed : .off)
         XCTAssertNil(harness.coordinator.failureMessage)
@@ -218,11 +218,14 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
         await harness.record()
         let finishing = harness.holdFinalisation()
         await harness.coordinator.finishCurrentUtterance()
+        let retiredFinalisation = harness.coordinator.finalisationTask
         await fulfillment(of: [finishing], timeout: 2)
         await harness.coordinator.disarm()
         await harness.record()
         harness.finish?.resume(returning: .failed(.captureFailed))
-        await Task { @MainActor in }.value
+        await retiredFinalisation?.value
+        // The retired owner did reach its rearm decision, and was refused.
+        XCTAssertEqual(harness.rearmAtCompletion, false)
         XCTAssertEqual(harness.coordinator.state, .recording)
         XCTAssertNil(harness.coordinator.failureMessage)
         XCTAssertEqual(harness.cancels, 1)
@@ -240,7 +243,7 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
                 preparing.fulfill()
             }
         }
-        await harness.coordinator.toggle()
+        let retiredStart = await harness.beginArming()
         await fulfillment(of: [preparing], timeout: 2)
         await harness.coordinator.sceneActivityChanged(isActive: false)?.value
         XCTAssertEqual(harness.coordinator.state, .off)
@@ -253,7 +256,7 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
         } else {
             prepared?.resume()
         }
-        await Task { @MainActor in }.value
+        await retiredStart?.value
         XCTAssertEqual(harness.coordinator.state, .armed)
         XCTAssertEqual(harness.deactivations, deactivations)
         XCTAssertNil(harness.coordinator.failureMessage)
@@ -269,6 +272,9 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
     }
 }
 
+// Boundaries capture the fixture unowned on purpose. A call after a test has
+// released it means the test returned without joining work it started; that
+// must fail loudly rather than be absorbed by a weak capture.
 @MainActor
 private final class Harness {
     let manager = AudioSessionManager()
@@ -322,9 +328,18 @@ private final class Harness {
         coordinator.inputIsUsable = { true }
     }
 
-    func arm() async {
+    /// Toggles arming on and returns its detector start. Retirement drops the
+    /// coordinator's reference, so a test keeps this one to join that exact
+    /// operation: a resumed boundary returns through the global executor, which
+    /// no fixed number of main-actor turns is guaranteed to wait for.
+    func beginArming() async -> Task<Void, Never>? {
         await coordinator.toggle()
-        await Task { @MainActor in }.value
+        XCTAssertNotNil(coordinator.armTask, "Arming must own a detector start")
+        return coordinator.armTask
+    }
+
+    func arm() async {
+        await beginArming()?.value
         XCTAssertEqual(coordinator.state, .armed)
     }
 

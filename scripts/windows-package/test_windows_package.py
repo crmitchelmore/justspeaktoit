@@ -39,14 +39,17 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.dll", "KERNEL32.dll")):
+def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.dll", "KERNEL32.dll"),
+                architecture="x64"):
     """Write a bundle directory shaped exactly like build-windows-bundle.py output."""
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    executable = BUNDLE_TESTS.build_pe(imports=exe_imports)
+    target = windows_msix.windows_targets.target(architecture)
+    machine = target["processMachine"]
+    executable = BUNDLE_TESTS.build_pe(imports=exe_imports, machine=machine)
     entries = {
         "SpeakWindows.exe": executable,
-        "swiftCore.dll": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], dll=True),
+        "swiftCore.dll": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], dll=True, machine=machine),
         "SpeakApp_SpeakCore.resources/ReleaseNotes.json": b'{"entries": [{"version": "1"}]}',
         # Larger than one 64 KiB block, so block maps have several blocks.
         "SpeakApp_SpeakCore.resources/Large.bin": bytes(range(256)) * 700,
@@ -57,7 +60,8 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
                "licenses/LICENSE-JustSpeakToIt.txt": "application-license"}
     manifest = {
         "schemaVersion": 1,
-        "bundle": {"kind": "unsigned Windows x64 developer runtime bundle", "notInstaller": True, "codeSigned": False},
+        "bundle": {"kind": "unsigned Windows %s developer runtime bundle" % target["displayName"],
+                   "architecture": target["bundleArchitecture"], "notInstaller": True, "codeSigned": False},
         "application": {"sourceCommit": commit, "configuration": "release", "appBuiltForTesting": False,
                         "executableSHA256": sha256(executable)},
         "dependencies": {"bundled": {"swiftcore.dll": {"name": "swiftCore.dll", "source": "swift-runtime",
@@ -73,7 +77,7 @@ def make_bundle(directory, commit=COMMIT, mutate=None, exe_imports=("swiftCore.d
                          for path, data in sorted(entries.items()) if path != "bundle-manifest.json"]
     manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode()
     entries["bundle-manifest.json"] = manifest_bytes
-    archive = directory / ("justspeaktoit-windows-x64-developer-%s.zip" % commit[:7])
+    archive = directory / ("justspeaktoit-windows-%s-developer-%s.zip" % (architecture, commit[:7]))
     BUILD.write_deterministic_zip(archive, entries)
     data = archive.read_bytes()
     evidence = {"schemaVersion": 1,
@@ -167,7 +171,10 @@ class IdentityTests(unittest.TestCase):
             lambda data: data["presentation"].update(displayName="Just | Speak"),
             lambda data: data["capabilities"]["device"].append("webcam"),
             lambda data: data.update(releaseTrain="stable"),
-            lambda data: data["identity"].update(processorArchitecture="arm64"),
+            lambda data: data["identity"].update(processorArchitectures=["x86"]),
+            lambda data: data["identity"].update(processorArchitectures=[]),
+            lambda data: data["identity"].update(processorArchitectures=["x64", "x64"]),
+            lambda data: data["identity"].update(processorArchitectures="x64"),
             lambda data: data["application"].update(executionAlias="nested\\alias.exe"),
         ]
         with tempfile.TemporaryDirectory() as scratch:
@@ -203,6 +210,22 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(names, ["runFullTrust", "unvirtualizedResources", "microphone"])
         family = root.find("f:Dependencies/f:TargetDeviceFamily", ns)
         self.assertEqual((family.get("MinVersion"), family.get("MaxVersionTested")), ("10.0.19041.0", "10.0.20348.0"))
+
+    def test_arm64_manifest_declares_the_same_identity_for_arm64(self):
+        data = windows_msix.render_manifest(self.identity, "0.0.7.1", "CN=Just Speak to It Developer",
+                                            architecture="arm64")
+        identity = ET.fromstring(data).find("f:Identity", windows_msix.NAMESPACES)
+        self.assertEqual(identity.get("ProcessorArchitecture"), "arm64")
+        self.assertEqual(identity.get("Name"), "com.justspeaktoit.windows.developer")
+        with self.assertRaises(windows_msix.PackageError):
+            windows_msix.check_manifest(data, self.identity, "0.0.7.1", "CN=Just Speak to It Developer")
+        record = windows_msix.package_identity(self.identity, "0.0.7.1", "CN=Just Speak to It Developer", "arm64")
+        self.assertEqual(record["packageFullName"], "com.justspeaktoit.windows.developer_0.0.7.1_arm64__"
+                         + windows_msix.publisher_id("CN=Just Speak to It Developer"))
+        x64_only = copy.deepcopy(self.identity)
+        x64_only["identity"]["processorArchitectures"] = ["x64"]
+        with self.assertRaisesRegex(windows_msix.PackageError, "does not allow the arm64"):
+            windows_msix.render_manifest(x64_only, "0.0.7.1", "CN=Just Speak to It Developer", architecture="arm64")
 
     def test_text_values_are_escaped(self):
         identity = copy.deepcopy(self.identity)
@@ -308,6 +331,46 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(package_manifest["bundle"]["runtimeModules"], ["swiftCore.dll"])
         self.assertEqual(package_manifest["executable"]["subsystem"], "console")
         self.assertEqual(evidence["layout"]["files"], len(hashes))
+
+    def test_arm64_bundle_becomes_an_arm64_package_of_the_same_identity(self):
+        bundle = make_bundle(self.root / "bundle", architecture="arm64")
+        evidence = self.build(bundle, expected_commit=COMMIT)
+        self.assertEqual(evidence["package"]["architecture"], "arm64")
+        self.assertIn("_0.0.9.1_arm64__", evidence["package"]["packageFullName"])
+        package_manifest, _ = windows_msix.verify_layout(self.root / "out/layout")
+        self.assertEqual(package_manifest["package"]["kind"], "unsigned Windows ARM64 developer MSIX payload")
+        manifest = ET.fromstring((self.root / "out/layout/AppxManifest.xml").read_bytes())
+        self.assertEqual(manifest.find("f:Identity", windows_msix.NAMESPACES).get("ProcessorArchitecture"), "arm64")
+        x64 = self.build(make_bundle(self.root / "x64-bundle"), output="x64")
+        self.assertEqual(x64["package"]["packageFamilyName"], evidence["package"]["packageFamilyName"])
+        self.assertEqual(x64["package"]["architecture"], "x64")
+
+    def test_images_foreign_to_the_bundle_architecture_are_refused(self):
+        arm64 = windows_msix.windows_pe.IMAGE_FILE_MACHINE_ARM64
+        cases = [
+            ("x64-dll", "arm64", lambda entries, manifest: entries.update(
+                {"swiftCore.dll": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], dll=True)}),
+             "swiftCore.dll is not a native arm64 DLL"),
+            ("arm64ec-dll", "arm64", lambda entries, manifest: entries.update(
+                {"swiftCore.dll": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], dll=True, hybrid_metadata=0x18000A2E8)}),
+             "not a native arm64 DLL \\(it is arm64ec\\)"),
+            ("arm64-exe-in-x64", "x64", lambda entries, manifest: entries.update(
+                {"SpeakWindows.exe": BUNDLE_TESTS.build_pe(imports=["KERNEL32.dll"], machine=arm64)}) or
+             manifest["application"].update(executableSHA256=sha256(entries["SpeakWindows.exe"])),
+             "not a Windows x64 executable \\(it is arm64\\)"),
+            ("no-architecture", "x64", lambda entries, manifest: manifest["bundle"].pop("architecture"),
+             "unsupported bundle architecture"),
+        ]
+        for name, architecture, mutate, message in cases:
+            bundle = make_bundle(self.root / name, mutate=mutate, architecture=architecture)
+            if name == "arm64-exe-in-x64":
+                # The evidence names the recorded executable; keep it consistent with the mutation.
+                evidence = json.loads((bundle / "bundle-evidence.json").read_text(encoding="utf-8"))
+                with zipfile.ZipFile(next(bundle.glob("*.zip"))) as archive:
+                    evidence["application"]["executableSHA256"] = sha256(archive.read("SpeakWindows.exe"))
+                (bundle / "bundle-evidence.json").write_text(json.dumps(evidence), encoding="utf-8")
+            with self.assertRaisesRegex(windows_msix.PackageError, message, msg=name):
+                self.build(bundle, output="out-" + name)
 
     def test_layout_is_deterministic(self):
         bundle = make_bundle(self.root / "bundle")

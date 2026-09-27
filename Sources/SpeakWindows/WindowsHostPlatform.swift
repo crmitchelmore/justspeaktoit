@@ -99,10 +99,11 @@ enum WindowsHostPlatform: DesktopHostPlatform {
 
     package static func makeReadAloudState() -> WindowsReadAloudState { WindowsReadAloudState() }
 
-    package static func stopReadAloud(_ state: inout WindowsReadAloudState) {
-        state.task?.cancel()
-        state.task = nil
+    package static func stopReadAloud(_ state: inout WindowsReadAloudState, playback: WindowsAudioPlaybackController) {
+        state.stop(playback)
     }
+
+    package static func isReadingAloud(_ state: WindowsReadAloudState) -> Bool { state.task != nil }
 
     package static func makeLocalModelsState() -> WindowsLocalModelsState { WindowsLocalModelsState() }
 
@@ -116,6 +117,14 @@ enum WindowsHostPlatform: DesktopHostPlatform {
         _ audio: URL, model: String, language: String?, controller: isolated WindowsAppController
     ) async throws -> TranscriptionResult {
         try await controller.transcribeLocally(audio, model: model, language: language)
+    }
+
+    package static func beginLocalUse(_ model: String, controller: isolated WindowsAppController) -> String? {
+        controller.holdLocalModel(model)
+    }
+
+    package static func endLocalUse(_ model: String?, controller: isolated WindowsAppController) {
+        controller.releaseLocalModel(model)
     }
 
     package static var defaultHotKey: WindowsHotKeySettings { WindowsHotKeySettings() }

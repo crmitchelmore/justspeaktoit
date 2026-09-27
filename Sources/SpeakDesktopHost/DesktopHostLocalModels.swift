@@ -5,9 +5,18 @@ import SpeakDesktop
 /// Hooks the controller calls into a host's History sync once it is configured.
 package struct DesktopHostSyncHooks: Sendable {
     package var historyChanged: (@Sendable () -> Void)?
+    /// Saves a provider key typed in Settings or the post-processing dialog
+    /// (removes it when empty) and marks it saved by hand in the same step, so
+    /// a key imported from the Mac and deleted there cannot take a newly typed
+    /// key with it.
+    package var saveKeyByHand: (@Sendable (_ value: String, _ identifier: String) async throws -> Void)?
 
-    package init(historyChanged: (@Sendable () -> Void)? = nil) {
+    package init(
+        historyChanged: (@Sendable () -> Void)? = nil,
+        saveKeyByHand: (@Sendable (_ value: String, _ identifier: String) async throws -> Void)? = nil
+    ) {
         self.historyChanged = historyChanged
+        self.saveKeyByHand = saveKeyByHand
     }
 }
 
@@ -42,6 +51,18 @@ package extension DesktopHostPlatform {
     ) async throws -> TranscriptionResult {
         throw DesktopTranscriptionError.unsupportedModel
     }
+
+    static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String? { nil }
+
+    static func endLocalUse(_ model: String?, controller: isolated DesktopHostController<Self>) {}
+}
+
+extension DesktopHostController {
+    /// Holds an on-device model for one recording or transcription until
+    /// `endLocalUse`, so it cannot be removed meanwhile. Nil for other models.
+    package func beginLocalUse(_ model: String) -> String? { Platform.beginLocalUse(model, controller: self) }
+
+    package func endLocalUse(_ model: String?) { Platform.endLocalUse(model, controller: self) }
 }
 
 extension DesktopHostController {

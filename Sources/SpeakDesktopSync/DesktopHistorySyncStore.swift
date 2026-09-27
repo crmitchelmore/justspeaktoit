@@ -213,8 +213,13 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
         }
     }
 
+    /// Reports the changes applied since the last report. Each was saved, with
+    /// its sync state, by a step the pass fence admitted; this writes nothing
+    /// account-bound, which is why the fence does not admit it. It can
+    /// therefore run after the pass's session has ended, and a pass stopped
+    /// before reaching it leaves its saved changes for the next one to report:
+    /// either way the window only learns of records already on disk.
     public func persistRemoteChanges() async throws {
-        // Every change was saved as it was applied; report them to the host now.
         guard !unreported.isEmpty else { return }
         let changes = unreported
         unreported.removeAll()

@@ -1,22 +1,37 @@
 """Read Windows PE metadata without executing anything.
 
 Only the structures the bundle needs are decoded: the COFF/optional headers,
-section table, static import directory, delay-load import directory and the
+section table, static import directory, delay-load import directory, the
+load configuration's hybrid (ARM64EC/ARM64X) metadata pointer and the
 VS_VERSIONINFO resource. Every read is bounds-checked; malformed input raises
 ``PEFormatError`` instead of producing a partial dependency list.
 """
 import pathlib
 import struct
 
+IMAGE_FILE_MACHINE_I386 = 0x14C
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
+IMAGE_FILE_MACHINE_ARM64 = 0xAA64
 IMAGE_SUBSYSTEM_WINDOWS_GUI = 2
 IMAGE_SUBSYSTEM_WINDOWS_CUI = 3
 IMAGE_FILE_DLL = 0x2000
 DIRECTORY_IMPORT = 1
 DIRECTORY_RESOURCE = 2
+DIRECTORY_LOAD_CONFIG = 10
 DIRECTORY_DELAY_IMPORT = 13
+# IMAGE_LOAD_CONFIG_DIRECTORY64.CHPEMetadataPointer. Only hybrid images set it:
+# ARM64EC code behind an x64 header, or ARM64X with an ARM64 header.
+LOAD_CONFIG_CHPE_METADATA_64 = 0xC8
 RT_VERSION = 16
 MAX_DLL_NAME = 260
+
+# Image architectures. The x64 header of an ARM64EC image and the ARM64 header
+# of an ARM64X image are told apart from plain x64 and ARM64 by that pointer.
+X86, X64, ARM64, ARM64EC, ARM64X = "x86", "x64", "arm64", "arm64ec", "arm64x"
+# The images each Windows process architecture loads natively. An ARM64
+# process uses ARM64X's native view; ARM64EC needs an emulated x64 process and
+# never runs on x64 hardware, so neither target accepts it.
+NATIVE_IMAGES = {X64: frozenset({X64}), ARM64: frozenset({ARM64, ARM64X})}
 
 
 class PEFormatError(ValueError):
@@ -96,7 +111,37 @@ class PEImage:
 
     @property
     def is_x64(self):
-        return self.machine == IMAGE_FILE_MACHINE_AMD64 and self.optional_magic == 0x20B
+        return self.architecture == X64
+
+    @property
+    def architecture(self):
+        """``x64``, ``arm64``, ``arm64ec``, ``arm64x``, ``x86`` or ``machine-0x....``."""
+        if self.optional_magic == 0x20B and self.machine == IMAGE_FILE_MACHINE_AMD64:
+            return ARM64EC if self.hybrid_metadata() else X64
+        if self.optional_magic == 0x20B and self.machine == IMAGE_FILE_MACHINE_ARM64:
+            return ARM64X if self.hybrid_metadata() else ARM64
+        if self.optional_magic == 0x10B and self.machine == IMAGE_FILE_MACHINE_I386:
+            return X86
+        return "machine-%#06x" % self.machine
+
+    def runs_natively_on(self, architecture):
+        """Whether a process of ``architecture`` (``x64`` or ``arm64``) loads this image natively."""
+        if architecture not in NATIVE_IMAGES:
+            raise ValueError("unsupported Windows architecture: %r" % (architecture,))
+        return self.architecture in NATIVE_IMAGES[architecture]
+
+    def hybrid_metadata(self):
+        """The CHPE metadata address of an ARM64EC or ARM64X image; 0 for any other image."""
+        rva, size = self.directory(DIRECTORY_LOAD_CONFIG)
+        if (not rva and not size) or self.optional_magic != 0x20B:
+            return 0
+        if not rva or size < 4:
+            raise PEFormatError(self.name + ": truncated load configuration directory")
+        # The structure's own Size field says which trailing fields exist.
+        declared = self._u32(self.offset(rva, 4))
+        if declared < LOAD_CONFIG_CHPE_METADATA_64 + 8:
+            return 0
+        return self._u64(self.offset(rva + LOAD_CONFIG_CHPE_METADATA_64, 8))
 
     def section_name_of(self, rva):
         for name, address, size, _, _ in self.sections:
@@ -294,7 +339,7 @@ def describe(path):
     image = PEImage.load(path)
     version = image.version_info()
     return {
-        "machine": "x64" if image.is_x64 else "%#x" % image.machine,
+        "machine": image.architecture,
         "dll": image.is_dll,
         "subsystem": image.subsystem,
         "imports": image.imports(),

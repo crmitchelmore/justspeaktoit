@@ -17,8 +17,9 @@ Apple capture path.
 Windows CI uses **Swift 6.2.3, Windows Server 2022, x86_64**. Follow the official
 [Swift Windows installation guide](https://www.swift.org/install/windows/) for
 Visual Studio C++ tools, Windows SDK and Swift prerequisites. That page includes
-previous Swift releases; select 6.2.3 to reproduce CI. Windows arm64 is not part
-of this target's verified matrix yet.
+previous Swift releases; select 6.2.3 to reproduce CI. Windows ARM64 has a
+separate native workflow with native-execution evidence, described in
+[Windows ARM64](windows-arm64.md); it has no CI receipt yet.
 
 In PowerShell from the repository root:
 
@@ -40,11 +41,39 @@ Azure, Mistral, Soniox, Rev.ai, Modulate, AssemblyAI and OpenRouter. The canonic
 shared catalogue owns their identifiers, metadata and routes. OpenRouter model
 discovery uses the same cache and refresh policy as Apple; native model controls
 refresh without changing an active recording or reusing an earlier model index.
-Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs
-and xAI's dedicated speech-to-text live models use shared Swift clients with the native WinHTTP transport. The xAI
-stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is source-wired with
-fake-transport tests only and still needs a Windows provider receipt; the Grok
-Voice conversation route stays unavailable. A WinHTTP socket whose native
+Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs,
+Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live and xAI's
+dedicated speech-to-text live models use shared Swift clients with the native
+WinHTTP transport. The xAI stream (`xai/speech-to-text-streaming`, 24 kHz PCM) is
+source-wired with fake-transport tests only and still needs a Windows provider
+receipt; the Grok Voice conversation route stays unavailable. Gladia
+(`gladia/solaria-1-streaming`) creates its single-use session with an HTTPS
+request, then streams on the WinHTTP socket that session names; the account key
+never reaches the socket. Cartesia (`cartesia/ink-2-streaming`) completes a
+finish only on the server's normal closure (1000) after its `close` command,
+read from the close status the transport reports. Rev.ai
+(`revai/machine-v2-streaming`) holds audio until the server's `connected`
+message and completes a finish only on the normal closure that follows a
+delivered `EOS`; a closure before `EOS`, any other status or a dropped
+connection fails visibly, and its access token travels only in the socket
+query, which is never logged. All three have fake-transport and synthetic
+loopback tests, the latter also over WinHTTP in the probe step. Cartesia's
+production handshake (`Authorization: Bearer`, `Cartesia-Version` 2026-03-01)
+and its normal closure after `close` were confirmed once against the live
+service on 2026-09-23 through the Apple URLSession transport, by the opt-in
+`CartesiaServiceAcceptanceTests` probe (one test, no failures, 1.575 s, run by
+the integrator with an existing key held in memory only). That probe streams
+one second of generated silence, so it is not a Windows receipt: the WinHTTP
+path against the real service and transcription accuracy remain unproven, and
+none of the three has a Windows provider receipt yet. Azure Voice Live
+(`azure/azure-speech-streaming` and `azure/mai-transcribe-streaming`, 24 kHz PCM)
+connects only to the resource endpoint saved in Settings → Azure Speech
+resource…, with no regional fallback, and leaves the language to Azure's
+multilingual detection. A finish ends only once Azure acknowledges its commit
+and finalisation barrier and every turn has settled; any other server error,
+including one naming the barrier, is a failure. It has fake-transport tests and
+synthetic loopback tests over WinHTTP in the probe step, and no Windows provider
+receipt yet. A WinHTTP socket whose native
 destruction cannot yet complete keeps its handles and callback context owned by
 a release queue that retries with capped backoff; at four such sockets new live
 connections are refused with a retryable error rather than accumulating native
@@ -93,7 +122,8 @@ converter, retaining the original in History and removing private temporary WAV
 output afterwards. The converter uses installed Windows codecs; it does not
 promise support for every Ogg, Opus or WebM encoding. Native Windows decode/cancellation tests passed; run 35725040396 also decoded generated AAC/M4A and MP3 fixtures, checked their non-silent signal and retained originals.
 Other compressed formats and physical-device acceptance remain pending. Canonical recordings bypass decoding after a 44-byte header probe. Azure keys accept `key:region` (a raw key defaults to eastus);
-custom resource endpoint UI remains pending. Mistral, Soniox and Rev.ai stream multipart bodies
+Settings → Azure Speech resource… saves the resource endpoint (as `azureSpeechResourceEndpoint`,
+the Apple apps' key), which recorded audio uses when set. Mistral, Soniox and Rev.ai stream multipart bodies
 from temporary files, using a native protected ACL for the current Windows user
 and SYSTEM. Creation refuses existing files and reparse-point paths; completed,
 failed and cancelled uploads remove their staging files. Soniox removes accepted
@@ -150,9 +180,17 @@ first matching profile becomes an immutable session snapshot, leaving normal
 settings unchanged. Unavailable models, inherited values and Apple-only matchers
 survive edits; unsupported overrides have an explicit notice retained in History.
 Atomic persistence and queued settings application precede the next recording.
-Spoken-language overrides reach supported live models through their shared client:
-OpenAI, Deepgram Nova and multilingual Flux. English-only Flux and AssemblyAI
-retain a model-specific limitation; Automatic keeps the model's normal language
+Spoken-language overrides reach supported live models through their shared client,
+as each model's canonical capability allows: OpenAI, Deepgram Nova and multilingual
+Flux, Speechmatics, Soniox, ElevenLabs, xAI speech-to-text, Gladia and Rev.ai.
+Gladia's session request pins one of its documented language codes; a language it
+does not list lets Gladia detect the language instead. Rev.ai's socket query
+carries one of its nine documented codes (Mandarin as `cmn`); as on Apple
+platforms, Automatic resolves the system language first, and a language Rev.ai
+does not list is omitted, which Rev.ai reads as English, without a profile notice
+yet. English-only Flux, AssemblyAI,
+Cartesia Ink-2 (English only, with no language field) and Voxtral retain a
+model-specific limitation; Automatic keeps the model's normal language
 behaviour without a warning. Personal lexicon overrides are not applied yet.
 
 Automatic insertion targets the control that had focus when the hotkey fired
@@ -313,7 +351,12 @@ The macOS host currently executes shared live engines for eleven remote provider
 families. This includes xAI's dedicated speech-to-text route and Speechmatics
 through `SharedClientLiveController`; a platform-specific client class is not
 required for those routes. AssemblyAI, Cartesia, Gladia and Modulate still have
-duplicate macOS transports. Deepgram and OpenAI share transport but retain
+duplicate macOS transports. Cartesia and Gladia now also have shared, finalising
+clients, which iOS and the Windows projection build; the macOS app still records
+through its own controllers for them, and its Compare Models lanes use the
+shared clients. Rev.ai has one shared client on every platform: macOS runs it
+through `SharedClientLiveController`, iOS through its factory and Windows through
+the desktop projection. Deepgram and OpenAI share transport but retain
 separate macOS stop orchestration. These are explicit consolidation gaps:
 provider changes must still inspect both paths until their adapters are migrated
 and their existing capabilities and finalisation behaviour are verified.
@@ -339,7 +382,7 @@ but must not be presented as the identical Apple-only engine or service.
 |---|---|---|
 | Recording and file import | WASAPI PCM capture, native controls and file selection implemented | Physical microphones, device changes, permission denial, interruption and long-session recovery |
 | Batch transcription | All 31 static remote models through shared clients, plus shared OpenRouter discovery and native refresh | Final-head Windows/Linux CI, real provider receipts and supported formats/languages |
-| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs and the xAI dedicated speech-to-text model use shared clients and native WinHTTP; Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox and ElevenLabs streams, and remaining streaming providers |
+| Live transcription | Four OpenAI, three Deepgram, one AssemblyAI, Speechmatics, Soniox, ElevenLabs, Mistral Voxtral, Gladia, Cartesia Ink-2, Rev.ai, two Azure Voice Live routes (to the saved resource endpoint) and the xAI dedicated speech-to-text model use shared clients and native WinHTTP (Gladia's session request is HTTPS); Grok Voice is not exposed | Final-head native host checks, Windows provider receipts including real xAI, Speechmatics, Soniox, ElevenLabs, Mistral, Gladia, Cartesia, Rev.ai and Azure streams (Cartesia's handshake and normal closure are confirmed over Apple URLSession only; Rev.ai's normal closure after `EOS` follows its documentation and reconnection tutorial but has no live receipt yet; Azure's commit and barrier acknowledgements have no live receipt for the shared client yet), and the remaining streaming providers: Google, Meta and Modulate |
 | Global shortcut | Configurable Ctrl/Alt combination with conflict refusal, and all four activation styles: press-to-toggle natively; hold, double-tap and both through the shared SpeakCore gesture machine and session policy. Local Windows cross-compilation and portable gesture/policy tests pass; the native dialog, registration and release polling are covered by the window smoke test with fake registration and key state | Windows CI for this revision, physical keyboard acceptance of hold/double-tap timing, user-adjustable timing, the macOS host adopting the shared machine (it keeps its own `GestureDetector`), hands-free arming and Escape cancel |
 | Text output | Captured-field insertion: native Edit/RichEdit caret/selection replacement, UI Automation Value pattern for empty or fully selected fields, guarded history-excluded paste with clipboard restore and read-back verification, field-identity and password/read-only/elevation refusal; native Text output dialog for Smart, direct-only and clipboard-only output, replace-field and clipboard restoration; each recording keeps the choice read at its Record event; clipboard-only output also copies in-app recordings as an ordinary copy | Windows CI and physical keyboard/screen reader/DPI acceptance of the dialog, physical browser/Electron/Office/XAML acceptance, undo, streaming insertion and voice edit |
 | On-device transcription | Local batch recording and file import through a run-time loaded whisper.cpp 1.9.4 (best CPU variant, or Vulkan on any vendor's GPU when a driver is present). Four canonical Whisper entries (tiny, base, small, large-v3-turbo) are projected from the shared catalogue with pinned GGML files, sizes and SHA-256; the native Local models dialog downloads (resumable, atomic, verified), cancels, removes and sets the GPU choice. Source picker: Remote or Local, then Batch or Live; Local offers Batch only, so the Mode picker hides for it. Runtime DLLs are built from the pinned commit in CI and shipped in the bundle and MSIX with licence and provenance; the native job and the self-contained bundle transcribe the JFK sample with the tiny model | Windows CI receipt for this revision, local streaming, Hugging Face import, real Vulkan hardware (the runners have no GPU), CPU/GPU throughput and memory on physical PCs, and local post-processing |
@@ -397,14 +440,34 @@ reused; its sherpa and bzip2 path is not.
   With the GPU choice on, ggml picks Vulkan when `vulkan-1.dll` and a device are
   present, otherwise the best CPU variant. Models stay loaded between
   recordings; cancelling a recording aborts inference.
+- **Removal.** `LocalModelOwnership` (SpeakDesktop) refuses to remove a model
+  that a recording, import or transcription uses, which a profile may choose
+  instead of the selected model, and never lets a download and a removal of one
+  model overlap. `LocalModelTeardown` deletes the files, then asks the runtime to
+  free its cached model on its own queue, because freeing waits for a running
+  recognition; the controller stays free to cancel or record meanwhile. The
+  runtime frees the model only if it was loaded from the removed file, checked
+  under the lock it loads under, so a model loaded in its place stays warm.
+  Deleting first is safe: the runtime closes a model's file once it is loaded.
 - **Controls.** The window's Source picker chooses Remote or Local above Batch or
   Live (Local has no live models yet, so Mode hides for it); Remote Batch,
   Remote Live and Local keep separate saved models. Local
   recordings skip API keys and the provider upload cap. Silent recordings stay
   empty. History and headers show the friendly name, for example "Whisper Tiny
-  (on-device)".
-- **Checks.** `--self-test` covers CNG vectors and a download, resume, tamper
-  and removal cycle. `--local-transcription-self-test <wav> --expect <phrase>`
+  (on-device)". History Retry transcribes a local recording again with its own
+  saved model and language, whatever the pickers show, after checking that the
+  model is downloaded and the runtime can run; if not, the recording and its
+  audio are left untouched and the status says why. Only genuinely live-only
+  recordings get the import guidance (`DesktopHistoryRetry`, SpeakDesktop).
+- **Checks.** `--self-test` covers CNG vectors, a download, resume, tamper
+  and removal cycle, the controller's removal ownership with a held
+  transcription and teardown and, with the runtime beside the app, a held
+  import, and History Retry of on-device recordings through the real
+  controller: its own model, language and audio, refusal without a model or
+  runtime, and failed or silent retries keeping the recording. With the
+  runtime present, the platform tests also delete a loaded model's file and
+  hold a removal while another model replaces it in the cache.
+  `--local-transcription-self-test <wav> --expect <phrase>`
   downloads the pinned model into `JSTI_LOCAL_MODEL_DIRECTORY` and transcribes
   the WAV; CI runs it on the native build and from the self-contained bundle
   with the JFK sample. `JSTI_WHISPER_RUNTIME_DIRECTORY` points a developer
@@ -443,12 +506,18 @@ What the Windows app does:
   Credential Manager, as `com.justspeaktoit/cloudkit.apiKeySyncKey`; the
   passphrase is not. The app imports keys only from the canonical list in
   `SyncSchema.EncryptedSecret.syncableIdentifiers`. It never writes keys to
-  iCloud. A key you save by hand is never removed by a later deletion on the
-  Mac.
-- Sync state (the cursor, the bound iCloud user and acknowledgements) is in
-  `%LOCALAPPDATA%\JustSpeakToIt\CloudSync\state.json`. If another Apple ID
-  signs in, that state is reset, and this PC's History uploads to the new
-  account.
+  iCloud. A key you type yourself, in Settings or in the post-processing
+  dialog, is never removed by a later deletion on the Mac, even one that
+  arrives as you save it; a newer key from the Mac still replaces it, as it
+  replaces any saved key. The latest choice wins: turning import off, or on
+  again with another passphrase, overrides a turn-on that is still in progress.
+- Sync state (the cursor, the bound iCloud user, acknowledgements and which
+  keys were imported) is in `%LOCALAPPDATA%\JustSpeakToIt\CloudSync\state.json`.
+  Signing out keeps it. If another Apple ID signs in, that state is reset and
+  nothing on this PC is deleted; every syncable History record then uploads to
+  the new account, both recordings made on this PC and transcripts downloaded
+  from the previous account. That second part is open for review; see
+  [Changing Apple ID](windows-cloudkit-sync.md#changing-apple-id).
 
 The CloudKit API token is not a Mac credential. Apple apps use the operating
 system's CloudKit session, and no token from them can be reused here. The API

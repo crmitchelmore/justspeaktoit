@@ -17,10 +17,11 @@ struct WindowsNativeEffects: WindowsControllerEffects {
     }
 
     func makeLiveClient(
-        model: String, key: String, language: String?
+        model: String, key: String, language: String?, azureEndpoint: String
     ) -> (any FinalizingStreamingTranscriptionClient)? {
         DesktopLiveTranscription.makeClient(
-            model: model, apiKey: key, language: language, makeConnection: { WinHTTPStreamingConnection(request: $0) }
+            model: model, apiKey: key, language: language, azureEndpoint: azureEndpoint,
+            makeConnection: { WinHTTPStreamingConnection(request: $0) }
         )
     }
 

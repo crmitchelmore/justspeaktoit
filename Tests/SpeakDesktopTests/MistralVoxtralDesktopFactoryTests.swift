@@ -89,8 +89,11 @@ final class MistralVoxtralDesktopFactoryTests: XCTestCase {
             XCTAssertNil(DesktopLiveTranscription.provider(forID: identifier), identifier)
             XCTAssertEqual(DesktopLiveTranscription.captureFrameMilliseconds(forID: identifier), 100, identifier)
         }
+        // Gladia's, Cartesia's, Rev.ai's and Azure's shared clients joined the
+        // projection alongside Voxtral, and their desktop factory tests cover
+        // them positively; the rest stay out.
         let unimplemented: Set<LiveTranscriptionProviderID> = [
-            .apple, .azure, .cartesia, .gladia, .google, .modulate, .meta, .revai
+            .apple, .google, .modulate, .meta
         ]
         for model in ModelCatalog.liveTranscription {
             guard let route = LiveTranscriptionRouting.route(for: model.id),

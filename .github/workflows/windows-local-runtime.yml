@@ -1,20 +1,27 @@
 name: Windows on-device runtime
 
-# Builds the pinned whisper.cpp runtime DLLs (CPU variants and Vulkan) once per
-# pin change and hands them to the calling workflow as the
-# `windows-local-runtime` artifact. Callers: windows.yml (native tests) and
-# windows-cross-proof.yml (runtime bundle and developer MSIX).
+# Builds the pinned whisper.cpp runtime DLLs once per pin change and hands them
+# to the calling workflow. x64 (CPU variants and Vulkan) is the
+# `windows-local-runtime` artifact for windows.yml (native tests) and
+# windows-cross-proof.yml (runtime bundle and developer MSIX). ARM64 (one CPU
+# backend, built natively with clang) is `windows-local-runtime-arm64` for
+# windows-arm64.yml.
 on:
   workflow_call:
+    inputs:
+      architecture:
+        description: Pinned architecture in scripts/windows-local-runtime/dependencies.json (x64 or arm64)
+        type: string
+        default: x64
 
 permissions:
   contents: read
 
 jobs:
   runtime:
-    name: Build pinned whisper.cpp runtime (CPU and Vulkan)
-    runs-on: windows-2022
-    timeout-minutes: 90
+    name: ${{ inputs.architecture == 'arm64' && 'Build pinned whisper.cpp runtime (ARM64 CPU)' || 'Build pinned whisper.cpp runtime (CPU and Vulkan)' }}
+    runs-on: ${{ inputs.architecture == 'arm64' && 'windows-11-arm' || 'windows-2022' }}
+    timeout-minutes: ${{ inputs.architecture == 'arm64' && 45 || 90 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,12 +38,14 @@ jobs:
         uses: actions/cache@v6
         with:
           path: local-runtime-output
-          key: whisper-runtime-${{ hashFiles('scripts/windows-local-runtime/dependencies.json', 'scripts/windows-local-runtime/build-whisper-runtime.py', 'scripts/windows-bundle/runtime-policy.json', 'scripts/windows-bundle/windows_pe.py') }}
+          key: whisper-runtime-${{ inputs.architecture }}-${{ hashFiles('scripts/windows-local-runtime/dependencies.json', 'scripts/windows-local-runtime/build-whisper-runtime.py', 'scripts/windows-bundle/runtime-policy.json', 'scripts/windows-bundle/windows_pe.py') }}
       - name: Build whisper.cpp from the pinned commit
         if: steps.cache.outputs.cache-hit != 'true'
         shell: pwsh
+        env:
+          ARCHITECTURE: ${{ inputs.architecture }}
         run: |
-          python -B scripts/windows-local-runtime/build-whisper-runtime.py `
+          python -B scripts/windows-local-runtime/build-whisper-runtime.py --architecture $env:ARCHITECTURE `
             --output local-runtime-output --work (Join-Path $env:RUNNER_TEMP 'whisper-runtime-work') --jobs 4
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Show the runtime manifest
@@ -45,7 +54,7 @@ jobs:
       - name: Upload the runtime
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: windows-local-runtime
+          name: ${{ inputs.architecture == 'x64' && 'windows-local-runtime' || format('windows-local-runtime-{0}', inputs.architecture) }}
           path: local-runtime-output/
           if-no-files-found: error
           retention-days: 14

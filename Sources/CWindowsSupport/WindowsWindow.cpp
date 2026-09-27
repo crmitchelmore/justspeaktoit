@@ -26,6 +26,9 @@ bool jsti_hotkey_self_test(HWND owner, int (*observe)(void *), void *context, st
 bool jsti_voice_output_available();
 void jsti_show_voice_settings(HWND owner);
 bool jsti_voice_settings_self_test(HWND owner, std::string &error);
+bool jsti_azure_resource_available();
+void jsti_show_azure_resource_settings(HWND owner);
+bool jsti_azure_resource_settings_self_test(HWND owner, std::string &error);
 bool jsti_local_models_available();
 std::wstring jsti_local_models_summary();
 void jsti_show_local_models(HWND owner);
@@ -65,7 +68,7 @@ constexpr int voiceSettingsID = 173;
 // Settings menu commands. They open the same dialogs as their buttons; the
 // automation item emits AUTOMATION_TOGGLED with the requested state.
 constexpr int menuShortcutID = 180, menuTextOutputID = 181, menuVoiceID = 182, menuPostProcessingID = 183,
-    menuAutomationID = 184, menuCloudSyncID = 185, menuLocalModelsID = 186;
+    menuAutomationID = 184, menuCloudSyncID = 185, menuLocalModelsID = 186, menuAzureResourceID = 187;
 // The Source picker (Remote/Local) and the Local models dialog button, which
 // takes the place of Refresh models while the Local source is selected.
 constexpr int sourceLabelID = 89;
@@ -443,6 +446,7 @@ void updateSettingsMenu(HWND window, int recording) {
     enable(menuPostProcessingID, recording == 0 && jsti_postprocessing_available());
     enable(menuLocalModelsID, recording == 0 && jsti_local_models_available());
     enable(menuCloudSyncID, recording == 0 && jsti_cloud_sync_available());
+    enable(menuAzureResourceID, recording == 0 && jsti_azure_resource_available());
     bool automation;
     { std::lock_guard<std::mutex> lock(state.mutex); automation = state.automationEnabled; }
     CheckMenuItem(menu, menuAutomationID, MF_BYCOMMAND | (automation ? MF_CHECKED : MF_UNCHECKED));
@@ -458,6 +462,7 @@ HMENU createSettingsMenu() {
         !AppendMenuW(settings, MF_STRING, menuPostProcessingID, L"&Post-processing\u2026") ||
         !AppendMenuW(settings, MF_STRING, menuLocalModelsID, L"&Local models\u2026") ||
         !AppendMenuW(settings, MF_STRING, menuCloudSyncID, L"i&Cloud sync\u2026") ||
+        !AppendMenuW(settings, MF_STRING, menuAzureResourceID, L"A&zure Speech resource\u2026") ||
         !AppendMenuW(settings, MF_SEPARATOR, 0, nullptr) ||
         !AppendMenuW(settings, MF_STRING, menuAutomationID, L"Allow &automation (speak command)") ||
         !AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(settings), L"Setti&ngs")) {
@@ -938,7 +943,7 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         }
         case processingID: jsti_show_postprocessing(window); return 0;
         case menuShortcutID: case menuTextOutputID: case menuVoiceID: case menuPostProcessingID:
-        case menuLocalModelsID: case menuCloudSyncID: {
+        case menuLocalModelsID: case menuCloudSyncID: case menuAzureResourceID: {
             const int recording = jsti_window_recording_state();
             const HMENU menu = GetMenu(window);
             if (!menu || recording != 0 || !IsWindowEnabled(window) ||
@@ -954,6 +959,8 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
                 jsti_show_local_models(window);
             } else if (LOWORD(wparam) == menuCloudSyncID) {
                 jsti_show_cloud_sync_settings(window);
+            } else if (LOWORD(wparam) == menuAzureResourceID) {
+                jsti_show_azure_resource_settings(window);
             } else {
                 jsti_show_postprocessing(window);
             }
@@ -2382,7 +2389,8 @@ int jsti_window_self_test(char *error, size_t errorCapacity) {
         return jsti_settings_self_test(window, failure) && jsti_profiles_self_test(window, failure) &&
             jsti_text_output_settings_self_test(window, textOutputID, setRecording, recordingBlocked, &observed, failure) &&
             jsti_hotkey_self_test(window, observe, &observed, failure) && jsti_voice_settings_self_test(window, failure) &&
-            jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure);
+            jsti_local_models_self_test(window, failure) && jsti_cloud_sync_settings_self_test(window, failure) &&
+            jsti_azure_resource_settings_self_test(window, failure);
     };
     bool passed = false;
     try { passed = check(); }

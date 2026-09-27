@@ -89,4 +89,142 @@ final class WindowsLocalTranscriptionTests: XCTestCase {
             XCTFail("A cancelled transcription completed")
         } catch is CancellationError {}
     }
+
+    /// The runtime closes a model's file once it is loaded and keys its cache
+    /// by path. So on NTFS a removal can delete the loaded model's folder first
+    /// and the model still recognises from memory; freeing another path keeps
+    /// it, and freeing its own path releases it.
+    func testLoadedModelSurvivesDeletingItsFileUntilItsOwnPathIsReleased() async throws {
+        let fixture = try await LocalRuntimeFixture.make()
+        defer { fixture.cleanUp() }
+        let model = try fixture.copy("loaded")
+        try await fixture.recognise(model)
+        try FileManager.default.removeItem(at: model.deletingLastPathComponent())
+        let afterDeletion = try await fixture.recognisesWithoutItsFile(model)
+        XCTAssertTrue(afterDeletion, "The loaded model needed its deleted file")
+
+        let other = fixture.scratch.appendingPathComponent("other").appendingPathComponent(model.lastPathComponent)
+        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: other))
+        let afterOtherRelease = try await fixture.recognisesWithoutItsFile(model)
+        XCTAssertTrue(afterOtherRelease, "Freeing another path released the loaded model")
+
+        XCTAssertTrue(fixture.runtime.releaseModel(loadedFrom: model))
+        XCTAssertFalse(fixture.runtime.releaseModel(loadedFrom: model), "Nothing is cached any more")
+        let afterOwnRelease = try await fixture.recognisesWithoutItsFile(model)
+        XCTAssertFalse(afterOwnRelease, "The released model was still cached")
+    }
+
+    /// The reported race: A's removal is admitted while A is loaded, and its
+    /// teardown waits while B is recognised, replacing A in the cache. The
+    /// draft's unconditional release then freed B. Releasing A by path, checked
+    /// under the lock recognition loads under, frees nothing and B stays warm.
+    func testHeldRemovalFreesOnlyTheModelItRemoves() async throws {
+        let fixture = try await LocalRuntimeFixture.make()
+        defer { fixture.cleanUp() }
+        let unconditional = try await replacementSurvivesHeldRemoval(fixture) { runtime, _ in runtime.releaseModel() }
+        XCTAssertFalse(unconditional, "Expected the race: an unconditional release frees the replacement")
+        let byPath = try await replacementSurvivesHeldRemoval(fixture) { runtime, removed in
+            _ = runtime.releaseModel(loadedFrom: removed)
+        }
+        XCTAssertTrue(byPath, "Removing one model freed the model that replaced it")
+    }
+
+    /// Loads `removed`, admits its removal with the teardown held, recognises
+    /// `replacement` so it replaces `removed` in the cache, then lets the
+    /// teardown delete `removed` and call `release`. Returns whether the
+    /// replacement is still loaded.
+    private func replacementSurvivesHeldRemoval(
+        _ fixture: LocalRuntimeFixture, release: @escaping @Sendable (WindowsWhisperRuntime, URL) -> Void
+    ) async throws -> Bool {
+        let removed = try fixture.copy("removed-\(UUID().uuidString)")
+        let replacement = try fixture.copy("replacement-\(UUID().uuidString)")
+        try await fixture.recognise(removed)
+        let teardown = LocalModelTeardown()
+        let held = expectation(description: "The teardown is held")
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let holding = Task {
+            await teardown.remove({ held.fulfill(); _ = gate.wait(timeout: .now() + 60) }, release: {})
+        }
+        await fulfillment(of: [held], timeout: 10)
+        let runtime = fixture.runtime
+        let removal = Task {
+            await teardown.remove(
+                { try FileManager.default.removeItem(at: removed.deletingLastPathComponent()) },
+                release: { release(runtime, removed) }
+            )
+        }
+        try await fixture.recognise(replacement)
+        gate.signal()
+        _ = await holding.value
+        let failure = await removal.value
+        XCTAssertNil(failure)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: removed.path))
+        return try await fixture.recognisesWithoutItsFile(replacement)
+    }
+}
+
+/// The real runtime with copies of the pinned tiny model. Each copy's path is
+/// its identity in the runtime's one-model cache, so copies act as models.
+private struct LocalRuntimeFixture {
+    let runtime: WindowsWhisperRuntime
+    let installed: URL
+    let samples: [Float]
+    let scratch: URL
+
+    /// CI sets the variables the transcription test above documents.
+    static func make() async throws -> LocalRuntimeFixture {
+        let environment = ProcessInfo.processInfo.environment
+        guard let runtimeDirectory = environment["JSTI_WHISPER_RUNTIME_DIRECTORY"],
+              let audio = environment["JSTI_WHISPER_TEST_AUDIO"],
+              let models = environment["JSTI_LOCAL_MODEL_DIRECTORY"] else {
+            throw XCTSkip("Requires the whisper.cpp runtime build, its JFK sample and a model folder.")
+        }
+        let spec = try XCTUnwrap(DesktopLocalTranscription.model(for: "local/whisperkit/tiny", host: .windows))
+        let installer = LocalModelInstaller(
+            root: URL(fileURLWithPath: models, isDirectory: true), digests: WindowsSHA256Hasher.provider,
+            transport: LocalModelURLSessionTransport()
+        )
+        let installed = try await installer.install(.init(spec))
+        let runtime = try WindowsWhisperRuntime.open(
+            directory: URL(fileURLWithPath: runtimeDirectory, isDirectory: true), allowGPU: true
+        )
+        let samples = try DesktopLocalAudio.read(
+            URL(fileURLWithPath: audio), maximumBytes: DesktopLocalTranscription.maximumAudioBytes
+        ).samples
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jsti-model-cache-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        return LocalRuntimeFixture(runtime: runtime, installed: installed, samples: samples, scratch: scratch)
+    }
+
+    func copy(_ name: String) throws -> URL {
+        let folder = scratch.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent(installed.lastPathComponent)
+        try FileManager.default.copyItem(at: installed, to: file)
+        return file
+    }
+
+    /// Loads `model` unless the runtime already holds it, then recognises.
+    func recognise(_ model: URL) async throws {
+        _ = try await runtime.transcribe(samples: samples, modelFile: model, language: "en")
+    }
+
+    /// Deletes the model's file if it is still there, then reports whether the
+    /// model still recognises, which only a cached model can then do.
+    func recognisesWithoutItsFile(_ model: URL) async throws -> Bool {
+        if FileManager.default.fileExists(atPath: model.path) { try FileManager.default.removeItem(at: model) }
+        do {
+            try await recognise(model)
+            return true
+        } catch let error as WindowsLocalTranscriptionError where error.message.contains("could not be opened") {
+            return false
+        }
+    }
+
+    func cleanUp() {
+        runtime.releaseModel()
+        try? FileManager.default.removeItem(at: scratch)
+    }
 }

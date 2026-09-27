@@ -26,13 +26,6 @@ extension SpeechmaticsRealtimeEvent {
     }
 }
 
-extension RevAIStreamingEvent {
-    init?(message: URLSessionWebSocketTask.Message) {
-        guard let object = StreamingFrameDecoding.jsonObject(from: message) else { return nil }
-        self.init(object: object)
-    }
-}
-
 extension MistralRealtimeEvent {
     init?(message: URLSessionWebSocketTask.Message) {
         guard let object = StreamingFrameDecoding.jsonObject(from: message) else { return nil }

@@ -4,6 +4,11 @@ import Foundation
 /// current when the call begins. A multi-request operation passes one session
 /// to every request so none of them can run after a sign-out or sign-in.
 extension CloudKitWebServicesClient {
+    /// `pinned`, or the session current now.
+    func session(or pinned: CloudKitWebSession?) -> CloudKitWebSession {
+        pinned ?? session()
+    }
+
     /// One page of a custom zone's change feed (`changes/zone`). A page too
     /// large for the response limit is requested again with half the record
     /// limit, down to a single record.

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build the payload layout of the unsigned Windows x64 developer MSIX package.
+"""Build the payload layout of the unsigned Windows developer MSIX package.
 
 The input is the self-contained runtime bundle directory (bundle-evidence.json
-and its ZIP). Its archive, manifest, per-file hashes, source commit, runtime
-policy and production executable are authenticated first; the layout then
+and its ZIP); the package's processor architecture (x64 or arm64) is the
+bundle's. Its archive, manifest, per-file hashes, source commit, runtime
+policy, image architectures and production executable are authenticated first; the layout then
 holds those bytes unchanged plus a generated AppxManifest.xml, logos derived
 from the canonical app icon and package-manifest.json. MakeAppx packs the
 layout on Windows. The version must be supplied explicitly: this developer

@@ -5,17 +5,42 @@ Only binds IPv4 loopback. No third-party packages or external connections.
 The slow route deliberately applies socket backpressure; it is not a benchmark.
 The Voxtral route plays Mistral's realtime transcription peer for the actual
 shared Swift client, with a synthetic key and generated audio only.
+
+The /gladia* routes play Gladia's two-stage live protocol for the shared
+client: POST /<scenario>/v2/live creates a session and returns a single-use,
+tokenised WebSocket URL; that socket takes 100 ms PCM16 frames and
+stop_recording, and answers with transcripts and lifecycle events. The key is
+a synthetic marker; tokens and keys never enter the logs.
+
+The Cartesia route plays the Ink-2 automatic-turns stream at the shared
+client's own path and query: exact 100 ms PCM16 frames, then the close
+command, answered by the scenario's turns and the server's closure.
+
+The Rev.ai route plays the streaming speech-to-text socket at the shared
+client's own path and query: `connected` is held and nothing may arrive
+before it, then exact 100 ms PCM16 frames and the literal EOS, answered by
+the scenario's hypotheses and closure. The query carries the synthetic access
+token, so a Rev.ai route's query never enters the logs.
+
+The Azure route plays Voice Live input transcription at the shared client's
+own path, query and api-key header: the transcription-only configuration,
+exact 100 ms PCM16 frames with a server-VAD turn part way, then the client's
+commit and finalisation barrier, answered as the scenario asks.
 """
 import argparse
 import base64
 import hashlib
 import json
 from pathlib import Path
+import re
+import secrets
+import select
 import socket
 import socketserver
 import struct
 import threading
 import time
+import urllib.parse
 
 
 MAX_PAYLOAD = 4 * 1024 * 1024
@@ -45,9 +70,166 @@ def mistral_pcm(index):
     return bytes((index * 31 + offset * 7) & 0xFF for offset in range(MISTRAL_FRAME_BYTES))
 
 
+# The Gladia two-stage live peer: a marked local POST creates a session, whose
+# single-use token the WebSocket upgrade must carry instead of the account key.
+GLADIA_ROUTE = re.compile(r"/(gladia(?:-failure|-hold|-held-session)?)/(v2/live|live)")
+GLADIA_SYNTHETIC_KEY = "synthetic-loopback-key"
+GLADIA_FRAME_BYTES = 3_200
+GLADIA_FRAMES = 10
+# The failure lands once every frame was received, so it can only reach the
+# client through its receive path, after the final that precedes it.
+GLADIA_FAILURE_AFTER_FRAMES = GLADIA_FRAMES
+GLADIA_SESSION_HOLD_SECONDS = 8
+GLADIA_MAX_MESSAGES = 64
+GLADIA_CREATED_AT = "2026-09-22T12:00:00Z"
+# Mirrored exactly, scalar for scalar, by GladiaWinHTTPRuntimeTests. Spelled
+# as escapes so the file stays ASCII and no editor can normalise a scalar.
+GLADIA_PARTIAL = "Caf\U000000E9 \U00002014 na\U000000EFve"
+GLADIA_FIRST_FINAL = ("Caf\U000000E9 \U00002014 na\U000000EFve e\U00000301 "
+                      "\U0001F469\U0001F3FD\U0000200D\U0001F4BB \U0000754C.")
+GLADIA_TAIL_PARTIAL = "\U000000DCbergr\U000000F6\U000000DFe"
+GLADIA_TAIL_FINAL = "\U000000DCbergr\U000000F6\U000000DFe \U00002013 \U000000BD \U00002713 \U0001F600"
+GLADIA_FAILURE_FINAL = "Vor dem Fehler \U00002014 \U000000E7a va."
+GLADIA_HELD_FINAL = "Held \U000023F8 final."
+
+
 def log(event, **fields):
     with LOG_LOCK:
         print(json.dumps({"event": event, **fields}, sort_keys=True), flush=True)
+
+
+def gladia_pcm(index):
+    """The 100 ms PCM16 frame the runtime test sends at position `index`."""
+    return bytes((offset * 7 + index * 31) & 0xFF for offset in range(GLADIA_FRAME_BYTES))
+
+
+def gladia_session_problems(body, headers):
+    """Checks the session request against the shared client's documented init."""
+    expected = {"model": "solaria-1", "encoding": "wav/pcm", "bit_depth": 16,
+                "sample_rate": 16_000, "channels": 1}
+    problems = [f"{name} must be {value!r}" for name, value in expected.items() if body.get(name) != value]
+    messages = body.get("messages_config") or {}
+    for flag in ("receive_partial_transcripts", "receive_final_transcripts", "receive_lifecycle_events"):
+        if messages.get(flag) is not True:
+            problems.append(f"{flag} must be true")
+    if messages.get("receive_post_processing_events") is not False:
+        problems.append("post-processing events must stay off")
+    language = body.get("language_config") or {}
+    if language.get("languages") != [] or language.get("code_switching") is not True:
+        problems.append("automatic language detection expected")
+    if headers.get("content-type") != "application/json":
+        problems.append("content-type must be application/json")
+    return problems
+
+
+def gladia_transcript(utterance_id, text, is_final):
+    return {"session_id": "loopback", "created_at": GLADIA_CREATED_AT, "type": "transcript",
+            "data": {"id": utterance_id, "is_final": is_final,
+                     "utterance": {"text": text, "start": 0.0, "end": 0.5, "language": "en", "channel": 0}}}
+
+
+def gladia_lifecycle(kind, data=None):
+    event = {"session_id": "loopback", "created_at": GLADIA_CREATED_AT, "type": kind}
+    if data is not None:
+        event["data"] = data
+    return event
+
+
+# Cartesia Ink-2 automatic-turns peer for the Cartesia loopback runtime tests.
+# The route, query and headers are exactly what the shared Swift client builds;
+# only the origin is redirected here. The key is synthetic and never logged.
+CARTESIA_ROUTE = "/stt/turns/websocket"
+CARTESIA_QUERY = "model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-03-01"
+CARTESIA_AUTHORIZATION = "Bearer loopback-synthetic-key"
+CARTESIA_VERSION = "2026-03-01"
+CARTESIA_SCENARIOS = ("complete", "failure", "incomplete", "hold", "abrupt", "abnormal")
+CARTESIA_FRAMES = 10
+CARTESIA_FRAME_BYTES = 3200
+# (update, end) per turn. The second turn carries its own leading space, as
+# Cartesia turns are concatenated without adding whitespace. Mirrored scalar
+# for scalar by the Swift tests; spelled as escapes so this file stays ASCII.
+CARTESIA_TURNS = (
+    ("Gr\U000000FC\U000000DFe aus", "Gr\U000000FC\U000000DFe aus Z\U000000FCrich \U00002014 \U00004E16\U0000754C"),
+    (" na\U000000EFve", " na\U000000EFve caf\U000000E9 \U0001F469\U0001F3FD\U0000200D\U0001F4BB"),
+)
+
+
+def cartesia_frame(index):
+    """100 ms of 16 kHz PCM16 mono, generated identically by the Swift test."""
+    return bytes(((index * 7 + offset * 13) & 0xFF) for offset in range(CARTESIA_FRAME_BYTES))
+
+
+# Rev.ai streaming peer for the Rev.ai loopback runtime tests. The route and
+# query items, in order, are exactly what the shared Swift client builds for a
+# French selection; only the origin is redirected here.
+REVAI_ROUTE = "/speechtotext/v1/stream"
+REVAI_QUERY = {
+    "access_token": "loopback-synthetic-token",
+    "content_type": "audio/x-raw;layout=interleaved;rate=16000;format=S16LE;channels=1",
+    "transcriber": "machine_v2",
+    "language": "fr",
+}
+REVAI_SCENARIOS = ("complete", "credits", "early", "abrupt", "incomplete", "hold")
+REVAI_FRAMES = 10
+REVAI_FRAME_BYTES = 3200
+# `connected` is held this long. Rev.ai rejects audio sent before it, so the
+# client must stay silent meanwhile.
+REVAI_CONNECTED_DELAY = 0.3
+# Mirrored scalar for scalar by the Swift tests; spelled as escapes so this
+# file stays ASCII. A partial carries words only, and a final's punct
+# elements carry its spacing and punctuation, as in Rev.ai's example session.
+REVAI_PARTIAL = ("Bonjour", "caf\U000000E9")
+REVAI_FINAL = (("text", "Bonjour"), ("punct", ","), ("punct", " "), ("text", "caf\U000000E9"), ("punct", " "),
+               ("text", "cr\U000000E8me"), ("punct", " "), ("punct", "\U00002014"), ("punct", " "),
+               ("text", "na\U000000EFve"), ("punct", "."))
+REVAI_TAIL_PARTIAL = ("\U0001F469\U0001F3FD\U0000200D\U0001F4BB",)
+REVAI_TAIL_FINAL = (("text", "\U0001F469\U0001F3FD\U0000200D\U0001F4BB"), ("punct", " "), ("text", "fin"),
+                    ("punct", "."))
+
+
+def revai_frame(index):
+    """100 ms of 16 kHz PCM16 mono, generated identically by the Swift tests."""
+    return bytes(((index * 11 + offset * 17) & 0xFF) for offset in range(REVAI_FRAME_BYTES))
+
+
+def revai_partial(words):
+    return {"type": "partial", "ts": 0.0, "end_ts": 0.5,
+            "elements": [{"type": "text", "value": word} for word in words]}
+
+
+def revai_final(elements):
+    return {"type": "final", "ts": 0.0, "end_ts": 1.0,
+            "elements": [{"type": kind, "value": value} for kind, value in elements]}
+
+
+# Azure Voice Live input-transcription peer for the Azure loopback runtime
+# tests. The route, query and api-key header are exactly what the shared Swift
+# client builds; only the origin is redirected here. The key is synthetic and
+# never logged. Voice Live never ends a session itself; the client's close does.
+AZURE_ROUTE = "/voice-live/realtime"
+AZURE_QUERY = "api-version=2026-04-10&model=gpt-4.1"
+AZURE_KEY = "loopback-synthetic-key"
+AZURE_SCENARIOS = ("complete", "commit-empty", "barrier-error", "abrupt", "hold")
+AZURE_FRAMES = 10
+AZURE_FRAME_BYTES = 4800  # 100 ms of 24 kHz mono PCM16
+AZURE_VAD_AFTER_FRAMES = 5
+# Mirrored scalar for scalar by the Swift tests; spelled as escapes so this
+# file stays ASCII and no editor can normalise a scalar.
+AZURE_VAD_DRAFT = "Gr\U000000FC\U000000DFe aus"
+AZURE_VAD_FINAL = "Gr\U000000FC\U000000DFe aus Z\U000000FCrich \U00002014 \U00004E16\U0000754C"
+AZURE_TAIL_DRAFT = "na\U000000EFve"
+AZURE_TAIL_FINAL = "na\U000000EFve caf\U000000E9 \U0001F469\U0001F3FD\U0000200D\U0001F4BB"
+
+
+def azure_frame(index):
+    """100 ms of 24 kHz PCM16 mono, generated identically by the Swift test."""
+    return bytes(((index * 31 + offset * 7) & 0xFF) for offset in range(AZURE_FRAME_BYTES))
+
+
+def azure_transcription(kind, item, text):
+    field = "delta" if kind == "delta" else "transcript"
+    return {"type": f"conversation.item.input_audio_transcription.{kind}", "item_id": item,
+            "content_index": 0, field: text}
 
 
 class ProbeHandler(socketserver.BaseRequestHandler):
@@ -103,18 +285,26 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         self.pending = bytearray(remainder)
         lines = header.decode("ascii").split("\r\n")
         method, path, version = lines[0].split(" ")
+        route, _, query = path.partition("?")
         headers = {}
         for line in lines[1:]:
             name, value = line.split(":", 1)
             name, value = name.lower(), value.strip()
             headers[name] = headers[name] + ", " + value if name in headers else value
+        gladia = GLADIA_ROUTE.fullmatch(route)
         # Only protocol fields and the synthetic marker are recorded. No
-        # credentials, arbitrary request headers or WebSocket keys enter logs.
-        log("handshake-request", method=method, path=path, version=version,
+        # credentials, arbitrary request headers or WebSocket keys enter logs,
+        # and the query of a Gladia route (its session token) or a Rev.ai route
+        # (its access token) is dropped.
+        logged_path = route if gladia or route == REVAI_ROUTE else path
+        log("handshake-request", method=method, path=logged_path, version=version,
             connection=headers.get("connection"), upgrade=headers.get("upgrade"),
             websocketVersion=headers.get("sec-websocket-version"),
             subprotocol=headers.get("sec-websocket-protocol"),
             markerVerified=headers.get("x-jsti-probe") == "local-only")
+        if gladia and gladia.group(2) == "v2/live":
+            self.create_gladia_session(method, gladia.group(1), headers)
+            return None, None
         connection_tokens = {value.strip().lower() for value in headers.get("connection", "").split(",")}
         if (method != "GET" or version != "HTTP/1.1"
                 or headers.get("upgrade", "").lower() != "websocket"
@@ -126,9 +316,21 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         key = headers.get("sec-websocket-key", "")
         if len(base64.b64decode(key, validate=True)) != 16:
             raise ValueError("invalid handshake key")
-        route, _, query = path.partition("?")
+        scenario = None
         if route == MISTRAL_PATH:
             self.mistral_scenario = self.verify_mistral_request(query, headers)
+            path = route
+        elif gladia:
+            scenario = self.consume_gladia_token(gladia.group(1), query, headers)
+            path = route
+        elif route == CARTESIA_ROUTE:
+            self.verify_cartesia(query, headers)
+            path = route
+        elif route == REVAI_ROUTE:
+            self.verify_revai(query, headers)
+            path = route
+        elif route == AZURE_ROUTE:
+            self.verify_azure(query, headers)
             path = route
         elif path not in ("/echo", "/slow", "/hold", "/abrupt", "/delay", "/fragment", "/oversize"):
             raise ValueError("unknown route")
@@ -142,7 +344,7 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         self.request.sendall(response.encode("ascii"))
         self.upgraded = True
         log("handshake", path=path, headerVerified=True)
-        return path
+        return path, scenario
 
     def read_frame(self):
         first, second = self.read_exact(2)
@@ -184,13 +386,18 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             raise ValueError("unexpected Voxtral handshake")
         return scenario
 
-    def read_message(self):
-        """Returns one complete data message, answering pings; a close ends the peer."""
+    def read_message(self, close_ends=True):
+        """Returns one complete data message, answering pings; a close ends the peer.
+
+        With close_ends=False a close frame is returned as (8, payload) instead,
+        for a peer that initiated the closing handshake or is waiting for one."""
         message = bytearray()
         message_opcode = None
         while True:
             final, opcode, payload = self.read_frame()
             if opcode == 8:
+                if not close_ends:
+                    return 8, bytes(payload)
                 self.send_frame(8, payload)
                 raise ConnectionError("client closed")
             if opcode == 9:
@@ -292,9 +499,20 @@ class ProbeHandler(socketserver.BaseRequestHandler):
         log("mistral-done", scenario=scenario)
 
     def run_connection(self):
-        path = self.handshake()
+        path, scenario = self.handshake()
+        if path is None:
+            return
         if path == MISTRAL_PATH:
             return self.run_mistral(self.mistral_scenario)
+        if path == CARTESIA_ROUTE:
+            return self.run_cartesia()
+        if path == REVAI_ROUTE:
+            return self.run_revai()
+        if path == AZURE_ROUTE:
+            return self.run_azure()
+        if scenario is not None:
+            self.run_gladia(path, scenario)
+            return
         self.slow = path == "/slow"
         if self.slow:
             time.sleep(0.25)
@@ -363,11 +581,458 @@ class ProbeHandler(socketserver.BaseRequestHandler):
             message_opcode = None
         raise ValueError("message count exceeded bound")
 
+    # Gladia two-stage live protocol
+
+    def create_gladia_session(self, method, scenario, headers):
+        if method != "POST" or headers.get("x-jsti-probe") != "local-only":
+            raise ValueError("gladia sessions are created by a marked local POST")
+        length = int(headers.get("content-length", "0"))
+        if not 0 < length <= 16 * 1024:
+            raise ValueError("gladia session body out of bounds")
+        if headers.get("expect", "").lower() == "100-continue":
+            self.request.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+        body = json.loads(bytes(self.read_exact(length)).decode("utf-8"))
+        key_verified = headers.get("x-gladia-key") == GLADIA_SYNTHETIC_KEY
+        problems = gladia_session_problems(body, headers)
+        log("gladia-session-request", scenario=scenario, keyVerified=key_verified, configVerified=not problems)
+        if not key_verified:
+            self.respond_json(401, "Unauthorized", {"statusCode": 401, "message": "Unauthorized"})
+            return
+        if problems:
+            self.respond_json(422, "Unprocessable Entity", {"statusCode": 422, "message": "; ".join(problems)})
+            return
+        if scenario == "gladia-held-session":
+            log("gladia-session-held", scenario=scenario, seconds=GLADIA_SESSION_HOLD_SECONDS)
+            time.sleep(GLADIA_SESSION_HOLD_SECONDS)
+        token = secrets.token_hex(16)
+        with self.server.gladia_lock:
+            self.server.gladia_tokens[token] = scenario
+        port = self.server.server_address[1]
+        self.respond_json(201, "Created", {
+            "id": secrets.token_hex(8), "created_at": GLADIA_CREATED_AT,
+            "url": f"ws://127.0.0.1:{port}/{scenario}/live?token={token}"})
+        log("gladia-session-created", scenario=scenario)
+
+    def respond_json(self, status, reason, payload):
+        body = json.dumps(payload).encode("utf-8")
+        head = (f"HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n"
+                f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n")
+        self.request.sendall(head.encode("ascii") + body)
+
+    def consume_gladia_token(self, scenario, query, headers):
+        token = urllib.parse.parse_qs(query).get("token", [""])[0]
+        with self.server.gladia_lock:
+            issued = self.server.gladia_tokens.pop(token, None)
+        account_key_absent = "x-gladia-key" not in headers and "authorization" not in headers
+        log("gladia-socket-request", scenario=scenario, tokenVerified=issued == scenario,
+            accountKeyAbsent=account_key_absent)
+        if issued != scenario:
+            raise ValueError("unknown or reused gladia session token")
+        if not account_key_absent:
+            raise ValueError("account credential forwarded to the session socket")
+        return scenario
+
+    def run_gladia(self, route, scenario):
+        self.send_gladia(gladia_lifecycle("start_session"))
+        digest = hashlib.sha256()
+        frames = 0
+        for _ in range(GLADIA_MAX_MESSAGES):
+            # A client close raises ConnectionError, which ends the session.
+            opcode, payload = self.read_message()
+            if opcode == 2:
+                if payload != gladia_pcm(frames):
+                    log("gladia-pcm-mismatch", scenario=scenario, frame=frames + 1, bytes=len(payload))
+                    self.send_gladia({"type": "error", "error": {"message": f"PCM frame {frames + 1} differs"}})
+                    return
+                frames += 1
+                digest.update(payload)
+                log("gladia-audio", scenario=scenario, frame=frames, bytes=len(payload))
+                if self.reply_while_streaming(scenario, frames):
+                    return
+                continue
+            if opcode != 1 or json.loads(payload.decode("utf-8")) != {"type": "stop_recording"}:
+                raise ValueError("unexpected gladia client message")
+            log("gladia-stop-recording", scenario=scenario, frames=frames,
+                bytes=frames * GLADIA_FRAME_BYTES, sha256=digest.hexdigest())
+            self.finish_gladia(route, scenario, frames)
+            return
+        raise ValueError("gladia message count exceeded bound")
+
+    def reply_while_streaming(self, scenario, frames):
+        """Sends the scenario's live transcripts; answers whether the session ended."""
+        if scenario == "gladia" and frames == 2:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_PARTIAL, False))
+        elif scenario == "gladia" and frames == 4:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_FIRST_FINAL, True))
+        elif scenario == "gladia-hold" and frames == 1:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_HELD_FINAL, True))
+        elif scenario == "gladia-failure" and frames == GLADIA_FAILURE_AFTER_FRAMES:
+            self.send_fragmented_gladia(gladia_transcript("00-00000001", GLADIA_FAILURE_FINAL, True))
+            self.send_frame(8, struct.pack("!H", 1011) + b"synthetic failure")
+            log("gladia-terminal-failure", scenario=scenario, frames=frames)
+            return True
+        return False
+
+    def finish_gladia(self, route, scenario, frames):
+        if scenario == "gladia-hold":
+            # Never answers stop_recording: the client must bound its own wait,
+            # and its close or cancellation ends the session.
+            log("gladia-holding-completion", scenario=scenario)
+            for _ in range(GLADIA_MAX_MESSAGES):
+                self.read_message()
+            raise ValueError("gladia message count exceeded bound")
+        if frames != GLADIA_FRAMES:
+            self.send_gladia({"type": "error", "error": {
+                "message": f"expected {GLADIA_FRAMES} PCM frames, received {frames}"}})
+            return
+        self.send_fragmented_gladia(gladia_transcript("00-00000002", GLADIA_TAIL_PARTIAL, False))
+        self.send_fragmented_gladia(gladia_transcript("00-00000002", GLADIA_TAIL_FINAL, True))
+        self.send_gladia(gladia_lifecycle("end_recording", {
+            "reason": "user_request", "received_total_bytes": frames * GLADIA_FRAME_BYTES}))
+        self.send_gladia(gladia_lifecycle("end_session"))
+        self.send_frame(8, struct.pack("!H", 1000) + b"session-complete")
+        log("gladia-session-complete", scenario=scenario, frames=frames)
+        _, reply_opcode, _ = self.read_frame()
+        log("close-acknowledged" if reply_opcode == 8 else "close-unacknowledged", path=route)
+
+    def send_gladia(self, payload):
+        self.send_frame(1, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+    def send_fragmented_gladia(self, payload):
+        """Splits one text message inside UTF-8 scalars across continuation frames."""
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        continuation = [index for index, byte in enumerate(data) if 0x80 <= byte < 0xC0]
+        if len(continuation) < 2:
+            raise ValueError("fragmented transcript needs multi-byte text")
+        cuts = sorted({continuation[0], continuation[len(continuation) // 2]})
+        bounds = list(zip([0] + cuts, cuts + [len(data)]))
+        for number, (start, end) in enumerate(bounds):
+            self.send_frame(1 if number == 0 else 0, data[start:end], final=number == len(bounds) - 1)
+
+    # Cartesia Ink-2 automatic-turns stream
+
+    def verify_cartesia(self, query, headers):
+        """The exact request the shared client builds: route, query, bearer and version."""
+        scenario = headers.get("x-jsti-cartesia-scenario", "")
+        checks = {
+            "queryVerified": query == CARTESIA_QUERY,
+            "authorizationVerified": headers.get("authorization") == CARTESIA_AUTHORIZATION,
+            "versionVerified": headers.get("cartesia-version") == CARTESIA_VERSION,
+            "scenarioVerified": scenario in CARTESIA_SCENARIOS,
+        }
+        log("cartesia-handshake", scenario=scenario if checks["scenarioVerified"] else None, **checks)
+        if not all(checks.values()):
+            raise ValueError("unexpected Cartesia handshake")
+        self.cartesia_scenario = scenario
+
+    def send_json(self, event, request_id="loopback"):
+        """One text message, split inside a multi-byte UTF-8 scalar when it has
+        one, so the client must assemble the message before decoding it. Ink-2
+        events name their connection; Rev.ai's and Voice Live's pass request_id=None."""
+        body = {**event, "request_id": request_id} if request_id else event
+        payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        continuation = (index for index, byte in enumerate(payload) if (byte & 0xC0) == 0x80)
+        split = max(1, min(next(continuation, len(payload) // 2), len(payload) - 1))
+        self.send_frame(1, payload[:split], final=False)
+        self.send_frame(0, payload[split:])
+
+    def send_turn(self, update, end):
+        self.send_json({"type": "turn.start"})
+        self.send_json({"type": "turn.update", "transcript": update})
+        self.send_json({"type": "turn.end", "transcript": end})
+
+    def close_cartesia(self, code, reason):
+        """Ends the stream from the server side, as Cartesia does after `close`."""
+        try:
+            self.send_frame(8, struct.pack("!H", code) + reason)
+            log("cartesia-server-close", code=code)
+            opcode, _ = self.read_message(close_ends=False)
+        except (ConnectionError, OSError):
+            opcode = None
+        log("cartesia-closed", acknowledged=opcode == 8)
+
+    def reject_cartesia(self, reason):
+        log("cartesia-protocol-violation", reason=reason)
+        self.send_json({"type": "error", "status_code": 400, "title": "Loopback protocol violation",
+                        "message": reason, "error_code": "loopback_protocol"})
+        self.close_cartesia(1008, b"protocol-violation")
+
+    def run_cartesia(self):
+        """Requires the exact 100 ms PCM frames in order, then the close command,
+        then answers as the scenario asks. Any deviation is reported to the client
+        as a Cartesia error frame, which fails the Swift test visibly."""
+        scenario = self.cartesia_scenario
+        self.send_json({"type": "connected"})
+        digest = hashlib.sha256()
+        for index in range(CARTESIA_FRAMES):
+            opcode, payload = self.read_message(close_ends=False)
+            if opcode != 2 or payload != cartesia_frame(index):
+                return self.reject_cartesia(f"PCM frame {index} was not the exact 100 ms frame")
+            digest.update(payload)
+            if scenario == "complete" and index == CARTESIA_FRAMES // 2 - 1:
+                # A turn that ends while audio is still streaming.
+                self.send_turn(*CARTESIA_TURNS[0])
+        opcode, payload = self.read_message(close_ends=False)
+        if opcode != 1 or payload != b'{"type":"close"}':
+            return self.reject_cartesia("expected the close command after every audio frame")
+        log("cartesia-close-command", scenario=scenario, frames=CARTESIA_FRAMES,
+            bytes=CARTESIA_FRAMES * CARTESIA_FRAME_BYTES, sha256=digest.hexdigest())
+        if scenario == "hold":
+            # Never answer: the client must bound or cancel its own finish.
+            try:
+                opcode, _ = self.read_message(close_ends=False)
+            except (ConnectionError, OSError):
+                opcode = None
+            log("cartesia-client-released", closeFrame=opcode == 8)
+        elif scenario == "incomplete":
+            self.send_json({"type": "turn.start"})
+            self.send_json({"type": "turn.update", "transcript": "Unfinished thought"})
+            self.close_cartesia(1000, b"stream-complete")
+        elif scenario == "abrupt":
+            # The flush arrives, then the connection drops without a close frame.
+            self.send_turn(*CARTESIA_TURNS[1])
+            log("cartesia-abrupt-disconnect")
+        elif scenario == "abnormal":
+            # The flush arrives, then the server closes with a non-normal status.
+            self.send_turn(*CARTESIA_TURNS[1])
+            self.close_cartesia(1011, b"loopback-abnormal")
+        else:
+            self.send_turn(*CARTESIA_TURNS[1])
+            if scenario == "failure":
+                self.send_json({"type": "error", "status_code": 500, "title": "Loopback failure",
+                                "message": "Synthetic terminal failure", "error_code": "loopback_failure"})
+                self.close_cartesia(1011, b"loopback-failure")
+            else:
+                self.close_cartesia(1000, b"stream-complete")
+
+    # Rev.ai streaming speech-to-text
+
+    def verify_revai(self, query, headers):
+        """The exact request the shared client builds: route, query items in
+        order with the synthetic token, and no header credential. Only
+        verdicts are logged, never the query."""
+        scenario = headers.get("x-jsti-revai-scenario", "")
+        try:
+            items = urllib.parse.parse_qsl(query, keep_blank_values=True, strict_parsing=True)
+        except ValueError:
+            items = []
+        checks = {
+            "queryVerified": items == list(REVAI_QUERY.items()),
+            "authorizationAbsent": "authorization" not in headers,
+            "scenarioVerified": scenario in REVAI_SCENARIOS,
+        }
+        log("revai-handshake", scenario=scenario if checks["scenarioVerified"] else None, **checks)
+        if not all(checks.values()):
+            raise ValueError("unexpected Rev.ai handshake")
+        self.revai_scenario = scenario
+
+    def close_revai(self, code, reason):
+        """Ends the stream from the server side, then drains the client until its
+        closing reply or disconnect; audio already in flight may precede it."""
+        opcode = None
+        try:
+            self.send_frame(8, struct.pack("!H", code) + reason)
+            log("revai-server-close", code=code)
+            for _ in range(REVAI_FRAMES + 2):
+                opcode, _ = self.read_message(close_ends=False)
+                if opcode == 8:
+                    break
+        except (ConnectionError, OSError):
+            opcode = None
+        log("revai-closed", acknowledged=opcode == 8)
+
+    def reject_revai(self, reason):
+        """A deviation closes with Rev.ai's bad-request status, which the Swift
+        test reports as a failure."""
+        log("revai-protocol-violation", reason=reason)
+        self.close_revai(4002, b"loopback-protocol-violation")
+
+    def run_revai(self):
+        """Holds `connected` and requires silence meanwhile, then the exact
+        100 ms PCM frames in order and the literal EOS, and answers as the
+        scenario asks: a partial and a final while audio streams, then the tail
+        hypotheses and the closure that end the stream after EOS."""
+        scenario = self.revai_scenario
+        readable, _, _ = select.select([self.request], [], [], REVAI_CONNECTED_DELAY)
+        if self.pending or readable:
+            return self.reject_revai("the client sent data before connected")
+        self.send_json({"type": "connected", "id": "loopback"}, request_id=None)
+        digest = hashlib.sha256()
+        for index in range(REVAI_FRAMES):
+            opcode, payload = self.read_message(close_ends=False)
+            if opcode != 2 or payload != revai_frame(index):
+                return self.reject_revai(f"PCM frame {index} was not the exact 100 ms frame")
+            digest.update(payload)
+            if index == 1:
+                self.send_json(revai_partial(REVAI_PARTIAL), request_id=None)
+            elif index == 3:
+                self.send_json(revai_final(REVAI_FINAL), request_id=None)
+                if scenario == "credits":
+                    log("revai-credits-exhausted", frames=index + 1)
+                    return self.close_revai(4003, b"insufficient-credits")
+        if scenario == "early":
+            # The server ends the stream on its own, as at its three-hour limit,
+            # before the client has finished.
+            log("revai-early-close", frames=REVAI_FRAMES)
+            return self.close_revai(1000, b"reached-max-session-lifetime")
+        opcode, payload = self.read_message(close_ends=False)
+        if opcode != 1 or payload != b"EOS":
+            return self.reject_revai("expected the literal EOS after every audio frame")
+        log("revai-end-of-stream", scenario=scenario, frames=REVAI_FRAMES,
+            bytes=REVAI_FRAMES * REVAI_FRAME_BYTES, sha256=digest.hexdigest())
+        if scenario == "hold":
+            # Never answer: the client must bound or cancel its own finish.
+            try:
+                opcode, _ = self.read_message(close_ends=False)
+            except (ConnectionError, OSError):
+                opcode = None
+            log("revai-client-released", closeFrame=opcode == 8)
+            return None
+        self.send_json(revai_partial(REVAI_TAIL_PARTIAL), request_id=None)
+        if scenario == "incomplete":
+            # The last partial never gets its final before the closure.
+            return self.close_revai(1000, b"end-of-stream")
+        self.send_json(revai_final(REVAI_TAIL_FINAL), request_id=None)
+        if scenario == "abrupt":
+            # The tail arrives, then the connection drops without a close frame.
+            log("revai-abrupt-disconnect")
+            return None
+        return self.close_revai(1000, b"end-of-stream")
+
+    # Azure Voice Live input transcription
+
+    def verify_azure(self, query, headers):
+        """The exact request the shared client builds: route, query and api-key header."""
+        scenario = headers.get("x-jsti-azure-scenario", "")
+        checks = {
+            "queryVerified": query == AZURE_QUERY,
+            "keyVerified": headers.get("api-key") == AZURE_KEY,
+            "bearerAbsent": "authorization" not in headers,
+            "scenarioVerified": scenario in AZURE_SCENARIOS,
+        }
+        log("azure-handshake", scenario=scenario if checks["scenarioVerified"] else None, **checks)
+        if not all(checks.values()):
+            raise ValueError("unexpected Azure Voice Live handshake")
+        self.azure_scenario = scenario
+
+    def send_azure(self, event):
+        """Voice Live events carry their own event_id, never a request_id."""
+        self.send_json(event, request_id=None)
+
+    def read_azure_event(self):
+        opcode, message = self.read_message(close_ends=False)
+        if opcode == 8:
+            raise ConnectionError("client closed")
+        if opcode != 1:
+            raise ValueError("Voice Live client messages are JSON text")
+        event = json.loads(message.decode("utf-8"))
+        if not isinstance(event, dict) or not isinstance(event.get("type"), str):
+            raise ValueError("Voice Live client message is not a typed JSON object")
+        return event
+
+    def reject_azure(self, reason):
+        """Reports a deviation as a Voice Live error, which fails the Swift test visibly."""
+        log("azure-protocol-violation", reason=reason)
+        self.send_azure({"type": "error", "event_id": "event_violation", "error": {
+            "type": "invalid_request_error", "code": "loopback_protocol", "message": reason}})
+        self.wait_for_azure_close()
+
+    def wait_for_azure_close(self):
+        """Voice Live never closes a session itself: the client's close ends it."""
+        opcode = None
+        try:
+            for _ in range(64):
+                opcode, _ = self.read_message(close_ends=False)
+                if opcode == 8:
+                    self.send_frame(8, struct.pack("!H", 1000))
+                    break
+        except (ConnectionError, OSError):
+            opcode = None
+        log("azure-client-closed", closeFrame=opcode == 8)
+
+    def azure_configuration_problem(self, update):
+        session = update.get("session") or {}
+        transcription = session.get("input_audio_transcription") or {}
+        turns = session.get("turn_detection") or {}
+        expected = (update.get("type") == "session.update" and bool(update.get("event_id"))
+                    and session.get("modalities") == ["text"] and session.get("input_audio_format") == "pcm16"
+                    and session.get("input_audio_sampling_rate") == 24000
+                    and transcription.get("model") == "azure-speech" and "language" not in transcription
+                    and turns.get("type") == "azure_semantic_vad" and turns.get("create_response") is False)
+        return None if expected else "expected the transcription-only session.update first"
+
+    def read_azure_audio(self, scenario):
+        """Requires the exact 100 ms frames in order; server VAD ends a turn part way."""
+        digest = hashlib.sha256()
+        for index in range(AZURE_FRAMES):
+            event = self.read_azure_event()
+            audio = event.get("audio", "") if event["type"] == "input_audio_buffer.append" else None
+            if audio is None or base64.b64decode(audio, validate=True) != azure_frame(index):
+                return None, f"PCM frame {index} was not the exact 100 ms frame"
+            digest.update(azure_frame(index))
+            if index == AZURE_VAD_AFTER_FRAMES - 1:
+                self.send_azure({"type": "input_audio_buffer.committed", "item_id": "item_vad",
+                                 "previous_item_id": None})
+                self.send_azure(azure_transcription("delta", "item_vad", AZURE_VAD_DRAFT))
+                self.send_azure(azure_transcription("completed", "item_vad", AZURE_VAD_FINAL))
+        log("azure-audio", scenario=scenario, frames=AZURE_FRAMES, bytes=AZURE_FRAMES * AZURE_FRAME_BYTES,
+            sha256=digest.hexdigest())
+        return digest, None
+
+    def run_azure(self):
+        """Plays one session: created, the configuration and its acknowledgement,
+        exact PCM, then the commit and the barrier, answered as the scenario asks.
+        Any deviation is reported to the client as a Voice Live error."""
+        scenario = self.azure_scenario
+        self.send_azure({"type": "session.created", "event_id": "event_created", "session": {"id": "sess_loopback"}})
+        update = self.read_azure_event()
+        problem = self.azure_configuration_problem(update)
+        if problem:
+            return self.reject_azure(problem)
+        self.send_azure({"type": "session.updated", "event_id": "event_configured", "session": {"id": "sess_loopback"}})
+        _, problem = self.read_azure_audio(scenario)
+        if problem:
+            return self.reject_azure(problem)
+        commit = self.read_azure_event()
+        if commit["type"] != "input_audio_buffer.commit" or not commit.get("event_id"):
+            return self.reject_azure("expected the commit after every audio frame")
+        if scenario == "commit-empty":
+            # Server VAD already committed everything, so the commit finds nothing.
+            self.send_azure({"type": "error", "event_id": "event_empty", "error": {
+                "type": "invalid_request_error", "code": "input_audio_buffer_commit_empty",
+                "message": "Synthetic empty buffer", "event_id": commit["event_id"]}})
+        else:
+            self.send_azure({"type": "input_audio_buffer.committed", "item_id": "item_tail",
+                             "previous_item_id": "item_vad"})
+        barrier = self.read_azure_event()
+        if (barrier["type"] != "session.update" or barrier.get("session") != {"modalities": ["text"]}
+                or barrier.get("event_id") in (None, update["event_id"], commit["event_id"])):
+            return self.reject_azure("expected the finalisation barrier after the commit")
+        log("azure-barrier", scenario=scenario)
+        if scenario == "abrupt":
+            # The barrier arrives, then the connection drops without a close frame.
+            log("azure-abrupt-disconnect")
+            return None
+        if scenario == "barrier-error":
+            self.send_azure(azure_transcription("completed", "item_tail", AZURE_TAIL_FINAL))
+            self.send_azure({"type": "error", "event_id": "event_barrier_failure", "error": {
+                "type": "server_error", "code": "server_error", "message": "Synthetic server failure",
+                "event_id": barrier["event_id"]}})
+        elif scenario != "hold":
+            # "hold" never answers: the client must bound or cancel its own finish.
+            self.send_azure({"type": "session.updated", "event_id": "event_barrier", "session": {"id": "sess_loopback"}})
+            if scenario == "complete":
+                self.send_azure(azure_transcription("delta", "item_tail", AZURE_TAIL_DRAFT))
+                self.send_azure(azure_transcription("completed", "item_tail", AZURE_TAIL_FINAL))
+        return self.wait_for_azure_close()
+
 
 class ProbeServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
     allow_reuse_address = False
     slots = threading.BoundedSemaphore(8)
+    gladia_lock = threading.Lock()
+    gladia_tokens = {}
 
 
 def main():

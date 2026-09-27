@@ -50,15 +50,19 @@ final class CloudKitWebSyncAccountTests: XCTestCase {
     func testAnIdentityObservedBeforeASignInIsNeverBound() async throws {
         let transport = ScriptedCloudKitTransport()
         await transport.enqueue(CloudKitWebFixture.response(["users": [["userRecordName": "_synthetic-a"]]]))
+        await transport.holdRequests()
         let client = try makeTestClient(store: HeldTokenStore(token: "synthetic-account-a"), transport: transport)
         let accounts = HeldAccountStore(bound: nil)
-        await accounts.holdReads()
         let cursor = MemoryCursorStore(token: Data("cursor".utf8))
 
         let validation = Task { try await Self.validate(client, accounts, cursor) }
-        try await eventually { await accounts.heldReadCount == 1 }
-        try await client.storeWebAuthToken("synthetic-account-b")
-        await accounts.releaseReads()
+        try await eventually { await transport.heldCount == 1 }
+        // Queued behind the identity request, the sign-in takes effect before
+        // the account-bound step can begin.
+        let signIn = Task { try await client.storeWebAuthToken("synthetic-account-b") }
+        try await eventually { await client.waitingRequestCount == 1 }
+        await transport.releaseHeldRequests()
+        try await signIn.value
 
         do {
             _ = try await validation.value
@@ -107,17 +111,23 @@ final class CloudKitWebSyncAccountTests: XCTestCase {
     }
 }
 
-/// Remembers the bound account; reads can be held to order a test schedule.
+/// Remembers the bound account; reads and the next bind can be held to order
+/// a test schedule, and binds are noted in a shared log.
 actor HeldAccountStore: CloudKitWebSyncAccountStore {
     private(set) var bound: String?
+    private let log: EventLog?
     private var holdsReads = false
     private var heldReads: [CheckedContinuation<Void, Never>] = []
+    private var holdsNextBind = false
+    private var heldBind: CheckedContinuation<Void, Never>?
 
-    init(bound: String?) {
+    init(bound: String?, log: EventLog? = nil) {
         self.bound = bound
+        self.log = log
     }
 
     var heldReadCount: Int { heldReads.count }
+    var isHoldingBind: Bool { heldBind != nil }
 
     func holdReads() {
         holdsReads = true
@@ -130,6 +140,16 @@ actor HeldAccountStore: CloudKitWebSyncAccountStore {
         waiting.forEach { $0.resume() }
     }
 
+    /// Holds inside the next bind, before the account is recorded.
+    func holdNextBind() {
+        holdsNextBind = true
+    }
+
+    func releaseBind() {
+        heldBind?.resume()
+        heldBind = nil
+    }
+
     func boundAccountRecordName() async throws -> String? {
         if holdsReads {
             await withCheckedContinuation { heldReads.append($0) }
@@ -138,17 +158,39 @@ actor HeldAccountStore: CloudKitWebSyncAccountStore {
     }
 
     func bindAccount(recordName: String) async throws {
+        if holdsNextBind {
+            holdsNextBind = false
+            await withCheckedContinuation { heldBind = $0 }
+        }
         bound = recordName
+        await log?.append("bound \(recordName)")
     }
 }
 
-/// An in-memory cursor, as a desktop host's durable store would behave.
+/// An in-memory cursor, as a desktop host's durable store would behave. Its
+/// next clear can be held, and clears are noted in a shared log.
 actor MemoryCursorStore: SyncChangeTokenStore {
     private var token: Data?
+    private let log: EventLog?
     private(set) var saveCount = 0
+    private var holdsNextClear = false
+    private var heldClear: CheckedContinuation<Void, Never>?
 
-    init(token: Data?) {
+    init(token: Data?, log: EventLog? = nil) {
         self.token = token
+        self.log = log
+    }
+
+    var isHoldingClear: Bool { heldClear != nil }
+
+    /// Holds inside the next clear, before the cursor is removed.
+    func holdNextClear() {
+        holdsNextClear = true
+    }
+
+    func releaseClear() {
+        heldClear?.resume()
+        heldClear = nil
     }
 
     func loadChangeToken() async throws -> Data? {
@@ -161,6 +203,20 @@ actor MemoryCursorStore: SyncChangeTokenStore {
     }
 
     func clearChangeToken() async throws {
+        if holdsNextClear {
+            holdsNextClear = false
+            await withCheckedContinuation { heldClear = $0 }
+        }
         token = nil
+        await log?.append("cleared")
+    }
+}
+
+/// The order of events across actors in one test schedule.
+actor EventLog {
+    private(set) var entries: [String] = []
+
+    func append(_ entry: String) {
+        entries.append(entry)
     }
 }

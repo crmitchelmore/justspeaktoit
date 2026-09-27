@@ -52,23 +52,55 @@ final class URLSessionStreamingConnection: StreamingWebSocketConnection, @unchec
     }
 
     func receive(completion: @escaping @Sendable (Result<StreamingWebSocketMessage, Error>) -> Void) {
+        let task = task, delegate = delegate
         task.receive { result in
-            completion(result.flatMap { message in
-                switch message {
-                case .string(let text): return .success(.text(text))
-                case .data(let data): return .success(.binary(data))
-                @unknown default: return .failure(URLError(.cannotParseResponse))
+            completion(result
+                .mapError { error in
+                    // Only this connection's own task can say how it closed:
+                    // the close frame its delegate saw, or the code it recorded.
+                    URLSessionWebSocketClosure.wrapping(error, closeCode: delegate.closeCode ?? task.peerCloseCode)
                 }
-            })
+                .flatMap { message in
+                    switch message {
+                    case .string(let text): return .success(.text(text))
+                    case .data(let data): return .success(.binary(data))
+                    @unknown default: return .failure(URLError(.cannotParseResponse))
+                    }
+                })
         }
     }
 
     func cancel() { task.cancel(with: .goingAway, reason: nil) }
 }
 
+/// A receive failure after a close frame on the failing connection's own task,
+/// carrying that frame's status. A failure without one, such as a dropped
+/// network, is passed through untouched and so reports no close at all.
+struct URLSessionWebSocketClosure: StreamingWebSocketCloseReporting, LocalizedError {
+    let webSocketCloseCode: Int?
+    let underlying: Error
+
+    /// Hosts keep showing the transport's own description.
+    var errorDescription: String? { underlying.localizedDescription }
+
+    static func wrapping(_ error: Error, closeCode: Int?) -> Error {
+        guard let closeCode else { return error }
+        return URLSessionWebSocketClosure(webSocketCloseCode: closeCode, underlying: error)
+    }
+}
+
+private extension URLSessionWebSocketTask {
+    /// The status of a close frame this task has seen, or nil before one.
+    var peerCloseCode: Int? { closeCode == .invalid ? nil : closeCode.rawValue }
+}
+
 private final class StreamingSocketDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var onOpen: (@Sendable () -> Void)?
+    private var closeCodeValue: Int?
+
+    /// The status of the close frame reported for this delegate's one task.
+    var closeCode: Int? { lock.withLock { closeCodeValue } }
 
     func install(_ callback: @escaping @Sendable () -> Void) { lock.withLock { onOpen = callback } }
 
@@ -80,7 +112,11 @@ private final class StreamingSocketDelegate: NSObject, URLSessionWebSocketDelega
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        // The receive completion carries closure to the shared lifecycle.
-        lock.withLock { onOpen = nil }
+        // The receive completion carries closure to the shared lifecycle, with
+        // this status attached.
+        lock.withLock {
+            onOpen = nil
+            if closeCode != .invalid { closeCodeValue = closeCode.rawValue }
+        }
     }
 }

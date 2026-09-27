@@ -1,9 +1,12 @@
 # Windows developer MSIX package
 
 These scripts turn the verified self-contained runtime bundle into an unsigned
-Windows x64 developer MSIX, pack it with Microsoft's pinned MakeAppx, sign
+Windows developer MSIX, pack it with Microsoft's pinned MakeAppx, sign
 copies with an externally supplied certificate and run the install, upgrade,
-failure and uninstall lifecycle on a disposable Windows machine.
+failure and uninstall lifecycle on a disposable Windows machine. The package's
+processor architecture (x64 or arm64) is the bundle's; both use the one
+developer identity. ARM64 packages are built and exercised by
+`.github/workflows/windows-arm64.yml` ([Docs/windows-arm64.md](../../Docs/windows-arm64.md)).
 
 | File | Role |
 |---|---|

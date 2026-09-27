@@ -12,6 +12,9 @@ final class LinuxAudioPlayback: DesktopHostPlayback, @unchecked Sendable {
         let recordID: UUID
         let revision: UInt64
         let duration: TimeInterval
+        /// Read aloud speech: its end is reported to the waiting speaker, not
+        /// on the status line.
+        let speech: Bool
         private let player: OpaquePointer
         private let lock = NSLock()
         private var destroyed = false
@@ -30,12 +33,15 @@ final class LinuxAudioPlayback: DesktopHostPlayback, @unchecked Sendable {
             }
         }
 
-        init(recordID: UUID, revision: UInt64, duration: TimeInterval, player: OpaquePointer) {
+        init(recordID: UUID, revision: UInt64, duration: TimeInterval, speech: Bool, player: OpaquePointer) {
             self.recordID = recordID
             self.revision = revision
             self.duration = duration
+            self.speech = speech
             self.player = player
         }
+
+        var isDestroyed: Bool { lock.withLock { destroyed } }
     }
 
     private let lock = NSLock()
@@ -51,6 +57,46 @@ final class LinuxAudioPlayback: DesktopHostPlayback, @unchecked Sendable {
     package func isCurrent(revision: UInt64) -> Bool { lock.withLock { self.revision == revision && !closed } }
 
     package func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws {
+        _ = try start(recordID: recordID, path: path, speech: false)
+    }
+
+    /// Plays one Read aloud segment for `recordID` through the same single
+    /// player as History playback, so the two are never audible together,
+    /// and returns the seconds heard once it ends. Cancelling the calling task
+    /// stops it; so do Stop, another row, recording and closing, which then
+    /// throw `CancellationError`.
+    func playToCompletion(recordID: UUID, path: String) async throws -> TimeInterval {
+        guard let run = try start(recordID: recordID, path: path, speech: true) else { throw CancellationError() }
+        return try await withTaskCancellationHandler {
+            while true {
+                guard let (state, position) = run.with({ (jsti_player_state($0), jsti_player_position($0)) }) else {
+                    throw CancellationError()
+                }
+                if state == Int32(JSTI_PLAYER_FAILED) {
+                    end(take(run))
+                    throw LinuxNativeError(message: "The audio output failed.")
+                }
+                if state == Int32(JSTI_PLAYER_FINISHED) {
+                    end(take(run))
+                    return position
+                }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        } onCancel: {
+            self.end(self.take(run))
+        }
+    }
+
+    /// Clears `run` if it is still the current one, returning it to end.
+    private func take(_ run: Run) -> Run? {
+        lock.withLock {
+            guard current === run else { return run.isDestroyed ? nil : run }
+            current = nil
+            return run
+        }
+    }
+
+    private func start(recordID: UUID, path: String, speech: Bool) throws -> Run? {
         let (samples, rate) = try Self.readPCM16WAV(URL(fileURLWithPath: path))
         stop()
         var error = [CChar](repeating: 0, count: 512)
@@ -62,13 +108,15 @@ final class LinuxAudioPlayback: DesktopHostPlayback, @unchecked Sendable {
             guard !closed else { return nil }
             revision &+= 1
             let run = Run(
-                recordID: recordID, revision: revision, duration: Double(samples.count) / Double(rate), player: player
+                recordID: recordID, revision: revision, duration: Double(samples.count) / Double(rate),
+                speech: speech, player: player
             )
             current = run
             return run
         }
-        guard let run else { jsti_player_destroy(player); return }
+        guard let run else { jsti_player_destroy(player); return nil }
         run.monitor = Task.detached { [weak self] in await self?.monitor(run) }
+        return run
     }
 
     package func togglePause(recordID: UUID) -> Bool {
@@ -81,7 +129,14 @@ final class LinuxAudioPlayback: DesktopHostPlayback, @unchecked Sendable {
         return true
     }
 
-    package func stop() { end(lock.withLock { () -> Run? in defer { current = nil }; return current }) }
+    /// Only the user's Stop is `announcing` and reports "Playback stopped.".
+    package func stop(announcing: Bool = false) {
+        let run = lock.withLock { () -> Run? in defer { current = nil }; return current }
+        end(run)
+        guard announcing, let run, !run.speech else { return }
+        let handler = lock.withLock { status }
+        handler?(run.revision, "Playback stopped.")
+    }
 
     package func stop(unless recordID: UUID) {
         end(lock.withLock { () -> Run? in
@@ -121,7 +176,7 @@ final class LinuxAudioPlayback: DesktopHostPlayback, @unchecked Sendable {
                     current = nil
                     return true
                 }
-                guard ended else { return }
+                guard ended, !run.speech else { return }
                 run.destroy()
                 _ = jsti_window_set_playback(run.recordID.uuidString, 0, "")
                 let handler = lock.withLock { status }

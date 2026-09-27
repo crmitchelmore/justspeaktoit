@@ -17,7 +17,9 @@ package protocol DesktopHostPlayback: AnyObject, Sendable {
     func isCurrent(revision: UInt64) -> Bool
     func play(recordID: UUID, path: String, knownDuration: TimeInterval?) throws
     func togglePause(recordID: UUID) -> Bool
-    func stop()
+    /// Requests cancellation. Only the user's Stop is `announcing` and reports
+    /// "Playback stopped."; stopping to make way for other work stays silent.
+    func stop(announcing: Bool)
     func stop(unless recordID: UUID)
     /// Returns once output is acknowledged silent.
     func stopAndWait() async throws
@@ -89,7 +91,9 @@ package protocol DesktopHostPlatform: Sendable {
     // Read aloud. Hosts without it keep an empty state.
     static func makeReadAloudState() -> ReadAloudState
     /// Ends Read aloud: the current segment stops and no later one starts.
-    static func stopReadAloud(_ state: inout ReadAloudState)
+    static func stopReadAloud(_ state: inout ReadAloudState, playback: Playback)
+    /// True while Read aloud is speaking or synthesising a segment.
+    static func isReadingAloud(_ state: ReadAloudState) -> Bool
 
     // On-device transcription. Hosts without a local runtime keep the defaults
     // and configure no local models.
@@ -103,6 +107,9 @@ package protocol DesktopHostPlatform: Sendable {
     static func transcribeLocally(
         _ audio: URL, model: String, language: String?, controller: isolated DesktopHostController<Self>
     ) async throws -> TranscriptionResult
+    /// Holds an on-device model until `endLocalUse`; returns what to release.
+    static func beginLocalUse(_ model: String, controller: isolated DesktopHostController<Self>) -> String?
+    static func endLocalUse(_ model: String?, controller: isolated DesktopHostController<Self>)
 
     // Shortcut text for the status line.
     static var defaultHotKey: HotKeySettings { get }

@@ -5,8 +5,10 @@ MSIX package** built from the verified self-contained runtime bundle with
 Microsoft's MakeAppx, plus a lifecycle test that signs it with an ephemeral
 certificate on a disposable CI runner and installs, launches, upgrades and
 uninstalls it. It is not an Alpha or Stable release, not signed for
-distribution, not an updater and not an ARM64 package. No install receipt
-exists until the `package-lifecycle` job has passed for a revision (see
+distribution and not an updater. An ARM64 package of the same identity is
+built from the ARM64 bundle by `windows-arm64.yml`
+([Windows ARM64](windows-arm64.md)). No install receipt exists until the
+`package-lifecycle` job has passed for a revision (see
 [Evidence](#evidence-at-this-checkpoint)).
 
 ## Identity and version
@@ -22,7 +24,7 @@ identity in the repository.
 | Application / AUMID | `JustSpeakToIt` / `<family>!JustSpeakToIt` |
 | Display name | Just Speak to It Developer |
 | Execution alias | `JustSpeakToItDeveloper.exe` |
-| Architecture | x64 only |
+| Architecture | The runtime bundle's: x64, or arm64 from the ARM64 bundle (`processorArchitectures` lists both) |
 | Target | `Windows.Desktop`, minimum 10.0.19041.0, tested 10.0.20348.0 (the CI runner build) |
 | Capabilities | `runFullTrust`, `unvirtualizedResources` (restricted), `microphone` (device) |
 | Payload | Every file of the verified runtime bundle, byte for byte (including its `README.txt`, which describes the portable bundle), plus `AppxManifest.xml`, three logos and `package-manifest.json` |
@@ -387,12 +389,12 @@ with the refused run's own evidence.
 
 ## Remaining gates and integration needs
 
-- **ARM64 (same issue, next slice).** Needs an arm64 cross build and bundle:
-  arm64 Swift runtime DLLs and lock, the arm64 Visual C++ runtime from its
-  pinned redistributable, a per-architecture runtime policy, a package with
-  `ProcessorArchitecture="arm64"` or an `.msixbundle` for both architectures
-  (a family may move from `.msix` to a bundle, not back), and execution on an
-  arm64 Windows runner. Nothing here claims arm64 support.
+- **ARM64.** `windows-arm64.yml` packs the ARM64 bundle as
+  `ProcessorArchitecture="arm64"` in the same family and runs this lifecycle,
+  unchanged, on `windows-11-arm`, where the pinned x64 MakeAppx and SignTool
+  are expected to run under emulation. It has no receipt yet, and no `.msixbundle` holds both
+  architectures (a family may move from `.msix` to a bundle, not back). See
+  [Windows ARM64](windows-arm64.md).
 - **Updater (same issue, later slice).** Needs a stable, externally signed
   publisher first. MSIX updates can use an `.appinstaller` file over HTTPS
   with update settings, or an in-app check through the PackageManager API;

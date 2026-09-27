@@ -75,6 +75,8 @@ actor ScriptedCloudKitTransport: CloudKitWebServicesHTTPTransport {
     private var scripted: [Result<CloudKitWebServicesHTTPResponse, Error>] = []
     private var fallback = CloudKitWebFixture.records([])
     private var holdsRequests = false
+    private var ignoresCancellation = false
+    private var heldPathSuffix: String?
     private var held: [Held] = []
     private(set) var requests: [CloudKitWebServicesHTTPRequest] = []
 
@@ -96,8 +98,19 @@ actor ScriptedCloudKitTransport: CloudKitWebServicesHTTPTransport {
         holdsRequests = true
     }
 
+    /// Holds requests like a transport that cannot abandon one in flight: a
+    /// cancelled caller still receives the response once the test releases
+    /// it. With `pathSuffix`, only requests whose path ends with it are held.
+    func holdRequestsIgnoringCancellation(pathSuffix: String? = nil) {
+        holdsRequests = true
+        ignoresCancellation = true
+        heldPathSuffix = pathSuffix
+    }
+
     func releaseHeldRequests() {
         holdsRequests = false
+        ignoresCancellation = false
+        heldPathSuffix = nil
         let waiting = held
         held.removeAll()
         waiting.forEach { $0.continuation.resume() }
@@ -108,7 +121,12 @@ actor ScriptedCloudKitTransport: CloudKitWebServicesHTTPTransport {
         responseLimit: Int
     ) async throws -> CloudKitWebServicesHTTPResponse {
         requests.append(request)
-        if holdsRequests {
+        let matches = heldPathSuffix.map { request.url.path.hasSuffix($0) } ?? true
+        if holdsRequests, matches, ignoresCancellation {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                held.append(Held(id: UUID(), continuation: continuation))
+            }
+        } else if holdsRequests, matches {
             let id = UUID()
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in

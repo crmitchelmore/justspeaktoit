@@ -4,12 +4,15 @@ import SpeakDesktop
 
 extension DesktopHostController {
     /// Output is the recording's own authority; imports and retries pass nil.
-    func transcribe(
+    package func transcribe(
         _ original: DesktopRecordingStore.Record, duration: TimeInterval, output: DesktopHostRecordingOutput<Platform>?,
         profile: DesktopProfileSession? = nil
     ) async {
         var record = original
         cancellationRequested = false
+        // The record's on-device model, a profile's or the app's, stays in use until this finishes.
+        let localModel = beginLocalUse(record.modelIdentifier)
+        defer { endLocalUse(localModel) }
         let session = profile ?? .defaults(
             modelIdentifier: record.modelIdentifier, postProcessing: settings.postProcessing ?? .init(),
             language: record.languageIdentifier

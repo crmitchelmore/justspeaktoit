@@ -99,7 +99,8 @@ public struct GladiaBatchClient: Sendable {
     }
 
     /// Step 2. Start the job. An empty `languages` array is Gladia's documented
-    /// way to ask for detection, so "Automatic" stays automatic.
+    /// way to ask for detection, so "Automatic", and a language Gladia does not
+    /// list, detect instead of failing the job.
     private func startJob(audioURL: String, apiKey: String, language: String?) async throws -> Job {
         var request = URLRequest(url: self.baseURL.appendingPathComponent("v2/pre-recorded"))
         request.httpMethod = "POST"
@@ -162,7 +163,7 @@ public struct GladiaBatchClient: Sendable {
 
     static func requestBody(audioURL: String, language: String?) -> [String: Any] {
         var body: [String: Any] = ["audio_url": audioURL, "model": Self.modelName]
-        let languages = BatchTranscriptionJob.languageCode(from: language).map { [$0] } ?? []
+        let languages = GladiaLive.languageCode(for: language).map { [$0] } ?? []
         body["language_config"] = ["languages": languages, "code_switching": languages.isEmpty]
         return body
     }

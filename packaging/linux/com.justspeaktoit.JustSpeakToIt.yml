@@ -89,6 +89,11 @@ modules:
       - /include
       - /lib/justspeaktoit/cmake
       - /lib/justspeaktoit/pkgconfig
+      # Development links; the app loads the SONAMEs.
+      - /lib/justspeaktoit/libggml.so
+      - /lib/justspeaktoit/libggml-base.so
+      - /lib/justspeaktoit/libparakeet.so
+      - /lib/justspeaktoit/libwhisper.so
     sources:
       - type: git
         url: https://github.com/ggml-org/whisper.cpp.git

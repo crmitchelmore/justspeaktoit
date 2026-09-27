@@ -63,6 +63,9 @@ jobs:
             echo "build-args are not allowed: the build runs offline" >&2; exit 1
           fi
 
+      - name: Lint the manifest (Flathub's linter)
+        run: flatpak-builder-lint manifest "$MANIFEST"
+
       - name: Install the Swift SDK extension
         run: |
           flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -80,11 +83,11 @@ jobs:
           --state-dir "$RUNNER_TEMP/flatpak-state" --repo "$RUNNER_TEMP/flatpak-repo"
           "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
 
-      - name: Self-test, whisper.cpp runtime and window smoke test inside the Flatpak
+      - name: Install, then self-test, whisper.cpp runtime and window smoke test with flatpak run
         run: |
           # flatpak run needs a machine ID for its session bus; the container has none.
           [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
-          scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+          scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/flatpak-repo"
 
       - name: Bundle
         run: >-

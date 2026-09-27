@@ -21,6 +21,9 @@ public enum DictationProfileIssue: Equatable, Sendable {
     /// or bare file name could never equal the captured application's path, so
     /// the profile would silently never activate.
     case invalidWindowsExecutablePath(path: String)
+    /// A Linux matcher that is neither a full executable path nor a window
+    /// class, so it could never match the focused application.
+    case invalidLinuxApplication(value: String)
     /// A native editor selection no longer belongs to its captured catalogue.
     case invalidSelection(field: String)
     case duplicateProfile
@@ -45,6 +48,9 @@ public enum DictationProfileIssue: Equatable, Sendable {
         case .invalidWindowsExecutablePath(let path):
             return "“\(path)” is not a full Windows executable path. "
                 + "Use the complete path, for example C:\\Program Files\\App\\App.exe, or choose it with Browse."
+        case .invalidLinuxApplication(let value):
+            return "“\(value)” is not an application Linux can match. "
+                + "Use a full executable path such as /usr/bin/gedit, or an X11 window class such as gedit."
         }
     }
 }
@@ -59,6 +65,11 @@ public enum DictationProfileValidator {
             // Blank values are inert (they match nothing), like blank bundle IDs.
             if let path = trimmedNonEmpty(matcher.value), !DictationProfileMatcher.isFullWindowsExecutablePath(path) {
                 issues.append(.invalidWindowsExecutablePath(path: path))
+            }
+        }
+        for matcher in profile.matchers where DictationProfileMatcher.isLinuxKind(matcher.kind) {
+            if let value = trimmedNonEmpty(matcher.value), !DictationProfileMatcher.isValidLinuxMatcher(matcher) {
+                issues.append(.invalidLinuxApplication(value: value))
             }
         }
         if let override = profile.resolvedTranscriptionOverride {

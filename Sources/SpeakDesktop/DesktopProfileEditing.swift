@@ -14,13 +14,16 @@ public enum DesktopProfileEditing {
     public struct Catalogue: Sendable {
         public var capabilities: DesktopProfileCapabilities
         public var languages: [TranscriptionLanguageOption]
+        public var matchers: MatcherPlatform
 
         public init(
             capabilities: DesktopProfileCapabilities,
-            languages: [TranscriptionLanguageOption] = TranscriptionLanguageCatalog.options
+            languages: [TranscriptionLanguageOption] = TranscriptionLanguageCatalog.options,
+            matchers: MatcherPlatform = .windows
         ) {
             self.capabilities = capabilities
             self.languages = languages
+            self.matchers = matchers
         }
 
         public var batchModels: [ModelCatalog.Option] { capabilities.batchModels }
@@ -110,7 +113,8 @@ public enum DesktopProfileEditing {
     // MARK: - Profile to draft
 
     public static func draft(for profile: DictationProfile, catalogue: Catalogue) -> Draft {
-        var draft = Draft(id: profile.id, name: profile.name, executablePaths: profile.windowsExecutablePaths)
+        let applications = catalogue.matchers == .linux ? profile.linuxApplications : profile.windowsExecutablePaths
+        var draft = Draft(id: profile.id, name: profile.name, executablePaths: applications)
         draft.transcription = transcriptionChoice(for: profile, catalogue: catalogue)
         switch profile.polishEnabled {
         case .some(true): draft.polishMode = .enabled
@@ -168,6 +172,7 @@ public enum DesktopProfileEditing {
             notes.append("Also matches these macOS apps, which only the Mac editor changes: "
                 + bundleIDs.joined(separator: ", ") + ".")
         }
+        notes += otherDesktopNotes(for: profile, catalogue: catalogue)
         if profile.matchers.contains(where: { $0.kind == .urlPattern }) {
             notes.append("Has a browser URL matcher, which no platform evaluates yet; it is kept as stored.")
         }
@@ -185,7 +190,7 @@ public enum DesktopProfileEditing {
     ) -> DictationProfile {
         var profile = original ?? DictationProfile(id: draft.id ?? UUID(), name: "")
         profile.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        profile = profile.replacingWindowsExecutablePaths(cleanedPaths(draft.executablePaths))
+        profile = replacingApplications(of: profile, with: draft.executablePaths, catalogue: catalogue)
 
         applyTranscription(draft, to: &profile, original: original, catalogue: catalogue)
 
@@ -319,5 +324,57 @@ extension DesktopProfileEditing {
 
     private static func trimmedNonEmpty(_ value: String?) -> String? {
         DesktopProfileSessionResolver.trimmedNonEmpty(value)
+    }
+}
+
+// MARK: - Other desktop platforms
+
+extension DesktopProfileEditing {
+    /// Which platform's application matchers the editor shows as its app list.
+    public enum MatcherPlatform: Sendable {
+        /// Full Windows executable paths.
+        case windows
+        /// Full Linux executable paths and X11 window classes, one per line.
+        case linux
+    }
+
+    /// The profile with this editor's applications replaced; every other
+    /// platform's matchers are kept.
+    static func replacingApplications(
+        of profile: DictationProfile, with lines: [String], catalogue: Catalogue
+    ) -> DictationProfile {
+        switch catalogue.matchers {
+        case .windows: return profile.replacingWindowsExecutablePaths(cleanedPaths(lines))
+        case .linux: return profile.replacingLinuxApplications(cleanedLinuxApplications(lines))
+        }
+    }
+
+    /// Linux lines trimmed, blanks dropped and exact duplicates removed (paths
+    /// are case-sensitive; window classes compare ignoring case).
+    public static func cleanedLinuxApplications(_ lines: [String]) -> [String] {
+        var seen = Set<String>()
+        var cleaned: [String] = []
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            let key = line.hasPrefix("/") ? line : line.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            cleaned.append(line)
+        }
+        return cleaned
+    }
+
+    /// The other desktop's applications, which only its own editor changes.
+    static func otherDesktopNotes(for profile: DictationProfile, catalogue: Catalogue) -> [String] {
+        switch catalogue.matchers {
+        case .linux where !profile.windowsExecutablePaths.isEmpty:
+            return ["Also matches these Windows apps, which only the Windows editor changes: "
+                + profile.windowsExecutablePaths.joined(separator: ", ") + "."]
+        case .windows where !profile.linuxApplications.isEmpty:
+            return ["Also matches these Linux apps, which only the Linux editor changes: "
+                + profile.linuxApplications.joined(separator: ", ") + "."]
+        default:
+            return []
+        }
     }
 }

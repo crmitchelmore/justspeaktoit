@@ -4,14 +4,14 @@ import Foundation
 
 /// A rule binding a dictation profile to a target context.
 ///
-/// `bundleID` matchers are evaluated on macOS (frontmost-app matching) and
+/// `bundleID` matchers are evaluated on macOS (frontmost-app matching),
 /// `windowsExecutablePath` matchers on Windows (the captured application's
-/// full executable path). Each platform evaluates only its own kind and keeps
-/// the others untouched when it edits a profile, so one profile list can carry
-/// both. `urlPattern` is reserved so browser URL matching (Safari/Chrome via AX)
-/// can be added later without a storage or sync format change; unknown kinds
-/// written by newer clients are dropped on decode instead of failing the whole
-/// profile list.
+/// full executable path) and the `linux…` matchers on Linux under X11. Each
+/// platform evaluates only its own kind and keeps the others untouched when it
+/// edits a profile, so one profile list can carry all of them. `urlPattern` is
+/// reserved so browser URL matching (Safari/Chrome via AX) can be added later
+/// without a storage or sync format change; unknown kinds written by newer
+/// clients are dropped on decode instead of failing the whole profile list.
 public struct DictationProfileMatcher: Codable, Equatable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable {
         /// Matches the frontmost application's bundle identifier (case-insensitive).
@@ -24,6 +24,13 @@ public struct DictationProfileMatcher: Codable, Equatable, Hashable, Sendable {
         /// no `\\?\` prefix). A bare file name or a bundle identifier never
         /// matches; nothing is inferred from a process name.
         case windowsExecutablePath
+        /// Matches the full executable path of the Linux process that owned the
+        /// focused X11 window (`/proc/<pid>/exe`), compared exactly: Linux paths
+        /// are case-sensitive. A bare name never matches.
+        case linuxExecutablePath
+        /// Matches the focused X11 window's `WM_CLASS` class (case-insensitive),
+        /// for example `firefox` or `gnome-terminal-server`.
+        case linuxWindowClass
     }
 
     public var kind: Kind

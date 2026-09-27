@@ -10,7 +10,7 @@ set -euo pipefail
 
 build_dir="${1:?usage: $0 <build-dir> [manifest]}"
 manifest="${2:-packaging/linux/com.justspeaktoit.JustSpeakToIt.yml}"
-run() { flatpak-builder --run "$build_dir" "$manifest" "$@"; }
+run() { flatpak-builder --disable-rofiles-fuse --run "$build_dir" "$manifest" "$@"; }
 
 echo "== native self-test (inside the Flatpak)"
 run justspeaktoit --self-test
@@ -34,7 +34,7 @@ if command -v xvfb-run >/dev/null; then
     echo "== window smoke test (Xvfb, private session bus, inside the Flatpak)"
     # Unset Wayland so the fallback-x11 socket is shared with the sandbox.
     env -u WAYLAND_DISPLAY xvfb-run -a -s "-screen 0 1280x1024x24 -nolisten tcp" \
-        flatpak-builder --run "$build_dir" "$manifest" \
+        flatpak-builder --disable-rofiles-fuse --run "$build_dir" "$manifest" \
         env GDK_BACKEND=x11 GSK_RENDERER=cairo GTK_A11Y=none NO_AT_BRIDGE=1 \
         timeout 120 dbus-run-session -- justspeaktoit --ui-smoke-test
 else

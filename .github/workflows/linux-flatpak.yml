@@ -81,7 +81,10 @@ jobs:
           "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
 
       - name: Self-test, whisper.cpp runtime and window smoke test inside the Flatpak
-        run: scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
+        run: |
+          # flatpak run needs a machine ID for its session bus; the container has none.
+          [ -s /etc/machine-id ] || dbus-uuidgen > /etc/machine-id
+          scripts/linux-flatpak-checks.sh "$RUNNER_TEMP/flatpak-build" "$MANIFEST"
 
       - name: Bundle
         run: >-

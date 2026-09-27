@@ -17,7 +17,7 @@ Check desktop and mobile layouts (360 px to wide desktop, no horizontal scroll),
 
 ## Deployment
 
-`.github/workflows/deploy-landing-page.yml` tests and builds the site, then publishes `landing-page/dist/` to the existing Cloudflare Pages project `justspeaktoit` when website changes merge to `main`. Normal repository PR/review gates apply. Cloudflare serves `privacy.html` at `/privacy`; `_redirects` preserves the Mac downloads and Sparkle feeds. `.well-known/` contains the existing Apple association and Tesla public-key files. `npm run build` copies the complete set of public assets for standalone deployments.
+`.github/workflows/deploy-landing-page.yml` tests and builds the site, then publishes `landing-page/dist/` to the existing Cloudflare Pages project `justspeaktoit` when website changes merge to `main`. Normal repository PR/review gates apply. Cloudflare serves `privacy.html` at `/privacy`; `_redirects` preserves the Mac downloads and Sparkle feeds. `.well-known/` contains the existing Apple association and Tesla public-key files; every file in it is deployed, so the Flathub verification token (`.well-known/org.flathub.VerifiedApps.txt`, see `Docs/linux-packaging.md`) only needs adding there. `npm run build` copies the complete set of public assets for standalone deployments.
 
 ## Content maintenance
 

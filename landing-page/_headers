@@ -12,6 +12,10 @@
   Content-Type: application/x-pem-file
   Access-Control-Allow-Origin: *
 
+/.well-known/org.flathub.VerifiedApps.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=0, must-revalidate
+
 /download-architecture.js
   Cache-Control: public, max-age=0, must-revalidate
 

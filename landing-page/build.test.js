@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFile, cp, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -42,4 +42,21 @@ test('deployed styles and motion get new URLs only when their content changes', 
   const last = await build();
   assert.notEqual(last.motion, next.motion, 'A motion change must invalidate the old script URL');
   assert.equal(last.stylesheet, next.stylesheet, 'A script change should not invalidate CSS');
+});
+
+test('files dropped into .well-known are deployed, including the Flathub verification token', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'speak-website-well-known-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const fixture = path.join(directory, 'site');
+  await cp(source, fixture, {
+    recursive: true,
+    filter: filename => !['dist', 'node_modules'].includes(path.relative(source, filename).split(path.sep)[0]),
+  });
+  // Flathub reads https://justspeaktoit.com/.well-known/org.flathub.VerifiedApps.txt.
+  const token = path.join('.well-known', 'org.flathub.VerifiedApps.txt');
+  await writeFile(path.join(fixture, token), 'fixture-token\n');
+  execFileSync(process.execPath, [path.join(fixture, 'build.mjs')]);
+  assert.equal(await readFile(path.join(fixture, 'dist', token), 'utf8'), 'fixture-token\n');
+  const headers = await readFile(path.join(fixture, 'dist', '_headers'), 'utf8');
+  assert.match(headers, /\/\.well-known\/org\.flathub\.VerifiedApps\.txt\n\s+Content-Type: text\/plain/);
 });

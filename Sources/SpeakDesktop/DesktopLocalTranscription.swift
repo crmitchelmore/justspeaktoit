@@ -47,15 +47,7 @@ public enum DesktopLocalTranscription {
 
     /// Picker options keeping each catalogue identifier.
     public static func options(host: LocalModelHostSupport) -> [ModelCatalog.Option] {
-        models(host: host).map { model in
-            ModelCatalog.Option(
-                id: model.catalogueID,
-                displayName: model.displayName + " (on-device)",
-                description: model.summary,
-                latencyTier: .medium,
-                tags: [.privacy]
-            )
-        }
+        models(host: host).map(option)
     }
 
     public static func model(for identifier: String, host: LocalModelHostSupport) -> WhisperCppModel? {
@@ -63,10 +55,48 @@ public enum DesktopLocalTranscription {
         return models(host: host).first { $0.catalogueID == trimmed }
     }
 
-    /// The friendly name of a whisper.cpp selection, or `nil` for any other
-    /// identifier. History keeps showing it even if a host stops offering it.
+    /// Catalogue models followed by verified imports the host can run.
+    public static func models(host: LocalModelHostSupport, imported: [ImportedLocalModelFile]) -> [WhisperCppModel] {
+        guard host.canExecute(.whisperCppGGML) else { return [] }
+        var seen = Set<String>()
+        return (models(host: host) + imported.compactMap(\.whisperCppModel)).filter { seen.insert($0.catalogueID).inserted }
+    }
+
+    public static func options(host: LocalModelHostSupport, imported: [ImportedLocalModelFile]) -> [ModelCatalog.Option] {
+        models(host: host, imported: imported).map(option)
+    }
+
+    public static func model(
+        for identifier: String, host: LocalModelHostSupport, imported: [ImportedLocalModelFile]
+    ) -> WhisperCppModel? {
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return models(host: host, imported: imported).first { $0.catalogueID == trimmed }
+    }
+
+    static func option(_ model: WhisperCppModel) -> ModelCatalog.Option {
+        ModelCatalog.Option(
+            id: model.catalogueID,
+            displayName: model.displayName + " (on-device)",
+            description: model.summary,
+            latencyTier: .medium,
+            tags: [.privacy]
+        )
+    }
+
+    /// The friendly name of an on-device selection (catalogue, live or
+    /// imported), or `nil` for any other identifier. History keeps showing it
+    /// even if a host stops offering the model.
     public static func displayName(for identifier: String) -> String? {
-        WhisperCppModels.model(forCatalogueID: identifier).map { $0.displayName + " (on-device)" }
+        if let base = DesktopLocalLiveTranscription.catalogueID(forSelection: identifier) {
+            return WhisperCppModels.model(forCatalogueID: base).map { $0.displayName + " (on-device, live)" }
+        }
+        if let model = WhisperCppModels.model(forCatalogueID: identifier) { return model.displayName + " (on-device)" }
+        if let name = DesktopLocalModelNames.name(for: identifier) { return name + " (on-device)" }
+        let lowered = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lowered.hasPrefix(LocalModelIdentity.whisperCppHuggingFacePrefix) {
+            return ModelCatalog.friendlyName(for: identifier) + " (on-device)"
+        }
+        return nil
     }
 
     /// Whisper takes a bare ISO 639 code. Region and script subtags are

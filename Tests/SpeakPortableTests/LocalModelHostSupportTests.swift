@@ -27,22 +27,22 @@ final class LocalModelHostSupportTests: XCTestCase {
         XCTAssertTrue(appStore.executableModels(in: postProcessing).isEmpty)
     }
 
-    func testWindowsExposesOnlyWhisperCppQualifiedCatalogueEntries() throws {
+    func testWindowsExposesOnlyWhisperCppAndLlamaCppCatalogueEntries() throws {
         let windows = LocalModelHostSupport.windows
 
-        XCTAssertEqual(windows.backends, [.whisperCppGGML])
+        XCTAssertEqual(windows.backends, [.whisperCppGGML, .llamaCppGGUF])
         let qualified = Set(WhisperCppModels.all.map(\.catalogueID))
         XCTAssertEqual(
             windows.executableModels(in: transcription).map(\.id),
             transcription.map(\.id).filter { qualified.contains($0) },
             "Catalogue order, and only entries with pinned GGML weights"
         )
-        XCTAssertTrue(windows.executableModels(in: streaming).isEmpty)
-        XCTAssertTrue(windows.executableModels(in: postProcessing).isEmpty)
+        XCTAssertTrue(windows.executableModels(in: streaming).isEmpty, "No sherpa-onnx runtime on Windows")
+        XCTAssertEqual(windows.executableModels(in: postProcessing), postProcessing)
         // Imported Core ML records decode everywhere; they never gain a
         // whisper.cpp route by sharing a name with a catalogue entry.
         XCTAssertTrue(windows.executableModels(in: try Self.importedTranscriptionModels()).isEmpty)
-        for backend in [LocalModelBackend.whisperKitCoreML, .sherpaOnnx, .llamaCppGGUF] {
+        for backend in [LocalModelBackend.whisperKitCoreML, .sherpaOnnx] {
             XCTAssertFalse(windows.canExecute(backend))
         }
         for model in windows.executableModels(in: transcription) {

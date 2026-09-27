@@ -755,6 +755,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             if lowercased.hasPrefix("local/whisperkit/huggingface/") {
                 return friendlyLocalModelName(from: trimmed, prefixes: ["local/whisperkit/huggingface/"])
             }
+            if lowercased.hasPrefix(LocalModelIdentity.whisperCppHuggingFacePrefix) {
+                return friendlyLocalModelName(from: trimmed, prefixes: [LocalModelIdentity.whisperCppHuggingFacePrefix])
+            }
             if lowercased.hasPrefix("local/streaming/huggingface/") {
                 return friendlyLocalModelName(from: trimmed, prefixes: ["local/streaming/huggingface/"])
             }

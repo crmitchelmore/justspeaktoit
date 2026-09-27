@@ -11,6 +11,8 @@ public enum LocalModelIdentity {
     public static let streamingHuggingFacePrefix = "local/streaming/huggingface/"
     public static let postProcessingPrefix = "local/post-processing/"
     public static let postProcessingHuggingFacePrefix = "local/post-processing/huggingface/"
+    /// Single-file whisper.cpp GGML weights imported on a desktop host.
+    public static let whisperCppHuggingFacePrefix = "local/whispercpp/huggingface/"
 
     /// Lowercases and replaces everything except letters, numbers, `-` and `/`
     /// with `-`. The result is lossy: keep the original repository and model
@@ -30,6 +32,10 @@ public enum LocalModelIdentity {
 
     public static func streamingSourceID(repoID: String, modelName: String) -> String {
         "\(streamingHuggingFacePrefix)\(slug(repoID))/\(slug(modelName))"
+    }
+
+    public static func whisperCppHuggingFaceModelID(repoID: String, filename: String) -> String {
+        "\(whisperCppHuggingFacePrefix)\(slug(repoID))/\(slug(filename))"
     }
 
     public static func postProcessingHuggingFaceModelID(repoID: String, filename: String) -> String {

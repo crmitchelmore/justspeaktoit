@@ -4,12 +4,16 @@ import FoundationNetworking
 #endif
 import SpeakCore
 
-/// Explicit post-processing choices for desktop hosts. Remote cleanup is opt-in;
-/// neither missing credentials nor an unsupported model selects a local substitute.
+/// Explicit post-processing choices for desktop hosts. Remote and local cleanup
+/// are opt-in; neither missing credentials nor an unsupported model selects a
+/// substitute in the other location.
 public enum DesktopPostProcessing {
     public enum Mode: String, Codable, Sendable {
         case disabled
         case remote
+        /// On this device: built-in rules or a downloaded GGUF model
+        /// (`DesktopLocalPostProcessing`). Nothing leaves the machine.
+        case local
     }
 
     public struct Options: Codable, Equatable, Sendable {
@@ -18,19 +22,32 @@ public enum DesktopPostProcessing {
         public var customPrompt: String?
         public var outputLanguage: String?
         public var temperature: Double
+        /// The local cleanup model: built-in rules or a downloaded
+        /// `local/post-processing/...` model. `modelIdentifier` stays the
+        /// remote choice, so switching location keeps both selections.
+        /// Absent in settings saved before local cleanup existed.
+        public var localModelIdentifier: String?
 
         public init(
             mode: Mode = .disabled,
             modelIdentifier: String = ModelCatalog.defaultPostProcessingModel,
             customPrompt: String? = nil,
             outputLanguage: String? = nil,
-            temperature: Double = 0.2
+            temperature: Double = 0.2,
+            localModelIdentifier: String? = nil
         ) {
             self.mode = mode
             self.modelIdentifier = modelIdentifier
             self.customPrompt = customPrompt
             self.outputLanguage = outputLanguage
             self.temperature = temperature
+            self.localModelIdentifier = localModelIdentifier
+        }
+
+        /// The local model local cleanup runs; built-in rules when none is saved.
+        public var resolvedLocalModel: String {
+            let trimmed = localModelIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return trimmed.isEmpty ? LocalPostProcessingModel.builtInRulesModelID : trimmed
         }
     }
 
@@ -51,14 +68,21 @@ public enum DesktopPostProcessing {
     /// send transcripts to the same remote service; a model this host cannot run
     /// (for example a local cleanup model) disables post-processing instead of
     /// substituting a remote one.
+    ///
+    /// Local cleanup keeps any local identifier: whether its download is still
+    /// present is checked when it runs, and a missing model fails visibly
+    /// rather than falling back to a remote service.
     public static func migrated(_ options: Options) -> Options {
         var result = options
         let model = ModelCatalog.normalizedPostProcessingModel(options.modelIdentifier)
         if remoteModels.contains(where: { $0.id == model }) {
             result.modelIdentifier = model
         } else {
-            result.mode = .disabled
+            if result.mode == .remote { result.mode = .disabled }
             result.modelIdentifier = ModelCatalog.defaultPostProcessingModel
+        }
+        if let local = result.localModelIdentifier, !DesktopLocalPostProcessing.isLocalModelID(local) {
+            result.localModelIdentifier = nil
         }
         return result
     }

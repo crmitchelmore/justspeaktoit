@@ -111,11 +111,13 @@ public struct LocalModelHostSupport: Equatable, Sendable {
     public static let unsupported = LocalModelHostSupport(backends: [])
 
     /// Windows runs pinned GGML Whisper weights through the bundled
-    /// whisper.cpp runtime (Vulkan when a driver provides it, otherwise the
-    /// CPU). Only catalogue entries `WhisperCppModels` qualifies project into
-    /// it; sherpa-onnx, llama.cpp and Core ML artefacts stay unavailable.
-    /// Whether the runtime DLLs are present is a separate runtime check.
-    public static let windows = LocalModelHostSupport(backends: [.whisperCppGGML])
+    /// whisper.cpp runtime and pinned GGUF cleanup models through the bundled
+    /// llama.cpp runner (each on a Vulkan GPU when a driver provides one,
+    /// otherwise the CPU). Only entries with pinned bytes (`WhisperCppModels`,
+    /// `LlamaCppModels` or a verified import) are offered; sherpa-onnx and
+    /// Core ML artefacts stay unavailable. Whether the runtime files are
+    /// present is a separate runtime check.
+    public static let windows = LocalModelHostSupport(backends: [.whisperCppGGML, .llamaCppGGUF])
 
     /// macOS runs WhisperKit's Core ML models in process on every channel.
     /// sherpa-onnx and llama.cpp install or spawn executables, which only

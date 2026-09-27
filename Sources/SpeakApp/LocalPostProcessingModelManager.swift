@@ -473,34 +473,13 @@ final class LocalPostProcessingModelManager: ObservableObject {
   /// System prompt for the explicit-prompt path: the caller's prompt verbatim,
   /// with only the local-engine constraint appended.
   nonisolated static func explicitLocalSystemPrompt(_ systemPrompt: String) -> String {
-    """
-    \(systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines))
-
-    \(localEngineConstraint)
-    """
+    LocalPostProcessingPrompt.systemInstruction(systemPrompt)
   }
 
-  nonisolated private static let localEngineConstraint =
-    "Local engine constraint: never enter thinking mode, emit <think> tags, include reasoning, or ask questions."
+  nonisolated private static let localEngineConstraint = LocalPostProcessingPrompt.engineConstraint
 
   nonisolated static func sanitizedModelOutput(_ output: String) -> String {
-    output
-      .replacingOccurrences(
-        of: #"(?is)<think\b[^>]*>.*?</think>"#,
-        with: "",
-        options: .regularExpression
-      )
-      .replacingOccurrences(
-        of: #"(?is)<think\b[^>]*>.*"#,
-        with: "",
-        options: .regularExpression
-      )
-      .replacingOccurrences(
-        of: #"(?i)</think>"#,
-        with: "",
-        options: .regularExpression
-      )
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    LocalPostProcessingPrompt.sanitizedOutput(output)
   }
 
   #if !APP_STORE

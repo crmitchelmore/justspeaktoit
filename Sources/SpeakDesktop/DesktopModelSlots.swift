@@ -7,7 +7,8 @@ public struct DesktopModelSlots: Sendable {
     public struct Entry: Sendable {
         public internal(set) var option: ModelCatalog.Option
         public let isLive: Bool
-        /// A downloaded model the host runs on-device (batch only).
+        /// A downloaded model the host runs on-device; with `isLive`, its
+        /// live-qualified selection.
         public let isLocal: Bool
         public internal(set) var isAvailable: Bool
     }
@@ -21,15 +22,20 @@ public struct DesktopModelSlots: Sendable {
     public private(set) var entries: [Entry]
     public private(set) var visibleIndices: [Int]
     private var indices: [String: Int]
-    private let initial: [ModelCatalog.Option]
+    private var initial: [ModelCatalog.Option]
     private let maximumSlots: Int
 
-    public init(live: [ModelCatalog.Option], local: [ModelCatalog.Option] = [], maximumSlots: Int = 10_000) {
+    /// `localLive` holds on-device live selections: they are both live and local.
+    public init(
+        live: [ModelCatalog.Option], local: [ModelCatalog.Option] = [], localLive: [ModelCatalog.Option] = [],
+        maximumSlots: Int = 10_000
+    ) {
         let batch = DesktopTranscription.batchModels
-        let liveIDs = Set(live.map(\.id))
-        let localIDs = Set(local.map(\.id)).subtracting(liveIDs)
+        let localLiveIDs = Set(localLive.map(\.id))
+        let liveIDs = Set(live.map(\.id)).union(localLiveIDs)
+        let localIDs = Set(local.map(\.id)).subtracting(liveIDs).union(localLiveIDs)
         var seen = Set<String>()
-        initial = (batch + local + live).filter { seen.insert($0.id).inserted }
+        initial = (batch + local + localLive + live).filter { seen.insert($0.id).inserted }
         entries = initial.map {
             Entry(option: $0, isLive: liveIDs.contains($0.id), isLocal: localIDs.contains($0.id), isAvailable: true)
         }
@@ -38,13 +44,27 @@ public struct DesktopModelSlots: Sendable {
         self.maximumSlots = max(entries.count, maximumSlots)
     }
 
+    /// Adds on-device batch models imported while the host runs, after the
+    /// existing slots. Known identifiers keep their slot and mode.
+    public mutating func appendLocal(_ options: [ModelCatalog.Option]) throws {
+        let additions = options.filter { indices[$0.id] == nil }
+        guard !additions.isEmpty else { return }
+        guard additions.count <= maximumSlots - entries.count else { throw Failure.capacityExceeded }
+        for option in additions {
+            indices[option.id] = entries.count
+            entries.append(Entry(option: option, isLive: false, isLocal: true, isAvailable: true))
+            initial.append(option)
+            visibleIndices.append(entries.count - 1)
+        }
+    }
+
     /// The caller supplies a canonical visible projection. Retained valid dynamic
     /// selections stay visible even when absent from the latest catalogue.
     /// Capacity failures are atomic: no partially added identity slots escape.
     public mutating func update(discovered: [OpenRouterAudioModel], retaining identifiers: [String]) throws {
         let batch = DesktopTranscription.batchModels(includingDiscovered: discovered)
         let local = initial.filter { indices[$0.id].map { entries[$0].isLocal } == true }
-        let live = initial.filter { indices[$0.id].map { entries[$0].isLive } == true }
+        let live = initial.filter { indices[$0.id].map { entries[$0].isLive && !entries[$0].isLocal } == true }
         var seen = Set<String>()
         var options = (batch + local + live).filter { seen.insert($0.id).inserted }
         let available = seen

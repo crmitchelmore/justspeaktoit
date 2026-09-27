@@ -29,6 +29,20 @@ final class WhisperCppModelsTests: XCTestCase {
         XCTAssertNil(WhisperCppModels.model(forCatalogueID: "local/whisperkit/distil-large-v3-turbo"))
     }
 
+    func testLiveQualificationIsExplicitAndASubsetOfTheCatalogueLiveModels() {
+        // Only models with a CPU live receipt on the hosted runner; see
+        // WhisperCppModels.liveQualification. Adding one needs that receipt.
+        XCTAssertEqual(WhisperCppModels.all.filter(\.supportsLiveStreaming).map(\.catalogueID), [
+            "local/whisperkit/tiny", "local/whisperkit/base"
+        ])
+        for model in WhisperCppModels.all where model.supportsLiveStreaming {
+            XCTAssertEqual(
+                ModelCatalog.localTranscription.first { $0.id == model.catalogueID }?.supportsLiveStreaming, true,
+                "A whisper.cpp live model is live in the shared catalogue too"
+            )
+        }
+    }
+
     func testArtefactsArePinnedByRevisionSizeAndDigest() {
         let revision = WhisperCppModels.revision
         XCTAssertEqual(revision.count, 40)

@@ -51,7 +51,24 @@ public struct WhisperCppModel: Hashable, Sendable {
     /// The GGML tensor type of the pinned weights, such as `f16` or `q5_0`.
     public let quantization: String
     public let multilingual: Bool
+    /// Whether a whisper.cpp host may offer this model for live dictation.
+    /// See `WhisperCppModels.liveQualification`; imported models are never
+    /// live-qualified.
+    public let supportsLiveStreaming: Bool
     public let artifact: LocalModelFileArtifact
+
+    public init(
+        catalogueID: String, displayName: String, summary: String, quantization: String, multilingual: Bool,
+        supportsLiveStreaming: Bool, artifact: LocalModelFileArtifact
+    ) {
+        self.catalogueID = catalogueID
+        self.displayName = displayName
+        self.summary = summary
+        self.quantization = quantization
+        self.multilingual = multilingual
+        self.supportsLiveStreaming = supportsLiveStreaming
+        self.artifact = artifact
+    }
 
     public var backend: LocalModelBackend { .whisperCppGGML }
 }
@@ -77,6 +94,18 @@ public enum WhisperCppModels {
     /// are admitted with their subdomains (a leading dot).
     static let huggingFaceHosts: Set<String> = ["huggingface.co", ".huggingface.co", ".hf.co"]
 
+    /// Live qualification rule. whisper.cpp has no streaming decoder: a live
+    /// host re-decodes a sliding window of recent audio, and every pass runs
+    /// the encoder over a full 30-second window. A model is live-qualified only
+    /// when a Windows CI receipt (`--local-live-self-test` on the hosted
+    /// four-core CPU, no GPU) shows its passes finishing well inside the live
+    /// refresh budget. Tiny and Base qualify; Small and Large v3 Turbo take
+    /// several seconds a pass on that CPU, so they stay batch-only even though
+    /// a GPU might keep up: GPU behaviour is unverified.
+    public static let liveQualification =
+        "Live on-device dictation re-decodes recent audio about once a second; only models whose CPU passes "
+        + "keep that pace on a hosted four-core runner are offered live."
+
     static let provenance = "OpenAI Whisper weights converted to GGML by the whisper.cpp project "
         + "(huggingface.co/\(repository) at revision \(revision))"
 
@@ -85,13 +114,13 @@ public enum WhisperCppModels {
         model(
             Pin(catalogueID: "local/whisperkit/tiny", displayName: "Whisper Tiny", file: "ggml-tiny.bin",
                 quantization: "f16", bytes: 77_691_713,
-                sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"),
+                sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21", live: true),
             summary: "Smallest on-device Whisper model: fastest, lowest accuracy."
         ),
         model(
             Pin(catalogueID: "local/whisperkit/base", displayName: "Whisper Base", file: "ggml-base.bin",
                 quantization: "f16", bytes: 147_951_465,
-                sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"),
+                sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe", live: true),
             summary: "Balanced on-device Whisper model for everyday dictation."
         ),
         model(
@@ -120,6 +149,7 @@ public enum WhisperCppModels {
         let quantization: String
         let bytes: Int64
         let sha256: String
+        var live = false
     }
 
     private static func model(_ pin: Pin, summary: String) -> WhisperCppModel {
@@ -127,7 +157,7 @@ public enum WhisperCppModels {
         let url = URL(string: "https://huggingface.co/\(repository)/resolve/\(revision)/\(pin.file)")!
         return WhisperCppModel(
             catalogueID: pin.catalogueID, displayName: pin.displayName, summary: summary,
-            quantization: pin.quantization, multilingual: true,
+            quantization: pin.quantization, multilingual: true, supportsLiveStreaming: pin.live,
             artifact: LocalModelFileArtifact(
                 url: url, filename: pin.file, byteCount: pin.bytes, sha256: pin.sha256, license: "MIT",
                 provenance: provenance

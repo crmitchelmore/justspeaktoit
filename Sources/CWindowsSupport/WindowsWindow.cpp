@@ -665,6 +665,13 @@ RECT cardBody(HWND window, const RECT &card) {
                 card.bottom - scale(window, 20)};
 }
 
+// Sets a control's text only when it changes, so layout never repaints needlessly.
+void setLabel(HWND window, int identifier, const wchar_t *text) {
+    wchar_t shown[64] = {};
+    GetDlgItemTextW(window, identifier, shown, 64);
+    if (wcscmp(shown, text) != 0) SetDlgItemTextW(window, identifier, text);
+}
+
 void layoutDashboard(HWND window, const RECT &content) {
     const int gap = scale(window, 18);
     const int heroBottom = layoutHero(window, content, scale(window, 200), jsti::chrome::Gradient::brand);
@@ -680,6 +687,7 @@ void layoutDashboard(HWND window, const RECT &content) {
     const int buttonHeight = scale(window, 34);
     placeField(window, transcriptID, RECT{body.left, body.top, body.right, body.bottom - buttonHeight - scale(window, 12)}, true);
     place(window, copyID, box(body.right - scale(window, 156), body.bottom - buttonHeight, scale(window, 156), buttonHeight));
+    setLabel(window, copyID, L"&Copy transcript");
     const int half = (widthOf(content) - gap) / 2;
     const RECT insights = box(content.left, content.bottom - rowHeight, half, rowHeight);
     const RECT setup = box(content.left + half + gap, content.bottom - rowHeight, widthOf(content) - half - gap, rowHeight);
@@ -750,6 +758,8 @@ void layoutHistory(HWND window, const RECT &content) {
     place(window, playPauseID, cell(0, actions, 3));
     place(window, stopPlaybackID, cell(1, actions, 3));
     place(window, copyID, cell(2, actions, 3));
+    // A third of the card is too narrow for "Copy transcript"; the Mac says Copy here too.
+    setLabel(window, copyID, L"&Copy");
     actions += row + scale(window, 8);
     place(window, readAloudID, cell(0, actions, 2));
     place(window, retryID, cell(1, actions, 2));
@@ -1893,8 +1903,14 @@ LRESULT CALLBACK procedure(HWND window, UINT message, WPARAM wparam, LPARAM lpar
         return 0;
     }
     case WM_PRINTCLIENT: {
+        // The client belongs at the DC's device origin. A WM_PRINT caller may
+        // have moved the viewport so child windows land at their window-relative
+        // offsets (the snapshot does), and Windows passes that DC on unchanged.
+        HDC target = reinterpret_cast<HDC>(wparam);
         HDC source = backdropDC(window);
-        if (source) BitBlt(reinterpret_cast<HDC>(wparam), 0, 0, backdrop.width, backdrop.height, source, 0, 0, SRCCOPY);
+        POINT origin{};
+        GetViewportOrgEx(target, &origin);
+        if (source) BitBlt(target, -origin.x, -origin.y, backdrop.width, backdrop.height, source, 0, 0, SRCCOPY);
         return 0;
     }
     case WM_MEASUREITEM: {

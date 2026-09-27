@@ -3,7 +3,7 @@
   "notes": [
     "Every module name is matched case-insensitively; Windows loader names are case-insensitive.",
     "windowsSystemModules lists operating-system DLLs observed as direct imports of the production app or its bundled runtime. They ship with Windows 10 and later and are never copied into the bundle.",
-    "windowsApiSetPatterns cover the core and Universal CRT API sets that Windows 10 and later resolve through apisetschema; the Universal CRT is an operating-system component, so ucrtbase.dll and api-ms-win-crt-* are not redistributed.",
+    "windowsApiSetPatterns cover the core and Universal CRT API sets that Windows 10 and later resolve through apisetschema; the Universal CRT is an operating-system component, so ucrtbase.dll and api-ms-win-crt-* are not redistributed. The Windows SDK links GetDpiForMonitor (the recording HUD) through api-ms-win-shcore-scaling-l1-1-*, which resolves to shcore.dll on Windows 8.1 and later.",
     "swiftRuntimeModules are the exact DLL names installed by the Swift 6.2.3 runtime package (rtl.msi). Only the members reached from the app's import closure are bundled.",
     "microsoftRuntimeModules are the Visual C++ v14 runtime DLL names published in Microsoft's redistributable. Only the members reached from the import closure are bundled, and they are always taken from the pinned official download, never from the Swift installer copy.",
     "testModules indicate a test-enabled executable; a production bundle refuses to package anything that imports them.",
@@ -45,7 +45,8 @@
   ],
   "windowsApiSetPatterns": [
     "^api-ms-win-core-[a-z0-9]+(?:-[a-z0-9]+)*-l[0-9]+-[0-9]+-[0-9]+\\.dll$",
-    "^api-ms-win-crt-[a-z0-9]+-l[0-9]+-[0-9]+-[0-9]+\\.dll$"
+    "^api-ms-win-crt-[a-z0-9]+-l[0-9]+-[0-9]+-[0-9]+\\.dll$",
+    "^api-ms-win-shcore-scaling-l1-1-[0-9]+\\.dll$"
   ],
   "swiftRuntimeModules": [
     "BlocksRuntime.dll",

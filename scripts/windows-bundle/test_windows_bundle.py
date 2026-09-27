@@ -461,6 +461,9 @@ class ClosureTests(unittest.TestCase):
         self.assertEqual(policy.classify("API-MS-WIN-CORE-SYNCH-L1-2-0.dll"), BUILD.SYSTEM_MODULE)
         self.assertEqual(policy.classify("ucrtbase.dll"), BUILD.SYSTEM_MODULE)
         self.assertEqual(policy.classify("api-ms-win-crt-private-l1-1-0.dll"), BUILD.SYSTEM_MODULE)
+        # GetDpiForMonitor links through the shcore scaling API set; no other shcore set is admitted.
+        self.assertEqual(policy.classify("api-ms-win-shcore-scaling-l1-1-1.dll"), BUILD.SYSTEM_MODULE)
+        self.assertEqual(policy.classify("api-ms-win-shcore-stream-l1-1-0.dll"), BUILD.UNKNOWN_MODULE)
         self.assertEqual(policy.classify("ext-ms-win-something-l1-1-0.dll"), BUILD.UNKNOWN_MODULE)
         self.assertEqual(policy.classify("Testing.dll"), BUILD.TEST_MODULE)
         for path in ["swiftCore.lib", "usr/include/module.modulemap", "SpeakAppPackageTests.exe", "XCTest.dll",

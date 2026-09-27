@@ -53,13 +53,24 @@ final class WindowsCloudSync: @unchecked Sendable {
     private let lock = NSLock()
     private var context: UnsafeMutableRawPointer?
     private var signIn: Task<Void, Never>?
+    /// How the browser returns from Apple ID sign-in: the build's
+    /// `signInCallback`, or the reason it is unusable.
+    private let callbackMode: Result<DesktopCloudSyncSignIn.CallbackMode, Error>
+    /// Custom-scheme callbacks forwarded by `WindowsActivationRouter`.
+    private let callbacks = DesktopSignInCallbackInbox()
 
     init(controller: WindowsAppController, directory: URL) throws {
+        let environment = ProcessInfo.processInfo.environment
         let resolution = DesktopCloudSyncConfiguration.resolve(
             buildToken: CloudKitWebBuildConfiguration.apiToken,
             buildEnvironment: CloudKitWebBuildConfiguration.environment,
-            processEnvironment: ProcessInfo.processInfo.environment
+            processEnvironment: environment
         )
+        callbackMode = Result {
+            try DesktopCloudSyncSignIn.callbackMode(
+                build: CloudKitWebBuildConfiguration.signInCallback, processEnvironment: environment
+            )
+        }
         let state = try DesktopCloudSyncStateStore(
             url: directory.appendingPathComponent("CloudSync").appendingPathComponent("state.json")
         )
@@ -211,17 +222,26 @@ final class WindowsCloudSync: @unchecked Sendable {
 
     // MARK: - Sign-in
 
-    /// Opens Apple's sign-in page and waits for its redirect to the loopback
-    /// callback registered on the container's API token.
+    /// A `justspeaktoit://cloudkit-sign-in` link a launch forwarded. `false`
+    /// when no custom-scheme sign-in is waiting, so the token is dropped.
+    func deliverSignInCallback(_ webAuthToken: String) -> Bool {
+        guard case .success(.customScheme) = callbackMode else { return false }
+        return callbacks.deliver(webAuthToken)
+    }
+
+    /// Opens Apple's sign-in page and waits for its redirect to the callback
+    /// registered on the container's API token: the loopback listener, or a
+    /// forwarded custom-scheme activation.
     private func performSignIn() async {
         do {
+            let mode = try callbackMode.get()
             guard let page = try await service.signInPage() else {
                 notify("Already signed in to iCloud.")
                 await runSync(announce: true)
                 return
             }
-            let listener = try WindowsLoopbackListener(port: DesktopCloudSyncSignIn.callbackPort)
-            defer { listener.close() }
+            let callback = try SignInCallback(mode: mode, inbox: callbacks)
+            defer { callback.close() }
             // Checked just before opening, so closing the window does not start a
             // browser sign-in. The shell may wait on other windows, so no lock is
             // held while it opens the page.
@@ -230,7 +250,7 @@ final class WindowsCloudSync: @unchecked Sendable {
                 try WindowsNative.checked { jsti_shell_open_sign_in_page(url, $0, $1) }
             }
             notify("Finish signing in with your Apple ID in your browser.")
-            let token = try await Self.awaitCallback(on: listener)
+            let token = try await callback.token(within: Self.signInWindow)
             try Task.checkCancellation()
             try await service.completeSignIn(webAuthToken: token)
             notify("Signed in to iCloud. Choose what to sync in Settings, iCloud sync.")
@@ -241,31 +261,6 @@ final class WindowsCloudSync: @unchecked Sendable {
             notify("iCloud sign-in did not finish: \(error.localizedDescription)")
         }
         await publish()
-    }
-
-    private static func awaitCallback(on listener: WindowsLoopbackListener) async throws -> String {
-        let deadline = ContinuousClock.now + signInWindow
-        while true {
-            let remaining = deadline - ContinuousClock.now
-            guard remaining > .zero else { throw WindowsLoopbackListener.Failure.timedOut }
-            let connection = try await listener.accept(timeout: remaining)
-            if let target = connection.target,
-               let token = DesktopCloudSyncSignIn.webAuthToken(fromRequestTarget: target) {
-                connection.respond(callbackPage(
-                    "Signed in", "You are signed in to iCloud. You can close this tab and return to Just Speak to It."
-                ))
-                return token
-            }
-            connection.respond(callbackPage("Not found", "This address only completes iCloud sign-in.", status: 404))
-        }
-    }
-
-    private static func callbackPage(_ title: String, _ message: String, status: Int = 200) -> Data {
-        let body = "<!doctype html><meta charset=\"utf-8\"><title>\(title)</title><p>\(message)</p>"
-        let head = "HTTP/1.1 \(status) \(status == 200 ? "OK" : "Not Found")\r\n"
-            + "Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n"
-            + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
-        return Data((head + body).utf8)
     }
 
     // MARK: - Dialog state
@@ -377,6 +372,7 @@ extension SpeakWindowsMain {
 
     /// Detaches dialogs that hold the event context before it can be released.
     static func releaseServices(_ holder: WindowsEventContext) async {
+        await holder.activation?.shutDown()
         jsti_window_clear_voice_output()
         jsti_window_clear_local_models()
         await WindowsCloudSync.shutDown(holder)

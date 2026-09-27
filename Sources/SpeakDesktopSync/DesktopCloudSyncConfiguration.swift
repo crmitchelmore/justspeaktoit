@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakDesktop
 import SpeakSync
 
 /// Where a desktop build's CloudKit Web Services settings come from.
@@ -94,17 +95,61 @@ public struct VaultWebAuthTokenStore: CloudKitWebAuthTokenStore {
     }
 }
 
-/// The loopback sign-in callback registered on the container's API token.
+/// The sign-in callback registered on the container's API token.
 ///
 /// Apple's web sign-in finishes by redirecting the browser to the API token's
-/// sign-in callback with `?ckWebAuthToken=…`. A packaged desktop app receives
-/// that on a fixed loopback port it listens on only during sign-in. The URL
-/// must match the token's callback in CloudKit Console exactly.
+/// sign-in callback with `?ckWebAuthToken=…`. The URL must match the token's
+/// callback in CloudKit Console exactly, so a build chooses one of two forms at
+/// build time (`CLOUDKIT_WEB_SIGN_IN_CALLBACK`, beside the token):
+///
+/// - `loopback` (the default): `http://127.0.0.1:47823/cloudkit-sign-in`, a
+///   port the app listens on only during sign-in;
+/// - `custom-scheme`: `justspeaktoit://cloudkit-sign-in` (the release train's
+///   scheme), which the browser hands to the app through the package's
+///   protocol activation; a second launch forwards it to the running window.
+///
+/// Whether CloudKit Console accepts either form is not yet verified, which is
+/// why both exist. Developers may override the mode at run time with
+/// `JSTI_CLOUDKIT_WEB_SIGN_IN_CALLBACK`.
 public enum DesktopCloudSyncSignIn {
     public static let callbackHost = "127.0.0.1"
     public static let callbackPort: UInt16 = 47_823
-    public static let callbackPath = "/cloudkit-sign-in"
+    public static let callbackPath = "/" + DesktopActivationLink.cloudKitSignInRoute
     public static var callbackURL: String { "http://\(callbackHost):\(callbackPort)\(callbackPath)" }
+    public static let callbackModeVariable = "JSTI_CLOUDKIT_WEB_SIGN_IN_CALLBACK"
+
+    /// How the browser hands the web auth token back to the app.
+    public enum CallbackMode: String, Equatable, Sendable, CaseIterable {
+        case loopback
+        case customScheme = "custom-scheme"
+    }
+
+    /// The build's mode, unless the process environment overrides it.
+    /// Anything else is a misconfiguration and is reported, not guessed.
+    public static func callbackMode(
+        build: String,
+        processEnvironment: [String: String]
+    ) throws -> CallbackMode {
+        let override = processEnvironment[callbackModeVariable]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = override.flatMap { $0.isEmpty ? nil : $0 } ?? build
+        guard let mode = CallbackMode(rawValue: name) else {
+            throw DesktopActivationLinkError(
+                "iCloud sync is misconfigured: “\(name)” is not a sign-in callback (loopback or custom-scheme)."
+            )
+        }
+        return mode
+    }
+
+    /// The exact URL to register as the API token's sign-in callback.
+    public static func callbackURL(
+        for mode: CallbackMode,
+        scheme: String = ReleaseTrain.current.urlScheme
+    ) -> String {
+        switch mode {
+        case .loopback: return callbackURL
+        case .customScheme: return DesktopActivationLink.cloudKitSignInURL(scheme: scheme)
+        }
+    }
 
     /// The web auth token from a callback request target such as
     /// `/cloudkit-sign-in?ckWebAuthToken=…`, or `nil` for anything else.

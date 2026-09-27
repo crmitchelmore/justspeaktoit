@@ -9,6 +9,8 @@ final class WindowsEventContext {
     var smokeTestFailure: Error?
     var microphoneMonitor: WindowsMicrophoneMonitor?
     var cloudSync: WindowsCloudSync?
+    /// Forwarded `justspeaktoit://` links; `nil` for the smoke test.
+    var activation: WindowsActivation?
     let search: WindowsSearchCoalescer
     private let historyEvents: DesktopEventDispatcher<DesktopHistoryEvent>
     private let copies: DesktopTranscriptCopyDispatcher
@@ -180,6 +182,7 @@ private func transcriptEvent(_ event: Int32, value: String, holder: WindowsEvent
 private func ready(_ holder: WindowsEventContext) {
     guard holder.smokeTest else {
         WindowsInsertionTarget.prepare()
+        holder.activation?.router.attach(holder)
         do {
             holder.microphoneMonitor = try WindowsMicrophoneMonitor()
         } catch {
@@ -275,26 +278,33 @@ enum SpeakWindowsMain {
                 return
             }
             let smokeTest = CommandLine.arguments.contains("--ui-smoke-test")
-            let directory: URL
-            if smokeTest {
-                directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            } else {
-                guard let local = ProcessInfo.processInfo.environment["LOCALAPPDATA"] else {
-                    throw WindowsNativeError(message: "Windows did not provide the local app data directory.")
-                }
-                directory = URL(fileURLWithPath: local).appendingPathComponent("JustSpeakToIt")
+            var activation: WindowsActivation?
+            if !smokeTest {
+                // A launch carrying a link while another window runs hands it over and exits.
+                guard let begun = WindowsActivation.begin() else { return }
+                activation = begun
             }
+            let directory = try dataDirectory(smokeTest: smokeTest)
             defer { if smokeTest { try? FileManager.default.removeItem(at: directory) } }
             let controller = try await Task.detached {
                 try WindowsAppController(directory: directory)
             }.value
             let holder = WindowsEventContext(controller: controller, smokeTest: smokeTest)
+            holder.activation = activation
             try await runWindow(controller: controller, holder: holder)
             if smokeTest { print("Native window creation and shutdown passed.") }
         } catch {
             FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
             exit(1)
         }
+    }
+
+    private static func dataDirectory(smokeTest: Bool) throws -> URL {
+        if smokeTest { return FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
+        guard let local = ProcessInfo.processInfo.environment["LOCALAPPDATA"] else {
+            throw WindowsNativeError(message: "Windows did not provide the local app data directory.")
+        }
+        return URL(fileURLWithPath: local).appendingPathComponent("JustSpeakToIt")
     }
 
     /// A hand-edited or corrupt shortcut falls back to the default rather than

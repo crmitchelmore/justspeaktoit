@@ -225,10 +225,17 @@ ARM64.
 - **iCloud sync token.** Only the x64 Mac cross-build receives the CloudKit Web
   Services token on `main`. Native ARM64 builds report iCloud sync as
   unavailable.
-- **Signing and distribution.** The Artifact Signing job signs x64 only. There
-  is no ARM64 signing, `.msixbundle`, updater or Alpha/Stable Windows surface.
-- **`speak.exe`** is not built into or packaged with either architecture's
-  bundle.
+- **Signing and distribution.** The `package-bundle` job in
+  `windows-cross-proof.yml` combines this workflow's ARM64 runtime bundle with
+  the x64 one into a single `.msixbundle`, and the Certum route of the `sign`
+  job signs the ARM64 package and the bundle as well as x64 (Azure Artifact
+  Signing still signs x64 only). Neither has a receipt yet. App Installer and
+  winget files are generated as previews; there is no Alpha/Stable Windows
+  surface. See [Windows developer MSIX package](windows-installer.md).
+- **`speak.exe`.** The native job now builds the `speak` product and stages it
+  with the app; the bundle carries it, `verify-windows-bundle.ps1` runs
+  `speak --version` from the bundle, and the MSIX exposes it as an execution
+  alias. The first ARM64 receipt for that is still to come.
 
 ## Commands
 

@@ -31,7 +31,7 @@ final class DesktopHistoryPresentationTests: XCTestCase {
         let insights = DesktopHistoryInsights(records: [
             record(duration: 24, cost: Decimal(string: "0.08")!),
             polishFailed,
-            record(text: nil, failure: "The network is offline."),
+            record(text: nil, failure: "The network is offline.")
         ])
         XCTAssertEqual(insights.sessions, 3)
         XCTAssertEqual(insights.sessionsWithErrors, 2)

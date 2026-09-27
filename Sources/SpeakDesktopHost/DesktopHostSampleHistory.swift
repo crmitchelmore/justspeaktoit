@@ -50,7 +50,7 @@ package enum DesktopHostSampleHistory {
             minutesAgo: 2_900, model: "deepgram/nova-3", text: nil, processed: nil, postProcessingModel: nil,
             duration: 12, cost: nil, failure: "Deepgram rejected the API key (HTTP 401). Save a new key and retry.",
             profile: nil
-        ),
+        )
     ]
 
     /// Writes every sample into `directory`/History, with a short silent WAV

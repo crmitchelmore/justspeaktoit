@@ -61,7 +61,8 @@ final class LocalLanguageModelPromptTests: XCTestCase {
         let prompt = LocalLanguageModelPrompt.systemPrompt(customPrompt: "  ", outputLanguage: nil)
         XCTAssertTrue(prompt.hasPrefix(TranscriptCleanupPolicy.baseSystemPrompt))
         XCTAssertEqual(
-            LocalLanguageModelPrompt.userMessage(transcript: "hi"), TranscriptCleanupPolicy.userMessage(transcript: "hi")
+            LocalLanguageModelPrompt.userMessage(transcript: "hi"),
+            TranscriptCleanupPolicy.userMessage(transcript: "hi")
         )
     }
 

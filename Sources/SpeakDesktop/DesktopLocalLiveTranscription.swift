@@ -139,12 +139,13 @@ public final class DesktopLocalLiveClient: FinalizingStreamingTranscriptionClien
     public func stop() { cancel() }
 
     public func cancel() {
-        let (task, wake, waiters) = lock.withLock { () -> (Task<Void, Never>?, AsyncStream<Void>.Continuation?, [CheckedContinuation<Void, Never>]) in
+        let waiters = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
             stopped = true
             let waiters = idleWaiters
             idleWaiters = []
-            return (worker, self.wake, waiters)
+            return waiters
         }
+        let (task, wake) = lock.withLock { (worker, self.wake) }
         task?.cancel()
         wake?.finish()
         waiters.forEach { $0.resume() }
@@ -180,28 +181,6 @@ public final class DesktopLocalLiveClient: FinalizingStreamingTranscriptionClien
         return lock.withLock {
             stopped = true
             return committed.transcriptOrNil
-        }
-    }
-
-    private func workerEnded() {
-        let waiters = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
-            workerDone = true
-            let waiters = idleWaiters
-            idleWaiters = []
-            return waiters
-        }
-        waiters.forEach { $0.resume() }
-    }
-
-    /// Resumes once the worker has handled all audio appended so far.
-    func waitUntilIdle() async {
-        await withCheckedContinuation { continuation in
-            let ready = lock.withLock { () -> Bool in
-                if stopped || finishing || workerDone || (!working && !isDue()) { return true }
-                idleWaiters.append(continuation)
-                return false
-            }
-            if ready { continuation.resume() }
         }
     }
 
@@ -323,7 +302,32 @@ public final class DesktopLocalLiveClient: FinalizingStreamingTranscriptionClien
         callback?(error)
     }
 
-    // MARK: - Voice activity
+}
+
+// MARK: - Idle tracking and voice activity
+
+extension DesktopLocalLiveClient {
+    fileprivate func workerEnded() {
+        let waiters = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            workerDone = true
+            let waiters = idleWaiters
+            idleWaiters = []
+            return waiters
+        }
+        waiters.forEach { $0.resume() }
+    }
+
+    /// Resumes once the worker has handled all audio appended so far.
+    func waitUntilIdle() async {
+        await withCheckedContinuation { continuation in
+            let ready = lock.withLock { () -> Bool in
+                if stopped || finishing || workerDone || (!working && !isDue()) { return true }
+                idleWaiters.append(continuation)
+                return false
+            }
+            if ready { continuation.resume() }
+        }
+    }
 
     /// Speech flags per 30 ms frame against an adaptive noise floor.
     func speechFrames(_ samples: [Float]) -> [Bool] {

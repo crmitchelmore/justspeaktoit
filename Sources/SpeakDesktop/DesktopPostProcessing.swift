@@ -156,11 +156,11 @@ public enum DesktopPostProcessing {
             customPrompt: options.customPrompt, outputLanguage: options.outputLanguage
         )
         let userPrompt = LocalLanguageModelPrompt.userMessage(transcript: rawText)
-        let raw = try await languageModel.generate(
+        let request = DesktopLocalGeneration(
             systemPrompt: systemPrompt, userMessage: userPrompt, temperature: options.temperature,
-            maximumTokens: LocalLanguageModelPrompt.maximumOutputTokens(for: rawText), model: model,
-            modelFile: modelFile
+            maximumTokens: LocalLanguageModelPrompt.maximumOutputTokens(for: rawText)
         )
+        let raw = try await languageModel.generate(request, model: model, modelFile: modelFile)
         try Task.checkCancellation()
         let cleaned = LocalLanguageModelPrompt.sanitizedOutput(raw)
         guard !cleaned.isEmpty else { throw DesktopPostProcessingError.emptyLocalResponse }
@@ -198,14 +198,26 @@ public enum DesktopPostProcessingError: LocalizedError {
     }
 }
 
+/// One prompt pair for a local language model, with its sampling limits.
+public struct DesktopLocalGeneration: Sendable, Equatable {
+    public let systemPrompt: String
+    public let userMessage: String
+    public let temperature: Double
+    public let maximumTokens: Int
+
+    public init(systemPrompt: String, userMessage: String, temperature: Double, maximumTokens: Int) {
+        self.systemPrompt = systemPrompt
+        self.userMessage = userMessage
+        self.temperature = temperature
+        self.maximumTokens = maximumTokens
+    }
+}
+
 /// Runs one prompt pair on a downloaded GGUF language model.
 public protocol DesktopLocalLanguageModel: Sendable {
     /// Returns the model's reply. Throws `CancellationError` when the calling
     /// task is cancelled before or during generation.
-    func generate(
-        systemPrompt: String, userMessage: String, temperature: Double, maximumTokens: Int,
-        model: LlamaCppModel, modelFile: URL
-    ) async throws -> String
+    func generate(_ request: DesktopLocalGeneration, model: LlamaCppModel, modelFile: URL) async throws -> String
 }
 
 /// The desktop host's projection of the shared local post-processing

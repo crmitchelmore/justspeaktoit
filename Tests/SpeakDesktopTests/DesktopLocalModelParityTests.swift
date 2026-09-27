@@ -76,7 +76,8 @@ final class DesktopLocalModelParityTests: XCTestCase {
             "https://huggingface.co/api/models/owner/repo/revision/main":
                 #"{"sha":"\#(sha)","cardData":{"license":"apache-2.0"}}"#,
             "https://huggingface.co/api/models/owner/repo/tree/\(sha)/q":
-                #"[{"type":"file","path":"q/Model-Q4_K_M.gguf","size":134,"lfs":{"oid":"\#(digest)","size":987654321}}]"#
+                #"[{"type":"file","path":"q/Model-Q4_K_M.gguf","size":134,"#
+                    + #""lfs":{"oid":"\#(digest)","size":987654321}}]"#
         ])
         let model = try await HuggingFaceModelResolver.resolve(
             repoID: " owner/repo ", path: "q/Model-Q4_K_M.gguf", kind: .postProcessing, fetch: fetch
@@ -88,7 +89,9 @@ final class DesktopLocalModelParityTests: XCTestCase {
         XCTAssertEqual(model.license, "apache-2.0")
         XCTAssertEqual(model.displayName, "Model Q4 K M from owner/repo")
         let artifact = try XCTUnwrap(model.artifact)
-        XCTAssertEqual(artifact.url.absoluteString, "https://huggingface.co/owner/repo/resolve/\(sha)/q/Model-Q4_K_M.gguf")
+        XCTAssertEqual(
+            artifact.url.absoluteString, "https://huggingface.co/owner/repo/resolve/\(sha)/q/Model-Q4_K_M.gguf"
+        )
         XCTAssertEqual(artifact.filename, "Model-Q4_K_M.gguf")
         XCTAssertEqual(model.languageModel?.identifier, model.identifier)
         XCTAssertNil(model.whisperModel)
@@ -119,7 +122,9 @@ final class DesktopLocalModelParityTests: XCTestCase {
     }
 
     func testValidationRejectsUnsafeOrMismatchedInput() {
-        XCTAssertThrowsError(try HuggingFaceModelResolver.validate(repoID: "repo", path: "a.gguf", kind: .postProcessing))
+        XCTAssertThrowsError(
+            try HuggingFaceModelResolver.validate(repoID: "repo", path: "a.gguf", kind: .postProcessing)
+        )
         XCTAssertThrowsError(
             try HuggingFaceModelResolver.validate(repoID: "a/b/c", path: "a.gguf", kind: .postProcessing)
         )
@@ -179,13 +184,10 @@ final class DesktopLocalModelParityTests: XCTestCase {
         private(set) var systemPrompts: [String] = []
         private(set) var userMessages: [String] = []
         init(reply: String) { self.reply = reply }
-        func generate(
-            systemPrompt: String, userMessage: String, temperature: Double, maximumTokens: Int, model: LlamaCppModel,
-            modelFile: URL
-        ) async throws -> String {
+        func generate(_ request: DesktopLocalGeneration, model: LlamaCppModel, modelFile: URL) async throws -> String {
             lock.withLock {
-                systemPrompts.append(systemPrompt)
-                userMessages.append(userMessage)
+                systemPrompts.append(request.systemPrompt)
+                userMessages.append(request.userMessage)
             }
             return reply
         }
@@ -245,7 +247,9 @@ final class DesktopLocalModelParityTests: XCTestCase {
             )
             XCTFail("An empty reply must not replace the transcript")
         } catch {
-            XCTAssertEqual(error.localizedDescription, DesktopPostProcessingError.emptyLocalResponse.localizedDescription)
+            XCTAssertEqual(
+                error.localizedDescription, DesktopPostProcessingError.emptyLocalResponse.localizedDescription
+            )
         }
     }
 

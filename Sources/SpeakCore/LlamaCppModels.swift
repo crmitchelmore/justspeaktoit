@@ -37,22 +37,23 @@ public enum LlamaCppModels {
 
     /// In `ModelCatalog.localPostProcessing` order.
     public static let all: [LlamaCppModel] = [
-        pinned(
-            "local/post-processing/qwen3-1.7b-q4", revision: "d7f544eead698dbd1f15126ef60b45a1e1933222",
+        Pin(
+            identifier: "local/post-processing/qwen3-1.7b-q4", revision: "d7f544eead698dbd1f15126ef60b45a1e1933222",
             bytes: 1_107_409_472, sha256: "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897",
-            license: "Apache-2.0", base: "Qwen/Qwen3-1.7B"
+            base: "Qwen/Qwen3-1.7B"
         ),
-        pinned(
-            "local/post-processing/qwen3-0.6b-q4", revision: "50968a4468ef4233ed78cd7c3de230dd1d61a56b",
+        Pin(
+            identifier: "local/post-processing/qwen3-0.6b-q4", revision: "50968a4468ef4233ed78cd7c3de230dd1d61a56b",
             bytes: 396_705_472, sha256: "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
-            license: "Apache-2.0", base: "Qwen/Qwen3-0.6B"
+            base: "Qwen/Qwen3-0.6B"
         ),
-        pinned(
-            "local/post-processing/smollm2-360m-instruct-q4", revision: "7be6f65f1db715fe5dc5a4634c0d459b4eed42ec",
+        Pin(
+            identifier: "local/post-processing/smollm2-360m-instruct-q4",
+            revision: "7be6f65f1db715fe5dc5a4634c0d459b4eed42ec",
             bytes: 270_590_880, sha256: "2fa3f013dcdd7b99f9b237717fa0b12d75bbb89984cc1274be1471a465bac9c2",
-            license: "Apache-2.0", base: "HuggingFaceTB/SmolLM2-360M-Instruct"
+            base: "HuggingFaceTB/SmolLM2-360M-Instruct"
         )
-    ].compactMap { $0 }
+    ].compactMap(pinned)
 
     public static func model(for identifier: String) -> LlamaCppModel? {
         let lowered = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -72,18 +73,26 @@ public enum LlamaCppModels {
         return URL(string: "https://huggingface.co/" + path)
     }
 
-    private static func pinned(
-        _ identifier: String, revision: String, bytes: Int64, sha256: String, license: String, base: String
-    ) -> LlamaCppModel? {
-        guard let entry = ModelCatalog.localPostProcessing.first(where: { $0.id == identifier }),
-              let url = huggingFaceURL(repoID: entry.repoID, revision: revision, filename: entry.filename) else {
+    /// Every pinned repository publishes its weights under Apache 2.0.
+    private struct Pin {
+        let identifier: String
+        let revision: String
+        let bytes: Int64
+        let sha256: String
+        let base: String
+    }
+
+    private static func pinned(_ pin: Pin) -> LlamaCppModel? {
+        guard let entry = ModelCatalog.localPostProcessing.first(where: { $0.id == pin.identifier }),
+              let url = huggingFaceURL(repoID: entry.repoID, revision: pin.revision, filename: entry.filename) else {
             return nil
         }
+        let source = "huggingface.co/\(entry.repoID) at revision \(pin.revision)"
         return LlamaCppModel(
             identifier: entry.id, displayName: entry.displayName, summary: entry.description,
             artifact: LocalModelFileArtifact(
-                url: url, filename: entry.filename, byteCount: bytes, sha256: sha256, license: license,
-                provenance: "\(base) weights \(provenanceSuffix) (huggingface.co/\(entry.repoID) at revision \(revision))"
+                url: url, filename: entry.filename, byteCount: pin.bytes, sha256: pin.sha256, license: "Apache-2.0",
+                provenance: "\(pin.base) weights \(provenanceSuffix) (\(source))"
             )
         )
     }

@@ -55,7 +55,8 @@ public struct DesktopImportedLocalModel: Codable, Equatable, Sendable {
     public var displayName: String {
         switch kind {
         case .transcription:
-            var base = filename.replacingOccurrences(of: ".bin", with: "", options: [.caseInsensitive, .anchored, .backwards])
+            var base = filename
+            if base.lowercased().hasSuffix(".bin") { base.removeLast(4) }
             if base.lowercased().hasPrefix("ggml-") { base.removeFirst(5) }
             base = base.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
             return "\(base) from \(repoID)"
@@ -260,7 +261,7 @@ public enum HuggingFaceModelResolver {
         guard let infoURL = apiURL(repo: repo, suffix: "revision/main") else {
             throw DesktopLocalModelImportError.invalidRepository
         }
-        let info = try decode(ModelInfo.self, from: await fetch(infoURL))
+        let info = try decode(HuggingFaceModelInfo.self, from: await fetch(infoURL))
         guard info.sha.range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil else {
             throw DesktopLocalModelImportError.unreadableResponse
         }
@@ -268,7 +269,7 @@ public enum HuggingFaceModelResolver {
         guard let treeURL = apiURL(
             repo: repo, suffix: "tree/\(info.sha)" + (directory.isEmpty ? "" : "/\(directory)")
         ) else { throw DesktopLocalModelImportError.invalidFile("Enter the file's path inside the repository.") }
-        let entries = try decode([TreeEntry].self, from: await fetch(treeURL))
+        let entries = try decode([HuggingFaceTreeEntry].self, from: await fetch(treeURL))
         guard let entry = entries.first(where: { $0.type == "file" && $0.path == file }) else {
             throw DesktopLocalModelImportError.notFound(file)
         }
@@ -290,7 +291,7 @@ public enum HuggingFaceModelResolver {
         case .transcription:
             return URL(string: "https://huggingface.co/models?search=whisper%20ggml&sort=downloads")!
         case .postProcessing:
-            return URL(string: "https://huggingface.co/models?library=gguf&pipeline_tag=text-generation&sort=downloads")!
+            return URL(string: "https://huggingface.co/models?library=gguf&sort=downloads")!
         }
     }
 
@@ -322,30 +323,35 @@ public enum HuggingFaceModelResolver {
             throw DesktopLocalModelImportError.unreadableResponse
         }
     }
+}
 
-    private struct ModelInfo: Decodable {
-        struct Card: Decodable {
-            let license: String?
-            init(from decoder: Decoder) throws {
-                let container = try decoder.container(keyedBy: Keys.self)
-                // A licence is usually a string but may be a list.
-                license = (try? container.decode(String.self, forKey: .license))
-                    ?? (try? container.decode([String].self, forKey: .license))?.first
-            }
-            enum Keys: String, CodingKey { case license }
-        }
-        let sha: String
-        let cardData: Card?
+/// The parts of Hugging Face's model API responses an import reads.
+private struct HuggingFaceModelInfo: Decodable {
+    let sha: String
+    let cardData: HuggingFaceModelCard?
+}
+
+private struct HuggingFaceModelCard: Decodable {
+    let license: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        // A licence is usually a string but may be a list.
+        license = (try? container.decode(String.self, forKey: .license))
+            ?? (try? container.decode([String].self, forKey: .license))?.first
     }
 
-    private struct TreeEntry: Decodable {
-        struct LFS: Decodable {
-            let oid: String
-            let size: Int64?
-        }
-        let type: String
-        let path: String
-        let size: Int64?
-        let lfs: LFS?
-    }
+    enum Keys: String, CodingKey { case license }
+}
+
+private struct HuggingFaceTreeEntry: Decodable {
+    let type: String
+    let path: String
+    let size: Int64?
+    let lfs: HuggingFaceLFS?
+}
+
+private struct HuggingFaceLFS: Decodable {
+    let oid: String
+    let size: Int64?
 }

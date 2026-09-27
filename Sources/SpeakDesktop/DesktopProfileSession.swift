@@ -242,11 +242,15 @@ public enum DesktopProfileSessionResolver {
         var options = defaults
         var skippedPolishReason: String?
         if let enabled = profile.polishEnabled {
-            options.mode = enabled ? .remote : .disabled
+            // Enabling keeps a local app choice local; profiles pick only remote models.
+            let keepsLocal = defaults.mode == .local
+                && DesktopLocalPostProcessing.isLocalIdentifier(defaults.modelIdentifier)
+            options.mode = enabled ? (keepsLocal ? .local : .remote) : .disabled
         }
         if let requested = trimmedNonEmpty(profile.polishModelID) {
             if capabilities.canRun(polishModel: requested) {
                 options.modelIdentifier = requested
+                if options.mode == .local { options.mode = .remote }
             } else {
                 let limitation = DesktopProfileLimitation.polishModelUnavailable(modelID: requested)
                 limitations.append(limitation)

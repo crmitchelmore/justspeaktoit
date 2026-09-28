@@ -168,7 +168,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
             IOSBatchTranscriptionRoute.route(for: GeminiTranscribeModels.batchCatalogID),
             .gemini
         )
-        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: "google/gemini-2.0-flash-001"), .openRouter)
+        XCTAssertEqual(IOSBatchTranscriptionRoute.route(for: "google/gemini-3.1-flash-lite"), .openRouter)
         XCTAssertEqual(
             IOSBatchTranscriptionRoute.route(for: MetaMuseVoiceTranscribe.batchCatalogID),
             .metaMuse
@@ -188,7 +188,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
     func testBatchCredentials_splitDirectProvidersFromOpenRouter() {
         let expected = [
             GeminiTranscribeModels.batchCatalogID: "google.apiKey",
-            "google/gemini-2.0-flash-001": "openrouter.apiKey",
+            "google/gemini-3.1-flash-lite": "openrouter.apiKey",
             MetaMuseVoiceTranscribe.batchCatalogID: "meta.apiKey",
             OpenAITranscriptionModels.gptTranscribeCatalogID: "openai.apiKey"
         ]
@@ -211,7 +211,7 @@ final class PlatformFeatureVisibilityTests: XCTestCase {
     func testPaddedBatchModelsKeepRoutingAndCredentialsInAgreement() {
         let cases: [String: (IOSBatchTranscriptionRoute, String)] = [
             GeminiTranscribeModels.batchCatalogID: (.gemini, "google.apiKey"),
-            "google/gemini-2.0-flash-001": (.openRouter, "openrouter.apiKey"),
+            "google/gemini-3.1-flash-lite": (.openRouter, "openrouter.apiKey"),
             MetaMuseVoiceTranscribe.batchCatalogID: (.metaMuse, "meta.apiKey"),
             OpenAITranscriptionModels.gptTranscribeCatalogID: (.openAI, "openai.apiKey")
         ]

@@ -173,7 +173,7 @@ actor ElevenLabsClient: TextToSpeechClient {
     let url = baseURL.appendingPathComponent("text-to-dialogue")
     let body: [String: Any] = [
       "inputs": [["text": text, "voice_id": voiceID]],
-      "model_id": modelID,
+      "model_id": modelID
     ]
     return try await send(body: body, to: url, apiKey: apiKey, fallbackOnRejection: true)
   }

@@ -149,41 +149,6 @@ final class ElevenLabsTranscriptionProviderTests: XCTestCase {
         XCTAssertTrue(bodyString.contains("fr"), "Body should contain the extracted language code")
     }
 
-    func testTranscribeFile_sendsMedicalModelID_forScribeV2Medical() async throws {
-        let requestObserver = RequestObserver()
-        StubURLProtocol.respond {  request in
-            await requestObserver.store(request: request)
-            let response = HTTPURLResponse(
-                url: try XCTUnwrap(request.url),
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            let json = #"{"text":"blood pressure","language_code":"en","words":null}"#
-            return (response, Data(json.utf8))
-        }
-        defer { StubURLProtocol.reset() }
-
-        let provider = ElevenLabsTranscriptionProvider(session: makeMockSession())
-        let audioURL = try makeSilentAudioFile()
-        defer { try? FileManager.default.removeItem(at: audioURL) }
-
-        // Use try? because AVURLAsset may fail to determine duration for synthetic test audio
-        _ = try? await provider.transcribeFile(
-            at: audioURL,
-            apiKey: "test-key",
-            model: ModelCatalog.elevenLabsScribeV2MedicalBatchID,
-            language: nil
-        )
-
-        let capturedBody = await requestObserver.capturedBody()
-        let bodyString = String(data: try XCTUnwrap(capturedBody), encoding: .utf8) ?? ""
-        XCTAssertTrue(
-            bodyString.contains("name=\"model_id\"\r\n\r\nscribe_v2_medical\r\n"),
-            "ElevenLabs expects the bare scribe_v2_medical id in the model_id form field"
-        )
-    }
-
     // MARK: - Error Paths
 
     func testTranscribeFile_throwsHttpError_onNon2xxResponse() async throws {

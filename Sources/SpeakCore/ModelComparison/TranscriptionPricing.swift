@@ -75,6 +75,8 @@ public enum TranscriptionPricing {
         "deepgram/base": rate("0.0145"),
         // https://elevenlabs.io/pricing/api (checked 2026-09-12).
         "elevenlabs/scribe_v2": perHour("0.22"),
+        // Scribe v2 Medical is billed at the Scribe v2 rate.
+        ModelCatalog.elevenLabsScribeV2MedicalBatchID: perHour("0.22"),
         "elevenlabs/scribe-v2-streaming": perHour("0.39"),
         // Modulate Velma: $0.03/hr batch, $0.025/hr English very-fast,
         // $0.06/hr streaming (matches ModulateTranscriptionProvider).

@@ -274,12 +274,21 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: elevenLabsScribeV2BatchID, displayName: "ElevenLabs Scribe v2",
             description: "ElevenLabs Scribe v2: high-accuracy speech-to-text across 90+ languages "
                 + "with word-level timestamps.",
+            estimatedLatencyMs: 800, latencyTier: .fast),
+        Option(
+            id: elevenLabsScribeV2MedicalBatchID, displayName: "ElevenLabs Scribe v2 Medical",
+            description: "Scribe v2 fine-tuned for clinical audio: fewer errors on medical terminology, "
+                + "with the same languages, pricing and word-level timestamps as Scribe v2.",
             estimatedLatencyMs: 800, latencyTier: .fast)
     ] + AzureTranscriptionModels.batchOptions
 
     /// Current ElevenLabs batch speech-to-text model. ElevenLabs removed
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.
     public static let elevenLabsScribeV2BatchID = "elevenlabs/scribe_v2"
+
+    /// Scribe v2 specialised for medical and clinical audio (GA 2026-09-11).
+    /// Same Create transcript API and per-hour rate as Scribe v2.
+    public static let elevenLabsScribeV2MedicalBatchID = "elevenlabs/scribe_v2_medical"
 
     /// Retired ElevenLabs batch identifiers that must be migrated to Scribe v2
     /// when they are read back out of persisted settings.

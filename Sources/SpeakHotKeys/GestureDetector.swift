@@ -17,6 +17,7 @@ public final class GestureDetector {
   private var holdFired = false
   private var tapCount = 0
   private var lastReleaseUptime: TimeInterval = 0
+  private var cooldownUntilUptime: TimeInterval = 0
 
   private var holdTimer: DispatchSourceTimer?
   private var pendingTapWorkItem: DispatchWorkItem?
@@ -28,6 +29,10 @@ public final class GestureDetector {
   /// Call when the monitored key is pressed down.
   public func keyDown(source: String = "") {
     guard !isKeyDown else { return }
+    guard ProcessInfo.processInfo.systemUptime >= cooldownUntilUptime else {
+      log.debug("Ignoring key down during gesture cooldown")
+      return
+    }
     log.debug("Key down via \(source)")
     isKeyDown = true
     holdFired = false
@@ -95,6 +100,7 @@ public final class GestureDetector {
     holdFired = false
     tapCount = 0
     lastReleaseUptime = 0
+    cooldownUntilUptime = 0
 
     if hadHoldInProgress {
       log.info("Ending an in-progress hold because the detector was reset")
@@ -126,6 +132,9 @@ public final class GestureDetector {
 
   private func fire(_ gesture: HotKeyGesture, source: String) {
     log.debug("Firing gesture: \(gesture.rawValue)")
+    if gesture != .holdStart {
+      cooldownUntilUptime = ProcessInfo.processInfo.systemUptime + configuration.gestureCooldown
+    }
     let event = HotKeyEvent(gesture: gesture, source: source)
     onGesture?(event)
   }

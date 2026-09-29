@@ -128,10 +128,16 @@ public struct HotKeyListenerToken: Hashable, Sendable {
 public struct HotKeyConfiguration: Sendable {
   public var holdThreshold: TimeInterval
   public var doubleTapWindow: TimeInterval
+  public var gestureCooldown: TimeInterval
 
-  public init(holdThreshold: TimeInterval = 0.35, doubleTapWindow: TimeInterval = 0.4) {
+  public init(
+    holdThreshold: TimeInterval = 0.35,
+    doubleTapWindow: TimeInterval = 0.4,
+    gestureCooldown: TimeInterval = 0.12
+  ) {
     self.holdThreshold = holdThreshold
     self.doubleTapWindow = doubleTapWindow
+    self.gestureCooldown = gestureCooldown
   }
 }
 

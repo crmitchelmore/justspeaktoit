@@ -5,7 +5,11 @@ import XCTest
 
 @MainActor
 final class GestureDetectorTests: XCTestCase {
-  private let configuration = HotKeyConfiguration(holdThreshold: 0.02, doubleTapWindow: 0.05)
+  private let configuration = HotKeyConfiguration(
+    holdThreshold: 0.02,
+    doubleTapWindow: 0.05,
+    gestureCooldown: 0.03
+  )
 
   func testHoldThenRelease_firesABalancedPair() async {
     let recorder = GestureRecorder()
@@ -99,6 +103,23 @@ final class GestureDetectorTests: XCTestCase {
     XCTAssertEqual(recorder.gestures, [.tripleTap])
     try? await Task.sleep(for: .milliseconds(80))
     XCTAssertEqual(recorder.gestures, [.tripleTap])
+  }
+
+  func testFourthRapidTapIsIgnoredUntilPostResolutionCooldownEnds() async {
+    let recorder = GestureRecorder()
+    let detector = makeDetector(recorder: recorder)
+
+    tap(detector)
+    tap(detector)
+    tap(detector)
+    tap(detector)
+
+    try? await Task.sleep(for: .milliseconds(80))
+    XCTAssertEqual(recorder.gestures, [.tripleTap])
+
+    tap(detector)
+    try? await Task.sleep(for: .milliseconds(80))
+    XCTAssertEqual(recorder.gestures, [.tripleTap, .singleTap])
   }
 
   // MARK: - Helpers

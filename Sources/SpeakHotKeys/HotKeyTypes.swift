@@ -90,6 +90,7 @@ public enum HotKeyGesture: String, CaseIterable, Identifiable, Sendable {
   case holdEnd
   case singleTap
   case doubleTap
+  case tripleTap
 
   public var id: String { rawValue }
 
@@ -99,6 +100,7 @@ public enum HotKeyGesture: String, CaseIterable, Identifiable, Sendable {
     case .holdEnd: return "Hold End"
     case .singleTap: return "Single Tap"
     case .doubleTap: return "Double Tap"
+    case .tripleTap: return "Triple Tap"
     }
   }
 }

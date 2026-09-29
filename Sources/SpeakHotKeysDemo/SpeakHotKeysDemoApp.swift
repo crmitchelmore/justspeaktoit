@@ -215,6 +215,7 @@ extension HotKeyGesture {
     case .holdEnd: return "hand.raised"
     case .singleTap: return "hand.point.up"
     case .doubleTap: return "hand.point.up.fill"
+    case .tripleTap: return "3.circle.fill"
     }
   }
 
@@ -224,6 +225,7 @@ extension HotKeyGesture {
     case .holdEnd: return .blue
     case .singleTap: return .green
     case .doubleTap: return .purple
+    case .tripleTap: return .pink
     }
   }
 }

@@ -2,7 +2,7 @@
 import Foundation
 import os.log
 
-/// Converts raw keyDown/keyUp events into gestures (hold, tap, double-tap).
+/// Converts raw keyDown/keyUp events into gestures (hold, tap, double-tap, triple-tap).
 ///
 /// Feed it `keyDown()` and `keyUp()` calls; it emits `HotKeyGesture` values
 /// via the `onGesture` callback. Timing is configurable via `configuration`.
@@ -15,12 +15,11 @@ public final class GestureDetector {
 
   private var isKeyDown = false
   private var holdFired = false
+  private var tapCount = 0
   private var lastReleaseUptime: TimeInterval = 0
-  private var lastDoubleTapFireTime: TimeInterval = 0
-  private var doubleTapCooldownDeadline: TimeInterval = 0
 
   private var holdTimer: DispatchSourceTimer?
-  private var pendingSingleTapWorkItem: DispatchWorkItem?
+  private var pendingTapWorkItem: DispatchWorkItem?
 
   public init(configuration: HotKeyConfiguration = HotKeyConfiguration()) {
     self.configuration = configuration
@@ -32,7 +31,6 @@ public final class GestureDetector {
     log.debug("Key down via \(source)")
     isKeyDown = true
     holdFired = false
-    pendingSingleTapWorkItem?.cancel()
     scheduleHoldTimer(source: source)
   }
 
@@ -47,36 +45,35 @@ public final class GestureDetector {
     let now = ProcessInfo.processInfo.systemUptime
     if holdFired {
       holdFired = false
+      resetTapSequence()
       fire(.holdEnd, source: source)
-      lastReleaseUptime = now
       return
     }
 
     let elapsed = now - lastReleaseUptime
-    if elapsed <= configuration.doubleTapWindow {
-      pendingSingleTapWorkItem?.cancel()
-      pendingSingleTapWorkItem = nil
-      fire(.doubleTap, source: source)
-      doubleTapCooldownDeadline = now + min(configuration.doubleTapWindow, 0.25)
-      lastReleaseUptime = now
+    tapCount = elapsed <= configuration.doubleTapWindow ? tapCount + 1 : 1
+    lastReleaseUptime = now
+    pendingTapWorkItem?.cancel()
+    pendingTapWorkItem = nil
+
+    if tapCount == 3 {
+      resetTapSequence()
+      fire(.tripleTap, source: source)
       return
     }
 
-    if now < doubleTapCooldownDeadline {
-      lastReleaseUptime = now
-      return
-    }
-
+    let pendingCount = tapCount
     let workItem = DispatchWorkItem { [weak self] in
-      self?.fire(.singleTap, source: source)
+      guard let self, self.tapCount == pendingCount else { return }
+      self.resetTapSequence()
+      self.fire(pendingCount == 1 ? .singleTap : .doubleTap, source: source)
     }
-    pendingSingleTapWorkItem = workItem
+    pendingTapWorkItem = workItem
     DispatchQueue.main.asyncAfter(deadline: .now() + configuration.doubleTapWindow) {
       [weak workItem] in
       guard let workItem, !workItem.isCancelled else { return }
       workItem.perform()
     }
-    lastReleaseUptime = now
   }
 
   /// Whether a hold is in progress: `holdStart` fired and `holdEnd` is still due.
@@ -91,14 +88,13 @@ public final class GestureDetector {
   public func reset(source: String = "reset") {
     holdTimer?.cancel()
     holdTimer = nil
-    pendingSingleTapWorkItem?.cancel()
-    pendingSingleTapWorkItem = nil
+    pendingTapWorkItem?.cancel()
+    pendingTapWorkItem = nil
     let hadHoldInProgress = holdFired
     isKeyDown = false
     holdFired = false
+    tapCount = 0
     lastReleaseUptime = 0
-    lastDoubleTapFireTime = 0
-    doubleTapCooldownDeadline = 0
 
     if hadHoldInProgress {
       log.info("Ending an in-progress hold because the detector was reset")
@@ -114,23 +110,21 @@ public final class GestureDetector {
     timer.setEventHandler { [weak self] in
       guard let self, self.isKeyDown, !self.holdFired else { return }
       self.holdFired = true
+      self.resetTapSequence()
       self.fire(.holdStart, source: source)
     }
     holdTimer = timer
     timer.resume()
   }
 
-  private func fire(_ gesture: HotKeyGesture, source: String) {
-    if gesture == .doubleTap {
-      let now = ProcessInfo.processInfo.systemUptime
-      let minimumGap = max(0.2, configuration.doubleTapWindow * 0.5)
-      if now - lastDoubleTapFireTime < minimumGap {
-        log.debug("Ignoring duplicate double tap")
-        return
-      }
-      lastDoubleTapFireTime = now
-    }
+  private func resetTapSequence() {
+    pendingTapWorkItem?.cancel()
+    pendingTapWorkItem = nil
+    tapCount = 0
+    lastReleaseUptime = 0
+  }
 
+  private func fire(_ gesture: HotKeyGesture, source: String) {
     log.debug("Firing gesture: \(gesture.rawValue)")
     let event = HotKeyEvent(gesture: gesture, source: source)
     onGesture?(event)

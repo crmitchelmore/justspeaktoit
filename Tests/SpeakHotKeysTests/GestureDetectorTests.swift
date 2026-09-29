@@ -76,12 +76,42 @@ final class GestureDetectorTests: XCTestCase {
     XCTAssertFalse(engine.isKeyDown)
   }
 
+  func testTwoRapidTaps_fireDoubleTapAfterTripleTapWindowExpires() async {
+    let recorder = GestureRecorder()
+    let detector = makeDetector(recorder: recorder)
+
+    tap(detector)
+    tap(detector)
+
+    XCTAssertEqual(recorder.gestures, [])
+    try? await Task.sleep(for: .milliseconds(80))
+    XCTAssertEqual(recorder.gestures, [.doubleTap])
+  }
+
+  func testThreeRapidTaps_fireTripleTapWithoutDoubleTap() async {
+    let recorder = GestureRecorder()
+    let detector = makeDetector(recorder: recorder)
+
+    tap(detector)
+    tap(detector)
+    tap(detector)
+
+    XCTAssertEqual(recorder.gestures, [.tripleTap])
+    try? await Task.sleep(for: .milliseconds(80))
+    XCTAssertEqual(recorder.gestures, [.tripleTap])
+  }
+
   // MARK: - Helpers
 
   private func makeDetector(recorder: GestureRecorder) -> GestureDetector {
     let detector = GestureDetector(configuration: configuration)
     detector.onGesture = { recorder.record($0.gesture) }
     return detector
+  }
+
+  private func tap(_ detector: GestureDetector) {
+    detector.keyDown(source: "test")
+    detector.keyUp(source: "test")
   }
 }
 

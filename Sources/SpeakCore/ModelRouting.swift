@@ -2,12 +2,14 @@ import Foundation
 
 public enum LocalTranscriptionEngine: Hashable, Sendable {
     case whisperKit
+    case phonon
     case transcribeCpp
     case streaming
     case unknown(String)
 
     public init(identifier: String) {
         switch identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "phonon": self = .phonon
         case "whisperkit": self = .whisperKit
         case "transcribe.cpp", "transcribe-cpp": self = .transcribeCpp
         case "streaming": self = .streaming
@@ -17,6 +19,7 @@ public enum LocalTranscriptionEngine: Hashable, Sendable {
 
     public var identifier: String {
         switch self {
+        case .phonon: return "phonon"
         case .whisperKit: return "whisperkit"
         case .transcribeCpp: return "transcribe.cpp"
         case .streaming: return "streaming"
@@ -26,6 +29,7 @@ public enum LocalTranscriptionEngine: Hashable, Sendable {
 
     public var displayName: String {
         switch self {
+        case .phonon: return "Phonon / MLX"
         case .whisperKit: return "WhisperKit"
         case .transcribeCpp: return "transcribe.cpp"
         case .streaming: return "Streaming"

@@ -58,7 +58,7 @@ struct LocalTranscriptionBenchmarkCommand {
             return try await WhisperKitBenchmarkRunner(model: arguments.model, modelRepo: arguments.modelRepo)
         case .transcribeCpp:
             return try TranscribeCppBenchmarkRunner(modelPath: arguments.model, backend: arguments.backend)
-        case .streaming, .unknown:
+        case .phonon, .streaming, .unknown:
             throw CLIError.invalidValue("Unsupported benchmark engine: \(arguments.engine.identifier)")
         }
     }

@@ -174,8 +174,14 @@ final class LocalModelManager: ObservableObject {
     refreshInstallStates()
   }
 
+  #if !APP_STORE
+  private var phonon: PhononRuntime {
+    PhononRuntime(root: markerDirectory.appendingPathComponent("Phonon", isDirectory: true))
+  }
+  #endif
+
   var availableModels: [LocalTranscriptionModel] {
-    ModelCatalog.localTranscription + importedModels
+    ModelCatalog.availableLocalTranscription + importedModels
   }
 
   var availableModelOptions: [ModelCatalog.Option] {
@@ -287,9 +293,16 @@ final class LocalModelManager: ObservableObject {
   #endif
 
   func install(_ model: LocalTranscriptionModel) async {
-    guard loadingPipelines[model.id] == nil else { return }
+    guard !isModelBusy(model.id), self.model(for: model.id) != nil else { return }
     installStates[model.id] = .installing
     do {
+      #if !APP_STORE
+      if model.engine == .phonon {
+        try await phonon.install()
+        installStates[model.id] = .installed
+        return
+      }
+      #endif
       _ = try await pipeline(for: model, useManagedStorage: true)
       try Data("installed-managed-v1\n".utf8).write(to: markerURL(for: model), options: .atomic)
       installStates[model.id] = .installed
@@ -305,6 +318,13 @@ final class LocalModelManager: ObservableObject {
       return false
     }
     do {
+      #if !APP_STORE
+      if model.engine == .phonon {
+        try phonon.deleteModel()
+        installStates[model.id] = .notInstalled
+        return true
+      }
+      #endif
       activePipelines[model.id] = nil
       try modelStorage.removeDownload(for: model.id)
       let markerURL = markerURL(for: model)
@@ -333,6 +353,11 @@ final class LocalModelManager: ObservableObject {
     activePipelineUses[model.id, default: 0] += 1
     defer { releasePipelineUse(for: model.id) }
     try Task.checkCancellation()
+    #if !APP_STORE
+    if model.engine == .phonon {
+      return try await phonon.transcribe(url, language: language)
+    }
+    #endif
     let start = Date()
     let pipe = try await pipeline(for: model)
     try Task.checkCancellation()
@@ -389,6 +414,7 @@ final class LocalModelManager: ObservableObject {
   private func pipeline(
     for model: LocalTranscriptionModel, useManagedStorage: Bool = false
   ) async throws -> WhisperKit {
+    guard model.engine == .whisperKit else { throw LocalModelError.unknownModel(model.id) }
     let hasOwnership = try modelStorage.hasOwnership(for: model.id)
     let managed = useManagedStorage || hasOwnership
     if let existing = activePipelines[model.id] {
@@ -423,11 +449,16 @@ final class LocalModelManager: ObservableObject {
   }
 
   func canDelete(_ model: LocalTranscriptionModel) -> Bool {
-    !isModelBusy(model.id) && (markerExists(for: model) || (try? modelStorage.hasDownload(for: model.id)) == true)
+    #if !APP_STORE
+    if model.engine == .phonon { return !isModelBusy(model.id) && phonon.hasDownload }
+    #endif
+    return !isModelBusy(model.id)
+      && (markerExists(for: model) || (try? modelStorage.hasDownload(for: model.id)) == true)
   }
 
   private func isModelBusy(_ modelID: String) -> Bool {
-    loadingPipelines[modelID] != nil || activePipelineUses[modelID, default: 0] > 0
+    installStates[modelID] == .installing
+      || loadingPipelines[modelID] != nil || activePipelineUses[modelID, default: 0] > 0
   }
 
   /// Legacy installs continue using their dependency-managed cache. Only an
@@ -464,6 +495,12 @@ final class LocalModelManager: ObservableObject {
   }
 
   private func refreshInstallState(for model: LocalTranscriptionModel) {
+    #if !APP_STORE
+    if model.engine == .phonon {
+      installStates[model.id] = phonon.isInstalled ? .installed : .notInstalled
+      return
+    }
+    #endif
     guard markerExists(for: model) else {
       installStates[model.id] = .notInstalled
       return

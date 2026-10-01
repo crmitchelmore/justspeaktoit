@@ -50,9 +50,22 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
     // The website package runs its own suite via `npm test` in deploy-landing-page.yml.
     && !path.startsWith('landing-page/'));
   assert.ok(toolingTests.length > 0, 'must find the tracked tooling tests');
+  const trackedFiles = new Set(tracked);
+  // `unittest discover -s scripts/tests` loads identifier-named test_*.py modules and
+  // recurses only into regular packages (directories with __init__.py) below the start.
+  const discoveredByUnittest = path => {
+    const match = path.match(/^scripts\/tests\/((?:[^/]+\/)*)test_\w*\.py$/);
+    if (!match) return false;
+    let directory = 'scripts/tests';
+    for (const part of match[1].split('/').filter(Boolean)) {
+      directory += `/${part}`;
+      if (!trackedFiles.has(`${directory}/__init__.py`)) return false;
+    }
+    return true;
+  };
   for (const path of toolingTests) {
     const discovered = /^scripts\/tests\/[^/]+\.test\.mjs$/.test(path)
-      || /^scripts\/tests\/test_[^/]+\.py$/.test(path)
+      || discoveredByUnittest(path)
       || (/^scripts\/tests\/[^/]+_test\.rb$/.test(path) && makefile.includes(`\truby ${path}\n`));
     assert.ok(discovered, `${path} is not run by make test-tooling`);
   }

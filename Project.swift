@@ -608,7 +608,9 @@ let iosTestsTarget: Target = .target(
     dependencies: [
         .target(name: "SpeakiOS"),
         .package(product: "SpeakCore"),
-        .package(product: "SpeakiOSLib")
+        .package(product: "SpeakiOSLib"),
+        // Shared URLProtocol stub (issue #1124).
+        .package(product: "SpeakTestSupport")
     ],
     settings: .settings(base: iosTestSettings)
 )

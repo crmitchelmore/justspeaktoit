@@ -89,7 +89,7 @@ struct GeminiTranscriptionProvider: TranscriptionProvider {
     true
   }
 
-  /// Only Google's own transcription model. The `google/gemini-2.0-flash-*`
+  /// Only Google's own transcription model. The OpenRouter `google/gemini-*`
   /// entries share this prefix but are OpenRouter-routed, so a prefix match
   /// would steal them from the OpenRouter batch client.
   func supportedModels() -> [ModelCatalog.Option] {

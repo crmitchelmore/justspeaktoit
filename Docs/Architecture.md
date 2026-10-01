@@ -6,14 +6,17 @@ provisioning or distribution has been completed.
 
 ## Module and build map
 
-The repository has three build graphs:
+The repository has four build graphs:
 
-- [Package.swift](../Package.swift) owns reusable modules, the macOS executable, CLI, demo, benchmark and host tests.
+- [Package.swift](../Package.swift) owns reusable modules, the macOS executable, CLI, demo and host tests.
 - [Project.swift](../Project.swift) owns generated Apple app, extension and UI-test targets. It consumes products from
   the local root package. [Workspace.swift](../Workspace.swift) generates the `Just Speak to It` workspace containing
   the root project; generated Xcode projects are not hand-maintained declarations.
 - [Tooling/Package.swift](../Tooling/Package.swift) is an independent SwiftLint dependency graph, isolated from the app
   and test resolver.
+- [Benchmarks/LocalTranscription/Package.swift](../Benchmarks/LocalTranscription/Package.swift) is the isolated local
+  transcription benchmark package. It consumes `SpeakCore` from the root package by path and pins its own graph in
+  `Benchmarks/LocalTranscription/Package.resolved` (issue #1120).
 
 The root package declares macOS 14 and iOS 17 as its package platforms. That declaration does not mean every target is
 host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `SpeakiOSLib` contains iOS-guarded code.
@@ -22,7 +25,6 @@ host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `S
 
 | Target | Kind | Direct internal dependencies / role |
 | --- | --- | --- |
-| `CTranscribe` | binary | Remote transcribe.cpp XCFramework used only by the benchmark executable. |
 | `SpeakHotKeys` | library target | Global-hot-key implementation. |
 | `SpeakCore` | library target | Shared catalogues, protocols, models, capture policies and resources. |
 | `SpeakSync` | library target | Depends on `SpeakCore`; CloudKit history, comparison and encrypted-key sync. |
@@ -31,8 +33,7 @@ host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `S
 | `SpeakCLI` | executable target | Depends on `SpeakAutomationKit` and `SpeakCore`; product name `speak`. |
 | `SpeakApp` | executable target | Depends on `SpeakCore`, `SpeakSync`, `SpeakHotKeys` and external macOS packages. |
 | `SpeakHotKeysDemo` | executable target | Depends on `SpeakHotKeys`; development demo. |
-| `LocalTranscriptionBenchmarkKit` | library target | Depends on `SpeakCore`; benchmark measurement and result support. |
-| `LocalTranscriptionBenchmark` | executable target | Depends on the benchmark kit, WhisperKit and `CTranscribe`; product name `local-transcription-benchmark`. |
+| `SpeakTestSupport` | library target | Test-only shared doubles under `Tests/SpeakTestSupport`; not shipped API. |
 | `SpeakCoreTests` | test target | Tests `SpeakCore`. |
 | `SpeakHotKeysTests` | test target | Tests `SpeakHotKeys`. |
 | `SpeakSyncTests` | test target | Tests `SpeakSync`. |
@@ -40,10 +41,9 @@ host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `S
 | `SpeakAppSnapshotTests` | test target | Tests `SpeakApp` with SnapshotTesting. |
 | `SpeakiOSTests` | test target | Host package tests for `SpeakiOSLib`. |
 | `SpeakAutomationKitTests` | test target | Tests `SpeakAutomationKit` and `SpeakCore`. |
-| `LocalTranscriptionBenchmarkTests` | test target | Tests the benchmark kit and its `SpeakCore` contract. |
 
-The products are `SpeakHotKeys`, `SpeakCore`, `SpeakSync`, `SpeakiOSLib`, `SpeakAutomationKit`, `SpeakApp`, `speak` and
-`local-transcription-benchmark`. The benchmark and `CTranscribe` are part of the root graph at this inspected base.
+The products are `SpeakHotKeys`, `SpeakCore`, `SpeakSync`, `SpeakiOSLib`, `SpeakAutomationKit`, `SpeakTestSupport`
+(test-only), `SpeakApp` and `speak`. The root graph does not contain the benchmark or `CTranscribe`.
 
 ```mermaid
 flowchart TD
@@ -58,6 +58,19 @@ flowchart TD
 ```
 
 Each arrow points from a dependency to the target that consumes it.
+
+### Local transcription benchmark package
+
+| Target | Kind | Direct dependencies / role |
+| --- | --- | --- |
+| `CTranscribe` | binary | Remote transcribe.cpp XCFramework; checksum verified by `make verify-checksums`. |
+| `LocalTranscriptionBenchmarkKit` | library target | Depends on root `SpeakCore`; benchmark measurement and result support. |
+| `LocalTranscriptionBenchmark` | executable target | Depends on the kit, `SpeakCore`, WhisperKit and `CTranscribe`; product `local-transcription-benchmark`. |
+| `LocalTranscriptionBenchmarkTests` | test target | Tests the benchmark kit, its `SpeakCore` contract and its argmax-oss-swift pin. |
+
+Run it with `make bench BENCH_ARGS='…'`. The path-filtered
+[local-transcription-benchmark.yml](../.github/workflows/local-transcription-benchmark.yml) workflow resolves, builds
+and tests it without model inference, and fails if its `Package.resolved` drifts.
 
 ### Tuist targets
 

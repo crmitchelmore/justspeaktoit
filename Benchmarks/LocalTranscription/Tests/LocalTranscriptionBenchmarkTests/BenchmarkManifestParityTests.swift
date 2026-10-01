@@ -36,5 +36,16 @@ final class BenchmarkManifestParityTests: XCTestCase {
             runners.contains("\"argmax-oss-swift \(pinnedVersion)\""),
             "EngineRunners.runtimeVersion must name the benchmark's argmax-oss-swift pin \(pinnedVersion)"
         )
+        let pinnedRevision = try XCTUnwrap(
+            firstMatch(
+                #""identity" : "argmax-oss-swift".*?"(revision)" : "([^"]+)""#,
+                in: resolved
+            ),
+            "argmax-oss-swift revision missing from benchmark Package.resolved"
+        )
+        XCTAssertTrue(
+            runners.contains("runtimeCommit: String? = \"\(pinnedRevision)\""),
+            "EngineRunners.runtimeCommit must name the benchmark's argmax-oss-swift revision \(pinnedRevision)"
+        )
     }
 }

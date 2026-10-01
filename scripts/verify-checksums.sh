@@ -50,7 +50,8 @@ fi
 archive=$(mktemp "${TMPDIR:-/tmp}/CTranscribe.XXXXXX.zip")
 trap 'rm -f "$archive"' EXIT
 echo "→ Downloading CTranscribe artifact..."
-curl --fail --location --silent --show-error "$binary_url" --output "$archive"
+curl --fail --location --silent --show-error --connect-timeout 30 --max-time 600 --retry 3 \
+  "$binary_url" --output "$archive"
 actual_checksum=$(swift package compute-checksum "$archive")
 if [[ "$actual_checksum" != "$declared_checksum" ]]; then
   echo "✗ CTranscribe checksum mismatch" >&2

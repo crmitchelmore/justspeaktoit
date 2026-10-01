@@ -43,8 +43,9 @@ jobs:
       - name: Verify package resolution and CTranscribe checksum
         run: make verify-checksums
 
-      - name: Check benchmark Package.resolved drift
-        run: git diff --exit-code Benchmarks/LocalTranscription/Package.resolved
+      # verify-checksums resolves both graphs, so neither lockfile may change.
+      - name: Check root and benchmark Package.resolved drift
+        run: git diff --exit-code Package.resolved Benchmarks/LocalTranscription/Package.resolved
 
       - name: Build clean shipping core graph without CTranscribe
         run: |

@@ -928,7 +928,7 @@ public final class AppSettings: ObservableObject {
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
                 || AzureTranscriptionModels.batchIDs.contains(option.id)
-                // OpenRouter-routed Gemini 2.x batch models upload through the
+                // OpenRouter-routed Gemini batch models upload through the
                 // OpenRouter client; Gemini 3.5 Transcribe uploads through the
                 // shared `GeminiInteractionsClient` with the Google key
                 // (issue #862). Both are listed, and `batchAPIKey(for:)` and
@@ -1604,6 +1604,12 @@ public struct SettingsView: View {
                     Label("Release Notes", systemImage: "sparkles")
                 }
                 .accessibilityHint("Shows what changed in this version and earlier versions")
+
+                Link(destination: PrivacyPolicy.url) {
+                    Label("Privacy Policy", systemImage: "hand.raised.square")
+                }
+                .accessibilityIdentifier("privacyPolicyLink")
+                .accessibilityHint("Opens the published privacy policy in your browser")
             }
         }
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)
@@ -2661,9 +2667,22 @@ struct PrivacyView: View {
             networkActivitySection
             notCollectedSection
             permissionsSection
+            privacyPolicySection
         }
         .navigationTitle("Privacy")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// App Review looks for the published policy from inside the app, and the
+    /// macOS About pane has carried the same link for several releases.
+    @ViewBuilder
+    private var privacyPolicySection: some View {
+        Section("Published Policy") {
+            Link(destination: PrivacyPolicy.url) {
+                Label("Read the Privacy Policy", systemImage: "hand.raised.square")
+            }
+            .accessibilityIdentifier("privacyPolicyLink")
+        }
     }
 
     @ViewBuilder

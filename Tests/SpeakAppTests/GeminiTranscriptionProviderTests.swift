@@ -61,11 +61,11 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
     XCTAssertEqual(provider?.metadata.apiKeyIdentifier, "google.apiKey")
   }
 
-  /// The `google/` prefix is shared with the OpenRouter-routed Gemini 2.0
+  /// The `google/` prefix is shared with the OpenRouter-routed Gemini
   /// entries; claiming them would break their existing OpenRouter path.
   func testProviderRegistry_leavesOpenRouterRoutedGeminiModelsAlone() async {
     let provider = await TranscriptionProviderRegistry.shared.provider(
-      forModel: "google/gemini-2.0-flash-001")
+      forModel: "google/gemini-3.1-flash-lite")
 
     XCTAssertNil(provider)
   }
@@ -84,7 +84,7 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
     )
     XCTAssertEqual(
       ModelCredentialResolver.requirement(
-        for: "google/gemini-2.0-flash-001", purpose: .batchTranscription),
+        for: "google/gemini-3.1-flash-lite", purpose: .batchTranscription),
       .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")
     )
     XCTAssertEqual(
@@ -187,12 +187,12 @@ final class GeminiTranscriptionProviderTests: XCTestCase {
       _ = try await provider.transcribeFile(
         at: URL(fileURLWithPath: "/tmp/does-not-matter.m4a"),
         apiKey: "k",
-        model: "google/gemini-2.0-flash-001",
+        model: "google/gemini-3.1-flash-lite",
         language: nil
       )
       XCTFail("Expected an unsupportedModel error")
     } catch {
-      XCTAssertEqual(error as? GeminiBatchError, .unsupportedModel("google/gemini-2.0-flash-001"))
+      XCTAssertEqual(error as? GeminiBatchError, .unsupportedModel("google/gemini-3.1-flash-lite"))
     }
   }
 

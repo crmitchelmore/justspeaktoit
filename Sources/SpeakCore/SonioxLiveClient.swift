@@ -10,6 +10,8 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
 
     struct Timing: Sendable {
         let overall: TimeInterval
+        /// Bounds the configuration send while recording, so a stalled socket fails.
+        var startup: TimeInterval = 8
         static let production = Timing(overall: 3)
     }
 
@@ -123,10 +125,11 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         let socket = socketFactory(request)
         queue.async { [weak self] in
             guard let self else { return }
+            // Completing a previous run discards its held audio; anything else in the
+            // pre-roll was captured for this run, so it is kept and sent once ready.
             if let previous = self.run { self.complete(previous, closeCode: .goingAway) }
             self.lastTranscript = nil
             self.acceptsPrestartAudio = false
-            self.preroll.reset()
             let current = Run(
                 socket: socket, sampleRate: self.sampleRate,
                 onTranscript: onTranscript, onError: onError
@@ -142,6 +145,7 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             current.outbound.append(Outbound(message: config, audioBytes: 0, makesReady: true))
             self.pump(current)
             self.receive(on: current)
+            self.scheduleStartupDeadline(for: current)
             self.logger.info("Soniox WebSocket connecting (model=\(self.model, privacy: .public))")
         }
     }
@@ -291,6 +295,16 @@ extension SonioxLiveClient {
         }
     }
 
+    /// Fails a recording run whose configuration send never completes (finish has its own bound).
+    private func scheduleStartupDeadline(for current: Run) {
+        queue.asyncAfter(deadline: .now() + timing.startup) { [weak self, weak current] in
+            guard let self, let current, self.isActive(current),
+                  !current.ready, !current.finishing else { return }
+            self.emitError(StreamingClientError.transportStalled(provider: "Soniox"), on: current)
+            self.complete(current, closeCode: .goingAway)
+        }
+    }
+
     private func enqueueAudio(_ data: Data, on current: Run) {
         guard current.sendBudget.admit(data.count) else {
             emitError(StreamingClientError.transportStalled(provider: "Soniox"), on: current)
@@ -377,15 +391,5 @@ extension SonioxLiveClient {
             guard let self, self.queue.sync(execute: { self.callbackRunID == id }) else { return }
             callback(error)
         }
-    }
-
-    private func mapConnectionError(_ error: Error) -> Error {
-        let nsError = error as NSError
-        let description = nsError.localizedDescription.lowercased()
-        if nsError.code == 401 || nsError.code == 403 || description.contains("unauthorized")
-            || description.contains("forbidden") {
-            return StreamingClientError.invalidAPIKey(provider: "Soniox")
-        }
-        return error
     }
 }

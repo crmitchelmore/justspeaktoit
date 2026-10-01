@@ -12,6 +12,9 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         let readiness: TimeInterval
         let postCommitDrain: TimeInterval
         let overall: TimeInterval
+        /// Bound on the `session_started` handshake while recording, so a socket
+        /// that opens but never acknowledges the session fails instead of idling.
+        var startup: TimeInterval = 8
 
         static let production = Timing(readiness: 2, postCommitDrain: 1.5, overall: 4)
     }
@@ -32,6 +35,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         var outbound: [Outbound] = []
         var waiters: [CheckedContinuation<String?, Never>] = []
         var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
+        var finalTwins = ElevenLabsFinalTwinTracker()
         let sendBudget: StreamingAudioSendBudget
         let onTranscript: (String, Bool) -> Void
         let onError: (Error) -> Void
@@ -134,10 +138,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         let socket = socketFactory(request)
         queue.async { [weak self] in
             guard let self else { return }
+            // Completing a previous run discards its held audio. Anything still in
+            // the pre-roll was captured for this run before it was published, so it
+            // is kept and replayed after `session_started`.
             if let previous = self.run { self.complete(previous, closeCode: .goingAway) }
             self.lastTranscript = nil
             self.acceptsPrestartAudio = false
-            self.preroll.reset()
             let current = Run(
                 socket: socket, sampleRate: self.sampleRate,
                 onTranscript: onTranscript, onError: onError
@@ -146,6 +152,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             self.callbackRunID = current.id
             socket.resume()
             self.receive(on: current)
+            self.scheduleStartupDeadline(for: current)
         }
     }
 
@@ -270,9 +277,9 @@ extension ElevenLabsLiveClient {
         case "partial_transcript":
             emitPartial(response, on: current)
         case "committed_transcript":
-            commitFinal(response, on: current)
+            commitFinal(response, on: current, timestamped: false)
         case "committed_transcript_with_timestamps":
-            break
+            commitFinal(response, on: current, timestamped: true)
         default:
             break
         }
@@ -293,9 +300,10 @@ extension ElevenLabsLiveClient {
         emitTranscript(text, isFinal: false, on: current)
     }
 
-    private func commitFinal(_ response: ElevenLabsStreamResponse, on current: Run) {
+    private func commitFinal(_ response: ElevenLabsStreamResponse, on current: Run, timestamped: Bool) {
         guard let text = response.text,
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !current.finalTwins.isTwin(timestamped: timestamped) else { return }
         current.accumulated.append(final: text)
         if !current.finishing { emitTranscript(text, isFinal: true, on: current) }
     }
@@ -369,6 +377,17 @@ extension ElevenLabsLiveClient {
         return .string(text)
     }
 
+    /// Fails a run whose socket never acknowledges the session during normal
+    /// recording. A finishing run is bounded by its own readiness deadline.
+    private func scheduleStartupDeadline(for current: Run) {
+        queue.asyncAfter(deadline: .now() + timing.startup) { [weak self, weak current] in
+            guard let self, let current, self.isActive(current),
+                  !current.ready, !current.finishing else { return }
+            self.emitError(ElevenLabsLiveError.connectionFailed, on: current)
+            self.complete(current, closeCode: .goingAway)
+        }
+    }
+
     private func scheduleReadinessDeadline(for current: Run) {
         queue.asyncAfter(deadline: .now() + timing.readiness) { [weak self, weak current] in
             guard let self, let current, self.isActive(current), !current.ready else { return }
@@ -428,6 +447,33 @@ extension ElevenLabsLiveClient {
             return ElevenLabsLiveError.missingAPIKey
         }
         return NSError(domain: "ElevenLabs", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+}
+
+/// Pairs a `committed_transcript` with its `committed_transcript_with_timestamps`
+/// twin. With timestamps enabled ElevenLabs sends both forms for one segment;
+/// either form may also arrive alone. A form that arrives while the other form
+/// of a segment is outstanding is that segment again and must not count twice.
+struct ElevenLabsFinalTwinTracker {
+    private var outstandingPlain = 0
+    private var outstandingTimestamped = 0
+
+    /// Records one final and reports whether it repeats a segment already counted.
+    mutating func isTwin(timestamped: Bool) -> Bool {
+        if timestamped {
+            guard outstandingPlain == 0 else {
+                outstandingPlain -= 1
+                return true
+            }
+            outstandingTimestamped += 1
+        } else {
+            guard outstandingTimestamped == 0 else {
+                outstandingTimestamped -= 1
+                return true
+            }
+            outstandingPlain += 1
+        }
+        return false
     }
 }
 

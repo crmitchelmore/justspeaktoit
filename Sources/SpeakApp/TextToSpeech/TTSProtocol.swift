@@ -501,6 +501,15 @@ struct VoiceCatalog {
     )
   }
 
+  /// A voice from a resource's own listing. A curated MAI voice keeps the
+  /// catalogue's traits (accent, multilingual, low latency), so it filters the
+  /// same whether or not the listing loaded.
+  static func azureListedVoice(_ voice: AzureSpeechVoice) -> TTSVoice {
+    let gender: TTSVoice.VoiceTrait = voice.gender == "Female" ? .female : .male
+    let traits = azureMAIVoices.first(where: { $0.id == voice.id })?.traits ?? [gender]
+    return TTSVoice(id: voice.id, name: voice.name, provider: .azure, traits: traits, previewURL: nil)
+  }
+
   static let azureNeuralVoices: [TTSVoice] = [
     TTSVoice(
       id: "azure/en-US-AriaNeural",

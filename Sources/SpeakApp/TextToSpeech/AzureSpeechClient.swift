@@ -31,10 +31,8 @@ actor AzureSpeechClient: TextToSpeechClient {
         credentials: credentials, text: text, voice: voice, format: outputFormat(for: settings),
         speed: settings.speed, pitch: settings.pitch, useSSML: settings.useSSML
       )
-    } catch AzureSpeechError.service(let status) where status == 400 && AzureMAIVoiceCatalog.isMAIVoice(voice) {
-      throw TTSError.synthesisFailure(
-        "Azure rejected this MAI voice (HTTP 400). Check that your Speech resource can use MAI voices."
-      )
+    } catch let error as AzureSpeechSynthesisError {
+      throw Self.ttsError(for: error, voice: voice)
     }
 
     // Save audio data to temporary file
@@ -65,14 +63,23 @@ actor AzureSpeechClient: TextToSpeechClient {
           !voices.isEmpty else {
       return VoiceCatalog.azureVoices
     }
-    let listed = voices.map { voice in
-      TTSVoice(id: voice.id, name: voice.name, provider: .azure,
-               traits: voice.gender == "Female" ? [.female] : [.male], previewURL: nil)
-    }
+    let listed = voices.map(VoiceCatalog.azureListedVoice)
     // Microsoft routes MAI-Voice-2.1 and Flash globally, so a regional listing
     // that omits them does not mean the resource cannot use them.
     let missing = AzureMAIVoiceCatalog.voicesMissing(fromListedIDs: Set(listed.map(\.id)))
     return listed + missing.map(VoiceCatalog.azureMAIVoice)
+  }
+
+  /// Keeps Azure's own diagnostic. MAI access guidance is reserved for a
+  /// response whose text says the voice or model is unavailable; a malformed
+  /// request to an MAI voice is reported like any other.
+  static func ttsError(for error: AzureSpeechSynthesisError, voice: String) -> TTSError {
+    if AzureMAIVoiceCatalog.isMAIVoice(voice), error.indicatesUnavailableVoice {
+      return .providerAccessRequired(
+        .azure, reason: "this Speech resource cannot use this MAI voice. Azure said: \(error.detail)"
+      )
+    }
+    return .synthesisFailure(error.localizedDescription)
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {

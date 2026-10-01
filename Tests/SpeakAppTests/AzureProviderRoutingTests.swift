@@ -60,5 +60,47 @@ final class AzureProviderRoutingTests: XCTestCase {
         XCTAssertEqual(voice.provider, .azure)
         XCTAssertEqual(voice.name, "Soleil (fr-FR, MAI-Voice-2.1)")
         XCTAssertNil(VoiceCatalog.voice(forID: "azure/en-GB-LibbyNeural"))
+        let scripted = try XCTUnwrap(VoiceCatalog.voice(forID: "azure/zh-Hans-CN-Xiaoxiao:MAI-Voice-2.1"))
+        XCTAssertEqual(scripted.name, "Xiaoxiao (zh-Hans-CN, MAI-Voice-2.1)")
+    }
+
+    func testListedCuratedVoice_keepsTheCatalogueTraits() throws {
+        let listing = try JSONDecoder().decode([AzureSpeechVoice].self, from: Data(#"""
+        [
+          {"ShortName":"en-GB-Emily:MAI-Voice-2.1-Flash","DisplayName":"Emily","Locale":"en-GB","Gender":"Female"},
+          {"ShortName":"fr-FR-Soleil:MAI-Voice-2.1","DisplayName":"Soleil","Locale":"fr-FR","Gender":"Female"}
+        ]
+        """#.utf8))
+        let voices = listing.map(VoiceCatalog.azureListedVoice)
+        let curated = try XCTUnwrap(VoiceCatalog.voice(forID: "azure/en-GB-Emily:MAI-Voice-2.1-Flash"))
+
+        XCTAssertEqual(voices[0].traits, curated.traits)
+        XCTAssertTrue(voices[0].traits.contains(.lowLatency))
+        XCTAssertEqual(voices[0].name, "Emily (en-GB, MAI-Voice-2.1-Flash)")
+        // A voice only the listing knows keeps the listing's own gender.
+        XCTAssertEqual(voices[1].traits, [.female])
+    }
+
+    func testMAIAccessMessage_isReservedForAnUnavailableVoice() {
+        let maiVoice = "azure/en-US-Harper:MAI-Voice-2.1"
+        let unavailable = AzureSpeechSynthesisError(
+            statusCode: 400, body: Data("Voice en-US-Harper:MAI-Voice-2.1 is not supported.".utf8), apiKey: ""
+        )
+        guard case .providerAccessRequired(.azure, let reason) = AzureSpeechClient.ttsError(
+            for: unavailable, voice: maiVoice
+        ) else { return XCTFail("An unavailable MAI voice should report an access requirement") }
+        XCTAssertTrue(reason.contains("is not supported"))
+
+        let malformed = AzureSpeechSynthesisError(
+            statusCode: 400, body: Data("SSML parsing error: unexpected element".utf8), apiKey: ""
+        )
+        guard case .synthesisFailure(let message) = AzureSpeechClient.ttsError(for: malformed, voice: maiVoice)
+        else { return XCTFail("A malformed MAI request is a request failure, not an access problem") }
+        XCTAssertEqual(message, "Azure Speech returned HTTP 400. SSML parsing error: unexpected element")
+
+        // A neural voice never gets MAI guidance, whatever Azure says.
+        guard case .synthesisFailure = AzureSpeechClient.ttsError(
+            for: unavailable, voice: "azure/en-GB-SoniaNeural"
+        ) else { return XCTFail("Neural voices keep the general diagnostic") }
     }
 }

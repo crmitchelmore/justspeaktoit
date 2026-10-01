@@ -67,6 +67,15 @@ final class AzureMAIVoiceTests: XCTestCase {
             AzureMAIVoiceCatalog.displayName(forVoiceID: "azure/en-US-Harper:MAI-Voice-2"),
             "Harper (en-US, MAI-Voice-2)"
         )
+        // A locale with a script or variant: the speaker is the last component.
+        XCTAssertEqual(
+            AzureMAIVoiceCatalog.displayName(forVoiceID: "azure/zh-Hans-CN-Xiaoxiao:MAI-Voice-2.1"),
+            "Xiaoxiao (zh-Hans-CN, MAI-Voice-2.1)"
+        )
+        XCTAssertEqual(
+            AzureMAIVoiceCatalog.displayName(forVoiceID: "azure/zh-CN-sichuan-Yunxi:MAI-Voice-2.1-Flash"),
+            "Yunxi (zh-CN-sichuan, MAI-Voice-2.1-Flash)"
+        )
         XCTAssertNil(AzureMAIVoiceCatalog.displayName(forVoiceID: "azure/en-GB-SoniaNeural"))
         XCTAssertNil(AzureMAIVoiceCatalog.displayName(forVoiceID: "azure/Harper:MAI-Voice-2.1"))
     }
@@ -124,8 +133,9 @@ final class AzureMAIVoiceTests: XCTestCase {
         XCTAssertFalse(body.contains("prosody"), "MAI voices are sent without prosody controls")
     }
 
-    func testSynthesize_reportsTheServiceStatusForARejectedVoice() async {
-        StubURLProtocol.handler = { _ in .status(400, Data()) }
+    func testSynthesize_keepsAzuresDiagnosticForARejectedRequest() async {
+        let reply = Data("Unsupported voice en-US-Harper:MAI-Voice-2.1-Flash.\n".utf8)
+        StubURLProtocol.handler = { _ in .status(400, reply) }
         let api = AzureSpeechVoiceAPI(session: StubURLProtocol.makeSession())
 
         do {
@@ -134,11 +144,57 @@ final class AzureMAIVoiceTests: XCTestCase {
                 format: "riff-24khz-16bit-mono-pcm"
             )
             XCTFail("A 400 must not be returned as audio")
-        } catch AzureSpeechError.service(let status) {
-            XCTAssertEqual(status, 400)
+        } catch let error as AzureSpeechSynthesisError {
+            XCTAssertEqual(error.statusCode, 400)
+            XCTAssertEqual(error.detail, "Unsupported voice en-US-Harper:MAI-Voice-2.1-Flash.")
+            XCTAssertTrue(error.indicatesUnavailableVoice)
+            XCTAssertEqual(
+                error.localizedDescription,
+                "Azure Speech returned HTTP 400. Unsupported voice en-US-Harper:MAI-Voice-2.1-Flash."
+            )
         } catch {
             XCTFail("Unexpected error \(error)")
         }
+    }
+
+    func testSynthesize_keepsCredentialGuidanceForARejectedKey() async {
+        StubURLProtocol.handler = { _ in .status(401, Data("Access denied".utf8)) }
+        let api = AzureSpeechVoiceAPI(session: StubURLProtocol.makeSession())
+
+        do {
+            _ = try await api.synthesize(
+                credentials: "secret:eastus", text: "Hello", voice: "azure/en-GB-SoniaNeural",
+                format: "riff-24khz-16bit-mono-pcm"
+            )
+            XCTFail("A 401 must not be returned as audio")
+        } catch AzureSpeechError.service(let status) {
+            XCTAssertEqual(status, 401)
+        } catch {
+            XCTFail("Unexpected error \(error)")
+        }
+    }
+
+    func testSynthesisError_truncatesAndRedactsTheResponseText() {
+        let body = "Key secret-key was rejected. " + String(repeating: "padding ", count: 100)
+        let error = AzureSpeechSynthesisError(statusCode: 429, body: Data(body.utf8), apiKey: "secret-key")
+
+        XCTAssertFalse(error.detail.contains("secret-key"))
+        XCTAssertTrue(error.detail.hasPrefix("Key [redacted] was rejected."))
+        XCTAssertEqual(error.detail.count, AzureSpeechSynthesisError.detailLimit + 1)
+        XCTAssertTrue(error.detail.hasSuffix("…"))
+        XCTAssertTrue(error.localizedDescription.hasPrefix("Azure quota or rate limit reached."))
+    }
+
+    func testSynthesisError_onlyClaimsAnUnavailableVoiceWhenAzureSaysSo() {
+        func error(_ text: String) -> AzureSpeechSynthesisError {
+            AzureSpeechSynthesisError(statusCode: 400, body: Data(text.utf8), apiKey: "")
+        }
+        XCTAssertTrue(error("The voice MAI-Voice-2.1 is not available in this region.").indicatesUnavailableVoice)
+        XCTAssertTrue(error("Model not supported for this resource").indicatesUnavailableVoice)
+        // A malformed request names neither an unavailable voice nor model.
+        XCTAssertFalse(error("SSML parsing error: 0x80045003 - Unexpected element.").indicatesUnavailableVoice)
+        XCTAssertFalse(error("").indicatesUnavailableVoice)
+        XCTAssertEqual(error("").localizedDescription, "Azure Speech returned HTTP 400.")
     }
 
     func testSynthesize_treatsAnEmptySuccessAsInvalid() async {

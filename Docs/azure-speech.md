@@ -62,19 +62,26 @@ regional voice list omits them. The resource's own list still supplies every
 other MAI speaker and locale, and older MAI models it still serves
 (MAI-Voice-2, MAI-Voice-1). Speakers such as Harper exist in many locales, so MAI
 voices are named with their locale and model, for example
-"Harper (en-US, MAI-Voice-2.1)". A saved MAI voice keeps that name offline.
+"Harper (en-US, MAI-Voice-2.1)". A saved MAI voice keeps that name offline,
+including locales with a script or variant such as `zh-Hans-CN`. A curated
+voice that the resource also lists keeps the catalogue's traits (accent,
+multilingual, low latency).
 
-If Azure answers an MAI request with HTTP 400, the app says the resource
-cannot use MAI voices instead of reporting a bare status code. Region coverage
-is still settling: Microsoft's MAI voice page lists 14 serving regions, while
-the region table marks 9.
+Failed synthesis keeps Azure's own response text (whitespace collapsed, at most
+300 characters, with the key removed if it were ever echoed). Only when that
+text says the voice or model is unavailable does an MAI request report that the
+resource cannot use MAI voices; a malformed request is reported as such. Region
+coverage is still settling: Microsoft's MAI voice page lists 14 serving regions,
+while the region table marks 9.
 
 MAI voice output currently requires normal speed and pitch. Unsupported changes
 produce an explicit message. MAI-Voice-2.1 is estimated at $22 and Flash at $15
 per million characters; older MAI models have no published rate here and are
 shown as unknown rather than using the conventional neural-voice price.
 MAI-Transcribe-2 recorded audio is estimated at its $0.10 per hour launch price,
-which Microsoft offers until the end of 2026. MP3 output requested through the M4A preference
+which Microsoft offers only until 31 December 2026. The pricing table is
+maintained by hand: replace that rate when Microsoft publishes the standard
+price. MP3 output requested through the M4A preference
 is saved with an MP3 extension, matching Azure's actual response container.
 Conventional voice prosody uses signed relative values (`+0%`, `+0st`);
 Azure rejects the unsigned zero values previously sent by the app.

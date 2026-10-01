@@ -127,16 +127,18 @@ public enum AzureMAIVoiceCatalog {
 
     /// A friendly name read from the identifier alone, for an MAI voice that
     /// only a resource listing offered. Nil for anything that is not an MAI
-    /// voice name of the form `<locale>-<speaker>:<model>`.
+    /// voice name of the form `<locale>-<speaker>:<model>`, where the locale
+    /// has at least a language and a region.
     public static func displayName(forVoiceID voiceID: String) -> String? {
         guard isMAIVoice(voiceID) else { return nil }
         let parts = shortName(forVoiceID: voiceID).split(separator: ":", maxSplits: 1)
         guard parts.count == 2 else { return nil }
+        // Azure locales can carry a script or variant (`zh-Hans-CN`,
+        // `zh-CN-sichuan`), so the speaker is the last component, not the third.
         let nameParts = parts[0].split(separator: "-")
-        guard nameParts.count >= 3 else { return nil }
-        let locale = nameParts.prefix(2).joined(separator: "-")
-        let speaker = nameParts.dropFirst(2).joined(separator: "-")
-        return displayName(speaker: speaker, locale: locale, model: String(parts[1]))
+        guard nameParts.count >= 3, let speaker = nameParts.last else { return nil }
+        let locale = nameParts.dropLast().joined(separator: "-")
+        return displayName(speaker: String(speaker), locale: locale, model: String(parts[1]))
     }
 
     /// Published price per 1,000 characters, or nil when the voice is not a

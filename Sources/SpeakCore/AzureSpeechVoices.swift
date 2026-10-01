@@ -22,6 +22,43 @@ public struct AzureSpeechVoice: Decodable, Sendable, Equatable {
     }
 }
 
+/// A synthesis response that was not audio, with Azure's own diagnostic.
+///
+/// `detail` is Azure's response text with whitespace collapsed, capped at
+/// `detailLimit` characters and with the subscription key removed should the
+/// service ever echo it, so it is safe to show and to log.
+public struct AzureSpeechSynthesisError: LocalizedError, Sendable, Equatable {
+    public static let detailLimit = 300
+    public let statusCode: Int
+    public let detail: String
+
+    public init(statusCode: Int, body: Data, apiKey: String) {
+        self.statusCode = statusCode
+        var text = String(bytes: body, encoding: .utf8) ?? ""
+        if !apiKey.isEmpty { text = text.replacingOccurrences(of: apiKey, with: "[redacted]") }
+        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        self.detail = collapsed.count > Self.detailLimit ? String(collapsed.prefix(Self.detailLimit)) + "…" : collapsed
+    }
+
+    /// Whether Azure's text says the voice or model itself is unavailable, as
+    /// opposed to a malformed request. Only that justifies access guidance.
+    public var indicatesUnavailableVoice: Bool {
+        let text = detail.lowercased()
+        let namesVoice = ["voice", "model", "mai-"].contains { text.contains($0) }
+        let unavailable = [
+            "not supported", "unsupported", "not available", "unavailable", "not found",
+            "does not exist", "not allowed", "not enabled"
+        ].contains { text.contains($0) }
+        return namesVoice && unavailable
+    }
+
+    public var errorDescription: String? {
+        let status = AzureSpeechError.service(statusCode).errorDescription
+            ?? "Azure Speech returned HTTP \(statusCode)."
+        return detail.isEmpty ? status : "\(status) \(detail)"
+    }
+}
+
 public struct AzureSpeechVoiceAPI: Sendable {
     private let session: URLSession
     public init(session: URLSession = .shared) { self.session = session }
@@ -55,7 +92,17 @@ public struct AzureSpeechVoiceAPI: Sendable {
         let (data, response) = try await session.data(for: request, delegate: redirects)
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse else { throw AzureSpeechError.invalidResponse }
-        guard http.statusCode == 200 else { throw AzureSpeechError.service(http.statusCode) }
+        guard http.statusCode == 200 else {
+            // A rejected key or region keeps its credential guidance; any other
+            // failure keeps Azure's own diagnostic.
+            if http.statusCode == 401 || http.statusCode == 403 {
+                throw AzureSpeechError.service(http.statusCode)
+            }
+            throw AzureSpeechSynthesisError(
+                statusCode: http.statusCode, body: data,
+                apiKey: request.value(forHTTPHeaderField: "Ocp-Apim-Subscription-Key") ?? ""
+            )
+        }
         guard !data.isEmpty else { throw AzureSpeechError.invalidResponse }
         return data
     }

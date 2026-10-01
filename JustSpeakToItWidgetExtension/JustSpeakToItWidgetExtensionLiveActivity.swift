@@ -194,7 +194,8 @@ private struct SmallTranscriptionActivityView: View {
         switch state.status {
         case .recording: "Recording"
         case .listening: "Listening"
-        case .arming: "Preparing…"
+        // Unproven capture shares the app's and Lock Screen's copy (issue #983).
+        case .arming: CapturePresentationGate.preparingMessage
         case .armed: "Ready for speech"
         case .idle: "Ready"
         case .paused: "Paused"

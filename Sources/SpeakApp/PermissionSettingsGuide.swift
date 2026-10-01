@@ -124,6 +124,10 @@ extension PermissionType {
             return "This permission is restricted. Check Screen Time or ask your Mac administrator "
                 + "to allow access."
         }
+        if self == .accessibility {
+            return "Turn on \(appName) in the app list. "
+                + RunningAppIdentity.current.accessibilityRecoveryInstructions
+        }
         if dragGuidancePane != nil {
             return "Turn on \(appName) in the app list. If it is missing, click + and select the running app. "
                 + "Unlock with your password or Touch ID if asked. "

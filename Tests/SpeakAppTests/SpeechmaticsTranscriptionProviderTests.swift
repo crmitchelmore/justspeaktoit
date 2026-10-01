@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -43,7 +44,7 @@ final class SpeechmaticsTranscriptionProviderTests: XCTestCase {
 
   func testValidateAPIKey_sendsAuthorizationHeaderToSpeechmaticsJobsEndpoint() async throws {
     let requestObserver = SpeechmaticsRequestObserver()
-    SpeechmaticsMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       let response = HTTPURLResponse(
         url: try XCTUnwrap(request.url),
@@ -53,7 +54,7 @@ final class SpeechmaticsTranscriptionProviderTests: XCTestCase {
       )!
       return (response, Data(#"{"jobs":[]} "#.utf8))
     }
-    defer { SpeechmaticsMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let provider = SpeechmaticsTranscriptionProvider(session: makeMockSession())
     let result = await provider.validateAPIKey("test-speechmatics-key")
@@ -72,7 +73,7 @@ final class SpeechmaticsTranscriptionProviderTests: XCTestCase {
 
   private func makeMockSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
-    configuration.protocolClasses = [SpeechmaticsMockURLProtocol.self]
+    configuration.protocolClasses = [StubURLProtocol.self]
     return URLSession(configuration: configuration)
   }
 }
@@ -87,36 +88,4 @@ private actor SpeechmaticsRequestObserver {
   func capturedRequest() -> URLRequest? {
     request
   }
-}
-
-private final class SpeechmaticsMockURLProtocol: URLProtocol {
-  nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("SpeechmaticsMockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
 }

@@ -5,15 +5,15 @@ import Foundation
 ///
 /// This is a different product from the Grok Voice realtime route in
 /// `XAIVoiceModels`: it has its own REST and WebSocket endpoints, and xAI
-/// publishes **no model identifier** for it — neither request accepts a `model`
-/// field, and the models page lists it as the capability "Speech to Text"
-/// rather than as a named model. The catalogue identifiers below are therefore
-/// named after the capability, so the app never advertises a model id that does
-/// not exist.
+/// supports an explicit model on both REST and WebSocket requests. Keep the
+/// catalogue identifiers stable so existing saved selections upgrade in place.
 ///
 /// Contract: https://docs.x.ai/developers/model-capabilities/audio/speech-to-text
-/// (read 2026-09-10).
+/// (read 2026-09-19).
 public enum XAISpeechToText {
+    public static let apiModelName = "grok-voice-transcribe-2.0"
+    public static let displayName = "Grok Voice Transcribe 2.0"
+
     /// Batch (file upload) catalogue identifier.
     public static let batchCatalogID = "xai/speech-to-text"
     /// Realtime (WebSocket) catalogue identifier.

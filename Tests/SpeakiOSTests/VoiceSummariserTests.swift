@@ -1,54 +1,9 @@
 import Foundation
+import SpeakCore
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakiOSLib
-
-private final class VoiceSummariserMockURLProtocol: URLProtocol {
-    private static let handlerQueue = DispatchQueue(label: "VoiceSummariserMockURLProtocol.handler")
-    private static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    static func setRequestHandler(
-        _ handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-    ) {
-        handlerQueue.sync {
-            requestHandler = handler
-        }
-    }
-
-    static func currentRequestHandler() -> (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))? {
-        handlerQueue.sync {
-            requestHandler
-        }
-    }
-
-    override static func canInit(with request: URLRequest) -> Bool {
-        true
-    }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
-    }
-
-    override func startLoading() {
-        guard let handler = Self.currentRequestHandler() else {
-            XCTFail("VoiceSummariserMockURLProtocol.requestHandler was not set")
-            return
-        }
-
-        Task {
-            do {
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
-}
 
 private func voiceSummariserRequestBody(from request: URLRequest) -> Data? {
     if let body = request.httpBody {
@@ -88,7 +43,7 @@ final class VoiceSummariserTests: XCTestCase {
     """
 
     override func tearDown() {
-        VoiceSummariserMockURLProtocol.setRequestHandler(nil)
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
@@ -101,7 +56,7 @@ final class VoiceSummariserTests: XCTestCase {
 
     func testSummarise_sendsExpectedRequestAndTrimsResponse() async throws {
         let expectedUserContent = markdownInput
-        VoiceSummariserMockURLProtocol.setRequestHandler { request in
+        StubURLProtocol.respond {  request in
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.url?.absoluteString, "https://openrouter.ai/api/v1/chat/completions")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
@@ -110,7 +65,7 @@ final class VoiceSummariserTests: XCTestCase {
 
             let body = try XCTUnwrap(voiceSummariserRequestBody(from: request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            XCTAssertEqual(json["model"] as? String, "openai/gpt-4o-mini")
+            XCTAssertEqual(json["model"] as? String, ModelCatalog.defaultFastTextModel)
             XCTAssertEqual(json["max_tokens"] as? Int, 300)
 
             let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
@@ -148,7 +103,7 @@ final class VoiceSummariserTests: XCTestCase {
     }
 
     func testSummarise_throwsAPIErrorForNonSuccessResponse() async {
-        VoiceSummariserMockURLProtocol.setRequestHandler { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 429,
@@ -171,7 +126,7 @@ final class VoiceSummariserTests: XCTestCase {
     }
 
     func testSummarise_throwsInvalidResponseForMalformedPayload() async {
-        VoiceSummariserMockURLProtocol.setRequestHandler { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -200,7 +155,7 @@ final class VoiceSummariserTests: XCTestCase {
 
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [VoiceSummariserMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 }

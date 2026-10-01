@@ -20,7 +20,7 @@ import zlib
 
 sys.dont_write_bytecode = True
 
-MODEL = "google/gemini-2.0-flash-001"  # ModelCatalog.defaultBatchTranscriptionModel
+MODEL = "google/gemini-3.1-flash-lite"  # ModelCatalog.defaultBatchTranscriptionModel
 COMPLETED_ID = "7D3E8A10-5C2B-4F6E-9A41-0C1D2E3F4A5B"
 INTERRUPTED_ID = "2B9F4C6D-8E1A-4D3B-B5C7-9E0F1A2B3C4D"
 TRANSCRIPT = ("Lifecycle fixture transcript: \N{GREEK SMALL LETTER KAPPA}\N{GREEK SMALL LETTER OMICRON WITH TONOS}"

@@ -20,9 +20,8 @@ extension MainManager {
     }
 
     static func friendlyPostProcessingMessage(for error: Error, modelIdentifier: String) -> String {
-        let trimmedModel = modelIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName = ModelCatalog.friendlyName(
-            for: trimmedModel.isEmpty ? "inception/mercury" : trimmedModel
+            for: ModelCatalog.resolvedPostProcessingModel(modelIdentifier)
         )
         if let routerError = error as? OpenRouterClientError {
             switch routerError {

@@ -1049,12 +1049,8 @@ final class MainManager: ObservableObject {
         else {
           return
         }
-        let configuredModel = appSettings.postProcessingModel
-          .trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedPostProcessingModel =
-          configuredModel.isEmpty
-          ? "inception/mercury"
-          : configuredModel
+          ModelCatalog.resolvedPostProcessingModel(appSettings.postProcessingModel)
         let postProcessingInput = finalText
         let outcomeResult = await postProcessingManager.process(
           rawText: postProcessingInput,
@@ -1366,10 +1362,8 @@ final class MainManager: ObservableObject {
       return
     }
 
-    let configuredModel = appSettings.postProcessingModel
-      .trimmingCharacters(in: .whitespacesAndNewlines)
     let resolvedPostProcessingModel =
-      configuredModel.isEmpty ? "inception/mercury" : configuredModel
+      ModelCatalog.resolvedPostProcessingModel(appSettings.postProcessingModel)
     let postProcessingInput = finalText
 
     session.postProcessingStarted = Date()

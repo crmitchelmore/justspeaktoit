@@ -90,10 +90,10 @@ public enum TranscriptionPricing {
         "groq/whisper-large-v3-turbo": perHour("0.04"),
         // Mistral Voxtral Mini transcription: $0.001/min.
         "mistral/voxtral-mini-latest": rate("0.001"),
-        // Google Gemini audio input: $0.70 per 1M tokens for 2.0 Flash and
-        // $0.075 for Flash-Lite, at 32 audio tokens per second.
-        "google/gemini-2.0-flash-001": rate("0.00134"),
-        "google/gemini-2.0-flash-lite-001": rate("0.00014"),
+        // Google Gemini audio input: $0.50 per 1M tokens for 3.1 Flash-Lite and
+        // $1.00 for 2.5 Flash, at 32 audio tokens per second.
+        "google/gemini-3.1-flash-lite": rate("0.00096"),
+        "google/gemini-2.5-flash": rate("0.00192"),
         // Gladia: $0.612/hr pre-recorded, $0.75/hr real-time.
         "gladia/solaria-1-streaming": perHour("0.75")
     ]

@@ -25,8 +25,7 @@ final class XAISpeechToTextLiveClientTests: XCTestCase {
         XCTAssertEqual(items.first { $0.name == "interim_results" }?.value, "true")
         XCTAssertEqual(items.first { $0.name == "language" }?.value, "en")
         XCTAssertEqual(items.filter { $0.name == "keyterm" }.map(\.value), ["Speak", "xAI"])
-        // No model parameter exists on this endpoint.
-        XCTAssertNil(items.first { $0.name == "model" })
+        XCTAssertEqual(items.filter { $0.name == "model" }.map(\.value), ["grok-voice-transcribe-2.0"])
     }
 
     func testEventDecoding_mapsTheDocumentedIsFinalAndSpeechFinalPairs() throws {
@@ -116,6 +115,29 @@ final class XAISpeechToTextLiveClientTests: XCTestCase {
             Date().timeIntervalSince(started), 2,
             "the done frame must resolve the finish rather than the budget"
         )
+    }
+
+    /// Observed from Transcribe 2.0: the same span is emitted as a chunk final
+    /// and an utterance final, followed by an empty completion frame.
+    func testLiveClient_transcribe2FinalsSurviveEmptyCompletionWithoutDuplication() async {
+        let client = XAISpeechToTextLiveClient(apiKey: "k")
+        let observer = XAITranscriptObserver()
+        client.beginSession(
+            onTranscript: { text, isFinal in observer.record(text, isFinal) },
+            onError: { _ in XCTFail("unexpected error") }
+        )
+        let text = "The blue bicycle is parked beside the library, please bring three apples tomorrow."
+        for speechFinal in [false, true] {
+            client.ingest("""
+            {"type":"transcript.partial","text":"\(text)","is_final":true,
+             "speech_final":\(speechFinal),"start":0.001}
+            """)
+        }
+        let result = await client.awaitFinalTranscript(budget: 5) {
+            client.ingest(#"{"type":"transcript.done","text":"","words":[],"duration":4.804}"#)
+        }
+        XCTAssertEqual(result, text)
+        XCTAssertEqual(observer.finals, [text])
     }
 
     func testLiveClient_sessionWithoutSpeechReturnsNilRatherThanEmptyText() async {

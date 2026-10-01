@@ -165,7 +165,7 @@ em { font-style: italic; }
 
 .site-nav a:hover { color: var(--text); }
 
-@media (max-width: 860px) {
+@media (max-width: 1080px) {
   .site-nav { display: none; }
   .site-header { justify-content: space-between; }
 }

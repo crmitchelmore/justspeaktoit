@@ -172,6 +172,23 @@ final class ComparisonSyncTests: XCTestCase {
         )
     }
 
+    func testRecord_withARoundPayloadMissingEntries_isNotATombstone() throws {
+        let round = makeRound()
+        let record = try ComparisonSyncRecord.record(from: round)
+        let payload = try XCTUnwrap(record["payload"] as? String)
+        var object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
+        )
+        object.removeValue(forKey: "entries")
+        let stripped = try JSONSerialization.data(withJSONObject: object)
+        record["payload"] = String(decoding: stripped, as: UTF8.self)
+        XCTAssertNil(ComparisonSyncRecord.round(from: record))
+        XCTAssertThrowsError(
+            try ComparisonSyncRecord.revision(from: record),
+            "A round payload without entries must not be mistaken for a deletion of the local copy"
+        )
+    }
+
     // MARK: Helpers
 
     private func makeEngine(

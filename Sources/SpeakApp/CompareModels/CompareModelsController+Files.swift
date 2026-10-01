@@ -37,13 +37,19 @@ extension CompareModelsController {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         let sample: ModelComparisonSample
+        // Kept so Cancel can stop hashing a large file instead of waiting it out
+        // with the file and its security-scoped access still open.
+        let sampling = Task.detached(priority: .userInitiated) {
+            try ComparisonFileRunner.sample(for: url)
+        }
+        sampleTask = sampling
         do {
-            sample = try await Task.detached(priority: .userInitiated) {
-                try ComparisonFileRunner.sample(for: url)
-            }.value
+            sample = try await sampling.value
             guard runID == generation else { return }
+            sampleTask = nil
         } catch {
             guard runID == generation else { return }
+            sampleTask = nil
             queuedFiles = []
             phase = .idle
             errorMessage = "Could not read \(url.lastPathComponent): \(error.localizedDescription)"

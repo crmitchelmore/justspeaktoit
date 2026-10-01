@@ -175,7 +175,6 @@ final class LivePolishManager: ObservableObject {
       return postProcessing
     }
 
-    // Fast default
-    return "openai/gpt-4.1-mini"
+    return ModelCatalog.defaultFastTextModel
   }
 }

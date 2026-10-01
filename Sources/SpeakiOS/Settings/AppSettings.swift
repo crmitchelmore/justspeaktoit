@@ -316,6 +316,12 @@ public final class AppSettings: ObservableObject {
     private static let logger = SpeakLogger.logger(category: "AppSettings")
     private var keyChangeObserver: NSObjectProtocol?
     private var syncedKeyReloadDepth = 0
+    /// Latest-edit-wins bookkeeping per credential identifier. Each write waits
+    /// for the previous one, so an older value can never land after a newer one;
+    /// a reload publishes a stored value only once every local edit is settled.
+    private var secretWriteTails: [String: Task<Void, Never>] = [:]
+    private var secretEditGenerations: [String: UInt64] = [:]
+    private var settledSecretGenerations: [String: UInt64] = [:]
     private let credentials: SecureStorage
     private let migratesLegacyCredentials: Bool
     private var protectedDataObserver: NSObjectProtocol?
@@ -337,20 +343,37 @@ public final class AppSettings: ObservableObject {
     /// Persists (or clears when empty) an API key on the canonical secure store.
     /// Keychain failures are logged rather than silently dropped so a key that
     /// appears saved but didn't persist is diagnosable from logs.
+    ///
+    /// Writes for one identifier run strictly in edit order: each waits for the
+    /// previous write, and a write already superseded by a newer edit is skipped
+    /// because that newer write is queued behind it.
     private func persistSecret(_ value: String, identifier: String) {
         guard syncedKeyReloadDepth == 0 else { return }
-        Task {
+        let generation = secretEditGenerations[identifier, default: 0] &+ 1
+        secretEditGenerations[identifier] = generation
+        let previousWrite = secretWriteTails[identifier]
+        secretWriteTails[identifier] = Task {
+            if let previousWrite { await previousWrite.value }
+            guard self.secretEditGenerations[identifier] == generation else { return }
             do {
                 if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    try await credentials.removeSecret(identifier: identifier)
+                    try await self.credentials.removeSecret(identifier: identifier)
                 } else {
-                    try await credentials.storeSecret(value, identifier: identifier)
+                    try await self.credentials.storeSecret(value, identifier: identifier)
                 }
             } catch {
                 Self.logger.error(
                     "Failed to persist secret \(identifier, privacy: .public): \(error.localizedDescription)"
                 )
             }
+            self.settledSecretGenerations[identifier] = generation
+        }
+    }
+
+    /// Waits until every queued API-key write has finished.
+    func awaitPendingSecretWrites() async {
+        for write in Array(secretWriteTails.values) {
+            await write.value
         }
     }
 
@@ -817,8 +840,6 @@ public final class AppSettings: ObservableObject {
     @discardableResult
     public func reloadSyncedAPIKeys() async -> Bool {
         guard await credentials.preloadAndReportSuccess() else { return false }
-        syncedKeyReloadDepth += 1
-        defer { syncedKeyReloadDepth -= 1 }
         await reloadCoreAPIKeys()
         await reloadStreamingProviderAPIKeys()
         credentialsAvailable = true
@@ -826,73 +847,25 @@ public final class AppSettings: ObservableObject {
     }
 
     private func reloadCoreAPIKeys() async {
-        deepgramAPIKey = await syncedAPIKeyValue(
-            identifier: Self.deepgramKeyID,
-            currentValue: deepgramAPIKey
-        )
-        openRouterAPIKey = await syncedAPIKeyValue(
-            identifier: Self.openRouterKeyID,
-            currentValue: openRouterAPIKey
-        )
-        openAIAPIKey = await syncedAPIKeyValue(
-            identifier: Self.openAIKeyID,
-            currentValue: openAIAPIKey
-        )
-        elevenLabsAPIKey = await syncedAPIKeyValue(
-            identifier: Self.elevenLabsKeyID,
-            currentValue: elevenLabsAPIKey
-        )
-        cartesiaAPIKey = await syncedAPIKeyValue(
-            identifier: Self.cartesiaKeyID,
-            currentValue: cartesiaAPIKey
-        )
-        sonioxAPIKey = await syncedAPIKeyValue(
-            identifier: Self.sonioxKeyID,
-            currentValue: sonioxAPIKey
-        )
-        modulateAPIKey = await syncedAPIKeyValue(
-            identifier: Self.modulateKeyID,
-            currentValue: modulateAPIKey
-        )
-        assemblyAIAPIKey = await syncedAPIKeyValue(
-            identifier: Self.assemblyAIKeyID,
-            currentValue: assemblyAIAPIKey
-        )
-        gladiaAPIKey = await syncedAPIKeyValue(
-            identifier: Self.gladiaKeyID,
-            currentValue: gladiaAPIKey
-        )
-        googleAPIKey = await syncedAPIKeyValue(
-            identifier: Self.googleKeyID,
-            currentValue: googleAPIKey
-        )
+        await reloadSyncedAPIKey(\.deepgramAPIKey, identifier: Self.deepgramKeyID)
+        await reloadSyncedAPIKey(\.openRouterAPIKey, identifier: Self.openRouterKeyID)
+        await reloadSyncedAPIKey(\.openAIAPIKey, identifier: Self.openAIKeyID)
+        await reloadSyncedAPIKey(\.elevenLabsAPIKey, identifier: Self.elevenLabsKeyID)
+        await reloadSyncedAPIKey(\.cartesiaAPIKey, identifier: Self.cartesiaKeyID)
+        await reloadSyncedAPIKey(\.sonioxAPIKey, identifier: Self.sonioxKeyID)
+        await reloadSyncedAPIKey(\.modulateAPIKey, identifier: Self.modulateKeyID)
+        await reloadSyncedAPIKey(\.assemblyAIAPIKey, identifier: Self.assemblyAIKeyID)
+        await reloadSyncedAPIKey(\.gladiaAPIKey, identifier: Self.gladiaKeyID)
+        await reloadSyncedAPIKey(\.googleAPIKey, identifier: Self.googleKeyID)
     }
 
     private func reloadStreamingProviderAPIKeys() async {
-        xAIAPIKey = await syncedAPIKeyValue(
-            identifier: Self.xAIKeyID,
-            currentValue: xAIAPIKey
-        )
-        azureAPIKey = await syncedAPIKeyValue(
-            identifier: Self.azureKeyID,
-            currentValue: azureAPIKey
-        )
-        metaAPIKey = await syncedAPIKeyValue(
-            identifier: Self.metaKeyID,
-            currentValue: metaAPIKey
-        )
-        speechmaticsAPIKey = await syncedAPIKeyValue(
-            identifier: Self.speechmaticsKeyID,
-            currentValue: speechmaticsAPIKey
-        )
-        revAIAPIKey = await syncedAPIKeyValue(
-            identifier: Self.revAIKeyID,
-            currentValue: revAIAPIKey
-        )
-        mistralAPIKey = await syncedAPIKeyValue(
-            identifier: Self.mistralKeyID,
-            currentValue: mistralAPIKey
-        )
+        await reloadSyncedAPIKey(\.xAIAPIKey, identifier: Self.xAIKeyID)
+        await reloadSyncedAPIKey(\.azureAPIKey, identifier: Self.azureKeyID)
+        await reloadSyncedAPIKey(\.metaAPIKey, identifier: Self.metaKeyID)
+        await reloadSyncedAPIKey(\.speechmaticsAPIKey, identifier: Self.speechmaticsKeyID)
+        await reloadSyncedAPIKey(\.revAIAPIKey, identifier: Self.revAIKeyID)
+        await reloadSyncedAPIKey(\.mistralAPIKey, identifier: Self.mistralKeyID)
     }
 
     @discardableResult
@@ -911,14 +884,30 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    private func syncedAPIKeyValue(identifier: String, currentValue: String) async -> String {
+    /// Publishes one stored credential without persisting it back. The value is
+    /// skipped when the store cannot be read, when a local edit is still being
+    /// written, or when the user edited the key while it was being read, so a
+    /// reload can never replace a newer local edit with an older stored value.
+    private func reloadSyncedAPIKey(
+        _ keyPath: ReferenceWritableKeyPath<AppSettings, String>,
+        identifier: String
+    ) async {
+        let generation = secretEditGenerations[identifier, default: 0]
+        let stored: String
         do {
-            return try await credentials.secret(identifier: identifier)
+            stored = try await credentials.secret(identifier: identifier)
         } catch SecureStorageError.valueNotFound {
-            return ""
+            stored = ""
         } catch {
-            return currentValue
+            return
         }
+        guard secretEditGenerations[identifier, default: 0] == generation,
+              settledSecretGenerations[identifier, default: 0] == generation else { return }
+        // Held only around the synchronous assignment, so an edit made while
+        // the reload awaits the store is still persisted.
+        syncedKeyReloadDepth += 1
+        defer { syncedKeyReloadDepth -= 1 }
+        self[keyPath: keyPath] = stored
     }
 
     private func observeSecureStorageChanges() {

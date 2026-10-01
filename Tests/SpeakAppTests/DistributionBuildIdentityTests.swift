@@ -177,6 +177,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
             encoding: .utf8
         )
+        let appSettings = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Settings/AppSettings.swift"),
+            encoding: .utf8
+        )
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
         XCTAssertTrue(manifest.contains("if isIOSKeyboardEnabled {"))
@@ -184,9 +188,12 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(manifest.contains("iosActiveCompilationConditions.append(\"IOS_KEYBOARD_FEATURE\")"))
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD_DIRECT_CAPTURE\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("IOS_KEYBOARD_DIRECT_CAPTURE"))
-        XCTAssertTrue(manifest.contains("let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled"))
+        // Both keyboard configurations now ship the checked-in plist: the
+        // extension binary references the record-permission and Speech APIs
+        // whether or not direct capture is on, so the purpose strings cannot be
+        // gated on the flag. See IOSAppStoreComplianceTests.
         XCTAssertTrue(
-            manifest.contains("? .file(path: .relativeToRoot(trainPlistPath(\"JustSpeakKeyboard/Info.plist\")))")
+            manifest.contains("trainPlistPath(\"JustSpeakKeyboard/Info.plist\")")
         )
         XCTAssertTrue(manifest.contains("infoPlist: iosKeyboardInfoPlist"))
         XCTAssertTrue(manifest.contains("settings: .settings(base: iosTestSettings)"))
@@ -201,7 +208,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(app.contains("guard FeatureFlags.iOSKeyboardEnabled else"))
         XCTAssertTrue(app.contains("KeyboardInstantDictationStore.shared.setEnabled(false)"))
         XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
-        XCTAssertTrue(settings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
+        XCTAssertTrue(appSettings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
     }
 
     func testWatchAppBuildFeature_isOffByDefault() throws {
@@ -445,8 +452,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
             )
         )
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
-        XCTAssertTrue(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
-        XCTAssertTrue(workflow.contains("Direct-capture keyboard is missing $usage_key"))
+        XCTAssertTrue(workflow.contains("python3 scripts/verify-keyboard-purpose-strings.py"))
+        XCTAssertFalse(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
         XCTAssertFalse(autoRelease.contains("-f include_keyboard=true"))
         XCTAssertTrue(workflow.contains("ref: ${{ inputs.manifest }}"))
 
@@ -545,7 +552,8 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("GITHUB_STEP_SUMMARY"))
 
         XCTAssertTrue(architectureScript.contains("lipo -archs"))
-        XCTAssertTrue(architectureScript.contains("Contents/MacOS/JustSpeakToIt"))
+        XCTAssertTrue(architectureScript.contains("CFBundleExecutable"))
+        XCTAssertFalse(architectureScript.contains("Contents/MacOS/JustSpeakToIt"))
         XCTAssertTrue(architectureScript.contains("Contents/MacOS/speak"))
         XCTAssertTrue(architectureScript.contains("must contain exactly"))
         XCTAssertTrue(sizeScript.contains("GITHUB_STEP_SUMMARY"))
@@ -685,9 +693,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Project.swift"),
             encoding: .utf8
         )
-        let iosTarget = try targetBlock(named: "SpeakiOS", in: manifest)
+        let infoPlist = try iosAppInfoPlistBlock(in: manifest)
 
-        XCTAssertTrue(iosTarget.contains("\"UIBackgroundModes\": [\"audio\", \"remote-notification\"]"))
+        XCTAssertTrue(infoPlist.contains("\"UIBackgroundModes\": [\"audio\", \"remote-notification\"]"))
     }
     // swiftlint:disable:next file_length
 }

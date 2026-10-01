@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -10,11 +11,11 @@ import XCTest
 final class GroqGeminiTTSTransportTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        TTSTransportMockURLProtocol.reset()
+        StubURLProtocol.reset()
     }
 
     override func tearDown() {
-        TTSTransportMockURLProtocol.reset()
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
@@ -30,7 +31,7 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
             request: GroqTTSRequest(voiceID: "groq/orpheus-v1-english/austin")
         )
 
-        let recorded = try XCTUnwrap(TTSTransportMockURLProtocol.lastRequest)
+        let recorded = try XCTUnwrap(StubURLProtocol.lastRequest)
         XCTAssertEqual(
             recorded.url?.absoluteString,
             "https://api.groq.com/openai/v1/audio/speech"
@@ -77,7 +78,7 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
         ) { error in
             XCTAssertEqual(error as? GroqTTSAPIError, .emptyText)
         }
-        XCTAssertNil(TTSTransportMockURLProtocol.lastRequest)
+        XCTAssertNil(StubURLProtocol.lastRequest)
     }
 
     func testGroqErrors_separateTheTermsGateFromABadKey() {
@@ -144,7 +145,7 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
             request: GeminiTTSRequest(voiceID: "google/Kore", languageIdentifier: "en_GB")
         )
 
-        let recorded = try XCTUnwrap(TTSTransportMockURLProtocol.lastRequest)
+        let recorded = try XCTUnwrap(StubURLProtocol.lastRequest)
         XCTAssertEqual(
             recorded.url?.absoluteString,
             "https://generativelanguage.googleapis.com/v1beta/interactions"
@@ -280,7 +281,7 @@ final class GroqGeminiTTSTransportTests: XCTestCase {
 
     func testGeminiSynthesize_retriesOnceWhenNoAudioComesBack() async throws {
         let counter = TTSTransportCallCounter()
-        TTSTransportMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let attempt = counter.next()
             let body = attempt == 0
                 ? Data(#"{"steps":[{"content":[{"type":"text","text":"sorry"}]}]}"#.utf8)

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakHotKeys
 
 // MARK: - Troubleshooting Item Model
@@ -166,9 +167,7 @@ struct PostProcessingAPIKeyCheck: TroubleshootingCheck {
       return []
     }
 
-    let model = settings.postProcessingModel
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    let resolvedModel = model.isEmpty ? "inception/mercury" : model
+    let resolvedModel = ModelCatalog.resolvedPostProcessingModel(settings.postProcessingModel)
     let isLocal = resolvedModel.lowercased().hasPrefix("apple/")
       || resolvedModel.lowercased().hasPrefix("local/")
       || resolvedModel.lowercased() == "on-device"

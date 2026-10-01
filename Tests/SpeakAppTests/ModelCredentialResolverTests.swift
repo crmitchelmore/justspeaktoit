@@ -67,7 +67,7 @@ final class ModelCredentialResolverTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelCredentialResolver.requirement(
-                for: "google/gemini-2.0-flash-001",
+                for: "google/gemini-3.1-flash-lite",
                 purpose: .batchTranscription
             ),
             .apiKey(identifier: "openrouter.apiKey", providerName: "OpenRouter")

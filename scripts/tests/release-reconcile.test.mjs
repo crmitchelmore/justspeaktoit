@@ -18,7 +18,7 @@ fs.appendFileSync(process.env.CALL_LOG,JSON.stringify(a)+'\\n');
 if(a[0]==='workflow') process.exit(0);
 const path=a.at(-1);
 if(path.includes('/releases?')) console.log('[[]]');
-else if(path.includes('/ci.yml/')) console.log(JSON.stringify([{workflow_runs:[5,4,3,2,1,0].map(n=>({head_sha:'source'+n}))}]));
+else if(path.includes('/ci.yml/')) console.log(JSON.stringify([{workflow_runs:[3,5,4,2,1,0].map(n=>({run_number:n,head_sha:'source'+n}))}]));
 else if(path.includes('/alpha-release.yml/')) {
  const pages=[{workflow_runs:Array.from({length:100},(_,n)=>({status:'in_progress',display_title:'unrelated'+n}))},{workflow_runs:[{status:'queued',display_title:'Alpha source0'}]}];
  console.log(JSON.stringify(a.includes('--paginate')?pages:pages[0]));
@@ -28,6 +28,6 @@ else if(path.includes('/alpha-release.yml/')) {
   cwd:root,env:{...process.env,PATH:bin+':'+process.env.PATH,CALL_LOG:log},stdio:'pipe'});
  const calls=readFileSync(log,'utf8').trim().split('\n').map(JSON.parse);
  const dispatches=calls.filter(a=>a[0]==='workflow').map(a=>a.at(-1));
- assert.deepEqual(dispatches,['source=source1','source=source2','source=source3']);
+ assert.deepEqual(dispatches,['source=source5','source=source4','source=source3']);
  assert.equal(calls.filter(a=>a[0]==='release').length,0,'undispatched sources are not marked delivered');
 });

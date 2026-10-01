@@ -208,12 +208,14 @@ final class TranscriptClipboardTests: XCTestCase {
         )
     }
 
+    // The pasteboard is main-actor isolated, so it is created in the body rather
+    // than in a default argument, which is evaluated in a nonisolated context.
     private func makeClipboard(
-        pasteboard: RecordingTranscriptPasteboard = RecordingTranscriptPasteboard(),
+        pasteboard: RecordingTranscriptPasteboard? = nil,
         policy: @escaping () -> TranscriptClipboardPolicy = { .defaultValue }
     ) -> TranscriptClipboard {
         TranscriptClipboard(
-            pasteboard: pasteboard,
+            pasteboard: pasteboard ?? RecordingTranscriptPasteboard(),
             now: { Date(timeIntervalSince1970: 1_800_000_000) },
             policy: policy
         )

@@ -76,10 +76,8 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
 
     private static func make(for error: iOSTranscriptionError) -> CaptureStartFailurePresentation {
         switch error {
-        case .permissionDenied(.microphone):
-            return self.microphonePermission
-        case .permissionDenied(.speechRecognition):
-            return self.speechRecognitionPermission
+        case .permissionDenied(let permission):
+            return self.permissionPresentation(for: permission)
         case .recognizerUnavailable:
             return self.recognizerUnavailable
         case .audioSessionFailed:
@@ -105,6 +103,17 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
             return self.microphoneDeliveredNoAudio
         case .finalisationTimedOut:
             return self.finalisationTimedOut
+        }
+    }
+
+    private static func permissionPresentation(
+        for permission: iOSTranscriptionError.Permission
+    ) -> CaptureStartFailurePresentation {
+        switch permission {
+        case .microphone:
+            return self.microphonePermission
+        case .speechRecognition:
+            return self.speechRecognitionPermission
         }
     }
 
@@ -144,7 +153,8 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
         recovery: nil
     )
     private static let liveActivityUnavailable = CaptureStartFailurePresentation(
-        message: "Recording needs Live Activities. Open the app, or enable Live Activities in Settings, then try again.",
+        message: "Recording needs Live Activities. Open the app, or enable Live Activities in Settings, "
+            + "then try again.",
         code: "start_live_activity",
         recovery: .appPermissions
     )

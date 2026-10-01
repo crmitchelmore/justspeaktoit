@@ -24,6 +24,7 @@ extension CartesiaLiveClient {
         var framer: CartesiaPCMFramer
         var assembler = CartesiaTranscriptAssembler()
         var finishWaiters: [CheckedContinuation<String?, Never>] = []
+        var ignoredReceiveFailureStart: TimeInterval?
 
         init(
             sampleRate: Int,
@@ -75,6 +76,30 @@ extension CartesiaLiveClient {
             return StreamingClientError.invalidAPIKey(provider: "Cartesia")
         }
         return error
+    }
+
+    /// Re-arms the receive loop after a failure `WebSocketErrorFilter` ignores.
+    /// ENOTCONN can be spurious around the handshake (the AssemblyAI client
+    /// re-arms for the same reason), but a socket that keeps failing for longer
+    /// than the send budget is a lost connection. The run then ends rather than
+    /// staying current with nothing to read: a finishing run returns what it
+    /// collected, and a recording run reports the failure.
+    func rearmAfterIgnoredReceiveFailure(_ run: Run, socket: LiveWebSocketTransport, socketID: UUID) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let firstFailure = run.ignoredReceiveFailureStart ?? now
+        run.ignoredReceiveFailureStart = firstFailure
+        guard now - firstFailure >= sendBudget else {
+            queue.asyncAfter(deadline: .now() + Self.readinessPoll) { [weak self, weak run] in
+                guard let self, let run, self.isCurrent(run), run.socketID == socketID else { return }
+                self.receive(run, socket: socket, socketID: socketID)
+            }
+            return
+        }
+        if run.finishing {
+            complete(run, closeCode: .normalClosure)
+        } else {
+            fail(run, error: StreamingClientError.transportStalled(provider: "Cartesia"))
+        }
     }
 }
 

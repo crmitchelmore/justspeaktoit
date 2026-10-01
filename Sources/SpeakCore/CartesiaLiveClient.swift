@@ -11,16 +11,16 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
     private static let host = "api.cartesia.ai"
     private static let path = "/stt/turns/websocket"
     private static let defaultSendBudget: TimeInterval = 1.5
-    private static let readinessPoll: TimeInterval = 0.01
+    static let readinessPoll: TimeInterval = 0.01
     private let apiKey: String
     private let model: String
     private let sampleRate: Int
-    private let sendBudget: TimeInterval
+    let sendBudget: TimeInterval
     private let postCloseBudget: TimeInterval
     private let stopGracePeriod: TimeInterval
     private let socketFactory: LiveWebSocketFactory
     private let retainedSession: URLSession?
-    private let queue = DispatchQueue(label: "com.speak.core.cartesia.live")
+    let queue = DispatchQueue(label: "com.speak.core.cartesia.live")
     private let callbackQueue = DispatchQueue(label: "com.speak.core.cartesia.live.callbacks")
     private var run: Run?
     private var lastAssembler: CartesiaTranscriptAssembler?
@@ -302,6 +302,7 @@ extension CartesiaLiveClient {
                 guard let self, let run, self.isCurrent(run), run.socketID == socketID else { return }
                 switch result {
                 case .success(let message):
+                    run.ignoredReceiveFailureStart = nil
                     self.handle(message, run: run) { [weak self, weak run] in
                         self?.queue.async { [weak self, weak run] in
                             guard let self, let run, self.isCurrent(run),
@@ -313,7 +314,7 @@ extension CartesiaLiveClient {
                     if run.finishing, run.closeAdmitted, socket.closeCode == .normalClosure {
                         self.complete(run, closeCode: .normalClosure)
                     } else if WebSocketErrorFilter.shouldIgnore(error) {
-                        return
+                        self.rearmAfterIgnoredReceiveFailure(run, socket: socket, socketID: socketID)
                     } else {
                         self.fail(run, error: self.mapConnectionError(error))
                     }

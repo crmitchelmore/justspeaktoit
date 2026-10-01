@@ -69,6 +69,53 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         XCTAssertEqual(awaited5, "Yes. Yes.")
     }
 
+    func testTimestampedFinalsCountWhenTheyArriveAlone() async {
+        let socket = TestLiveWebSocket()
+        let client = makeClient(socket)
+        let lock = NSLock()
+        var finals: [String] = []
+        client.start(onTranscript: { text, isFinal in
+            if isFinal { lock.withLock { finals.append(text) } }
+        }, onError: { _ in })
+        socket.emit(#"{"message_type":"session_started"}"#)
+        socket.emit(#"{"message_type":"committed_transcript_with_timestamps","text":"One."}"#)
+        socket.emit(#"{"message_type":"committed_transcript_with_timestamps","text":"Two."}"#)
+        let delivered = await eventually { lock.withLock { finals.count == 2 } }
+        XCTAssertTrue(delivered)
+        let transcript = await client.finishAndWait()
+        XCTAssertEqual(transcript, "One. Two.")
+        XCTAssertEqual(lock.withLock { finals }, ["One.", "Two."])
+    }
+
+    func testAudioCapturedBeforeStartIsReplayedAfterHandshake() async throws {
+        let socket = TestLiveWebSocket()
+        let client = makeClient(socket)
+        client.sendAudio(Data([5, 6]))
+        client.start(onTranscript: { _, _ in }, onError: { _ in })
+        socket.emit(#"{"message_type":"session_started"}"#)
+        let replayed = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(replayed)
+        let payload = try json(try XCTUnwrap(textMessages(socket).first))
+        XCTAssertEqual(payload["audio_base_64"] as? String, Data([5, 6]).base64EncodedString())
+    }
+
+    func testMissingHandshakeFailsAtStartupBoundWithoutFinish() async {
+        let socket = TestLiveWebSocket()
+        let client = ElevenLabsLiveClient(
+            apiKey: "test-key",
+            timing: .init(readiness: 0.15, postCommitDrain: 0.05, overall: 0.4, startup: 0.1),
+            socketFactory: TestSocketFactory([socket]).make
+        )
+        let failed = expectation(description: "startup failure")
+        client.start(onTranscript: { _, _ in }, onError: { error in
+            if case ElevenLabsLiveError.connectionFailed = error { failed.fulfill() }
+        })
+        client.sendAudio(Data([1, 2]))
+        await fulfillment(of: [failed], timeout: 1)
+        XCTAssertEqual(socket.cancelCount, 1)
+        XCTAssertFalse(client.isConnected)
+    }
+
     func testHeldSendAndConcurrentFinishersResolveAtBound() async {
         let socket = TestLiveWebSocket()
         socket.automaticallyCompletesSends = false

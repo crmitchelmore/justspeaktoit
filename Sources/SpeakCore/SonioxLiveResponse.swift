@@ -46,3 +46,18 @@ struct SonioxToken: Decodable {
         case isFinal = "is_final"
     }
 }
+
+extension SonioxLiveClient {
+    /// Maps a transport failure carrying an HTTP credential rejection, numeric or
+    /// textual, to the invalid-key error so callers can offer key recovery.
+    func mapConnectionError(_ error: Error) -> Error {
+        let nsError = error as NSError
+        let description = nsError.localizedDescription.lowercased()
+        if nsError.code == 401 || nsError.code == 403
+            || description.contains("401") || description.contains("403")
+            || description.contains("unauthorized") || description.contains("forbidden") {
+            return StreamingClientError.invalidAPIKey(provider: "Soniox")
+        }
+        return error
+    }
+}

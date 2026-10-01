@@ -116,6 +116,49 @@ final class SonioxLiveClientTests: XCTestCase {
         XCTAssertEqual(awaited15, "fresh")
     }
 
+    func testAudioCapturedBeforeStartIsSentAfterConfiguration() async {
+        let socket = TestLiveWebSocket()
+        let client = makeClient(socket)
+        client.sendAudio(Data([7, 8]))
+        client.start(onTranscript: { _, _ in }, onError: { _ in })
+        let sent = await eventually { socket.messages.count == 2 }
+        XCTAssertTrue(sent)
+        guard case .data(let pcm) = socket.messages.last else { return XCTFail("PCM must be binary") }
+        XCTAssertEqual(pcm, Data([7, 8]))
+    }
+
+    func testStalledConfigurationSendFailsAtStartupBoundWithoutFinish() async {
+        let socket = TestLiveWebSocket()
+        socket.automaticallyCompletesSends = false
+        let client = SonioxLiveClient(
+            apiKey: "test-key", timing: .init(overall: 0.4, startup: 0.1),
+            socketFactory: TestSocketFactory([socket]).make
+        )
+        let failed = expectation(description: "startup failure")
+        client.start(onTranscript: { _, _ in }, onError: { error in
+            if case StreamingClientError.transportStalled = error { failed.fulfill() }
+        })
+        client.sendAudio(Data([1, 2]))
+        await fulfillment(of: [failed], timeout: 1)
+        XCTAssertEqual(socket.cancelCount, 1)
+    }
+
+    func testTextualCredentialRejectionMapsToInvalidAPIKey() async {
+        let socket = TestLiveWebSocket()
+        let client = makeClient(socket)
+        let rejected = expectation(description: "invalid key")
+        client.start(onTranscript: { _, _ in }, onError: { error in
+            if case StreamingClientError.invalidAPIKey = error { rejected.fulfill() }
+        })
+        let configured = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(configured)
+        socket.failReceive(NSError(
+            domain: NSURLErrorDomain, code: NSURLErrorBadServerResponse,
+            userInfo: [NSLocalizedDescriptionKey: "WebSocket handshake failed with HTTP 401"]
+        ))
+        await fulfillment(of: [rejected], timeout: 1)
+    }
+
     func testStopStillCancelsWhenCallerDropsLastClientReference() async {
         let socket = TestLiveWebSocket()
         weak var released: SonioxLiveClient?

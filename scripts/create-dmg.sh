@@ -142,7 +142,7 @@ tell application "Finder"
         end try
         
         -- Position icons (centered in the layout)
-        set position of item "JustSpeakToIt.app" of container window to {145, 220}
+        set position of item "$(basename "$APP_PATH")" of container window to {145, 220}
         set position of item "Applications" of container window to {515, 220}
         
         close

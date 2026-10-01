@@ -150,12 +150,14 @@ already shipping, the dedicated speech-to-text service, and speech generation.
 | Platforms | macOS and iOS for both; the batch upload is the shared `XAIBatchTranscriptionClient` |
 | Price | $0.10 / hr of audio (REST), $0.20 / hr (streaming) |
 
-**There is no model identifier.** Neither request accepts a `model` field, and
-the models page prices the capability as "Speech to Text" rather than naming a
-model. The catalogue ids are therefore named after the capability, so the app
-never advertises a model id that does not exist. `grok-transcribe`, which the
-Grok Voice session names as its input-transcription model, is a different thing
-and stays where it is.
+**Grok Voice Transcribe 2.0 (updated 19 September 2026).** Both requests now
+explicitly send `model=grok-voice-transcribe-2.0`: a multipart field before the
+file for batch, and a query parameter for streaming. The pickers show Grok Voice
+Transcribe 2.0. Stable catalogue ids preserve existing saved selections, which
+upgrade in place; there is no separate Transcribe 1.0 option. The shared
+`XAISpeechToText` definition controls the model for both macOS and iOS.
+`grok-transcribe`, which the separate Grok Voice session names as its
+input-transcription model, stays where it is.
 
 **Grok Voice keeps its own entry.** It is speech-to-speech used in
 transcription-only mode and has no file endpoint, so selecting it for a

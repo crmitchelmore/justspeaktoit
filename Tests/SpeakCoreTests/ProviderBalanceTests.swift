@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -288,35 +289,10 @@ struct StubBalanceSource: ProviderBalanceSource {
     }
 }
 
-final class ProviderBalanceMockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.handler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
-    }
-
-    override func stopLoading() {}
-}
-
 extension XCTestCase {
     /// Answers every balance request with a fixed status and body.
     func stubProviderBalanceResponses(_ handler: @escaping @Sendable (URLRequest) -> (Int, String)) {
-        ProviderBalanceMockURLProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let (status, body) = handler(request)
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -330,7 +306,7 @@ extension XCTestCase {
 
     func providerBalanceMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [ProviderBalanceMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 }

@@ -91,8 +91,8 @@ final class ProviderCatalogInvariantTests: XCTestCase {
     /// Multimodal batch models served through OpenRouter rather than a dedicated
     /// provider. Their catalogue display names carry the "(OpenRouter)" suffix.
     private static let openRouterRoutedBatchModels: Set<String> = [
-        "google/gemini-2.0-flash-001",
-        "google/gemini-2.0-flash-lite-001",
+        "google/gemini-3.1-flash-lite",
+        "google/gemini-2.5-flash",
         "openai/gpt-4o-audio-preview-2024-12-17"
     ]
 }

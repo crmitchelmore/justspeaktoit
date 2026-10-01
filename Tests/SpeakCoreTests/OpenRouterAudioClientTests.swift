@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -11,19 +12,19 @@ final class OpenRouterAudioClientTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [OpenRouterAudioMockProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         session = URLSession(configuration: configuration)
     }
 
     override func tearDownWithError() throws {
         session.invalidateAndCancel()
-        OpenRouterAudioMockProtocol.handler = nil
-        OpenRouterAudioMockProtocol.onStop = nil
+        StubURLProtocol.reset()
+        StubURLProtocol.onStopLoading = nil
         try FileManager.default.removeItem(at: directory)
     }
 
     func testDedicatedTranscription_UsesJSONAndPreservesUsageWithoutDebugBodies() async throws {
-        OpenRouterAudioMockProtocol.handler = { request in
+        installAudioStub {  request in
             XCTAssertEqual(request.url?.path, "/api/v1/audio/transcriptions")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
@@ -52,7 +53,7 @@ final class OpenRouterAudioClientTests: XCTestCase {
     }
 
     func testTranscription_EmptyTextAndMissingUsageRemainValid() async throws {
-        OpenRouterAudioMockProtocol.handler = { request in
+        installAudioStub {  request in
             XCTAssertNil(try Self.body(request)["language"])
             return .json(#"{"text":""}"#)
         }
@@ -66,7 +67,7 @@ final class OpenRouterAudioClientTests: XCTestCase {
 
     func testSpeech_WritesRawMP3AndOmitsUnspecifiedProviderOptions() async throws {
         let mp3 = Data([0x49, 0x44, 0x33, 0, 1, 2])
-        OpenRouterAudioMockProtocol.handler = { request in
+        installAudioStub {  request in
             XCTAssertEqual(request.url?.path, "/api/v1/audio/speech")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-key")
             let json = try Self.body(request)
@@ -89,7 +90,7 @@ final class OpenRouterAudioClientTests: XCTestCase {
     }
 
     func testSpeech_ForwardsExplicitVoiceAndSpeed() async throws {
-        OpenRouterAudioMockProtocol.handler = { request in
+        installAudioStub {  request in
             let json = try Self.body(request)
             XCTAssertEqual(json["voice"] as? String, "voice/with:punctuation")
             XCTAssertEqual(json["speed"] as? Double, 1.25)
@@ -101,7 +102,7 @@ final class OpenRouterAudioClientTests: XCTestCase {
     }
 
     func testProviderError_DoesNotExposeBodyOrLeaveFiles() async throws {
-        OpenRouterAudioMockProtocol.handler = { _ in
+        installAudioStub {  _ in
             OpenRouterAudioFixture(data: Data("secret text and test-key".utf8), status: 401)
         }
         do {
@@ -122,7 +123,7 @@ final class OpenRouterAudioClientTests: XCTestCase {
             .init(data: Data([0, 1, 0, 1]), contentType: "audio/pcm")
         ]
         for fixture in fixtures {
-            OpenRouterAudioMockProtocol.handler = { _ in fixture }
+            installAudioStub {  _ in fixture }
             do {
                 _ = try await client().synthesize(text: "Hello", model: "provider/tts", voice: nil)
                 XCTFail("Expected invalid audio")
@@ -134,7 +135,7 @@ final class OpenRouterAudioClientTests: XCTestCase {
     }
 
     func testSpeech_RejectsOversizedStreamWithoutContentLengthAndRemovesPartialFile() async throws {
-        OpenRouterAudioMockProtocol.handler = { _ in OpenRouterAudioFixture(data: Data(repeating: 7, count: 9)) }
+        installAudioStub {  _ in OpenRouterAudioFixture(data: Data(repeating: 7, count: 9)) }
         do {
             _ = try await client(speechLimit: 8).synthesize(text: "Hello", model: "provider/tts", voice: nil)
             XCTFail("Expected bounded download")
@@ -147,8 +148,8 @@ final class OpenRouterAudioClientTests: XCTestCase {
     func testCancellation_StopsPendingDownloadAndRemovesPartialFile() async throws {
         let started = expectation(description: "Response started")
         let stopped = expectation(description: "Transport cancelled")
-        OpenRouterAudioMockProtocol.onStop = { stopped.fulfill() }
-        OpenRouterAudioMockProtocol.handler = { _ in
+        StubURLProtocol.onStopLoading = { stopped.fulfill() }
+        installAudioStub {  _ in
             started.fulfill()
             return OpenRouterAudioFixture(data: Data("ID3".utf8), finish: false)
         }
@@ -167,7 +168,7 @@ final class OpenRouterAudioClientTests: XCTestCase {
     }
 
     func testMissingKeyAndOversizedInput_DoNotSendRequest() async throws {
-        OpenRouterAudioMockProtocol.handler = { _ in
+        installAudioStub {  _ in
             XCTFail("Invalid input should not reach the network")
             return .json(#"{"text":"unexpected"}"#)
         }
@@ -226,28 +227,22 @@ private struct OpenRouterAudioFixture: Sendable {
     }
 }
 
-private final class OpenRouterAudioMockProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) throws -> OpenRouterAudioFixture)?
-    nonisolated(unsafe) static var onStop: (@Sendable () -> Void)?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        do {
-            let handler = try XCTUnwrap(Self.handler)
-            let fixture = try handler(request)
-            let response = try XCTUnwrap(HTTPURLResponse(
-                url: try XCTUnwrap(request.url), statusCode: fixture.status, httpVersion: nil,
-                headerFields: ["Content-Type": fixture.contentType]
-            ))
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: fixture.data)
-            if fixture.finish { client?.urlProtocolDidFinishLoading(self) }
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
+/// Installs an `OpenRouterAudioFixture`-producing closure as the shared stub's
+/// handler. The fixture shape is bespoke to these tests, so it is expressed
+/// here rather than in `StubURLProtocol` (issue #1124).
+private func installAudioStub(
+    _ handler: @escaping @Sendable (URLRequest) throws -> OpenRouterAudioFixture
+) {
+    StubURLProtocol.handler = { request in
+        let fixture = try handler(request)
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: fixture.status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": fixture.contentType]
+        )!
+        return fixture.finish
+            ? .respond(response, fixture.data)
+            : .respondWithoutFinishing(response, fixture.data)
     }
-
-    override func stopLoading() { Self.onStop?() }
 }

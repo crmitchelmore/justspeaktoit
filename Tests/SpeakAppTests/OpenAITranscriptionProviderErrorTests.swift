@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -11,7 +12,7 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
 
     func testTranscribeFile_httpFailure_reportsTheStatusCodeAndTheBody() async throws {
         let body = #"{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}"#
-        OpenAIErrorMockURLProtocol.responseHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 401,
@@ -20,7 +21,7 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
             )!
             return (response, Data(body.utf8))
         }
-        defer { OpenAIErrorMockURLProtocol.responseHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let error = await transcriptionFailure(apiKey: "bad-key")
 
@@ -31,7 +32,7 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
     }
 
     func testTranscribeFile_serverFailure_keepsTheBodyForDiagnostics() async throws {
-        OpenAIErrorMockURLProtocol.responseHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 500,
@@ -40,7 +41,7 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
             )!
             return (response, Data("upstream timeout".utf8))
         }
-        defer { OpenAIErrorMockURLProtocol.responseHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let error = await transcriptionFailure(apiKey: "test-key")
 
@@ -51,7 +52,7 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
     }
 
     func testTranscribeFile_nonHTTPResponse_reportsAnInvalidResponse() async throws {
-        OpenAIErrorMockURLProtocol.responseHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = URLResponse(
                 url: try XCTUnwrap(request.url),
                 mimeType: "application/json",
@@ -60,7 +61,7 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
             )
             return (response, Data())
         }
-        defer { OpenAIErrorMockURLProtocol.responseHandler = nil }
+        defer { StubURLProtocol.reset() }
 
         let error = await transcriptionFailure(apiKey: "test-key")
 
@@ -76,7 +77,7 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
 
     private func transcriptionFailure(apiKey: String) async -> Error? {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [OpenAIErrorMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         let provider = OpenAITranscriptionProvider(session: URLSession(configuration: configuration))
 
         let audioURL = FileManager.default.temporaryDirectory
@@ -105,33 +106,3 @@ final class OpenAITranscriptionProviderErrorTests: XCTestCase {
 }
 
 // MARK: - Test Infrastructure
-
-private final class OpenAIErrorMockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var responseHandler: (@Sendable (URLRequest) throws -> (URLResponse, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool {
-        true
-    }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
-    }
-
-    override func startLoading() {
-        guard let handler = Self.responseHandler else {
-            XCTFail("OpenAIErrorMockURLProtocol.responseHandler was not set")
-            return
-        }
-
-        do {
-            let (response, data) = try handler(request)
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-        }
-    }
-
-    override func stopLoading() {}
-}

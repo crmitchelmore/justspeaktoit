@@ -56,7 +56,7 @@ struct PhononRuntime: Sendable {
                 timeout: LocalProcessRunner.setupTimeout
             )
         }
-        guard let requirements = Bundle.module.url(forResource: "phonon-requirements", withExtension: "txt") else {
+        guard let requirements = Self.requirementsURL else {
             throw LocalProcessError.failed("The bundled Phonon runtime requirements are missing.")
         }
         _ = try await LocalProcessRunner.run(
@@ -87,6 +87,18 @@ struct PhononRuntime: Sendable {
         try Task.checkCancellation()
         let record = Receipt(runtimeVersion: Self.version, modelPath: folder.path)
         try JSONEncoder().encode(record).write(to: receipt, options: .atomic)
+    }
+
+    /// The release app (Tuist/Xcode) ships the pinned list in its main bundle; `swift build` uses the module bundle.
+    static var requirementsURL: URL? {
+        if let url = Bundle.main.url(forResource: "phonon-requirements", withExtension: "txt") {
+            return url
+        }
+        #if SWIFT_PACKAGE
+        return Bundle.module.url(forResource: "phonon-requirements", withExtension: "txt")
+        #else
+        return nil
+        #endif
     }
 
     func deleteModel() throws {

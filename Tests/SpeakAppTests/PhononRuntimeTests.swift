@@ -26,6 +26,14 @@ final class PhononRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try PhononRuntime.decode("not JSON"))
     }
 
+    func testBundledRequirementsPinTheRuntimeVersion() throws {
+        let url = try XCTUnwrap(PhononRuntime.requirementsURL, "phonon-requirements.txt must be bundled")
+        let pins = try String(contentsOf: url, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        XCTAssertTrue(pins.contains("fermion-research==\(PhononRuntime.version)"))
+    }
+
     func testLanguageHintsRejectUnsupportedLanguages() throws {
         for language in [nil, "", "auto", "en", "en-GB", "en_US", "English"] {
             XCTAssertNoThrow(try PhononRuntime.validateLanguage(language))

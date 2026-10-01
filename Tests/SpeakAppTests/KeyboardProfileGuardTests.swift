@@ -37,7 +37,7 @@ final class KeyboardProfileGuardTests: XCTestCase {
     }
 
     func testEveryOwningAppSettingPublishesAtItsMutationBoundary() throws {
-        let settings = try source("Sources/SpeakiOS/Views/SettingsView.swift")
+        let settings = try source("Sources/SpeakiOS/Settings/AppSettings.swift")
         let coordinator = try source("Sources/SpeakiOS/Services/KeyboardInstantDictationCoordinator.swift")
 
         for property in [

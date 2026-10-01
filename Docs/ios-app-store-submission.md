@@ -112,7 +112,7 @@ reasoning written down, because they look like yes and are not:
   SDK. Sentry is linked by the macOS target only. This answer changes the day
   issue #776 ships opt-in PostHog to iOS.
 - **History and API keys in iCloud.** History, including transcript text,
-  syncs to the user's own private CloudKit database automatically whenever the
+  syncs to the user's own private CloudKit database automatically when the
   device is signed in to iCloud. Encrypted API-Key Sync is opt-in and writes
   only passphrase-encrypted keys to the same private database. No app settings
   sync through iCloud. Data in the user's own iCloud account is not developer

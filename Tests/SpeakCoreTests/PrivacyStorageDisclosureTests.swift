@@ -38,6 +38,7 @@ final class PrivacyStorageDisclosureTests: XCTestCase {
     func testAPIKeySync_describesOptInPassphraseEncryptedCloudKit() {
         let copy = PrivacyStorageDisclosure.apiKeySync
         XCTAssertTrue(copy.contains("If you turn on"), copy)
+        XCTAssertTrue(copy.contains("supported keys"), copy)
         XCTAssertTrue(copy.contains("encrypted on this device"), copy)
         XCTAssertTrue(copy.contains("passphrase"), copy)
         XCTAssertTrue(copy.contains("private CloudKit database"), copy)

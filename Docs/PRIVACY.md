@@ -72,13 +72,14 @@ down the screen are reference material describing what the app *can* use, not wh
 - API keys are stored in the **iOS/macOS Keychain**, Apple's secure credential storage
 - Keys are encrypted at rest and protected by your device passcode/biometrics
 - When you use a cloud provider, its key is sent to that provider with each request to authenticate it
-- Optional **Encrypted API-Key Sync** encrypts keys on the device with your sync passphrase before saving them to your
-  private CloudKit database. The passphrase is never uploaded. Keys do not sync through iCloud Keychain.
+- Optional **Encrypted API-Key Sync** (iOS and Mac App Store builds) encrypts supported keys on the device with your
+  sync passphrase before saving them to your private CloudKit database. The passphrase is never uploaded. Keys do not
+  sync through iCloud Keychain, and direct-download Mac builds keep keys in the local Keychain only.
 
 ### What we never do
 - We never transmit your API keys to our servers
 - We never log or store API keys in plaintext
-- We never share your credentials with third parties
+- We never share your credentials with anyone other than the provider each key belongs to
 
 ## Network Activity
 
@@ -87,8 +88,8 @@ down the screen are reference material describing what the app *can* use, not wh
 - **Cloud transcription providers**: When actively transcribing with a cloud model
 - **Send to Mac**: Only on your local network (no internet required)
 - **iCloud History**: History, including raw and cleaned-up transcript text, syncs to your private CloudKit database
-  automatically whenever the device is signed in to iCloud (macOS builds without iCloud support do not sync)
-- **Encrypted API-Key Sync**: Only after you turn it on with a sync passphrase
+  automatically when the device is signed in to iCloud (macOS builds without iCloud support do not sync)
+- **Encrypted API-Key Sync**: Only after you turn it on with a sync passphrase (iOS and Mac App Store builds)
 
 ### What is sent to cloud providers?
 

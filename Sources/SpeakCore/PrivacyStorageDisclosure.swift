@@ -9,7 +9,7 @@ import Foundation
 /// - Encrypted API-Key Sync (`CloudKitKeySync`) is opt-in and writes only
 ///   passphrase-encrypted ciphertext to the private CloudKit database;
 /// - History (`HistorySyncEngine`) syncs raw and cleaned-up transcript text to
-///   the private CloudKit database whenever the iCloud account is available,
+///   the private CloudKit database when the iCloud account is available at launch,
 ///   with no in-app switch.
 ///
 /// The base Keychain item is deliberately not iCloud Keychain synchronizable, so
@@ -20,16 +20,17 @@ public enum PrivacyStorageDisclosure {
         "API keys are stored in this device's Keychain. When you use a cloud provider, "
         + "its key is sent to that provider with each request to authenticate it."
 
-    /// The opt-in, passphrase-encrypted key sync.
+    /// The opt-in, passphrase-encrypted key sync. Only the identifiers in
+    /// `CloudKitKeySync.syncableIdentifiers` sync, hence "supported keys".
     public static let apiKeySync =
-        "If you turn on Encrypted API-Key Sync, your keys are encrypted on this device with your sync "
-        + "passphrase before they are saved to your private CloudKit database. They cannot be read "
+        "If you turn on Encrypted API-Key Sync, supported keys are encrypted on this device with your "
+        + "sync passphrase before they are saved to your private CloudKit database. They cannot be read "
         + "without that passphrase, which is never uploaded."
 
     /// Automatic History sync, including transcript text.
     public static let historySync =
         "History, including transcript text, syncs to your private CloudKit database automatically "
-        + "whenever this device is signed in to iCloud."
+        + "when this device is signed in to iCloud."
 
     /// Short right-hand value for the History row of a network-activity list.
     public static let historySyncCondition = "When signed in to iCloud"

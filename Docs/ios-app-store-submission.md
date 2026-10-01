@@ -111,8 +111,12 @@ reasoning written down, because they look like yes and are not:
 - **Usage Data and Diagnostics.** The iOS app initialises no analytics or crash
   SDK. Sentry is linked by the macOS target only. This answer changes the day
   issue #776 ships opt-in PostHog to iOS.
-- **History and settings in iCloud.** CloudKit writes to the user's own private
-  database. Data in the user's own iCloud account is not developer collection.
+- **History and API keys in iCloud.** History, including transcript text,
+  syncs to the user's own private CloudKit database automatically whenever the
+  device is signed in to iCloud. Encrypted API-Key Sync is opt-in and writes
+  only passphrase-encrypted keys to the same private database. No app settings
+  sync through iCloud. Data in the user's own iCloud account is not developer
+  collection.
 
 ### Age rating
 

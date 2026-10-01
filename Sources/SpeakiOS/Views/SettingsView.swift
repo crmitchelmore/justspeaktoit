@@ -2730,8 +2730,14 @@ struct PrivacyView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Secure Storage", systemImage: "lock.fill")
                     .font(.headline)
-                // swiftlint:disable:next line_length
-                Text("API keys are encrypted in your device Keychain and never leave your device except when syncing via iCloud Keychain (end-to-end encrypted).")
+                Text(PrivacyStorageDisclosure.apiKeyStorage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Optional Key Sync", systemImage: "lock.icloud")
+                    .font(.headline)
+                Text(PrivacyStorageDisclosure.apiKeySync)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -2752,7 +2758,10 @@ struct PrivacyView: View {
                     InfoRow(label: provider, value: "During voice output")
                 }
                 InfoRow(label: "Send to Mac", value: "Local network only")
-                InfoRow(label: "iCloud Sync", value: "Settings & keys (optional)")
+                InfoRow(label: "iCloud History", value: PrivacyStorageDisclosure.historySyncCondition)
+                InfoRow(label: "API-Key Sync", value: PrivacyStorageDisclosure.apiKeySyncCondition)
+                Text(PrivacyStorageDisclosure.historySync)
+                    .foregroundStyle(.secondary)
             }
             .font(.caption)
         }

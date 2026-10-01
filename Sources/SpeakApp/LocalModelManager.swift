@@ -16,6 +16,11 @@ enum LocalModelError: LocalizedError {
 
   var errorDescription: String? {
     switch self {
+    case .unknownModel(let model)
+    where model == PhononLocalModels.phonon2.id && !PhononLocalModels.isSupportedOnCurrentPlatform:
+      // A selection carried over from the direct-download Apple silicon app.
+      return "Phonon-2 needs the direct-download app on an Apple silicon Mac. "
+        + "Choose another model in Settings > Transcription > Local Models."
     case .unknownModel(let model):
       return "Unknown local model: \(model)"
     case .notInstalled(let model):

@@ -26,12 +26,41 @@ final class PhononRuntimeTests: XCTestCase {
         XCTAssertThrowsError(try PhononRuntime.decode("not JSON"))
     }
 
-    func testBundledRequirementsPinTheRuntimeVersion() throws {
+    func testMalformedSegmentTimingFails() {
+        for segment in [#"{"start":-0.1,"end":1,"text":"a"}"#, #"{"start":1.5,"end":1,"text":"a"}"#,
+                        #"{"start":0,"end":2.5,"text":"a"}"#] {
+            XCTAssertThrowsError(try PhononRuntime.decode("""
+            {"text":"a","duration_seconds":2,"truncated":false,"segments":[\(segment)]}
+            """), segment)
+        }
+        XCTAssertNoThrow(try PhononRuntime.decode("""
+        {"text":"a b","duration_seconds":2,"truncated":false,
+         "segments":[{"start":0,"end":1,"text":"a"},{"start":1,"end":2,"text":"b"}]}
+        """))
+    }
+
+    func testBundledRequirementsPinEveryPackageByHash() throws {
         let url = try XCTUnwrap(PhononRuntime.requirementsURL, "phonon-requirements.txt must be bundled")
-        let pins = try String(contentsOf: url, encoding: .utf8)
+        let requirements = try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(of: "\\\n", with: " ")
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-        XCTAssertTrue(pins.contains("fermion-research==\(PhononRuntime.version)"))
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+        XCTAssertTrue(requirements.contains { $0.hasPrefix("fermion-research==\(PhononRuntime.version) ") })
+        for requirement in requirements {
+            XCTAssertTrue(requirement.contains("=="), requirement)
+            XCTAssertTrue(requirement.contains("--hash=sha256:"), requirement)
+        }
+        XCTAssertEqual(PhononRuntime.lockDigest?.count, 64)
+    }
+
+    func testPipInstallIsHashLockedAndIgnoresUserConfiguration() {
+        let arguments = PhononRuntime.pipInstallArguments(requirements: "/lock.txt")
+        for flag in ["--isolated", "--require-hashes", "--no-deps", "--only-binary=:all:"] {
+            XCTAssertTrue(arguments.contains(flag), flag)
+        }
+        XCTAssertEqual(arguments.suffix(4), ["--index-url", "https://pypi.org/simple/", "-r", "/lock.txt"])
+        XCTAssertEqual(PhononRuntime.pipEnvironment["PIP_CONFIG_FILE"], "/dev/null")
     }
 
     func testLanguageHintsRejectUnsupportedLanguages() throws {

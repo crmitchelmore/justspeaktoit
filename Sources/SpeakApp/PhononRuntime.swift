@@ -1,4 +1,5 @@
 #if !APP_STORE
+import CryptoKit
 import Foundation
 import SpeakCore
 
@@ -7,8 +8,11 @@ struct PhononRuntime: Sendable {
     static let version = "0.2.4"
     let root: URL
 
+    private var venv: URL { root.appendingPathComponent("venv", isDirectory: true) }
     private var python: URL { root.appendingPathComponent("venv/bin/python3") }
     private var cli: URL { root.appendingPathComponent("venv/bin/fermion") }
+    /// Digest of the hash-locked requirements this venv was populated from.
+    private var runtimeLock: URL { root.appendingPathComponent("venv/speak-runtime-lock.sha256") }
     private var receipt: URL { root.appendingPathComponent("ready.json") }
     private var modelCache: URL { root.appendingPathComponent("models", isDirectory: true) }
     private var hubCache: URL { root.appendingPathComponent("hf", isDirectory: true) }
@@ -25,12 +29,18 @@ struct PhononRuntime: Sendable {
 
     private func installedModel() throws -> URL {
         let record = try JSONDecoder().decode(Receipt.self, from: Data(contentsOf: receipt))
-        guard record.runtimeVersion == Self.version,
-              FileManager.default.isExecutableFile(atPath: python.path),
-              FileManager.default.isExecutableFile(atPath: cli.path) else {
+        guard record.runtimeVersion == Self.version, hasLockedRuntime else {
             throw LocalModelError.notInstalled("Phonon-2 runtime")
         }
         return try validatedModelPath(record.modelPath)
+    }
+
+    /// Only a venv populated from the bundled hash-locked requirements is executed or reused.
+    private var hasLockedRuntime: Bool {
+        guard let expected = Self.lockDigest,
+              FileManager.default.isExecutableFile(atPath: python.path),
+              FileManager.default.isExecutableFile(atPath: cli.path) else { return false }
+        return (try? String(contentsOf: runtimeLock, encoding: .utf8)) == expected
     }
 
     func validatedModelPath(_ path: String) throws -> URL {
@@ -48,22 +58,27 @@ struct PhononRuntime: Sendable {
             throw LocalProcessError.failed("Phonon-2 requires the direct-download app on Apple silicon.")
         }
         if isInstalled { return }
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        if !FileManager.default.isExecutableFile(atPath: python.path) {
-            let bootstrap = try await bootstrapPython()
-            _ = try await LocalProcessRunner.run(
-                executableURL: bootstrap, arguments: ["-m", "venv", root.appendingPathComponent("venv").path],
-                timeout: LocalProcessRunner.setupTimeout
-            )
-        }
-        guard let requirements = Self.requirementsURL else {
+        guard let requirements = Self.requirementsURL, let lockDigest = Self.lockDigest else {
             throw LocalProcessError.failed("The bundled Phonon runtime requirements are missing.")
         }
-        _ = try await LocalProcessRunner.run(
-            executableURL: python,
-            arguments: ["-m", "pip", "install", "--only-binary=:all:", "-r", requirements.path],
-            timeout: LocalProcessRunner.setupTimeout
-        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        if !hasLockedRuntime {
+            // pip does not re-check hashes of packages already present, so never reuse an unverified venv.
+            if FileManager.default.fileExists(atPath: venv.path) {
+                try FileManager.default.removeItem(at: venv)
+            }
+            let bootstrap = try await bootstrapPython()
+            _ = try await LocalProcessRunner.run(
+                executableURL: bootstrap, arguments: ["-m", "venv", venv.path],
+                timeout: LocalProcessRunner.setupTimeout
+            )
+            _ = try await LocalProcessRunner.run(
+                executableURL: python, arguments: Self.pipInstallArguments(requirements: requirements.path),
+                environment: Self.pipEnvironment, timeout: LocalProcessRunner.setupTimeout
+            )
+            try Task.checkCancellation()
+            try Data(lockDigest.utf8).write(to: runtimeLock, options: .atomic)
+        }
         // 0.2.4 still requires an audio argument even with --download-only; it does not read this path.
         let path = try await run(
             ["transcribe", PhononLocalModels.phonon2.modelName, "unused.wav", "--download-only"],
@@ -100,6 +115,22 @@ struct PhononRuntime: Sendable {
         return nil
         #endif
     }
+
+    /// SHA-256 of the bundled lock, recorded beside the venv it produced.
+    static let lockDigest: String? = requirementsURL
+        .flatMap { try? Data(contentsOf: $0) }
+        .map { data in SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+
+    /// Every wheel must match a hash in the bundled lock. Dependencies come only from that lock,
+    /// only from PyPI, and user, global or environment pip configuration is ignored.
+    static func pipInstallArguments(requirements: String) -> [String] {
+        ["-m", "pip", "install", "--isolated", "--no-input", "--disable-pip-version-check",
+         "--require-hashes", "--no-deps", "--only-binary=:all:",
+         "--index-url", "https://pypi.org/simple/", "-r", requirements]
+    }
+
+    /// `--isolated` skips user config and PIP_* variables; this also skips global and site config files.
+    static let pipEnvironment = ["PIP_CONFIG_FILE": "/dev/null"]
 
     func deleteModel() throws {
         // Retain the installed runtime for reuse; only these exact owned paths may be removed.
@@ -172,8 +203,17 @@ struct PhononRuntime: Sendable {
         guard !response.truncated else {
             throw LocalProcessError.failed("Phonon-2 returned an incomplete transcript. Try a shorter recording.")
         }
-        guard response.duration_seconds.isFinite, response.duration_seconds >= 0 else {
+        let duration = response.duration_seconds
+        guard duration.isFinite, duration >= 0 else {
             throw LocalProcessError.failed("Phonon-2 returned an invalid audio duration.")
+        }
+        // The pinned CLI derives both from window sample offsets with the same rounding, so valid
+        // output always satisfies 0 <= start <= end <= duration.
+        guard response.segments.allSatisfy({ segment in
+            segment.start.isFinite && segment.end.isFinite
+                && segment.start >= 0 && segment.start <= segment.end && segment.end <= duration
+        }) else {
+            throw LocalProcessError.failed("Phonon-2 returned invalid segment timing.")
         }
         return TranscriptionResult(
             text: response.text.trimmingCharacters(in: .whitespacesAndNewlines),

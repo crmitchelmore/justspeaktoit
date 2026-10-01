@@ -13,7 +13,14 @@ The canonical entry is `PhononLocalModels.phonon2` in SpeakCore, with ID
 History resolves the friendly name through the canonical catalogue.
 
 `PhononRuntime` uses `fermion-research==0.2.4` and the exact dependency versions in
-`Sources/SpeakApp/Resources/phonon-requirements.txt`. Python 3.11–3.13 must already be
+`Sources/SpeakApp/Resources/phonon-requirements.txt`. That file is the full transitive
+lock for CPython 3.11–3.13 on macOS 14+ arm64, including `setuptools`, which torch
+declares but `pip freeze` omits. Every entry carries the PyPI SHA-256 of each matching
+wheel. pip runs with `--require-hashes --no-deps --only-binary=:all:`, an explicit PyPI
+`--index-url`, `--isolated` and `PIP_CONFIG_FILE=/dev/null`, so user, global and
+environment pip configuration cannot redirect or loosen the install. pip does not re-check
+packages that are already installed, so the venv records the lock's digest and is rebuilt
+whenever that digest is missing or differs. Python 3.11–3.13 must already be
 installed. All packages install into a private virtual environment; no global
 Python installation is modified. The advertised 164 MB covers the compressed
 weights only; the runtime and its dependencies require additional disk space.

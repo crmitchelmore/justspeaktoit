@@ -95,7 +95,10 @@ public enum TranscriptionPricing {
         "google/gemini-3.1-flash-lite": rate("0.00096"),
         "google/gemini-2.5-flash": rate("0.00192"),
         // Gladia: $0.612/hr pre-recorded, $0.75/hr real-time.
-        "gladia/solaria-1-streaming": perHour("0.75")
+        "gladia/solaria-1-streaming": perHour("0.75"),
+        // MAI-Transcribe-2 launch price, a limited-time offer through the end
+        // of 2026: https://microsoft.ai/news/mai-transcribe-2 (checked 2026-10-01).
+        AzureTranscriptionModels.mai2: perHour("0.10")
     ]
 
     private static let prefixRates: [(prefix: String, rate: Decimal)] = [

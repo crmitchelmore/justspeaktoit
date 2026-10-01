@@ -484,7 +484,24 @@ struct VoiceCatalog {
     )
   ]
 
-  static let azureVoices: [TTSVoice] = [
+  /// Offline Azure fallback: the conventional neural voices plus the current
+  /// MAI models. A keyed resource's own listing replaces the neural part.
+  static let azureVoices: [TTSVoice] = azureNeuralVoices + azureMAIVoices
+
+  // Projected from the canonical SpeakCore MAI catalogue.
+  static let azureMAIVoices: [TTSVoice] = AzureMAIVoiceCatalog.voices.map { azureMAIVoice($0) }
+
+  static func azureMAIVoice(_ voice: AzureMAIVoice) -> TTSVoice {
+    TTSVoice(
+      id: voice.id,
+      name: voice.displayName,
+      provider: .azure,
+      traits: azureMAITraits(for: voice),
+      previewURL: nil
+    )
+  }
+
+  static let azureNeuralVoices: [TTSVoice] = [
     TTSVoice(
       id: "azure/en-US-AriaNeural",
       name: "Aria",
@@ -701,8 +718,13 @@ struct VoiceCatalog {
   /// Mistral publishes no presets, so a saved Voxtral selection has no
   /// catalogue entry. Without this the picker silently drops the user's own
   /// choice whenever the listing is unavailable — offline, or between launches
-  /// before the account list has loaded.
+  /// before the account list has loaded. An Azure MAI voice from a resource
+  /// listing (another locale or model) keeps its friendly name the same way.
   static func accountListedVoice(forID id: String) -> TTSVoice? {
+    if id.hasPrefix(AzureMAIVoiceCatalog.voiceIDPrefix),
+       let name = AzureMAIVoiceCatalog.displayName(forVoiceID: id) {
+      return TTSVoice(id: id, name: name, provider: .azure, traits: [], previewURL: nil)
+    }
     let prefix = MistralTTSCatalog.voiceIDPrefix
     guard id.hasPrefix(prefix) else { return nil }
     let name = String(id.dropFirst(prefix.count))
@@ -733,6 +755,20 @@ struct VoiceCatalog {
     case .filipino: .filipino
     case .irish: .irish
     }
+  }
+
+  private static func azureMAITraits(for voice: AzureMAIVoice) -> [TTSVoice.VoiceTrait] {
+    var traits: [TTSVoice.VoiceTrait] = [voice.gender == .female ? .female : .male]
+    switch voice.locale {
+    case "en-US": traits.append(.american)
+    case "en-GB": traits.append(.british)
+    case "en-AU": traits.append(.australian)
+    case "en-IN": traits.append(.indian)
+    default: break
+    }
+    traits.append(.multilingual)
+    if voice.model.isLowLatency { traits.append(.lowLatency) }
+    return traits
   }
 
   private static func cartesiaTraits(for voice: CartesiaTTSVoice) -> [TTSVoice.VoiceTrait] {

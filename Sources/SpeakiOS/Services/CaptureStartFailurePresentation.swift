@@ -74,6 +74,8 @@ struct CaptureStartFailurePresentation: LocalizedError, Equatable, Sendable {
         return self.unknown
     }
 
+    // One exhaustive switch keeps every typed failure a compile-checked copy decision.
+    // swiftlint:disable:next cyclomatic_complexity
     private static func make(for error: iOSTranscriptionError) -> CaptureStartFailurePresentation {
         switch error {
         case .permissionDenied(let permission):

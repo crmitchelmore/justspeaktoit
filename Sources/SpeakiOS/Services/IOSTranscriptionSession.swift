@@ -197,12 +197,8 @@ final class IOSTranscriptionSession: IOSRecordingSession {
     ) throws -> Backend {
         switch resolution.backend {
         case .batch:
-            let retainRecording: Bool
-            if case .batch(let shouldRetain) = mode {
-                retainRecording = shouldRetain
-            } else {
-                retainRecording = true
-            }
+            var retainRecording = true
+            if case .batch(let shouldRetain) = mode { retainRecording = shouldRetain }
             return .batch(
                 IOSBatchTranscriber(
                     audioSessionManager: audioSessionManager,
@@ -338,7 +334,6 @@ final class IOSTranscriptionSession: IOSRecordingSession {
             transcriber.onFirstInputBuffer = firstInputHandler
             transcriber.onStartupObservation = startupHandler
         }
-
     }
 }
 

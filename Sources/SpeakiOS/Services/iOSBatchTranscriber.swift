@@ -237,7 +237,7 @@ enum IOSBatchTranscriptionRoute: Equatable, Sendable {
     case gladia
     /// Google's own Interactions API, through the shared
     /// `GeminiInteractionsClient`. Matched on the direct-batch identifiers
-    /// only: the `google/gemini-2.0-flash-*` catalogue entries share the
+    /// only: the OpenRouter `google/gemini-*` catalogue entries share the
     /// `google/` prefix but are OpenRouter-routed.
     case gemini
     /// xAI's dedicated speech-to-text endpoint, through the shared

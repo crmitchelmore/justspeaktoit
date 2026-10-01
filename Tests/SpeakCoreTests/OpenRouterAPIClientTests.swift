@@ -1,17 +1,18 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
 
 final class OpenRouterAPIClientTests: XCTestCase {
     override func tearDown() {
-        OpenRouterMockURLProtocol.requestHandler = nil
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
     func testTranscribeFileWithAudioInput_UsesChatCompletionsJSONPayload() async throws {
         let requestObserver = OpenRouterRequestObserver()
-        OpenRouterMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             await requestObserver.store(request: request)
             return try makeOpenRouterChatResponse(for: request)
         }
@@ -43,7 +44,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
 
     func testBlankAPIKeyOverride_FallsBackToProviderKey() async throws {
         let requestObserver = OpenRouterRequestObserver()
-        OpenRouterMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             await requestObserver.store(request: request)
             return try makeOpenRouterChatResponse(for: request)
         }
@@ -76,7 +77,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
     /// enrichment read from the local file afterwards, so a container that
     /// AVFoundation cannot parse must degrade the duration, not the transcript.
     func testTranscribeFile_WhenDurationMetadataFails_KeepsTheTranscript() async throws {
-        OpenRouterMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             try makeOpenRouterChatResponse(for: request)
         }
 
@@ -108,7 +109,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
     }
 
     func testLocalFallback_WhenDurationMetadataFails_KeepsTheTranscript() async throws {
-        OpenRouterMockURLProtocol.requestHandler = { _ in
+        StubURLProtocol.respond {  _ in
             XCTFail("The local fallback must not send a request")
             throw OpenRouterClientError.invalidResponse
         }
@@ -136,7 +137,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
     }
 
     func testTranscribeFileWithOversizedAudio_ThrowsBeforeEncodingPayload() async throws {
-        OpenRouterMockURLProtocol.requestHandler = { _ in
+        StubURLProtocol.respond {  _ in
             XCTFail("Oversized audio should be rejected before sending a request")
             throw OpenRouterClientError.invalidResponse
         }
@@ -180,7 +181,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
         data: [DONE]
 
         """
-        OpenRouterMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
                 statusCode: 200,
@@ -286,7 +287,7 @@ final class OpenRouterAPIClientTests: XCTestCase {
 
     private func makeMockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [OpenRouterMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 
@@ -365,36 +366,4 @@ private actor OpenRouterRequestObserver {
 
         return data.isEmpty ? nil : data
     }
-}
-
-private final class OpenRouterMockURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var requestHandler: OpenRouterRequestHandler?
-
-    override static func canInit(with request: URLRequest) -> Bool {
-        true
-    }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-        request
-    }
-
-    override func startLoading() {
-        guard let handler = Self.requestHandler else {
-            XCTFail("OpenRouterMockURLProtocol.requestHandler was not set")
-            return
-        }
-
-        Task {
-            do {
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
 }

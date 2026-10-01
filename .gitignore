@@ -19,8 +19,6 @@ logs/
 .beads-credential-key
 issues.jsonl
 
-# Quality Software conformance derived evidence
-.conformance/
 .build-xc*/
 research/
 

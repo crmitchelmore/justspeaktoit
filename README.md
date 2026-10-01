@@ -112,15 +112,7 @@ open "Just Speak to It.xcworkspace"
 
 ## Versioning
 
-`VERSION` is a repository hint and `BUILD` tracks the monotonically increasing build number. `scripts/version.sh` keeps them in sync and updates `Config/AppInfo.plist` when present. For TestFlight, the release workflow requires an explicit iOS version; check App Store Connect rather than relying on `VERSION`. See [the iOS TestFlight release runbook](Docs/ios-testflight-release.md).
-
-Examples:
-
-```bash
-./scripts/version.sh bump-version minor
-./scripts/version.sh bump-build
-./scripts/version.sh show
-```
+`VERSION` and `BUILD_NUMBER` are repository hints only; nothing should be bumped by hand. Versions and build numbers are allocated by the release trains: `scripts/release-train.mjs` (driven by `alpha-release.yml`, `prepare-stable.yml` and `publish-stable.yml`) records them in each `alpha-build-N` / `stable-candidate-N` manifest, and the release workers stamp them into each build from that manifest. See [Alpha and Stable release trains](Docs/alpha-stable-release-trains.md). For TestFlight, check App Store Connect rather than relying on `VERSION`; see [the iOS TestFlight release runbook](Docs/ios-testflight-release.md).
 
 ## Tooling
 

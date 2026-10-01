@@ -7,7 +7,7 @@
 #
 # Intentional update workflow: a PR whose title carries the conventional
 # breaking marker (`type!:` / `type(scope)!:`) declares a major release, so
-# the gate reports the diff but does not fail — auto-release will publish it
+# the gate reports the diff but does not fail — the release train will ship it
 # as a major version and the PR review carries the migration note.
 
 set -uo pipefail

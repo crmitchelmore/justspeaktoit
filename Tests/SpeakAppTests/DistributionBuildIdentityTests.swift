@@ -410,14 +410,9 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 
-    // swiftlint:disable:next function_body_length
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),
-            encoding: .utf8
-        )
-        let autoRelease = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/auto-release.yml"),
             encoding: .utf8
         )
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
@@ -450,7 +445,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
         XCTAssertTrue(workflow.contains("python3 scripts/verify-keyboard-purpose-strings.py"))
         XCTAssertFalse(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
-        XCTAssertFalse(autoRelease.contains("-f include_keyboard=true"))
+        // The retired auto-release stub is gone; Stable goes through Prepare/Publish Stable.
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: repositoryRoot.appendingPathComponent(".github/workflows/auto-release.yml").path
+        ))
         XCTAssertTrue(workflow.contains("ref: ${{ inputs.manifest }}"))
 
         let profileBootstrap = try String(
@@ -625,14 +623,11 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(tapScript.contains("speak-#{version}-arm64.zip"))
         XCTAssertTrue(tapScript.contains("speak-#{version}-x86_64.zip"))
 
-        // Published candidate assets cannot be replaced by the legacy repair lane.
-        let retryWorkflow = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/publish-speak-cli.yml"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(retryWorkflow.contains("CLI assets are frozen with release-train candidates"))
-        XCTAssertTrue(retryWorkflow.contains("exit 1"))
-        XCTAssertFalse(retryWorkflow.contains("gh release upload"))
+        // Published candidate assets cannot be replaced by the legacy repair lane:
+        // the retired publish-speak-cli workflow no longer exists.
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: repositoryRoot.appendingPathComponent(".github/workflows/publish-speak-cli.yml").path
+        ))
 
         // Signing tools never arrive through an unverified download while the
         // private key is on disk.

@@ -11,6 +11,10 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     private static let beginTimeout: TimeInterval = 8
     private static let audioDrainTimeout: TimeInterval = 1.5
     private static let terminationTimeout: TimeInterval = 3
+    /// ENOTCONN can be spurious around the handshake, so an ignorable receive
+    /// failure re-arms the loop after a short delay, but only within this window.
+    private static let ignoredReceiveRetryDelay: TimeInterval = 0.01
+    private static let ignoredReceiveFailureWindow: TimeInterval = 1.5
     private let apiKey: String
     private let speechModel: String
     private let sampleRate: Int
@@ -202,6 +206,7 @@ extension AssemblyAILiveClient {
         var framer: AssemblyAIPCMFramer
         var assembler = AssemblyAIStreamingTranscriptAssembler()
         var finishWaiters: [CheckedContinuation<String?, Never>] = []
+        var ignoredReceiveFailureStart: TimeInterval?
 
         init(
             sampleRate: Int,
@@ -251,6 +256,7 @@ extension AssemblyAILiveClient {
         run.socket = socket
         run.socketID = socketID
         run.endpoint = endpoint
+        run.ignoredReceiveFailureStart = nil
         socket.resume()
         receive(run, socket: socket, socketID: socketID)
         queue.asyncAfter(deadline: .now() + Self.beginTimeout) { [weak self, weak run] in
@@ -365,19 +371,40 @@ extension AssemblyAILiveClient {
                 guard let self, let run, self.isCurrent(run), run.socketID == socketID else { return }
                 switch result {
                 case .success(let message):
+                    run.ignoredReceiveFailureStart = nil
                     self.handle(message, run: run)
                     if self.isCurrent(run), run.socketID == socketID {
                         self.receive(run, socket: socket, socketID: socketID)
                     }
                 case .failure(let error):
-                    if WebSocketErrorFilter.shouldIgnore(error) {
-                        self.receive(run, socket: socket, socketID: socketID)
-                    } else if !self.fallback(run, failedSocket: socket) {
+                    if WebSocketErrorFilter.shouldIgnore(error),
+                       self.rearmAfterIgnoredReceiveFailure(run, socket: socket, socketID: socketID) {
+                        return
+                    }
+                    if !self.fallback(run, failedSocket: socket) {
                         self.fail(run, error: error)
                     }
                 }
             }
         }
+    }
+
+    /// Re-arms the receive loop after an ignorable failure. Returns false once
+    /// such failures have persisted past the window, so the caller treats the
+    /// socket as lost (pre-Begin host fallback, otherwise a reported failure)
+    /// instead of spinning on a dead socket.
+    func rearmAfterIgnoredReceiveFailure(
+        _ run: Run, socket: LiveWebSocketTransport, socketID: UUID
+    ) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        let firstFailure = run.ignoredReceiveFailureStart ?? now
+        run.ignoredReceiveFailureStart = firstFailure
+        guard now - firstFailure < Self.ignoredReceiveFailureWindow else { return false }
+        queue.asyncAfter(deadline: .now() + Self.ignoredReceiveRetryDelay) { [weak self, weak run] in
+            guard let self, let run, self.isCurrent(run), run.socketID == socketID else { return }
+            self.receive(run, socket: socket, socketID: socketID)
+        }
+        return true
     }
 
     func fallback(_ run: Run, failedSocket: LiveWebSocketTransport) -> Bool {

@@ -1014,7 +1014,7 @@ public final class AppSettings: ObservableObject {
             AppleLocalModels.isSpeechAnalyzerModel(option.id)
                 || openAIBatchModelIDs.contains(option.id)
                 || AzureTranscriptionModels.batchIDs.contains(option.id)
-                // OpenRouter-routed Gemini 2.x batch models upload through the
+                // OpenRouter-routed Gemini batch models upload through the
                 // OpenRouter client; Gemini 3.5 Transcribe uploads through the
                 // shared `GeminiInteractionsClient` with the Google key
                 // (issue #862). Both are listed, and `batchAPIKey(for:)` and

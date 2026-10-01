@@ -8,7 +8,7 @@ import Foundation
 /// neither model is ever a default or an automatic fallback.
 ///
 /// The `google/` catalogue prefix is shared with the OpenRouter-routed
-/// `google/gemini-2.0-flash-*` batch entries, so anything that decides "is this
+/// `google/gemini-*` batch entries, so anything that decides "is this
 /// served by Google directly?" must match the identifiers below rather than the
 /// prefix alone.
 public enum GeminiTranscribeModels {
@@ -66,7 +66,7 @@ public enum GeminiTranscribeModels {
 
     /// Batch catalogue identifiers served by Google's own API rather than by
     /// OpenRouter. `ModelCredentialResolver` and the provider registry both key
-    /// off this so the OpenRouter-routed `google/gemini-2.0-flash-*` entries
+    /// off this so the OpenRouter-routed `google/gemini-*` entries
     /// keep requiring an OpenRouter key.
     public static let directBatchModelIDs: Set<String> = [batchCatalogID]
 

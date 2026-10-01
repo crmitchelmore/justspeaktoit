@@ -20,10 +20,10 @@ final class TranscriptionDisplayNameTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelCatalog.transcriptionDisplayName(
-                for: "google/gemini-2.0-flash-001",
+                for: "google/gemini-3.1-flash-lite",
                 isBatch: true
             ),
-            "Gemini 2.0 Flash (OpenRouter)"
+            "Gemini 3.1 Flash Lite (OpenRouter)"
         )
     }
 }

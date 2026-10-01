@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
 
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
@@ -39,6 +41,21 @@ test('tooling gate delegates to the complete local discovery target', () => {
   assert.match(makefile, /python3 -m unittest discover -s scripts\/tests -p 'test_\*\.py' -v/);
   assert.match(makefile, /python3 scripts\/generate-release-train-config\.py --check/);
   assert.doesNotMatch(workflow, /Tests\/ReleaseNotesTests|scripts\/release-train\.test\.mjs/);
+});
+
+test('every tracked tooling test is discovered by make test-tooling', () => {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0');
+  const toolingTests = tracked.filter(path => /\.test\.[cm]?js$|_test\.rb$|(^|\/)test_[^/]*\.py$/.test(path)
+    // The website package runs its own suite via `npm test` in deploy-landing-page.yml.
+    && !path.startsWith('landing-page/'));
+  assert.ok(toolingTests.length > 0, 'must find the tracked tooling tests');
+  for (const path of toolingTests) {
+    const discovered = /^scripts\/tests\/[^/]+\.test\.mjs$/.test(path)
+      || /^scripts\/tests\/test_[^/]+\.py$/.test(path)
+      || (/^scripts\/tests\/[^/]+_test\.rb$/.test(path) && makefile.includes(`\truby ${path}\n`));
+    assert.ok(discovered, `${path} is not run by make test-tooling`);
+  }
 });
 
 function passing() {

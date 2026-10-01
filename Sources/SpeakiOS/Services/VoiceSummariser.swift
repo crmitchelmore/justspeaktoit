@@ -30,12 +30,12 @@ public final class VoiceSummariser {
         """
 
     /// Summarise a response for voice output.
-    /// Uses the shared SpeakCore OpenRouter client with the configured
-    /// post-processing model.
+    /// Uses the shared SpeakCore OpenRouter client, defaulting to the shared
+    /// low-latency text model.
     public func summarise(
         _ text: String,
         apiKey: String,
-        model: String = "openai/gpt-4o-mini"
+        model: String = ModelCatalog.defaultFastTextModel
     ) async throws -> String {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return text

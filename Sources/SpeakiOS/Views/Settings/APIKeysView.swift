@@ -1,8 +1,41 @@
 #if os(iOS)
 import SpeakCore
 import SwiftUI
+import os.log
 
 // swiftlint:disable file_length
+
+private let apiKeysLogger = SpeakLogger.logger(category: "APIKeys")
+
+// MARK: - API Key Drafts
+
+/// The keys typed on the API Keys screen, keyed by entry id.
+///
+/// Every field reads and writes here, so whether Save has anything to save
+/// covers each editable key, including a provider added later.
+struct APIKeyDrafts: Equatable {
+    private var values: [String: String] = [:]
+
+    subscript(id: String) -> String {
+        get { self.values[id] ?? "" }
+        set { self.values[id] = newValue }
+    }
+
+    var hasUnsavedKey: Bool {
+        self.values.values.contains { !$0.isEmpty }
+    }
+
+    /// The non-empty drafts at the moment Save is pressed.
+    func submission() -> [String: String] {
+        self.values.filter { !$0.value.isEmpty }
+    }
+
+    /// Clears a saved draft, unless the user has edited it since submitting.
+    mutating func clear(_ id: String, ifStill submitted: String) {
+        guard self.values[id] == submitted else { return }
+        self.values[id] = nil
+    }
+}
 
 // MARK: - API Keys View
 
@@ -10,22 +43,7 @@ import SwiftUI
 struct APIKeysView: View {
     @ObservedObject var settings: AppSettings
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var deepgramKey = ""
-    @State private var openRouterKey = ""
-    @State private var openAIKey = ""
-    @State private var elevenLabsKey = ""
-    @State private var cartesiaKey = ""
-    @State private var sonioxKey = ""
-    @State private var modulateKey = ""
-    @State private var assemblyAIKey = ""
-    @State private var gladiaKey = ""
-    @State private var googleKey = ""
-    @State private var xAIKey = ""
-    @State private var azureKey = ""
-    @State private var metaKey = ""
-    @State private var speechmaticsKey = ""
-    @State private var revAIKey = ""
-    @State private var mistralKey = ""
+    @State private var drafts = APIKeyDrafts()
     @State private var isValidating = false
     @State private var validationMessage: String?
     @State private var showingValidation = false
@@ -174,21 +192,7 @@ struct APIKeysView: View {
                     Button("Save") {
                         saveKeys()
                     }
-                    .disabled(
-                        deepgramKey.isEmpty
-                            && openRouterKey.isEmpty
-                            && openAIKey.isEmpty
-                            && elevenLabsKey.isEmpty
-                            && cartesiaKey.isEmpty
-                            && sonioxKey.isEmpty
-                            && modulateKey.isEmpty
-                            && assemblyAIKey.isEmpty
-                            && gladiaKey.isEmpty
-                            && googleKey.isEmpty
-                            && xAIKey.isEmpty
-                            && metaKey.isEmpty
-                            && azureKey.isEmpty
-                    )
+                    .disabled(!self.drafts.hasUnsavedKey)
                 }
             }
         }
@@ -223,7 +227,7 @@ struct APIKeysView: View {
             // Purely informational: a billing endpoint that fails changes this
             // line and nothing else on the screen.
             ProviderBalanceView(
-                credentialIdentifier: "\(entry.id).apiKey",
+                credentialIdentifier: Self.credentialIdentifier(for: entry.id),
                 isKeyStored: entry.isStored,
                 store: balances
             )
@@ -319,30 +323,22 @@ struct APIKeysView: View {
         }
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     private func draftBinding(for id: String) -> Binding<String> {
-        switch id {
-        case "deepgram": return $deepgramKey
-        case "elevenlabs": return $elevenLabsKey
-        case "openrouter": return $openRouterKey
-        case "openai": return $openAIKey
-        case "cartesia": return $cartesiaKey
-        case "soniox": return $sonioxKey
-        case "modulate": return $modulateKey
-        case "assemblyai": return $assemblyAIKey
-        case "google": return $googleKey
-        case "xai": return $xAIKey
-        case "azure": return $azureKey
-        case "meta": return $metaKey
-        case "speechmatics": return $speechmaticsKey
-        case "revai": return $revAIKey
-        case "mistral": return $mistralKey
-        default: return $gladiaKey
-        }
+        Binding(
+            get: { self.drafts[id] },
+            set: { self.drafts[id] = $0 }
+        )
+    }
+
+    /// The Keychain identifier an entry's key is stored under, which is also
+    /// the one `ProviderBalanceDirectory` resolves accounts by. Azure's is not
+    /// `<entry id>.apiKey`.
+    static func credentialIdentifier(for id: String) -> String {
+        id == "azure" ? AzureSpeechConfiguration.credentialIdentifier : "\(id).apiKey"
     }
 
     private var storedCredentialIdentifiers: Set<String> {
-        Set(allEntries.filter(\.isStored).map { "\($0.id).apiKey" })
+        Set(allEntries.filter(\.isStored).map { Self.credentialIdentifier(for: $0.id) })
     }
 
     /// Forgets every rendered balance and re-reads the accounts whose key is
@@ -358,175 +354,121 @@ struct APIKeysView: View {
         )
     }
 
-    // swiftlint:disable:next cyclomatic_complexity
     private func clearStoredKey(for id: String) {
-        switch id {
-        case "deepgram": settings.deepgramAPIKey = ""
-        case "elevenlabs": settings.elevenLabsAPIKey = ""
-        case "openrouter": settings.openRouterAPIKey = ""
-        case "openai": settings.openAIAPIKey = ""
-        case "cartesia": settings.cartesiaAPIKey = ""
-        case "soniox": settings.sonioxAPIKey = ""
-        case "modulate": settings.modulateAPIKey = ""
-        case "assemblyai": settings.assemblyAIAPIKey = ""
-        case "google": settings.googleAPIKey = ""
-        case "xai": settings.xAIAPIKey = ""
-        case "azure": settings.azureAPIKey = ""
-        case "meta": settings.metaAPIKey = ""
-        case "speechmatics": settings.speechmaticsAPIKey = ""
-        case "revai": settings.revAIAPIKey = ""
-        case "mistral": settings.mistralAPIKey = ""
-        default: settings.gladiaAPIKey = ""
-        }
+        self.store("", for: id)
         reloadBalancesAfterCredentialChange()
     }
 
-    // swiftlint:disable:next function_body_length cyclomatic_complexity
+    // swiftlint:disable:next cyclomatic_complexity
+    private func store(_ key: String, for id: String) {
+        switch id {
+        case "deepgram": settings.deepgramAPIKey = key
+        case "elevenlabs": settings.elevenLabsAPIKey = key
+        case "openrouter": settings.openRouterAPIKey = key
+        case "openai": settings.openAIAPIKey = key
+        case "cartesia": settings.cartesiaAPIKey = key
+        case "soniox": settings.sonioxAPIKey = key
+        case "modulate": settings.modulateAPIKey = key
+        case "assemblyai": settings.assemblyAIAPIKey = key
+        case "google": settings.googleAPIKey = key
+        case "xai": settings.xAIAPIKey = key
+        case "azure": settings.azureAPIKey = key
+        case "meta": settings.metaAPIKey = key
+        case "speechmatics": settings.speechmaticsAPIKey = key
+        case "revai": settings.revAIAPIKey = key
+        case "mistral": settings.mistralAPIKey = key
+        default: settings.gladiaAPIKey = key
+        }
+    }
+
+    /// Saves what was entered when Save was pressed.
+    ///
+    /// Validation waits on the network while the fields stay editable, so the
+    /// submitted values are captured first: a key that passes is saved as it
+    /// was checked, never as a later edit, and its field is cleared only if it
+    /// still holds the submitted value.
     private func saveKeys() {
+        let submission = self.drafts.submission()
+        let order = self.allEntries.map(\.id)
         Task {
             isValidating = true
             var messages: [String] = []
-            if !azureKey.isEmpty {
-                do {
-                    _ = try await AzureSpeechVoiceAPI().listVoices(credentials: azureKey)
-                    settings.azureAPIKey = azureKey
-                    azureKey = ""
-                    messages.append("Azure key and region saved; transcription access depends on your resource.")
-                } catch { messages.append(error.localizedDescription) }
+            for id in order {
+                guard let key = submission[id] else { continue }
+                let message = await self.save(key, for: id)
+                messages.append(message)
             }
-
-            // Validate and save Deepgram key
-            if !deepgramKey.isEmpty {
-                let validator = DeepgramAPIKeyValidator()
-                let result = await validator.validate(deepgramKey)
-
-                switch result.outcome {
-                case .success:
-                    settings.deepgramAPIKey = deepgramKey
-                    deepgramKey = ""
-                    messages.append("✓ Deepgram key validated and saved")
-                    // Auto-select Deepgram as the provider now that we have a key
-                    settings.reconfigureDefaultProvider()
-                case .failure(let message):
-                    messages.append("✗ Deepgram: \(message)")
-                }
-            }
-
-            // Validate and save ElevenLabs key
-            if !elevenLabsKey.isEmpty {
-                let validator = ElevenLabsSTTAPIKeyValidator()
-                let result = await validator.validate(elevenLabsKey)
-
-                switch result.outcome {
-                case .success:
-                    settings.elevenLabsAPIKey = elevenLabsKey
-                    elevenLabsKey = ""
-                    messages.append("✓ ElevenLabs API key validated and saved")
-                case .failure(let message):
-                    messages.append("✗ ElevenLabs: \(message)")
-                }
-            }
-
-            // Save OpenRouter key (no validation endpoint available)
-            if !openRouterKey.isEmpty {
-                settings.openRouterAPIKey = openRouterKey
-                openRouterKey = ""
-                messages.append("✓ OpenRouter key saved")
-            }
-
-            // Save OpenAI key (no cheap validation endpoint)
-            if !openAIKey.isEmpty {
-                settings.openAIAPIKey = openAIKey
-                openAIKey = ""
-                messages.append("✓ OpenAI key saved")
-            }
-
-            // Save Cartesia key (no cheap validation endpoint)
-            if !cartesiaKey.isEmpty {
-                settings.cartesiaAPIKey = cartesiaKey
-                cartesiaKey = ""
-                messages.append("✓ Cartesia key saved")
-            }
-
-            // The same Soniox credential powers transcription and voice output.
-            if !sonioxKey.isEmpty {
-                settings.sonioxAPIKey = sonioxKey
-                sonioxKey = ""
-                messages.append("✓ Soniox key saved for transcription and voice output")
-            }
-
-            // Save Modulate key (no cheap validation endpoint)
-            if !modulateKey.isEmpty {
-                settings.modulateAPIKey = modulateKey
-                modulateKey = ""
-                messages.append("✓ Modulate key saved")
-            }
-
-            // Save AssemblyAI key (no cheap validation endpoint)
-            if !assemblyAIKey.isEmpty {
-                settings.assemblyAIAPIKey = assemblyAIKey
-                assemblyAIKey = ""
-                messages.append("✓ AssemblyAI key saved")
-            }
-
-            // Save Gladia key (no cheap validation endpoint)
-            if !gladiaKey.isEmpty {
-                settings.gladiaAPIKey = gladiaKey
-                gladiaKey = ""
-                messages.append("✓ Gladia key saved")
-            }
-
-            // Save Google Gemini key (validated when the session connects)
-            if !googleKey.isEmpty {
-                settings.googleAPIKey = googleKey
-                googleKey = ""
-                messages.append("✓ Google Gemini key saved")
-            }
-
-            // Save xAI key (validated when the realtime session connects)
-            if !xAIKey.isEmpty {
-                settings.xAIAPIKey = xAIKey
-                xAIKey = ""
-                messages.append("✓ xAI key saved")
-            }
-
-            if !metaKey.isEmpty {
-                let result = await MetaMuseAPIKeyValidator().validate(metaKey)
-                switch result.outcome {
-                case .success:
-                    settings.metaAPIKey = metaKey
-                    metaKey = ""
-                    messages.append("✓ Meta key validated for Muse Voice Transcribe and saved")
-                case .failure(let message):
-                    messages.append("✗ Meta: \(message)")
-                }
-            }
-
-            // Saved without a probe: Speechmatics, Rev.ai and Mistral all
-            // validate the credential when the realtime session connects, and
-            // a stored key is never read as entitlement.
-            if !speechmaticsKey.isEmpty {
-                settings.speechmaticsAPIKey = speechmaticsKey
-                speechmaticsKey = ""
-                messages.append("✓ Speechmatics key saved")
-            }
-
-            if !revAIKey.isEmpty {
-                settings.revAIAPIKey = revAIKey
-                revAIKey = ""
-                messages.append("✓ Rev.ai access token saved")
-            }
-
-            if !mistralKey.isEmpty {
-                settings.mistralAPIKey = mistralKey
-                mistralKey = ""
-                messages.append("✓ Mistral key saved")
-            }
-
             isValidating = false
             validationMessage = messages.joined(separator: "\n")
             showingValidation = true
             reloadBalancesAfterCredentialChange()
+        }
+    }
+
+    /// Validates `key` where the provider has a cheap probe, stores it, and
+    /// returns its line for the Validation alert.
+    private func save(_ key: String, for id: String) async -> String {
+        if let failure = await self.validationFailure(of: key, for: id) {
+            return failure
+        }
+        self.store(key, for: id)
+        self.drafts.clear(id, ifStill: key)
+        if id == "deepgram" {
+            // Auto-select Deepgram as the provider now that there is a key.
+            settings.reconfigureDefaultProvider()
+        }
+        return Self.savedMessage(for: id, title: self.presentation(for: id).title)
+    }
+
+    /// The alert line for a key its provider rejects, or nil when the key
+    /// passed or the provider has no cheap probe; the others check the key
+    /// when a session connects, and a stored key is never read as entitlement.
+    ///
+    /// Provider responses can echo account details or the submitted key, so
+    /// the alert gets a fixed local line and the original goes to the private
+    /// log.
+    private func validationFailure(of key: String, for id: String) async -> String? {
+        let title = self.presentation(for: id).title
+        let outcome: APIKeyValidationResult.Outcome
+        switch id {
+        case "azure":
+            do {
+                _ = try await AzureSpeechVoiceAPI().listVoices(credentials: key)
+                return nil
+            } catch {
+                SpeakLogger.logError(error, context: "Azure Speech key validation", logger: apiKeysLogger)
+                return "✗ \(title): the key and region could not be verified, so they were not saved."
+            }
+        case "deepgram":
+            outcome = await DeepgramAPIKeyValidator().validate(key).outcome
+        case "elevenlabs":
+            outcome = await ElevenLabsSTTAPIKeyValidator().validate(key).outcome
+        case "meta":
+            outcome = await MetaMuseAPIKeyValidator().validate(key).outcome
+        default:
+            return nil
+        }
+        guard case .failure(let detail) = outcome else { return nil }
+        apiKeysLogger.error(
+            "API key validation failed for \(id, privacy: .public): \(detail, privacy: .private)"
+        )
+        return "✗ \(title): the key could not be verified, so it was not saved. Check it and try again."
+    }
+
+    private static func savedMessage(for id: String, title: String) -> String {
+        switch id {
+        case "azure":
+            return "✓ Azure key and region saved; transcription access depends on your resource."
+        case "deepgram", "elevenlabs":
+            return "✓ \(title) key validated and saved"
+        case "meta":
+            return "✓ Meta key validated for Muse Voice Transcribe and saved"
+        case "soniox":
+            return "✓ Soniox key saved for transcription and voice output"
+        case "revai":
+            return "✓ Rev.ai access token saved"
+        default:
+            return "✓ \(title) key saved"
         }
     }
 }

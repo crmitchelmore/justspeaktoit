@@ -82,6 +82,14 @@ update-tooling: ## Intentionally upgrade the lint toolchain pinned in Tooling/Pa
 verify-checksums: ## Verify binary XCFramework and package checksums
 	./scripts/verify-checksums.sh
 
+.PHONY: bench
+bench: ## Run the local-transcription benchmark package (pass ARGS="run ..." or ARGS="compare ...")
+	swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark $(ARGS)
+
+.PHONY: bench-test
+bench-test: ## Test the local-transcription benchmark package
+	swift test --package-path Benchmarks/LocalTranscription
+
 .PHONY: install-hooks
 install-hooks: ## Install git hooks for pre-push verification
 	git config core.hooksPath .githooks

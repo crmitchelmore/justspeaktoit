@@ -62,9 +62,24 @@ final class ManifestParityTests: XCTestCase {
         }
     }
 
+    /// The benchmark package (issue #1120) depends on the root package, so its
+    /// WhisperKit requirement must agree with the root one or it cannot resolve.
+    func testBenchmarkPackageArgmaxRequirement_matchesTheRootPackage() throws {
+        let package = try contents(of: "Package.swift")
+        let benchmark = try contents(of: "Benchmarks/LocalTranscription/Package.swift")
+        let url = "https://github.com/argmaxinc/argmax-oss-swift.git"
+        let rootVersion = try XCTUnwrap(packageRequirement(in: package, url: url))
+        let benchmarkVersion = try XCTUnwrap(
+            packageRequirement(in: benchmark, url: url), "\(url) missing from the benchmark Package.swift"
+        )
+        XCTAssertEqual(rootVersion, benchmarkVersion)
+    }
+
     func testArgmaxPin_matchesTheBenchmarkRuntimeVersion() throws {
         let resolved = try contents(of: "Package.resolved")
-        let runners = try contents(of: "Sources/LocalTranscriptionBenchmark/EngineRunners.swift")
+        let runners = try contents(
+            of: "Benchmarks/LocalTranscription/Sources/LocalTranscriptionBenchmark/EngineRunners.swift"
+        )
         let pinnedVersion = try XCTUnwrap(
             firstMatch(
                 #""identity" : "argmax-oss-swift".*?"(version)" : "([^"]+)""#,

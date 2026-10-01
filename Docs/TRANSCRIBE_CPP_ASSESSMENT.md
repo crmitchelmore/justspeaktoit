@@ -104,16 +104,19 @@ Parakeet or streaming models only in separately labelled reports.
 
 ## Run
 
-Build the benchmark tool without building or launching the app:
+The benchmark is its own Swift package in `Benchmarks/LocalTranscription` (it depends on the root package for
+`SpeakCore`), so the transcribe.cpp XCFramework is only downloaded here. Build it without building or launching the app:
 
 ```sh
-swift build --product local-transcription-benchmark
+swift build --package-path Benchmarks/LocalTranscription --product local-transcription-benchmark
 ```
+
+`make bench ARGS="run ..."` is shorthand for the `swift run` commands below, and `make bench-test` runs its tests.
 
 Create the WhisperKit baseline:
 
 ```sh
-swift run local-transcription-benchmark run \
+swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark run \
   --engine whisperkit \
   --model openai_whisper-large-v3-v20240930_turbo_632MB \
   --repo argmaxinc/whisperkit-coreml \
@@ -127,7 +130,7 @@ swift run local-transcription-benchmark run \
 Create the transcribe.cpp candidate report with a checksum-verified GGUF pinned to a Hugging Face revision:
 
 ```sh
-swift run local-transcription-benchmark run \
+swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark run \
   --engine transcribe.cpp \
   --model /path/to/whisper-large-v3-turbo-Q8_0.gguf \
   --model-source https://huggingface.co/handy-computer/whisper-large-v3-turbo-gguf/resolve/PINNED_REVISION/whisper-large-v3-turbo-Q8_0.gguf \
@@ -149,7 +152,7 @@ Copy `Benchmarks/LocalTranscription/evidence.example.json` and fill it from obse
 is complete only when it has a pinned URL, 64-character SHA-256, byte size, and license. Then run:
 
 ```sh
-swift run local-transcription-benchmark compare \
+swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark compare \
   --baseline /path/to/whisperkit.json \
   --candidate /path/to/transcribe-cpp.json \
   --evidence /path/to/evidence.json \

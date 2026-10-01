@@ -10,6 +10,10 @@ echo "→ Resolving Swift package dependencies..."
 swift package resolve
 echo "✓ Package resolution OK"
 
+# The transcribe.cpp binary target is used only by the local-transcription
+# benchmark, which lives in its own package (issue #1120).
+binary_manifest=Benchmarks/LocalTranscription/Package.swift
+
 # Extract the complete multiline CTranscribe target declaration.
 target_block=$(
   awk '
@@ -22,7 +26,7 @@ target_block=$(
         block = ""
       }
     }
-  ' Package.swift
+  ' "$binary_manifest"
 )
 
 binary_url=$(
@@ -37,7 +41,7 @@ declared_checksum=$(
 )
 
 if [[ -z "$binary_url" || ! "$declared_checksum" =~ ^[0-9a-f]{64}$ ]]; then
-  echo "✗ Could not extract CTranscribe URL and checksum from Package.swift" >&2
+  echo "✗ Could not extract CTranscribe URL and checksum from $binary_manifest" >&2
   exit 1
 fi
 

@@ -26,3 +26,7 @@ research/
 
 # Project-local Alpha run bundle
 /dist/
+
+# The local-transcription benchmark package (issue #1120) is a developer tool
+# resolved on demand; the app graph is pinned by the root Package.resolved.
+Benchmarks/LocalTranscription/Package.resolved

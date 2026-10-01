@@ -20,11 +20,7 @@ let package = Package(
         // public-API compatibility gate.
         .library(name: "SpeakTestSupport", targets: ["SpeakTestSupport"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"]),
-        .executable(name: "speak", targets: ["SpeakCLI"]),
-        .executable(
-            name: "local-transcription-benchmark",
-            targets: ["LocalTranscriptionBenchmark"]
-        )
+        .executable(name: "speak", targets: ["SpeakCLI"])
     ],
     dependencies: [
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
@@ -50,12 +46,6 @@ let package = Package(
         )
     ],
     targets: [
-        .binaryTarget(
-            name: "CTranscribe",
-            url: "https://github.com/handy-computer/transcribe.cpp/releases/download/v0.1.3/"
-                + "TranscribeCpp.xcframework.zip",
-            checksum: "b7a3442e2f3552cac1ee71b5e164934dd4db243f6b4b16b1e3e3ed5d1645eefd"
-        ),
         .target(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"
@@ -116,18 +106,6 @@ let package = Package(
             dependencies: ["SpeakHotKeys"],
             path: "Sources/SpeakHotKeysDemo"
         ),
-        .target(
-            name: "LocalTranscriptionBenchmarkKit",
-            dependencies: ["SpeakCore"]
-        ),
-        .executableTarget(
-            name: "LocalTranscriptionBenchmark",
-            dependencies: [
-                "LocalTranscriptionBenchmarkKit",
-                .product(name: "WhisperKit", package: "argmax-oss-swift"),
-                "CTranscribe"
-            ]
-        ),
         // Shared test doubles (issue #1124). A plain target, not a test
         // target, so the Tuist-built iOS test bundle can compile the same
         // sources through its own glob.
@@ -176,10 +154,8 @@ let package = Package(
         .testTarget(
             name: "SpeakAutomationKitTests",
             dependencies: ["SpeakAutomationKit", "SpeakCore"]
-        ),
-        .testTarget(
-            name: "LocalTranscriptionBenchmarkTests",
-            dependencies: ["LocalTranscriptionBenchmarkKit", "SpeakCore"]
         )
+        // The local-transcription benchmark and its transcribe.cpp binary
+        // target live in Benchmarks/LocalTranscription (issue #1120).
     ]
 )

@@ -8,29 +8,29 @@ import XCTest
 final class CaptureStartFailurePresentationTests: XCTestCase {
     func testEveryTypedTranscriptionFailureHasStableSafePresentation() {
         let secret = SecretFailure()
-        let cases: [(iOSTranscriptionError, String, CaptureStartFailureRecovery?)] = [
-            (.permissionDenied(.microphone), "start_permission_microphone", .appPermissions),
-            (.permissionDenied(.speechRecognition), "start_permission_speech_recognition", .appPermissions),
-            (.recognizerUnavailable, "start_recognizer_unavailable", nil),
-            (.audioSessionFailed(secret), "start_audio_session", nil),
-            (.recognitionFailed(secret), "start_recognition", nil),
-            (.microphoneChanged, "start_microphone_changed", nil),
-            (.interrupted, "start_interrupted", nil),
-            (.liveActivityUnavailable, "start_live_activity", .appPermissions),
-            (.startTimedOut(after: nil), "start_timeout", nil),
-            (.startTimedOut(after: .credentialsReady), "start_timeout", nil),
-            (.startTimedOut(after: .audioSessionConfigured), "start_timeout", nil),
-            (.startTimedOut(after: .engineStarted), "start_timeout", nil),
-            (.startTimedOut(after: .sessionStarted), "start_timeout", nil),
-            (.startTimedOut(after: .firstPartial), "start_timeout", nil),
-            (.microphoneDeliveredNoAudio, "start_no_audio", nil),
-            (.finalisationTimedOut, "start_finalisation_timeout", nil)
+        let cases: [ExpectedPresentation] = [
+            .init(.permissionDenied(.microphone), "start_permission_microphone", .appPermissions),
+            .init(.permissionDenied(.speechRecognition), "start_permission_speech_recognition", .appPermissions),
+            .init(.recognizerUnavailable, "start_recognizer_unavailable"),
+            .init(.audioSessionFailed(secret), "start_audio_session"),
+            .init(.recognitionFailed(secret), "start_recognition"),
+            .init(.microphoneChanged, "start_microphone_changed"),
+            .init(.interrupted, "start_interrupted"),
+            .init(.liveActivityUnavailable, "start_live_activity", .appPermissions),
+            .init(.startTimedOut(after: nil), "start_timeout"),
+            .init(.startTimedOut(after: .credentialsReady), "start_timeout"),
+            .init(.startTimedOut(after: .audioSessionConfigured), "start_timeout"),
+            .init(.startTimedOut(after: .engineStarted), "start_timeout"),
+            .init(.startTimedOut(after: .sessionStarted), "start_timeout"),
+            .init(.startTimedOut(after: .firstPartial), "start_timeout"),
+            .init(.microphoneDeliveredNoAudio, "start_no_audio"),
+            .init(.finalisationTimedOut, "start_finalisation_timeout")
         ]
 
-        for (error, code, recovery) in cases {
-            let presentation = CaptureStartFailurePresentation.make(for: error)
-            XCTAssertEqual(presentation.code, code)
-            XCTAssertEqual(presentation.recovery, recovery)
+        for expected in cases {
+            let presentation = CaptureStartFailurePresentation.make(for: expected.error)
+            XCTAssertEqual(presentation.code, expected.code)
+            XCTAssertEqual(presentation.recovery, expected.recovery)
             XCTAssertFalse(presentation.message.isEmpty)
             XCTAssertFalse(presentation.message.contains(SecretFailure.secret))
         }
@@ -45,12 +45,14 @@ final class CaptureStartFailurePresentationTests: XCTestCase {
             CaptureStartFailurePresentation.make(for: iOSTranscriptionError.recognizerUnavailable).message,
             "Speech recognition is unavailable for the selected language. Choose another language and try again."
         )
+        let audioSessionFailure = iOSTranscriptionError.audioSessionFailed(SecretFailure())
         XCTAssertEqual(
-            CaptureStartFailurePresentation.make(for: iOSTranscriptionError.audioSessionFailed(SecretFailure())).message,
+            CaptureStartFailurePresentation.make(for: audioSessionFailure).message,
             "The microphone audio session couldn't start. Finish other audio activity and try again."
         )
+        let startTimeout = iOSTranscriptionError.startTimedOut(after: .engineStarted)
         XCTAssertEqual(
-            CaptureStartFailurePresentation.make(for: iOSTranscriptionError.startTimedOut(after: .engineStarted)).message,
+            CaptureStartFailurePresentation.make(for: startTimeout).message,
             "Recording didn't start in time while starting the microphone. Try again."
         )
     }
@@ -156,6 +158,22 @@ final class CaptureStartFailurePresentationTests: XCTestCase {
         XCTAssertEqual(CaptureStartFailureRecovery.appPermissions.buttonTitle, "Open Settings")
         XCTAssertEqual(CaptureStartFailureRecovery.credentials.buttonTitle, "API Keys")
         XCTAssertEqual(CaptureStartFailureRecovery.prepareAppleModel.buttonTitle, "Prepare Apple Model")
+    }
+}
+
+private struct ExpectedPresentation {
+    let error: iOSTranscriptionError
+    let code: String
+    let recovery: CaptureStartFailureRecovery?
+
+    init(
+        _ error: iOSTranscriptionError,
+        _ code: String,
+        _ recovery: CaptureStartFailureRecovery? = nil
+    ) {
+        self.error = error
+        self.code = code
+        self.recovery = recovery
     }
 }
 

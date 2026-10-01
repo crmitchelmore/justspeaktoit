@@ -15,12 +15,17 @@ import SpeakiOSLib
 private let brandAccent = Color(red: 1.0, green: 0.42, blue: 0.24)
 
 struct JustSpeakToItWidgetExtensionLiveActivity: Widget {
+    // An `if #available … else` builder branch does not type-check here
+    // ("branches have mismatching types"). Explicit returns opt out of
+    // `WidgetConfigurationBuilder` and use availability-conditional opaque
+    // result types (SE-0360) instead: the top-level, availability-only
+    // `if #available` selects the iOS 18 underlying type at runtime and the
+    // trailing return covers iOS 17.
     var body: some WidgetConfiguration {
         if #available(iOS 18.0, *) {
-            activityConfiguration.supplementalActivityFamilies([.small])
-        } else {
-            activityConfiguration
+            return activityConfiguration.supplementalActivityFamilies([.small])
         }
+        return activityConfiguration
     }
 
     private var activityConfiguration: some WidgetConfiguration {

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -8,7 +9,7 @@ import XCTest
 /// malformed body — none of which may produce a credit figure.
 final class ProviderBalanceClientTests: XCTestCase {
     override func tearDown() {
-        ProviderBalanceMockURLProtocol.handler = nil
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
@@ -71,7 +72,7 @@ final class ProviderBalanceClientTests: XCTestCase {
     }
 
     func testDeepgram_reportsCancellationWithoutInventingABalance() async {
-        ProviderBalanceMockURLProtocol.handler = { _ in throw URLError(.cancelled) }
+        StubURLProtocol.respond {  _ in throw URLError(.cancelled) }
 
         let snapshot = await makeDeepgramClient().fetchBalance(apiKey: "dg-key")
 
@@ -209,7 +210,7 @@ final class ProviderBalanceClientTests: XCTestCase {
     }
 
     func testElevenLabs_reportsUnknownAfterCancellation() async {
-        ProviderBalanceMockURLProtocol.handler = { _ in throw URLError(.cancelled) }
+        StubURLProtocol.respond {  _ in throw URLError(.cancelled) }
 
         let snapshot = await makeElevenLabsClient().fetchBalance(apiKey: "el-key")
 
@@ -292,7 +293,7 @@ final class ProviderBalanceClientTests: XCTestCase {
 /// wallets a figure covers is its own question.
 final class DeepgramMultiProjectBalanceTests: XCTestCase {
     override func tearDown() {
-        ProviderBalanceMockURLProtocol.handler = nil
+        StubURLProtocol.reset()
         super.tearDown()
     }
 

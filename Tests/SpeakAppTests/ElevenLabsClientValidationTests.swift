@@ -1,49 +1,38 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
 
 // MARK: - MockURLProtocol
 
-/// A URLProtocol subclass that intercepts requests and returns pre-configured responses.
-final class ElevenLabsMockURLProtocol: URLProtocol {
-    /// Map request URL path suffix → (statusCode, data)
-    static var handlers: [(String) -> (Int, Data)?] = []
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        let path = request.url?.path ?? ""
-        for handler in ElevenLabsMockURLProtocol.handlers {
-            if let (statusCode, body) = handler(path) {
-                let response = HTTPURLResponse(
-                    url: request.url!,
-                    statusCode: statusCode,
-                    httpVersion: "HTTP/1.1",
-                    headerFields: nil
-                )!
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: body)
-                client?.urlProtocolDidFinishLoading(self)
-                return
-            }
-        }
-        client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
-    }
-
-    override func stopLoading() {}
-}
-
 // MARK: - Tests
 
 @MainActor
 final class ElevenLabsClientValidationTests: XCTestCase {
 
-    private func makeMockSession(handlers: [(String) -> (Int, Data)?]) -> URLSession {
+    private func makeMockSession(
+        handlers: [@Sendable (String) -> (Int, Data)?]
+    ) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
-        ElevenLabsMockURLProtocol.handlers = handlers
-        config.protocolClasses = [ElevenLabsMockURLProtocol.self]
+        // Path routing is expressed in the handler rather than in a bespoke
+        // URLProtocol subclass (issue #1124).
+        StubURLProtocol.handler = { request in
+            let path = request.url?.path ?? ""
+            for handler in handlers {
+                if let (statusCode, body) = handler(path) {
+                    let response = HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: statusCode,
+                        httpVersion: "HTTP/1.1",
+                        headerFields: nil
+                    )!
+                    return .respond(response, body)
+                }
+            }
+            return .fail(URLError(.unsupportedURL))
+        }
+        config.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: config)
     }
 

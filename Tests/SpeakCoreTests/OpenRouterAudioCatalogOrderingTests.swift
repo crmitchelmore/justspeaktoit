@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 @testable import SpeakCore
 
@@ -41,7 +42,7 @@ final class OpenRouterAudioCatalogOrderingTests: XCTestCase {
         let started = expectation(description: "Older request waits for its response")
         let gate = OpenRouterCatalogResponseGate(started: started)
         let now = Date()
-        OpenRouterCatalogOrderingProtocol.handler = { request in
+        StubURLProtocol.respond {  request in
             let isOlder = request.value(forHTTPHeaderField: "Authorization") == "Bearer older"
             if isOlder { await gate.wait() }
             let response = HTTPURLResponse(
@@ -52,7 +53,7 @@ final class OpenRouterAudioCatalogOrderingTests: XCTestCase {
         let session = mockSession()
         defer {
             session.invalidateAndCancel()
-            OpenRouterCatalogOrderingProtocol.handler = nil
+            StubURLProtocol.reset()
         }
         let first = OpenRouterAudioCatalog(
             apiKeyProvider: { "older" }, session: session, cacheURL: cache, clock: { now }
@@ -76,7 +77,7 @@ final class OpenRouterAudioCatalogOrderingTests: XCTestCase {
 
     private func mockSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [OpenRouterCatalogOrderingProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 
@@ -116,30 +117,4 @@ private actor OpenRouterCatalogResponseGate {
         continuation?.resume()
         continuation = nil
     }
-}
-
-private final class OpenRouterCatalogOrderingProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        guard let handler = Self.handler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        Task {
-            do {
-                let (response, data) = try await handler(request)
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                client?.urlProtocol(self, didLoad: data)
-                client?.urlProtocolDidFinishLoading(self)
-            } catch {
-                client?.urlProtocol(self, didFailWithError: error)
-            }
-        }
-    }
-
-    override func stopLoading() {}
 }

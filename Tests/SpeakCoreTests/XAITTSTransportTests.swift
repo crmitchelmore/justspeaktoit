@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -8,7 +9,7 @@ import XCTest
 /// failure classification.
 final class XAITTSTransportTests: XCTestCase {
     override func tearDown() {
-        TTSTransportMockURLProtocol.reset()
+        StubURLProtocol.reset()
         super.tearDown()
     }
 
@@ -90,7 +91,7 @@ final class XAITTSTransportTests: XCTestCase {
             apiKey: "fixture",
             request: XAITTSRequest(voiceID: "xai/eve", language: "en")
         )
-        let request = try XCTUnwrap(TTSTransportMockURLProtocol.lastRequest)
+        let request = try XCTUnwrap(StubURLProtocol.lastRequest)
 
         XCTAssertEqual(audio.count, 16)
         XCTAssertEqual(request.url, XAITTSAPI.speechEndpoint)
@@ -169,7 +170,7 @@ final class XAITTSTransportTests: XCTestCase {
             """.utf8)
         )
         let voices = try await XAITTSAPI(session: session).listVoices(apiKey: "fixture")
-        let request = try XCTUnwrap(TTSTransportMockURLProtocol.lastRequest)
+        let request = try XCTUnwrap(StubURLProtocol.lastRequest)
 
         XCTAssertEqual(request.url, XAITTSAPI.voicesEndpoint)
         XCTAssertEqual(request.httpMethod, "GET")

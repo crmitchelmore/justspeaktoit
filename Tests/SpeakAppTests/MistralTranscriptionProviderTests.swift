@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -40,11 +41,11 @@ final class MistralTranscriptionProviderTests: XCTestCase {
 
   func testTranscribeFile_usesMistralMultipartEndpoint() async throws {
     let requestObserver = MistralRequestObserver()
-    MistralMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       return try Self.makeResponse(for: request, body: #"{"text":"hello world","duration":1.25}"#)
     }
-    defer { MistralMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -112,10 +113,10 @@ final class MistralTranscriptionProviderTests: XCTestCase {
 
   func testTranscribeFile_removesMultipartFileAfterSuccessfulUpload() async throws {
     let directory = try makeTemporaryDirectory()
-    MistralMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       try Self.makeResponse(for: request, body: #"{"text":"hello","duration":1}"#)
     }
-    defer { MistralMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     _ = try await makeProvider(multipartDirectory: directory).transcribeFile(
       at: try makeAudioFile(),
@@ -129,10 +130,10 @@ final class MistralTranscriptionProviderTests: XCTestCase {
 
   func testTranscribeFile_removesMultipartFileAfterFailedUpload() async throws {
     let directory = try makeTemporaryDirectory()
-    MistralMockURLProtocol.requestHandler = { _ in
+    StubURLProtocol.respond {  _ in
       throw URLError(.cannotConnectToHost)
     }
-    defer { MistralMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     do {
       _ = try await makeProvider(multipartDirectory: directory).transcribeFile(
@@ -160,10 +161,10 @@ final class MistralTranscriptionProviderTests: XCTestCase {
       ]
     }
     """
-    MistralMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       try Self.makeResponse(for: request, body: responseBody)
     }
-    defer { MistralMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -189,10 +190,10 @@ final class MistralTranscriptionProviderTests: XCTestCase {
       ]
     }
     """
-    MistralMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       try Self.makeResponse(for: request, body: responseBody)
     }
-    defer { MistralMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -214,10 +215,10 @@ final class MistralTranscriptionProviderTests: XCTestCase {
       ]
     }
     """
-    MistralMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       try Self.makeResponse(for: request, body: responseBody)
     }
-    defer { MistralMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = try await makeProvider().transcribeFile(
       at: try makeAudioFile(),
@@ -231,11 +232,11 @@ final class MistralTranscriptionProviderTests: XCTestCase {
 
   func testValidateAPIKey_usesMistralModelsEndpoint() async throws {
     let requestObserver = MistralRequestObserver()
-    MistralMockURLProtocol.requestHandler = { request in
+    StubURLProtocol.respond {  request in
       await requestObserver.store(request: request)
       return try Self.makeResponse(for: request, body: #"{"data":[]}"#)
     }
-    defer { MistralMockURLProtocol.requestHandler = nil }
+    defer { StubURLProtocol.reset() }
 
     let result = await makeProvider().validateAPIKey("test-mistral-key")
     let capturedRequest = await requestObserver.capturedRequest()
@@ -295,7 +296,7 @@ private func makeProvider(
     .appendingPathComponent("speak-multipart-uploads", isDirectory: true)
 ) -> MistralTranscriptionProvider {
   let configuration = URLSessionConfiguration.ephemeral
-  configuration.protocolClasses = [MistralMockURLProtocol.self]
+  configuration.protocolClasses = [StubURLProtocol.self]
   return MistralTranscriptionProvider(
     session: URLSession(configuration: configuration),
     multipartStaging: MultipartUploadStaging(directory: multipartDirectory)
@@ -313,36 +314,4 @@ private actor MistralRequestObserver {
     request
   }
 
-}
-
-private final class MistralMockURLProtocol: URLProtocol {
-  nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) async throws -> (HTTPURLResponse, Data))?
-
-  override static func canInit(with request: URLRequest) -> Bool {
-    true
-  }
-
-  override static func canonicalRequest(for request: URLRequest) -> URLRequest {
-    request
-  }
-
-  override func startLoading() {
-    guard let handler = Self.requestHandler else {
-      XCTFail("MistralMockURLProtocol.requestHandler was not set")
-      return
-    }
-
-    Task {
-      do {
-        let (response, data) = try await handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-      } catch {
-        client?.urlProtocol(self, didFailWithError: error)
-      }
-    }
-  }
-
-  override func stopLoading() {}
 }

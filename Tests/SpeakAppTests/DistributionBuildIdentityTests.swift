@@ -242,7 +242,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(
             watchTarget.contains("\"WKCompanionAppBundleIdentifier\": .string(trainValue(\"iosBundleIdentifier\"))")
         )
-        XCTAssertTrue(watchTarget.contains("\"Sources/SpeakCore/WatchCaptureProtocol.swift\""))
+        // Shared watch types come from the dependency-free SpeakWatchCore
+        // product, not from SpeakCore files compiled by path (issue #1123).
+        XCTAssertTrue(watchTarget.contains(".package(product: \"SpeakWatchCore\")"))
+        XCTAssertFalse(watchTarget.contains("\"Sources/SpeakCore/"))
     }
 
     func testWatchComplication_shipsOnlyWithTheWatchAppFeatureFlag() throws {
@@ -273,10 +276,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(widgetTarget.contains("product: .appExtension"))
         XCTAssertTrue(watchTarget.contains(".target(name: \"JustSpeakWatchWidgetExtension\")"))
         // Both watch targets compile the shared intent and read the same
-        // App Group container.
+        // App Group container, which SpeakWatchCore provides.
         for target in [widgetTarget, watchTarget] {
             XCTAssertTrue(target.contains("\"JustSpeakWatchShared/**\""))
-            XCTAssertTrue(target.contains("\"Sources/SpeakCore/WatchSharedContainer.swift\""))
+            XCTAssertTrue(target.contains(".package(product: \"SpeakWatchCore\")"))
         }
         XCTAssertTrue(manifest.contains("\"$(inherited) WATCH_WIDGET_EXTENSION\""))
         XCTAssertTrue(entitlements.contains("<string>group.com.justspeaktoit.watch</string>"))

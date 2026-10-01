@@ -5,9 +5,9 @@ import Foundation
 // The watch app and the watch widget extension are separate processes with
 // separate data containers, so anything the complication has to read (capture
 // queue, complication snapshot, pending record request) must live in the App
-// Group container they share. Pure Foundation so the same file compiles in
-// SpeakCore (mac/iOS) and is included by direct source reference in both
-// watchOS targets, which cannot depend on the package graph.
+// Group container they share. Pure Foundation: it lives in SpeakWatchCore,
+// which has no dependencies, so both watchOS targets can link it (SpeakCore
+// re-exports it for mac/iOS).
 
 /// The directory the watch app and its widget extension both read, plus the
 /// small-payload IO both do against it.

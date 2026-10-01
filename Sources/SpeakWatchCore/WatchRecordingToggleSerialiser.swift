@@ -7,11 +7,13 @@ import Foundation
 /// an operation awaits. Ownership stays reserved for the next waiter until it
 /// finishes, so a new caller cannot overtake an already queued tap.
 @MainActor
-final class WatchRecordingToggleSerialiser {
+public final class WatchRecordingToggleSerialiser {
     private var isRunning = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    func run(_ operation: @MainActor () async -> Void) async {
+    public init() {}
+
+    public func run(_ operation: @MainActor () async -> Void) async {
         await self.acquire()
         defer { self.release() }
         await operation()

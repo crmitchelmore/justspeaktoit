@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpeakCore
+@testable import SpeakWatchCore
 
 final class WatchSharedContainerTests: XCTestCase {
     private var scratch: URL!

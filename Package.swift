@@ -6,11 +6,17 @@ let package = Package(
     defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17)
+        .iOS(.v17),
+        // Only SpeakWatchCore is built for watchOS; it has no dependencies, so
+        // the watch targets never pull in packages without watchOS support.
+        .watchOS(.v10)
     ],
     products: [
         .library(name: "SpeakHotKeys", targets: ["SpeakHotKeys"]),
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        // Foundation-only watch/release-train types shared with the watchOS
+        // targets (issue #1123). SpeakCore re-exports it.
+        .library(name: "SpeakWatchCore", targets: ["SpeakWatchCore"]),
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
@@ -60,8 +66,18 @@ let package = Package(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"
         ),
+        // No dependencies: the watch app and complication link this product,
+        // and must not reach any package that lacks watchOS support.
+        .target(
+            name: "SpeakWatchCore",
+            path: "Sources/SpeakWatchCore",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
+        ),
         .target(
             name: "SpeakCore",
+            dependencies: ["SpeakWatchCore"],
             resources: [
                 // Bundled release notes so the in-app "What's New" screen works offline.
                 .process("Resources")
@@ -138,6 +154,10 @@ let package = Package(
         .testTarget(
             name: "SpeakCoreTests",
             dependencies: ["SpeakCore", "SpeakTestSupport"]
+        ),
+        .testTarget(
+            name: "SpeakWatchCoreTests",
+            dependencies: ["SpeakWatchCore"]
         ),
         .testTarget(
             name: "SpeakHotKeysTests",

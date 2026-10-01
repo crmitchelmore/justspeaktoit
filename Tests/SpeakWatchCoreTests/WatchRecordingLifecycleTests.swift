@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpeakCore
+@testable import SpeakWatchCore
 
 final class WatchRecordingLifecycleTests: XCTestCase {
     private let usableDuration: TimeInterval = 42

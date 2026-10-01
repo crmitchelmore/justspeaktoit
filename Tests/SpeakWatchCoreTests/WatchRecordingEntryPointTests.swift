@@ -33,14 +33,25 @@ final class WatchRecordingEntryPointTests: XCTestCase {
         XCTAssertEqual(module.status, 0, module.output)
         guard module.status == 0 else { return }
 
+        // The watch sources import SpeakWatchCore, so build the slice of it
+        // they need as its own module: this also proves they only use its
+        // public API, exactly as the watchOS targets do.
+        let watchCore = try self.run("/usr/bin/xcrun", arguments: [
+            "swiftc", "-j", "4", "-emit-library", "-emit-module", "-module-name", "SpeakWatchCore",
+            "-emit-module-path", directory.appendingPathComponent("SpeakWatchCore.swiftmodule").path,
+            root.appendingPathComponent("Sources/SpeakWatchCore/WatchCaptureProtocol.swift").path,
+            root.appendingPathComponent("Sources/SpeakWatchCore/WatchRecordingToggleSerialiser.swift").path,
+            "-o", directory.appendingPathComponent("libSpeakWatchCore.dylib").path
+        ])
+        XCTAssertEqual(watchCore.status, 0, watchCore.output)
+        guard watchCore.status == 0 else { return }
+
         let compiler = try self.run("/usr/bin/xcrun", arguments: [
             "swiftc", "-parse-as-library", "-j", "4",
-            "-I", directory.path, "-L", directory.path, "-lWatchConnectivity",
+            "-I", directory.path, "-L", directory.path, "-lWatchConnectivity", "-lSpeakWatchCore",
             "-Xlinker", "-rpath", "-Xlinker", directory.path,
             root.appendingPathComponent("JustSpeakWatch/WatchRecordingCoordinator.swift").path,
             root.appendingPathComponent("JustSpeakWatch/WatchCaptureStore.swift").path,
-            root.appendingPathComponent("Sources/SpeakCore/WatchCaptureProtocol.swift").path,
-            root.appendingPathComponent("Sources/SpeakCore/WatchRecordingToggleSerialiser.swift").path,
             harness.path, "-o", executable.path
         ])
         XCTAssertEqual(compiler.status, 0, compiler.output)
@@ -115,6 +126,7 @@ final class WatchRecordingEntryPointTests: XCTestCase {
 
     private static let harness = """
     import Foundation
+    import SpeakWatchCore
     import WatchConnectivity
 
     struct WatchSharedContainer {

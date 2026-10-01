@@ -197,6 +197,49 @@ final class OpenAICompatibleBatchClientTests: XCTestCase {
     XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
   }
 
+  func testUpload_cancelledWhileUploadSucceedsThrowsCancellationAndCleansUp() async throws {
+    let directory = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let source = directory.appendingPathComponent("audio.m4a")
+    try Data("audio".utf8).write(to: source)
+    let stagingDirectory = directory.appendingPathComponent("staging")
+    let client = OpenAICompatibleBatchTranscriptionClient(
+      staging: MultipartUploadStaging(directory: stagingDirectory)
+    ) { request, _ in
+      // The transfer completes, but the task is cancelled while it runs.
+      withUnsafeCurrentTask { task in
+        if let task { task.cancel() }
+      }
+      return (
+        Data(#"{"text":"late"}"#.utf8),
+        HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+      )
+    }
+    let task = Task {
+      try await client.upload(
+        request: URLRequest(url: URL(string: "https://example.test")!),
+        fields: [],
+        file: .init(fieldName: "file", filename: "audio.m4a", mimeType: "audio/m4a", sourceURL: source),
+        providerID: "fixture"
+      )
+    }
+
+    do {
+      _ = try await task.value
+      XCTFail("A cancelled upload must not be reported as a success")
+    } catch is CancellationError {}
+    let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: stagingDirectory.path)) ?? []
+    XCTAssertTrue(leftovers.isEmpty)
+  }
+
+  func testEscapedFilename_dropsEveryControlCharacterAndEscapesQuotes() {
+    XCTAssertEqual(
+      OpenAICompatibleBatchTranscriptionClient.escapedFilename("a\u{0}b\tc\u{7F}d\u{85}e\u{2028}f\"g\\h.m4a"),
+      #"abcdef\"g\\h.m4a"#
+    )
+  }
+
   private func temporaryDirectory() -> URL {
     FileManager.default.temporaryDirectory
       .appendingPathComponent("bounded-multipart-tests-\(UUID().uuidString)", isDirectory: true)

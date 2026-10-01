@@ -84,7 +84,7 @@ final class MultipartUploadStagingTests: XCTestCase {
   }
 
   func testPurge_ignoresFilesThatAreNotUploadBodies() throws {
-    let staging = makeStaging(stalenessThreshold: 0)
+    let staging = makeStaging(stalenessThreshold: 60)
     let unrelated = try seedFile(named: "notes.txt", age: 7_200)
     let wrongName = try seedFile(named: "recording.multipart", age: 7_200)
 
@@ -95,7 +95,7 @@ final class MultipartUploadStagingTests: XCTestCase {
   }
 
   func testPurge_neverRemovesActiveUploadBodies() throws {
-    let staging = makeStaging(stalenessThreshold: 0)
+    let staging = makeStaging(stalenessThreshold: 60)
 
     let active = try staging.createUploadBodyFile(providerID: "soniox")
     try backdate(active, by: 7_200)
@@ -106,7 +106,7 @@ final class MultipartUploadStagingTests: XCTestCase {
   }
 
   func testRemoveUploadBodyFile_deletesFileAndReleasesClaimForPurge() throws {
-    let staging = makeStaging(stalenessThreshold: 0)
+    let staging = makeStaging(stalenessThreshold: 60)
     let url = try staging.createUploadBodyFile(providerID: "mistral")
 
     staging.removeUploadBodyFile(at: url)
@@ -122,7 +122,7 @@ final class MultipartUploadStagingTests: XCTestCase {
   }
 
   func testCreateUploadBodyFile_purgesStaleLeftoversFirst() throws {
-    let staging = makeStaging(stalenessThreshold: 0)
+    let staging = makeStaging(stalenessThreshold: 60)
     let stale = try seedFile(named: "mistral-upload-\(UUID().uuidString).multipart", age: 7_200)
 
     let url = try staging.createUploadBodyFile(providerID: "mistral")
@@ -130,6 +130,64 @@ final class MultipartUploadStagingTests: XCTestCase {
 
     XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
     XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+  }
+
+  func testRemoveUploadBodyFile_refusesFilesThisInstanceDoesNotOwn() throws {
+    let staging = makeStaging()
+    let otherInstance = makeStaging()
+    let foreignBody = try otherInstance.createUploadBodyFile(providerID: "mistral")
+    defer { otherInstance.removeUploadBodyFile(at: foreignBody) }
+    let unclaimedBody = try seedFile(named: "mistral-upload-\(UUID().uuidString).multipart", age: 0)
+    let recording = try seedFile(named: "recording.m4a", age: 0)
+    let outside = directory.deletingLastPathComponent()
+      .appendingPathComponent("outside-\(UUID().uuidString).m4a")
+    try Data("source".utf8).write(to: outside)
+    defer { try? FileManager.default.removeItem(at: outside) }
+    let traversal = directory.appendingPathComponent("../\(outside.lastPathComponent)")
+
+    for url in [foreignBody, unclaimedBody, recording, outside, traversal] {
+      staging.removeUploadBodyFile(at: url)
+    }
+
+    for url in [foreignBody, unclaimedBody, recording, outside] {
+      XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), url.lastPathComponent)
+    }
+  }
+
+  func testRemoveUploadBodyFile_refusesABodyItAlreadyReleased() throws {
+    let staging = makeStaging()
+    let url = try staging.createUploadBodyFile(providerID: "mistral")
+    staging.removeUploadBodyFile(at: url)
+    try Data("recreated".utf8).write(to: url)
+
+    staging.removeUploadBodyFile(at: url)
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+  }
+
+  func testCreateUploadBodyFile_keepsATraversingProviderIDInsideTheStagingDirectory() throws {
+    let staging = makeStaging()
+
+    let url = try staging.createUploadBodyFile(providerID: "../escaped/..")
+    defer { staging.removeUploadBodyFile(at: url) }
+
+    XCTAssertEqual(url.deletingLastPathComponent().path, directory.path)
+    XCTAssertTrue(url.lastPathComponent.hasPrefix("___escaped___-upload-"))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+  }
+
+  func testInit_invalidStalenessThresholdFallsBackToDefault() throws {
+    for threshold in [TimeInterval.nan, .infinity, 0, -1] {
+      let staging = makeStaging(stalenessThreshold: threshold)
+      let stale = try seedFile(named: "mistral-upload-\(UUID().uuidString).multipart", age: 7_200)
+      let fresh = try seedFile(named: "mistral-upload-\(UUID().uuidString).multipart", age: 60)
+
+      staging.purgeStaleUploads()
+
+      XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path), "threshold \(threshold)")
+      XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path), "threshold \(threshold)")
+      try FileManager.default.removeItem(at: fresh)
+    }
   }
 
   // MARK: - Helpers

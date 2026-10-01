@@ -82,6 +82,9 @@ public struct OpenAICompatibleBatchTranscriptionClient: Sendable {
 
     try Task.checkCancellation()
     let (data, response) = try await self.performUpload(request, bodyURL)
+    // Cancellation is cooperative: an upload that completes while its task is
+    // being cancelled must not be reported (and then decoded) as a success.
+    try Task.checkCancellation()
     guard let http = response as? HTTPURLResponse else {
       throw TranscriptionProviderError.invalidResponse
     }
@@ -150,11 +153,18 @@ public struct OpenAICompatibleBatchTranscriptionClient: Sendable {
     }
   }
 
-  private static func escapedFilename(_ filename: String) -> String {
-    filename
-      .replacingOccurrences(of: "\r", with: "")
-      .replacingOccurrences(of: "\n", with: "")
-      .replacingOccurrences(of: "\\", with: "\\\\")
-      .replacingOccurrences(of: "\"", with: "\\\"")
+  /// Drops every control and line-break scalar (not only CR/LF), so nothing can
+  /// end or corrupt the `Content-Disposition` header, then escapes `\` and `"`
+  /// for the quoted-string parameter.
+  static func escapedFilename(_ filename: String) -> String {
+    let dropped = CharacterSet.controlCharacters.union(.newlines)
+    var escaped = String.UnicodeScalarView()
+    for scalar in filename.unicodeScalars where !dropped.contains(scalar) {
+      if scalar == "\\" || scalar == "\"" {
+        escaped.append("\\")
+      }
+      escaped.append(scalar)
+    }
+    return String(escaped)
   }
 }

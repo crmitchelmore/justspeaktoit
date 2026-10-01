@@ -22,6 +22,9 @@ public final class MultipartUploadStaging: @unchecked Sendable {
   private var claimedPaths: Set<String> = []
   private let logger = SpeakLogger.logger(category: "MultipartUploadStaging")
 
+  /// A `stalenessThreshold` that is not a finite, positive interval falls back to
+  /// `defaultStalenessThreshold`: `NaN` or infinity would silently disable the
+  /// stale purge, and zero or less would purge bodies the moment they are unclaimed.
   public init(
     directory: URL = FileManager.default.temporaryDirectory
         .appendingPathComponent(ReleaseTrain.current.namespace("speak-multipart-uploads"), isDirectory: true),
@@ -29,7 +32,9 @@ public final class MultipartUploadStaging: @unchecked Sendable {
     fileManager: FileManager = .default
   ) {
     self.directory = directory
-    self.stalenessThreshold = stalenessThreshold
+    self.stalenessThreshold = stalenessThreshold.isFinite && stalenessThreshold > 0
+      ? stalenessThreshold
+      : Self.defaultStalenessThreshold
     self.fileManager = fileManager
   }
 
@@ -52,8 +57,9 @@ public final class MultipartUploadStaging: @unchecked Sendable {
       [.posixPermissions: 0o700],
       ofItemAtPath: self.directory.path
     )
-    let url = self.directory
-      .appendingPathComponent("\(providerID)-upload-\(UUID().uuidString).multipart")
+    let url = self.directory.appendingPathComponent(
+      "\(Self.safeFileNamePrefix(providerID))-upload-\(UUID().uuidString).multipart"
+    )
     self.claim(url)
     let created = self.fileManager.createFile(
       atPath: url.path,
@@ -67,10 +73,19 @@ public final class MultipartUploadStaging: @unchecked Sendable {
     return url
   }
 
-  /// Removes an upload body and releases its claim. A failed removal is logged
-  /// (never the contents) and retried by a later purge pass once stale.
+  /// Removes an upload body this instance created and still claims, and releases
+  /// that claim. Any other URL (a source recording, another instance's body, a
+  /// path that merely resolves into the staging directory, or a body already
+  /// released) is refused and left untouched, so this public cleanup can never
+  /// delete a file it does not own. A failed removal is logged (never the
+  /// contents) and retried by a later purge pass once stale.
   public func removeUploadBodyFile(at url: URL) {
-    self.releaseClaim(url)
+    guard self.releaseClaimIfOwned(url) else {
+      self.logger.error(
+        "Refused to remove \(url.lastPathComponent, privacy: .private): not a body this staging instance owns"
+      )
+      return
+    }
     do {
       try self.fileManager.removeItem(at: url)
     } catch {
@@ -116,14 +131,27 @@ public final class MultipartUploadStaging: @unchecked Sendable {
     }
   }
 
+  /// Reduces a provider ID to one safe file-name component, so an ID such as
+  /// `../escaped` cannot place a body outside the staging directory, where the
+  /// stale purge would never find it.
+  static func safeFileNamePrefix(_ providerID: String) -> String {
+    var safe = String.UnicodeScalarView()
+    for scalar in providerID.unicodeScalars {
+      let isSafe = scalar.isASCII
+        && (CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == "_")
+      safe.append(isSafe ? scalar : "_")
+    }
+    return safe.isEmpty ? "provider" : String(safe)
+  }
+
   private static func isUploadBody(_ url: URL) -> Bool {
     url.pathExtension == "multipart" && url.lastPathComponent.contains("-upload-")
   }
 
   /// `contentsOfDirectory(at:)` resolves symlinks (`/var` → `/private/var`), so
-  /// claims are keyed by the fully resolved path.
+  /// claims are keyed by the standardised, fully resolved path.
   private static func claimKey(for url: URL) -> String {
-    url.resolvingSymlinksInPath().path
+    url.standardizedFileURL.resolvingSymlinksInPath().path
   }
 
   private func claim(_ url: URL) {
@@ -136,6 +164,15 @@ public final class MultipartUploadStaging: @unchecked Sendable {
     self.lock.lock()
     defer { self.lock.unlock() }
     self.claimedPaths.remove(Self.claimKey(for: url))
+  }
+
+  /// Claims are only ever taken for bodies this instance created inside its own
+  /// directory, so holding one is the ownership proof for removal. The check and
+  /// the release share one lock, so a body is removed at most once.
+  private func releaseClaimIfOwned(_ url: URL) -> Bool {
+    self.lock.lock()
+    defer { self.lock.unlock() }
+    return self.claimedPaths.remove(Self.claimKey(for: url)) != nil
   }
 
   private func currentClaims() -> Set<String> {

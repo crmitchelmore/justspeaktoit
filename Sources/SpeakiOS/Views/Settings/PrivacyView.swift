@@ -36,9 +36,22 @@ struct PrivacyView: View {
             networkActivitySection
             notCollectedSection
             permissionsSection
+            privacyPolicySection
         }
         .navigationTitle("Privacy")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// App Review looks for the published policy from inside the app, and the
+    /// macOS About pane has carried the same link for several releases.
+    @ViewBuilder
+    private var privacyPolicySection: some View {
+        Section("Published Policy") {
+            Link(destination: PrivacyPolicy.url) {
+                Label("Read the Privacy Policy", systemImage: "hand.raised.square")
+            }
+            .accessibilityIdentifier("privacyPolicyLink")
+        }
     }
 
     @ViewBuilder

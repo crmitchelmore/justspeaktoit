@@ -6,7 +6,7 @@ import Foundation
 import SpeakCore
 import Speech
 
-// @Implement This class manages system permissions. It knows how to request the following permissions when asked and also surface the current status of permissions as per the system
+// Owns system permission checks, explicit requests and recovery guidance.
 
 enum PermissionStatus: Equatable {
   case notDetermined
@@ -73,6 +73,8 @@ final class PermissionsManager: ObservableObject {
 
   @Published private(set) var statuses: [PermissionType: PermissionStatus] = [:]
   @Published private(set) var requestIssues: [PermissionType: PermissionRequestIssue] = [:]
+  private static let accessibilityGrantKey = "permissions.observedAccessibilityGrant"
+  private let grantHistory: UserDefaults
   private let statusProvider: (PermissionType) -> PermissionStatus
   private let speechAuthorizationRequester: SpeechAuthorizationRequester
   private let speechAuthorizationTimeout: TimeInterval
@@ -88,8 +90,10 @@ final class PermissionsManager: ObservableObject {
     },
     speechAuthorizationTimeout: TimeInterval = 8,
     notificationCenter: NotificationCenter = .default,
-    guidePresenter: ((PermissionType) -> Void)? = nil
+    guidePresenter: ((PermissionType) -> Void)? = nil,
+    grantHistory: UserDefaults = .standard
   ) {
+    self.grantHistory = grantHistory
     self.statusProvider = statusProvider
     self.speechAuthorizationRequester = speechAuthorizationRequester
     self.speechAuthorizationTimeout = speechAuthorizationTimeout
@@ -110,7 +114,7 @@ final class PermissionsManager: ObservableObject {
       return status
     }
     let status = computeStatus(for: type)
-    statuses[type] = status
+    record(status, for: type)
     return status
   }
 
@@ -122,10 +126,20 @@ final class PermissionsManager: ObservableObject {
 
   func refresh(_ type: PermissionType) {
     let status = computeStatus(for: type)
-    statuses[type] = status
-    if status != .notDetermined {
+    record(status, for: type)
+    if status != .notDetermined, requestIssues[type] != nil {
       requestIssues[type] = nil
     }
+  }
+
+  private func record(_ status: PermissionStatus, for type: PermissionType) {
+    if type == .accessibility, status.isGranted,
+       !grantHistory.bool(forKey: Self.accessibilityGrantKey) {
+      grantHistory.set(true, forKey: Self.accessibilityGrantKey)
+    }
+    // A refresh is read-only when nothing changed. Publishing identical snapshots
+    // can make observers that refresh permissions repeatedly trigger themselves.
+    if statuses[type] != status { statuses[type] = status }
   }
 
   func requestIssue(for type: PermissionType) -> PermissionRequestIssue? {
@@ -146,7 +160,7 @@ final class PermissionsManager: ObservableObject {
       status = requestInputMonitoring()
     }
 
-    statuses[type] = status
+    record(status, for: type)
     return status
   }
 
@@ -194,7 +208,7 @@ final class PermissionsManager: ObservableObject {
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecReturnData as String: false,
-      kSecMatchLimit as String: kSecMatchLimitOne,
+      kSecMatchLimit as String: kSecMatchLimitOne
     ]
 
     let status = SecItemCopyMatching(query as CFDictionary, nil)
@@ -342,4 +356,19 @@ final class PermissionsManager: ObservableObject {
       }
     ]
   }
+}
+
+extension PermissionsManager {
+  /// Historical success is evidence of lost access, not proof that a Settings switch is on.
+  var accessibilityAccessWasLost: Bool {
+    statuses[.accessibility] == .denied && grantHistory.bool(forKey: Self.accessibilityGrantKey)
+  }
+
+  var accessibilityRecoveryMessage: String? {
+    guard accessibilityAccessWasLost else { return nil }
+    return "Accessibility access was previously working but macOS now denies it. "
+      + "It may have been turned off or become stale after an update. "
+      + RunningAppIdentity.current.accessibilityRecoveryInstructions
+  }
+
 }

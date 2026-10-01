@@ -344,6 +344,8 @@ private extension SettingsTab {
       return .openKeyboardSettings
     case .permissions:
       return .openPermissionsSettings
+    case .compareModels:
+      return .openCompareModelsSettings
     case .about:
       return .openAboutSettings
     }

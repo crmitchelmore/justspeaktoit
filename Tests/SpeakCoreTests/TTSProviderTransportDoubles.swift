@@ -1,4 +1,5 @@
 import Foundation
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakCore
@@ -24,80 +25,6 @@ final class TTSTransportCallCounter: @unchecked Sendable {
     }
 }
 
-final class TTSTransportMockURLProtocol: URLProtocol, @unchecked Sendable {
-    nonisolated(unsafe) private static var handler: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
-    nonisolated(unsafe) private static var recorded: URLRequest?
-    private static let lock = NSLock()
-
-    static var requestHandler: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))? {
-        get {
-            lock.lock()
-            defer { lock.unlock() }
-            return handler
-        }
-        set {
-            lock.lock()
-            defer { lock.unlock() }
-            handler = newValue
-        }
-    }
-
-    static var lastRequest: URLRequest? {
-        lock.lock()
-        defer { lock.unlock() }
-        return recorded
-    }
-
-    static func reset() {
-        lock.lock()
-        defer { lock.unlock() }
-        handler = nil
-        recorded = nil
-    }
-
-    override static func canInit(with request: URLRequest) -> Bool { true }
-
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        // `httpBody` is stripped from the request the protocol receives, so the
-        // body stream is read back before the request is recorded.
-        var request = self.request
-        if request.httpBody == nil, let stream = request.httpBodyStream {
-            request.httpBody = Self.readBody(from: stream)
-        }
-        Self.lock.lock()
-        Self.recorded = request
-        let handler = Self.handler
-        Self.lock.unlock()
-
-        guard let handler else {
-            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
-            return
-        }
-        let (response, data) = handler(request)
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: data)
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
-
-    private static func readBody(from stream: InputStream) -> Data {
-        stream.open()
-        defer { stream.close() }
-        var data = Data()
-        let size = 4096
-        var buffer = [UInt8](repeating: 0, count: size)
-        while stream.hasBytesAvailable {
-            let read = stream.read(&buffer, maxLength: size)
-            guard read > 0 else { break }
-            data.append(buffer, count: read)
-        }
-        return data
-    }
-}
-
 func XCTAssertTTSThrowsAsync<T>(
     _ expression: @autoclosure () async throws -> T,
     file: StaticString = #filePath,
@@ -116,12 +43,12 @@ func XCTAssertTTSThrowsAsync<T>(
 enum TTSTransportStub {
     static func session() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [TTSTransportMockURLProtocol.self]
+        configuration.protocolClasses = [StubURLProtocol.self]
         return URLSession(configuration: configuration)
     }
 
     static func stub(statusCode: Int, body: Data) {
-        TTSTransportMockURLProtocol.requestHandler = { request in
+        StubURLProtocol.respond {  request in
             (response(for: request, statusCode: statusCode), body)
         }
     }
@@ -136,7 +63,10 @@ enum TTSTransportStub {
     }
 
     static func body(of request: URLRequest) throws -> [String: Any] {
-        let data = try XCTUnwrap(request.httpBody)
+        // URLSession hands the protocol a body stream rather than `httpBody`,
+        // so the bytes are read back through the shared stub's accessor.
+        let data = StubURLProtocol.body(of: request)
+        XCTAssertFalse(data.isEmpty, "Expected a request body")
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 

@@ -539,6 +539,12 @@ public struct SettingsView: View {
                     Label("Release Notes", systemImage: "sparkles")
                 }
                 .accessibilityHint("Shows what changed in this version and earlier versions")
+
+                Link(destination: PrivacyPolicy.url) {
+                    Label("Privacy Policy", systemImage: "hand.raised.square")
+                }
+                .accessibilityIdentifier("privacyPolicyLink")
+                .accessibilityHint("Opens the published privacy policy in your browser")
             }
         }
         .environment(\.defaultMinListRowHeight, settings.visualDensity.minimumListRowHeight)

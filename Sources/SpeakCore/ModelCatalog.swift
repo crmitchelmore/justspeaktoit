@@ -223,14 +223,13 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
 
         // OpenRouter multimodal models
         Option(
-            id: "google/gemini-2.0-flash-001", displayName: "Gemini 2.0 Flash (OpenRouter)",
+            id: "google/gemini-3.1-flash-lite", displayName: "Gemini 3.1 Flash Lite (OpenRouter)",
+            description: "Current low-latency, budget-friendly Gemini multimodal option.",
+            estimatedLatencyMs: 400, latencyTier: .fast),
+        Option(
+            id: "google/gemini-2.5-flash", displayName: "Gemini 2.5 Flash (OpenRouter)",
             description: "Fast multimodal model with strong shorthand transcription.",
             estimatedLatencyMs: 600, latencyTier: .fast),
-        Option(
-            id: "google/gemini-2.0-flash-lite-001",
-            displayName: "Gemini 2.0 Flash Lite (OpenRouter)",
-            description: "Low-latency, budget-friendly multimodal option.",
-            estimatedLatencyMs: 400, latencyTier: .fast),
         Option(
             id: "openai/gpt-4o-audio-preview-2024-12-17",
             displayName: "GPT-4o Audio Preview (OpenRouter)",
@@ -288,7 +287,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         "elevenlabs/scribe_v1_experimental"
     ]
 
-    public static let defaultBatchTranscriptionModel = "google/gemini-2.0-flash-001"
+    public static let defaultBatchTranscriptionModel = "google/gemini-3.1-flash-lite"
 
     /// Batch catalogue options owned by a provider, matched by the `provider/`
     /// prefix on the model identifier. Transcription providers derive their
@@ -370,6 +369,9 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     }()
 
     private static let retiredBatchTranscriptionModels: Set<String> = [
+        // Google retired Gemini 2.0 Flash; OpenRouter selections move to the default.
+        "google/gemini-2.0-flash-001",
+        "google/gemini-2.0-flash-lite-001",
         "openrouter/whisper-large-v3",
         "openrouter/whisper-medium",
         "openrouter/whisper-small"
@@ -688,6 +690,17 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     }
 
     public static let defaultPostProcessingModel = "openai/gpt-5-mini"
+
+    /// Low-latency cloud text model for latency-sensitive rewrites (live polish,
+    /// spoken-response summaries) when the user has not chosen one.
+    public static let defaultFastTextModel = "google/gemini-3.1-flash-lite"
+
+    /// The configured post-processing model, or the default when the setting is
+    /// empty. Unlike `normalizedPostProcessingModel`, custom identifiers are kept.
+    public static func resolvedPostProcessingModel(_ identifier: String?) -> String {
+        let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? defaultPostProcessingModel : trimmed
+    }
 
     /// Migrates retired selections while preserving valid catalogue entries
     /// and custom local cleanup models installed by the user.

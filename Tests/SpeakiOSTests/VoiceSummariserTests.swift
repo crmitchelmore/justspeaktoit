@@ -1,4 +1,5 @@
 import Foundation
+import SpeakCore
 import SpeakTestSupport
 import XCTest
 
@@ -64,7 +65,7 @@ final class VoiceSummariserTests: XCTestCase {
 
             let body = try XCTUnwrap(voiceSummariserRequestBody(from: request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            XCTAssertEqual(json["model"] as? String, "openai/gpt-4o-mini")
+            XCTAssertEqual(json["model"] as? String, ModelCatalog.defaultFastTextModel)
             XCTAssertEqual(json["max_tokens"] as? Int, 300)
 
             let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])

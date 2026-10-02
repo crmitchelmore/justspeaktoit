@@ -33,7 +33,9 @@ constexpr size_t requestLimit = 1024 * 1024;
 
 std::string socketError(const char *operation) { return jsti::systemError(operation, WSAGetLastError()); }
 
-// Bytes a complete request needs once its header block is known, or 0.
+// Bytes a complete request occupies once its header block is known, 0 before
+// that, or SIZE_MAX when it declares a body over the limit (which a size_t
+// sum could otherwise wrap).
 size_t expectedLength(const std::vector<uint8_t> &bytes) {
     const char *begin = reinterpret_cast<const char *>(bytes.data());
     const std::string text(begin, bytes.size());
@@ -47,7 +49,11 @@ size_t expectedLength(const std::vector<uint8_t> &bytes) {
         for (auto &character : header) {
             if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
         }
-        if (header.rfind("content-length:", 0) == 0) length = std::strtoull(header.c_str() + 15, nullptr, 10);
+        if (header.rfind("content-length:", 0) == 0) {
+            const unsigned long long declared = std::strtoull(header.c_str() + 15, nullptr, 10);
+            if (declared > requestLimit) return SIZE_MAX;
+            length = static_cast<size_t>(declared);
+        }
         line = next;
     }
     return end + 4 + length;
@@ -190,8 +196,8 @@ int jsti_loopback_accept(JSTILoopbackListener *listener, int timeout, JSTILoopba
     char buffer[16 * 1024];
     for (;;) {
         const size_t expected = expectedLength(result->request);
-        if (expected && result->request.size() >= expected) break;
-        if (result->request.size() > requestLimit) {
+        if (expected != SIZE_MAX && expected && result->request.size() >= expected) break;
+        if (expected == SIZE_MAX || result->request.size() > requestLimit) {
             jsti_loopback_connection_destroy(result);
             return jsti::fail("The loopback request is too large.", error, capacity);
         }

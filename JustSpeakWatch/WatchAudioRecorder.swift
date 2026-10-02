@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import SpeakWatchCore
 
 /// Records microphone audio on the watch into a local m4a file.
 ///

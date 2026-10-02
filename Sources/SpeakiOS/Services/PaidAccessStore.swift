@@ -117,8 +117,7 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     public var simpleModelChoicesPolicy: SimpleModelChoicesPolicy {
         SimpleModelChoicesPolicy(
             isEnabled: self.simpleModelChoices,
-            hasPaidRouting: PaidAccessFeature.isAvailableOnIOS
-                && self.entitlement.allowsPaidRouting()
+            hasPaidRouting: self.isPaidRoutingActive
         )
     }
 

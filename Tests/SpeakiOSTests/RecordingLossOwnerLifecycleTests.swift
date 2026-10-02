@@ -1,6 +1,7 @@
 #if os(iOS)
 import AVFoundation
 import SpeakCore
+import SpeakTestSupport
 import XCTest
 @testable import SpeakiOSLib
 
@@ -26,11 +27,14 @@ final class RecordingLossOwnerLifecycleTests: XCTestCase {
             owner.recorder.writeBuffer(buffer)
             await fulfillment(of: [written], timeout: 2)
             owner.recorder.didWriteBufferHook = nil
+            let persistenceIssue = expectation(description: "writer issue delivered: \(kind)")
+            owner.recorder.onPersistenceIssue = { diagnostics in
+                lateCallback(diagnostics)
+                persistenceIssue.fulfill()
+            }
             owner.recorder.beforeFileWrite = { throw CocoaError(.fileWriteOutOfSpace) }
             for _ in 0..<4 { owner.recorder.writeBuffer(buffer) }
-            for _ in 0..<100 where owner.reporting.currentReport.snapshot.persistence.isComplete {
-                try await Task.sleep(for: .milliseconds(10))
-            }
+            await fulfillment(of: [persistenceIssue], timeout: 5)
             owner.reporting.deliverWarningIfNeeded()
             owner.reporting.deliverWarningIfNeeded()
             XCTAssertEqual(warnings.count, 1, kind)
@@ -123,7 +127,10 @@ final class RecordingLossOwnerLifecycleTests: XCTestCase {
                          start: transcriber.start, stop: { await transcriber.stop() }, cancel: transcriber.cancel)
         default:
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.protocolClasses = [LossReportingURLProtocol.self]
+            configuration.protocolClasses = [StubURLProtocol.self]
+            StubURLProtocol.handler = { request in
+                .status(200, Data("{\"text\":\"Available words\"}".utf8), url: request.url!)
+            }
             let transcriber = IOSBatchTranscriber(
                 audioSessionManager: manager, model: "openai/gpt-4o-mini-transcribe", apiKey: "test",
                 session: URLSession(configuration: configuration)
@@ -155,15 +162,4 @@ private final class LossReportingClient: FinalizingStreamingTranscriptionClient 
     func finishAndWait() async -> String? { "Available words" }
 }
 
-private final class LossReportingURLProtocol: URLProtocol {
-    override static func canInit(with request: URLRequest) -> Bool { true }
-    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() {
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data("{\"text\":\"Available words\"}".utf8))
-        client?.urlProtocolDidFinishLoading(self)
-    }
-    override func stopLoading() {}
-}
 #endif

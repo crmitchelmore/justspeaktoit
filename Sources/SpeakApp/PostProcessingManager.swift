@@ -354,9 +354,7 @@ final class PostProcessingManager: ObservableObject {
   /// the setting is empty. Single source of truth so the key check, the session
   /// path, and the automation path can never disagree about which model runs.
   private func resolvedModel() -> String {
-    let configuredModel = settings.postProcessingModel
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-    return configuredModel.isEmpty ? "inception/mercury" : configuredModel
+    ModelCatalog.resolvedPostProcessingModel(settings.postProcessingModel)
   }
 
   func hasRequiredAPIKey() async -> Bool {

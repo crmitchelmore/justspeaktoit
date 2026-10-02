@@ -380,9 +380,14 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
 
 ### Behaviour worth knowing
 
-- **Idempotent calls.** The JSON-RPC call id becomes the automation request id
-  (`mcp-<id>`). The app replays the stored reply for an id it has already run, so
-  an agent retrying a timed-out `start_dictation` cannot open a second session.
+- **Process-scoped idempotent calls.** The JSON-RPC call id becomes an automation
+  request id shaped like `mcp-<process-scope>-<call-id>`, where the process scope
+  is an eight-character UUID prefix. The final identifier is truncated to
+  `AutomationLimits.maxIdentifierLength`. Reusing a call id within the same MCP
+  server process lets the app replay its cached reply, so an agent retrying a
+  timed-out `start_dictation` does not open a second session. A new server process
+  receives a new scope: this does not promise exactly-once execution across
+  processes or unlimited cache retention.
 - **Tool failures are results, not protocol errors.** "App not running" comes back
   as `isError: true` content the agent can act on, leaving the session usable.
 - **Bounded inputs.** Paths, identifiers, history limits and message sizes are
@@ -390,6 +395,41 @@ Every tool also returns `structuredContent` with the same fields as the CLI's
   before anything reaches the app.
 - **No credentials.** The protocol has no field for a key or token, and the app
   never puts provider configuration into a reply.
+
+### Claude Code qualification record
+
+The released-app protocol check from 26 August 2026 used app/CLI version 2.62.0
+and a hand-driven stdio client. It successfully called `get_history` with
+`limit: 1`, observed both `content` and `structuredContent`, confirmed owner-only
+socket permissions, and restored Automation to off. Preserve that as protocol
+evidence; it is not the outstanding real-Claude-Code client result.
+
+Use this compact record for the named-client gate. Do not include transcript
+text, request headers, tokens, account identifiers, or full client logs. Mark
+each result PASS, FAIL, or NOT RUN.
+
+| Evidence | Result |
+| --- | --- |
+| Date; macOS/architecture | NOT RUN — `<date>; <macOS>; <architecture>` |
+| App version/build; standalone `speak` path and version; `claude --version` | NOT RUN — `<versions and resolved absolute path>` |
+| Original Automation state; local registration name/scope; restoration | NOT RUN — `<state; name; local scope; restored yes/no>` |
+| Real client connection and discovered tools | NOT RUN — expect exactly `transcribe_file`, `get_history`, `start_dictation`, `stop_dictation` |
+| Invoked argument and response shape/count | NOT RUN — `get_history({"limit":1})`; record `content`, `structuredContent`, and item count without text |
+| Failure classification | NOT RUN — `<none, PATH, opt-in/socket, account/client permission, or protocol mismatch; redacted code>` |
+| Disabled-access check and final state | NOT RUN — `<fresh call blocked; socket absent where applicable; original state restored>` |
+
+Run this gate only on an authorised Mac with an existing usable Claude Code
+client/account, running app, installed standalone CLI, and explicitly
+non-sensitive History entry. Use a local registration and preserve any existing
+target-server configuration. Do not install software, change account/provider
+state, or enable Automation without authorisation. Configuration output alone is
+not a pass: the real client must discover exactly the four tools and complete
+`get_history({"limit":1})`. Disabling Automation prevents new access but does not
+erase content already returned to a client.
+
+The documentation change may merge while every row remains NOT RUN. Keep issue
+#656 open until the real-client registration and call pass; file transcription,
+microphone, and paid-provider qualification belong to their separate gates.
 
 ## Troubleshooting (CLI and MCP)
 

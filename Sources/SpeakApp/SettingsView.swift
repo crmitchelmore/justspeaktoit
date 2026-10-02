@@ -468,6 +468,8 @@ struct SettingsView: View {
       keyboardSettings
     case .permissions:
       permissionsSettings
+    case .compareModels:
+      CompareModelsView()
     case .dataMigration:
       DataMigrationView()
     case .about:

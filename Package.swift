@@ -6,14 +6,25 @@ let package = Package(
     defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
-        .iOS(.v17)
+        .iOS(.v17),
+        // Only SpeakWatchCore is built for watchOS; it has no dependencies, so
+        // the watch targets never pull in packages without watchOS support.
+        .watchOS(.v10)
     ],
     products: [
         .library(name: "SpeakHotKeys", targets: ["SpeakHotKeys"]),
         .library(name: "SpeakCore", targets: ["SpeakCore"]),
+        // Foundation-only watch/release-train types shared with the watchOS
+        // targets (issue #1123). SpeakCore re-exports it.
+        .library(name: "SpeakWatchCore", targets: ["SpeakWatchCore"]),
         .library(name: "SpeakSync", targets: ["SpeakSync"]),
         .library(name: "SpeakiOSLib", targets: ["SpeakiOSLib"]),
         .library(name: "SpeakAutomationKit", targets: ["SpeakAutomationKit"]),
+        // Test-only; a product purely so the Tuist-built iOS test bundle can
+        // link the same module the SwiftPM test targets import (issue #1124).
+        // Not part of the shipped API surface and not checked by the
+        // public-API compatibility gate.
+        .library(name: "SpeakTestSupport", targets: ["SpeakTestSupport"]),
         .executable(name: "SpeakApp", targets: ["SpeakApp"]),
         .executable(name: "speak", targets: ["SpeakCLI"]),
         .executable(
@@ -55,8 +66,18 @@ let package = Package(
             name: "SpeakHotKeys",
             path: "Sources/SpeakHotKeys"
         ),
+        // No dependencies: the watch app and complication link this product,
+        // and must not reach any package that lacks watchOS support.
+        .target(
+            name: "SpeakWatchCore",
+            path: "Sources/SpeakWatchCore",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
+        ),
         .target(
             name: "SpeakCore",
+            dependencies: ["SpeakWatchCore"],
             resources: [
                 // Bundled release notes so the in-app "What's New" screen works offline.
                 .process("Resources")
@@ -123,9 +144,20 @@ let package = Package(
                 "CTranscribe"
             ]
         ),
+        // Shared test doubles (issue #1124). A plain target, not a test
+        // target, so the Tuist-built iOS test bundle can compile the same
+        // sources through its own glob.
+        .target(
+            name: "SpeakTestSupport",
+            path: "Tests/SpeakTestSupport"
+        ),
         .testTarget(
             name: "SpeakCoreTests",
-            dependencies: ["SpeakCore"]
+            dependencies: ["SpeakCore", "SpeakTestSupport"]
+        ),
+        .testTarget(
+            name: "SpeakWatchCoreTests",
+            dependencies: ["SpeakWatchCore"]
         ),
         .testTarget(
             name: "SpeakHotKeysTests",
@@ -141,6 +173,7 @@ let package = Package(
                 "SpeakApp",
                 "SpeakAutomationKit",
                 "SpeakHotKeys",
+                "SpeakTestSupport",
                 // The Sentry event tests inspect the serialised payload, so the
                 // test target needs the SDK types, not just SpeakApp.
                 .product(name: "Sentry", package: "sentry-cocoa"),
@@ -158,7 +191,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SpeakiOSTests",
-            dependencies: ["SpeakiOSLib"]
+            dependencies: ["SpeakiOSLib", "SpeakTestSupport"]
         ),
         .testTarget(
             name: "SpeakAutomationKitTests",

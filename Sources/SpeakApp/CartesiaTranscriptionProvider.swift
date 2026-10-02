@@ -65,7 +65,7 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
-    request.setValue(CartesiaLiveTranscriber.apiVersion, forHTTPHeaderField: "Cartesia-Version")
+    request.setValue(CartesiaLiveClient.apiVersion, forHTTPHeaderField: "Cartesia-Version")
 
     do {
       let (data, response) = try await session.data(for: request)
@@ -105,7 +105,7 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
 }
 
 final class CartesiaLiveTranscriber: @unchecked Sendable {
-  static let apiVersion = "2026-03-01"
+  static let apiVersion = CartesiaLiveClient.apiVersion
   static let preferredChunkBytes = 3_200
   static let minimumChunkBytes = 1_600
 

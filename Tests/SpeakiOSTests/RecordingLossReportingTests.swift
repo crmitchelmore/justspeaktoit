@@ -61,6 +61,12 @@ final class RecordingLossReportingTests: XCTestCase {
         reporting.begin(recorder: recorder)
         reporting.startWriter(recorder, format: buffer.format)
         urls.append(try XCTUnwrap(recorder.currentFileURL))
+        let persistenceIssue = expectation(description: "writer issue delivered")
+        let onPersistenceIssue = try XCTUnwrap(recorder.onPersistenceIssue)
+        recorder.onPersistenceIssue = { diagnostics in
+            onPersistenceIssue(diagnostics)
+            persistenceIssue.fulfill()
+        }
         let entered = expectation(description: "writer stalled")
         let release = DispatchSemaphore(value: 0)
         let stall = FirstWriteStall(entered: { entered.fulfill() }, release: release)
@@ -76,9 +82,7 @@ final class RecordingLossReportingTests: XCTestCase {
         for _ in 0..<30 where recorder.writeBuffer(buffer) == .backpressured { drops += 1 }
         XCTAssertGreaterThan(drops, 0)
         // The callback runs off the audio thread; wait for the actual owner callback.
-        for _ in 0..<100 where reporting.currentReport.snapshot.persistence.isComplete {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await fulfillment(of: [persistenceIssue], timeout: 5)
         reporting.deliverWarningIfNeeded()
         release.signal()
         let info = try XCTUnwrap(reporting.finish(recorder: recorder, run: reporting.currentReport))

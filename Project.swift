@@ -153,7 +153,7 @@ if !iosActiveCompilationConditions.isEmpty {
 // two flavours: Developer ID / direct download (default) and Mac App Store. Generate
 // with `TUIST_APP_STORE=1 tuist generate` to produce a sandboxed App Store build: it
 // defines the `APP_STORE` Swift active compilation condition (gates Sparkle self-update
-// and external executable model runtimes — see Sources/SpeakCore/DistributionChannel.swift)
+// and external executable model runtimes — see SpeakCore's DistributionChannel.swift)
 // and selects the sandboxed entitlements file.
 //
 // NOTE: the env var MUST be `TUIST_`-prefixed. Tuist only forwards environment variables
@@ -190,8 +190,9 @@ var macAppSettings: [String: SettingValue] = [
 // public build merely because the subscription code is present.
 let paidAccessFlag = (ProcessInfo.processInfo.environment["TUIST_PAID_ACCESS"] ?? "").lowercased()
 let isPaidAccessBuild = ["1", "true", "yes"].contains(paidAccessFlag)
+var macActiveCompilationConditions = ["$(inherited)"]
 if isPaidAccessBuild {
-    macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) PAID_ACCESS"
+    macActiveCompilationConditions.append("PAID_ACCESS")
 }
 
 var iosWidgetSettings: [String: SettingValue] = [
@@ -208,6 +209,8 @@ var iosShareSettings: [String: SettingValue] = [
 
 var iosKeyboardSettings: [String: SettingValue] = [
     "APPLICATION_EXTENSION_API_ONLY": "YES",
+    "SPEAK_RELEASE_TRAIN": .string(releaseTrain),
+    "SPEAK_GIT_COMMIT_SHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
     "CURRENT_PROJECT_VERSION": "1",
     "MARKETING_VERSION": "\(version)",
     "SKIP_INSTALL": "YES"
@@ -216,26 +219,17 @@ if isIOSKeyboardDirectCaptureEnabled {
     iosKeyboardSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) IOS_KEYBOARD_DIRECT_CAPTURE"
 }
 
-let iosKeyboardInfoPlist: InfoPlist = isIOSKeyboardDirectCaptureEnabled
-    ? .file(path: .relativeToRoot(trainPlistPath("JustSpeakKeyboard/Info.plist")))
-    : .extendingDefault(with: [
-        "CFBundleDevelopmentRegion": "en",
-        "CFBundleDisplayName": .string(isAlphaBuild ? "Just Speak Alpha" : "Just Speak"),
-        "SpeakReleaseTrain": .string(releaseTrain),
-        "GitCommitSHA": .string(ProcessInfo.processInfo.environment["RELEASE_SOURCE"] ?? "development"),
-        "CFBundleShortVersionString": "$(MARKETING_VERSION)",
-        "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
-        "NSExtension": [
-            "NSExtensionAttributes": [
-                "IsASCIICapable": true,
-                "PrefersRightToLeft": false,
-                "PrimaryLanguage": "en-GB",
-                "RequestsOpenAccess": true
-            ],
-            "NSExtensionPointIdentifier": "com.apple.keyboard-service",
-            "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).KeyboardViewController"
-        ]
-    ])
+// The extension target compiles KeyboardDictationEngine.swift in every
+// configuration, so its binary references AVAudioApplication.requestRecordPermission
+// and SFSpeechRecognizer whether or not direct capture is switched on. An
+// extension whose Info.plist omits the matching purpose strings earns
+// ITMS-90683 on upload and traps the dictation path at runtime, so both
+// configurations ship the one checked-in plist that declares them. Release
+// provenance that used to come from the inline dictionary now arrives through
+// the SPEAK_GIT_COMMIT_SHA build setting below.
+let iosKeyboardInfoPlist: InfoPlist = .file(
+    path: .relativeToRoot(trainPlistPath("JustSpeakKeyboard/Info.plist"))
+)
 
 var watchAppSettings: [String: SettingValue] = [
     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
@@ -285,12 +279,16 @@ if let watchWidgetProfileName {
 }
 
 if isAppStoreBuild {
-    macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = "$(inherited) APP_STORE"
+    macActiveCompilationConditions.append("APP_STORE")
     macAppSettings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
     if let macAppStoreProfileName, !macAppStoreProfileName.isEmpty {
         configureManualSigning(for: &macAppSettings, profileName: macAppStoreProfileName)
     }
 }
+
+macAppSettings["SWIFT_ACTIVE_COMPILATION_CONDITIONS"] = .string(
+    macActiveCompilationConditions.joined(separator: " ")
+)
 
 // The `.remote` requirements below must mirror the same packages' requirements
 // in the root Package.swift. Xcode resolves the local package's graph and this
@@ -363,6 +361,64 @@ let macAppTarget: Target = .target(
     settings: .settings(base: macAppSettings)
 )
 
+var iosAppInfoPlist: [String: Plist.Value] = [
+    "UILaunchStoryboardName": "LaunchScreen",
+    "UIRequiresFullScreen": false,
+    "CFBundleDisplayName": .string(trainValue("displayName")),
+    "SpeakReleaseTrain": .string(releaseTrain),
+    "GitCommitSHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
+    "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+    "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+    // Purpose strings are read verbatim by App Review (guideline 5.1.1), so
+    // each one names the data, the feature that needs it and where the data
+    // goes. "A linked library requires this" is the wording that gets an app
+    // rejected; so is a string that understates off-device transmission.
+    "NSMicrophoneUsageDescription": .string(
+        "Just Speak to It records your voice so it can be turned into text. Recordings are sent to the "
+            + "transcription provider you choose in Settings, or stay on this device when you choose an "
+            + "on-device model."
+    ),
+    "NSSpeechRecognitionUsageDescription": .string(
+        "Apple's speech recognition turns your recorded voice into text. Apple processes some audio on "
+            + "its servers when on-device recognition is unavailable."
+    ),
+    "NSLocalNetworkUsageDescription":
+        "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer.",
+    "NSBonjourServices": [.string(trainValue("transportServiceType"))],
+    // The camera is used by QRScannerCoordinator, reached from
+    // Settings -> Transfer from Mac, to read the configuration QR code the
+    // Mac app displays.
+    "NSCameraUsageDescription": .string(
+        "Just Speak to It uses the camera to scan the QR code shown by the Mac app, so your settings and "
+            + "API keys transfer to this iPhone."
+    ),
+    // Encryption uses Apple CryptoKit, Security and URLSession only; the iOS
+    // dependency graph contains no third-party cryptographic implementation.
+    // Apple's OS-encryption documentation exemption applies (see submission docs).
+    "ITSAppUsesNonExemptEncryption": false,
+    "NSSupportsLiveActivities": true,
+    // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
+    // the History entry id, never the transcript itself.
+    "NSUserActivityTypes": ["com.justspeaktoit.transcript"],
+    // Tuist's default is ["armv7"], a 32-bit capability no device running
+    // this iOS 17, arm64-only app can report.
+    "UIRequiredDeviceCapabilities": ["arm64"],
+    "UIBackgroundModes": ["audio", "remote-notification"],
+    "UIApplicationShortcutItems": [
+        [
+            "UIApplicationShortcutItemType": "com.justspeaktoit.ios.quickaction.transcribe",
+            "UIApplicationShortcutItemTitle": "Transcribe Voice",
+            "UIApplicationShortcutItemSubtitle": "Start or stop recording",
+            "UIApplicationShortcutItemIconSymbolName": "mic.fill"
+        ]
+    ],
+    "CFBundleURLTypes": [
+        [
+            "CFBundleURLName": .string(trainValue("iosBundleIdentifier")),
+            "CFBundleURLSchemes": [.string(trainValue("urlScheme"))]
+        ]
+    ]
+]
 let iosAppTarget: Target = .target(
     name: "SpeakiOS",
     destinations: .iOS,
@@ -370,46 +426,7 @@ let iosAppTarget: Target = .target(
     productName: isAlphaBuild ? "JustSpeakToItAlpha" : "JustSpeakToIt",
     bundleId: trainIdentifier("com.justspeaktoit.ios"),
     deploymentTargets: .iOS("17.0"),
-    infoPlist: .extendingDefault(with: [
-        "UILaunchStoryboardName": "LaunchScreen",
-        "UIRequiresFullScreen": false,
-        "CFBundleDisplayName": .string(trainValue("displayName")),
-        "SpeakReleaseTrain": .string(releaseTrain),
-        "GitCommitSHA": .string(ProcessInfo.processInfo.environment["RELEASE_SOURCE"] ?? "development"),
-        "CFBundleShortVersionString": "$(MARKETING_VERSION)",
-        "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
-        "NSMicrophoneUsageDescription": "Just Speak to It needs microphone access for voice transcription.",
-        "NSSpeechRecognitionUsageDescription": "Just Speak to It uses speech recognition to transcribe your voice.",
-        "NSLocalNetworkUsageDescription":
-            "Just Speak to It uses your local network to connect iPhone and Mac for Send to Mac transcription transfer.",
-        "NSBonjourServices": [.string(trainValue("transportServiceType"))],
-        "NSCameraUsageDescription": "Just Speak to It does not use the camera, but a linked library requires this declaration.",
-        // Export compliance: the app uses only standard, published encryption
-        // (AES-GCM and PBKDF2 via CryptoKit) to protect the user's own API keys
-        // for end-to-end encrypted iCloud/CloudKit key sync, alongside OS-provided
-        // HTTPS and Keychain. This qualifies for the U.S. EAR Category 5 Part 2
-        // export exemption, so the app uses no *non-exempt* encryption.
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSSupportsLiveActivities": true,
-        // The "Continue on Mac" Handoff pointer (issue #1006). The payload is
-        // the History entry id, never the transcript itself.
-        "NSUserActivityTypes": ["com.justspeaktoit.transcript"],
-        "UIBackgroundModes": ["audio", "remote-notification"],
-        "UIApplicationShortcutItems": [
-            [
-                "UIApplicationShortcutItemType": "com.justspeaktoit.ios.quickaction.transcribe",
-                "UIApplicationShortcutItemTitle": "Transcribe Voice",
-                "UIApplicationShortcutItemSubtitle": "Start or stop recording",
-                "UIApplicationShortcutItemIconSymbolName": "mic.fill"
-            ]
-        ],
-        "CFBundleURLTypes": [
-            [
-                "CFBundleURLName": .string(trainValue("iosBundleIdentifier")),
-                "CFBundleURLSchemes": [.string(trainValue("urlScheme"))]
-            ]
-        ]
-    ]),
+    infoPlist: .extendingDefault(with: iosAppInfoPlist),
     sources: ["SpeakiOSApp/**"],
     resources: [
         "SpeakiOSApp/Assets.xcassets",
@@ -435,7 +452,7 @@ let watchAppTarget: Target = .target(
         "WKCompanionAppBundleIdentifier": .string(trainValue("iosBundleIdentifier")),
         "CFBundleDisplayName": .string(trainValue("displayName")),
         "SpeakReleaseTrain": .string(releaseTrain),
-        "GitCommitSHA": .string(ProcessInfo.processInfo.environment["RELEASE_SOURCE"] ?? "development"),
+        "GitCommitSHA": .string(ProcessInfo.processInfo.environment["TUIST_RELEASE_SOURCE"] ?? "development"),
         "CFBundleShortVersionString": "$(MARKETING_VERSION)",
         "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
         "NSMicrophoneUsageDescription":
@@ -449,26 +466,21 @@ let watchAppTarget: Target = .target(
         // in JustSpeakWatch/WatchRecordingRuntime.swift.
         "UIBackgroundModes": ["audio"]
     ]),
-    // The watch target cannot depend on the SpeakCore package product
+    // The watch targets cannot depend on the SpeakCore package product
     // (several transitive package manifests do not declare watchOS support),
-    // so it compiles the shared watch files directly. Pure Foundation;
-    // unit-tested via SpeakCoreTests. `JustSpeakWatchShared` is the source the
-    // watch app and its widget extension both compile.
+    // so they link SpeakWatchCore: the shared Foundation-only watch types,
+    // with no package dependencies (issue #1123). Unit-tested via
+    // SpeakWatchCoreTests. `JustSpeakWatchShared` is the source the watch app
+    // and its widget extension both compile.
     sources: [
         "JustSpeakWatch/**",
-        "JustSpeakWatchShared/**",
-        "Sources/SpeakCore/WatchCaptureProtocol.swift",
-        "Sources/SpeakCore/WatchComplicationState.swift",
-        "Sources/SpeakCore/WatchRecordingLifecycle.swift",
-        "Sources/SpeakCore/WatchRecordingToggleSerialiser.swift",
-        "Sources/SpeakCore/WatchSharedContainer.swift",
-        "Sources/SpeakCore/ReleaseTrain.swift",
-        "Sources/SpeakCore/ReleaseTrainCatalogue.swift"
+        "JustSpeakWatchShared/**"
     ],
     resources: ["JustSpeakWatch/Assets.xcassets"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatch/JustSpeakWatch.entitlements"))),
     dependencies: [
-        .target(name: "JustSpeakWatchWidgetExtension")
+        .target(name: "JustSpeakWatchWidgetExtension"),
+        .package(product: "SpeakWatchCore")
     ],
     settings: .settings(base: watchAppSettings)
 )
@@ -487,14 +499,12 @@ let watchWidgetTarget: Target = .target(
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/Info.plist"))),
     sources: [
         "JustSpeakWatchWidget/**",
-        "JustSpeakWatchShared/**",
-        "Sources/SpeakCore/WatchCaptureProtocol.swift",
-        "Sources/SpeakCore/WatchComplicationState.swift",
-        "Sources/SpeakCore/WatchSharedContainer.swift",
-        "Sources/SpeakCore/ReleaseTrain.swift",
-        "Sources/SpeakCore/ReleaseTrainCatalogue.swift"
+        "JustSpeakWatchShared/**"
     ],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/JustSpeakWatchWidget.entitlements"))),
+    dependencies: [
+        .package(product: "SpeakWatchCore")
+    ],
     settings: .settings(base: watchWidgetSettings)
 )
 
@@ -506,6 +516,7 @@ let keyboardTarget: Target = .target(
     deploymentTargets: .iOS("17.0"),
     infoPlist: iosKeyboardInfoPlist,
     sources: ["JustSpeakKeyboard/**/*.swift"],
+    resources: ["JustSpeakKeyboard/PrivacyInfo.xcprivacy"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakKeyboard/JustSpeakKeyboard.entitlements"))),
     dependencies: [
         .package(product: "SpeakCore")
@@ -539,7 +550,12 @@ let widgetTarget: Target = .target(
     deploymentTargets: .iOS("17.0"),
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakToItWidgetExtension/Info.plist"))),
     sources: ["JustSpeakToItWidgetExtension/**"],
-    entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements"))),
+    resources: ["JustSpeakToItWidgetExtension/PrivacyInfo.xcprivacy"],
+    entitlements: .file(
+        path: .relativeToRoot(
+            trainPlistPath("JustSpeakToItWidgetExtension/JustSpeakToItWidgetExtension.entitlements")
+        )
+    ),
     dependencies: [
         .package(product: "SpeakCore"),
         .package(product: "SpeakiOSLib")
@@ -600,7 +616,9 @@ let iosTestsTarget: Target = .target(
     dependencies: [
         .target(name: "SpeakiOS"),
         .package(product: "SpeakCore"),
-        .package(product: "SpeakiOSLib")
+        .package(product: "SpeakiOSLib"),
+        // Shared URLProtocol stub (issue #1124).
+        .package(product: "SpeakTestSupport")
     ],
     settings: .settings(base: iosTestSettings)
 )

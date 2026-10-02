@@ -226,10 +226,10 @@ struct HistoryItem: Codable, Identifiable, Hashable {
   }
 
   static let placeholder: HistoryItem = .init(
-    modelsUsed: ["apple/local/SFSpeechRecognizer", "inception/mercury"],
+    modelsUsed: ["apple/local/SFSpeechRecognizer", ModelCatalog.defaultPostProcessingModel],
     modelUsages: [
       ModelUsage(modelIdentifier: "apple/local/SFSpeechRecognizer", phase: .transcriptionLive),
-      ModelUsage(modelIdentifier: "inception/mercury", phase: .postProcessing)
+      ModelUsage(modelIdentifier: ModelCatalog.defaultPostProcessingModel, phase: .postProcessing)
     ],
     rawTranscription: "Hello world, this is a placeholder recording.",
     postProcessedTranscription: "Hello world - this is a placeholder recording.",

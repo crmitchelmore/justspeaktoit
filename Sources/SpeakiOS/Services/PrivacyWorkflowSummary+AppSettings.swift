@@ -12,7 +12,7 @@ public extension PrivacyWorkflowSummary {
         voiceOutputEnabled: Bool,
         voiceOutputProvider: VoiceOutputProvider
     ) -> PrivacyWorkflowSummary {
-        make(PrivacyWorkflowInputs(
+        var inputs = PrivacyWorkflowInputs(
             usesBatchTranscription: settings.transcriptionMode == .batch,
             liveTranscriptionModelID: settings.selectedModel,
             batchTranscriptionModelID: settings.batchTranscriptionModel,
@@ -20,7 +20,11 @@ public extension PrivacyWorkflowSummary {
             postProcessingModelID: settings.postProcessingModel,
             voiceOutputEnabled: voiceOutputEnabled,
             voiceOutputProvider: voiceOutputProvider
-        ))
+        )
+        // IOSTranscriptionSession enforces this for every Apple live backend,
+        // including an Analyzer fallback to the legacy recognizer.
+        inputs.appleSpeechRequiresOnDeviceRecognition = true
+        return make(inputs)
     }
 
     /// Voice output on iOS runs through the OpenClaw gateway, so it only speaks

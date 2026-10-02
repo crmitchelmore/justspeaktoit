@@ -100,7 +100,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   var simpleModelChoicesPolicy: SimpleModelChoicesPolicy {
     SimpleModelChoicesPolicy(
       isEnabled: self.settings.simpleModelChoices,
-      hasPaidRouting: self.entitlement.allowsPaidRouting()
+      hasPaidRouting: self.isPaidRoutingActive
     )
   }
 

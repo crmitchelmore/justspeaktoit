@@ -96,8 +96,38 @@ if [[ $status -eq 0 ]]; then
     exit 0
 fi
 
-# The command exits non-zero both for detected breakage and for tooling
-# failures; only treat runs that actually printed findings as breakage.
+# SwiftPM uses ExitCode.failure (1) for a completed comparison with breakage.
+# A signal or another tool status is never waived by the PR title/allowlist.
+if [[ $status -ne 1 ]]; then
+    echo "==> swift package diagnose-api-breaking-changes failed to run (status $status)" >&2
+    exit "$status"
+fi
+
+# A multi-module comparison can print genuine findings AND an error for a
+# different module, then exit 1. Treat the first diagnostic severity on a line
+# as authoritative: warning prose may itself contain "error:". Actual API
+# findings are data, so an API symbol or its diagnostic wording is not parsed
+# as a tool failure. Refuse parser failure too, before either waiver path.
+if ! printf '%s\n' "$output" | python3 -c '
+import re
+import sys
+
+ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+finding = re.compile(r"^(?:💔\s*)?API breakage: ")
+severity = re.compile(r"(?:^|:\s)(fatal error|error|warning|note|remark):")
+for raw in sys.stdin:
+    line = ansi.sub("", raw).strip()
+    if finding.match(line):
+        continue
+    diagnostic = severity.search(line)
+    if diagnostic and diagnostic.group(1) in ("error", "fatal error"):
+        sys.exit(1)
+'; then
+    echo "==> swift package diagnose-api-breaking-changes reported a tool error; comparison is incomplete" >&2
+    exit 1
+fi
+
+# Only actual findings can take the intentional-migration/allowlist routes.
 if ! grep -q "API breakage" <<< "$output"; then
     echo "==> swift package diagnose-api-breaking-changes failed to run" >&2
     exit "$status"

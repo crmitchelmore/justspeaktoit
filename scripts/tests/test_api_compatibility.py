@@ -49,7 +49,7 @@ class APICompatibilityTests(unittest.TestCase):
                 args = sys.argv[1:]
                 call = {"arguments": args}
                 if args[:3] == ["package", "diagnose-api-breaking-changes", os.environ["EXPECTED_BASELINE"]]:
-                    result = os.environ["DIAGNOSTIC"]
+                    result = Path(os.environ["DIAGNOSTIC_PATH"]).read_text()
                     status = int(os.environ["DIAGNOSE_STATUS"])
                 elif len(args) == 4 and args[:2] == ["package", "--package-path"] and args[3] == "dump-package":
                     package = Path(args[2])
@@ -66,6 +66,8 @@ class APICompatibilityTests(unittest.TestCase):
             """))
             swift.chmod(0o755)
             calls_file = root / "calls.jsonl"
+            diagnostic_file = root / "diagnostic.txt"
+            diagnostic_file.write_text(diagnostic)
             if raw_json is None:
                 raw_json = json.dumps({"products": [{"name": name} for name in (products or EXISTING_PRODUCTS)]})
             environment = {
@@ -77,7 +79,7 @@ class APICompatibilityTests(unittest.TestCase):
                 "DUMP_JSON": raw_json,
                 "DUMP_STATUS": str(dump_status),
                 "DIAGNOSE_STATUS": str(diagnose_status),
-                "DIAGNOSTIC": diagnostic,
+                "DIAGNOSTIC_PATH": str(diagnostic_file),
                 "PR_TITLE": title,
             }
             result = subprocess.run(
@@ -163,6 +165,52 @@ class APICompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 17)
         self.assert_products(calls, EXISTING_PRODUCTS + ["SpeakWatchCore"])
         self.assertIn("failed to run", result.stderr)
+
+
+    def test_mixed_findings_and_tool_failure_are_never_waived(self):
+        failures = [
+            "error: compiler could not load the module",
+            "/tmp/Module.swift:3:7: error: cannot find type Missing in scope",
+            "error: failed to read API digester output for SpeakWatchCore",
+            "swift-api-digester: fatal error: failed to load module",
+            "\x1b[31merror:\x1b[0m no such product SpeakWatchCore",
+        ]
+        for status in [1, 17]:
+            for failure in failures:
+                with self.subTest(status=status, failure=failure):
+                    result, calls = self.run_gate(
+                        products=EXISTING_PRODUCTS + ["SpeakWatchCore"], diagnose_status=status,
+                        diagnostic="  💔 API breakage: removed WatchCaptureEnvelope\n" + failure,
+                        title="chore!: declared migration"
+                    )
+                    self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+                    self.assert_products(calls, EXISTING_PRODUCTS + ["SpeakWatchCore"])
+                    self.assertNotIn("allowing the declared migration", result.stdout)
+
+    def test_abnormal_status_with_findings_alone_is_not_a_completed_comparison(self):
+        result, _ = self.run_gate(diagnose_status=17,
+                                  diagnostic="API breakage: removed WatchCaptureEnvelope",
+                                  title="chore!: declared migration")
+        self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
+
+    def test_mixed_tool_failure_is_not_hidden_by_additive_allowlist(self):
+        allowed = "API breakage: enumelement StreamingClientError.transportStalled has been added as a new enum case"
+        result, _ = self.run_gate(diagnose_status=1,
+                                  diagnostic=allowed + "\nerror: failed to read API digester output for SpeakWatchCore")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("No unreviewed public API breakage", result.stdout)
+
+    def test_diagnostic_words_in_findings_and_warnings_preserve_declared_migration(self):
+        diagnostic = "\n".join([
+            "/tmp/Module.swift:3:7: warning: this is an error in the Swift 6 language mode",
+            "warning: previous diagnostic text was error: example only",
+            "  💔 API breakage: func report(error:) has been removed",
+            "  💔 API breakage: enum case describes error: failure has been removed",
+        ])
+        result, _ = self.run_gate(diagnose_status=1, diagnostic=diagnostic,
+                                  title="refactor(watch)!: declared migration")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("allowing the declared migration", result.stdout)
 
 
 if __name__ == "__main__":

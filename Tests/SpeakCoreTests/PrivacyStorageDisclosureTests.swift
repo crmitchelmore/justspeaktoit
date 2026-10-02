@@ -59,7 +59,7 @@ final class PrivacyStorageDisclosureTests: XCTestCase {
         }
     }
 
-    /// The screen moves between files (issue #1115), so scan every iOS source
+    /// The screens move between files (issue #1115), so scan every iOS source
     /// rather than one path for the retired wording.
     func testIOSSources_doNotCarryTheRetiredPrivacyCopy() throws {
         let iosSources = repositoryRoot.appendingPathComponent("Sources/SpeakiOS")
@@ -70,6 +70,11 @@ final class PrivacyStorageDisclosureTests: XCTestCase {
             scanned += 1
             XCTAssertFalse(source.contains("syncing via iCloud Keychain"), url.lastPathComponent)
             XCTAssertFalse(source.contains("Settings & keys"), url.lastPathComponent)
+            // Settings › Sync once reported iCloud Keychain and iCloud Settings
+            // paths that carry no app data, and said settings sync via iCloud.
+            XCTAssertFalse(source.contains("\"iCloud Keychain\""), url.lastPathComponent)
+            XCTAssertFalse(source.contains("\"iCloud Settings\""), url.lastPathComponent)
+            XCTAssertFalse(source.contains("uses iCloud for settings"), url.lastPathComponent)
         }
         XCTAssertGreaterThan(scanned, 0, "Expected to scan the iOS sources at \(iosSources.path)")
     }

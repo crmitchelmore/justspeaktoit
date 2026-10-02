@@ -1496,9 +1496,9 @@ public struct SettingsView: View {
                 }
 
                 if !usesInlineDensityLayout {
-                    Text("Just Speak to It uses iCloud for settings and history when available. "
-                        + "If iCloud is unavailable, Bonjour Transport can send sessions to a paired Mac "
-                        + "on your local network; QR transfer remains available for manual setup.")
+                    Text("Just Speak to It syncs History through iCloud when available. Settings are not "
+                        + "synced; use QR transfer to copy them to another device. If iCloud is unavailable, "
+                        + "Bonjour Transport can send sessions to a paired Mac on your local network.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1721,16 +1721,9 @@ public struct SettingsView: View {
             Label(status.preferredBackend.displayName, systemImage: "arrow.triangle.branch")
                 .lineLimit(1)
             Spacer()
-            syncAvailabilityIcon(
-                "key.icloud",
-                available: status.iCloudKeychainAvailable,
-                label: "iCloud Keychain"
-            )
-            syncAvailabilityIcon(
-                "icloud",
-                available: status.iCloudKVStoreAvailable,
-                label: "iCloud Settings"
-            )
+            // No iCloud Keychain or iCloud Settings icons: API keys never use
+            // iCloud Keychain and no settings sync through iCloud. History and
+            // encrypted key sync report their own status above.
             syncAvailabilityIcon(
                 "network",
                 available: status.transportAvailable,
@@ -1760,18 +1753,8 @@ public struct SettingsView: View {
             }
             .accessibilityElement(children: .combine)
 
-            syncStatusRow(
-                name: "iCloud Keychain",
-                systemImage: "key.icloud",
-                value: status.iCloudKeychainAvailable ? "Available" : "Local only",
-                isAvailable: status.iCloudKeychainAvailable
-            )
-            syncStatusRow(
-                name: "iCloud Settings",
-                systemImage: "icloud",
-                value: status.iCloudKVStoreAvailable ? "Available" : "Local only",
-                isAvailable: status.iCloudKVStoreAvailable
-            )
+            // iCloud History and Encrypted API-Key Sync rows sit above; there is
+            // no iCloud Keychain or iCloud Settings path to report.
             syncStatusRow(
                 name: "Bonjour Transport",
                 systemImage: "network",

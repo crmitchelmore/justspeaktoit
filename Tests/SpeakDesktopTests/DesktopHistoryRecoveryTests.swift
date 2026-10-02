@@ -73,6 +73,28 @@ final class DesktopHistoryRecoveryTests: XCTestCase {
         }
     }
 
+    /// A History that cannot be listed is an error, never an empty History.
+    /// Listing by URL in swift-corelibs-foundation reports a path that is not
+    /// a folder as empty on Linux and Windows.
+    func testUnlistableHistory_FailsInsteadOfReadingAsEmpty() async throws {
+        let store = try DesktopRecordingStore(directory: history)
+        try FileManager.default.removeItem(at: history)
+        try Data("not a folder".utf8).write(to: history)
+
+        do {
+            _ = try await store.records()
+            XCTFail("History was listed as empty")
+        } catch {}
+        do {
+            _ = try await store.readableRecords()
+            XCTFail("Sync read History as empty")
+        } catch {}
+        do {
+            _ = try await store.recoverInterruptedRecordings()
+            XCTFail("Recovery read History as empty")
+        } catch {}
+    }
+
     func testRecovery_RepairsInterruptedAudioAndReportsMissingOrImportedAudio() async throws {
         let store = try DesktopRecordingStore(directory: history)
         let recoverable = try writePending(audioFilename: nil)

@@ -77,9 +77,7 @@ public actor DesktopRecordingStore {
     }
 
     public func records() throws -> [Record] {
-        let files = try FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "json" }
+        let files = try metadataFiles()
         // Surface corrupt records rather than silently hiding user history.
         return try files.map { try loadRecord(at: $0) }.sorted { $0.createdAt > $1.createdAt }
     }
@@ -92,9 +90,7 @@ public actor DesktopRecordingStore {
     /// corrupt file cannot stop other History from syncing; the corrupt file
     /// itself is still reported by `records()` and recovery, never touched.
     public func readableRecords() throws -> [Record] {
-        let files = try FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "json" }
+        let files = try metadataFiles()
         return files.compactMap { try? loadRecord(at: $0) }.sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -158,6 +154,17 @@ public actor DesktopRecordingStore {
         return record
     }
 
+    /// The metadata files in History. Listing by path fails on every platform
+    /// when History cannot be opened as a folder. The URL listing in
+    /// swift-corelibs-foundation reports a path that is not a folder, or (on
+    /// Linux) one it cannot open, as empty, which would show, sync and recover
+    /// an unreadable History as one with no recordings.
+    private func metadataFiles() throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .map { directory.appendingPathComponent($0, isDirectory: false) }
+            .filter { $0.pathExtension == "json" }
+    }
+
     /// The canonical basename is the record's UUID string. Hex case is
     /// tolerated because UUID equality, not spelling, identifies the record.
     static func recordID(ofMetadataFile url: URL) -> UUID? {
@@ -202,8 +209,7 @@ public actor DesktopRecordingStore {
     /// retained for retry; corrupt metadata is reported without hiding good rows.
     /// Nothing is ever deleted: unreadable files stay in place untouched.
     public func recoverInterruptedRecordings() throws -> RecoveryReport {
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
+        let files = try metadataFiles()
         var recovered: [Record] = []
         var unreadable: [String] = []
         for file in files {

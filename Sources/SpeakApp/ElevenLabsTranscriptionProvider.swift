@@ -33,42 +33,30 @@ struct ElevenLabsTranscriptionProvider: TranscriptionProvider {
         let endpoint = baseURL.appendingPathComponent("speech-to-text")
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-
-        let boundary = "Boundary-\(UUID().uuidString)"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
 
-        let audioData = try Data(contentsOf: url)
-        var body = Data()
-
         let modelID = extractModelID(from: model)
-        body.appendFormField(named: "model_id", value: modelID, boundary: boundary)
-        body.appendFormField(named: "timestamps_granularity", value: "word", boundary: boundary)
+        var fields = [
+            OpenAICompatibleBatchTranscriptionClient.FormField(name: "model_id", value: modelID),
+            OpenAICompatibleBatchTranscriptionClient.FormField(name: "timestamps_granularity", value: "word")
+        ]
 
         if let language {
             let languageCode = language.localeLanguageCode
-            body.appendFormField(named: "language_code", value: languageCode, boundary: boundary)
+            fields.append(.init(name: "language_code", value: languageCode))
         }
 
-        body.appendFileField(
-            named: "file",
-            filename: url.lastPathComponent,
-            mimeType: "audio/m4a",
-            fileData: audioData,
-            boundary: boundary
+        let (data, _) = try await OpenAICompatibleBatchTranscriptionClient(session: session).upload(
+            request: request,
+            fields: fields,
+            file: .init(
+                fieldName: "file",
+                filename: url.lastPathComponent,
+                mimeType: "audio/m4a",
+                sourceURL: url
+            ),
+            providerID: metadata.id
         )
-        body.appendString("--\(boundary)--\r\n")
-        request.httpBody = body
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw TranscriptionProviderError.invalidResponse
-        }
-
-        guard (200..<300).contains(http.statusCode) else {
-            let responseBody = String(data: data, encoding: .utf8) ?? "<no-body>"
-            throw TranscriptionProviderError.httpError(http.statusCode, responseBody)
-        }
 
         let decoded = try JSONDecoder().decode(ElevenLabsTranscriptionResponse.self, from: data)
         return try await buildTranscriptionResult(

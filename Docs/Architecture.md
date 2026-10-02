@@ -87,7 +87,7 @@ and tests it without model inference, and fails if its `Package.resolved` drifts
 | `JustSpeakKeyboard` | iOS extension, 17.0 | `TUIST_IOS_KEYBOARD`; consumes package `SpeakCore`. Direct capture has the separate `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE` gate. |
 | `JustSpeakShare` | iOS extension, 17.0 | `TUIST_IOS_SHARE_EXTENSION`; consumes package `SpeakCore`. |
 | `JustSpeakWatchApp` | watchOS app, 10.0 | `TUIST_WATCH_APP`; embeds the watch widget and consumes package `SpeakWatchCore`. |
-| `JustSpeakWatchWidgetExtension` | watchOS extension, 10.0 | Same Watch gate; consumes package `SpeakWatchCore`. |
+| `JustSpeakWatchWidgetExtension` | watchOS extension, 10.0 | Same Watch gate; compiles `JustSpeakWatchShared` adapters and consumes package `SpeakWatchCore`. |
 | `CoreJourneyFixtureApp` | macOS app | Always; fixture used by UI tests. |
 | `SpeakAppUITests` | macOS UI tests | Always; depends on `SpeakApp` and `CoreJourneyFixtureApp`. |
 | `SpeakiOSUITests` | iOS UI tests, 17.0 | Always; depends on `SpeakiOS`. |
@@ -96,8 +96,9 @@ and tests it without model inference, and fails if its `Package.resolved` drifts
 `SHOW_OPENCLAW_TAB` adds its iOS compilation condition. `TUIST_APP_STORE` selects the sandboxed macOS App Store
 identity and entitlement set; it is independent of `TUIST_RELEASE_TRAIN`, which selects Stable or Alpha identities.
 The Watch targets consume the dependency-free `SpeakWatchCore` package product instead of `SpeakCore`, whose
-transitive package manifests do not declare watchOS support. Their `Project.swift` source lists contain each
-target's app or extension sources; the shared Watch domain sources compile once in `SpeakWatchCore`.
+transitive package manifests do not declare watchOS support. Their `Project.swift` source lists include each
+target's app or extension sources and `JustSpeakWatchShared` adapters. The shared Watch domain sources compile
+once in `SpeakWatchCore`; those package dependencies are module arrows, while the adapter inclusion is not.
 
 ### Portable, Windows and Linux graph
 

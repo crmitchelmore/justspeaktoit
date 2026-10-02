@@ -35,6 +35,12 @@ public struct SettingsView: View {
 
     public init() {}
 
+    /// Whether the model pickers should be hidden because Simple model choices
+    /// is on and paid routing is actually available.
+    private var hidesModelSelection: Bool {
+        PaidAccessStore.shared.simpleModelChoicesPolicy.hidesModelSelection
+    }
+
     public var body: some View {
         Form {
             Section("Appearance") {
@@ -83,7 +89,16 @@ public struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("transcriptionLocationPicker")
 
+                if hidesModelSelection {
+                    Text(PaidAccessStore.shared.simpleModelChoicesPolicy.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 if transcriptionLocationBinding.wrappedValue == .local {
+                    // Never hidden: on-device transcription bypasses paid routing
+                    // entirely, so hiding this picker would leave no way to choose
+                    // the engine that is actually doing the work.
                     Picker("Apple Speech Model", selection: selectedModelBinding) {
                         ForEach(ModelCatalog.onDeviceLiveTranscription) { option in
                             HStack {
@@ -128,6 +143,8 @@ public struct SettingsView: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("remoteTranscriptionModePicker")
 
+                    // Never hidden either: streaming dictation does not go through
+                    // the paid service, so this picker chooses the model that runs.
                     if settings.transcriptionMode == .streaming {
                         Picker("Remote Streaming Model", selection: selectedModelBinding) {
                             ForEach(LiveModelGroup.grouped(AppSettings.supportedLiveModels)) { group in
@@ -152,7 +169,7 @@ public struct SettingsView: View {
                         }
                         .pickerStyle(.navigationLink)
                         .accessibilityIdentifier("remoteStreamingModelPicker")
-                    } else {
+                    } else if !hidesModelSelection {
                         Picker("Remote Batch Model", selection: $settings.batchTranscriptionModel) {
                             if let modelID = OpenRouterTranscriptionSelection.modelID(
                                 from: settings.batchTranscriptionModel
@@ -355,6 +372,24 @@ public struct SettingsView: View {
                     Label("OpenRouter API key required", systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+            }
+
+            // Hidden while iOS paid routing is unwired — see `PaidAccessFeature`.
+            // The screen stays compiled so re-enabling is one constant.
+            if PaidAccessFeature.isAvailableOnIOS {
+                Section("Subscription") {
+                    NavigationLink {
+                        PaidAccessSettingsView()
+                    } label: {
+                        HStack {
+                            Label("Paid Access", systemImage: "creditcard")
+                            Spacer()
+                            Text(PaidAccessStore.shared.entitlement.status.displayName)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
                 }
             }
 

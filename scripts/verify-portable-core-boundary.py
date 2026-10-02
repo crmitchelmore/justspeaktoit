@@ -30,9 +30,19 @@ if "exclude: appleCoreSources" not in portable or re.search(r"\bsources\s*:", po
 sources = {path.relative_to(source_root).as_posix() for path in source_root.rglob("*.swift")}
 included = sources - set(excluded)
 required = {"ModelCatalog.swift", "ModelCatalogTypes.swift", "StreamingTranscriptionClient.swift",
-            "TranscriptAccumulator.swift", "RecordingLifecycleCoordinator.swift", "OpenAIBatchClient.swift"}
+            "TranscriptAccumulator.swift", "RecordingLifecycleCoordinator.swift", "OpenAIBatchClient.swift",
+            "PaidAccess/PaidAccessModels.swift", "PaidAccess/PaidAccessRouting.swift",
+            "PaidAccess/PaidAccessClient.swift", "PaidAccess/PaidAccessSessionLifecycle.swift"}
 if missing := required - included:
     sys.exit("Canonical domain sources excluded from portable builds: " + ", ".join(sorted(missing)))
+
+# Paid domain/session contracts stay shared; only the existing Apple I/O
+# adapters are excluded. Keychain storage inside the shared client file is
+# guarded by SPEAK_PORTABLE_CORE, also for portable builds on a macOS host.
+paid_apple_adapters = {"PaidAccess/PaidAccessHTTPClient.swift", "PaidAccess/PaidAudioPayload.swift",
+                       "PaidAccess/PaidStoreKitSync.swift"}
+if admitted := paid_apple_adapters & included:
+    sys.exit("Apple paid adapters admitted to portable builds: " + ", ".join(sorted(admitted)))
 
 # SpeakSync follows the same rule: portable by default, with only the native
 # CloudKit adapters excluded by name.

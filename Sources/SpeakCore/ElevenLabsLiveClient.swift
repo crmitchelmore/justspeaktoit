@@ -10,13 +10,16 @@ import os.log
 
 /// Shared ElevenLabs Scribe v2 realtime client used by macOS, iOS and Windows.
 ///
-/// One `/v1/speech-to-text/realtime` socket per run. Audio is admitted
-/// synchronously into a bounded queue and sent one base64 `input_audio_chunk`
-/// at a time, but only after the server's `session_started` frame. Finalisation
-/// owns manual segments of at most twenty seconds, waits for each commit before
-/// sending the next segment, and drains admitted audio on finish. A commit
-/// requires its `committed_transcript` within a bounded budget. The transport is injectable; framing, admission and
-/// lifecycle stay here so the platforms cannot drift.
+/// One `/v1/speech-to-text/realtime` socket per run, with the server's VAD
+/// committing segments while recording. Audio is sent as base64
+/// `input_audio_chunk` frames, one at a time and only after the server's
+/// `session_started` frame; until then the newest five seconds wait in the
+/// pre-roll. Every committed segment, from the VAD or from the finish, counts
+/// once: a timestamped twin never adds it a second time. A finish drains the
+/// admitted audio, sends one manual commit and reads the finals that follow for
+/// a bounded post-commit window, because VAD commits carry no correlation id
+/// that could mark the commit's own answer. The transport is injectable;
+/// framing, admission and lifecycle stay here so the platforms cannot drift.
 public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
     /// Each `committed_transcript` is a newly finalised segment, so finals append.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
@@ -29,11 +32,12 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     public static let sendDeadline: TimeInterval = 5
     /// A finish that lands before readiness waits at most this long for it.
     public static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
-    /// How long a finish waits, after the manual commit, for the trailing final.
+    /// The post-commit window: how long a finish reads finals once its manual
+    /// commit is sent.
     public static let finishBudget: TimeInterval = 1.5
-    /// Stay below the provider's approximately 36-second automatic commit.
-    static let segmentSeconds = 20
-    /// Bounds readiness, all queued sends and both a pending and trailing commit.
+    /// Bounds the whole finish, which returns what it has by then: the wait
+    /// for readiness, the drain of admitted audio (one send deadline), then the
+    /// commit's send and its post-commit window (one finish budget each).
     public static let finishDrainBudget = finishReadyBudget + sendDeadline + 2 * finishBudget
     /// Exposes the active client's bound to platform lifecycle watchdogs.
     public var finalisationBudget: TimeInterval? { timing.overall }
@@ -53,8 +57,10 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     private let queue = DispatchQueue(label: "ElevenLabsLiveClient.state")
     private let queueKey = DispatchSpecificKey<Bool>()
     private var run: ElevenLabsLiveRun
-    /// Holds audio captured before `start()` opens a run (issue #641); a started
-    /// session parks connecting audio in its own bounded send queue instead.
+    /// Holds audio captured before `start()` opens a run (issue #641) and, as
+    /// the established Mac transcriber did, the newest five seconds captured
+    /// before `session_started`; both are replayed in capture order once the
+    /// session starts.
     let preroll: StreamingAudioPreroll
 
     public convenience init(
@@ -145,37 +151,36 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                 self.synchronized { if self.isCurrent(active) { self.log("WebSocket handshake completed") } }
             }
             receive(active)
+            // A finish has its own, shorter readiness bound.
             after(timing.startup, active) { client, active in
-                if !active.ready { client.fail(ElevenLabsLiveError.connectionFailed, active) }
+                if !active.ready, active.phase != .finishing {
+                    client.fail(ElevenLabsLiveError.connectionFailed, active)
+                }
             }
-            for audio in opening {
-                guard isCurrent(active) else { break }
-                sendAudio(audio)
-            }
+            // Audio offered before this first run waits for `session_started`,
+            // ahead of anything captured later.
+            opening.forEach(preroll.append)
         }
     }
 
-    /// Admission is synchronous and bounded: at most five seconds of PCM may be
-    /// queued or in flight and at most `maximumQueuedFrames` frames may wait.
-    /// Exceeding either is a transport stall, reported once, rather than silently
-    /// grown or dropped. Audio captured before `start()` is parked in the pre-roll.
+    /// Audio captured before `session_started` waits in the pre-roll, which
+    /// keeps the newest five seconds. Once the session has started, admission is
+    /// synchronous and bounded: at most five seconds of PCM may be queued or in
+    /// flight and at most `maximumQueuedFrames` frames may wait. Exceeding
+    /// either is a transport stall, reported once, rather than silently grown.
     public func sendAudio(_ audioData: Data) {
         guard !audioData.isEmpty else { return }
         synchronized {
             let active = run
-            if active.phase == .idle { preroll.append(audioData); return }
-            guard active.phase == .connecting || active.phase == .active else { return }
-            guard audioData.count.isMultiple(of: 2) else {
-                fail(ElevenLabsStreamingError.invalidPCM, active)
+            switch active.phase {
+            case .idle:
+                preroll.append(audioData)
+            case .connecting, .active:
+                guard active.ready else { preroll.append(audioData); return }
+                enqueueAudio(audioData, active)
+            case .finishing, .closed:
                 return
             }
-            guard active.outgoing.count + (active.sending ? 1 : 0) < Self.maximumQueuedFrames,
-                  active.sendBudget.admit(audioData.count) else {
-                fail(stalledError, active)
-                return
-            }
-            active.outgoing.append(audioData)
-            pump(active)
         }
     }
 
@@ -184,15 +189,15 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         sendAudio(PCM16Converter.data(from: samples, frameCount: frameCount))
     }
 
-    /// Manual commit flushes audio that the provider may not yet have exposed
-    /// as text. Shared consumers must always allow that finalisation path.
+    /// The finish's manual commit flushes audio the server's VAD has not yet
+    /// committed. Shared consumers must always allow that finalisation path.
     public var finishFlushesBufferedAudio: Bool { true }
 
-    /// Graceful stop waits for any current commit, drains admitted audio, then
-    /// commits a nonempty remainder and awaits its `committed_transcript`.
+    /// Drains the admitted audio, sends one manual commit and reads the finals
+    /// that follow for the post-commit window, all inside `finishDrainBudget`.
     /// Returns the session's full transcript, or `nil` when nothing was
-    /// transcribed; a trailing final consumed here is not also delivered through
-    /// `onTranscript`.
+    /// transcribed; finals consumed here are not also delivered through
+    /// `onTranscript`. A finish that reaches a bound returns what it has.
     public func finishAndWait() async -> String? {
         let active = synchronized { run }
         return await withTaskCancellationHandler {
@@ -209,24 +214,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                         return
                     }
                     active.waiters.append(continuation)
-                    guard active.phase != .finishing else { return }
-                    active.phase = .finishing
-                    if active.outgoing.isEmpty, active.segmentBytes == 0, !active.sending {
-                        close(active)
-                        return
-                    }
-                    after(timing.overall, active) { client, active in
-                        client.fail(ElevenLabsStreamingError.missingCompletion, active)
-                    }
-                    if active.ready {
-                        pump(active)
-                    } else {
-                        // Stop before `session_started`: keep the admitted audio
-                        // and bound the wait for readiness so a finish can't hang.
-                        after(timing.readiness, active) { client, active in
-                            if !active.ready { client.fail(ElevenLabsStreamingError.sessionNotReady, active) }
-                        }
-                    }
+                    beginFinish(active)
                 }
             }
         } onCancel: { [weak self, weak active] in
@@ -307,32 +295,34 @@ extension ElevenLabsLiveClient {
         }
     }
 
+    /// Releases the audio held for the handshake, in capture order, and the
+    /// commit of a finish that was waiting for it.
     private func markReady(_ active: ElevenLabsLiveRun) {
-        guard !active.ready else { return }
+        // The offline parser seam has no session for the pre-roll to join.
+        guard !active.ready, active.phase != .idle else { return }
         active.ready = true
         if active.phase == .connecting { active.phase = .active }
         log("Session started")
+        for audio in preroll.drain() {
+            // Nothing was admitted before readiness, and the pre-roll holds at
+            // most the same five seconds as the send budget.
+            guard active.sendBudget.admit(audio.count) else { fail(stalledError, active); return }
+            active.outgoing.append(.audio(audio))
+        }
+        if active.phase == .finishing { queueCommit(active) }
         pump(active)
     }
 
+    /// Every committed segment counts once, from the VAD while recording or
+    /// from the finish's commit: no commit carries a correlation id. A
+    /// timestamped twin repeats the segment it pairs with and never adds it
+    /// again; either form arriving alone still counts.
     private func handleCommitted(_ text: String, timestamped: Bool, _ active: ElevenLabsLiveRun) {
-        // Timestamp enrichment repeats a segment it follows: never a second
-        // utterance, and never another commit's acknowledgement.
-        guard !active.finalTwins.isTwin(timestamped: timestamped) else { return }
-        // The offline parser seam preserves existing transcript tests. A
-        // live socket, however, must only finalise its one owned commit.
-        if active.phase == .idle {
-            if !text.isEmpty { active.accumulated.append(final: text) }
-            return
-        }
-        guard active.pendingCommit != nil, !active.commitFinalReceived else {
-            fail(ElevenLabsStreamingError.unexpectedCompletion, active)
-            return
-        }
-        active.commitFinalReceived = true
-        if !text.isEmpty { active.accumulated.append(final: text) }
-        if active.phase != .finishing, !text.isEmpty { active.onTranscript?(text, true) }
-        pump(active)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !active.finalTwins.isTwin(timestamped: timestamped) else { return }
+        active.accumulated.append(final: text)
+        // A segment that lands during the finish is returned by it instead.
+        if active.phase != .finishing { active.onTranscript?(text, true) }
     }
 
     func fail(_ error: Error, _ active: ElevenLabsLiveRun) {

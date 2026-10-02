@@ -25,8 +25,7 @@ final class ElevenLabsLiveClientTests: XCTestCase {
             URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
         )
         XCTAssertEqual(query.first { $0.name == "audio_format" }?.value, "pcm_16000")
-        // The client owns manual commits of at most twenty seconds.
-        XCTAssertEqual(query.first { $0.name == "commit_strategy" }?.value, "manual")
+        XCTAssertEqual(query.first { $0.name == "commit_strategy" }?.value, "vad")
         XCTAssertFalse(socket.messages.contains { if case .data = $0 { return true }; return false })
         let object = try json(textMessages(socket)[0])
         XCTAssertEqual(object["audio_base_64"] as? String, pcm.base64EncodedString())
@@ -49,9 +48,6 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         )
     }
 
-    /// The manual commit's `committed_transcript` completes the finish: each
-    /// commit has exactly one, so a timestamped twin or a repeat arriving
-    /// after it cannot add a second utterance.
     func testFinishBeforeHandshakeReplaysThenCommitsAndRetainsLateFinals() async {
         let socket = TestLiveWebSocket()
         let client = makeClient(socket)
@@ -65,28 +61,24 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         socket.emit(#"{"message_type":"committed_transcript_with_timestamps","text":"Yes."}"#)
         socket.emit(#"{"message_type":"committed_transcript","text":"Yes."}"#)
         let awaited4 = await result
-        XCTAssertEqual(awaited4, "Yes.")
+        XCTAssertEqual(awaited4, "Yes. Yes.")
         let commit = try? json(textMessages(socket).last ?? "")
         XCTAssertEqual(commit?["commit"] as? Bool, true)
         XCTAssertEqual(commit?["audio_base_64"] as? String, "")
         let awaited5 = await client.finishAndWait()
-        XCTAssertEqual(awaited5, "Yes.")
+        XCTAssertEqual(awaited5, "Yes. Yes.")
     }
 
-    /// Each full twenty-second segment is committed while recording; a
-    /// timestamped final that arrives alone still answers its commit.
     func testTimestampedFinalsCountWhenTheyArriveAlone() async {
         let socket = TestLiveWebSocket()
-        let client = makeClient(socket, sampleRate: 8_000)
+        let client = makeClient(socket)
         let lock = NSLock()
         var finals: [String] = []
         client.start(onTranscript: { text, isFinal in
             if isFinal { lock.withLock { finals.append(text) } }
         }, onError: { _ in })
         socket.emit(#"{"message_type":"session_started"}"#)
-        fillSegment(client)
         socket.emit(#"{"message_type":"committed_transcript_with_timestamps","text":"One."}"#)
-        fillSegment(client)
         socket.emit(#"{"message_type":"committed_transcript_with_timestamps","text":"Two."}"#)
         let delivered = await eventually { lock.withLock { finals.count == 2 } }
         XCTAssertTrue(delivered)
@@ -130,7 +122,7 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         let client = makeClient(socket, overall: 0.12)
         client.start(onTranscript: { _, _ in }, onError: { _ in })
         socket.emit(#"{"message_type":"session_started"}"#)
-        client.sendAudio(Data([1, 2]))
+        client.sendAudio(Data([1]))
         async let one = client.finishAndWait()
         async let two = client.finishAndWait()
         let awaited6 = await one
@@ -156,7 +148,7 @@ final class ElevenLabsLiveClientTests: XCTestCase {
 
     func testRateLimitIsTerminalAndCallbacksStayOrdered() async {
         let socket = TestLiveWebSocket()
-        let client = makeClient(socket, sampleRate: 8_000)
+        let client = makeClient(socket)
         let delivered = expectation(description: "ordered callbacks")
         delivered.expectedFulfillmentCount = 3
         let lock = NSLock()
@@ -170,8 +162,6 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         })
         socket.emit(#"{"message_type":"session_started"}"#)
         socket.emit(#"{"message_type":"partial_transcript","text":"Hel"}"#)
-        // A committed transcript answers the commit of a full segment.
-        fillSegment(client)
         socket.emit(#"{"message_type":"committed_transcript","text":"Hello"}"#)
         socket.emit(#"{"message_type":"rate_limited","error":"rate limited"}"#)
         await fulfillment(of: [delivered], timeout: 1)
@@ -196,19 +186,12 @@ final class ElevenLabsLiveClientTests: XCTestCase {
         XCTAssertTrue(condition10)
     }
 
-    private func makeClient(
-        _ socket: TestLiveWebSocket, overall: TimeInterval = 0.4, sampleRate: Int = 16_000
-    ) -> ElevenLabsLiveClient {
+    private func makeClient(_ socket: TestLiveWebSocket, overall: TimeInterval = 0.4) -> ElevenLabsLiveClient {
         ElevenLabsLiveClient(
-            apiKey: "test-key", sampleRate: sampleRate,
-            timing: .init(readiness: 0.15, postCommitDrain: 0.5, overall: overall),
+            apiKey: "test-key",
+            timing: .init(readiness: 0.15, postCommitDrain: 0.05, overall: overall),
             socketFactory: TestSocketFactory([socket]).make
         )
-    }
-
-    /// Sends one full twenty-second segment at 8 kHz, which sends its commit.
-    private func fillSegment(_ client: ElevenLabsLiveClient) {
-        for _ in 0..<100 { client.sendAudio(Data(repeating: 0, count: 3_200)) }
     }
 
     private func json(_ text: String) throws -> [String: Any] {

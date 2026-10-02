@@ -25,7 +25,7 @@ final class ElevenLabsPortableLifecycleTests: XCTestCase {
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         XCTAssertEqual(query["model_id"], "scribe_v2_realtime")
         XCTAssertEqual(query["audio_format"], "pcm_16000")
-        XCTAssertEqual(query["commit_strategy"], "manual")
+        XCTAssertEqual(query["commit_strategy"], "vad")
         XCTAssertEqual(query["language_code"], "en", "A locale is reduced to an ISO-639 language code")
         XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "synthetic")
 
@@ -91,17 +91,20 @@ final class ElevenLabsPortableLifecycleTests: XCTestCase {
         XCTAssertFalse(fixture.client.isConnected)
     }
 
-    func testSmallChunksAlsoHaveABoundedQueueBeforeReadiness() {
+    func testAudioBeforeSessionStartedKeepsTheNewestFiveSecondsWithoutFailing() {
         let fixture = ElevenLabsFixture()
         fixture.start()
         let socket = fixture.socket
-        for _ in 0..<257 { fixture.client.sendAudio(Data([1, 0])) }
+        // Six one-second chunks of 16 kHz PCM16: the oldest makes room.
+        let chunks = (0..<6).map { Data(repeating: UInt8($0), count: 32_000) }
+        chunks.forEach(fixture.client.sendAudio)
         XCTAssertTrue(socket.controls.isEmpty)
-        XCTAssertEqual(fixture.events.errors.count, 1)
-        XCTAssertEqual(socket.cancels, 1)
-        socket.open()
-        socket.emit(ElevenLabsFixture.started())
-        XCTAssertTrue(socket.controls.isEmpty, "A failed run never sends after the handshake")
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        fixture.becomeReady()
+        for _ in 0..<4 { socket.completeSend() }
+        XCTAssertEqual(ElevenLabsFixture.audioChunks(socket), Array(chunks.dropFirst()))
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        fixture.client.cancel()
     }
 
     // MARK: - Duplicate / interim final replacement
@@ -134,12 +137,13 @@ final class ElevenLabsPortableLifecycleTests: XCTestCase {
         fixture.commit("Hello.")
         fixture.client.sendAudio(Data(repeating: 1, count: 3_200))
         let finish = Task { await fixture.client.finishAndWait() }
-        XCTAssertEqual(ElevenLabsFixture.audioChunks(socket).count, 5)
+        XCTAssertEqual(ElevenLabsFixture.audioChunks(socket).count, 1)
         socket.completeSend()
-        await fixture.settle { ElevenLabsFixture.commitCount(socket) == 2 }
-        XCTAssertEqual(ElevenLabsFixture.audioChunks(socket).count, 5, "Only the admitted audio, then the commit")
+        await fixture.settle { ElevenLabsFixture.commitCount(socket) == 1 }
+        XCTAssertEqual(ElevenLabsFixture.audioChunks(socket).count, 1, "Only the admitted audio, then the commit")
         socket.completeSend()
         socket.emit(ElevenLabsFixture.committed("World."))
+        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Hello. World.")
         XCTAssertEqual(fixture.events.texts, ["Hello."], "The trailing final is returned once, not re-delivered")
@@ -147,7 +151,7 @@ final class ElevenLabsPortableLifecycleTests: XCTestCase {
         XCTAssertTrue(fixture.events.errors.isEmpty)
     }
 
-    func testFinishWithNoTrailingFinalFailsAtTheBudgetWithBestAvailableText() async {
+    func testFinishWithNoTrailingFinalReturnsTheBestAvailableTextAtTheWindow() async {
         let fixture = ElevenLabsFixture()
         fixture.start()
         fixture.becomeReady()
@@ -156,22 +160,25 @@ final class ElevenLabsPortableLifecycleTests: XCTestCase {
         fixture.client.sendAudio(Data(repeating: 0, count: 3_200))
         socket.completeSend()
         let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { ElevenLabsFixture.commitCount(socket) == 2 }
+        await fixture.settle { ElevenLabsFixture.commitCount(socket) == 1 }
         socket.completeSend()
         fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Only segment.")
         XCTAssertEqual(socket.cancels, 1)
-        XCTAssertEqual(fixture.events.errors.first as? ElevenLabsStreamingError, .missingCompletion)
+        XCTAssertTrue(fixture.events.errors.isEmpty, "VAD commits carry no id, so a quiet window is not a failure")
     }
 
-    func testEmptyFinishReturnsNilWithoutSendingACommit() async {
+    func testStartedSessionWithoutAudioStillCommitsAndReturnsNilAfterTheWindow() async {
         let fixture = ElevenLabsFixture()
         fixture.start()
         fixture.becomeReady()
-        let transcript = await fixture.client.finishAndWait()
+        let finish = Task { await fixture.client.finishAndWait() }
+        await fixture.settle { ElevenLabsFixture.commitCount(fixture.socket) == 1 }
+        fixture.socket.completeSend()
+        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
+        let transcript = await finish.value
         XCTAssertNil(transcript)
-        XCTAssertEqual(ElevenLabsFixture.commitCount(fixture.socket), 0)
         XCTAssertTrue(fixture.events.errors.isEmpty)
         XCTAssertEqual(fixture.socket.cancels, 1)
     }
@@ -194,12 +201,13 @@ final class ElevenLabsPortableLifecycleTests: XCTestCase {
         await fixture.settle { ElevenLabsFixture.commitCount(socket) == 1 }
         socket.completeSend()
         socket.emit(ElevenLabsFixture.committed("Opening words."))
+        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Opening words.")
         XCTAssertEqual(fixture.factory.sockets.count, 1)
     }
 
-    func testStopBeforeReadinessFailsVisiblyWhenSessionStartedNeverArrives() async {
+    func testStopBeforeReadinessEndsAtItsBoundWhenSessionStartedNeverArrives() async {
         let fixture = ElevenLabsFixture()
         fixture.start()
         fixture.socket.open()
@@ -209,7 +217,7 @@ final class ElevenLabsPortableLifecycleTests: XCTestCase {
         fixture.clock.fire(ElevenLabsLiveClient.finishReadyBudget)
         let transcript = await finish.value
         XCTAssertNil(transcript)
-        XCTAssertEqual(fixture.events.errors.first as? ElevenLabsStreamingError, .sessionNotReady)
+        XCTAssertTrue(fixture.events.errors.isEmpty, "A finish's readiness bound returns what it has")
         XCTAssertEqual(fixture.socket.cancels, 1)
     }
 

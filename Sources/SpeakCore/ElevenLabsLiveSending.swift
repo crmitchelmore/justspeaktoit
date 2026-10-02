@@ -1,24 +1,31 @@
 import Foundation
 
 extension ElevenLabsLiveClient {
-    /// Manual mode has no request IDs. Owning a single <=20-second segment and
-    /// pausing further audio until its final makes each acknowledgement unique.
+    /// One frame is in flight at a time, and nothing moves before
+    /// `session_started`. The server's VAD commits segments while recording;
+    /// the only client commit is the finish's, after every admitted frame.
     /// https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/transcripts-and-commit-strategies
     func pump(_ active: ElevenLabsLiveRun) {
-        guard isCurrent(active), active.ready, !active.sending, let connection = active.connection else { return }
-        if active.pendingCommit != nil {
-            guard active.commitFinalReceived else { return }
-            active.pendingCommit = nil
-            active.commitFinalReceived = false
-            active.segmentBytes = 0
+        guard isCurrent(active), active.ready, !active.sending, let connection = active.connection,
+              !active.outgoing.isEmpty else { return }
+        let next = active.outgoing.removeFirst()
+        let message: StreamingWebSocketMessage
+        let audioBytes: Int
+        let isCommit: Bool
+        switch next {
+        case .audio(let data):
+            message = .text(ElevenLabsLiveProtocol.audioChunkJSON(pcm16: data, sampleRate: sampleRate))
+            audioBytes = data.count
+            isCommit = false
+        case .commit:
+            message = .text(ElevenLabsLiveProtocol.commitJSON())
+            audioBytes = 0
+            isCommit = true
         }
-        guard let frame = nextFrame(active) else { return }
-        let audioBytes = frame.audioBytes
-        let commit = frame.commitID
         active.sending = true
         active.sendID += 1
         let sendID = active.sendID
-        connection.send(frame.message) { [weak self, weak active] error in
+        connection.send(message) { [weak self, weak active] error in
             guard let self, let active else { return }
             self.synchronized {
                 guard self.isCurrent(active), active.sendID == sendID else { return }
@@ -27,48 +34,61 @@ extension ElevenLabsLiveClient {
                 // A spurious ENOTCONN on a send is ignored, as it always has
                 // been: the receive side decides whether the socket is gone.
                 if let error, !WebSocketErrorFilter.isSpuriousDisconnect(error) { self.fail(error, active); return }
-                if let commit, !active.commitFinalReceived {
-                    self.after(self.timing.postCommitDrain, active) { client, active in
-                        if active.pendingCommit == commit {
-                            client.fail(ElevenLabsStreamingError.missingCompletion, active)
-                        }
-                    }
+                // VAD commits carry no correlation id, so no final can be
+                // recognised as this commit's answer. The finish instead reads
+                // finals for a bounded window once the commit is sent.
+                if isCommit {
+                    self.after(self.timing.postCommitDrain, active) { client, active in client.close(active) }
                 }
                 self.pump(active)
             }
         }
+        // A finish is bounded by its own deadline, which returns what it has.
         after(Self.sendDeadline, active) { client, active in
-            if active.sending, active.sendID == sendID { client.fail(client.stalledError, active) }
+            if active.sending, active.sendID == sendID, active.phase != .finishing {
+                client.fail(client.stalledError, active)
+            }
         }
     }
 
-    private struct Frame {
-        let message: StreamingWebSocketMessage
-        let audioBytes: Int
-        let commitID: UInt64?
+    /// Stop sequencing: admitted audio, then one manual commit, then the
+    /// post-commit window. A finish that lands before `session_started` waits
+    /// at most `finishReadyBudget` for it; one that has nothing to send closes
+    /// at once. Every bound ends the finish with the text it has.
+    func beginFinish(_ active: ElevenLabsLiveRun) {
+        guard active.phase != .finishing else { return }
+        active.phase = .finishing
+        // A session that never started has sent nothing, so without held
+        // audio there is nothing to commit or to wait for.
+        guard active.ready || !preroll.isEmpty else { close(active); return }
+        after(timing.overall, active) { client, active in client.close(active) }
+        if active.ready {
+            queueCommit(active)
+        } else {
+            after(timing.readiness, active) { client, active in
+                if !active.ready { client.close(active) }
+            }
+        }
     }
 
-    private func nextFrame(_ active: ElevenLabsLiveRun) -> Frame? {
-        let limit = sampleRate * 2 * Self.segmentSeconds
-        let message: StreamingWebSocketMessage
-        let audioBytes: Int
-        let commit: UInt64?
-        if active.segmentBytes == limit || (active.phase == .finishing && active.outgoing.isEmpty) {
-            guard active.segmentBytes > 0 else { close(active); return nil }
-            active.commitSequence += 1
-            commit = active.commitSequence
-            active.pendingCommit = commit
-            message = .text(ElevenLabsLiveProtocol.commitJSON())
-            audioBytes = 0
-        } else if !active.outgoing.isEmpty {
-            let next = active.outgoing.removeFirst()
-            audioBytes = min(next.count, limit - active.segmentBytes)
-            let data = Data(next.prefix(audioBytes))
-            if audioBytes < next.count { active.outgoing.insert(Data(next.dropFirst(audioBytes)), at: 0) }
-            active.segmentBytes += audioBytes
-            commit = nil
-            message = .text(ElevenLabsLiveProtocol.audioChunkJSON(pcm16: data, sampleRate: sampleRate))
-        } else { return nil }
-        return Frame(message: message, audioBytes: audioBytes, commitID: commit)
+    /// Queues the finish's manual commit behind every admitted frame, once.
+    func queueCommit(_ active: ElevenLabsLiveRun) {
+        guard !active.commitQueued else { return }
+        active.commitQueued = true
+        active.outgoing.append(.commit)
+        pump(active)
+    }
+
+    /// Bounded admission once the session has started: at most five seconds of
+    /// PCM and `maximumQueuedFrames` frames may be queued or in flight.
+    /// Exceeding either is a transport stall, reported once.
+    func enqueueAudio(_ audio: Data, _ active: ElevenLabsLiveRun) {
+        guard active.outgoing.count + (active.sending ? 1 : 0) < Self.maximumQueuedFrames,
+              active.sendBudget.admit(audio.count) else {
+            fail(stalledError, active)
+            return
+        }
+        active.outgoing.append(.audio(audio))
+        pump(active)
     }
 }

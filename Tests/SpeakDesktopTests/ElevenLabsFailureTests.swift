@@ -50,7 +50,7 @@ final class ElevenLabsFailureTests: XCTestCase {
         fixture.client.sendAudio(Data(repeating: 1, count: 3_200))
         socket.completeSend()
         let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { ElevenLabsFixture.commitCount(socket) == 2 }
+        await fixture.settle { ElevenLabsFixture.commitCount(socket) == 1 }
         socket.completeSend()
         socket.emit(ElevenLabsFixture.error("quota_exceeded", "limit reached"))
         let transcript = await finish.value
@@ -137,12 +137,13 @@ final class ElevenLabsFailureTests: XCTestCase {
         second.emit(ElevenLabsFixture.started())
         fixture.commit("Second session.", socket: second)
         fixture.client.sendAudio(Data(repeating: 7, count: 3_200))
-        XCTAssertEqual(ElevenLabsFixture.audioChunks(second).count, 5)
+        XCTAssertEqual(ElevenLabsFixture.audioChunks(second).count, 1)
         second.completeSend()
         let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { ElevenLabsFixture.commitCount(second) == 2 }
+        await fixture.settle { ElevenLabsFixture.commitCount(second) == 1 }
         second.completeSend()
         second.emit(ElevenLabsFixture.committed(""))
+        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Second session.", "A reused client starts each session's transcript fresh")
         XCTAssertEqual(fixture.factory.sockets.count, 2)

@@ -6,22 +6,23 @@ import Foundation
 final class ElevenLabsLiveRun: @unchecked Sendable {
     enum Phase { case idle, connecting, active, finishing, closed }
 
+    /// A frame waiting for the transport: admitted PCM, or the finish's
+    /// manual commit, which follows every admitted frame.
+    enum Outbound {
+        case audio(Data)
+        case commit
+    }
+
     var phase = Phase.idle
     var connection: (any StreamingWebSocketConnection)?
     /// The `session_started` frame has arrived; audio may now be sent.
     var ready = false
-    /// PCM frames admitted but not yet handed to the transport.
-    var outgoing: [Data] = []
+    /// Frames admitted but not yet handed to the transport, in capture order.
+    var outgoing: [Outbound] = []
     var sending = false
     var sendID: UInt64 = 0
-    /// Bytes handed to the transport for the current manual segment, including
-    /// an in-flight chunk. No segment may cross the client-owned time boundary.
-    var segmentBytes = 0
-    var commitSequence: UInt64 = 0
-    var pendingCommit: UInt64?
-    /// A response can precede its send completion; both must succeed before
-    /// another segment is sent or graceful finish is acknowledged.
-    var commitFinalReceived = false
+    /// The finish's manual commit is queued or sent; a finish sends one.
+    var commitQueued = false
     /// Pairs each `committed_transcript` with its timestamped twin.
     var finalTwins = ElevenLabsFinalTwinTracker()
     /// Consecutive spurious ENOTCONN receive failures, bounded in time.

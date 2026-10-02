@@ -4,14 +4,14 @@ import FoundationNetworking
 #endif
 
 extension ElevenLabsLiveClient {
-    /// The client's readiness, commit and finish bounds. Production uses the
-    /// documented statics; tests shorten them to run in real time.
+    /// The client's readiness, post-commit and finish bounds. Production uses
+    /// the documented statics; tests shorten them to run in real time.
     struct Timing: Sendable {
         /// How long a finish that lands before `session_started` waits for it.
         let readiness: TimeInterval
-        /// How long a sent manual commit waits for its `committed_transcript`.
+        /// How long a finish reads finals once its manual commit is sent.
         let postCommitDrain: TimeInterval
-        /// The whole finish: readiness, queued sends and both commits.
+        /// The whole finish: readiness, the drain, the commit and its window.
         let overall: TimeInterval
         /// The handshake plus `session_started`, while recording.
         var startup: TimeInterval = ElevenLabsLiveClient.readyDeadline

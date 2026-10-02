@@ -196,8 +196,8 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
       audioProcessor.setRunning(false)
       await applyLiveStopGrace(stopGrace)
       guard transcriber === active else { return }
-      // The shared client owns drain/commit ordering. It can already have a
-      // periodic commit pending, so a separate Mac commit must never be sent.
+      // The shared client owns the drain and the finish's one manual commit,
+      // so a separate Mac commit must never be sent.
       snapshot = await active.finishAndWait()
       guard transcriber === active else { return }
     } else {

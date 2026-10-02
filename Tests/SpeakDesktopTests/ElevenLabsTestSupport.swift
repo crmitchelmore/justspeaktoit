@@ -18,13 +18,10 @@ final class ElevenLabsFixture: @unchecked Sendable {
         )
     }
 
+    /// The server's VAD commits a segment while recording: its
+    /// `committed_transcript` arrives without any client commit.
     func commit(_ text: String, socket: AssemblyAITestSocket? = nil) {
         let socket = socket ?? self.socket
-        for _ in 0..<4 {
-            client.sendAudio(Data(repeating: 0, count: 160_000))
-            socket.completeSend()
-        }
-        socket.completeSend()
         socket.emit(#"{"message_type":"committed_transcript","text":"\#(text)"}"#)
     }
 

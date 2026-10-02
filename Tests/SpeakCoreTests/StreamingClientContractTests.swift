@@ -98,36 +98,27 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
 
     // MARK: - ElevenLabs (segment-shaped finals)
 
-    // The shared client owns manual commits of at most twenty seconds, so each
-    // `committed_transcript` answers one commit: a full segment's commit while
-    // recording, then the finish's commit for the remainder.
-
     func testElevenLabs_finishAndWaitReturnsFullTranscriptNotTrailingSegment() async {
         let (client, socket) = Self.elevenLabsFixture()
         socket.emit(#"{"message_type":"session_started"}"#)
-        Self.fillElevenLabsSegment(client)
         socket.emit(Self.elevenLabs("Hello there.", isFinal: true))
         socket.emit(Self.elevenLabs("this is", isFinal: false))
-        client.sendAudio(Data(repeating: 0, count: 3_200))
-        async let transcript = client.finishAndWait()
-        let condition1 = await eventually { Self.elevenLabsCommits(socket) == 2 }
-        XCTAssertTrue(condition1)
         socket.emit(Self.elevenLabs("This is a test.", isFinal: true))
+        async let transcript = client.finishAndWait()
+        let condition1 = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(condition1)
         let awaited2 = await transcript
         XCTAssertEqual(awaited2, "Hello there. This is a test.")
     }
 
     func testElevenLabs_repeatedIdenticalStandaloneFinalsAreBothKept() async {
-        // Issue #700: "Yes." followed by "Yes." is two utterances.
         let (client, socket) = Self.elevenLabsFixture()
         socket.emit(#"{"message_type":"session_started"}"#)
-        Self.fillElevenLabsSegment(client)
         socket.emit(Self.elevenLabs("Yes.", isFinal: true))
-        client.sendAudio(Data(repeating: 0, count: 3_200))
+        socket.emit(Self.elevenLabs("Yes.", isFinal: true))
         async let transcript = client.finishAndWait()
-        let condition3 = await eventually { Self.elevenLabsCommits(socket) == 2 }
+        let condition3 = await eventually { socket.messages.count == 1 }
         XCTAssertTrue(condition3)
-        socket.emit(Self.elevenLabs("Yes.", isFinal: true))
         let awaited4 = await transcript
         XCTAssertEqual(awaited4, "Yes. Yes.")
     }
@@ -136,10 +127,11 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         let (client, socket) = Self.elevenLabsFixture()
         socket.emit(#"{"message_type":"session_started"}"#)
         socket.emit(Self.elevenLabs("partial", isFinal: false))
-        let awaited6 = await client.finishAndWait()
+        async let transcript = client.finishAndWait()
+        let condition5 = await eventually { socket.messages.count == 1 }
+        XCTAssertTrue(condition5)
+        let awaited6 = await transcript
         XCTAssertNil(awaited6)
-        // Nothing was sent, so there is no segment to commit.
-        XCTAssertTrue(socket.messages.isEmpty)
     }
 
     // MARK: - Soniox (cumulative final tokens)
@@ -546,30 +538,18 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
     }
 
     private static func elevenLabs(_ text: String, isFinal: Bool) -> String {
-        // Current ElevenLabs Scribe v2 realtime shape: `message_type` frames
-        // carrying `text`, not the retired `speech_event_type`/`transcript`.
-        let messageType = isFinal ? "committed_transcript" : "partial_transcript"
-        return #"{"message_type":"\#(messageType)","text":"\#(text)"}"#
+        let event = isFinal ? "committed_transcript" : "partial_transcript"
+        return #"{"message_type":"\#(event)","text":"\#(text)"}"#
     }
 
-    /// 8 kHz keeps a full twenty-second manual segment to 100 frames.
     private static func elevenLabsFixture() -> (ElevenLabsLiveClient, TestLiveWebSocket) {
         let socket = TestLiveWebSocket()
         let client = ElevenLabsLiveClient(
-            apiKey: "k", sampleRate: 8_000, timing: .init(readiness: 0.1, postCommitDrain: 1, overall: 2),
+            apiKey: "k", timing: .init(readiness: 0.1, postCommitDrain: 0.03, overall: 0.2),
             socketFactory: TestSocketFactory([socket]).make
         )
         client.start(onTranscript: { _, _ in }, onError: { _ in })
         return (client, socket)
-    }
-
-    /// Sends one full twenty-second segment, which sends its manual commit.
-    private static func fillElevenLabsSegment(_ client: ElevenLabsLiveClient) {
-        for _ in 0..<100 { client.sendAudio(Data(repeating: 0, count: 3_200)) }
-    }
-
-    private static func elevenLabsCommits(_ socket: TestLiveWebSocket) -> Int {
-        textMessages(socket).filter { $0.contains(#""commit":true"#) }.count
     }
 
     private static func xai(_ text: String, type: String) -> String {

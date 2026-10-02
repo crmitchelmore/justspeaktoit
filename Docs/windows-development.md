@@ -870,11 +870,13 @@ The integrated portable suite passed 511 tests with five optional skips and
 zero failures. These checks do not qualify physical audio or the later branch's
 Windows runtime; use the exact Windows checkpoint below for that evidence.
 
-The shared ElevenLabs client streams partials continuously and confirms
-client-owned segments of at most twenty seconds. This changes the former macOS
-server-VAD confirmation cadence; real-provider transcript behaviour and latency
-require qualification before release. The portable and Apple unit suites do not
-substitute for that acceptance check.
+The shared ElevenLabs client streams partials continuously and, like the former
+macOS transcriber, lets the server's VAD commit segments while recording. At
+stop it sends one manual commit and reads finals for a bounded 1.5-second
+window; because VAD commits carry no correlation id it does not end that window
+at the first final, as the former macOS transcriber did. Real-provider stop
+latency requires qualification before release. The portable and Apple unit
+suites do not substitute for that acceptance check.
 
 The subsequent History correction `ca4b85c4` passed **3,903 normal Apple tests**
 (16 optional skips), **514 portable release tests** (five optional skips), and

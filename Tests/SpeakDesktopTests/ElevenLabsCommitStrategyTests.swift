@@ -5,51 +5,58 @@ import FoundationNetworking
 import XCTest
 @testable import SpeakCore
 
-final class ElevenLabsManualCommitTests: XCTestCase {
-    func testCrossingChunkSplitsBeforeTwentySecondsAndWaitsForPriorFinal() async {
-        let fixture = ElevenLabsFixture()
-        fixture.start()
-        fixture.becomeReady()
+/// The server's VAD commits segments while recording; a finish drains the
+/// admitted audio, sends one manual commit and reads finals for a bounded
+/// post-commit window. VAD commits carry no correlation id, so no final is
+/// treated as the commit's own answer.
+final class ElevenLabsCommitStrategyTests: XCTestCase {
+    func testVADFinalsWhileRecordingAreDeliveredAndATimestampedTwinCountsOnce() async {
+        let fixture = readyFixture()
         let socket = fixture.socket
-        let prefix = Data(repeating: 1, count: 152_000) // 4.75 s each, 19 s total.
-        for _ in 0..<4 {
-            fixture.client.sendAudio(prefix)
-            socket.completeSend()
-        }
-        let crossing = Data((0..<96_000).map { UInt8($0 % 251) }) // Three seconds.
-        fixture.client.sendAudio(crossing)
-        XCTAssertEqual(audio(socket).last, Data(crossing.prefix(32_000)))
-        socket.completeSend()
-        XCTAssertEqual(commits(socket), 1)
-        socket.completeSend()
-        XCTAssertEqual(audio(socket).reduce(0) { $0 + $1.count }, 640_000)
-        let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { fixture.clock.pending(ElevenLabsLiveClient.finishDrainBudget) > 1 }
         socket.emit(final("First."))
-        XCTAssertEqual(audio(socket).last, Data(crossing.dropFirst(32_000)))
-        XCTAssertEqual(socket.cancels, 0, "The prior segment's final cannot finish unsent trailing audio")
         socket.emit(timestamp("First."))
-        socket.completeSend()
-        XCTAssertEqual(commits(socket), 2)
-        socket.completeSend()
+        socket.emit(timestamp("Second."))
         socket.emit(final("Second."))
+        XCTAssertEqual(fixture.events.texts, ["First.", "Second."])
+        XCTAssertEqual(fixture.events.finals, [true, true])
+        XCTAssertEqual(commits(socket), 0, "Recording never sends a client commit")
+        let finish = Task { await fixture.client.finishAndWait() }
+        await fixture.settle { self.commits(socket) == 1 }
+        socket.completeSend()
+        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
         let text = await finish.value
         XCTAssertEqual(text, "First. Second.")
         XCTAssertTrue(fixture.events.errors.isEmpty)
-        XCTAssertEqual(audio(socket).reduce(Data(), +), prefix + prefix + prefix + prefix + crossing)
     }
 
-    func testStopAtPeriodicBoundaryDoesNotSendAnEmptySecondCommit() async {
+    func testFinishCommitsOnceAfterTheAdmittedAudioAndReadsFinalsForTheWindow() async {
         let fixture = readyFixture()
-        fillSegment(fixture)
+        let socket = fixture.socket
+        let first = Data(repeating: 1, count: 3_200)
+        let second = Data(repeating: 2, count: 3_200)
+        fixture.client.sendAudio(first)
+        fixture.client.sendAudio(second)
         let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { fixture.clock.pending(ElevenLabsLiveClient.finishDrainBudget) > 1 }
-        fixture.socket.completeSend()
-        fixture.socket.emit(final("Boundary."))
+        let again = Task { await fixture.client.finishAndWait() }
+        await fixture.settle { self.finishStarted(fixture) }
+        XCTAssertEqual(commits(socket), 0, "The commit waits behind the admitted audio")
+        socket.completeSend()
+        socket.completeSend()
+        XCTAssertEqual(audio(socket), [first, second])
+        XCTAssertEqual(commits(socket), 1)
+        socket.emit(final("Tail one."))
+        socket.completeSend()
+        socket.emit(timestamp("Tail one."))
+        socket.emit(final("Tail two."))
+        XCTAssertEqual(socket.cancels, 0, "No final ends the window early")
+        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
         let text = await finish.value
-        XCTAssertEqual(text, "Boundary.")
-        XCTAssertEqual(commits(fixture.socket), 1)
-        XCTAssertTrue(fixture.events.errors.isEmpty)
+        let repeated = await again.value
+        XCTAssertEqual(text, "Tail one. Tail two.")
+        XCTAssertEqual(repeated, text)
+        XCTAssertTrue(fixture.events.texts.isEmpty, "Finals read by the finish are returned, not delivered")
+        XCTAssertEqual(commits(socket), 1)
+        XCTAssertEqual(socket.cancels, 1)
     }
 
     func testFinalBeforeCommitSendCompletionDoesNotFinishAndSendFailureRemainsVisible() async {
@@ -66,7 +73,7 @@ final class ElevenLabsManualCommitTests: XCTestCase {
         XCTAssertEqual(fixture.events.errors.count, 1, "Error must precede the finish return")
     }
 
-    func testInlineFinalBeforeCommitSendCompletionCanSucceed() async {
+    func testInlineFinalBeforeCommitSendCompletionIsKept() async {
         let fixture = readyFixture()
         let socket = fixture.socket
         socket.onSend = { message in
@@ -80,12 +87,13 @@ final class ElevenLabsManualCommitTests: XCTestCase {
         await fixture.settle { self.commits(socket) == 1 }
         XCTAssertEqual(socket.cancels, 0)
         socket.completeSend()
+        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
         let text = await finish.value
         XCTAssertEqual(text, "Inline.")
         XCTAssertTrue(fixture.events.errors.isEmpty)
     }
 
-    func testShortSilentAudioNeedsARealFinalOrAnExplicitTimeout() async {
+    func testPostCommitWindowEndsTheFinishWithWhatItHas() async {
         for receivesFinal in [false, true] {
             let fixture = readyFixture()
             fixture.client.sendAudio(Data(repeating: 0, count: 320))
@@ -93,54 +101,29 @@ final class ElevenLabsManualCommitTests: XCTestCase {
             let finish = Task { await fixture.client.finishAndWait() }
             await fixture.settle { self.commits(fixture.socket) == 1 }
             fixture.socket.completeSend()
-            if receivesFinal {
-                fixture.socket.emit(final(""))
-            } else {
-                fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
-            }
+            if receivesFinal { fixture.socket.emit(final("")) }
+            fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
             let text = await finish.value
             XCTAssertNil(text)
-            XCTAssertEqual(fixture.events.errors.count, receivesFinal ? 0 : 1)
-            if !receivesFinal {
-                XCTAssertEqual(fixture.events.errors.first as? ElevenLabsStreamingError, .missingCompletion)
-            }
+            XCTAssertTrue(fixture.events.errors.isEmpty, "A blank or absent final is not a failure")
+            XCTAssertEqual(fixture.socket.cancels, 1)
         }
     }
 
-    func testPeriodicCommitTimeoutFailsAndDoesNotSendQueuedNextSegment() {
-        let fixture = readyFixture()
-        fillSegment(fixture)
-        fixture.socket.completeSend()
-        fixture.client.sendAudio(Data(repeating: 1, count: 3200))
-        fixture.clock.fire(ElevenLabsLiveClient.finishBudget)
-        XCTAssertEqual(audio(fixture.socket).reduce(0) { $0 + $1.count }, 640_000)
-        XCTAssertEqual(fixture.events.errors.first as? ElevenLabsStreamingError, .missingCompletion)
-        XCTAssertEqual(fixture.socket.cancels, 1)
-    }
-
-    func testWaitingForACommitStillBoundsAdmittedBacklog() {
-        let fixture = readyFixture()
-        fillSegment(fixture)
-        fixture.socket.completeSend()
-        fixture.client.sendAudio(Data(repeating: 1, count: 160_000))
-        fixture.client.sendAudio(Data([1, 0]))
-        XCTAssertEqual(fixture.events.errors.count, 1)
-        guard case StreamingClientError.transportStalled? = fixture.events.errors.first else {
-            return XCTFail("A missing final must not cause an unbounded recording queue")
-        }
-        XCTAssertEqual(audio(fixture.socket).count, 4)
-    }
-
-    func testWholeFinishDeadlineBoundsSlowDrainAndPreservesConfirmedText() async {
+    func testWholeFinishDeadlineBoundsSlowDrainAndReturnsWhatItHas() async {
         let fixture = readyFixture()
         fixture.commit("Saved.")
         fixture.client.sendAudio(Data(repeating: 1, count: 3200))
         let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { fixture.clock.pending(ElevenLabsLiveClient.finishDrainBudget) > 1 }
+        await fixture.settle { self.finishStarted(fixture) }
+        fixture.clock.fire(ElevenLabsLiveClient.sendDeadline)
+        XCTAssertTrue(fixture.events.errors.isEmpty, "A finish is bounded by its own deadline")
         fixture.clock.fire(ElevenLabsLiveClient.finishDrainBudget)
         let text = await finish.value
         XCTAssertEqual(text, "Saved.")
-        XCTAssertEqual(fixture.events.errors.first as? ElevenLabsStreamingError, .missingCompletion)
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        XCTAssertEqual(commits(fixture.socket), 0, "The stalled audio send was never overtaken by the commit")
+        XCTAssertEqual(fixture.socket.cancels, 1)
     }
 
     func testPreStartAudioIsReplayedInOrderThroughTheSameAdmissionPath() {
@@ -168,11 +151,12 @@ final class ElevenLabsManualCommitTests: XCTestCase {
         XCTAssertEqual(fixture.socket.cancels, 1)
     }
 
-    func testUnsupportedPCMAndRateFailBeforeMalformedAudioCanBeSent() {
+    func testPartialSampleChunksAreSentAsCapturedAndUnsupportedRatesFail() {
         let fixture = readyFixture()
         fixture.client.sendAudio(Data([1]))
-        XCTAssertEqual(fixture.events.errors.first as? ElevenLabsStreamingError, .invalidPCM)
-        XCTAssertTrue(fixture.socket.controls.isEmpty)
+        XCTAssertEqual(audio(fixture.socket), [Data([1])])
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        fixture.client.cancel()
         for rate in [12_345, 0, Int.min, Int.max] {
             let factory = AssemblyAISocketFactory()
             let events = AssemblyAITestEvents()
@@ -183,44 +167,42 @@ final class ElevenLabsManualCommitTests: XCTestCase {
         }
     }
 
-    func testCompletedSegmentDeadlinesCannotFailTheNextPendingCommit() async {
+    func testRetiredPostCommitWindowCannotEndTheNextSession() async {
         let fixture = readyFixture()
-        fixture.commit("Repeated.")
-        let oldDeadlines = fixture.clock.drain()
-        fillSegment(fixture)
-        oldDeadlines.forEach { $0() }
-        XCTAssertTrue(fixture.events.errors.isEmpty)
-        XCTAssertTrue(fixture.client.isConnected)
+        fixture.client.sendAudio(Data(repeating: 1, count: 320))
         fixture.socket.completeSend()
-        fixture.socket.emit(final("Repeated."))
-        let text = await fixture.client.finishAndWait()
-        XCTAssertEqual(text, "Repeated. Repeated.")
-        XCTAssertEqual(commits(fixture.socket), 2)
-    }
-
-    func testUnexpectedLiveFinalFailsInsteadOfInventingAcknowledgementCorrelation() {
-        let fixture = readyFixture()
-        fixture.socket.emit(final("Unowned."))
-        XCTAssertEqual(fixture.events.errors.first as? ElevenLabsStreamingError, .unexpectedCompletion)
-        XCTAssertEqual(fixture.socket.cancels, 1)
+        let finish = Task { await fixture.client.finishAndWait() }
+        await fixture.settle { self.commits(fixture.socket) == 1 }
+        fixture.socket.completeSend()
+        fixture.socket.emit(final("First."))
+        let oldDeadlines = fixture.clock.drain()
+        fixture.client.cancel()
+        _ = await finish.value
+        fixture.start()
+        let replacement = fixture.factory.sockets[1]
+        replacement.open()
+        replacement.emit(ElevenLabsFixture.started())
+        oldDeadlines.forEach { $0() }
+        XCTAssertTrue(fixture.client.isConnected)
+        XCTAssertEqual(replacement.cancels, 0)
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        fixture.client.cancel()
     }
 }
 
-private extension ElevenLabsManualCommitTests {
+private extension ElevenLabsCommitStrategyTests {
+    /// The finish has armed its overall bound beside the startup deadline,
+    /// which has the same length in production.
+    func finishStarted(_ fixture: ElevenLabsFixture) -> Bool {
+        XCTAssertEqual(ElevenLabsLiveClient.finishDrainBudget, ElevenLabsLiveClient.readyDeadline)
+        return fixture.clock.pending(ElevenLabsLiveClient.finishDrainBudget) == 2
+    }
+
     func readyFixture() -> ElevenLabsFixture {
         let fixture = ElevenLabsFixture()
         fixture.start()
         fixture.becomeReady()
         return fixture
-    }
-
-    func fillSegment(_ fixture: ElevenLabsFixture) {
-        let expected = commits(fixture.socket) + 1
-        for _ in 0..<4 {
-            fixture.client.sendAudio(Data(repeating: 0, count: 160_000))
-            fixture.socket.completeSend()
-        }
-        XCTAssertEqual(commits(fixture.socket), expected)
     }
 
     func final(_ text: String) -> String {

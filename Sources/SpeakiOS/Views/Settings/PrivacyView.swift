@@ -23,8 +23,8 @@ struct PrivacyView: View {
 
     private func processingDescription(for provider: LiveTranscriptionProviderID) -> String {
         if provider == .apple {
-            return "Microphone audio is transcribed on-device when supported; Apple's speech service may otherwise "
-                + "process it on its servers."
+            return "Microphone audio is transcribed on this device without uploading it. "
+                + "If on-device recognition is unavailable or fails, transcription stops."
         }
         return "Microphone audio is streamed to \(provider.displayName) for transcription."
     }

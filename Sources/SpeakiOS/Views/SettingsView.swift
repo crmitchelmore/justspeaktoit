@@ -113,8 +113,8 @@ public struct SettingsView: View {
 
                     if !usesInlineDensityLayout {
                         Text(
-                            "Uses Apple's on-device speech engines when available. "
-                                + "If recognition is unavailable or fails, audio may be sent to Apple."
+                            "Transcribes on this device without uploading audio. "
+                                + "If on-device recognition is unavailable or fails, transcription stops."
                         )
                             .font(.caption)
                             .foregroundStyle(.secondary)

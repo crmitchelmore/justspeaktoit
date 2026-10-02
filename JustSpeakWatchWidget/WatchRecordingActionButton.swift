@@ -1,3 +1,4 @@
+import SpeakWatchCore
 import SwiftUI
 
 /// Selects the system recording intent where watchOS supports it and preserves

@@ -60,6 +60,10 @@ public struct PrivacyWorkflowInputs: Equatable, Sendable {
     /// Live SpeechAnalyzer may fall back to the legacy, cloud-capable recognizer.
     /// Set false only when the execution path explicitly disables that fallback.
     public var appleSpeechAnalyzerFallbackAllowed = true
+    /// The live Apple route requires on-device recognition, including legacy
+    /// recognizer fallback. iOS enables this; other callers retain their policy.
+    /// This does not alter the separate recorded-audio routing contract.
+    public var appleSpeechRequiresOnDeviceRecognition = false
 
     public init(
         usesBatchTranscription: Bool,
@@ -199,6 +203,8 @@ public struct PrivacyWorkflowSummary: Equatable, Sendable {
             if modelID == AppleLocalModels.legacySpeechModelID {
                 return (.cloud(providerName: "OpenRouter"), false)
             }
+        } else if inputs.appleSpeechRequiresOnDeviceRecognition && AppleLocalModels.isAppleSpeechModel(modelID) {
+            return (.onDevice, false)
         } else if modelID == AppleLocalModels.legacySpeechModelID
             || (AppleLocalModels.isSpeechAnalyzerModel(modelID) && inputs.appleSpeechAnalyzerFallbackAllowed) {
             return (.cloud(providerName: "Apple"), true)

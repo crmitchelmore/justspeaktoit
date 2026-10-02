@@ -65,6 +65,20 @@ make run
 
 That's it! The app will launch and guide you through granting microphone permissions.
 
+### Windows and Linux (developer preview)
+
+Native Windows and Linux apps share the Swift core and one desktop controller
+(`SpeakDesktopHost`). They are developer builds, not releases: see
+[Windows development](Docs/windows-development.md) and
+[Linux development](Docs/linux-development.md) for the build steps and a
+feature-by-feature parity matrix of what is verified and what still needs a
+physical device.
+
+```bash
+# Linux (Ubuntu 24.04, Swift 6.2.3, GTK 4/libadwaita development packages)
+SPEAK_LINUX_TARGET=1 swift build --product SpeakLinux
+```
+
 ## Project Structure
 
 ```
@@ -112,15 +126,10 @@ open "Just Speak to It.xcworkspace"
 
 ## Versioning
 
-`VERSION` is a repository hint and `BUILD` tracks the monotonically increasing build number. `scripts/version.sh` keeps them in sync and updates `Config/AppInfo.plist` when present. For TestFlight, the release workflow requires an explicit iOS version; check App Store Connect rather than relying on `VERSION`. See [the iOS TestFlight release runbook](Docs/ios-testflight-release.md).
-
-Examples:
-
-```bash
-./scripts/version.sh bump-version minor
-./scripts/version.sh bump-build
-./scripts/version.sh show
-```
+`VERSION` is a repository hint. Current build allocation and release manifests are managed by
+`scripts/release-train.mjs` and the active release workflows. Alpha publication is automatic;
+Stable promotion remains owner-approved. See [the Alpha and Stable release-train guide](Docs/alpha-stable-release-trains.md)
+and [the iOS TestFlight release runbook](Docs/ios-testflight-release.md).
 
 ## Tooling
 

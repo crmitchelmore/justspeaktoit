@@ -64,7 +64,10 @@ final class HistorySyncEngineTests: XCTestCase {
         XCTAssertNotNil(engine.state.lastSyncTime)
     }
 
-    func testPaginationCoalescesDuplicatesAndAppliesFinalTombstone() async {
+    /// Each page is coalesced to its final events and applied on its own;
+    /// across pages the feed order decides, so a tombstone on a later page
+    /// still removes the entry, and the last page's token is kept.
+    func testPaginationCommitsEachPageAndAppliesTheFinalTombstone() async {
         let deleted = makeEntry(text: "delete me")
         let duplicateID = UUID()
         let firstDuplicate = makeEntry(id: duplicateID, text: "old", updatedAt: Date(timeIntervalSince1970: 10))
@@ -74,12 +77,12 @@ final class HistorySyncEngineTests: XCTestCase {
         let transport = FakeHistorySyncTransport(
             pages: [
                 HistoryChangePage(
-                    changes: [.changed(deleted), .changed(firstDuplicate)],
+                    changes: [.changed(deleted), .changed(firstDuplicate), .changed(finalDuplicate)],
                     serverChangeTokenData: token1,
                     moreComing: true
                 ),
                 HistoryChangePage(
-                    changes: [.deleted(deleted.id), .changed(finalDuplicate)],
+                    changes: [.deleted(deleted.id)],
                     serverChangeTokenData: token2,
                     moreComing: false
                 )
@@ -93,10 +96,9 @@ final class HistorySyncEngineTests: XCTestCase {
 
         XCTAssertEqual(transport.requestedTokens, [nil, token1])
         XCTAssertEqual(defaults.data(forKey: SyncConfiguration.syncTokenKey), token2)
+        XCTAssertEqual(delegate.receivedEntries.map(\.rawTranscription), ["delete me", "new"])
         XCTAssertEqual(delegate.deletedIDs, [deleted.id])
-        XCTAssertFalse(delegate.receivedEntries.contains { $0.id == deleted.id })
-        XCTAssertEqual(delegate.receivedEntries.filter { $0.id == duplicateID }.count, 1)
-        XCTAssertEqual(delegate.receivedEntries.first { $0.id == duplicateID }?.rawTranscription, "new")
+        XCTAssertFalse(delegate.pendingEntries().contains { $0.id == deleted.id })
         XCTAssertEqual(engine.state.pendingDownloadCount, 0)
     }
 

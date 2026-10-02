@@ -23,6 +23,8 @@ struct OpenRouterAudioCatalogSnapshot: Codable {
     let models: [OpenRouterAudioModel]
     let requestOrder: OpenRouterAudioCatalogRequestOrder?
 
+    private static let writeLock = NSLock()
+
     static let maximumBytes = 4 * 1_024 * 1_024
 
     init(
@@ -44,16 +46,22 @@ struct OpenRouterAudioCatalogSnapshot: Codable {
         guard let url = url?.standardizedFileURL.resolvingSymlinksInPath(),
               let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
               size <= maximumBytes,
-              let data = try? Data(contentsOf: url), data.count <= maximumBytes,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: maximumBytes + 1), data.count <= maximumBytes,
               let snapshot = try? JSONDecoder().decode(Self.self, from: data),
               snapshot.version == 1,
               snapshot.models.allSatisfy({ $0.capability != nil }) else { return nil }
         return snapshot
     }
 
-    /// Comparison and atomic replacement run synchronously on one actor across every catalogue instance.
-    @MainActor
+    /// One process-wide lock serialises comparison and atomic replacement across
+    /// Apple facades and native stores, without requiring the main actor.
     func write(to url: URL?) {
+        Self.writeLock.withLock { writeLocked(to: url) }
+    }
+
+    private func writeLocked(to url: URL?) {
         guard let url = url?.standardizedFileURL.resolvingSymlinksInPath(),
               let data = try? JSONEncoder().encode(self), data.count <= Self.maximumBytes else { return }
         if let existing = Self.readStored(from: url) {

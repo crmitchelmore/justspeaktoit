@@ -113,6 +113,26 @@ final class HistorySyncSwitchTests: XCTestCase {
         XCTAssertTrue(delegate.pendingEntries().isEmpty)
     }
 
+    func testSwitchOffDuringFetchStopsUploadAndQueuedFollowUp() async {
+        let transport = RecordingTransport()
+        let saved = makeEntry(text: "not uploaded after off")
+        let delegate = AckingDelegate(entries: [saved])
+        let engine = HistorySyncEngine(
+            transport: transport, defaults: defaults, cloudAvailable: true, delegate: delegate
+        )
+        transport.onFetch = {
+            await engine.sync()
+            engine.setSyncEnabled(false)
+        }
+        await engine.sync()
+        XCTAssertEqual(transport.fetchCount, 1)
+        XCTAssertTrue(transport.uploadedBatches.isEmpty)
+        XCTAssertEqual(delegate.pendingEntries().map(\.id), [saved.id])
+        XCTAssertNil(engine.state.error)
+        await engine.setSyncEnabled(true)?.value
+        XCTAssertEqual(transport.uploadedBatches, [[saved.id]])
+    }
+
     // MARK: - Helpers
 
     private func makeEntry(text: String) -> SyncableHistoryEntry {

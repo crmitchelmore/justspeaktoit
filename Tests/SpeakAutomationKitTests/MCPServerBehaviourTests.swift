@@ -64,7 +64,7 @@ final class MCPServerBehaviourTests: XCTestCase {
         let client = StubAutomationClient(result: AutomationResult(text: "agent ready", model: "nova-3"))
         let response = try XCTUnwrap(self.respond(self.handler(client), [
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": ["name": "transcribe_file", "arguments": ["path": "/tmp/clip.m4a"]]
+            "params": ["name": "transcribe_file", "arguments": ["path": AutomationTestPaths.clip]]
         ]))
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["isError"] as? Bool, false)
@@ -76,7 +76,7 @@ final class MCPServerBehaviourTests: XCTestCase {
         let structured = try XCTUnwrap(result["structuredContent"] as? [String: Any])
         XCTAssertEqual(structured["text"] as? String, "agent ready")
         XCTAssertEqual(client.sentRequests.first?.command, .transcribeFile)
-        XCTAssertEqual(client.sentRequests.first?.path, "/tmp/clip.m4a")
+        XCTAssertEqual(client.sentRequests.first?.path, AutomationTestPaths.clip)
     }
 
     func testGetHistoryTool_passesBoundedLimit() throws {

@@ -269,9 +269,11 @@ final class RecordingTransport: HistorySyncTransport {
     var uploadFailures: [UUID: Error] = [:]
     var remoteEntriesByID: [UUID: SyncableHistoryEntry] = [:]
     var deleteError: Error?
+    var onFetch: (() async -> Void)?
 
     func fetchChanges(after _: Data?) async throws -> HistoryChangePage {
         fetchCount += 1
+        if let onFetch { self.onFetch = nil; await onFetch() }
         return HistoryChangePage(changes: [], serverChangeTokenData: nil, moreComing: false)
     }
 

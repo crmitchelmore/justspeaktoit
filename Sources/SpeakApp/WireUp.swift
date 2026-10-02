@@ -58,7 +58,7 @@ final class AppEnvironment: ObservableObject {
   /// Compare Models rounds and their CloudKit bridge (issue #1101). Created
   /// at bootstrap so rounds judged on another Mac arrive before the section
   /// is opened, and retained here for the same reason as the history adapter.
-  let comparisonRounds = ComparisonRoundStore()
+  let comparisonRounds: ComparisonRoundStore
   fileprivate(set) var comparisonSyncAdapter: MacComparisonSyncAdapter?
   /// Owned here rather than by the Settings view so leaving the section
   /// mid-capture cannot deallocate a controller that still holds the
@@ -110,7 +110,8 @@ final class AppEnvironment: ObservableObject {
     profiles: DictationProfileStore,
     main: MainManager,
     transportServer: TransportServer,
-    hudPresenter: HUDWindowPresenter
+    hudPresenter: HUDWindowPresenter,
+    comparisonRounds: ComparisonRoundStore
   ) {
     self.settings = settings
     self.permissions = permissions
@@ -134,6 +135,7 @@ final class AppEnvironment: ObservableObject {
     self.main = main
     self.transportServer = transportServer
     self.hudPresenter = hudPresenter
+    self.comparisonRounds = comparisonRounds
   }
 
   /// Sets up the product analytics controller and subscribes to settings changes
@@ -498,13 +500,65 @@ enum WireUp {
   struct BootstrapOptions {
     var settingsOverride: AppSettings?
     var permissionsOverride: PermissionsManager?
+    /// Opens an isolated credential vault under this service instead of the
+    /// user's. It has no legacy predecessor and never joins API-key sync, so a
+    /// test or launch profile cannot read, copy or sync the user's keys.
     var keychainServiceOverride: String?
     /// Whether to clear the files a pre-warmed recorder staged in an earlier
-    /// run. Only the real app does this: a test bootstrap resolves the user's
-    /// own recordings directory, which it must never touch.
+    /// run. Only the real app does this: staging lives in the user's temporary
+    /// folder, which a test or launch profile shares with the real app.
     var sweepsStagedLeftovers = true
+    /// Resolves Application Support for history, the personal lexicon,
+    /// corrections, Compare Models rounds and analytics state.
+    var fileManager: FileManager = .default
+    /// Preferences for the stores that do not read `AppSettings`: profiles,
+    /// pronunciation, shortcuts, synced-history bookkeeping and speech usage.
+    var defaults: UserDefaults = .standard
+    /// Process-wide services started once the graph is wired.
+    var integrations: Integrations = .live
 
     static let `default` = BootstrapOptions()
+
+    /// The credential vault this bootstrap opens.
+    var credentialStorage: SecureStorageConfiguration {
+      keychainServiceOverride.map(SecureAppStorage.isolatedConfiguration(service:))
+        ?? SecureAppStorage.productionConfiguration
+    }
+
+    /// Whether this bootstrap starts encrypted API-key sync on `channel`. Only
+    /// the user's own vault may: the shared sync pairs it with this Mac's sync
+    /// state and the user's private CloudKit database.
+    func startsCredentialKeySync(on channel: DistributionChannel) -> Bool {
+      keychainServiceOverride == nil && channel.supportsEncryptedCloudKitKeySync
+    }
+  }
+
+  /// The services a bootstrap reaches beyond the app's own objects. The app
+  /// uses `.live`; a test injects its own so bootstrap never syncs the
+  /// developer's iCloud account, registers for or posts notifications, or
+  /// sends analytics.
+  struct Integrations {
+    /// Starts CloudKit history and Compare Models sync, and remote-transcript
+    /// delivery, which registers its notification actions and re-runs sync
+    /// on wake and activation.
+    var startCloudSync: @MainActor (MacHistorySyncAdapter, MacComparisonSyncAdapter, RemoteTranscriptDelivery) -> Void
+    /// Builds product analytics over the bootstrap's storage, or nil when absent.
+    var makeAnalytics: @MainActor (AppSettings, FileManager) -> ProductAnalyticsController?
+
+    static let live = Integrations(
+      startCloudSync: { history, comparisons, remoteTranscripts in
+        #if APP_STORE
+        NSApp.registerForRemoteNotifications()
+        #endif
+        remoteTranscripts.start()
+        Task {
+          await history.start()
+          // After the history engine, which owns zone creation for the shared zone.
+          await comparisons.start()
+        }
+      },
+      makeAnalytics: WireUp.makeAnalyticsController(settings:fileManager:)
+    )
   }
 
   // swiftlint:disable:next function_body_length
@@ -514,13 +568,11 @@ enum WireUp {
     #if DEBUG
     let profile = CoreJourneyLaunchProfile.current
     let options = profile?.bootstrapOptions() ?? suppliedOptions
-    let fileManager = profile?.fileManager ?? FileManager.default
-    let profileDefaults = profile?.defaults ?? UserDefaults.standard
     #else
     let options = suppliedOptions
-    let fileManager = FileManager.default
-    let profileDefaults = UserDefaults.standard
     #endif
+    let fileManager = options.fileManager
+    let defaults = options.defaults
     let settings = options.settingsOverride ?? AppSettings()
     let permissions = options.permissionsOverride
       ?? PermissionsManager()
@@ -537,12 +589,7 @@ enum WireUp {
     if options.sweepsStagedLeftovers {
       AudioFileManager.scheduleStagedLeftoverSweep(in: settings.recordingsDirectory)
     }
-    let secureStorage = SecureAppStorage(
-      permissionsManager: permissions,
-      appSettings: settings,
-      keychainService: options.keychainServiceOverride
-        ?? "com.github.speakapp.credentials"
-    )
+    let secureStorage = buildSecureStorage(options: options, settings: settings, permissions: permissions)
     #if DEBUG
     let openRouter = profile?.runsBatchJourney == true
       ? CoreJourneyBatchFixture.makeClient() : OpenRouterAPIClient(secureStorage: secureStorage)
@@ -559,13 +606,18 @@ enum WireUp {
     )
     let personalLexiconStore = PersonalLexiconStore(fileManager: fileManager)
     let personalLexicon = PersonalLexiconService(store: personalLexiconStore)
-    let pronunciationManager = PronunciationManager(defaults: profileDefaults)
+    let pronunciationManager = PronunciationManager(defaults: defaults)
     let postProcessing = PostProcessingManager(
       client: openRouter,
       settings: settings,
       personalLexicon: personalLexicon
     )
-    let tts = buildTTSManager(settings: settings, secureStorage: secureStorage, pronunciation: pronunciationManager)
+    let tts = buildTTSManager(
+      settings: settings,
+      secureStorage: secureStorage,
+      pronunciation: pronunciationManager,
+      defaults: defaults
+    )
     let livePolish = LivePolishManager(client: openRouter, settings: settings)
     let liveTextInserter = LiveTextInserter(
       permissionsManager: permissions,
@@ -578,7 +630,7 @@ enum WireUp {
       lexiconService: personalLexicon,
       appSettings: settings
     )
-    let profiles = DictationProfileStore(defaults: profileDefaults)
+    let profiles = DictationProfileStore(defaults: defaults)
     let main = MainManager(
       appSettings: settings,
       permissionsManager: permissions,
@@ -598,7 +650,7 @@ enum WireUp {
       profileStore: profiles
     )
     let hudPresenter = HUDWindowPresenter(manager: hud, settings: settings)
-    let shortcuts = ShortcutManager(permissionsManager: permissions)
+    let shortcuts = ShortcutManager(permissionsManager: permissions, defaults: defaults)
 
     // Transport server for "Send to Mac" from iOS
     let transportServer = TransportServer()
@@ -625,10 +677,11 @@ enum WireUp {
       profiles: profiles,
       main: main,
       transportServer: transportServer,
-      hudPresenter: hudPresenter
+      hudPresenter: hudPresenter,
+      comparisonRounds: ComparisonRoundStore(fileManager: fileManager)
     )
 
-    configureServices(environment: environment, settings: settings, secureStorage: secureStorage)
+    configureServices(environment: environment, settings: settings, secureStorage: secureStorage, options: options)
     AppEnvironment.shared = environment
     return environment
   }
@@ -645,7 +698,8 @@ enum WireUp {
   private static func configureServices(
     environment: AppEnvironment,
     settings: AppSettings,
-    secureStorage: SecureAppStorage
+    secureStorage: SecureAppStorage,
+    options: BootstrapOptions
   ) {
     #if DEBUG
     // Construct production managers and UI, but never preload credentials,
@@ -688,11 +742,7 @@ enum WireUp {
 
     environment.startAutomationServerIfEnabled()
 
-    #if APP_STORE
-    NSApp.registerForRemoteNotifications()
-    #endif
-
-    let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history)
+    let syncAdapter = MacHistorySyncAdapter(historyManager: environment.history, defaults: options.defaults)
     environment.historySyncAdapter = syncAdapter
     // Phone and watch captures arriving through CloudKit history sync (#1007).
     let remoteTranscripts = RemoteTranscriptDelivery(
@@ -713,17 +763,12 @@ enum WireUp {
     syncAdapter.onRemoteEntryArrived = { [weak remoteTranscripts] entry, isNew in
       remoteTranscripts?.handle(entry: entry, isNewToThisMac: isNew)
     }
-    remoteTranscripts.start()
     let comparisonSync = MacComparisonSyncAdapter(store: environment.comparisonRounds)
     environment.comparisonSyncAdapter = comparisonSync
-    Task {
-      await syncAdapter.start()
-      // After the history engine, which owns zone creation for the shared zone.
-      await comparisonSync.start()
-    }
+    options.integrations.startCloudSync(syncAdapter, comparisonSync, remoteTranscripts)
 
     Task { await secureStorage.preloadTrackedSecrets() }
-    if DistributionChannel.current.supportsEncryptedCloudKitKeySync {
+    if options.startsCredentialKeySync(on: .current) {
       Task {
         let coreStorage = await secureStorage.coreStorage()
         let keySync = CloudKitKeySync.shared
@@ -741,7 +786,7 @@ enum WireUp {
     }
 
     // Analytics
-    if let analyticsController = makeAnalyticsController(settings: settings) {
+    if let analyticsController = options.integrations.makeAnalytics(settings, options.fileManager) {
       environment.installAnalytics(analyticsController)
     }
 
@@ -750,15 +795,18 @@ enum WireUp {
 
   // MARK: - Analytics Factory
 
-  private static func makeAnalyticsController(settings: AppSettings) -> ProductAnalyticsController? {
+  private static func makeAnalyticsController(
+    settings: AppSettings,
+    fileManager: FileManager
+  ) -> ProductAnalyticsController? {
     #if APP_STORE
     return nil
     #else
     guard DistributionChannel.current == .direct else { return nil }
     guard PostHogProductAnalyticsSink.isConfigured else { return nil }
-    let stateURL = (FileManager.default
+    let stateURL = (fileManager
       .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-      .first ?? FileManager.default.homeDirectoryForCurrentUser)
+      .first ?? fileManager.homeDirectoryForCurrentUser)
       .appendingPathComponent(ReleaseTrain.current.supportDirectory)
       .appendingPathComponent("analytics_state.json")
     let queueURL = stateURL.deletingLastPathComponent().appendingPathComponent("analytics_queue.json")
@@ -798,12 +846,28 @@ enum WireUp {
     )
   }
 
+  // MARK: - Credential Vault Factory
+
+  /// Opens the credential vault a bootstrap with `options` uses.
+  static func buildSecureStorage(
+    options: BootstrapOptions,
+    settings: AppSettings,
+    permissions: PermissionsManager
+  ) -> SecureAppStorage {
+    SecureAppStorage(
+      permissionsManager: permissions,
+      appSettings: settings,
+      configuration: options.credentialStorage
+    )
+  }
+
   // MARK: - TTS Factory
 
   private static func buildTTSManager(
     settings: AppSettings,
     secureStorage: SecureAppStorage,
-    pronunciation: PronunciationManager
+    pronunciation: PronunciationManager,
+    defaults: UserDefaults
   ) -> TextToSpeechManager {
     let clients: [TTSProvider: TextToSpeechClient] = [
       .elevenlabs: ElevenLabsClient(secureStorage: secureStorage),
@@ -824,7 +888,8 @@ enum WireUp {
       appSettings: settings,
       secureStorage: secureStorage,
       clients: clients,
-      pronunciationManager: pronunciation
+      pronunciationManager: pronunciation,
+      defaults: defaults
     )
   }
 

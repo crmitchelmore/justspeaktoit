@@ -486,15 +486,12 @@ private struct GladiaLiveInitRequest: Encodable {
 private struct GladiaLanguageConfig: Encodable {
   static let automaticCodeSwitching = GladiaLanguageConfig(languages: [], codeSwitching: true)
 
+  /// The canonical Gladia mapping (`GladiaLive.languageCode`), shared with the
+  /// iOS and Windows client and the batch job: a listed language pins the
+  /// session, anything else detects it with code switching.
   static func from(language: String?) -> GladiaLanguageConfig {
-    guard let language else { return automaticCodeSwitching }
-    let normalized = language
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-      .replacingOccurrences(of: "_", with: "-")
-    guard let code = normalized.split(separator: "-").first, !code.isEmpty else {
-      return automaticCodeSwitching
-    }
-    return GladiaLanguageConfig(languages: [String(code).lowercased()], codeSwitching: false)
+    guard let code = GladiaLive.languageCode(for: language) else { return automaticCodeSwitching }
+    return GladiaLanguageConfig(languages: [code], codeSwitching: false)
   }
 
   let languages: [String]

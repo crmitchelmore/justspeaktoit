@@ -29,12 +29,13 @@ final class OnboardingStateTests: XCTestCase {
     }
 
     @MainActor
-    func testPermissionChanges_updateOnboardingWithoutConfirmationOrAnotherPoll() {
+    func testPermissionChanges_updateOnboardingWithoutConfirmationOrAnotherPoll() throws {
         var accessibilityStatus = PermissionStatus.denied
-        let permissions = PermissionsManager(statusProvider: { permission in
+        let host = try makeWireUpTestHost()
+        let permissions = host.makePermissions { permission in
             permission == .accessibility ? accessibilityStatus : .granted
-        })
-        let environment = WireUp.bootstrap(options: makeWireUpTestOptions(permissionsOverride: permissions))
+        }
+        let environment = WireUp.bootstrap(options: host.options(permissions: permissions))
         let state = OnboardingState(
             permissionsManager: permissions,
             secureStorage: environment.secureStorage,

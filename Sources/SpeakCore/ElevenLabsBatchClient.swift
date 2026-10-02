@@ -20,14 +20,17 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
 
     private let baseURL = URL(string: "https://api.elevenlabs.io/v1")!
     private let session: URLSession
+    private let staging: SharedMultipartUploadStaging?
 
     private let durationResolver: @Sendable (URL) async throws -> TimeInterval
 
     public init(
         session: URLSession = .shared,
+        staging: SharedMultipartUploadStaging? = nil,
         durationResolver: @escaping @Sendable (URL) async throws -> TimeInterval = { _ in 0 }
     ) {
         self.session = session
+        self.staging = staging
         self.durationResolver = durationResolver
     }
 
@@ -41,43 +44,22 @@ public struct ElevenLabsBatchClient: TranscriptionProvider {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
 
-        let boundary = "Boundary-\(UUID().uuidString)"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
 
-        let audioData = try Data(contentsOf: url)
-        var body = Data()
-
-        let modelID = extractModelID(from: model)
-        body.appendFormField(named: "model_id", value: modelID, boundary: boundary)
-        body.appendFormField(named: "timestamps_granularity", value: "word", boundary: boundary)
-
-        if let language {
-            let languageCode = language.localeLanguageCode
-            body.appendFormField(named: "language_code", value: languageCode, boundary: boundary)
-        }
-
+        var fields = [
+            OpenAICompatibleBatchTranscriptionClient.FormField(name: "model_id", value: extractModelID(from: model)),
+            .init(name: "timestamps_granularity", value: "word")
+        ]
+        if let language { fields.append(.init(name: "language_code", value: language.localeLanguageCode)) }
         let mimeType = url.pathExtension.lowercased() == "m4a"
             ? "audio/m4a" : BatchTranscriptionJob.mimeType(for: url) ?? "audio/m4a"
-        body.appendFileField(
-            named: "file",
-            filename: url.lastPathComponent,
-            mimeType: mimeType,
-            fileData: audioData,
-            boundary: boundary
+        let (data, _) = try await OpenAICompatibleBatchTranscriptionClient(
+            session: session, sharedStaging: try BatchUploadStaging.resolve(staging)
+        ).upload(
+            request: request, fields: fields,
+            file: .init(fieldName: "file", filename: url.lastPathComponent, mimeType: mimeType, sourceURL: url),
+            providerID: metadata.id
         )
-        body.appendString("--\(boundary)--\r\n")
-        request.httpBody = body
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw TranscriptionProviderError.invalidResponse
-        }
-
-        guard (200..<300).contains(http.statusCode) else {
-            let responseBody = String(data: data, encoding: .utf8) ?? "<no-body>"
-            throw TranscriptionProviderError.httpError(http.statusCode, responseBody)
-        }
 
         let decoded = try JSONDecoder().decode(ElevenLabsTranscriptionResponse.self, from: data)
         return try await buildTranscriptionResult(

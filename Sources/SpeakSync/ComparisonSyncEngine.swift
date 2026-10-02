@@ -41,6 +41,7 @@ public final class ComparisonSyncEngine: ObservableObject {
             transport: transport,
             tokenStore: UserDefaultsSyncChangeTokenStore(defaults: defaults, key: Self.syncTokenKey),
             cloudAvailability: cloudAvailability,
+            isSyncEnabled: { SyncConfiguration.isDataSyncEnabled(in: defaults) },
             isChangeTokenExpired: { ($0 as? CKError)?.code == .changeTokenExpired },
             observer: mirror
         )

@@ -168,7 +168,7 @@ enum ComparisonRecordCodec {
         // `ModelComparisonRevision` decodes from any object carrying `id` and
         // `updatedAt`, which every round payload does.
         guard let payload = record.string(forKey: Field.payload),
-              !isRoundShaped(Data(payload.utf8)),
+              isTombstoneShaped(Data(payload.utf8)),
               let revision = try? decoder.decode(ModelComparisonRevision.self, from: Data(payload.utf8)),
               revision.isValid, revision.round == nil,
               revision.id == SyncSchema.ComparisonRound.roundID(fromRecordName: record.syncRecordName) else {
@@ -196,9 +196,9 @@ enum ComparisonRecordCodec {
         return .deleted(id)
     }
 
-    private static func isRoundShaped(_ payload: Data) -> Bool {
+    private static func isTombstoneShaped(_ payload: Data) -> Bool {
         guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else { return false }
-        return object["entries"] != nil
+        return Set(object.keys) == Set(["id", "updatedAt"])
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakWatchCore
 import WidgetKit
 
 /// One rendering of the watch-face state.

@@ -1,4 +1,5 @@
 import Foundation
+import SpeakWatchCore
 
 /// The app-process entry point for "start/stop a recording", whoever asked:
 /// the on-screen record button, the Double Tap gesture, or the watch-face

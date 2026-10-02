@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / 'Sources/SpeakCore/Resources/ReleaseTrains.json'
-TARGET = ROOT / 'Sources/SpeakCore/ReleaseTrainCatalogue.swift'
+TARGET = ROOT / 'Sources/SpeakWatchCore/ReleaseTrainCatalogue.swift'
 
 
 def rendered():

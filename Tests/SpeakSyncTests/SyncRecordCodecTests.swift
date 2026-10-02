@@ -128,6 +128,21 @@ final class SyncRecordCodecTests: XCTestCase {
         XCTAssertNil(try ComparisonRecordCodec.change(from: history), "other record types are skipped, not rejected")
     }
 
+    func testTombstoneWithUnknownPayloadKeysIsNeverConsumed() throws {
+        let tombstone = ModelComparisonRevision(deleting: UUID(), at: Date(timeIntervalSince1970: 100))
+        var fields = try ComparisonRecordCodec.assignments(for: tombstone)
+        let index = try XCTUnwrap(fields.firstIndex { $0.key == "payload" })
+        guard case .string(let payload) = fields[index].value else { return XCTFail("Missing payload") }
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
+        object["futureRoundData"] = ["unknown"]
+        fields[index].value = .string(String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+        let record = try SyncWireFixture.record(
+            name: SyncSchema.ComparisonRound.recordName(for: tombstone.id),
+            type: SyncSchema.ComparisonRound.recordType, assignments: fields
+        )
+        XCTAssertThrowsError(try ComparisonRecordCodec.revision(from: record))
+    }
+
     func testSecretsAndKeySyncMetadataRoundTripOnlyUnderTheirOwnTypes() throws {
         let secret = EncryptedSecret(
             identifier: "assemblyai.apiKey",

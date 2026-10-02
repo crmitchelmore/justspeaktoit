@@ -139,16 +139,22 @@ public enum DesktopTranscription {
         case .prepared(let provider):
             return try await transcribePrepared(input, using: provider, session: session)
         case .openai:
-            return try await OpenAIBatchClient(session: session, durationResolver: { _ in input.duration })
+            return try await OpenAIBatchClient(
+                session: session, staging: try secureStaging(input.staging), durationResolver: { _ in input.duration }
+            )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .groq:
-            return try await GroqBatchClient(session: session, durationResolver: { _ in input.duration })
+            return try await GroqBatchClient(
+                session: session, staging: try secureStaging(input.staging), durationResolver: { _ in input.duration }
+            )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .deepgram:
             return try await DeepgramBatchClient(session: session, durationResolver: { _ in input.duration })
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .elevenlabs:
-            return try await ElevenLabsBatchClient(session: session, durationResolver: { _ in input.duration })
+            return try await ElevenLabsBatchClient(
+                session: session, staging: try secureStaging(input.staging), durationResolver: { _ in input.duration }
+            )
                 .transcribeFile(at: input.audioURL, apiKey: input.apiKey, model: input.model, language: input.language)
         case .google:
             return try await GeminiInteractionsClient(session: session, durationResolver: { _ in input.duration })

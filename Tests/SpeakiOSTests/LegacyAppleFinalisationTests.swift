@@ -255,28 +255,30 @@ private final class Fixture {
         manager.deactivateRecording = { [weak self] in self?.releases += 1 }
         self.transcriber.permissionCheck = { true }
         self.transcriber.modelID = AppleLocalModels.legacySpeechModelID
-        self.transcriber.legacyRecognitionStart = { [unowned self] callback in
-            self.callbacks.append(callback)
+        // Weak captures: the transcriber's tasks can call back after the test
+        // has released this fixture.
+        self.transcriber.legacyRecognitionStart = { [weak self] callback in
+            self?.callbacks.append(callback)
             return LegacyAppleRecognitionTask(
-                endAudio: { [unowned self] in
-                    self.operations.append("end")
-                    self.onEndAudio?()
+                endAudio: { [weak self] in
+                    self?.operations.append("end")
+                    self?.onEndAudio?()
                 },
-                finish: { [unowned self] in
-                    self.operations.append("finish")
-                    self.finishing.fulfill()
+                finish: { [weak self] in
+                    self?.operations.append("finish")
+                    self?.finishing.fulfill()
                 },
-                cancel: { [unowned self] in self.operations.append("cancel") }
+                cancel: { [weak self] in self?.operations.append("cancel") }
             )
         }
         if !useRealDeadline {
-            self.transcriber.scheduleLegacyDeadline = { [unowned self] completion in
-                self.deadlines.append(completion)
-                return { [unowned self] in self.deadlineCancellations += 1 }
+            self.transcriber.scheduleLegacyDeadline = { [weak self] completion in
+                self?.deadlines.append(completion)
+                return { [weak self] in self?.deadlineCancellations += 1 }
             }
         }
-        self.transcriber.onFinalResult = { [unowned self] in self.outputs.append($0) }
-        self.transcriber.onError = { [unowned self] in self.errors.append($0) }
+        self.transcriber.onFinalResult = { [weak self] in self?.outputs.append($0) }
+        self.transcriber.onError = { [weak self] in self?.errors.append($0) }
     }
 
     func send(_ text: String, final: Bool, confidence: Double = 0.8) {

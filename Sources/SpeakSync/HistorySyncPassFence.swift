@@ -34,6 +34,7 @@ extension HistorySyncCoordinator {
         isolation: isolated (any Actor)?,
         _ work: () async throws -> Value
     ) async throws -> Value {
+        try requireSyncEnabled()
         guard let fence else { return try await work() }
         return try await fence.admit(isolation: isolation, work)
     }

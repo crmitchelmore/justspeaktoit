@@ -25,6 +25,7 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
   private let stalenessThreshold: TimeInterval
   private let fileManager: FileManager
   private static let claims = ClaimRegistry()
+  private let ownerID = UUID()
   private let securityPolicy: SecurityPolicy
   private let report: @Sendable (Event) -> Void
 
@@ -73,7 +74,7 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
   /// Removes an upload body and releases its claim. A failed removal is logged
   /// (never the contents) and retried by a later purge pass once stale.
   public func removeUploadBodyFile(at url: URL) {
-    self.releaseClaim(url)
+    guard self.releaseClaimIfOwned(url) else { return }
     do {
       try self.fileManager.removeItem(at: url)
     } catch {
@@ -121,7 +122,7 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
   /// `contentsOfDirectory(at:)` resolves symlinks (`/var` → `/private/var`), so
   /// claims are keyed by the fully resolved path.
   private static func claimKey(for url: URL) -> String {
-    let path = url.resolvingSymlinksInPath().path
+    let path = url.standardizedFileURL.resolvingSymlinksInPath().path
     #if os(Windows)
     return path.lowercased()
     #else
@@ -130,21 +131,43 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
   }
 
   private func claim(_ url: URL) {
-    _ = Self.claims.lock.withLock { Self.claims.paths.insert(Self.claimKey(for: url)) }
+    Self.claims.lock.withLock { Self.claims.owners[Self.claimKey(for: url)] = ownerID }
   }
 
   private func releaseClaim(_ url: URL) {
-    _ = Self.claims.lock.withLock { Self.claims.paths.remove(Self.claimKey(for: url)) }
+    Self.claims.lock.withLock {
+      let key = Self.claimKey(for: url)
+      if Self.claims.owners[key] == ownerID { Self.claims.owners.removeValue(forKey: key) }
+    }
+  }
+
+  /// Directory aliases are permitted, but a caller-owned final-file symlink
+  /// cannot release another body's active claim. The registry protects every
+  /// instance from purge, while cleanup remains owned by its creating instance.
+  private func releaseClaimIfOwned(_ url: URL) -> Bool {
+    Self.claims.lock.withLock {
+      let key = Self.claimKey(for: url)
+      let locationURL = url.deletingLastPathComponent().standardizedFileURL
+        .resolvingSymlinksInPath().appendingPathComponent(url.lastPathComponent)
+      #if os(Windows)
+      let location = locationURL.path.lowercased()
+      #else
+      let location = locationURL.path
+      #endif
+      guard location == key, Self.claims.owners[key] == ownerID else { return false }
+      Self.claims.owners.removeValue(forKey: key)
+      return true
+    }
   }
 
   private func currentClaims() -> Set<String> {
-    Self.claims.lock.withLock { Self.claims.paths }
+    Self.claims.lock.withLock { Set(Self.claims.owners.keys) }
   }
 
   /// Apple and portable consumers may have different logging/policy adapters
   /// for one directory. Claims must therefore span all staging instances.
   private final class ClaimRegistry: @unchecked Sendable {
     let lock = NSLock()
-    var paths: Set<String> = []
+    var owners: [String: UUID] = [:]
   }
 }

@@ -1,3 +1,4 @@
+import SpeakWatchCore
 import SwiftUI
 import WidgetKit
 

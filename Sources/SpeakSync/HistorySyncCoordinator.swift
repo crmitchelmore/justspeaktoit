@@ -138,6 +138,7 @@ public final class HistorySyncCoordinator {
     public static let maxCoalescedPasses = 3
 
     public private(set) var status: HistorySyncStatus
+    private var isSyncEnabled: Bool
 
     private let transport: any HistorySyncTransport
     private let tokenStore: any SyncChangeTokenStore
@@ -153,11 +154,13 @@ public final class HistorySyncCoordinator {
         transport: any HistorySyncTransport,
         tokenStore: any SyncChangeTokenStore,
         cloudAvailable: Bool,
+        isSyncEnabled: Bool = true,
         observer: (any HistorySyncStatusObserver)? = nil,
         events: (@Sendable (HistorySyncEvent) -> Void)? = nil,
         now: @escaping @Sendable () -> Date = { Date() },
         fence: (any HistorySyncPassFence)? = nil
     ) {
+        self.isSyncEnabled = isSyncEnabled
         self.transport = transport
         self.tokenStore = tokenStore
         self.observer = observer
@@ -165,6 +168,17 @@ public final class HistorySyncCoordinator {
         self.now = now
         self.fence = fence
         status = HistorySyncStatus(isCloudAvailable: cloudAvailable)
+    }
+
+    /// The host owns this choice on the coordinator's isolation domain. Turning
+    /// it off immediately prevents subsequent requests and queued passes.
+    public func setSyncEnabled(_ enabled: Bool) {
+        isSyncEnabled = enabled
+        if !enabled { followUpRequested = false }
+    }
+
+    func requireSyncEnabled() throws {
+        guard isSyncEnabled else { throw HistorySyncDisabledError() }
     }
 
     /// Records the host's account probe. Sync refuses to run while unavailable.
@@ -193,6 +207,10 @@ public final class HistorySyncCoordinator {
         await set(\.pendingUploadCount, pendingCount, .pendingUploadCount, isolation: isolation)
         await set(\.pendingDownloadCount, 0, .pendingDownloadCount, isolation: isolation)
 
+        guard isSyncEnabled else {
+            await set(\.error, nil, .error, isolation: isolation)
+            return
+        }
         guard status.isCloudAvailable else {
             await set(\.error, SyncError.cloudUnavailable, .error, isolation: isolation)
             events?(.syncRequestedWhileCloudUnavailable)
@@ -218,7 +236,7 @@ public final class HistorySyncCoordinator {
             followUpRequested = false
             await runReconciliationPass(store: store, isolation: isolation)
             passes += 1
-        } while followUpRequested && passes < Self.maxCoalescedPasses
+        } while followUpRequested && isSyncEnabled && passes < Self.maxCoalescedPasses
 
         await set(\.isSyncing, false, .isSyncing, isolation: isolation)
     }
@@ -229,6 +247,7 @@ public final class HistorySyncCoordinator {
         store: (any HistorySyncStore)?,
         isolation: isolated (any Actor)? = #isolation
     ) async throws {
+        try requireSyncEnabled()
         guard status.isCloudAvailable else {
             throw SyncError.cloudUnavailable
         }
@@ -255,6 +274,7 @@ public final class HistorySyncCoordinator {
     }
 
     public func delete(entryID: UUID, isolation: isolated (any Actor)? = #isolation) async throws {
+        try requireSyncEnabled()
         guard status.isCloudAvailable else {
             throw SyncError.cloudUnavailable
         }
@@ -273,6 +293,7 @@ public final class HistorySyncCoordinator {
     ) async {
         do {
             try await fetchRemoteChanges(store: store, isolation: isolation)
+            try requireSyncEnabled()
             try await uploadPendingEntries(store: store, isolation: isolation)
             await set(\.pendingDownloadCount, 0, .pendingDownloadCount, isolation: isolation)
             let pendingCount = try await store.pendingEntries().count
@@ -283,7 +304,10 @@ public final class HistorySyncCoordinator {
             await set(\.lastSyncTime, now(), .lastSyncTime, isolation: isolation)
             events?(.passCompleted)
         } catch {
-            await set(\.error, error, .error, isolation: isolation)
+            await set(\.error, isSyncEnabled ? error : nil, .error, isolation: isolation)
+            if !isSyncEnabled {
+                await set(\.pendingDownloadCount, 0, .pendingDownloadCount, isolation: isolation)
+            }
             let pendingCount = (try? await store.pendingEntries())?.count ?? status.pendingUploadCount
             await set(\.pendingUploadCount, pendingCount, .pendingUploadCount, isolation: isolation)
             events?(.passFailed(error))

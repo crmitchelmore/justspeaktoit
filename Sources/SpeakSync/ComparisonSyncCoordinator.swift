@@ -88,6 +88,7 @@ public final class ComparisonSyncCoordinator {
     private let transport: any ComparisonSyncTransport
     private let tokenStore: any SyncChangeTokenStore
     private let cloudAvailability: () async -> Bool
+    private let isSyncEnabled: () -> Bool
     private let isChangeTokenExpired: @Sendable (Error) -> Bool
     private let observer: (any ComparisonSyncStatusObserver)?
     private let now: @Sendable () -> Date
@@ -99,6 +100,7 @@ public final class ComparisonSyncCoordinator {
         transport: any ComparisonSyncTransport,
         tokenStore: any SyncChangeTokenStore,
         cloudAvailability: @escaping () async -> Bool,
+        isSyncEnabled: @escaping () -> Bool = { true },
         isChangeTokenExpired: @escaping @Sendable (Error) -> Bool = { _ in false },
         observer: (any ComparisonSyncStatusObserver)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
@@ -106,6 +108,7 @@ public final class ComparisonSyncCoordinator {
         self.transport = transport
         self.tokenStore = tokenStore
         self.cloudAvailability = cloudAvailability
+        self.isSyncEnabled = isSyncEnabled
         self.isChangeTokenExpired = isChangeTokenExpired
         self.observer = observer
         self.now = now
@@ -117,6 +120,10 @@ public final class ComparisonSyncCoordinator {
         isolation: isolated (any Actor)? = #isolation
     ) async {
         guard let store else { return }
+        guard isSyncEnabled() else {
+            await set(\.lastError, nil, .lastError, isolation: isolation)
+            return
+        }
         guard !status.isSyncing else {
             followUpRequested = true
             return
@@ -137,10 +144,10 @@ public final class ComparisonSyncCoordinator {
                 await set(\.lastError, nil, .lastError, isolation: isolation)
                 await set(\.lastSyncTime, now(), .lastSyncTime, isolation: isolation)
             } catch {
-                await set(\.lastError, error, .lastError, isolation: isolation)
+                await set(\.lastError, isSyncEnabled() ? error : nil, .lastError, isolation: isolation)
             }
             passes += 1
-        } while followUpRequested && passes < Self.maxCoalescedPasses
+        } while followUpRequested && isSyncEnabled() && passes < Self.maxCoalescedPasses
         await set(\.isSyncing, false, .isSyncing, isolation: isolation)
     }
 
@@ -150,7 +157,9 @@ public final class ComparisonSyncCoordinator {
     ) async throws {
         var token = try await tokenStore.loadChangeToken()
         while true {
+            try requireSyncEnabled()
             let page = try await transport.fetchChanges(after: token)
+            try requireSyncEnabled()
             guard !page.moreComing || (page.serverChangeTokenData != nil && page.serverChangeTokenData != token) else {
                 throw SyncError.invalidChangePage
             }
@@ -179,11 +188,16 @@ public final class ComparisonSyncCoordinator {
         while !remaining.isEmpty {
             let batch = Array(remaining.prefix(SyncSchema.batchSize))
             remaining.removeFirst(batch.count)
+            try requireSyncEnabled()
             let result = await transport.upload(revisions: batch)
             for remote in result.remote { try await store.applyRemoteRevision(remote) }
             try await store.acknowledgeRevisions(result.acknowledged)
             if !result.failures.isEmpty { throw SyncError.partialUploadFailure(result.failures.count) }
         }
+    }
+
+    private func requireSyncEnabled() throws {
+        guard isSyncEnabled() else { throw HistorySyncDisabledError() }
     }
 
     private func set<Value>(

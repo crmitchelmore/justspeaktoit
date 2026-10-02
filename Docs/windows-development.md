@@ -19,7 +19,11 @@ Windows CI uses **Swift 6.2.3, Windows Server 2022, x86_64**. Follow the officia
 Visual Studio C++ tools, Windows SDK and Swift prerequisites. That page includes
 previous Swift releases; select 6.2.3 to reproduce CI. Windows ARM64 has a
 separate native workflow with native-execution evidence, described in
-[Windows ARM64](windows-arm64.md); it has no CI receipt yet.
+[Windows ARM64](windows-arm64.md). Native build, bundle execution without Swift
+on PATH and developer MSIX lifecycle checks passed at `5ae80301` in
+[run 36983969304](https://github.com/crmitchelmore/justspeaktoit/actions/runs/36983969304).
+That receipt predates the current integration; new integration checks and physical
+device acceptance remain separate.
 
 In PowerShell from the repository root:
 

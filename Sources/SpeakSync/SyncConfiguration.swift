@@ -32,6 +32,18 @@ public enum SyncConfiguration {
     /// UserDefaults key for tracking subscription creation.
     public static let subscriptionCreatedKey = "speak.sync.subscriptionCreated"
 
+    /// UserDefaults key for this device's iCloud data sync switch, which covers
+    /// History and, on Mac, Compare Models results. Encrypted API-Key Sync has
+    /// its own opt-in. Absent means on, so a device that synced before the
+    /// switch existed keeps syncing until the user turns it off.
+    public static let dataSyncEnabledKey = "speak.sync.iCloudDataSyncEnabled"
+
+    /// Whether this device takes part in iCloud data sync. Off keeps History
+    /// and comparison results on this device only.
+    public static func isDataSyncEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: dataSyncEnabledKey) as? Bool ?? true
+    }
+
     /// The database subscription whose pushes announce a history change.
     public static let historySubscriptionID = SyncSchema.History.subscriptionID
 

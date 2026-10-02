@@ -88,6 +88,32 @@ final class ComparisonCoordinatorTests: XCTestCase {
         XCTAssertEqual(lastSync, Date(timeIntervalSince1970: 7))
     }
 
+    @MainActor
+    func testDisableDuringFetchStopsUploadAndKeepsCursorForCatchUp() async throws {
+        let flag = ComparisonSyncSwitch()
+        let revision = ModelComparisonRevision(round: SyncWireFixture.round())
+        let store = FakeComparisonStore(pending: [revision])
+        let transport = FakeComparisonTransport(results: [.success(page(revision, token: "unaccepted"))])
+        let cursor = MemoryCursorStore(token: nil)
+        let coordinator = ComparisonSyncCoordinator(
+            transport: transport, tokenStore: cursor, cloudAvailability: { true },
+            isSyncEnabled: { flag.enabled }
+        )
+        await transport.setOnFetch { flag.set(false) }
+        await coordinator.sync(store: store)
+        let uploaded = await transport.uploadCount
+        let applied = await store.applied
+        let saved = try await cursor.loadChangeToken()
+        XCTAssertEqual(uploaded, 0)
+        XCTAssertTrue(applied.isEmpty)
+        XCTAssertNil(saved)
+        XCTAssertNil(coordinator.status.lastError)
+        flag.set(true)
+        await coordinator.sync(store: store)
+        let caughtUp = await store.acknowledged
+        XCTAssertEqual(caughtUp, [revision])
+    }
+
     private func page(_ revision: ModelComparisonRevision, token: String) -> ComparisonChangePage {
         ComparisonChangePage(changes: [.revision(revision)], serverChangeTokenData: Data(token.utf8), moreComing: false)
     }
@@ -119,6 +145,10 @@ private actor ComparisonHost {
 private actor FakeComparisonTransport: ComparisonSyncTransport {
     private var results: [Result<ComparisonChangePage, Error>]
     private let uploadResult: ComparisonUploadResult?
+    private var onFetch: (@Sendable () -> Void)?
+    private(set) var uploadCount = 0
+
+    func setOnFetch(_ action: @escaping @Sendable () -> Void) { onFetch = action }
     private(set) var requestedTokens: [Data?] = []
 
     init(results: [Result<ComparisonChangePage, Error>], upload: ComparisonUploadResult? = nil) {
@@ -128,11 +158,14 @@ private actor FakeComparisonTransport: ComparisonSyncTransport {
 
     func fetchChanges(after tokenData: Data?) async throws -> ComparisonChangePage {
         requestedTokens.append(tokenData)
+        onFetch?()
+        onFetch = nil
         return try (results.isEmpty ? .success(.empty) : results.removeFirst()).get()
     }
 
     func upload(revisions: [ModelComparisonRevision]) async -> ComparisonUploadResult {
-        uploadResult ?? ComparisonUploadResult(acknowledged: revisions)
+        uploadCount += 1
+        return uploadResult ?? ComparisonUploadResult(acknowledged: revisions)
     }
 }
 
@@ -163,4 +196,11 @@ private actor FakeComparisonStore: ComparisonSyncStore {
     }
 
     func applyLegacyDeletion(id: UUID) async throws {}
+}
+
+private final class ComparisonSyncSwitch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = true
+    var enabled: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func set(_ enabled: Bool) { lock.lock(); defer { lock.unlock() }; value = enabled }
 }

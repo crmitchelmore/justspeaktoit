@@ -18,6 +18,37 @@ final class SharedMultipartUploadStagingTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: active.path))
     }
 
+    func testCleanupRequiresCreatingOwnerAndPreservesTheClaim() throws {
+        let directory = temporaryDirectory()
+        let owner = staging(directory)
+        let other = staging(directory)
+        let active = try owner.createUploadBodyFile(providerID: "openai")
+        defer { owner.removeUploadBodyFile(at: active) }
+        other.removeUploadBodyFile(at: active)
+        other.purgeStaleUploads(now: .distantFuture)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
+        owner.removeUploadBodyFile(at: active)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: active.path))
+    }
+
+    #if !os(Windows)
+    func testFinalFileAliasCannotReleaseRealBodyButDirectoryAliasCanRemoveIt() throws {
+        let directory = temporaryDirectory()
+        let owner = staging(directory)
+        let body = try owner.createUploadBodyFile(providerID: "openai")
+        let fileAlias = directory.appendingPathComponent("alias")
+        let directoryAlias = directory.appendingPathComponent("directory-alias")
+        try FileManager.default.createSymbolicLink(at: fileAlias, withDestinationURL: body)
+        owner.removeUploadBodyFile(at: fileAlias)
+        owner.purgeStaleUploads(now: .distantFuture)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: body.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileAlias.path))
+        try FileManager.default.createSymbolicLink(at: directoryAlias, withDestinationURL: directory)
+        owner.removeUploadBodyFile(at: directoryAlias.appendingPathComponent(body.lastPathComponent))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: body.path))
+    }
+    #endif
+
     func testPolicyFailurePreventsScanningOrCreatingFiles() throws {
         let directory = temporaryDirectory()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -100,7 +131,7 @@ final class SharedMultipartUploadStagingTests: XCTestCase {
             for try await file in group { files.append(file) }
             return files
         }
-        defer { files.forEach { first.removeUploadBodyFile(at: $0) } }
+        defer { files.forEach { first.removeUploadBodyFile(at: $0); second.removeUploadBodyFile(at: $0) } }
         second.purgeStaleUploads(now: .distantFuture)
         XCTAssertEqual(Set(files).count, 32)
         for file in files { XCTAssertTrue(FileManager.default.fileExists(atPath: file.path)) }

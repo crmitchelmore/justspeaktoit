@@ -23,7 +23,7 @@ final class AssemblyAICancellationTests: XCTestCase {
         let old = fixture.factory.sockets[0]
         old.open(); old.begin()
         let forcing = expectation(description: "A begun session's finish forces the endpoint")
-        old.onSend = { if case .text = $0 { forcing.fulfill() } }
+        old.onSend = { if case .text(#"{"type":"ForceEndpoint"}"#) = $0 { forcing.fulfill() } }
         let finish = Task { await fixture.client.finishAndWait() }
         await fulfillment(of: [forcing], timeout: 2)
         fixture.start()
@@ -82,7 +82,7 @@ final class AssemblyAICancellationTests: XCTestCase {
         let socket = fixture.factory.sockets[0]
         socket.open(); socket.begin()
         let forcing = expectation(description: "A begun session's finish forces the endpoint")
-        socket.onSend = { if case .text = $0 { forcing.fulfill() } }
+        socket.onSend = { if case .text(#"{"type":"ForceEndpoint"}"#) = $0 { forcing.fulfill() } }
         let finish = Task { await fixture.client.finishAndWait() }
         await fulfillment(of: [forcing], timeout: 2)
         XCTAssertTrue(socket.binary.isEmpty, "No fictitious audio is sent")

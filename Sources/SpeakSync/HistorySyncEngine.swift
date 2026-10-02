@@ -35,6 +35,7 @@ public protocol HistorySyncDurabilityDelegate: HistorySyncDelegate {
 @MainActor
 public final class HistorySyncEngine: ObservableObject {
     @Published public private(set) var state: SyncState
+    @Published public private(set) var isSyncEnabled: Bool
 
     public static let shared = HistorySyncEngine()
 
@@ -63,6 +64,8 @@ public final class HistorySyncEngine: ObservableObject {
         let state = SyncState()
         state.isCloudAvailable = cloudAvailable
         let eventLog = SpeakLogger.logger(category: "HistorySync")
+        let enabled = SyncConfiguration.isDataSyncEnabled(in: defaults)
+        self.isSyncEnabled = enabled
         self.state = state
         self.defaults = defaults
         self.delegate = delegate
@@ -70,6 +73,7 @@ public final class HistorySyncEngine: ObservableObject {
             transport: transport,
             tokenStore: UserDefaultsSyncChangeTokenStore(defaults: defaults, key: SyncConfiguration.syncTokenKey),
             cloudAvailable: cloudAvailable,
+            isSyncEnabled: enabled,
             observer: SyncStateMirror(state: state),
             events: { Self.write($0, to: eventLog) }
         )
@@ -77,6 +81,7 @@ public final class HistorySyncEngine: ObservableObject {
 
     public func initialize(delegate: HistorySyncDelegate) async {
         self.delegate = delegate
+        guard isSyncEnabled else { return }
         await checkCloudAvailability()
         if state.isCloudAvailable {
             await setupCloudKitInfrastructure()
@@ -98,6 +103,31 @@ public final class HistorySyncEngine: ObservableObject {
 
     public func delete(entryID: UUID) async throws {
         try await coordinator.delete(entryID: entryID)
+    }
+
+    /// Keeps this device's History local while disabled. Cloud copies remain.
+    @discardableResult
+    public func setSyncEnabled(_ enabled: Bool) -> Task<Void, Never>? {
+        guard enabled != isSyncEnabled else { return nil }
+        isSyncEnabled = enabled
+        coordinator.setSyncEnabled(enabled)
+        defaults.set(enabled, forKey: SyncConfiguration.dataSyncEnabledKey)
+        guard enabled else {
+            state.error = nil
+            state.pendingDownloadCount = 0
+            return nil
+        }
+        return Task { await self.resumeAfterEnabling() }
+    }
+
+    private func resumeAfterEnabling() async {
+        guard delegate != nil, isSyncEnabled else { return }
+        if !state.isCloudAvailable {
+            await checkCloudAvailability()
+            guard isSyncEnabled, state.isCloudAvailable else { return }
+            await setupCloudKitInfrastructure()
+        }
+        await sync()
     }
 
     /// The delegate as a shared-coordinator store for one call, or `nil`.
@@ -125,6 +155,7 @@ public final class HistorySyncEngine: ObservableObject {
     }
 
     private func setupCloudKitInfrastructure() async {
+        guard isSyncEnabled else { return }
         if !defaults.bool(forKey: SyncConfiguration.zoneCreatedKey) {
             do {
                 try await createCustomZone()
@@ -133,7 +164,7 @@ public final class HistorySyncEngine: ObservableObject {
                 log.error("Zone creation failed: \(error.localizedDescription)")
             }
         }
-        if !defaults.bool(forKey: SyncConfiguration.subscriptionCreatedKey) {
+        if isSyncEnabled && !defaults.bool(forKey: SyncConfiguration.subscriptionCreatedKey) {
             do {
                 try await createSubscription()
                 defaults.set(true, forKey: SyncConfiguration.subscriptionCreatedKey)

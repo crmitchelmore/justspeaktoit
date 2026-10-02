@@ -112,6 +112,8 @@ public final class TranscriptionRecordingService: ObservableObject {
     private let historyManager: iOSHistoryManager
     private let foregroundOwnership: ForegroundRecordingOwnership
     private let ensureKeysLoaded: @MainActor () async -> Void
+    private let networkSnapshot: CaptureNetworkPathMonitor.SnapshotProvider
+    private let localRecognitionCapability: @MainActor (String) -> AppleLocalRecognitionCapability
 
     private(set) var transcriptionSession: (any IOSRecordingSession)?
     private var stoppingSession: (any IOSRecordingSession)?
@@ -196,7 +198,9 @@ public final class TranscriptionRecordingService: ObservableObject {
             hasPolishingKey: { AppSettings.shared.hasOpenRouterKey },
             polish: { text, model, apiKey in
                 try await iOSPostProcessingManager.shared.polish(text: text, model: model, apiKey: apiKey)
-            }
+            },
+            networkSnapshot: CaptureNetworkPathMonitor.liveSnapshotProvider(),
+            localRecognitionCapability: AppleLegacyRecognitionCapabilityProbe.capability(for:)
         )
     }
 
@@ -210,11 +214,16 @@ public final class TranscriptionRecordingService: ObservableObject {
         completeActivity: @escaping ActivityCompletion = TranscriptionRecordingService.completeSharedActivity,
         sessionFactory: (() throws -> IOSTranscriptionSession)? = nil,
         foregroundOwnership: ForegroundRecordingOwnership? = nil,
-        ensureKeysLoaded: @escaping @MainActor () async -> Void = { await AppSettings.shared.ensureKeysLoaded() }
+        ensureKeysLoaded: @escaping @MainActor () async -> Void = { await AppSettings.shared.ensureKeysLoaded() },
+        networkSnapshot: @escaping CaptureNetworkPathMonitor.SnapshotProvider = { .unknown },
+        localRecognitionCapability: @escaping @MainActor (String) -> AppleLocalRecognitionCapability =
+            { _ in .available }
     ) {
         self.sessionFactory = sessionFactory
         self.foregroundOwnership = foregroundOwnership ?? .shared
         self.ensureKeysLoaded = ensureKeysLoaded
+        self.networkSnapshot = networkSnapshot
+        self.localRecognitionCapability = localRecognitionCapability
         self.sharedState = sharedState
         self.historyManager = historyManager
         self.polishClipboard = polishClipboard
@@ -416,6 +425,19 @@ public final class TranscriptionRecordingService: ObservableObject {
             run: runID
         )
 
+        let languageIdentifier = keyboardProfile?.languageIdentifier
+            ?? runParameters.languageIdentifier
+            ?? settings.preferredLocaleIdentifier
+        let localeIdentifier = TranscriptionLanguageCatalog.localeIdentifier(for: languageIdentifier)
+        let strictOnDeviceRecognition = try applyOfflineRouting(
+            usesBatch: usesBatchTranscription,
+            binding: keyboardProfile == nil
+                ? (runParameters.modelID == nil ? .ordinary : .explicitModel)
+                : .keyboardProfile,
+            localeIdentifier: localeIdentifier,
+            run: runID
+        )
+
         if !usesBatchTranscription && keyboardProfile == nil {
             try resolveLiveModelHonouringRequest(
                 settings: settings,
@@ -433,9 +455,11 @@ public final class TranscriptionRecordingService: ObservableObject {
         // asserts (EXC_BREAKPOINT). In the foreground a Live Activity is optional,
         // so only enforce this when the app isn't active.
         let appIsActive = UIApplication.shared.applicationState == .active
-        let activityProvider = providerFallbackNotice == nil
-            ? modelDisplayName
-            : "\(modelDisplayName) (\(settings.credentialFallbackReason))"
+        let activityProvider = providerFallbackNotice == OfflineCaptureRouting.fallbackNotice
+            ? "\(modelDisplayName) (Offline)"
+            : providerFallbackNotice == nil
+                ? modelDisplayName
+                : "\(modelDisplayName) (\(settings.credentialFallbackReason))"
         let activityStarted = (requiresLiveActivity || appIsActive)
             ? activityManager.startActivity(provider: activityProvider, initialStatus: .arming)
             : false
@@ -468,9 +492,6 @@ public final class TranscriptionRecordingService: ObservableObject {
             let mode: IOSTranscriptionSession.Mode = usesBatchTranscription
                 ? .batch(retainRecording: retainBatchRecording)
                 : .streaming
-            let languageIdentifier = keyboardProfile?.languageIdentifier
-                ?? runParameters.languageIdentifier
-                ?? settings.preferredLocaleIdentifier
             // Both seams are honoured: `makeSession` (#936) injects any
             // recording session so an interruption can finalise through its
             // owner, while `sessionFactory` remains the concrete test seam.
@@ -483,7 +504,8 @@ public final class TranscriptionRecordingService: ObservableObject {
                 audioSessionManager: audioSessionManager,
                 batchAPIKey: settings.batchAPIKey(for: currentModel),
                 liveAPIKey: settings.liveAPIKey(for:),
-                transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords)
+                transcriptionKeywords: MetaMuseVoiceTranscribe.keywords(from: settings.transcriptionKeywords),
+                requiresStrictOnDeviceRecognition: strictOnDeviceRecognition
             )
             session.onPartialResult = { [weak self, weak session] text, isFinal in
                 guard let self, let session,
@@ -699,6 +721,42 @@ public final class TranscriptionRecordingService: ObservableObject {
             """
         )
         throw CaptureParameterFailure.modelUnavailable
+    }
+
+    /// Applies only a known-offline live decision. The selected preference is
+    /// never mutated; `currentModel` belongs to this run and is what History
+    /// and the Live Activity already report.
+    private func applyOfflineRouting(
+        usesBatch: Bool,
+        binding: OfflineCaptureRequestBinding,
+        localeIdentifier: String,
+        run: UUID
+    ) throws -> Bool {
+        let connectivity = self.networkSnapshot()
+        let capability = OfflineCaptureRouting.needsLocalCapability(
+            usesBatch: usesBatch,
+            requestedModelID: self.currentModel,
+            connectivity: connectivity
+        ) ? self.localRecognitionCapability(localeIdentifier) : .unknown
+        let decision = OfflineCaptureRouting.decide(
+            usesBatch: usesBatch,
+            requestedModelID: self.currentModel,
+            binding: binding,
+            connectivity: connectivity,
+            localCapability: capability
+        )
+        switch decision {
+        case .use(let route):
+            self.currentModel = route.modelID
+            if let notice = route.notice { self.providerFallbackNotice = notice }
+            return route.requiresStrictOnDeviceRecognition
+        case .refuse(.explicitRemoteModelUnavailable):
+            self.unwindCancelledStart(outcome: .failed, run: run)
+            throw CaptureParameterFailure.modelUnavailable
+        case .refuse(.localRecognitionUnavailable):
+            self.unwindCancelledStart(outcome: .failed, run: run)
+            throw iOSTranscriptionError.offlineLocalRecognitionUnavailable
+        }
     }
 
     /// Settles the current session's outcome under its own identity and clears

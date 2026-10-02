@@ -11,7 +11,7 @@ by this integration. Access to a model depends on the resource's tier and region
 | Fast recorded-audio transcription | Speech `transcriptions:transcribe`, version `2025-10-15` | macOS, iOS and Windows |
 | MAI-Transcribe-2 / 1.5 recorded audio | Same API, with the explicit enhanced-mode model | macOS, iOS and Windows; resource access required |
 | Azure Speech / MAI live input | Voice Live, version `2026-04-10`, pre-deployed `gpt-4.1` session | macOS, iOS and Windows; resource endpoint required |
-| Azure neural and available MAI voices | Regional synthesis and voices-list APIs | macOS TTS; shared transport and voice descriptors in SpeakCore |
+| Azure neural voices, MAI-Voice-2.1 and MAI-Voice-2.1-Flash | Regional synthesis and voices-list APIs | macOS TTS; shared transport and MAI catalogue in SpeakCore |
 
 MAI live input uses Azure's `mai-transcribe` identifier. It is intentionally not
 labelled MAI-Transcribe-2: the live API does not promise the same version as the
@@ -44,13 +44,49 @@ silently reused for Azure.
    Only the documented Azure custom-resource hostnames are accepted. The endpoint is device-local configuration, not a secret.
 3. Recorded audio uses the regional Speech endpoint if the resource field is empty.
 4. Choose the Azure model under Remote → Batch or Remote → Streaming.
-5. On macOS, voice output loads the resource's regional voice list. MAI-Voice-2
-   and Flash appear only if returned by Azure. Conventional saved voice IDs are
-   preserved; the original neural voice list remains an offline fallback.
+5. On macOS, voice output loads the resource's regional voice list. Conventional
+   saved voice IDs are preserved; the original neural voice list remains an
+   offline fallback.
+
+### MAI voices
+
+MAI-Voice-2.1 (highest fidelity) and MAI-Voice-2.1-Flash (low latency) were
+released on 1 October 2026 and are in public preview on Azure Speech. They use
+the same key, regional `cognitiveservices/v1` synthesis endpoint and SSML as
+neural voices; the model is the voice-name suffix, for example
+`en-US-Harper:MAI-Voice-2.1-Flash`. No new credential or endpoint is needed.
+
+`AzureMAIVoiceCatalog` in SpeakCore is the one definition of the MAI models,
+their published prices and eight curated English speakers (Harper, Olivia,
+Grant and Ethan in en-US; Emily and Harry in en-GB; Isla in en-AU; Priya in
+en-IN), each offered with both models. The macOS picker projects that catalogue.
+Microsoft documents both models as globally accessible, with requests routed to
+the regions that serve them, so the curated voices are offered even when a
+regional voice list omits them. The resource's own list still supplies every
+other MAI speaker and locale, and older MAI models it still serves
+(MAI-Voice-2, MAI-Voice-1). Speakers such as Harper exist in many locales, so MAI
+voices are named with their locale and model, for example
+"Harper (en-US, MAI-Voice-2.1)". A saved MAI voice keeps that name offline,
+including locales with a script or variant such as `zh-Hans-CN`. A curated
+voice that the resource also lists keeps the catalogue's traits (accent,
+multilingual, low latency).
+
+Failed synthesis keeps Azure's own response text (whitespace collapsed, at most
+300 characters plus an ellipsis, with an exact key echo removed). This diagnostic
+can still contain user content and must not be logged. Only when that
+text says the voice or model is unavailable does an MAI request report that the
+resource cannot use MAI voices; a malformed request is reported as such. Region
+coverage is still settling: Microsoft's MAI voice page lists 14 serving regions,
+while the region table marks 9.
 
 MAI voice output currently requires normal speed and pitch. Unsupported changes
-produce an explicit message. MAI costs are shown as unknown rather than using the
-conventional neural-voice price. MP3 output requested through the M4A preference
+produce an explicit message. MAI-Voice-2.1 is estimated at $22 and Flash at $15
+per million characters; older MAI models have no published rate here and are
+shown as unknown rather than using the conventional neural-voice price.
+MAI-Transcribe-2 recorded audio is estimated at its $0.10 per hour launch price,
+which Microsoft offers only until 31 December 2026. The pricing table is
+maintained by hand: replace that rate when Microsoft publishes the standard
+price. MP3 output requested through the M4A preference
 is saved with an MP3 extension, matching Azure's actual response container.
 Conventional voice prosody uses signed relative values (`+0%`, `+0st`);
 Azure rejects the unsigned zero values previously sent by the app.
@@ -99,3 +135,6 @@ skipped without explicit configuration and never obtain credentials themselves.
 - [MAI transcription](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe)
 - [Voice Live authentication, events and input transcription](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to)
 - [MAI voice names and synthesis](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-voices)
+- [MAI-Voice-2.1 and Flash launch and pricing](https://microsoft.ai/news/our-first-streaming-transcription-model)
+- [MAI-Transcribe-2 launch pricing](https://microsoft.ai/news/mai-transcribe-2)
+- [Speech regions, including MAI voices and MAI-Transcribe](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/regions)

@@ -24,6 +24,8 @@ actor HistoryHost {
         )
     }
 
+    func setSyncEnabled(_ enabled: Bool) { coordinator.setSyncEnabled(enabled) }
+
     func sync(store: (any HistorySyncStore)?) async {
         await coordinator.sync(store: store)
     }

@@ -7,6 +7,10 @@ updates:
       security:
         applies-to: security-updates
         patterns: ["*"]
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     schedule:
       interval: "weekly"
     commit-message:
@@ -20,6 +24,10 @@ updates:
       security:
         applies-to: security-updates
         patterns: ["*"]
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     schedule:
       interval: "weekly"
     commit-message:
@@ -33,6 +41,10 @@ updates:
       security:
         applies-to: security-updates
         patterns: ["*"]
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     schedule:
       interval: "weekly"
     commit-message:
@@ -46,6 +58,10 @@ updates:
       security:
         applies-to: security-updates
         patterns: ["*"]
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     schedule:
       interval: "weekly"
     commit-message:

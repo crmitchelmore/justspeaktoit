@@ -16,8 +16,9 @@ The repository has three build graphs:
 - [Tooling/Package.swift](../Tooling/Package.swift) is an independent SwiftLint dependency graph, isolated from the app
   and test resolver.
 
-The root package declares macOS 14 and iOS 17 as its package platforms. That declaration does not mean every target is
-host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `SpeakiOSLib` contains iOS-guarded code.
+The root package declares macOS 14, iOS 17 and watchOS 10 as its package platforms. That declaration does not mean every
+target is host-buildable for every platform: `SpeakApp` imports macOS frameworks, `SpeakiOSLib` contains iOS-guarded
+code, and only the dependency-free `SpeakWatchCore` is built for watchOS.
 
 ### Root Swift package
 
@@ -25,7 +26,8 @@ host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `S
 | --- | --- | --- |
 | `CTranscribe` | binary | Remote transcribe.cpp XCFramework used only by the benchmark executable. |
 | `SpeakHotKeys` | library target | Global-hot-key implementation. |
-| `SpeakCore` | library target | Shared catalogues, protocols, models, capture policies and resources. |
+| `SpeakWatchCore` | library target | No dependencies; Foundation-only watch capture/complication types and `ReleaseTrain`, linked by the watch targets. |
+| `SpeakCore` | library target | Depends on `SpeakWatchCore` (re-exported); shared catalogues, protocols, models, capture policies and resources. |
 | `SpeakSync` | library target | Depends on `SpeakCore`; CloudKit history, comparison and encrypted-key sync. |
 | `SpeakiOSLib` | library target | Depends on `SpeakCore` and `SpeakSync`; iOS views and services. |
 | `SpeakAutomationKit` | library target | Depends on `SpeakCore`; CLI parsing, socket client and MCP server. |
@@ -34,6 +36,7 @@ host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `S
 | `SpeakHotKeysDemo` | executable target | Depends on `SpeakHotKeys`; development demo. |
 | `LocalTranscriptionBenchmarkKit` | library target | Depends on `SpeakCore`; benchmark measurement and result support. |
 | `LocalTranscriptionBenchmark` | executable target | Depends on the benchmark kit, WhisperKit and `CTranscribe`; product name `local-transcription-benchmark`. |
+| `SpeakWatchCoreTests` | test target | Tests `SpeakWatchCore`. |
 | `SpeakCoreTests` | test target | Tests `SpeakCore`. |
 | `SpeakHotKeysTests` | test target | Tests `SpeakHotKeys`. |
 | `SpeakSyncTests` | test target | Tests `SpeakSync`. |
@@ -43,12 +46,13 @@ host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `S
 | `SpeakAutomationKitTests` | test target | Tests `SpeakAutomationKit` and `SpeakCore`. |
 | `LocalTranscriptionBenchmarkTests` | test target | Tests the benchmark kit and its `SpeakCore` contract. |
 
-The products are `SpeakHotKeys`, `SpeakCore`, `SpeakSync`, `SpeakiOSLib`, `SpeakAutomationKit`, `SpeakApp`, `speak` and
-`local-transcription-benchmark`. The benchmark and `CTranscribe` are part of the root graph at this inspected base.
+The products are `SpeakHotKeys`, `SpeakCore`, `SpeakWatchCore`, `SpeakSync`, `SpeakiOSLib`, `SpeakAutomationKit`,
+`SpeakApp`, `speak` and `local-transcription-benchmark`. The benchmark and `CTranscribe` are part of the root graph at this inspected base.
 
 ```mermaid
 flowchart TD
-    Core[SpeakCore] --> Sync[SpeakSync]
+    WatchCore[SpeakWatchCore] --> Core[SpeakCore]
+    Core --> Sync[SpeakSync]
     Core --> IOSLib[SpeakiOSLib]
     Sync --> IOSLib
     Core --> Automation[SpeakAutomationKit]
@@ -69,8 +73,8 @@ Each arrow points from a dependency to the target that consumes it.
 | `JustSpeakToItWidgetExtension` | iOS extension, 17.0 | Always; consumes package `SpeakCore` and `SpeakiOSLib`. |
 | `JustSpeakKeyboard` | iOS extension, 17.0 | `TUIST_IOS_KEYBOARD`; consumes package `SpeakCore`. Direct capture has the separate `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE` gate. |
 | `JustSpeakShare` | iOS extension, 17.0 | `TUIST_IOS_SHARE_EXTENSION`; consumes package `SpeakCore`. |
-| `JustSpeakWatchApp` | watchOS app, 10.0 | `TUIST_WATCH_APP`; embeds the watch widget and directly compiles selected `SpeakCore` files. |
-| `JustSpeakWatchWidgetExtension` | watchOS extension, 10.0 | Same Watch gate; directly compiles shared Watch and selected `SpeakCore` files. |
+| `JustSpeakWatchApp` | watchOS app, 10.0 | `TUIST_WATCH_APP`; embeds the watch widget and consumes package `SpeakWatchCore`. |
+| `JustSpeakWatchWidgetExtension` | watchOS extension, 10.0 | Same Watch gate; compiles shared Watch sources and consumes package `SpeakWatchCore`. |
 | `CoreJourneyFixtureApp` | macOS app | Always; fixture used by UI tests. |
 | `SpeakAppUITests` | macOS UI tests | Always; depends on `SpeakApp` and `CoreJourneyFixtureApp`. |
 | `SpeakiOSUITests` | iOS UI tests, 17.0 | Always; depends on `SpeakiOS`. |

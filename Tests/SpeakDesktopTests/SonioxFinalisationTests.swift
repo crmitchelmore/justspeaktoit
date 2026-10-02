@@ -16,7 +16,11 @@ extension SonioxPortableLifecycleTests {
         await fixture.settle { socket.binary.count == 1 }
         XCTAssertEqual(socket.binary.count, 1, "The queued audio drains before end-of-stream")
         socket.completeSend()
+        // The finish runs on its own task, so its finalize may follow the
+        // audio's completion rather than wait behind it.
+        await fixture.settle { socket.controls.last == SonioxLiveFixture.finalize }
         XCTAssertEqual(socket.controls.last, SonioxLiveFixture.finalize, "Finalize follows the drained audio")
+        XCTAssertEqual(socket.binary.count, 1, "Finalize precedes end-of-stream")
         socket.completeSend()
         await fixture.settle { socket.binary.count == 2 }
         XCTAssertEqual(socket.binary.last, Data(), "The end-of-stream frame is empty")

@@ -349,3 +349,8 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         #endif
     }
 }
+
+extension SonioxLiveClient {
+    /// A finish drains every admitted frame before `finalize` and end-of-stream.
+    public var finishFlushesBufferedAudio: Bool { true }
+}

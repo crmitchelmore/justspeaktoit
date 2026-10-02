@@ -14,6 +14,8 @@ import FoundationNetworking
 public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient, @unchecked Sendable {
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+    /// A finish drains every admitted frame before `ForceEndpoint`.
+    public let finishFlushesBufferedAudio = true
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
     public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 

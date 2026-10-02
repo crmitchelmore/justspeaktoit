@@ -60,6 +60,9 @@ extension DesktopHostController {
     /// Applies the shared macOS session rules to one recognised shortcut
     /// input: a gesture stops only the kind of session it started, and a start
     /// recognised while an earlier shortcut stop was still finishing is stale.
+    /// Waiting for the text output lets other work run, so the decision is
+    /// checked again afterwards and a shortcut whose state changed does
+    /// nothing: it never stops a recording it did not see, or starts one.
     package func shortcut(_ request: DesktopHostShortcutRequest<Platform>) async {
         guard !closed else { return }
         if case .gesture(.doubleTap) = request.input {
@@ -72,20 +75,27 @@ extension DesktopHostController {
         ) else { return }
         switch command {
         case .start(let trigger):
-            guard recording == nil, !busy, request.recognisedAt >= hotKeySession.startsAfter else { return }
+            guard canStartFromShortcut(request) else { return }
+            let textOutput = await request.textOutput.value
+            guard canStartFromShortcut(request) else { return }
             await toggle(
                 target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                targetExecutablePath: request.targetExecutablePath, textOutput: await request.textOutput.value,
-                trigger: trigger
+                targetExecutablePath: request.targetExecutablePath, textOutput: textOutput, trigger: trigger
             )
         case .stop:
-            guard recording != nil, !busy else { return }
+            guard let active = recording?.record.id, !busy else { return }
+            let textOutput = await request.textOutput.value
+            guard !closed, recording?.record.id == active, !busy else { return }
             await toggle(
                 target: request.target, modelIndex: request.modelIndex, deviceID: request.deviceID,
-                targetExecutablePath: request.targetExecutablePath, textOutput: await request.textOutput.value
+                targetExecutablePath: request.targetExecutablePath, textOutput: textOutput
             )
             hotKeySession.startsAfter = ProcessInfo.processInfo.systemUptime
         }
+    }
+
+    private func canStartFromShortcut(_ request: DesktopHostShortcutRequest<Platform>) -> Bool {
+        !closed && recording == nil && !busy && request.recognisedAt >= hotKeySession.startsAfter
     }
 }
 

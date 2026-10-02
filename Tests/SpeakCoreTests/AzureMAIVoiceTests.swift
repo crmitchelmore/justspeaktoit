@@ -197,6 +197,26 @@ final class AzureMAIVoiceTests: XCTestCase {
         XCTAssertEqual(error("").localizedDescription, "Azure Speech returned HTTP 400.")
     }
 
+    func testSynthesisError_keepsMalformedVoiceRequestsAndServiceFailuresGeneric() {
+        let malformed = [
+            "SSML voice element contains unsupported attribute 'foo'.",
+            "Unsupported voice attribute 'foo'.",
+            "Voice MAI-Voice-2.1 is not supported for this output format.",
+            "SSML parsing error for MAI-Voice-2.1: element not found."
+        ]
+        for text in malformed {
+            let error = AzureSpeechSynthesisError(statusCode: 400, body: Data(text.utf8), apiKey: "")
+            XCTAssertFalse(error.indicatesUnavailableVoice, text)
+            XCTAssertTrue(error.localizedDescription.contains(text))
+        }
+        for status in [429, 500, 503] {
+            let error = AzureSpeechSynthesisError(
+                statusCode: status, body: Data("Voice MAI-Voice-2.1 is unavailable.".utf8), apiKey: ""
+            )
+            XCTAssertFalse(error.indicatesUnavailableVoice, "HTTP \(status) is not an access refusal")
+        }
+    }
+
     func testSynthesize_treatsAnEmptySuccessAsInvalid() async {
         StubURLProtocol.handler = { _ in .status(200, Data()) }
         let api = AzureSpeechVoiceAPI(session: StubURLProtocol.makeSession())

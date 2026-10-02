@@ -25,8 +25,8 @@ public struct AzureSpeechVoice: Decodable, Sendable, Equatable {
 /// A synthesis response that was not audio, with Azure's own diagnostic.
 ///
 /// `detail` is Azure's response text with whitespace collapsed, capped at
-/// `detailLimit` characters and with the subscription key removed should the
-/// service ever echo it, so it is safe to show and to log.
+/// `detailLimit` characters plus an ellipsis, and with an exact subscription-key
+/// echo removed. It can still contain user content and is not safe for logging.
 public struct AzureSpeechSynthesisError: LocalizedError, Sendable, Equatable {
     public static let detailLimit = 300
     public let statusCode: Int
@@ -43,13 +43,21 @@ public struct AzureSpeechSynthesisError: LocalizedError, Sendable, Equatable {
     /// Whether Azure's text says the voice or model itself is unavailable, as
     /// opposed to a malformed request. Only that justifies access guidance.
     public var indicatesUnavailableVoice: Bool {
+        guard statusCode == 400 || statusCode == 404 else { return false }
         let text = detail.lowercased()
-        let namesVoice = ["voice", "model", "mai-"].contains { text.contains($0) }
-        let unavailable = [
-            "not supported", "unsupported", "not available", "unavailable", "not found",
-            "does not exist", "not allowed", "not enabled"
-        ].contains { text.contains($0) }
-        return namesVoice && unavailable
+        // Recognise a direct statement about the model, not unrelated words in
+        // an SSML diagnostic such as "voice element has an unsupported attribute".
+        // Ambiguous provider wording keeps the ordinary synthesis diagnostic.
+        let name = #"(?:[a-z]{2,3}(?:-[a-z0-9]+)+:)?mai-voice-[a-z0-9.-]+"#
+        let subject = #"(?:the )?(?:voice|model)(?: ["']?\#(name)["']?)?"#
+        let unavailable = "(?:not supported|unsupported|not available|unavailable|not found|"
+            + "does not exist|not allowed|not enabled)"
+        let scope = #"(?:[.!?]|$| (?:in|for|on) (?:this |the |your )?(?:region|resource|subscription|account)\b)"#
+        let patterns = [
+            #"^\#(subject) (?:is )?\#(unavailable)\#(scope)"#,
+            #"^unsupported (?:voice|model)(?: ["']?\#(name)["']?)?\#(scope)"#
+        ]
+        return patterns.contains { text.range(of: $0, options: .regularExpression) != nil }
     }
 
     public var errorDescription: String? {

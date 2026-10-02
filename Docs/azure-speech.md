@@ -68,7 +68,8 @@ voice that the resource also lists keeps the catalogue's traits (accent,
 multilingual, low latency).
 
 Failed synthesis keeps Azure's own response text (whitespace collapsed, at most
-300 characters, with the key removed if it were ever echoed). Only when that
+300 characters plus an ellipsis, with an exact key echo removed). This diagnostic
+can still contain user content and must not be logged. Only when that
 text says the voice or model is unavailable does an MAI request report that the
 resource cannot use MAI voices; a malformed request is reported as such. Region
 coverage is still settling: Microsoft's MAI voice page lists 14 serving regions,

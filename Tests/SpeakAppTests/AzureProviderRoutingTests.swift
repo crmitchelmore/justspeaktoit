@@ -98,6 +98,17 @@ final class AzureProviderRoutingTests: XCTestCase {
         else { return XCTFail("A malformed MAI request is a request failure, not an access problem") }
         XCTAssertEqual(message, "Azure Speech returned HTTP 400. SSML parsing error: unexpected element")
 
+        let malformedVoice = AzureSpeechSynthesisError(
+            statusCode: 400, body: Data("SSML voice element contains unsupported attribute 'foo'.".utf8), apiKey: ""
+        )
+        guard case .synthesisFailure(let voiceMessage) = AzureSpeechClient.ttsError(
+            for: malformedVoice, voice: maiVoice
+        )
+        else { return XCTFail("An unsupported SSML attribute must not report missing MAI access") }
+        XCTAssertEqual(
+            voiceMessage, "Azure Speech returned HTTP 400. SSML voice element contains unsupported attribute 'foo'."
+        )
+
         // A neural voice never gets MAI guidance, whatever Azure says.
         guard case .synthesisFailure = AzureSpeechClient.ttsError(
             for: unavailable, voice: "azure/en-GB-SoniaNeural"

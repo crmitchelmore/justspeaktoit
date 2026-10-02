@@ -109,10 +109,14 @@ final class OpenAIBatchClientTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
         let staging = SharedMultipartUploadStaging(directory: stagingDirectory, securityPolicy: .init(
-            prepareDirectory: { url, manager in try manager.createDirectory(at: url, withIntermediateDirectories: true) },
+            prepareDirectory: { url, manager in
+                try manager.createDirectory(at: url, withIntermediateDirectories: true)
+            },
             createFile: { url, manager in manager.createFile(atPath: url.path, contents: nil) }
         ))
-        return OpenAIBatchClient(session: URLSession(configuration: configuration), staging: staging, durationResolver: { _ in duration })
+        return OpenAIBatchClient(
+            session: URLSession(configuration: configuration), staging: staging, durationResolver: { _ in duration }
+        )
     }
 
     private func audioFile() throws -> URL {

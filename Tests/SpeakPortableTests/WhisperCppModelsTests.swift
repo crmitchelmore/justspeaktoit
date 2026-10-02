@@ -53,15 +53,24 @@ final class WhisperCppModelsTests: XCTestCase {
     }
 
     func testCatalogueEntriesGainTheWhisperCppBackendOnlyThroughAPin() {
+        let mac = LocalModelHostSupport.macOS(channel: .appStore)
+        let directAppleSilicon = LocalModelHostSupport.macOS(channel: .direct, isAppleSilicon: true)
         for entry in ModelCatalog.localTranscription {
             let pinned = WhisperCppModels.model(forCatalogueID: entry.id) != nil
-            XCTAssertEqual(entry.backend, .whisperKitCoreML, "The Apple primary backend is unchanged")
             XCTAssertEqual(entry.backends.contains(.whisperCppGGML), pinned, entry.id)
-        }
-        // macOS keeps running Core ML for the same identifiers.
-        let mac = LocalModelHostSupport.macOS(channel: .appStore)
-        for entry in ModelCatalog.localTranscription {
-            XCTAssertEqual(mac.preferredBackend(for: entry), .whisperKitCoreML)
+            switch entry.engine {
+            case .whisperKit:
+                XCTAssertEqual(entry.backend, .whisperKitCoreML, "The Whisper primary backend is unchanged")
+                XCTAssertEqual(mac.preferredBackend(for: entry), .whisperKitCoreML)
+            case .phonon:
+                XCTAssertFalse(pinned, "Phonon cannot gain a whisper.cpp route")
+                XCTAssertEqual(entry.backend, .phononFermion)
+                XCTAssertEqual(entry.backends, [.phononFermion])
+                XCTAssertEqual(directAppleSilicon.preferredBackend(for: entry), .phononFermion)
+                XCTAssertNil(mac.preferredBackend(for: entry), "Fermion is unavailable in App Store builds")
+            default:
+                XCTFail("Unqualified canonical engine: \(entry.engine)")
+            }
         }
     }
 

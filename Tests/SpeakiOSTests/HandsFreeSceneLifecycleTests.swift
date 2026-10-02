@@ -274,9 +274,12 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
         XCTAssertNil(harness.coordinator.failureMessage)
         await harness.coordinator.disarm()
     }
+}
 
-    private func waitForState(_ state: HandsFreeDictationMachine.State,
-                              _ coordinator: IOSHandsFreeDictationCoordinator) async {
+private extension HandsFreeSceneLifecycleTests {
+    func waitForState(
+        _ state: HandsFreeDictationMachine.State, _ coordinator: IOSHandsFreeDictationCoordinator
+    ) async {
         let reached = expectation(description: "state \(state)")
         let observer = coordinator.$state.first { $0 == state }.sink { _ in reached.fulfill() }
         await fulfillment(of: [reached], timeout: 2)

@@ -135,7 +135,8 @@ final class SyncRecordCodecTests: XCTestCase {
         guard case .string(let payload) = fields[index].value else { return XCTFail("Missing payload") }
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any])
         object["futureRoundData"] = ["unknown"]
-        fields[index].value = .string(String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+        let payloadData = try JSONSerialization.data(withJSONObject: object)
+        fields[index].value = .string(try XCTUnwrap(String(bytes: payloadData, encoding: .utf8)))
         let record = try SyncWireFixture.record(
             name: SyncSchema.ComparisonRound.recordName(for: tombstone.id),
             type: SyncSchema.ComparisonRound.recordType, assignments: fields

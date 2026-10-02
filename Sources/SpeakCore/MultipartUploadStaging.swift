@@ -6,7 +6,8 @@ import Foundation
 public final class MultipartUploadStaging: @unchecked Sendable {
     public static let shared = MultipartUploadStaging()
     public static let defaultStalenessThreshold = SharedMultipartUploadStaging.defaultStalenessThreshold
-    package let sharedStore: SharedMultipartUploadStaging
+    /// The same owned staging store is shared with native app targets outside SwiftPM.
+    public let sharedStore: SharedMultipartUploadStaging
 
     public init(
         directory: URL = FileManager.default.temporaryDirectory
@@ -34,7 +35,7 @@ public final class MultipartUploadStaging: @unchecked Sendable {
         let safe = providerID.lowercased().utf8.map { byte -> UInt8 in
             (97...122).contains(byte) || (48...57).contains(byte) || byte == 45 || byte == 95 ? byte : 95
         }
-        return safe.isEmpty ? "provider" : String(decoding: safe.prefix(64), as: UTF8.self)
+        return safe.isEmpty ? "provider" : (String(bytes: safe.prefix(64), encoding: .utf8) ?? "provider")
     }
 
     private static func report(_ event: SharedMultipartUploadStaging.Event) {
@@ -44,7 +45,9 @@ public final class MultipartUploadStaging: @unchecked Sendable {
         case .purged(let filename):
             logger.info("Purged stale multipart upload body \(filename, privacy: .public)")
         case .removalFailed(let filename, let message):
-            logger.error("Failed to remove multipart upload body \(filename, privacy: .public): \(message, privacy: .public)")
+            logger.error(
+                "Failed to remove multipart upload body \(filename, privacy: .public): \(message, privacy: .public)"
+            )
         case .directoryPreparationFailed(let message):
             logger.error("Failed to secure multipart upload directory: \(message, privacy: .public)")
         }

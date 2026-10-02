@@ -45,10 +45,12 @@ final class SyncSwitchCoordinatorTests: XCTestCase {
         let host = HistoryHost(transport: transport, tokens: OrderedCursorStore(token: nil))
         await host.setSyncEnabled(false)
         await host.sync(store: store)
-        do { try await host.upload(entry, store: store); XCTFail("Expected disabled upload") }
-        catch is HistorySyncDisabledError {} catch { XCTFail("Unexpected \(error)") }
-        do { try await host.delete(entry.id); XCTFail("Expected disabled delete") }
-        catch is HistorySyncDisabledError {} catch { XCTFail("Unexpected \(error)") }
+        do {
+            try await host.upload(entry, store: store); XCTFail("Expected disabled upload")
+        } catch is HistorySyncDisabledError {} catch { XCTFail("Unexpected \(error)") }
+        do {
+            try await host.delete(entry.id); XCTFail("Expected disabled delete")
+        } catch is HistorySyncDisabledError {} catch { XCTFail("Unexpected \(error)") }
         let fetched = await transport.requestedTokens
         let uploaded = await transport.uploadedBatches
         let deleted = await transport.deleted

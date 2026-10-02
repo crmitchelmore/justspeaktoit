@@ -36,7 +36,7 @@ final class DesktopBoundedBatchTests: XCTestCase {
                 fixture.staging.purgeStaleUploads(now: .distantFuture)
                 let body = try Data(contentsOf: bodyURL)
                 XCTAssertNotNil(body.range(of: audio))
-                let text = String(decoding: body, as: UTF8.self)
+                let text = try XCTUnwrap(String(bytes: body, encoding: .utf8))
                 XCTAssertTrue(text.contains("name=\"\(modelField)\"\r\n\r\n\(model.split(separator: "/").last!)\r\n"))
                 XCTAssertTrue(text.contains("name=\"\(languageField)\"\r\n\r\nen\r\n"))
                 XCTAssertTrue(text.contains("Content-Type: audio/wav"))

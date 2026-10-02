@@ -8,20 +8,24 @@ import XCTest
 @testable import SpeakDesktop
 
 final class DesktopAdditionalProvidersTests: XCTestCase {
+    private let multipart = DesktopMultipartFixture()
+
     override func tearDown() {
         StubURLProtocol.reset()
+        multipart.remove()
         super.tearDown()
     }
 
     func testGroqModelsUseSharedCompatibleTransportAndKeepProviderCredentials() async throws {
         let audio = try fixture()
         defer { try? FileManager.default.removeItem(at: audio) }
+        let multipart = self.multipart
         for model in GroqBatchClient().supportedModels() {
             StubURLProtocol.reset()
             StubURLProtocol.handler = { request in
                 XCTAssertEqual(request.url?.absoluteString, "https://api.groq.com/openai/v1/audio/transcriptions")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer desktop-test")
-                let body = StubURLProtocol.body(of: request)
+                let body = try multipart.body(for: request)
                 let apiModel = model.id.split(separator: "/").last!
                 XCTAssertNotNil(body.range(of: Data("name=\"model\"\r\n\r\n\(apiModel)\r\n".utf8)))
                 XCTAssertNotNil(body.range(of: Data("name=\"response_format\"\r\n\r\nverbose_json\r\n".utf8)))
@@ -34,6 +38,7 @@ final class DesktopAdditionalProvidersTests: XCTestCase {
             XCTAssertEqual(result.duration, 2.5)
             XCTAssertEqual(result.modelIdentifier, model.id)
             XCTAssertEqual(DesktopTranscription.provider(for: model.id)?.apiKeyIdentifier, "groq.apiKey")
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: multipart.directory.path).isEmpty)
         }
     }
 
@@ -153,7 +158,7 @@ private extension DesktopAdditionalProvidersTests {
     func transcribe(_ audio: URL, model: String) async throws -> TranscriptionResult {
         try await DesktopTranscription.transcribe(
             audioURL: audio, model: model, apiKey: "  desktop-test  ", duration: 7,
-            language: "en_GB", session: StubURLProtocol.makeSession()
+            language: "en_GB", staging: multipart.staging, session: StubURLProtocol.makeSession()
         )
     }
 

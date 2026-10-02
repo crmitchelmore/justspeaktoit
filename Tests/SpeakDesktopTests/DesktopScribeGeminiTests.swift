@@ -8,21 +8,25 @@ import XCTest
 @testable import SpeakDesktop
 
 final class DesktopScribeGeminiTests: XCTestCase {
+    private let multipart = DesktopMultipartFixture()
+
     override func tearDown() {
         StubURLProtocol.reset()
+        multipart.remove()
         super.tearDown()
     }
 
     func testElevenLabsReusesScribeModelKeyAndWordTimingContract() async throws {
         let audio = try fixture()
         defer { try? FileManager.default.removeItem(at: audio) }
+        let multipart = self.multipart
         for model in ElevenLabsBatchClient().supportedModels() {
             StubURLProtocol.reset()
             StubURLProtocol.handler = { request in
                 XCTAssertEqual(request.url?.absoluteString, "https://api.elevenlabs.io/v1/speech-to-text")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "xi-api-key"), "desktop-test")
                 XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
-                let body = StubURLProtocol.body(of: request)
+                let body = try multipart.body(for: request)
                 let apiModel = model.id.split(separator: "/").last!
                 for field in [
                     "name=\"model_id\"\r\n\r\n\(apiModel)\r\n",
@@ -45,6 +49,7 @@ final class DesktopScribeGeminiTests: XCTestCase {
             XCTAssertEqual(result.segments.map(\.text), ["Hello", "Scribe"])
             XCTAssertEqual(result.segments.last?.endTime, 0.9)
             XCTAssertEqual(DesktopTranscription.provider(for: model.id)?.apiKeyIdentifier, "elevenlabs.apiKey")
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: multipart.directory.path).isEmpty)
         }
     }
 
@@ -179,7 +184,7 @@ private extension DesktopScribeGeminiTests {
     func transcribe(_ audio: URL, model: String) async throws -> TranscriptionResult {
         try await DesktopTranscription.transcribe(
             audioURL: audio, model: model, apiKey: "desktop-test", duration: 7,
-            language: "en_GB", session: StubURLProtocol.makeSession()
+            language: "en_GB", staging: multipart.staging, session: StubURLProtocol.makeSession()
         )
     }
 

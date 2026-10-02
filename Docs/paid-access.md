@@ -98,7 +98,7 @@ The dashed path matters: BYO and local users never contact our servers. Only pai
 | Mac App Store | `appStore` | StoreKit 2 auto-renewable subscription | `/v1/billing/storekit/sync` with a verified signed transaction |
 | iOS App Store / TestFlight | `appStore` | StoreKit 2 auto-renewable subscription | `/v1/billing/storekit/sync` with a verified signed transaction |
 
-The client hides the wrong control for its channel, and the Worker rejects it anyway. Client-side selection is a UX affordance, not the control.
+The client selects controls for its build channel. The Worker requires a caller-declared `direct` channel for Stripe endpoints; that field does not independently attest the installed build. Build/channel identity qualification remains open.
 
 **iOS does not sell paid access yet.** `PaidAccessStore` compiles and can hold an entitlement bought on a Mac, but nothing on iOS routes work through it — `iOSBatchTranscriber`, `VoiceSummariser` and `PostProcessingView` all go straight to the user's own key or an on-device model. The purchase UI is therefore switched off behind `PaidAccessFeature.isAvailableOnIOS` (`Sources/SpeakiOS/Services/PaidAccessStore.swift`) so nobody is charged for routing that does not happen. Wire those three call sites through a proxy client, then flip that constant.
 

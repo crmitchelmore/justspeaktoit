@@ -34,10 +34,13 @@ extension PaidAccessStore {
             return
         }
         let term = term ?? self.selectedTerm
+        let operation = UUID()
+        self.busyOperation = operation
         self.isBusy = true
         self.lastError = nil
-        defer { self.isBusy = false }
+        defer { if operation == self.busyOperation { self.isBusy = false } }
 
+        let generation = self.sessions.generation
         guard let session = await self.currentSession() else {
             self.lastError = PaidAccessError.notSignedIn.errorDescription
             return
@@ -45,6 +48,7 @@ extension PaidAccessStore {
         if self.products.isEmpty {
             await self.loadProducts()
         }
+        guard generation == self.sessions.generation else { return }
         // Matched by product id, never by position.
         guard let product = self.product(for: term) else {
             self.lastError = "The \(term.displayName.lowercased()) subscription is not available in this build yet."
@@ -64,22 +68,27 @@ extension PaidAccessStore {
 
         do {
             let result = try await product.purchase(options: [.appAccountToken(accountToken)])
-            await self.handlePurchaseResult(result, session: session)
+            guard generation == self.sessions.generation else { return }
+            await self.handlePurchaseResult(result, session: session, generation: generation)
         } catch {
+            guard generation == self.sessions.generation else { return }
             self.lastError = "The purchase could not be completed."
         }
     }
 
     private func handlePurchaseResult(
         _ result: Product.PurchaseResult,
-        session: PaidAccessSession
+        session: PaidAccessSession,
+        generation: UUID
     ) async {
+        guard generation == self.sessions.generation else { return }
         switch result {
         case .success(let verification):
-            if await self.syncIfSubscription(verification, session: session),
-               case .verified(let transaction) = verification {
+            if await self.syncIfSubscription(verification, session: session, generation: generation),
+                case .verified(let transaction) = verification {
                 await transaction.finish()
             }
+            guard generation == self.sessions.generation else { return }
             await self.refreshEntitlement()
         case .pending:
             self.lastError = """
@@ -94,16 +103,21 @@ extension PaidAccessStore {
     }
 
     public func restorePurchases() async {
+        let operation = UUID()
+        self.busyOperation = operation
         self.isBusy = true
-        defer { self.isBusy = false }
+        defer { if operation == self.busyOperation { self.isBusy = false } }
 
+        let generation = self.sessions.generation
         guard let session = await self.currentSession() else {
             self.lastError = PaidAccessError.notSignedIn.errorDescription
             return
         }
         for await result in Transaction.currentEntitlements {
-            await self.syncIfSubscription(result, session: session)
+            guard generation == self.sessions.generation else { return }
+            await self.syncIfSubscription(result, session: session, generation: generation)
         }
+        guard generation == self.sessions.generation else { return }
         await self.refreshEntitlement()
     }
 
@@ -111,7 +125,8 @@ extension PaidAccessStore {
     /// the user to an external payment page.
     public func manageSubscription() {
         guard self.entitlement.provider == .storeKit else {
-            self.lastError = self.entitlement.provider == .stripe
+            self.lastError =
+                self.entitlement.provider == .stripe
                 ? "This subscription was purchased on the website. Manage it in your Just Speak to It web account."
                 : "This access was granted manually and has no subscription to manage."
             return
@@ -121,26 +136,35 @@ extension PaidAccessStore {
     }
 
     func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
+        let generation = self.sessions.generation
         guard let session = await self.currentSession() else { return }
-        if await self.syncIfSubscription(result, session: session),
-           case .verified(let transaction) = result {
+        if await self.syncIfSubscription(result, session: session, generation: generation),
+            case .verified(let transaction) = result {
             await transaction.finish()
         }
+        guard generation == self.sessions.generation else { return }
         await self.refreshEntitlement()
     }
 
     func syncIfSubscription(
         _ result: VerificationResult<Transaction>,
-        session: PaidAccessSession
+        session: PaidAccessSession,
+        generation: UUID
     ) async -> Bool {
+        guard generation == self.sessions.generation else { return false }
         do {
-            guard let entitlement = try await PaidStoreKitSync.entitlement(
-              for: result, session: session, client: self.client
-            ) else { return false }
+            guard
+                let entitlement = try await PaidStoreKitSync.entitlement(
+                    for: result, session: session, client: self.client
+                )
+            else { return false }
+            guard generation == self.sessions.generation else { return false }
             self.entitlement = entitlement
             return true
         } catch {
-            self.lastError = (error as? PaidAccessError)?.errorDescription
+            guard generation == self.sessions.generation else { return false }
+            self.lastError =
+                (error as? PaidAccessError)?.errorDescription
                 ?? "Could not confirm the subscription."
             return false
         }

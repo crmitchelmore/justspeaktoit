@@ -71,9 +71,9 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     @Published public var selectedTerm: PaidSubscriptionTerm = .monthly
 
     let client: any PaidAccessClienting
-    private let sessionStore: any PaidAccessSessionStoring
+    let sessions: PaidAccessSessionLifecycle
+    var busyOperation = UUID()
     private var transactionListener: Task<Void, Never>?
-    private var refreshTask: Task<PaidAccessSession?, Never>?
     private var signInContinuation: CheckedContinuation<ASAuthorization, Error>?
 
     override private convenience init() {
@@ -87,7 +87,7 @@ public final class PaidAccessStore: NSObject, ObservableObject {
 
     init(client: any PaidAccessClienting, sessionStore: any PaidAccessSessionStoring) {
         self.client = client
-        self.sessionStore = sessionStore
+        self.sessions = PaidAccessSessionLifecycle(client: client, store: sessionStore)
         self.simpleModelChoices = UserDefaults.standard.bool(forKey: "simpleModelChoices")
         self.paidRoutingEnabled = UserDefaults.standard.bool(forKey: "paidAccessRoutingEnabled")
         super.init()
@@ -142,55 +142,38 @@ public final class PaidAccessStore: NSObject, ObservableObject {
     /// Internal rather than private: `PaidAccessStore+Purchase.swift` needs it,
     /// and Swift scopes `private` to the file.
     func currentSession() async -> PaidAccessSession? {
-        guard let stored = await self.sessionStore.loadSession() else {
-            self.isSignedIn = false
-            return nil
-        }
-        self.isSignedIn = true
-
-        guard stored.needsRefresh() else { return stored }
-        guard stored.isRefreshable() else {
-            await self.clearSession()
-            return nil
-        }
-
-        // `@MainActor` isolation does not survive the await below, so without a
-        // single-flight task two concurrent callers would each present the same
-        // refresh token and the server's reuse detection would sign the user out.
-        if let inFlight = self.refreshTask {
-            return await inFlight.value
-        }
-        let task = Task { [client, sessionStore] () -> PaidAccessSession? in
-            do {
-                let refreshed = try await client.refresh(session: stored)
-                try await sessionStore.saveSession(refreshed)
-                return refreshed
-            } catch PaidAccessError.notSignedIn {
-                return nil
-            } catch {
-                return stored
+        let generation = self.sessions.generation
+        do {
+            let session = try await self.sessions.currentSession()
+            guard generation == self.sessions.generation else { return nil }
+            self.isSignedIn = session != nil
+            if session == nil {
+                // An empty store is not another logout: sign-in may be awaiting Apple.
+                self.entitlement = .unentitled
+                self.policy = .unknown
             }
-        }
-        self.refreshTask = task
-        let result = await task.value
-        self.refreshTask = nil
-        if result == nil {
+            return session
+        } catch {
+            guard generation == self.sessions.generation else { return nil }
             await self.clearSession()
+            return nil
         }
-        return result
     }
 
     private func clearSession() async {
-        await self.sessionStore.clearSession()
+        let clearing = self.sessions.clear()
         self.isSignedIn = false
         self.entitlement = .unentitled
         self.policy = .unknown
+        _ = await clearing.value
     }
 
     // MARK: - Entitlement
 
     public func refreshEntitlement() async {
+        let generation = self.sessions.generation
         guard let session = await self.currentSession() else {
+            guard generation == self.sessions.generation else { return }
             self.entitlement = .unentitled
             self.policy = .unknown
             return
@@ -201,12 +184,15 @@ public final class PaidAccessStore: NSObject, ObservableObject {
             // policy call could fail and leave an active entitlement with an
             // empty policy, which routes nothing.
             let state = try await self.client.entitlement(session: session)
+            guard generation == self.sessions.generation else { return }
             self.entitlement = state.entitlement
             self.policy = state.policy
             self.lastError = nil
         } catch PaidAccessError.notSignedIn {
+            guard generation == self.sessions.generation else { return }
             await self.clearSession()
         } catch {
+            guard generation == self.sessions.generation else { return }
             self.lastError = (error as? PaidAccessError)?.errorDescription
         }
     }
@@ -217,9 +203,19 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         // A second sign-in would overwrite `signInContinuation`, leaking the
         // first continuation and leaving `isBusy` stuck true for the session.
         guard self.signInContinuation == nil, !self.isBusy else { return }
+        let clearing = self.sessions.clear()
+        let generation = self.sessions.generation
+        self.isSignedIn = false
+        self.entitlement = .unentitled
+        self.policy = .unknown
+        let operation = UUID()
+        self.busyOperation = operation
         self.isBusy = true
         self.lastError = nil
-        defer { self.isBusy = false }
+        defer { if operation == self.busyOperation { self.isBusy = false } }
+
+        _ = await clearing.value
+        guard generation == self.sessions.generation else { return }
 
         let rawNonce = Self.makeRawNonce()
         let request = ASAuthorizationAppleIDProvider().createRequest()
@@ -228,6 +224,7 @@ public final class PaidAccessStore: NSObject, ObservableObject {
 
         do {
             let authorization = try await self.performAuthorization(for: request)
+            guard generation == self.sessions.generation else { return }
             guard
                 let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
                 let tokenData = credential.identityToken,
@@ -242,25 +239,36 @@ public final class PaidAccessStore: NSObject, ObservableObject {
                 rawNonce: rawNonce,
                 deviceLabel: UIDevice.current.name
             )
-            try await self.sessionStore.saveSession(session)
+            guard let signedInGeneration = try await self.sessions.acceptSignIn(session, generation: generation),
+                signedInGeneration == self.sessions.generation
+            else { return }
             self.isSignedIn = true
             await self.refreshEntitlement()
         } catch let error as ASAuthorizationError where error.code == .canceled {
             // The user dismissed the sheet.
         } catch {
-            self.lastError = (error as? PaidAccessError)?.errorDescription
+            guard generation == self.sessions.generation else { return }
+            self.lastError =
+                (error as? PaidAccessError)?.errorDescription
                 ?? "Could not sign in with Apple."
         }
     }
 
     public func signOut() async {
+        let clearing = self.sessions.clear()
+        self.isSignedIn = false
+        self.entitlement = .unentitled
+        self.policy = .unknown
+        let operation = UUID()
+        self.busyOperation = operation
         self.isBusy = true
-        defer { self.isBusy = false }
+        defer { if operation == self.busyOperation { self.isBusy = false } }
 
-        if let session = await self.sessionStore.loadSession() {
+        // Clear local credentials first. A slow revocation must never clear a
+        // replacement account or restore state from an earlier refresh.
+        if let session = await clearing.value {
             await self.client.signOut(session: session)
         }
-        await self.clearSession()
     }
 
     private func performAuthorization(

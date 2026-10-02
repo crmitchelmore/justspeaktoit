@@ -161,9 +161,9 @@ function checkoutPriceFrom(body: CheckoutBody, allowed: readonly string[]): stri
 }
 
 /**
- * App Store builds must transact through StoreKit. The client also enforces
- * this, but the server refuses regardless of what the client claims, so a
- * modified build cannot route App Store users to Stripe.
+ * Stripe requires a caller-declared `direct` channel. This validates the
+ * request field, not the identity of the installed build. Independent
+ * build/channel attestation remains a qualification gap.
  */
 function requireDirectChannel(body: CheckoutBody): void {
   if (body.channel !== 'direct') {

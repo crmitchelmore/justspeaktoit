@@ -560,14 +560,15 @@ enum WireUp {
     // Without a verified entitlement every request goes straight through to
     // `openRouter`, so subscribers and non-subscribers share one code path and
     // an outage degrades to the user's own keys instead of breaking dictation.
+    let paidClient = PaidAccessHTTPClient(baseURL: PaidAccessFeature.baseURL)
     let paidAccess = PaidAccessManager(
-      client: PaidAccessHTTPClient(),
+      client: paidClient,
       sessionStore: AppSecureStorageSessionStore(storage: secureStorage),
       settings: settings
     )
     let routedClient = PaidAccessProxyClient(
       fallback: openRouter,
-      paidClient: PaidAccessHTTPClient(),
+      paidClient: paidClient,
       sessionProvider: paidAccess.sessionProvider(),
       routerProvider: paidAccess.routerProvider()
     )

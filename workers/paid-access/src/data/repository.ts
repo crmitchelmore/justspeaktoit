@@ -30,10 +30,10 @@ export interface RequestClaim {
 }
 
 /**
- * How long an idempotency key is remembered.
+ * How long an operational request claim is remembered.
  *
- * Long enough to cover any retry a client could plausibly make, short enough
- * that a content-derived key does not refuse an identical dictation for ever.
+ * Completed charges remain deduplicated by the permanent usage ledger after
+ * claims expire. A deliberate new attempt already uses a fresh client key.
  */
 export const REQUEST_CLAIM_TTL_SECONDS = 24 * 60 * 60;
 
@@ -553,9 +553,11 @@ export class Repository {
     correlationId: string;
     nowSeconds: number;
   }): Promise<RequestClaim | null> {
-    // Clear an expired claim first so the insert below can win it. Keys are
-    // derived from request content, so a claim that outlived its window would
-    // otherwise refuse an identical dictation for ever.
+    // Expiry releases operational claims, not the permanent metering identity.
+    // Reconcile with the existing ledger before reserving quota or dispatching
+    // another provider call. No transcript or response content is retained.
+    const metered = await this.meteredRequest(input.userId, input.idempotencyKey);
+    if (metered !== null) return metered;
     await this.db
       .prepare(
         `DELETE FROM request_claims
@@ -569,7 +571,9 @@ export class Repository {
         `INSERT INTO request_claims
            (id, user_id, idempotency_key, operation, status, correlation_id,
             created_at, expires_at)
-         VALUES (?1, ?2, ?3, ?4, 'in_flight', ?5, ?6, ?7)
+         SELECT ?1, ?2, ?3, ?4, 'in_flight', ?5, ?6, ?7
+          WHERE NOT EXISTS (SELECT 1 FROM usage_ledger
+                            WHERE user_id = ?2 AND idempotency_key = ?3)
          ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
       )
       .bind(
@@ -584,6 +588,10 @@ export class Repository {
       .run();
 
     if ((result.meta.changes ?? 0) > 0) return null;
+
+    // A previous owner may have settled between the first read and insert.
+    const settled = await this.meteredRequest(input.userId, input.idempotencyKey);
+    if (settled !== null) return settled;
 
     const row = await this.db
       .prepare(
@@ -602,6 +610,13 @@ export class Repository {
       operation: row.operation as PaidOperationName,
       status: row.status as RequestClaimStatus,
     };
+  }
+
+  private async meteredRequest(userId: string, idempotencyKey: string): Promise<RequestClaim | null> {
+    const row = await this.db.prepare(
+      'SELECT operation FROM usage_ledger WHERE user_id = ?1 AND idempotency_key = ?2',
+    ).bind(userId, idempotencyKey).first<{ operation: PaidOperationName }>();
+    return row === null ? null : { operation: row.operation, status: 'completed' };
   }
 
   /**
@@ -630,8 +645,8 @@ export class Repository {
   /**
    * Drops a claim whose request failed, so the client's retry is served rather
    * than answered as a duplicate for ever. Only an `in_flight` claim is removed;
-   * a completed one stays put until it expires, which is what stops a retry of
-   * work we already did and charged for buying a second upstream call.
+   * a completed one stays put until expiry. The permanent usage ledger continues
+   * to decline metered retries after the operational claim is pruned.
    */
   async releaseRequestClaim(input: { userId: string; idempotencyKey: string }): Promise<void> {
     await this.db

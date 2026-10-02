@@ -228,14 +228,34 @@ function wavDurationSeconds(audio: Uint8Array): number {
     throw new ApiError('bad_request', 'Audio body is not a WAV payload');
   }
 
-  let byteRate: number | null = null;
+  let framesPerSecond: number | null = null;
+  let bytesPerFrame: number | null = null;
   let dataBytes: number | null = null;
   let offset = 12;
   while (offset + 8 <= audio.byteLength) {
     const chunkId = tag(offset);
     const chunkSize = view.getUint32(offset + 4, true);
-    if (chunkId === 'fmt ' && offset + 24 <= audio.byteLength) {
-      byteRate = view.getUint32(offset + 16, true);
+    if (chunkId === 'fmt ') {
+      if (framesPerSecond !== null || chunkSize < 16 || offset + 8 + chunkSize > audio.byteLength) {
+        throw new ApiError('bad_request', 'Audio body has an invalid WAV format chunk');
+      }
+      const format = view.getUint16(offset + 8, true);
+      const channels = view.getUint16(offset + 10, true);
+      const sampleRate = view.getUint32(offset + 12, true);
+      const byteRate = view.getUint32(offset + 16, true);
+      const blockAlign = view.getUint16(offset + 20, true);
+      const bitsPerSample = view.getUint16(offset + 22, true);
+      const expectedBlockAlign = channels * (bitsPerSample / 8);
+      // byteRate and blockAlign are redundant client-controlled fields, not
+      // independent measurements. Accept integer PCM only and require every
+      // field to agree before using the actual frame count for metering.
+      if (format !== 1 || channels === 0 || sampleRate === 0
+        || ![8, 16, 24, 32].includes(bitsPerSample)
+        || blockAlign !== expectedBlockAlign || byteRate !== sampleRate * expectedBlockAlign) {
+        throw new ApiError('bad_request', 'Audio body has inconsistent PCM geometry');
+      }
+      framesPerSecond = sampleRate;
+      bytesPerFrame = blockAlign;
     } else if (chunkId === 'data') {
       // A streamed WAV can declare a zero or overlong size; trust what arrived.
       const declared = chunkSize === 0 ? Number.MAX_SAFE_INTEGER : chunkSize;
@@ -246,10 +266,11 @@ function wavDurationSeconds(audio: Uint8Array): number {
     offset += 8 + chunkSize + (chunkSize % 2);
   }
 
-  if (byteRate === null || byteRate <= 0 || dataBytes === null || dataBytes <= 0) {
+  if (framesPerSecond === null || bytesPerFrame === null
+    || dataBytes === null || dataBytes <= 0 || dataBytes % bytesPerFrame !== 0) {
     throw new ApiError('bad_request', 'Audio body is not a readable WAV payload');
   }
-  return dataBytes / byteRate;
+  return (dataBytes / bytesPerFrame) / framesPerSecond;
 }
 
 // ---------------------------------------------------------------------------

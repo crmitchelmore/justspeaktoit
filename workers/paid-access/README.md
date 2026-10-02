@@ -178,7 +178,7 @@ Rules:
 - **`console.log` bypasses the redaction.** Use the request logger. Never log a request or response body.
 - **Reservations leak if you return early.** Every failure path after `reserve` must release. Follow the shape in `src/routes/paid.ts`.
 - **Apple JWS payloads are never merely decoded.** `apple-jws.ts` verifies the whole `x5c` chain against the pinned root. Do not add a "just read the claims" shortcut.
-- **StoreKit and Stripe are not interchangeable.** `channel:"direct"` is rejected for App Store builds server-side, not just hidden in the UI.
+- **StoreKit and Stripe use distinct paths.** Stripe endpoints require the caller-declared `channel:"direct"`; this field does not independently attest the installed build. App Store UI uses StoreKit. Build/channel identity qualification remains open.
 - **Quota reservations are upper bounds.** Finalise with the measured amount or the user is over-billed against their monthly allowance.
 - **The kill switch is a var, not a secret.** `PAID_ROUTING_DISABLED = "true"` plus a redeploy fails paid routing closed with 503 while entitlements stay intact.
 

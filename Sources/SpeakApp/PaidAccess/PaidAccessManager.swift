@@ -18,6 +18,18 @@ enum PaidAccessFeature {
   #else
   static let isEnabled = false
   #endif
+
+  static var baseURL: URL {
+    #if PAID_ACCESS
+    if let override = ProcessInfo.processInfo.environment["PAID_ACCESS_BASE_URL"],
+       let url = URL(string: override),
+       let scheme = url.scheme,
+       ["http", "https"].contains(scheme) {
+      return url
+    }
+    #endif
+    return PaidAccessHTTPClient.defaultBaseURL
+  }
 }
 
 /// Owns the paid-access session, entitlement and purchase flows on macOS.
@@ -47,10 +59,10 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   @Published var selectedTerm: PaidSubscriptionTerm = .monthly
 
   private let client: any PaidAccessClienting
-  private let sessionStore: any PaidAccessSessionStoring
+  private let sessions: PaidAccessSessionLifecycle
+  private var busyOperation = UUID()
   private let settings: AppSettings
   private var transactionListener: Task<Void, Never>?
-  private var refreshTask: Task<PaidAccessSession?, Never>?
   private var launchRestore: Task<Void, Never>?
   private var hasFinishedLaunchRestore = false
   private var launchRestoreWaiters: [CheckedContinuation<Void, Never>] = []
@@ -71,7 +83,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     settings: AppSettings
   ) {
     self.client = client
-    self.sessionStore = sessionStore
+    self.sessions = PaidAccessSessionLifecycle(client: client, store: sessionStore)
     self.settings = settings
     super.init()
 
@@ -124,51 +136,30 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   /// Returns a usable session, rotating the refresh token when the access token
   /// is close to expiry. Returns `nil` when the user is not signed in.
   private func currentSession() async -> PaidAccessSession? {
-    guard let stored = await self.sessionStore.loadSession() else {
-      self.isSignedIn = false
-      return nil
-    }
-    self.isSignedIn = true
-
-    guard stored.needsRefresh() else { return stored }
-    guard stored.isRefreshable() else {
-      await self.clearSession()
-      return nil
-    }
-
-    // `@MainActor` isolation does not survive the await below, so without a
-    // single-flight task two concurrent callers would each present the same
-    // refresh token and the server's reuse detection would sign the user out.
-    if let inFlight = self.refreshTask {
-      return await inFlight.value
-    }
-    let task = Task { [client, sessionStore] () -> PaidAccessSession? in
-      do {
-        let refreshed = try await client.refresh(session: stored)
-        try await sessionStore.saveSession(refreshed)
-        return refreshed
-      } catch PaidAccessError.notSignedIn {
-        return nil
-      } catch {
-        // A transient refresh failure must not sign the user out; the stored
-        // session may still work, and if it does not the caller falls back.
-        return stored
+    let generation = self.sessions.generation
+    do {
+      let session = try await self.sessions.currentSession()
+      guard generation == self.sessions.generation else { return nil }
+      self.isSignedIn = session != nil
+      if session == nil {
+        // An empty store is not another logout: sign-in may be awaiting Apple.
+        self.entitlement = .unentitled
+        self.policy = .unknown
       }
-    }
-    self.refreshTask = task
-    let result = await task.value
-    self.refreshTask = nil
-    if result == nil {
+      return session
+    } catch {
+      guard generation == self.sessions.generation else { return nil }
       await self.clearSession()
+      return nil
     }
-    return result
   }
 
   private func clearSession() async {
-    await self.sessionStore.clearSession()
+    let clearing = self.sessions.clear()
     self.isSignedIn = false
     self.entitlement = .unentitled
     self.policy = .unknown
+    _ = await clearing.value
   }
 
   /// Session accessor for the proxy client. Never surfaces errors — an absent
@@ -241,7 +232,9 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   // MARK: - Entitlement
 
   func refreshEntitlement() async {
+    let generation = self.sessions.generation
     guard let session = await self.currentSession() else {
+      guard generation == self.sessions.generation else { return }
       self.entitlement = .unentitled
       self.policy = .unknown
       return
@@ -252,12 +245,15 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
       // active entitlement paired with an empty policy — entitled, with
       // nowhere to send the request — if the second call failed.
       let state = try await self.client.entitlement(session: session)
+      guard generation == self.sessions.generation else { return }
       self.entitlement = state.entitlement
       self.policy = state.policy
       self.lastError = nil
     } catch PaidAccessError.notSignedIn {
+      guard generation == self.sessions.generation else { return }
       await self.clearSession()
     } catch {
+      guard generation == self.sessions.generation else { return }
       // Keep the last known entitlement so a brief outage does not flip the UI
       // to "not subscribed"; routing still re-checks expiry locally.
       self.lastError = (error as? PaidAccessError)?.errorDescription
@@ -270,9 +266,19 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     // A second sign-in would overwrite `signInContinuation`, leaking the first
     // continuation and leaving `isBusy` stuck true for the rest of the launch.
     guard self.signInContinuation == nil, !self.isBusy else { return }
+    let clearing = self.sessions.clear()
+    let generation = self.sessions.generation
+    self.isSignedIn = false
+    self.entitlement = .unentitled
+    self.policy = .unknown
+    let operation = UUID()
+    self.busyOperation = operation
     self.isBusy = true
     self.lastError = nil
-    defer { self.isBusy = false }
+    defer { if operation == self.busyOperation { self.isBusy = false } }
+
+    _ = await clearing.value
+    guard generation == self.sessions.generation else { return }
 
     let rawNonce = Self.makeRawNonce()
     let request = ASAuthorizationAppleIDProvider().createRequest()
@@ -284,6 +290,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
 
     do {
       let authorization = try await self.performAuthorization(for: request)
+      guard generation == self.sessions.generation else { return }
       guard
         let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
         let tokenData = credential.identityToken,
@@ -298,7 +305,9 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
         rawNonce: rawNonce,
         deviceLabel: Host.current().localizedName
       )
-      try await self.sessionStore.saveSession(session)
+      guard let signedInGeneration = try await self.sessions.acceptSignIn(session, generation: generation),
+        signedInGeneration == self.sessions.generation
+      else { return }
       self.isSignedIn = true
       await self.refreshEntitlement()
     } catch is CancellationError {
@@ -306,19 +315,28 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     } catch let error as ASAuthorizationError where error.code == .canceled {
       // Same.
     } catch {
-      self.lastError = (error as? PaidAccessError)?.errorDescription
+      guard generation == self.sessions.generation else { return }
+      self.lastError =
+        (error as? PaidAccessError)?.errorDescription
         ?? "Could not sign in with Apple."
     }
   }
 
   func signOut() async {
+    let clearing = self.sessions.clear()
+    self.isSignedIn = false
+    self.entitlement = .unentitled
+    self.policy = .unknown
+    let operation = UUID()
+    self.busyOperation = operation
     self.isBusy = true
-    defer { self.isBusy = false }
+    defer { if operation == self.busyOperation { self.isBusy = false } }
 
-    if let session = await self.sessionStore.loadSession() {
+    // Clear local credentials first. A slow revocation must never clear a
+    // replacement account or restore state from an earlier refresh.
+    if let session = await clearing.value {
       await self.client.signOut(session: session)
     }
-    await self.clearSession()
   }
 
   private func performAuthorization(
@@ -350,10 +368,13 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   ///   current choice rather than to whichever product loaded first.
   func purchase(term: PaidSubscriptionTerm? = nil) async {
     let term = term ?? self.selectedTerm
+    let operation = UUID()
+    self.busyOperation = operation
     self.isBusy = true
     self.lastError = nil
-    defer { self.isBusy = false }
+    defer { if operation == self.busyOperation { self.isBusy = false } }
 
+    let generation = self.sessions.generation
     guard let session = await self.currentSession() else {
       self.lastError = PaidAccessError.notSignedIn.errorDescription
       return
@@ -363,20 +384,24 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     case .stripeCheckout:
       do {
         let url = try await self.client.createCheckoutURL(session: session)
+        guard generation == self.sessions.generation else { return }
         NSWorkspace.shared.open(url)
       } catch {
-        self.lastError = (error as? PaidAccessError)?.errorDescription
+        self.lastError =
+          (error as? PaidAccessError)?.errorDescription
           ?? "Could not start checkout."
       }
 
     case .storeKit:
-      await self.purchaseThroughStoreKit(term: term, session: session)
+      await self.purchaseThroughStoreKit(term: term, session: session, generation: generation)
     }
   }
 
   func manageSubscription() async {
+    let operation = UUID()
+    self.busyOperation = operation
     self.isBusy = true
-    defer { self.isBusy = false }
+    defer { if operation == self.busyOperation { self.isBusy = false } }
 
     if self.entitlement.provider == .manual {
       self.lastError = "This access was granted manually and has no subscription to manage."
@@ -388,15 +413,18 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     }
     switch self.entitlement.provider == .storeKit ? PaidBillingChannel.storeKit : .stripeCheckout {
     case .stripeCheckout:
+      let generation = self.sessions.generation
       guard let session = await self.currentSession() else {
         self.lastError = PaidAccessError.notSignedIn.errorDescription
         return
       }
       do {
         let url = try await self.client.createBillingPortalURL(session: session)
+        guard generation == self.sessions.generation else { return }
         NSWorkspace.shared.open(url)
       } catch {
-        self.lastError = (error as? PaidAccessError)?.errorDescription
+        self.lastError =
+          (error as? PaidAccessError)?.errorDescription
           ?? "Could not open the billing portal."
       }
 
@@ -410,21 +438,26 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   }
 
   func restorePurchases() async {
+    let operation = UUID()
+    self.busyOperation = operation
     self.isBusy = true
-    defer { self.isBusy = false }
+    defer { if operation == self.busyOperation { self.isBusy = false } }
 
     guard self.billingChannel == .storeKit else {
       await self.refreshEntitlement()
       return
     }
+    let generation = self.sessions.generation
     guard let session = await self.currentSession() else {
       self.lastError = PaidAccessError.notSignedIn.errorDescription
       return
     }
 
     for await result in Transaction.currentEntitlements {
-      await self.syncIfSubscription(result, session: session)
+      guard generation == self.sessions.generation else { return }
+      await self.syncIfSubscription(result, session: session, generation: generation)
     }
+    guard generation == self.sessions.generation else { return }
     await self.refreshEntitlement()
   }
 
@@ -441,11 +474,14 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
 
   private func purchaseThroughStoreKit(
     term: PaidSubscriptionTerm,
-    session: PaidAccessSession
+    session: PaidAccessSession,
+    generation: UUID
   ) async {
+    guard generation == self.sessions.generation else { return }
     if self.products.isEmpty {
       await self.loadProducts()
     }
+    guard generation == self.sessions.generation else { return }
     // Matched by product id, never by position: `products.first` bought the
     // cheapest loaded product whatever the user had chosen.
     guard let product = self.product(for: term) else {
@@ -463,34 +499,48 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
 
     do {
       let result = try await product.purchase(options: [.appAccountToken(accountToken)])
-      switch result {
-      case .success(let verification):
-        let didSync = await self.syncIfSubscription(verification, session: session)
-        if didSync, case .verified(let transaction) = verification {
-          await transaction.finish()
-        }
-        await self.refreshEntitlement()
-      case .pending:
-        self.lastError = """
-          The purchase is awaiting approval (for example Ask to Buy). \
-          Access activates automatically once it is approved.
-          """
-      case .userCancelled:
-        break
-      @unknown default:
-        break
-      }
+      guard generation == self.sessions.generation else { return }
+      await self.handlePurchaseResult(result, session: session, generation: generation)
     } catch {
+      guard generation == self.sessions.generation else { return }
       self.lastError = "The purchase could not be completed."
     }
   }
 
+  private func handlePurchaseResult(
+    _ result: Product.PurchaseResult,
+    session: PaidAccessSession,
+    generation: UUID
+  ) async {
+    guard generation == self.sessions.generation else { return }
+    switch result {
+    case .success(let verification):
+      let didSync = await self.syncIfSubscription(verification, session: session, generation: generation)
+      if didSync, case .verified(let transaction) = verification {
+        await transaction.finish()
+      }
+      guard generation == self.sessions.generation else { return }
+      await self.refreshEntitlement()
+    case .pending:
+      self.lastError = """
+        The purchase is awaiting approval (for example Ask to Buy). \
+        Access activates automatically once it is approved.
+        """
+    case .userCancelled:
+      break
+    @unknown default:
+      break
+    }
+  }
+
   private func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
+    let generation = self.sessions.generation
     guard let session = await self.currentSession() else { return }
-    let didSync = await self.syncIfSubscription(result, session: session)
+    let didSync = await self.syncIfSubscription(result, session: session, generation: generation)
     if didSync, case .verified(let transaction) = result {
       await transaction.finish()
     }
+    guard generation == self.sessions.generation else { return }
     await self.refreshEntitlement()
   }
 
@@ -501,16 +551,23 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   /// never trusted on its own.
   private func syncIfSubscription(
     _ result: VerificationResult<Transaction>,
-    session: PaidAccessSession
+    session: PaidAccessSession,
+    generation: UUID
   ) async -> Bool {
+    guard generation == self.sessions.generation else { return false }
     do {
-      guard let entitlement = try await PaidStoreKitSync.entitlement(
-        for: result, session: session, client: self.client
-      ) else { return false }
+      guard
+        let entitlement = try await PaidStoreKitSync.entitlement(
+          for: result, session: session, client: self.client
+        )
+      else { return false }
+      guard generation == self.sessions.generation else { return false }
       self.entitlement = entitlement
       return true
     } catch {
-      self.lastError = (error as? PaidAccessError)?.errorDescription
+      guard generation == self.sessions.generation else { return false }
+      self.lastError =
+        (error as? PaidAccessError)?.errorDescription
         ?? "Could not confirm the subscription."
       return false
     }

@@ -1,5 +1,6 @@
 import { env, fetchMock, SELF } from 'cloudflare:test';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { Repository } from '../src/data/repository.js';
 import { issueAccessToken } from '../src/auth/session.js';
 
 const SIGNING_KEY = 'test-session-signing-key-that-is-long-enough';
@@ -547,4 +548,80 @@ describe('post-processing spending bounds', () => {
       .bind(userId).first<{ units: number }>();
     expect(row?.units).toBe(4000);
   });
+});
+
+
+describe('metering boundary regressions', () => {
+  it.each([
+    ['inflated byte rate', 28, 0xffffffff, 32],
+    ['inconsistent block alignment', 32, 4, 16],
+    ['zero channels', 22, 0, 16],
+    ['zero sample rate', 24, 0, 32],
+    ['unsupported compression', 20, 3, 16],
+    ['unsupported sample width', 34, 12, 16],
+  ] as const)('rejects %s before admitting a paid request', async (_name, offset, value, bits) => {
+    const userId = await seedEntitledUser();
+    const audio = wavPayload({ seconds: 60, sampleRate: 16_000, channels: 1 });
+    const view = new DataView(audio.buffer);
+    if (bits === 16) view.setUint16(offset, value, true);
+    else view.setUint32(offset, value, true);
+    // No upstream interceptor: any network dispatch is refused by fetchMock.
+    expect((await transcribeBatch(await tokenFor(userId), audio)).status).toBe(400);
+    for (const table of ['request_claims', 'usage_ledger']) {
+      const row = await env.DB.prepare(`SELECT COUNT(*) AS total FROM ${table} WHERE user_id = ?1`)
+        .bind(userId).first<{ total: number }>();
+      expect(row?.total).toBe(0);
+    }
+  });
+
+  it('rejects a partial PCM frame but accepts consistent mono and stereo geometry', async () => {
+    const userId = await seedEntitledUser();
+    const audio = wavPayload({ seconds: 3, sampleRate: 16_000, channels: 1 });
+    expect((await transcribeBatch(await tokenFor(userId), audio.slice(0, -1))).status).toBe(400);
+    for (const channels of [1, 2]) {
+      const account = await seedEntitledUser();
+      mockOpenRouterCompletion('Synthetic.');
+      expect((await transcribeBatch(await tokenFor(account),
+        wavPayload({ seconds: 3, sampleRate: 16_000, channels }))).status).toBe(200);
+      expect(await env.DB.prepare('SELECT units FROM usage_ledger WHERE user_id = ?1')
+        .bind(account).first('units')).toBe(3);
+    }
+  });
+
+  it.each(['expired', 'pruned', 'completion-ack-missing'] as const)(
+    'declines a metered retry before quota and upstream work when its claim is %s', async (condition) => {
+      const userId = await seedEntitledUser();
+      const token = await tokenFor(userId);
+      let calls = 0;
+      fetchMock.get('https://openrouter.ai')
+        .intercept({ path: '/api/v1/chat/completions', method: 'POST' })
+        .reply(() => {
+          calls += 1;
+          return { statusCode: 200, data: JSON.stringify({ choices: [{ message: { content: 'Synthetic.' } }],
+            usage: { prompt_tokens: 40, completion_tokens: 20 } }) };
+        });
+      expect((await postProcess(token, { operation: 'post_processing', text: 'same' })).status).toBe(200);
+      if (condition === 'completion-ack-missing') {
+        // The permanent metering row survived, but the operational claim did not.
+        await env.DB.prepare('DELETE FROM request_claims WHERE user_id = ?1').bind(userId).run();
+      } else {
+        await env.DB.prepare('UPDATE request_claims SET expires_at = 1 WHERE user_id = ?1').bind(userId).run();
+        if (condition === 'pruned') await new Repository(env.DB).pruneExpiredRequestClaims(2);
+      }
+      const response = await postProcess(token, { operation: 'post_processing', text: 'same' });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: 'already_processed' } });
+      const entitlement = await SELF.fetch('https://api.test/v1/entitlement', {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(await entitlement.json()).toMatchObject({ usage: { tokens_used: 60 } });
+      expect(await env.DB.prepare('SELECT COUNT(*) AS rows, SUM(units) AS units FROM usage_ledger WHERE user_id = ?1')
+        .bind(userId).first()).toEqual({ rows: 1, units: 60 });
+      // Reusing the key for another operation must retain the original identity.
+      const crossOperation = await transcribeBatch(token, wavPayload({ seconds: 1, sampleRate: 16_000, channels: 1 }));
+      expect(crossOperation.status).toBe(409);
+      expect(await crossOperation.json()).toMatchObject({ error: { code: 'conflict' } });
+      expect(calls).toBe(1);
+    },
+  );
 });

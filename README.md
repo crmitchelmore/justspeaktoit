@@ -65,6 +65,20 @@ make run
 
 That's it! The app will launch and guide you through granting microphone permissions.
 
+### Windows and Linux (developer preview)
+
+Native Windows and Linux apps share the Swift core and one desktop controller
+(`SpeakDesktopHost`). They are developer builds, not releases: see
+[Windows development](Docs/windows-development.md) and
+[Linux development](Docs/linux-development.md) for the build steps and a
+feature-by-feature parity matrix of what is verified and what still needs a
+physical device.
+
+```bash
+# Linux (Ubuntu 24.04, Swift 6.2.3, GTK 4/libadwaita development packages)
+SPEAK_LINUX_TARGET=1 swift build --product SpeakLinux
+```
+
 ## Project Structure
 
 ```

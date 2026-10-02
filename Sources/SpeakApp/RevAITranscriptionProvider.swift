@@ -1,244 +1,30 @@
-import SpeakCore
 import AVFoundation
 import Foundation
+import SpeakCore
 
+/// Keeps native asset duration at the Apple boundary. Requests, polling and
+/// response mapping use the same streamed batch client as Windows.
 struct RevAITranscriptionProvider: TranscriptionProvider {
-  let metadata = TranscriptionProviderMetadata(
-    id: "revai",
-    displayName: "Rev.ai",
-    systemImage: "waveform.badge.mic",
-    tintColor: "purple",
-    website: "https://www.rev.ai"
-  )
+    private let client: RevAIBatchClient
+    var metadata: TranscriptionProviderMetadata { client.metadata }
 
-  private let baseURL = URL(string: "https://api.rev.ai/speechtotext/v1")!
-  private let session: URLSession
-
-  init(session: URLSession = .shared) {
-    self.session = session
-  }
-
-  func transcribeFile(
-    at url: URL,
-    apiKey: String,
-    model: String,
-    language: String?
-  ) async throws -> TranscriptionResult {
-    // Step 1: Submit job
-    let jobID = try await submitJob(url: url, apiKey: apiKey, language: language)
-
-    // Step 2: Poll for completion
-    let transcript = try await pollForCompletion(jobID: jobID, apiKey: apiKey)
-
-    // Step 3: Build result
-    return try await buildTranscriptionResult(
-      transcript: transcript,
-      audioURL: url,
-      model: model
-    )
-  }
-
-  func validateAPIKey(_ key: String) async -> APIKeyValidationResult {
-    await GETProbeAPIKeyValidator(
-      url: baseURL.appendingPathComponent("jobs"),
-      headers: { ["Authorization": "Bearer \($0)"] },
-      serviceName: "Rev.ai",
-      session: session
-    ).validate(key)
-  }
-
-  func requiresAPIKey(for model: String) -> Bool {
-    true
-  }
-
-  func supportedModels() -> [ModelCatalog.Option] {
-    ModelCatalog.batchTranscriptionOptions(forProvider: metadata.id)
-  }
-
-  // MARK: - Private Methods
-
-  private func submitJob(url: URL, apiKey: String, language: String?) async throws -> String {
-    let endpoint = baseURL.appendingPathComponent("jobs")
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "POST"
-
-    let boundary = "Boundary-\(UUID().uuidString)"
-    request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-    let audioData = try Data(contentsOf: url)
-    var body = Data()
-
-    // Add metadata
-    var metadata: [String: Any] = [:]
-    if let language {
-      // Rev.ai accepts language codes like "en", but also accepts locale-specific codes
-      // Normalize to just language code for consistency
-      metadata["language"] = language.localeLanguageCode
-    }
-    metadata["skip_diarization"] = false
-    metadata["skip_punctuation"] = false
-
-    if let metadataJSON = try? JSONSerialization.data(withJSONObject: metadata) {
-      body.appendFormField(
-        named: "metadata",
-        value: String(data: metadataJSON, encoding: .utf8) ?? "{}",
-        boundary: boundary
-      )
+    init(session: URLSession = .shared, multipartStaging: MultipartUploadStaging = .shared) {
+        client = RevAIBatchClient(
+            session: session, multipartStaging: multipartStaging.sharedStore,
+            durationResolver: { url in
+                let asset = AVURLAsset(url: url)
+                return try await asset.load(.duration).seconds
+            }
+        )
     }
 
-    body.appendFileField(
-      named: "media",
-      filename: url.lastPathComponent,
-      mimeType: "audio/m4a",
-      fileData: audioData,
-      boundary: boundary
-    )
-    body.appendString("--\(boundary)--\r\n")
-    request.httpBody = body
-
-    let (data, response) = try await session.data(for: request)
-    guard let http = response as? HTTPURLResponse else {
-      throw TranscriptionProviderError.invalidResponse
+    func transcribeFile(
+        at url: URL, apiKey: String, model: String, language: String?
+    ) async throws -> TranscriptionResult {
+        try await client.transcribeFile(at: url, apiKey: apiKey, model: model, language: language)
     }
 
-    guard (200..<300).contains(http.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-      throw TranscriptionProviderError.httpError(http.statusCode, body)
-    }
-
-    let decoded = try JSONDecoder().decode(RevAIJobResponse.self, from: data)
-    return decoded.id
-  }
-
-  private func pollForCompletion(jobID: String, apiKey: String) async throws
-    -> RevAITranscriptResponse
-  {
-    let endpoint = baseURL.appendingPathComponent("jobs/\(jobID)")
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-    // Poll every 2 seconds for up to 5 minutes
-    for _ in 0..<150 {
-      let (data, response) = try await session.data(for: request)
-      guard let http = response as? HTTPURLResponse else {
-        throw TranscriptionProviderError.invalidResponse
-      }
-
-      guard (200..<300).contains(http.statusCode) else {
-        let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-        throw TranscriptionProviderError.httpError(http.statusCode, body)
-      }
-
-      let job = try JSONDecoder().decode(RevAIJobResponse.self, from: data)
-
-      switch job.status {
-      case "transcribed":
-        return try await fetchTranscript(jobID: jobID, apiKey: apiKey)
-      case "failed":
-        throw TranscriptionProviderError.httpError(500, "Rev.ai transcription failed")
-      default:
-        // Still processing
-        try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-      }
-    }
-
-    throw TranscriptionProviderError.httpError(408, "Rev.ai transcription timed out")
-  }
-
-  private func fetchTranscript(jobID: String, apiKey: String) async throws
-    -> RevAITranscriptResponse
-  {
-    let endpoint = baseURL.appendingPathComponent("jobs/\(jobID)/transcript")
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    request.setValue("application/vnd.rev.transcript.v1.0+json", forHTTPHeaderField: "Accept")
-
-    let (data, response) = try await session.data(for: request)
-    guard let http = response as? HTTPURLResponse else {
-      throw TranscriptionProviderError.invalidResponse
-    }
-
-    guard (200..<300).contains(http.statusCode) else {
-      let body = String(data: data, encoding: .utf8) ?? "<no-body>"
-      throw TranscriptionProviderError.httpError(http.statusCode, body)
-    }
-
-    return try JSONDecoder().decode(RevAITranscriptResponse.self, from: data)
-  }
-
-  private func buildTranscriptionResult(
-    transcript: RevAITranscriptResponse,
-    audioURL: URL,
-    model: String
-  ) async throws -> TranscriptionResult {
-    let asset = AVURLAsset(url: audioURL)
-    let durationTime = try await asset.load(.duration)
-    let duration = durationTime.seconds
-
-    // Build full text from monologues
-    let fullText =
-      transcript.monologues?
-      .flatMap { $0.elements }
-      .compactMap { $0.value }
-      .joined(separator: " ") ?? ""
-
-    // Build segments from monologues
-    var segments: [TranscriptionSegment] = []
-    if let monologues = transcript.monologues {
-      for monologue in monologues {
-        for element in monologue.elements where element.type == "text" {
-          segments.append(
-            TranscriptionSegment(
-              startTime: element.ts ?? 0,
-              endTime: element.end_ts ?? 0,
-              text: element.value ?? ""
-            ))
-        }
-      }
-    }
-
-    if segments.isEmpty {
-      segments = [TranscriptionSegment(startTime: 0, endTime: duration, text: fullText)]
-    }
-
-    return TranscriptionResult(
-      text: fullText,
-      segments: segments,
-      confidence: nil,
-      duration: duration,
-      modelIdentifier: model,
-      cost: nil,
-      rawPayload: nil,
-      debugInfo: nil
-    )
-  }
-
-}
-
-// MARK: - Response Models
-
-private struct RevAIJobResponse: Decodable {
-  let id: String
-  let status: String
-  let created_on: String?
-}
-
-private struct RevAITranscriptResponse: Decodable {
-  struct Monologue: Decodable {
-    struct Element: Decodable {
-      let type: String
-      let value: String?
-      let ts: TimeInterval?
-      let end_ts: TimeInterval?
-      let confidence: Double?
-    }
-
-    let speaker: Int?
-    let elements: [Element]
-  }
-
-  let monologues: [Monologue]?
+    func validateAPIKey(_ key: String) async -> APIKeyValidationResult { await client.validateAPIKey(key) }
+    func requiresAPIKey(for model: String) -> Bool { client.requiresAPIKey(for: model) }
+    func supportedModels() -> [ModelCatalog.Option] { client.supportedModels() }
 }

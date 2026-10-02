@@ -6,12 +6,12 @@ import XCTest
 final class WireUpDITests: XCTestCase {
 
     @MainActor
-    func testBootstrap_acceptsCustomSettings() {
-        let customSettings = AppSettings()
+    func testBootstrap_acceptsCustomSettings() throws {
+        let host = try makeWireUpTestHost()
+        let customSettings = host.makeSettings()
         customSettings.postProcessingEnabled = false
 
-        let options = makeWireUpTestOptions(settingsOverride: customSettings)
-        let env = WireUp.bootstrap(options: options)
+        let env = WireUp.bootstrap(options: host.options(settings: customSettings))
 
         XCTAssertFalse(
             env.settings.postProcessingEnabled,
@@ -27,10 +27,10 @@ final class WireUpDITests: XCTestCase {
     }
 
     @MainActor
-    func testBootstrap_acceptsCustomPermissions() {
-        let customPermissions = PermissionsManager()
-        let options = makeWireUpTestOptions(permissionsOverride: customPermissions)
-        let env = WireUp.bootstrap(options: options)
+    func testBootstrap_acceptsCustomPermissions() throws {
+        let host = try makeWireUpTestHost()
+        let customPermissions = host.makePermissions()
+        let env = WireUp.bootstrap(options: host.options(permissions: customPermissions))
 
         XCTAssertTrue(
             env.permissions === customPermissions,
@@ -39,10 +39,10 @@ final class WireUpDITests: XCTestCase {
     }
 
     @MainActor
-    func testBootstrap_injectedSettingsIsSharedAcrossServices() {
-        let customSettings = AppSettings()
-        let options = makeWireUpTestOptions(settingsOverride: customSettings)
-        let env = WireUp.bootstrap(options: options)
+    func testBootstrap_injectedSettingsIsSharedAcrossServices() throws {
+        let host = try makeWireUpTestHost()
+        let customSettings = host.makeSettings()
+        let env = WireUp.bootstrap(options: host.options(settings: customSettings))
 
         XCTAssertTrue(
             env.settings === customSettings,

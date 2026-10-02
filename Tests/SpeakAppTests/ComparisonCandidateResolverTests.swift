@@ -24,9 +24,11 @@ final class ComparisonCandidateResolverTests: XCTestCase {
         let candidates = ComparisonCandidateResolver.candidates(in: environment())
         let ids = candidates.map(\.modelID)
         XCTAssertEqual(ids.count, Set(ids).count, "No duplicate candidates")
-        for option in ModelCatalog.batchTranscription + ModelCatalog.localTranscriptionOptions {
+        for option in ModelCatalog.batchTranscription + ModelCatalog.availableLocalTranscription.map(\.option) {
             XCTAssertTrue(ids.contains(option.id), "\(option.id) should be offered for file mode")
         }
+        XCTAssertEqual(ids.contains(PhononLocalModels.phonon2.id),
+                       PhononLocalModels.isSupportedOnCurrentPlatform)
         for option in ModelCatalog.remoteLiveTranscription where !option.id.hasPrefix("openai/") {
             XCTAssertTrue(ids.contains(option.id), "\(option.id) should be offered for streaming")
         }

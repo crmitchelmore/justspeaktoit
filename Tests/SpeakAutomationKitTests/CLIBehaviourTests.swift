@@ -19,10 +19,10 @@ final class CLIBehaviourTests: XCTestCase {
     // MARK: - Parsing
 
     func testTranscribe_withOptions_buildsBoundedRequest() throws {
-        let plan = try XCTUnwrap(self.plan(from: ["transcribe", "/tmp/a.m4a",
+        let plan = try XCTUnwrap(self.plan(from: ["transcribe", AutomationTestPaths.audio,
                                                  "--timeout", "42", "--json"]))
         XCTAssertEqual(plan.command, .transcribeFile)
-        XCTAssertEqual(plan.path, "/tmp/a.m4a")
+        XCTAssertEqual(plan.path, AutomationTestPaths.audio)
         XCTAssertEqual(plan.timeout, 42)
         XCTAssertTrue(plan.json)
     }
@@ -46,8 +46,13 @@ final class CLIBehaviourTests: XCTestCase {
     }
 
     func testRelativePath_isResolvedAgainstCallerDirectory() {
+        #if os(Windows)
+        let resolved = CommandLineParser.absolutePath(for: "clip.m4a", currentDirectory: #"C:\Users\example\audio"#)
+        XCTAssertEqual(resolved, #"C:\Users\example\audio\clip.m4a"#)
+        #else
         let resolved = CommandLineParser.absolutePath(for: "clip.m4a", currentDirectory: "/Users/example/audio")
         XCTAssertEqual(resolved, "/Users/example/audio/clip.m4a")
+        #endif
     }
 
     func testMCPVerb_selectsServerMode() throws {

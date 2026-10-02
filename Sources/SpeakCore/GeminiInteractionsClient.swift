@@ -1,5 +1,10 @@
+#if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
 import AVFoundation
+#endif
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // MARK: - Gemini 3.5 Transcribe batch client
 //
@@ -20,19 +25,40 @@ import Foundation
 /// Never logs audio, transcript text or the API key.
 public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this type_body_length
     private let session: URLSession
+    private let durationResolver: @Sendable (URL) async -> TimeInterval
     private let inlineAudioByteLimit: Int
     private let filePollInterval: TimeInterval
     private let filePollTimeout: TimeInterval
     // Internal seam lets tests inspect the on-disk source without buffering it.
     var uploadRecording: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
 
+    #if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
+    /// Preserves native asset probing for existing macOS and iOS callers.
     public init(
         session: URLSession = .shared,
         inlineAudioByteLimit: Int = GeminiTranscribeModels.inlineAudioByteLimit,
         filePollInterval: TimeInterval = 1.5,
         filePollTimeout: TimeInterval = 60
     ) {
+        self.init(
+            session: session, inlineAudioByteLimit: inlineAudioByteLimit,
+            filePollInterval: filePollInterval, filePollTimeout: filePollTimeout,
+            durationResolver: { url in await Self.assetDuration(for: url) }
+        )
+    }
+    #endif
+
+    /// Portable hosts provide the duration they measured during native capture
+    /// or import; provider transport and Files API lifecycle stay shared.
+    public init(
+        session: URLSession = .shared,
+        inlineAudioByteLimit: Int = GeminiTranscribeModels.inlineAudioByteLimit,
+        filePollInterval: TimeInterval = 1.5,
+        filePollTimeout: TimeInterval = 60,
+        durationResolver: @escaping @Sendable (URL) async -> TimeInterval
+    ) {
         self.session = session
+        self.durationResolver = durationResolver
         self.inlineAudioByteLimit = inlineAudioByteLimit
         self.filePollInterval = filePollInterval
         self.filePollTimeout = filePollTimeout
@@ -74,7 +100,7 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
         let transcript = decoded.transcript
         guard !transcript.isEmpty else { throw GeminiBatchError.emptyTranscript }
 
-        let duration = await Self.assetDuration(for: url)
+        let duration = await self.durationResolver(url)
         return TranscriptionResult(
             text: transcript,
             segments: Self.segments(from: decoded, transcript: transcript, duration: duration),
@@ -328,10 +354,12 @@ public struct GeminiInteractionsClient: Sendable { // swiftlint:disable:this typ
         return (try? decoder.decode(GeminiFileUploadResponse.self, from: data))?.file?.state
     }
 
+    #if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
     private static func assetDuration(for url: URL) async -> TimeInterval {
         let asset = AVURLAsset(url: url)
         guard let duration = try? await asset.load(.duration) else { return 0 }
         let seconds = duration.seconds
         return seconds.isFinite ? seconds : 0
     }
+    #endif
 }

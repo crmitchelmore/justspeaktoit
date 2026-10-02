@@ -92,6 +92,17 @@ final class CaptureParameterResolutionTests: XCTestCase {
         XCTAssertTrue(parameters.requiresBatchMode)
     }
 
+    func testBatchOnlyPhononForcesBatchWhileWhisperKitRemainsLive() throws {
+        let phonon = PhononLocalModels.phonon2.id
+        XCTAssertTrue(CaptureParameterResolution.requiresBatchMode(phonon))
+        XCTAssertTrue(try CaptureParameterResolution.resolve(model: phonon.uppercased()).requiresBatchMode)
+        let whisperKit = try XCTUnwrap(
+            ModelCatalog.localTranscription.first { $0.engine == .whisperKit && $0.supportsLiveStreaming }
+        )
+        XCTAssertFalse(CaptureParameterResolution.requiresBatchMode(whisperKit.id))
+        XCTAssertFalse(try CaptureParameterResolution.resolve(model: whisperKit.id).requiresBatchMode)
+    }
+
     // MARK: - Source tag
 
     func testSourceTagIsTrimmedCollapsedAndCapped() {

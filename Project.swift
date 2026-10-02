@@ -354,7 +354,9 @@ let macAppTarget: Target = .target(
     sources: ["Sources/SpeakApp/**"],
     resources: [
         .glob(pattern: .relativeToRoot(isAlphaBuild ? "Resources/AppIconAlpha.icns" : "Resources/AppIcon.icns")),
-        .glob(pattern: "Resources/Sounds/**")
+        .glob(pattern: "Resources/Sounds/**"),
+        // Pinned Phonon-2 runtime requirements; SwiftPM bundles the same file for `swift build`.
+        .glob(pattern: "Sources/SpeakApp/Resources/phonon-requirements.txt")
     ],
     entitlements: .file(path: .relativeToRoot(trainPlistPath(macEntitlementsPath))),
     dependencies: macAppDependencies,

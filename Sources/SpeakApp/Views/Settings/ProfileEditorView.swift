@@ -98,7 +98,7 @@ extension ProfileEditorView {
           title: "Local Model",
           help: "Downloaded model that transcribes the finished recording on this Mac "
             + "when this profile is active.",
-          options: ModelCatalog.localTranscriptionOptions,
+          options: ModelCatalog.availableLocalTranscription.map(\.option),
           value: $draft.localModel,
           credentialPurpose: .batchTranscription,
           storedAPIKeyIdentifiers: Set(settings.trackedAPIKeyIdentifiers),

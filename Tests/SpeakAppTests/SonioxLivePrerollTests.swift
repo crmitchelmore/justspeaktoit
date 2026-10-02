@@ -4,13 +4,9 @@ import XCTest
 
 @testable import SpeakApp
 
-/// Regression cover for issue #641 on the macOS Soniox path.
-///
-/// `SwitchingLiveTranscriber` routes `soniox/` models to `SonioxLiveController`
-/// → ``SonioxLiveTranscriber``, not the shared `SpeakCore` client, so the
-/// pre-roll contract has to hold here too: audio captured between the recording
-/// cue and the WebSocket reaching `.running` must be held and replayed rather
-/// than dropped.
+/// Compatibility coverage for the legacy public SonioxLiveTranscriber.
+/// Production macOS capture now uses SonioxControllerClient / SonioxLiveClient;
+/// SonioxControllerWireTests verifies that path's actual pre-roll admission.
 final class SonioxLivePrerollTests: XCTestCase {
 
     private func chunk(_ byte: UInt8, count: Int = 3_200) -> Data {

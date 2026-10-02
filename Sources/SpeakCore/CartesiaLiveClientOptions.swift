@@ -6,21 +6,33 @@ import FoundationNetworking
 // Stop options, the result snapshot and the boundary contract for the shared
 // Cartesia client, kept beside its lifecycle so the client file stays focused.
 extension CartesiaLiveClient {
-    /// Per-client bounds. Production uses the documented statics; a caller's
-    /// stop options can only widen the finish bound, because the server's
-    /// normal closure, not a timer, ends a healthy finish.
+    /// Per-client bounds. Production uses the documented statics and the
+    /// catalogue's post-stop budget; a caller's ``LiveClientOptions`` set the
+    /// post-stop budget and add their stop grace after `close`.
     struct Timing: Sendable {
+        /// Each send must complete within this bound.
         var send: TimeInterval = CartesiaLiveClient.sendDeadline
-        var finish: TimeInterval = CartesiaLiveClient.finishBudget
+        /// The drain, including any wait for the handshake, must deliver
+        /// `close` within this bound.
+        var drain: TimeInterval = CartesiaLiveClient.finishBudget
+        /// After `close`, results are read until the server's normal closure
+        /// or until this bound, which then completes the finish.
+        var postClose: TimeInterval = CartesiaLiveClient.defaultPostStopFinalizeBudget
         /// How long consecutive spurious ENOTCONN receive failures are retried.
         var ignoredReceiveWindow: TimeInterval = IgnoredReceiveFailureWindow.defaultWindow
 
         init() {}
 
         init(postStopFinalizeBudget: TimeInterval?, stopGracePeriod: TimeInterval) {
-            let budget = postStopFinalizeBudget.map(CartesiaLiveClient.sanitized) ?? 0
-            finish = max(CartesiaLiveClient.finishBudget, budget) + CartesiaLiveClient.sanitized(stopGracePeriod)
+            let budget = postStopFinalizeBudget.map(CartesiaLiveClient.sanitized)
+                ?? CartesiaLiveClient.defaultPostStopFinalizeBudget
+            postClose = budget + CartesiaLiveClient.sanitized(stopGracePeriod)
         }
+    }
+
+    /// The catalogue's post-stop budget for Ink-2 streaming.
+    static var defaultPostStopFinalizeBudget: TimeInterval {
+        sanitized(ModelCatalog.liveCapabilities(for: "cartesia/ink-2-streaming").postStopFinalizeBudget)
     }
 
     /// The settings-aware initializer the live-client factory uses.
@@ -40,8 +52,8 @@ extension CartesiaLiveClient {
     }
 
     /// Test seam: real-time scheduling with short, explicit bounds. The send
-    /// budget bounds each send and the spurious-disconnect retries, and the
-    /// whole finish fits inside the send, post-close and grace budgets.
+    /// budget bounds each send, the drain to `close` and the spurious-disconnect
+    /// retries; the post-close budget and grace bound the read after `close`.
     convenience init(
         apiKey: String = "test-key",
         model: String = "ink-2",
@@ -53,7 +65,8 @@ extension CartesiaLiveClient {
     ) {
         var timing = Timing()
         timing.send = Self.sanitized(sendBudget)
-        timing.finish = timing.send + Self.sanitized(postStopFinalizeBudget) + Self.sanitized(stopGracePeriod)
+        timing.drain = timing.send
+        timing.postClose = Self.sanitized(postStopFinalizeBudget) + Self.sanitized(stopGracePeriod)
         timing.ignoredReceiveWindow = timing.send
         self.init(
             apiKey: apiKey, model: model, sampleRate: sampleRate, timing: timing,

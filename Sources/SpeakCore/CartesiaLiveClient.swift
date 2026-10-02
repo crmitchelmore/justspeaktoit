@@ -11,13 +11,14 @@ import FoundationNetworking
 /// `CartesiaLiveTranscriber` and does not use this client yet.
 ///
 /// One `/stt/turns/websocket` socket per run (see `CartesiaLiveProtocol`). PCM16
-/// mono is admitted synchronously into a bounded queue and sent as one binary
-/// frame at a time once the socket has actually opened. A graceful finish
-/// drains every admitted frame, sends `{"type":"close"}` and waits, inside one
-/// bounded budget, for the server to close the stream after flushing its
-/// remaining events. The transport is injected (`URLSessionStreamingConnection`
-/// on Apple, WinHTTP on Windows); framing, admission and lifecycle stay here so
-/// the platforms cannot drift.
+/// mono is repacked into 100 ms frames and sent as one binary frame at a time
+/// once the socket has actually opened; until then the newest two seconds wait,
+/// the oldest making room. A graceful finish drains every admitted frame,
+/// sends exactly one `{"type":"close"}` and reads the remaining results until
+/// the server's normal closure or the post-stop budget, whichever comes first,
+/// then returns the whole session. The transport is injected
+/// (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows); framing,
+/// admission and lifecycle stay here so the platforms cannot drift.
 ///
 /// State lives under one lock that is never held across a transport call, a
 /// host callback, a scheduler call or a continuation resume.
@@ -31,23 +32,19 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
     public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
     public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-    /// One deadline bounds a graceful finish: any wait for the handshake, the
-    /// drain of admitted audio, `close` and the server's closure. A healthy
-    /// stream ends on the closure itself; nothing sleeps.
-    public static let finishBudget: TimeInterval = 8
-    /// Exposes this client's finish bound to host lifecycle watchdogs.
-    public var finalisationBudget: TimeInterval? { timing.finish }
-    /// A finish that lands before the handshake waits at most this long for it.
-    static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
+    /// A finish must have drained its admitted audio, including any wait for
+    /// the handshake, and sent `close` within this bound.
+    public static let finishBudget: TimeInterval = 1.5
+    /// Exposes this client's finish bound to host lifecycle watchdogs: the
+    /// drain, then the post-stop budget and any stop grace after `close`.
+    public var finalisationBudget: TimeInterval? { timing.drain + timing.postClose }
     /// The handshake must complete within this bound of `start()`.
     static let readyDeadline: TimeInterval = 10
     /// A single send that has not completed by then means the transport stalled.
     static let sendDeadline: TimeInterval = 5
-    /// Seconds of PCM that may be queued or in flight, including audio held
-    /// while the socket opens.
-    static let bufferedAudioSeconds: Double = StreamingAudioPreroll.defaultBudgetSeconds
-    /// Frames that may be queued or in flight, alongside the byte bound.
-    static let maximumQueuedFrames = 256
+    /// Seconds of PCM that may wait for the socket to open, the newest kept,
+    /// and that may be queued or in flight once it has.
+    static let bufferedAudioSeconds: Double = 2
 
     let apiKey: String
     let model: String
@@ -73,8 +70,9 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     /// `postStopFinalizeBudget` and `stopGracePeriod` come from
-    /// ``LiveClientOptions``. The server's normal closure still ends a healthy
-    /// finish; they only widen the bound on waiting for it.
+    /// ``LiveClientOptions`` and bound the read after `close`; the server's
+    /// normal closure ends a healthy finish sooner. Without a budget the
+    /// catalogue's Ink-2 post-stop budget applies.
     public convenience init(
         apiKey: String,
         model: String = "ink-2",
@@ -128,10 +126,6 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
             active.phase = .connecting
             active.onTranscript = onTranscript
             active.onError = onError
-            if let failure = active.pendingFailure {
-                fail(active, failure, &effects)
-                return nil
-            }
             guard !apiKey.isEmpty else {
                 fail(active, StreamingClientError.missingAPIKey(provider: "Cartesia"), &effects)
                 return nil
@@ -151,62 +145,45 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
         connect(opening.0, request: opening.1)
     }
 
-    /// Admission is synchronous and bounded: at most `bufferedAudioSeconds` of
-    /// PCM and `maximumQueuedFrames` frames may be queued or in flight,
-    /// including audio held while the socket opens. Exceeding either is
-    /// reported as a stalled transport instead of silently trimming the
-    /// recording, and a frame of partial samples is refused before it could
-    /// misalign every later sample. Audio before the first `start()` is held
-    /// under the same bounds and a failure there is reported by `start()`.
+    /// Capture chunks are repacked into 100 ms frames, so a chunk need not hold
+    /// whole samples. While the socket opens, including before the first
+    /// `start()`, the newest `bufferedAudioSeconds` wait and the oldest frames
+    /// make room. Once it has opened, admission is bounded by the same amount
+    /// queued or in flight, and exceeding it is a stalled transport.
     public func sendAudio(_ audioData: Data) {
         guard !audioData.isEmpty else { return }
         let outbound: CartesiaOutbound? = withState { effects in
             let active = run
-            guard active.phase == .idle || active.phase == .connecting || active.phase == .streaming,
-                  active.pendingFailure == nil else { return nil }
-            let failure: Error?
-            if !audioData.count.isMultiple(of: 2) {
-                failure = CartesiaStreamingError.invalidPCM
-            } else if active.admittedFrames >= Self.maximumQueuedFrames
-                || active.admittedBytes + audioData.count > active.maximumBytes {
-                failure = stalledError
-            } else {
-                failure = nil
+            guard active.phase == .idle || active.phase == .connecting || active.phase == .streaming else {
+                return nil
             }
-            guard let failure else {
-                active.outgoing.append(audioData)
-                active.admittedBytes += audioData.count
-                return claim(active, &effects)
+            for frame in active.framer.append(audioData) {
+                guard admit(frame, active, &effects) else { return nil }
             }
-            if active.phase == .idle {
-                // No callbacks exist yet. The held audio can no longer be sent
-                // intact, so it is released now and `start()` reports why.
-                active.pendingFailure = failure
-                active.outgoing.removeAll()
-                active.admittedBytes = 0
-            } else {
-                fail(active, failure, &effects)
-            }
-            return nil
+            trimStartupAudio(active)
+            return claim(active, &effects)
         }
         if let outbound { drive(outbound) }
     }
 
     /// Immediate teardown; `cancel()` is the same path. A pending handshake,
     /// drain or finish is aborted at once and every waiter resumes with the
-    /// text confirmed so far.
+    /// text received so far.
     public func stop() { withState { retire(run, &$0) } }
 
     public func cancel() { stop() }
 
-    /// Drains every admitted frame, sends `{"type":"close"}` and waits for the
-    /// server to close the stream, all inside `finishBudget`. Returns the whole
-    /// session transcript, or `nil` when no turn produced words; turns that end
-    /// during the finish are folded into it rather than also delivered through
-    /// `onTranscript`. A finish that cannot reach that documented end publishes
-    /// its error before returning the confirmed text, also to callers that join
-    /// while the error is being delivered. Concurrent callers share one outcome;
-    /// cancelling the calling task aborts the session.
+    /// Drains every admitted frame and the framer's padded tail, sends
+    /// `{"type":"close"}` once, then reads results until the server's normal
+    /// closure or the post-stop budget (plus any stop grace). Returns the whole
+    /// session transcript, confirmed turns and the open turn's words, or `nil`
+    /// when nothing has words; turns that end during the finish are folded into
+    /// it rather than also delivered through `onTranscript`. Later calls return
+    /// the same result until the next `start()`. A drain that cannot send
+    /// `close` within `finishBudget`, or a failed stream, publishes its error
+    /// before returning, also to callers that join while the error is being
+    /// delivered. Concurrent callers share one outcome; cancelling the calling
+    /// task aborts the session.
     public func finishAndWait() async -> String? {
         let active: CartesiaLiveRun = withState { _ in run }
         return await withTaskCancellationHandler {

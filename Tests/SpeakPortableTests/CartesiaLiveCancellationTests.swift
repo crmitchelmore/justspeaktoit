@@ -87,7 +87,7 @@ final class CartesiaLiveCancellationTests: XCTestCase {
         fixture.startAndOpen()
         let old = fixture.socket
         old.keepCallbacksAfterCancel()
-        for index in 0..<49 { fixture.client.sendAudio(CartesiaLiveFixture.frame(UInt8(index))) }
+        for index in 0..<20 { fixture.client.sendAudio(CartesiaLiveFixture.frame(UInt8(index))) }
         old.turnUpdate("Old draft")
 
         fixture.start()
@@ -103,8 +103,8 @@ final class CartesiaLiveCancellationTests: XCTestCase {
 
         XCTAssertEqual(replacement.cancels, 0)
         XCTAssertEqual(fixture.log.entries, [.transcript("Old draft", final: false)])
-        // The replacement's own budget is intact: a full five seconds is admitted.
-        for index in 0..<50 { fixture.client.sendAudio(CartesiaLiveFixture.frame(UInt8(index))) }
+        // The replacement's own budget is intact: a full two seconds is admitted.
+        for index in 0..<20 { fixture.client.sendAudio(CartesiaLiveFixture.frame(UInt8(index))) }
         replacement.turn("Fresh.")
         XCTAssertEqual(replacement.binary.count, 1)
         XCTAssertEqual(old.binary.count, 1, "Nothing further left on the old socket")
@@ -149,7 +149,7 @@ final class CartesiaLiveCancellationTests: XCTestCase {
         let transcript = await finish.value
         XCTAssertEqual(transcript, "Saved.")
         XCTAssertEqual(Array(log.entries.suffix(2)), [
-            .error(#"server(statusCode: Optional(500), code: nil, message: "Synthetic failure")"#), .finished("Saved.")
+            .error("Cartesia(500): Synthetic failure"), .finished("Saved.")
         ])
         XCTAssertEqual(old.cancels, 1)
         XCTAssertEqual(fixture.factory.sockets.count, 2)
@@ -169,9 +169,11 @@ final class CartesiaLiveCancellationTests: XCTestCase {
             client.start(onTranscript: { log.transcript($0, final: $1) }, onError: { log.fail($0) })
         })
         fixture.socket.open()
-        // Odd PCM fails synchronously inside `sendAudio`, on this thread.
-        client.sendAudio(Data([1, 2, 3]))
-        XCTAssertEqual(log.errors.first as? CartesiaStreamingError, .invalidPCM)
+        // A backlog beyond two seconds fails synchronously inside `sendAudio`, on this thread.
+        for index in 0..<21 { client.sendAudio(CartesiaLiveFixture.frame(UInt8(index))) }
+        guard case StreamingClientError.transportStalled? = log.errors.first else {
+            return XCTFail("Expected the backlog to fail as a stalled transport")
+        }
         let replacement = fixture.factory.sockets[1]
         replacement.open()
         client.sendAudio(CartesiaLiveFixture.frame(1))

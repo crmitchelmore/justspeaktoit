@@ -127,37 +127,37 @@ final class CartesiaLiveProtocolTests: XCTestCase {
         XCTAssertNil(CartesiaLiveClient.transcriptEvent(from: #"{"type":"turn.start"}"#))
     }
 
-    func testErrorFramesMapToTypedFailures() {
-        func failure(_ object: [String: Any]) -> Error? {
-            guard case .failure(let failure)? = CartesiaTurnEvent(
-                data: Data(CartesiaTestSocket.eventJSON(object).utf8)
-            ) else { return nil }
-            return CartesiaLiveProtocol.error(for: failure)
+    func testErrorFramesKeepTheProviderStatusAndMessage() {
+        func failure(_ object: [String: Any]) -> NSError? {
+            let json = CartesiaTestSocket.eventJSON(object)
+            guard case .failure(let failure)? = CartesiaTurnEvent(data: Data(json.utf8)) else { return nil }
+            let error = CartesiaLiveProtocol.error(for: failure) as NSError
+            XCTAssertEqual(CartesiaLiveClient.providerError(from: json) as NSError?, error)
+            return error
         }
         for status in [401, 403] {
             let error = failure(["type": "error", "status_code": status, "title": "Unauthorized", "message": "No"])
-            guard case .invalidAPIKey(let provider)? = error as? StreamingClientError else {
-                return XCTFail("\(status) must be a rejected key")
-            }
-            XCTAssertEqual(provider, "Cartesia")
+            XCTAssertEqual(error?.domain, "Cartesia")
+            XCTAssertEqual(error?.code, status)
+            XCTAssertEqual(error?.localizedDescription, "No")
         }
         let invalidModel = failure([
             "type": "error", "status_code": 400, "title": "Invalid model",
             "message": "The model is not valid.", "error_code": "model_not_found"
         ])
-        XCTAssertEqual(
-            invalidModel as? CartesiaStreamingError,
-            .server(statusCode: 400, code: "model_not_found", message: "The model is not valid.")
-        )
+        XCTAssertEqual(invalidModel?.code, 400)
+        XCTAssertEqual(invalidModel?.localizedDescription, "The model is not valid.")
         let titled = failure(["type": "error", "status_code": 500, "title": "Server error"])
-        XCTAssertEqual(titled as? CartesiaStreamingError, .server(statusCode: 500, code: nil, message: "Server error"))
+        XCTAssertEqual(titled?.code, 500)
+        XCTAssertEqual(titled?.localizedDescription, "Server error")
+        let untitled = failure(["type": "error"])
+        XCTAssertEqual(untitled?.code, -1)
+        XCTAssertEqual(untitled?.localizedDescription, "Cartesia streaming error")
         let noisy = "line one\nline two " + String(repeating: "x", count: 400)
-        let long = failure(["type": "error", "status_code": 500, "message": noisy])
-        guard case .server(_, _, let message)? = long as? CartesiaStreamingError else {
-            return XCTFail("Expected a server failure")
-        }
+        let message = failure(["type": "error", "status_code": 500, "message": noisy])?.localizedDescription ?? ""
         XCTAssertFalse(message.contains("\n"))
         XCTAssertLessThanOrEqual(message.count, 201)
+        XCTAssertNil(CartesiaLiveClient.providerError(from: #"{"type":"turn.end","transcript":"Not an error."}"#))
     }
 
     func testTransportFailuresRecogniseRejectedKeys() {
@@ -181,18 +181,22 @@ final class CartesiaLiveProtocolTests: XCTestCase {
         XCTAssertEqual(client.finalShape, .standaloneSegments)
         XCTAssertEqual(finalizing.finalShape, .standaloneSegments)
         XCTAssertTrue(finalizing.finishFlushesBufferedAudio)
-        XCTAssertEqual(finalizing.finalisationBudget, CartesiaLiveClient.finishBudget)
-        XCTAssertEqual(CartesiaLiveClient.finishBudget, 8)
+        // The drain bound, then the catalogue's post-stop budget after `close`.
+        let postStop = ModelCatalog.liveCapabilities(for: "cartesia/ink-2-streaming").postStopFinalizeBudget
+        XCTAssertEqual(finalizing.finalisationBudget, CartesiaLiveClient.finishBudget + postStop)
+        XCTAssertEqual(CartesiaLiveClient.finishBudget, 1.5)
+        let widened = CartesiaLiveClient(
+            apiKey: "k", postStopFinalizeBudget: 4, stopGracePeriod: 0.5, makeConnection: { _ in CartesiaTestSocket() }
+        )
+        XCTAssertEqual(widened.finalisationBudget, CartesiaLiveClient.finishBudget + 4.5)
     }
 
-    func testBudgetsAreBoundedAndNestedInsideTheFinish() {
-        XCTAssertLessThan(CartesiaLiveClient.finishReadyBudget, CartesiaLiveClient.finishBudget)
-        XCTAssertLessThan(CartesiaLiveClient.sendDeadline, CartesiaLiveClient.finishBudget)
+    func testBudgetsAreBounded() {
         XCTAssertEqual(CartesiaLiveClient.readyDeadline, 10)
-        XCTAssertEqual(CartesiaLiveClient.maximumQueuedFrames, 256)
-        // Five seconds of 16 kHz PCM16 mono: fifty 100 ms capture frames.
-        XCTAssertEqual(CartesiaLiveRun(sampleRate: 16_000).maximumBytes, 160_000)
-        // The host watchdog keeps its 10 s floor with this budget.
-        XCTAssertLessThanOrEqual(CartesiaLiveClient.finishBudget + 1, 10)
+        XCTAssertEqual(CartesiaLiveClient.sendDeadline, 5)
+        // Two seconds of 16 kHz PCM16 mono: twenty 100 ms frames.
+        XCTAssertEqual(CartesiaLiveRun(sampleRate: 16_000).maximumBytes, 64_000)
+        // The host watchdog keeps its 10 s floor with the default budget.
+        XCTAssertLessThanOrEqual((CartesiaLiveClient(apiKey: "k").finalisationBudget ?? .infinity) + 1, 10)
     }
 }

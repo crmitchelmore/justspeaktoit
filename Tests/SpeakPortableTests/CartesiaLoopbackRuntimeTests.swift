@@ -39,22 +39,19 @@ final class CartesiaLoopbackRuntimeTests: XCTestCase {
         XCTAssertEqual(transcript, "naïve café 👩🏽‍💻")
         XCTAssertEqual(harness.entries, [
             .transcript(" naïve café 👩🏽‍💻", final: true),
-            .error(#"server(statusCode: Optional(500), code: Optional("loopback_failure"), "#
-                + #"message: "Synthetic terminal failure")"#),
+            .error("Cartesia(500): Synthetic terminal failure"),
             .finished("naïve café 👩🏽‍💻")
         ])
     }
 
-    func testClosureWithAnUnendedTurnIsReportedAndItsDraftDelivered() async throws {
+    func testClosureWithAnUnendedTurnReturnsItsWordsWithTheSession() async throws {
         let harness = try CartesiaLoopbackHarness(scenario: "incomplete")
         defer { harness.invalidate() }
         harness.start()
         CartesiaLoopbackHarness.frames.forEach(harness.client.sendAudio)
         let transcript = await harness.finish()
-        XCTAssertNil(transcript)
-        XCTAssertEqual(harness.entries, [
-            .transcript("Unfinished thought", final: false), .error("incompleteTurn"), .finished(nil)
-        ])
+        XCTAssertEqual(transcript, "Unfinished thought")
+        XCTAssertEqual(harness.entries, [.finished("Unfinished thought")], "The normal closure completes the finish")
     }
 
     func testDroppedConnectionAfterAValidFlushIsAFailure() async throws {
@@ -171,8 +168,7 @@ private final class CartesiaLoopbackHarness: @unchecked Sendable {
             if isFinal { self.lock.withLock { self.finalObserver }?(text) }
         }, onError: { [weak self] error in
             // Transport errors differ by platform; the stream outcome does not.
-            let description = (error as? CartesiaStreamingError).map { "\($0)" } ?? "transport"
-            self?.record(.error(description))
+            self?.record(.error(Self.describe(error)))
         })
     }
 
@@ -197,6 +193,13 @@ private final class CartesiaLoopbackHarness: @unchecked Sendable {
     }
 
     private func record(_ entry: Entry) { lock.withLock { entriesValue.append(entry) } }
+
+    private static func describe(_ error: Error) -> String {
+        if let streaming = error as? CartesiaStreamingError { return "\(streaming)" }
+        let provider = error as NSError
+        if provider.domain == "Cartesia" { return "Cartesia(\(provider.code)): \(provider.localizedDescription)" }
+        return "transport"
+    }
 }
 
 private final class ObservedTransport: @unchecked Sendable {

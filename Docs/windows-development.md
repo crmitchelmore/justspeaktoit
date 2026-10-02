@@ -49,9 +49,11 @@ source-wired with fake-transport tests only and still needs a Windows provider
 receipt; the Grok Voice conversation route stays unavailable. Gladia
 (`gladia/solaria-1-streaming`) creates its single-use session with an HTTPS
 request, then streams on the WinHTTP socket that session names; the account key
-never reaches the socket. Cartesia (`cartesia/ink-2-streaming`) completes a
-finish only on the server's normal closure (1000) after its `close` command,
-read from the close status the transport reports. Rev.ai
+never reaches the socket. Cartesia (`cartesia/ink-2-streaming`) repacks audio
+into 100 ms frames, keeps the newest two seconds while its socket opens, and
+after its single `close` command reads results until the server's normal
+closure (1000), read from the close status the transport reports, or its
+post-stop budget, then returns the whole session. Rev.ai
 (`revai/machine-v2-streaming`) holds audio until the server's `connected`
 message and completes a finish only on the normal closure that follows a
 delivered `EOS`; a closure before `EOS`, any other status or a dropped

@@ -64,51 +64,33 @@ final class CartesiaLiveClientTests: XCTestCase {
         ))
     }
 
-    /// Error frames become typed failures: a rejected key is recognised, and
-    /// any other provider error keeps its status and message.
-    func testProviderErrorPreservesStatusAndMessage() {
-        func error(_ json: String) -> Error? {
-            guard case .failure(let failure)? = CartesiaTurnEvent(data: Data(json.utf8)) else { return nil }
-            return CartesiaLiveProtocol.error(for: failure)
-        }
+    func testProviderErrorPreservesStatusAndMessage() throws {
+        let error = try XCTUnwrap(CartesiaLiveClient.providerError(
+            from: #"{"type":"error","status_code":403,"message":"denied"}"#
+        )) as NSError
 
-        let limited = error(#"{"type":"error","status_code":429,"message":"denied"}"#)
-        XCTAssertEqual(
-            limited as? CartesiaStreamingError, .server(statusCode: 429, code: nil, message: "denied")
-        )
-        XCTAssertEqual(limited?.localizedDescription.contains("denied"), true)
-        let rejected = error(#"{"type":"error","status_code":403,"message":"denied"}"#)
-        guard case .invalidAPIKey? = rejected as? StreamingClientError else {
-            return XCTFail("403 must be a rejected key")
-        }
+        XCTAssertEqual(error.domain, "Cartesia")
+        XCTAssertEqual(error.code, 403)
+        XCTAssertEqual(error.localizedDescription, "denied")
     }
 
-    /// Capture frames reach the socket byte-for-byte, in order and unrepacked;
-    /// a frame of partial samples is refused before it could misalign them.
-    func testPCMIsSentAsCapturedWithoutRepacking() async {
-        let socket = TestLiveWebSocket()
-        let client = makeClient(TestSocketFactory([socket]), sampleRate: 1_000)
-        let lock = NSLock()
-        var errors: [Error] = []
-        client.start(onTranscript: { _, _ in }, onError: { error in lock.withLock { errors.append(error) } })
-        let frames = [Data(repeating: 1, count: 98), Data(repeating: 2, count: 152), Data(repeating: 3, count: 120)]
-        frames.forEach(client.sendAudio)
-        let didSend = await eventually { socket.messages.count == 3 }
-        XCTAssertTrue(didSend)
-        XCTAssertEqual(socket.messages.compactMap { if case .data(let data) = $0 { data } else { nil } }, frames)
+    func testPCMFramerPreservesBytesAndUsesConfiguredDurations() {
+        var framer = CartesiaPCMFramer(sampleRate: 1_000)
+        XCTAssertNil(framer.finish())
+        XCTAssertTrue(framer.append(Data(repeating: 1, count: 99)).isEmpty)
+        let frames = framer.append(Data(repeating: 2, count: 151))
 
-        client.sendAudio(Data(repeating: 4, count: 99))
-        let didRefuse = await eventually { lock.withLock { errors.count == 1 } }
-        XCTAssertTrue(didRefuse)
-        XCTAssertEqual(socket.messages.count, 3)
+        XCTAssertEqual(frames.map(\.count), [200])
+        XCTAssertEqual(Array(frames[0].prefix(99)), [UInt8](repeating: 1, count: 99))
+        XCTAssertEqual(framer.finish()?.count, 100)
+
+        var unpadded = CartesiaPCMFramer(sampleRate: 1_000)
+        XCTAssertTrue(unpadded.append(Data(repeating: 3, count: 120)).isEmpty)
+        XCTAssertEqual(unpadded.finish(), Data(repeating: 3, count: 120))
     }
 }
 
 extension CartesiaLiveClientTests {
-    /// Audio held while the handshake is pending drains once it completes,
-    /// without another capture chunk. Startup audio is bounded by the
-    /// five-second admission budget, whose overflow is reported rather than
-    /// trimmed (`CartesiaLiveStreamingTests`).
     func testDelayedTransportDrainsBoundedStartupAudioWithoutAnotherCaptureChunk() async {
         let socket = TestLiveWebSocket()
         socket.automaticallyRunsOnResume = false
@@ -119,16 +101,17 @@ extension CartesiaLiveClientTests {
         for index in 0..<20 {
             client.sendAudio(Data(repeating: UInt8(index), count: 200))
         }
+        client.sendAudio(Data(repeating: 20, count: 199))
         _ = client.transcriptSnapshot(captureDuration: 0)
         XCTAssertTrue(socket.messages.isEmpty)
         socket.markRunning()
 
-        let didDrain = await eventually { socket.messages.count == 20 }
+        let didDrain = await eventually { socket.messages.count == 19 }
         XCTAssertTrue(didDrain)
         guard case .data(let first) = socket.messages[0] else {
-            return XCTFail("Expected startup PCM")
+            return XCTFail("Expected framed startup PCM")
         }
-        XCTAssertEqual(first.first, 0)
+        XCTAssertEqual(first.first, 1)
     }
 
     func testFinishDrainsResidualThenCloseAndConsumesLateFinals() async {
@@ -172,7 +155,7 @@ extension CartesiaLiveClientTests {
         guard case .data(let residual) = socket.messages[0] else {
             return XCTFail("Expected residual PCM before close")
         }
-        XCTAssertEqual(residual.count, 800, "Audio is sent as captured, not padded")
+        XCTAssertEqual(residual.count, 1_600)
     }
 
     func testOrdinaryEventsKeepStandaloneCallbackShapeAndSnapshotInterim() async {
@@ -202,20 +185,11 @@ extension CartesiaLiveClientTests {
         XCTAssertEqual(snapshot.segments.map(\.text), ["Final."])
     }
 
-    /// A finish the server never closes is bounded. Only the server's normal
-    /// closure completes one, so the missing completion is reported and the
-    /// finish returns confirmed text only; the draft already reached the host.
     func testNoResponseFinishIsBoundedAndRetainsInterim() async {
         let socket = TestLiveWebSocket()
         let factory = TestSocketFactory([socket])
         let client = makeClient(factory)
-        let lock = NSLock()
-        var callbacks: [String] = []
-        var errors: [Error] = []
-        client.start(
-            onTranscript: { text, _ in lock.withLock { callbacks.append(text) } },
-            onError: { error in lock.withLock { errors.append(error) } }
-        )
+        client.start(onTranscript: { _, _ in }, onError: { _ in })
         let didStart = await eventually { socket.state == .running }
         XCTAssertTrue(didStart)
         socket.emit(Self.partial("unfinished"))
@@ -226,9 +200,7 @@ extension CartesiaLiveClientTests {
 
         let transcript = await client.finishAndWait()
 
-        XCTAssertNil(transcript)
-        XCTAssertEqual(lock.withLock { callbacks }, ["unfinished"])
-        XCTAssertEqual(lock.withLock { errors }.first as? CartesiaStreamingError, .missingCompletion)
+        XCTAssertEqual(transcript, "unfinished")
         XCTAssertEqual(textMessages(socket), [#"{"type":"close"}"#])
         XCTAssertEqual(socket.cancelCount, 1)
     }
@@ -240,13 +212,10 @@ extension CartesiaLiveClientTests {
         client.start(onTranscript: { _, _ in }, onError: { _ in })
         let didStart = await eventually { socket.state == .running }
         XCTAssertTrue(didStart)
-        socket.emit(Self.final("shared"))
+        socket.emit(Self.partial("shared"))
 
         async let first = client.finishAndWait()
         async let second = client.finishAndWait()
-        let didSendClose = await eventually { textMessages(socket).contains(#"{"type":"close"}"#) }
-        XCTAssertTrue(didSendClose)
-        socket.closeFromServer()
         let firstResult = await first
         let secondResult = await second
 
@@ -262,13 +231,9 @@ extension CartesiaLiveClientTests {
         client.start(onTranscript: { _, _ in }, onError: { _ in })
         let didStartFirst = await eventually { firstSocket.state == .running }
         XCTAssertTrue(didStartFirst)
-        firstSocket.emit(Self.final("retained"))
+        firstSocket.emit(Self.partial("retained"))
 
-        let finish = Task { await client.finishAndWait() }
-        let didSendClose = await eventually { textMessages(firstSocket).contains(#"{"type":"close"}"#) }
-        XCTAssertTrue(didSendClose)
-        firstSocket.closeFromServer()
-        let firstResult = await finish.value
+        let firstResult = await client.finishAndWait()
         let repeatedResult = await client.finishAndWait()
         XCTAssertEqual(firstResult, "retained")
         XCTAssertEqual(repeatedResult, "retained")
@@ -282,6 +247,52 @@ extension CartesiaLiveClientTests {
 }
 
 extension CartesiaLiveClientTests {
+    func testNetworkFailureAfterCloseIsSurfaced() async {
+        let failedSocket = TestLiveWebSocket()
+        let failedFactory = TestSocketFactory([failedSocket])
+        let failedClient = makeClient(failedFactory)
+        let lock = NSLock()
+        var errors: [Error] = []
+        failedClient.start(
+            onTranscript: { _, _ in },
+            onError: { error in lock.withLock { errors.append(error) } }
+        )
+        let didStart = await eventually { failedSocket.state == .running }
+        XCTAssertTrue(didStart)
+        let failedFinish = Task { await failedClient.finishAndWait() }
+        let didSendClose = await eventually {
+            textMessages(failedSocket).contains(#"{"type":"close"}"#)
+        }
+        XCTAssertTrue(didSendClose)
+        failedSocket.failReceive(URLError(.networkConnectionLost))
+        let failedTranscript = await failedFinish.value
+        XCTAssertNil(failedTranscript)
+        let didSurfaceError = await eventually { lock.withLock { errors.count == 1 } }
+        XCTAssertTrue(didSurfaceError)
+    }
+
+    func testNormalServerCloseAfterClientCloseIsNotSurfaced() async {
+        let normalSocket = TestLiveWebSocket()
+        let normalFactory = TestSocketFactory([normalSocket])
+        let normalClient = makeClient(normalFactory)
+        let lock = NSLock()
+        var errors: [Error] = []
+        normalClient.start(
+            onTranscript: { _, _ in },
+            onError: { error in lock.withLock { errors.append(error) } }
+        )
+        let didStartNormal = await eventually { normalSocket.state == .running }
+        XCTAssertTrue(didStartNormal)
+        let normalFinish = Task { await normalClient.finishAndWait() }
+        let didSendNormalClose = await eventually {
+            textMessages(normalSocket).contains(#"{"type":"close"}"#)
+        }
+        XCTAssertTrue(didSendNormalClose)
+        normalSocket.closeFromServer()
+        _ = await normalFinish.value
+        XCTAssertTrue(lock.withLock { errors.isEmpty })
+    }
+
     func testStalledAudioSendFailsWithinInjectedBudgetWithoutSendingClose() async {
         let socket = TestLiveWebSocket()
         socket.automaticallyCompletesSends = false
@@ -338,15 +349,13 @@ extension CartesiaLiveClientTests {
         XCTAssertEqual(oldSocket.cancelCount, 1)
     }
 
-    /// Bounds long enough that a scripted closure always lands inside them.
     private func makeClient(
         _ factory: TestSocketFactory,
         sampleRate: Int = 16_000
     ) -> CartesiaLiveClient {
         CartesiaLiveClient(
             sampleRate: sampleRate,
-            sendBudget: 0.5,
-            postStopFinalizeBudget: 0.5,
+            postStopFinalizeBudget: 0.05,
             stopGracePeriod: 0,
             socketFactory: factory.make
         )

@@ -5,11 +5,12 @@ import FoundationNetworking
 import XCTest
 @testable import SpeakCore
 
-/// The automatic-turns stream has no acknowledgement frame: after `close`, only
-/// the server's affirmative normal closure (1000), reported by the transport
-/// through `StreamingWebSocketCloseReporting`, completes a finish. A dropped
-/// network or any other close code fails it, publishes the flushed words and
-/// the error first, and still returns the confirmed text.
+/// The automatic-turns stream has no acknowledgement frame: after `close`, the
+/// server's normal closure (1000), reported by the transport through
+/// `StreamingWebSocketCloseReporting`, completes a finish early; otherwise the
+/// post-stop budget does. A dropped network or any other close code fails it,
+/// publishes the flushed words and the error first, and still returns the
+/// session's text.
 final class CartesiaLiveClosureTests: XCTestCase {
     func testNormalClosureAfterAValidFlushCompletesTheFinish() async {
         let fixture = CartesiaLiveFixture()
@@ -75,17 +76,16 @@ final class CartesiaLiveClosureTests: XCTestCase {
         }
     }
 
-    func testTruncatedTurnBeforeANormalClosureIsReportedWithItsDraft() async {
+    func testOpenTurnAtANormalClosureIsReturnedWithTheWholeSession() async {
         let fixture = CartesiaLiveFixture()
         let finish = await finishingFixture(fixture, confirmed: "Confirmed.")
         fixture.socket.turnStart()
         fixture.socket.turnUpdate("Cut off mid")
         fixture.socket.closeNormally()
         let transcript = await finish.value
-        XCTAssertEqual(transcript, "Confirmed.")
-        XCTAssertEqual(Array(fixture.log.entries.suffix(3)), [
-            .transcript("Cut off mid", final: false), .error("incompleteTurn"), .finished("Confirmed.")
-        ])
+        XCTAssertEqual(transcript, "Confirmed. Cut off mid")
+        XCTAssertTrue(fixture.log.errors.isEmpty)
+        XCTAssertEqual(fixture.log.entries.last, .finished("Confirmed. Cut off mid"))
     }
 
     func testNormalClosureBeforeCloseIsSentIsAFailure() async {

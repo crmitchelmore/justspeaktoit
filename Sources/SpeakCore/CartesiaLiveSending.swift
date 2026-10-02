@@ -121,7 +121,11 @@ extension CartesiaLiveClient {
             }
             if active.closeSent, !active.closeDelivered {
                 active.closeDelivered = true
-                if let closure = active.peerClosure { settle(closure: closure, active, &effects) }
+                if let closure = active.peerClosure {
+                    settle(closure: closure, active, &effects)
+                } else {
+                    awaitClosure(active, &effects)
+                }
                 return nil
             }
             return claim(active, &effects)
@@ -129,25 +133,57 @@ extension CartesiaLiveClient {
         if let outbound { drive(outbound) }
     }
 
-    /// Stop sequencing: every admitted frame is sent and completed, then
-    /// `{"type":"close"}`, then the server's closure ends the stream. Audio held
-    /// while the socket opens waits for the handshake within
-    /// `finishReadyBudget`, and one deadline (`finishBudget`, widened by any
-    /// stop options) bounds the whole finish.
+    /// Queues one framed PCM frame. Before the socket opens it joins the
+    /// startup audio, which `trimStartupAudio` keeps to the newest
+    /// `bufferedAudioSeconds`. Once it has opened, a backlog beyond that bound
+    /// is a stalled transport, reported once.
+    func admit(_ frame: Data, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) -> Bool {
+        guard !frame.isEmpty else { return true }
+        if active.opened, active.admittedBytes + frame.count > active.maximumBytes {
+            fail(active, stalledError, &effects)
+            return false
+        }
+        active.outgoing.append(frame)
+        active.admittedBytes += frame.count
+        return true
+    }
+
+    /// Startup audio keeps the newest `bufferedAudioSeconds`, counting the
+    /// framer's partial frame: the oldest frames make room while the socket
+    /// opens, instead of failing the recording.
+    func trimStartupAudio(_ active: CartesiaLiveRun) {
+        guard !active.opened else { return }
+        while active.admittedBytes + active.framer.bufferedByteCount > active.maximumBytes,
+              !active.outgoing.isEmpty {
+            active.admittedBytes -= active.outgoing.removeFirst().count
+        }
+    }
+
+    /// Stop sequencing: the framer's padded tail joins the admitted audio,
+    /// every frame is sent and completed, then exactly one `{"type":"close"}`.
+    /// The drain, including any wait for the handshake, must deliver `close`
+    /// within `finishBudget`; after it the results are read until the server's
+    /// normal closure or the post-stop budget.
     func beginFinish(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
         guard active.phase != .finishing else { return }
         active.phase = .finishing
-        after(timing.finish, active, &effects) { client, active, effects in
-            let error: Error = active.closeDelivered ? CartesiaStreamingError.missingCompletion : client.stalledError
-            client.fail(active, error, &effects)
-        }
-        if !active.opened {
-            after(Self.finishReadyBudget, active, &effects) { client, active, effects in
-                if !active.opened { client.fail(active, CartesiaStreamingError.sessionNotReady, &effects) }
-            }
+        if let tail = active.framer.finish(), !admit(tail, active, &effects) { return }
+        after(timing.drain, active, &effects) { client, active, effects in
+            guard !active.closeDelivered else { return }
+            client.fail(active, active.opened ? client.stalledError : CartesiaStreamingError.sessionNotReady, &effects)
         }
         if let outbound = claim(active, &effects) {
             effects.add { [weak self] in self?.drive(outbound) }
+        }
+    }
+
+    /// `close` is with the server: results are read until its normal closure
+    /// or until the post-stop budget (and any stop grace) elapses, and either
+    /// way the finish returns the whole session.
+    private func awaitClosure(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
+        after(timing.postClose, active, &effects) { client, active, effects in
+            guard active.phase == .finishing else { return }
+            client.complete(active, &effects)
         }
     }
 }

@@ -73,14 +73,13 @@ enum CartesiaLiveProtocol {
         return request
     }
 
-    /// 401/403 is a rejected key; anything else is a typed server failure whose
-    /// provider text is bounded before it reaches a user-visible message.
+    /// A server `error` frame, which ends the session, keeps the provider's
+    /// status and message (bounded before it reaches a user-visible message) in
+    /// the `Cartesia` error domain.
     static func error(for failure: CartesiaTurnEvent.ServerFailure) -> Error {
-        if failure.statusCode == 401 || failure.statusCode == 403 {
-            return StreamingClientError.invalidAPIKey(provider: "Cartesia")
-        }
-        return CartesiaStreamingError.server(
-            statusCode: failure.statusCode, code: failure.code, message: boundedMessage(failure.message)
+        NSError(
+            domain: "Cartesia", code: failure.statusCode ?? -1,
+            userInfo: [NSLocalizedDescriptionKey: boundedMessage(failure.message)]
         )
     }
 
@@ -174,19 +173,11 @@ enum CartesiaTurnEvent: Equatable {
 }
 
 /// Failures specific to the Cartesia stream. Transport and credential failures
-/// use the shared ``StreamingClientError``.
+/// use the shared ``StreamingClientError``; a server `error` frame keeps the
+/// provider's status in the `Cartesia` error domain.
 public enum CartesiaStreamingError: LocalizedError, Equatable, Sendable {
     /// The WebSocket did not open within its bound.
     case sessionNotReady
-    /// A server `error` frame, which ends the session.
-    case server(statusCode: Int?, code: String?, message: String)
-    /// A frame that is not whole 16-bit samples would misalign every later sample.
-    case invalidPCM
-    /// The server closed the stream while a turn it had started was still
-    /// open, so the trailing words were never confirmed.
-    case incompleteTurn
-    /// The finish budget elapsed after `close` without the server closing the stream.
-    case missingCompletion
     /// The server closed the socket with this status other than as the normal
     /// end of a finished stream, so the transcript may be incomplete.
     case closed(code: Int)
@@ -195,15 +186,6 @@ public enum CartesiaStreamingError: LocalizedError, Equatable, Sendable {
         switch self {
         case .sessionNotReady:
             return "Cartesia did not open the transcription stream in time."
-        case .server(let statusCode, _, let message):
-            let status = statusCode.map { " (\($0))" } ?? ""
-            return "Cartesia reported a streaming error\(status): \(message)"
-        case .invalidPCM:
-            return "Cartesia requires complete 16-bit PCM samples."
-        case .incompleteTurn:
-            return "Cartesia closed the stream before confirming the last words. The recording is available to retry."
-        case .missingCompletion:
-            return "Cartesia did not complete the transcription in time. The recording is available to retry."
         case .closed(let code):
             return "Cartesia closed the stream unexpectedly (code \(code)). The recording is available to retry."
         }
@@ -225,6 +207,13 @@ extension CartesiaLiveClient {
     /// internal seam, kept source-compatible.
     public static func webSocketURL(model: String, sampleRate: Int) -> URL? {
         CartesiaLiveProtocol.webSocketURL(model: model, sampleRate: sampleRate)
+    }
+
+    /// A server `error` frame as the error that ends the session, or `nil` for
+    /// any other frame.
+    static func providerError(from json: String) -> Error? {
+        guard case .failure(let failure)? = CartesiaTurnEvent(data: Data(json.utf8)) else { return nil }
+        return CartesiaLiveProtocol.error(for: failure)
     }
 
     /// The client's earlier internal seam, kept source-compatible.

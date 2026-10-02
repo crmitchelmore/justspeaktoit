@@ -126,7 +126,7 @@ final class CartesiaLiveDeliveryOrderingTests: XCTestCase {
 
         let returned = expectation(description: "The capture call returned without waiting for the host")
         DispatchQueue.global().async {
-            client.sendAudio(Data([1, 2, 3]))
+            Self.overflowTheBacklog(client)
             returned.fulfill()
         }
         await fulfillment(of: [returned], timeout: 2)
@@ -139,7 +139,7 @@ final class CartesiaLiveDeliveryOrderingTests: XCTestCase {
         let transcript = await late.value
         XCTAssertEqual(transcript, "Final words.")
         XCTAssertEqual(Array(log.entries.suffix(3)), [
-            .transcript("Final words.", final: true), .error("invalidPCM"), .finished("Final words.")
+            .transcript("Final words.", final: true), Self.stalled, .finished("Final words.")
         ])
     }
 
@@ -160,7 +160,7 @@ final class CartesiaLiveDeliveryOrderingTests: XCTestCase {
         old.open()
         DispatchQueue.global().async { old.turn("Old final.") }
         await fulfillment(of: [delivering], timeout: 2)
-        client.sendAudio(Data([1, 2, 3]))
+        Self.overflowTheBacklog(client)
         XCTAssertEqual(old.cancels, 1, "The failed run is retired before any host callback re-enters")
         let late = fixture.finish()
         await fixture.waitForFinishes(1)
@@ -177,7 +177,7 @@ final class CartesiaLiveDeliveryOrderingTests: XCTestCase {
         XCTAssertEqual(replacement.binary, [CartesiaLiveFixture.frame(1)])
         XCTAssertEqual(log.entries, [
             .transcript("Old final.", final: false), .transcript("Old final.", final: true),
-            .error("invalidPCM"), .finished("Old final."),
+            Self.stalled, .finished("Old final."),
             .transcript("New.", final: false), .transcript("New.", final: true)
         ])
         client.cancel()
@@ -210,13 +210,19 @@ final class CartesiaLiveDeliveryOrderingTests: XCTestCase {
         fixture.clock.fire(CartesiaLiveClient.sendDeadline)
         XCTAssertEqual(socket.cancels, 1)
         XCTAssertTrue(log.errors.isEmpty, "The report waits behind the draft already on its way to the host")
-        XCTAssertFalse(log.entries.contains(.finished(nil)), "The registered finish waits for the report")
+        XCTAssertFalse(log.entries.contains(.finished("Draft")), "The registered finish waits for the report")
         release.signal()
 
         let transcript = await finish.value
-        XCTAssertNil(transcript)
-        XCTAssertEqual(log.entries, [
-            .transcript("Draft", final: false), .error("transportStalled(provider: \"Cartesia\")"), .finished(nil)
-        ])
+        XCTAssertEqual(transcript, "Draft", "A failed finish still returns the whole session")
+        XCTAssertEqual(log.entries, [.transcript("Draft", final: false), Self.stalled, .finished("Draft")])
+    }
+
+    private static let stalled = CartesiaEventLog.Entry.error("transportStalled(provider: \"Cartesia\")")
+
+    /// A backlog beyond two seconds fails the run synchronously, on the calling
+    /// thread, while every send is held.
+    private static func overflowTheBacklog(_ client: CartesiaLiveClient) {
+        for index in 0..<21 { client.sendAudio(CartesiaLiveFixture.frame(UInt8(index))) }
     }
 }

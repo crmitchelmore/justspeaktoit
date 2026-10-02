@@ -158,21 +158,22 @@ extension CartesiaLiveClient {
     }
 
     /// The documented end of the stream: after `close`, the server flushes its
-    /// events and then closes the socket normally. Only that affirmative close
-    /// (1000), as the transport reports it, completes a finish. Any other code,
-    /// or a transport failure without a close frame, fails it: the words it
-    /// flushed are still released to the host and the confirmed text returned.
-    /// Words of a turn the server never ended are reported rather than dropped;
-    /// a started turn that produced no words loses nothing.
+    /// events and then closes the socket normally (1000), as the transport
+    /// reports it. That closure completes the finish with the whole session,
+    /// including the words of a turn the server never ended. Any other code, or
+    /// a transport failure without a close frame, fails it: the words it
+    /// flushed are still released to the host before the error.
     func settle(closure error: Error, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
         guard CartesiaLiveProtocol.isNormalClosure(error) else {
             fail(active, CartesiaLiveProtocol.connectionError(error), &effects)
             return
         }
-        guard active.openTurnDraft == nil else {
-            fail(active, CartesiaStreamingError.incompleteTurn, &effects)
-            return
-        }
+        complete(active, &effects)
+    }
+
+    /// The finish ends successfully: the run retires and every waiter
+    /// receives the whole session.
+    func complete(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
         log("Stream completed")
         retire(active, &effects)
     }

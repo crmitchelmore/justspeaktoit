@@ -177,7 +177,7 @@ final class StreamingAudioPrerollTests: XCTestCase {
     /// | Soniox (SpeakApp) | shared `StreamingAudioPreroll` | `Tests/SpeakAppTests/SonioxLivePrerollTests.swift` |
     /// | Gladia | bespoke `pendingAudio`, private, 5s inline cap | not asserted — no visible seam |
     /// | AssemblyAI | queued frames, newest five seconds kept before `Begin` | `AssemblyAILiveClientTests` |
-    /// | Cartesia | bounded five-second queue, overflow reported | `CartesiaLiveClientTests` |
+    /// | Cartesia | provider-local framed two-second cap | `CartesiaLiveClientTests` |
     /// | Gemini | bespoke `pendingAudio`, private, trimmed | not asserted — no visible seam |
     /// | xAI | bespoke `pendingAudio`, private, trimmed | not asserted — no visible seam |
     /// | **Modulate** | **none — `sendAudio` returns early with no socket** | **gap, tracked by #947** |

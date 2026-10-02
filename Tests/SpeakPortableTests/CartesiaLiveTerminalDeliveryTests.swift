@@ -10,9 +10,7 @@ import XCTest
 /// the error is out, must return only after the error has been delivered, and
 /// nothing may reconnect or touch a replacement afterwards.
 final class CartesiaLiveTerminalDeliveryTests: XCTestCase {
-    private let serverFailure = CartesiaEventLog.Entry.error(
-        #"server(statusCode: Optional(500), code: nil, message: "Synthetic failure")"#
-    )
+    private let serverFailure = CartesiaEventLog.Entry.error("Cartesia(500): Synthetic failure")
 
     func testFinishJoiningWhileTheFailedSocketIsCancelledReturnsOnlyAfterTheError() async {
         let fixture = CartesiaLiveFixture()

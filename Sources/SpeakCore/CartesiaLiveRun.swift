@@ -18,13 +18,15 @@ final class CartesiaLiveRun: @unchecked Sendable {
 
     // MARK: Outbound audio
 
-    /// Admitted PCM not yet handed to the transport, in capture order.
+    /// Repacks capture chunks into 100 ms frames; it holds the partial frame.
+    var framer: CartesiaPCMFramer
+    /// Framed PCM not yet handed to the transport, in capture order. Before the
+    /// socket opens this is the startup audio, which keeps the newest
+    /// `maximumBytes`.
     var outgoing: [Data] = []
     /// Admitted PCM bytes, queued plus in flight, against `maximumBytes`.
     var admittedBytes = 0
     let maximumBytes: Int
-    /// An idle-phase admission that failed; `start()` reports it at once.
-    var pendingFailure: Error?
     /// Exactly one frame is with the transport at a time.
     var sending = false
     var sendGeneration: UInt64 = 0
@@ -85,24 +87,30 @@ final class CartesiaLiveRun: @unchecked Sendable {
     var lateWaiters: [CheckedContinuation<String?, Never>] = []
 
     init(sampleRate: Int, ignoredReceiveWindow: TimeInterval = IgnoredReceiveFailureWindow.defaultWindow) {
-        maximumBytes = max(Int(Double(max(sampleRate, 1) * 2) * CartesiaLiveClient.bufferedAudioSeconds), 1)
+        framer = CartesiaPCMFramer(sampleRate: sampleRate)
+        maximumBytes = max(Int(Double(max(sampleRate, 1) * 2) * CartesiaLiveClient.bufferedAudioSeconds), 2)
         ignoredReceiveFailures = IgnoredReceiveFailureWindow(window: ignoredReceiveWindow)
     }
 
-    /// Frames admitted and not yet completed: the queue plus any audio in flight.
-    var admittedFrames: Int { outgoing.count + (inFlightAudioBytes > 0 ? 1 : 0) }
+    /// The whole session so far, confirmed turns and the open turn's words, or
+    /// `nil` when nothing has words: the shape `finishAndWait()` returns.
+    var transcript: String? {
+        let whole = wholeText
+        return whole.isEmpty ? nil : whole
+    }
 
-    /// The confirmed transcript so far, or `nil` when no turn has ended with
-    /// words: the shape `finishAndWait()` returns.
-    var transcript: String? { accumulated.transcriptOrNil }
+    /// The open turn's latest words, trimmed; empty when no turn is open.
+    private var draft: String { openTurnDraft?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+
+    /// Confirmed turns, then the open turn's words.
+    private var wholeText: String { [accumulated.text, draft].filter { !$0.isEmpty }.joined(separator: " ") }
 
     /// Confirmed turns and the open turn's latest words, kept apart.
     var snapshot: StreamingTranscriptSnapshot {
-        let draft = openTurnDraft?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return StreamingTranscriptSnapshot(
+        StreamingTranscriptSnapshot(
             confirmedText: accumulated.text,
             pendingInterim: draft,
-            displayText: [accumulated.text, draft].filter { !$0.isEmpty }.joined(separator: " "),
+            displayText: wholeText,
             segments: confirmedSegments.map { TranscriptionSegment(startTime: 0, endTime: 0, text: $0) },
             isTerminal: phase == .closed
         )

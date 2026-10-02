@@ -15,10 +15,14 @@ final class CartesiaLiveFixture: @unchecked Sendable {
     let log = CartesiaEventLog()
     let client: CartesiaLiveClient
 
+    /// The post-stop budget these fixtures use, distinct from the drain bound
+    /// (`CartesiaLiveClient.finishBudget`) so each deadline can be fired alone.
+    static let postClose: TimeInterval = 3
+
     init(key: String = "synthetic-key", model: String = "ink-2", sampleRate: Int = 16_000) {
         let factory = factory, clock = clock
         client = CartesiaLiveClient(
-            apiKey: key, model: model, sampleRate: sampleRate,
+            apiKey: key, model: model, sampleRate: sampleRate, postStopFinalizeBudget: Self.postClose,
             makeConnection: { factory.make($0) }, schedule: { clock.schedule($0, action: $1) }
         )
     }
@@ -381,6 +385,8 @@ final class CartesiaEventLog: @unchecked Sendable {
         if let streaming = error as? CartesiaStreamingError { return "\(streaming)" }
         if let shared = error as? StreamingClientError { return "\(shared)" }
         if let url = error as? URLError { return "URLError(\(url.code.rawValue))" }
+        let provider = error as NSError
+        if provider.domain == "Cartesia" { return "Cartesia(\(provider.code)): \(provider.localizedDescription)" }
         return "\(type(of: error))"
     }
 

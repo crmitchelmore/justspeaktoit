@@ -38,22 +38,19 @@ final class CartesiaWinHTTPRuntimeTests: XCTestCase {
         XCTAssertEqual(transcript, "naïve café 👩🏽‍💻")
         XCTAssertEqual(harness.entries, [
             .transcript(" naïve café 👩🏽‍💻", final: true),
-            .error(#"server(statusCode: Optional(500), code: Optional("loopback_failure"), "#
-                + #"message: "Synthetic terminal failure")"#),
+            .error("Cartesia(500): Synthetic terminal failure"),
             .finished("naïve café 👩🏽‍💻")
         ], "Withheld words reach the host, then the error, then the confirmed return")
         XCTAssertEqual(harness.recorder.binary, CartesiaLoopback.frames)
     }
 
-    func testClosureWithAnUnendedTurnIsReportedAndItsDraftDelivered() async throws {
+    func testClosureWithAnUnendedTurnReturnsItsWordsWithTheSession() async throws {
         let harness = try CartesiaWinHTTPHarness(scenario: "incomplete")
         harness.start()
         CartesiaLoopback.frames.forEach(harness.client.sendAudio)
         let transcript = await harness.finish()
-        XCTAssertNil(transcript)
-        XCTAssertEqual(harness.entries, [
-            .transcript("Unfinished thought", final: false), .error("incompleteTurn"), .finished(nil)
-        ])
+        XCTAssertEqual(transcript, "Unfinished thought")
+        XCTAssertEqual(harness.entries, [.finished("Unfinished thought")], "The normal closure completes the finish")
     }
 
     func testDroppedConnectionAfterAValidFlushIsAFailure() async throws {
@@ -181,6 +178,8 @@ private final class CartesiaWinHTTPHarness: @unchecked Sendable {
     private static func describe(_ error: Error) -> String {
         if let streaming = error as? CartesiaStreamingError { return "\(streaming)" }
         if let shared = error as? StreamingClientError { return "\(shared)" }
+        let provider = error as NSError
+        if provider.domain == "Cartesia" { return "Cartesia(\(provider.code)): \(provider.localizedDescription)" }
         return "transport"
     }
 }

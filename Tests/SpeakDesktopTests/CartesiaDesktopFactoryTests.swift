@@ -44,7 +44,9 @@ final class CartesiaDesktopFactoryTests: XCTestCase {
         XCTAssertTrue(client is CartesiaLiveClient)
         XCTAssertEqual(client?.finalShape, .standaloneSegments)
         XCTAssertEqual(client?.finishFlushesBufferedAudio, true)
-        XCTAssertEqual(client?.finalisationBudget, CartesiaLiveClient.finishBudget)
+        // The drain bound, then the catalogue's post-stop budget after `close`.
+        let postStop = ModelCatalog.liveCapabilities(for: option.id).postStopFinalizeBudget
+        XCTAssertEqual(client?.finalisationBudget, CartesiaLiveClient.finishBudget + postStop)
     }
 
     func testSelectedLanguageNeverReachesTheRequest() throws {

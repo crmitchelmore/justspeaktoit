@@ -11,8 +11,9 @@ import XCTest
 /// the environment, which it never prints. It opens the exact handshake every
 /// client of the stream opens (bearer key, pinned `Cartesia-Version`), sends
 /// one second of generated silence as ten 100 ms frames, finishes, and needs
-/// the documented end: the service's normal closure (1000) after `close`, with
-/// no error. Silence has no words, so no transcript is expected.
+/// the documented end: the service's normal closure (1000) after `close`,
+/// before the post-stop budget could end it, with no error. Silence has no
+/// words, so no transcript is expected.
 ///
 ///     JSTI_CARTESIA_SERVICE_PROBE=1 CARTESIA_API_KEY=<standard key> \
 ///       SPEAK_PORTABLE_CORE=1 xcrun swift test --filter CartesiaServiceAcceptanceTests
@@ -38,7 +39,9 @@ final class CartesiaServiceAcceptanceTests: XCTestCase {
         let report = "errors: \(outcome.errors), finals: \(outcome.finals), "
             + "transcript: \(transcript ?? "none"), finish: \(String(format: "%.2f", elapsed)) s"
         XCTAssertTrue(outcome.errors.isEmpty, report)
-        XCTAssertLessThan(elapsed, CartesiaLiveClient.finishBudget, "The closure, not the deadline, ends it: \(report)")
+        // The post-stop budget can only end a finish this long after `close`.
+        let postStop = ModelCatalog.liveCapabilities(for: "cartesia/ink-2-streaming").postStopFinalizeBudget
+        XCTAssertLessThan(elapsed, postStop, "The closure, not the post-stop budget, ends it: \(report)")
         #endif
     }
 }

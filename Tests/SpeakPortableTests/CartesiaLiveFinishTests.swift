@@ -5,9 +5,10 @@ import FoundationNetworking
 import XCTest
 @testable import SpeakCore
 
-/// Graceful finalisation: drain, `{"type":"close"}`, then the server's normal
-/// closure, inside one bounded budget, with every failure published before the
-/// finish returns its confirmed text.
+/// Graceful finalisation: drain within its bound, exactly one
+/// `{"type":"close"}`, then results until the server's normal closure or the
+/// post-stop budget, returning the whole session; every failure is published
+/// before the finish returns.
 final class CartesiaLiveFinishTests: XCTestCase {
     private typealias Entry = CartesiaEventLog.Entry
     private let stalled = Entry.error("transportStalled(provider: \"Cartesia\")")
@@ -37,8 +38,9 @@ final class CartesiaLiveFinishTests: XCTestCase {
             .finished("Before stop. After stop.")
         ], "Turns ending during the finish are returned once, not also delivered")
         XCTAssertEqual(fixture.socket.cancels, 1)
+        XCTAssertEqual(fixture.clock.pending(CartesiaLiveClient.finishBudget), 1, "The drain bound never fired")
         XCTAssertEqual(
-            fixture.clock.pending(CartesiaLiveClient.finishBudget), 1, "Completion never waited for a deadline"
+            fixture.clock.pending(CartesiaLiveFixture.postClose), 1, "Completion never waited for the post-stop budget"
         )
     }
 
@@ -75,7 +77,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         let closeSent = fixture.expectClose(self)
         let finish = fixture.finish()
         await fixture.waitForFinishes(1)
-        XCTAssertEqual(fixture.clock.pending(CartesiaLiveClient.finishReadyBudget), 1)
+        XCTAssertEqual(fixture.clock.pending(CartesiaLiveClient.finishBudget), 1, "The drain is bounded")
         XCTAssertTrue(fixture.socket.sent.isEmpty)
         fixture.socket.open()
         fixture.socket.completeSend()
@@ -90,13 +92,13 @@ final class CartesiaLiveFinishTests: XCTestCase {
         XCTAssertTrue(fixture.log.errors.isEmpty)
     }
 
-    func testFinishBeforeAHandshakeThatNeverCompletesFailsVisibly() async {
+    func testFinishBeforeAHandshakeThatNeverCompletesFailsAtTheDrainBound() async {
         let fixture = CartesiaLiveFixture()
         fixture.start()
         fixture.client.sendAudio(CartesiaLiveFixture.frame(1))
         let finish = fixture.finish()
         await fixture.waitForFinishes(1)
-        fixture.clock.fire(CartesiaLiveClient.finishReadyBudget)
+        fixture.clock.fire(CartesiaLiveClient.finishBudget)
         let transcript = await finish.value
         XCTAssertNil(transcript)
         XCTAssertEqual(fixture.log.entries, [.error("sessionNotReady"), .finished(nil)])
@@ -172,7 +174,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         XCTAssertEqual(fixture.socket.closeCommands, 0)
     }
 
-    func testClosureWithATurnStillOpenIsReportedAndTheDraftKept() async {
+    func testClosureWithATurnStillOpenReturnsItsWordsInTheWholeSession() async {
         let fixture = CartesiaLiveFixture()
         fixture.startAndOpen()
         fixture.socket.turn("Confirmed.")
@@ -184,10 +186,10 @@ final class CartesiaLiveFinishTests: XCTestCase {
         fixture.socket.turnUpdate("Unfinished thought")
         fixture.socket.closeNormally()
         let transcript = await finish.value
-        XCTAssertEqual(transcript, "Confirmed.", "Unconfirmed words are never returned as confirmed")
-        XCTAssertEqual(Array(fixture.log.entries.suffix(3)), [
-            .transcript("Unfinished thought", final: false), .error("incompleteTurn"), .finished("Confirmed.")
-        ], "The withheld draft reaches the host before the error, and the error before the return")
+        XCTAssertEqual(transcript, "Confirmed. Unfinished thought")
+        XCTAssertTrue(fixture.log.errors.isEmpty)
+        XCTAssertEqual(fixture.log.entries.last, .finished("Confirmed. Unfinished thought"))
+        XCTAssertEqual(fixture.client.transcriptSnapshot(captureDuration: 0).segments.map(\.text), ["Confirmed."])
     }
 
     func testClosureAfterAStartedTurnWithoutWordsCompletesNormally() async {
@@ -206,7 +208,7 @@ final class CartesiaLiveFinishTests: XCTestCase {
         XCTAssertTrue(fixture.log.errors.isEmpty, "A started turn that produced no words loses nothing")
     }
 
-    func testClosureAfterAShownDraftIsReportedWithoutRepeatingIt() async {
+    func testClosureAfterAShownDraftReturnsItWithoutRepeatingIt() async {
         let fixture = CartesiaLiveFixture()
         fixture.startAndOpen()
         fixture.socket.turnStart()
@@ -217,10 +219,10 @@ final class CartesiaLiveFinishTests: XCTestCase {
         fixture.socket.completeSend()
         fixture.socket.closeNormally()
         let transcript = await finish.value
-        XCTAssertNil(transcript)
+        XCTAssertEqual(transcript, "Shown draft")
         XCTAssertEqual(fixture.log.entries, [
-            .transcript("Shown draft", final: false), .error("incompleteTurn"), .finished(nil)
-        ], "The host already shows the draft, so only the error follows it")
+            .transcript("Shown draft", final: false), .finished("Shown draft")
+        ], "The draft is delivered once and returned with the session")
     }
 
     func testServerErrorDuringFinishReleasesWithheldWordsBeforeTheError() async {
@@ -238,12 +240,12 @@ final class CartesiaLiveFinishTests: XCTestCase {
         XCTAssertEqual(fixture.log.entries, [
             .transcript("Early.", final: false), .transcript("Early.", final: true),
             .transcript("Kept.", final: true),
-            .error(#"server(statusCode: Optional(500), code: Optional("internal"), message: "Synthetic failure")"#),
+            .error("Cartesia(500): Synthetic failure"),
             .finished("Early. Kept.")
         ])
     }
 
-    func testFinishBudgetWithoutTheClosureReportsAMissingCompletion() async {
+    func testPostStopBudgetWithoutTheClosureReturnsTheWholeSession() async {
         let fixture = CartesiaLiveFixture()
         fixture.startAndOpen()
         fixture.socket.turn("Confirmed.")
@@ -251,11 +253,16 @@ final class CartesiaLiveFinishTests: XCTestCase {
         let finish = fixture.finish()
         await fulfillment(of: [closeSent], timeout: 2)
         fixture.socket.completeSend()
+        fixture.socket.turnStart()
+        fixture.socket.turnUpdate("Trailing")
         fixture.clock.fire(CartesiaLiveClient.finishBudget)
+        XCTAssertEqual(fixture.client.pendingFinishes, 1, "Close was delivered, so the drain bound has nothing to end")
+        fixture.clock.fire(CartesiaLiveFixture.postClose)
         let transcript = await finish.value
-        XCTAssertEqual(transcript, "Confirmed.")
-        XCTAssertEqual(Array(fixture.log.entries.suffix(2)), [.error("missingCompletion"), .finished("Confirmed.")])
+        XCTAssertEqual(transcript, "Confirmed. Trailing")
+        XCTAssertTrue(fixture.log.errors.isEmpty, "The post-stop budget returns what the finish has")
         XCTAssertEqual(fixture.socket.cancels, 1)
+        XCTAssertEqual(fixture.socket.closeCommands, 1)
     }
 
     func testDrainThatNeverCompletesReportsAStalledTransport() async {

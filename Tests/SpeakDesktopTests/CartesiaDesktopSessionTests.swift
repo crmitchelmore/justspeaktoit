@@ -6,10 +6,11 @@ import XCTest
 @testable import SpeakCore
 @testable import SpeakDesktop
 
-/// The shared desktop session over the shared Cartesia client: a normal server
-/// closure after `close` is the only success, every failure keeps the best
-/// visible text, and a failure that is still being delivered can never be
-/// overtaken by a finish reporting success.
+/// The shared desktop session over the shared Cartesia client: after `close`, a
+/// normal server closure (or the post-stop budget) completes the session with
+/// its whole transcript, every failure keeps the best visible text, and a
+/// failure that is still being delivered can never be overtaken by a finish
+/// reporting success.
 final class CartesiaDesktopSessionTests: XCTestCase {
     private static let serverError = #"{"type":"error","status_code":500,"title":"Synthetic","message":"Synthetic"}"#
 
@@ -64,7 +65,7 @@ final class CartesiaDesktopSessionTests: XCTestCase {
         XCTAssertEqual(snapshot.error, CartesiaStreamingError.closed(code: 1_011).localizedDescription)
     }
 
-    func testSessionKeepsTheBestVisibleDraftWhenTheLastTurnIsNeverConfirmed() async throws {
+    func testUnconfirmedLastTurnIsReturnedWithTheSessionOnANormalClosure() async throws {
         let fixture = try makeFixture()
         let session = fixture.session, socket = fixture.socket
         socket.open()
@@ -79,9 +80,9 @@ final class CartesiaDesktopSessionTests: XCTestCase {
         socket.close(code: 1_000)
 
         let snapshot = await finish.value
-        XCTAssertEqual(snapshot.phase, .failed)
-        XCTAssertEqual(snapshot.text, "Confirmed. Trailing words", "The flushed draft stays visible as recovery text")
-        XCTAssertEqual(snapshot.error, CartesiaStreamingError.incompleteTurn.localizedDescription)
+        XCTAssertEqual(snapshot.phase, .finished)
+        XCTAssertEqual(snapshot.text, "Confirmed. Trailing words", "The open turn's words complete the session")
+        XCTAssertNil(snapshot.error)
     }
 
     func testServerFailureDuringFinishIsReportedAndTheDraftIsKept() async throws {
@@ -128,9 +129,9 @@ final class CartesiaDesktopSessionTests: XCTestCase {
     }
 
     /// The receive worker is handing a final to the session when the capture
-    /// thread sends a partial sample. The capture call must not wait for the
-    /// host, and the error must reach the session only after that final, or
-    /// the session fails with the confirmed words missing from its text.
+    /// thread overflows the two-second backlog of held sends. The capture call
+    /// must not wait for the host, and the error must reach the session only
+    /// after that final, or the session fails with the confirmed words missing.
     func testCaptureFailureCannotOvertakeAFinalTheSessionIsReceiving() async throws {
         let option = try XCTUnwrap(
             ModelCatalog.liveTranscription.first { LiveTranscriptionRouting.route(for: $0.id)?.provider == .cartesia }
@@ -155,7 +156,7 @@ final class CartesiaDesktopSessionTests: XCTestCase {
 
         let returned = expectation(description: "The capture call returned without waiting for the host")
         DispatchQueue.global().async {
-            session.sendAudio(Data([1, 2, 3]))
+            for index in 0..<21 { session.sendAudio(Data(repeating: UInt8(index), count: 3_200)) }
             returned.fulfill()
         }
         await fulfillment(of: [returned], timeout: 2)
@@ -165,7 +166,9 @@ final class CartesiaDesktopSessionTests: XCTestCase {
         try await waitUntil { session.snapshot().phase == .failed }
         let snapshot = session.snapshot()
         XCTAssertEqual(snapshot.text, "Final words.", "The confirmed words stay visible as recovery text")
-        XCTAssertEqual(snapshot.error, CartesiaStreamingError.invalidPCM.localizedDescription)
+        XCTAssertEqual(
+            snapshot.error, StreamingClientError.transportStalled(provider: "Cartesia").localizedDescription
+        )
         let finished = await session.finish()
         XCTAssertEqual(finished.phase, .failed, "The failed session is never reported as finished")
         XCTAssertEqual(finished.text, "Final words.")

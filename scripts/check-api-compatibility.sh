@@ -2,13 +2,15 @@
 # Public-API compatibility gate (issue #680).
 #
 # Diagnoses breaking changes to the exported SwiftPM library products against
-# a baseline treeish (in CI: the PR's base branch). A non-major change that
+# a baseline treeish (in CI: the PR's base branch). An undeclared change that
 # removes or incompatibly alters a public symbol fails here.
 #
 # Intentional update workflow: a PR whose title carries the conventional
-# breaking marker (`type!:` / `type(scope)!:`) declares a major release, so
-# the gate reports the diff but does not fail — auto-release will publish it
-# as a major version and the PR review carries the migration note.
+# breaking marker (`type!:` / `type(scope)!:`) declares an intentional API
+# break, so the gate reports the diff but does not fail. PR review carries the
+# migration note. Main follows the commissioned Alpha process; Stable version
+# selection and publication remain explicit owner decisions, not an automatic
+# major release caused by this marker.
 
 set -uo pipefail
 
@@ -16,6 +18,68 @@ BASELINE="${1:?usage: check-api-compatibility.sh <baseline-treeish>}"
 PR_TITLE="${PR_TITLE:-}"
 
 PRODUCTS=(SpeakCore SpeakSync SpeakiOSLib SpeakHotKeys SpeakAutomationKit)
+
+# A newly introduced product has no baseline API. Once it exists on the base
+# branch it must stay covered, even if the current branch removes it. Evaluate
+# the baseline manifest itself: a text match could find a comment or target
+# name that is not an exported product. dump-package does not resolve or build
+# dependencies, and the disposable directory isolates manifest evaluation.
+if ! baseline_manifest_dir=$(mktemp -d "${TMPDIR:-/tmp}/speak-api-baseline.XXXXXX"); then
+    echo "==> Unable to prepare baseline manifest evaluation" >&2
+    exit 1
+fi
+trap 'rm -rf -- "$baseline_manifest_dir"' EXIT
+if ! git show "${BASELINE}:Package.swift" > "$baseline_manifest_dir/Package.swift"; then
+    echo "==> Unable to read baseline Package.swift" >&2
+    exit 1
+fi
+if ! swift package --package-path "$baseline_manifest_dir" dump-package > "$baseline_manifest_dir/package.json"; then
+    echo "==> Unable to evaluate baseline package products" >&2
+    exit 1
+fi
+if ! baseline_has_watch=$(python3 - "$baseline_manifest_dir/package.json" <<'PY'
+import json
+import sys
+
+def unique_fields(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON field: {key}")
+        result[key] = value
+    return result
+
+def reject_constant(value):
+    raise ValueError(f"invalid JSON constant: {value}")
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        manifest = json.load(stream, object_pairs_hook=unique_fields, parse_constant=reject_constant)
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("products"), list):
+        raise ValueError("expected a products array")
+    names = []
+    for product in manifest["products"]:
+        if not isinstance(product, dict) or not isinstance(product.get("name"), str) or not product["name"]:
+            raise ValueError("expected a nonempty product name")
+        names.append(product["name"])
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate product names")
+except (OSError, UnicodeError, ValueError) as error:
+    sys.exit(f"Invalid baseline package products: {error}")
+print("yes" if "SpeakWatchCore" in names else "no")
+PY
+); then
+    echo "==> Unable to establish baseline API coverage" >&2
+    exit 1
+fi
+if [[ "$baseline_has_watch" == "yes" ]]; then
+    PRODUCTS+=(SpeakWatchCore)
+elif [[ "$baseline_has_watch" == "no" ]]; then
+    echo "==> Baseline has no SpeakWatchCore product; skipping its initial API comparison"
+else
+    echo "==> Invalid baseline product decision" >&2
+    exit 1
+fi
 
 product_args=()
 for product in "${PRODUCTS[@]}"; do
@@ -71,13 +135,13 @@ sed 's/^/    /' <<< "$remaining" >&2
 breaking_title_pattern='^[a-z]+(\([^)]+\))?!:'
 if [[ "$PR_TITLE" =~ $breaking_title_pattern ]]; then
     echo "==> Breaking API change declared by the PR title's '!' marker;"
-    echo "    allowing under the major-release workflow. Ensure the PR body"
+    echo "    allowing the declared migration. Ensure the PR body"
     echo "    documents the migration path."
     exit 0
 fi
 
 cat >&2 << 'MSG'
-==> Breaking public API change without a declared major release.
+==> Breaking public API change without a declared migration.
     Either restore compatibility (a deprecated shim forwarding to the new
     API), or declare the break by adding the conventional-commit '!' marker
     to the PR title (e.g. `refactor!: ...`) with a migration note in the PR

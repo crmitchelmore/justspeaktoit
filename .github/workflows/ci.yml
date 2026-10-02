@@ -519,9 +519,9 @@ jobs:
           fetch-depth: 0
 
       # Exported library products must not lose or incompatibly change
-      # public symbols in a non-major PR (issue #680). A PR title carrying
-      # the conventional '!' breaking marker declares the major release and
-      # is allowed through with the diff reported.
+      # public symbols without a declared migration (issue #680). A PR title
+      # carrying the conventional '!' marker permits the reported break;
+      # Stable version selection and publication remain explicit decisions.
       - name: Diagnose breaking public API changes
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

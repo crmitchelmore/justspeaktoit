@@ -1,0 +1,46 @@
+name: Dependabot auto-merge
+
+# Trusted main policy only; dependency PR source and artifacts are never executed with the write token.
+# Selected CI completions/status changes wake the gate. Daily bounded reconciliation covers late dynamic/external checks.
+# Adoption is held in trusted configuration until main CI and publication can run for bot-token merges.
+# GITHUB_TOKEN suppresses push workflows; no release token or Stable approval is substituted.
+on:
+  workflow_run:
+    workflows: ["CI", "CodeQL", "Conformance PR Review", "Tessl Code Review", "Dependabot policy checks"]
+    types: [completed]
+  status:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+  statuses: read
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.name != 'Dependabot auto-merge')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read trusted default-branch policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Verify policy invariants
+        run: node --test .github/scripts/dependabot-merge.test.mjs
+      - name: Reconcile the commissioned dependency policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/dependabot-merge.mjs

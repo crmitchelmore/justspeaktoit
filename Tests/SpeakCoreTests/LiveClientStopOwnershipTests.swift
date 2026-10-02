@@ -3,51 +3,39 @@ import Foundation
 import XCTest
 
 final class LiveClientStopOwnershipTests: XCTestCase {
-    func testAssemblyAIStopRetainsPendingCleanupWhenOwnerReleases() async {
-        let entered = expectation(description: "start entered transport factory")
-        let gate = DispatchSemaphore(value: 0)
+    func testAssemblyAIStopOwnsImmediateCleanupWhenOwnerReleases() {
         let socket = TestLiveWebSocket()
-        var client: AssemblyAILiveClient? = AssemblyAILiveClient(socketFactory: { _ in
-            entered.fulfill()
-            _ = gate.wait(timeout: .now() + 5)
-            return socket
-        })
-        weak var released: AssemblyAILiveClient?
-        released = client
+        socket.automaticallyRunsOnResume = false
+        var client: AssemblyAILiveClient? = AssemblyAILiveClient(socketFactory: { _ in socket })
+        weak var released = client
         client?.start(onTranscript: { _, _ in }, onError: { _ in })
-        await fulfillment(of: [entered], timeout: 2)
-        XCTAssertEqual(socket.state, .suspended, "the factory must still hold the serial queue")
+        XCTAssertEqual(socket.state, .suspended)
+
+        // The portable client owns cleanup synchronously. In particular, a
+        // queued weak capture must not defer it until after this method returns.
         client?.stop()
+        XCTAssertEqual(socket.cancelCount, 1, "stop must finish cleanup before returning")
         client?.stop()
         client = nil
-        gate.signal()
 
-        let deallocated = await eventually { released == nil }
-        XCTAssertTrue(deallocated, "cleanup must release its temporary ownership")
-        XCTAssertEqual(socket.cancelCount, 1, "queued repeated stops must cancel exactly once")
+        XCTAssertNil(released, "cleanup must not retain the client")
+        XCTAssertEqual(socket.cancelCount, 1, "repeated stop and deinit must cancel exactly once")
     }
 
-    func testCartesiaStopRetainsPendingCleanupWhenOwnerReleases() async {
-        let entered = expectation(description: "start entered transport factory")
-        let gate = DispatchSemaphore(value: 0)
+    func testCartesiaStopOwnsImmediateCleanupWhenOwnerReleases() {
         let socket = TestLiveWebSocket()
-        var client: CartesiaLiveClient? = CartesiaLiveClient(socketFactory: { _ in
-            entered.fulfill()
-            _ = gate.wait(timeout: .now() + 5)
-            return socket
-        })
-        weak var released: CartesiaLiveClient?
-        released = client
+        socket.automaticallyRunsOnResume = false
+        var client: CartesiaLiveClient? = CartesiaLiveClient(socketFactory: { _ in socket })
+        weak var released = client
         client?.start(onTranscript: { _, _ in }, onError: { _ in })
-        await fulfillment(of: [entered], timeout: 2)
-        XCTAssertEqual(socket.state, .suspended, "the factory must still hold the serial queue")
+        XCTAssertEqual(socket.state, .suspended)
+
         client?.stop()
+        XCTAssertEqual(socket.cancelCount, 1, "stop must perform its detached effects before returning")
         client?.stop()
         client = nil
-        gate.signal()
 
-        let deallocated = await eventually { released == nil }
-        XCTAssertTrue(deallocated, "cleanup must release its temporary ownership")
-        XCTAssertEqual(socket.cancelCount, 1, "queued repeated stops must cancel exactly once")
+        XCTAssertNil(released, "cleanup must not retain the client")
+        XCTAssertEqual(socket.cancelCount, 1, "repeated stop and deinit must cancel exactly once")
     }
 }

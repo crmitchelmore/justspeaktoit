@@ -36,6 +36,8 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     activeController?.isRunning ?? false
   }
 
+  var stopCompletionTimeout: TimeInterval { activeController?.stopCompletionTimeout ?? 10 }
+
   /// Notified whenever ownership of the live session moves to another
   /// controller (or is released on stop), so transcript display state can be
   /// scoped to the controller that is actually recording (issue #643).

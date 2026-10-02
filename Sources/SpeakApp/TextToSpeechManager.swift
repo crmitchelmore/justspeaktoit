@@ -27,6 +27,8 @@ final class TextToSpeechManager: ObservableObject {
   private let secureStorage: SecureAppStorage
   private let pronunciationManager: PronunciationManager?
   private let recordingSaver: (@MainActor (TTSResult) async throws -> Void)?
+  /// Holds the usage ledger; a test bootstrap passes its own suite.
+  private let defaults: UserDefaults
   let clients: [TTSProvider: TextToSpeechClient]
   private var audioPlayer: AVAudioPlayer?
   private let progressivePlayer = TTSProgressivePlayer()
@@ -40,13 +42,15 @@ final class TextToSpeechManager: ObservableObject {
     secureStorage: SecureAppStorage,
     clients: [TTSProvider: TextToSpeechClient],
     pronunciationManager: PronunciationManager? = nil,
-    recordingSaver: (@MainActor (TTSResult) async throws -> Void)? = nil
+    recordingSaver: (@MainActor (TTSResult) async throws -> Void)? = nil,
+    defaults: UserDefaults = .standard
   ) {
     self.appSettings = appSettings
     self.secureStorage = secureStorage
     self.clients = clients
     self.pronunciationManager = pronunciationManager
     self.recordingSaver = recordingSaver
+    self.defaults = defaults
     loadUsageHistory()
   }
 
@@ -361,7 +365,7 @@ extension TextToSpeechManager {
   }
 
   private func loadUsageHistory() {
-    guard let data = UserDefaults.standard.data(forKey: "ttsUsageHistory"),
+    guard let data = defaults.data(forKey: "ttsUsageHistory"),
       let history = try? JSONDecoder().decode([TTSUsageRecord].self, from: data)
     else {
       return
@@ -394,7 +398,7 @@ extension TextToSpeechManager {
     }
 
     if let data = try? JSONEncoder().encode(records) {
-      UserDefaults.standard.set(data, forKey: "ttsUsageHistory")
+      defaults.set(data, forKey: "ttsUsageHistory")
     }
   }
 }

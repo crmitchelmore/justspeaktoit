@@ -1,4 +1,6 @@
+#if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
 import AVFoundation
+#endif
 import Foundation
 
 // Small helpers that every transcription provider needs. They live here so the
@@ -45,6 +47,7 @@ public enum SpeakerLabelNormalizer {
     }
 }
 
+#if canImport(AVFoundation) && !SPEAK_PORTABLE_CORE
 /// Resolves the duration to report for a transcription, preferring what the provider
 /// said, then the last timestamp it emitted, and finally the audio file itself.
 public func resolvedTranscriptionDuration(
@@ -65,6 +68,8 @@ public func resolvedTranscriptionDuration(
     return durationTime.seconds
 }
 
+#endif
+
 /// WebSocket teardown races surface as ENOTCONN ("socket is not connected"); every
 /// live transcriber ignores them rather than surfacing a spurious error to the user.
 public enum WebSocketErrorFilter {
@@ -74,5 +79,49 @@ public enum WebSocketErrorFilter {
             return true
         }
         return nsError.localizedDescription.localizedCaseInsensitiveContains("socket is not connected")
+    }
+
+    /// An ignorable failure that carries no peer close frame. A receive that
+    /// reports the server's close code is the stream's real end, never noise,
+    /// even when the transport describes it as a lost socket.
+    public static func isSpuriousDisconnect(_ error: Error) -> Bool {
+        guard (error as? StreamingWebSocketCloseReporting)?.webSocketCloseCode == nil else { return false }
+        return shouldIgnore(error)
+    }
+}
+
+/// ENOTCONN can be reported spuriously around a WebSocket handshake, so a
+/// shared client re-arms its receive after one instead of ending the session.
+/// Only a bounded run of consecutive ignorable failures is tolerated: a socket
+/// that keeps failing is lost, and the client then reaches a terminal outcome
+/// rather than spinning on it. The count bound keeps the window finite under a
+/// test scheduler that never advances the clock.
+struct IgnoredReceiveFailureWindow: Sendable {
+    /// Delay before the receive is re-armed after an ignorable failure.
+    static let retryDelay: TimeInterval = 0.01
+    static let defaultWindow: TimeInterval = 1.5
+
+    let window: TimeInterval
+    private var firstFailure: TimeInterval?
+    private var retries = 0
+
+    init(window: TimeInterval = IgnoredReceiveFailureWindow.defaultWindow) {
+        self.window = window.isFinite ? max(0, window) : Self.defaultWindow
+    }
+
+    /// Records one ignorable failure and answers whether the receive may be
+    /// re-armed once more.
+    mutating func allowsRetry(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        let first = firstFailure ?? now
+        firstFailure = first
+        retries += 1
+        let maximumRetries = max(1, Int((window / Self.retryDelay).rounded(.up)))
+        return now - first < window && retries <= maximumRetries
+    }
+
+    /// A delivered frame ends the run of failures.
+    mutating func reset() {
+        firstFailure = nil
+        retries = 0
     }
 }

@@ -37,8 +37,17 @@ public protocol StreamingTranscriptionClient: AnyObject {
     /// Streams a chunk of linear16 mono PCM audio.
     func sendAudio(_ audioData: Data)
 
-    /// Closes the session and releases resources.
+    /// Closes the session and releases resources. Some established clients use
+    /// this entry point for graceful provider finalisation.
     func stop()
+
+    /// Aborts outstanding work immediately. The default preserves existing
+    /// conformers; clients with a graceful stop override this cancellation path.
+    func cancel()
+}
+
+public extension StreamingTranscriptionClient {
+    func cancel() { stop() }
 }
 
 /// Optional signal for clients that know when a provider has closed an
@@ -121,6 +130,10 @@ public protocol StreamingTranscriptSnapshotProviding: StreamingTranscriptionClie
 ///
 /// `StreamingClientContractTests` asserts this for every conformer.
 public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionClient {
+    /// Maximum provider drain time, excluding platform capture teardown and UI
+    /// delivery. Nil preserves the host's existing default watchdog policy.
+    var finalisationBudget: TimeInterval? { get }
+
     /// Commits pending input, waits for the provider's final transcript (with
     /// an implementation-defined timeout), then closes the connection.
     ///
@@ -140,6 +153,7 @@ public protocol FinalizingStreamingTranscriptionClient: StreamingTranscriptionCl
 }
 
 public extension FinalizingStreamingTranscriptionClient {
+    var finalisationBudget: TimeInterval? { nil }
     var finishFlushesBufferedAudio: Bool { true }
 }
 

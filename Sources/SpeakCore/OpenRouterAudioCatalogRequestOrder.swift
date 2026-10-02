@@ -7,17 +7,22 @@ struct OpenRouterAudioCatalogRequestOrder: Codable, Sendable {
     let ordinal: UInt64
     let startedAt: Date
 
-    @MainActor private static var currentProcessID = UUID()
-    @MainActor private static var nextOrdinal: UInt64 = 0
+    private final class Sequence: @unchecked Sendable {
+        let lock = NSLock()
+        var processID = UUID()
+        var ordinal: UInt64 = 0
+    }
+    private static let sequence = Sequence()
 
-    @MainActor
     static func begin(at date: Date) -> Self {
-        if nextOrdinal == .max {
-            currentProcessID = UUID()
-            nextOrdinal = 0
+        sequence.lock.withLock {
+            if sequence.ordinal == .max {
+                sequence.processID = UUID()
+                sequence.ordinal = 0
+            }
+            sequence.ordinal += 1
+            return Self(processID: sequence.processID, ordinal: sequence.ordinal, startedAt: date)
         }
-        nextOrdinal += 1
-        return Self(processID: currentProcessID, ordinal: nextOrdinal, startedAt: date)
     }
 
     func succeeds(_ snapshot: OpenRouterAudioCatalogSnapshot) -> Bool {

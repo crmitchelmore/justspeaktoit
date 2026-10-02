@@ -1,7 +1,7 @@
 import Foundation
 
 /// Represents a custom pronunciation entry for TTS engines.
-public struct PronunciationEntry: Codable, Identifiable, Hashable {
+public struct PronunciationEntry: Codable, Identifiable, Hashable, Sendable {
     public let id: UUID
     public var word: String           // Original text to match
     public var pronunciation: String  // How to pronounce (IPA or phonetic)

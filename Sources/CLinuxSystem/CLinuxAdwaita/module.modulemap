@@ -1,0 +1,4 @@
+module CLinuxAdwaita [system] {
+    header "shim.h"
+    export *
+}

@@ -35,23 +35,40 @@ public struct OpenAICompatibleBatchTranscriptionClient: Sendable {
 
   private static let copyChunkSize = 1024 * 1024
 
-  private let staging: MultipartUploadStaging
+  private let createUploadBodyFile: @Sendable (String) throws -> URL
+  private let removeUploadBodyFile: @Sendable (URL) -> Void
   private let performUpload: @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
 
+  #if !os(Windows)
   public init(session: URLSession = .shared, staging: MultipartUploadStaging = .shared) {
-    self.staging = staging
+    // Preserve the legacy facade's filename normalisation and owned cleanup.
+    self.createUploadBodyFile = { try staging.createUploadBodyFile(providerID: $0) }
+    self.removeUploadBodyFile = { staging.removeUploadBodyFile(at: $0) }
+    self.performUpload = { request, fileURL in
+      try await session.upload(for: request, fromFile: fileURL)
+    }
+  }
+  #endif
+
+  public init(session: URLSession = .shared, sharedStaging: SharedMultipartUploadStaging) {
+    self.createUploadBodyFile = { try sharedStaging.createUploadBodyFile(providerID: $0) }
+    self.removeUploadBodyFile = { sharedStaging.removeUploadBodyFile(at: $0) }
     self.performUpload = { request, fileURL in
       try await session.upload(for: request, fromFile: fileURL)
     }
   }
 
+  #if !os(Windows)
   init(
     staging: MultipartUploadStaging,
     performUpload: @escaping @Sendable (URLRequest, URL) async throws -> (Data, URLResponse)
   ) {
-    self.staging = staging
+    self.createUploadBodyFile = { try staging.createUploadBodyFile(providerID: $0) }
+    self.removeUploadBodyFile = { staging.removeUploadBodyFile(at: $0) }
     self.performUpload = performUpload
   }
+
+  #endif
 
   public func upload(
     request callerRequest: URLRequest,
@@ -68,8 +85,8 @@ public struct OpenAICompatibleBatchTranscriptionClient: Sendable {
     request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
     try Self.validateProviderID(providerID)
-    let bodyURL = try self.staging.createUploadBodyFile(providerID: providerID)
-    defer { self.staging.removeUploadBodyFile(at: bodyURL) }
+    let bodyURL = try self.createUploadBodyFile(providerID)
+    defer { self.removeUploadBodyFile(bodyURL) }
     let buildTask = Task.detached {
       try Self.writeBody(to: bodyURL, boundary: boundary, fields: fields, file: file)
     }

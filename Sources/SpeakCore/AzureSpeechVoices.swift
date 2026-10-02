@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Provider-returned voice names are authoritative for the resource's region,
 /// including every MAI voice and locale it offers. `AzureMAIVoiceCatalog`

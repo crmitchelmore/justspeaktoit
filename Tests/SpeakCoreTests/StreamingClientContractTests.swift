@@ -429,6 +429,12 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         // Voxtral Realtime emits no per-utterance final: `transcription.done`
         // restates the whole session.
         XCTAssertEqual(MistralVoxtralLiveClient(apiKey: "k").finalShape, .cumulativeTranscript)
+        // OpenAI Realtime restates the item-ordered session transcript on
+        // every delivery, so finals replace rather than append.
+        XCTAssertEqual(
+            OpenAIRealtimeLiveClient(apiKey: "k", model: "gpt-live-transcribe").finalShape,
+            .cumulativeTranscript
+        )
     }
 
     /// Every catalogued model must have a transport. A model the factory
@@ -449,14 +455,16 @@ final class StreamingClientContractTests: XCTestCase { // swiftlint:disable:this
         }
     }
 
-    /// The providers added alongside the shared Speechmatics client all commit
-    /// their tail on stop, so none of them can truncate a recording.
+    /// The providers added alongside the shared Speechmatics client, and those
+    /// ported onto shared finalising clients since, all commit their tail on
+    /// stop, so none of them can truncate a recording.
     func testTheNewlySharedProvidersAllFinaliseGracefully() {
         let clients: [StreamingTranscriptionClient] = [
-            CartesiaLiveClient(apiKey: "k"),
             SpeechmaticsLiveClient(apiKey: "k"),
             RevAILiveClient(accessToken: "k"),
-            MistralVoxtralLiveClient(apiKey: "k")
+            MistralVoxtralLiveClient(apiKey: "k"),
+            GladiaLiveClient(apiKey: "k"),
+            CartesiaLiveClient(apiKey: "k")
         ]
         for client in clients {
             guard let finalizing = client as? FinalizingStreamingTranscriptionClient else {

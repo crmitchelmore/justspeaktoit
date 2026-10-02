@@ -1,7 +1,10 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// The `wss://api.x.ai/v1/stt` session shape: the URL its query items
-/// configure, and how a server error is classified.
+/// configure, the one control frame, and how a server error is classified.
 ///
 /// Kept beside the client rather than inside it: these are pure functions of
 /// the protocol, with no connection state, and they are what the tests drive
@@ -34,6 +37,23 @@ extension XAISpeechToTextLiveClient {
         components.queryItems = items
         return components.url
     }
+
+    /// The connection request: the session URL plus the bearer credential. The
+    /// key travels only in this header, never in the query.
+    static func webSocketRequest(
+        apiKey: String, sampleRate: Int, language: String?, keywords: [String]
+    ) -> URLRequest? {
+        guard let url = webSocketURL(sampleRate: sampleRate, language: language, keywords: keywords) else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    /// The only control frame the client sends: end of audio, which the
+    /// service answers with `transcript.done` before closing the socket.
+    static let audioDoneFrame = #"{"type":"audio.done"}"#
 
     static func error(fromServerMessage rawMessage: String) -> Error {
         // The frame's text is provider-supplied and can echo submitted speech,

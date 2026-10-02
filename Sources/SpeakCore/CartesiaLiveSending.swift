@@ -183,7 +183,11 @@ extension CartesiaLiveClient {
     private func awaitClosure(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
         after(timing.postClose, active, &effects) { client, active, effects in
             guard active.phase == .finishing else { return }
-            client.complete(active, &effects)
+            if let error = active.pendingReceiveFailure {
+                client.fail(active, error, &effects)
+            } else {
+                client.complete(active, &effects)
+            }
         }
     }
 }

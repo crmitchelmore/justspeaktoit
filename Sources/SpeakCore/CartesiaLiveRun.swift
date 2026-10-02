@@ -62,6 +62,9 @@ final class CartesiaLiveRun: @unchecked Sendable {
     var confirmedSegments: [String] = []
     /// Consecutive spurious ENOTCONN receive failures, bounded in time.
     var ignoredReceiveFailures: IgnoredReceiveFailureWindow
+    /// A receive failure not yet followed by a successful read or real close.
+    /// A finish deadline cannot turn this unresolved error into success.
+    var pendingReceiveFailure: Error?
     /// Deliveries held back while a finish runs. A healthy finish returns them
     /// in its whole transcript; a failed one releases them before its error,
     /// so the host's visible draft keeps every word the server emitted.

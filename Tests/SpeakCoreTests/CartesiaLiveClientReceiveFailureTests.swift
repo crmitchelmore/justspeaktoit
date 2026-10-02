@@ -47,7 +47,7 @@ final class CartesiaLiveClientReceiveFailureTests: XCTestCase {
         XCTAssertEqual(socket.cancelCount, 1)
     }
 
-    func testPersistentIgnoredReceiveFailureWhileFinishingReturnsCollectedTranscript() async {
+    func testPersistentIgnoredReceiveFailureWhileFinishingReportsErrorBeforeReturningCollectedTranscript() async {
         let socket = TestLiveWebSocket()
         // A long post-close budget proves the run ends on the lost socket
         // rather than on the finish deadline.
@@ -57,11 +57,18 @@ final class CartesiaLiveClientReceiveFailureTests: XCTestCase {
         )
         let lock = NSLock()
         var errors: [Error] = []
-        client.start(onTranscript: { _, _ in }, onError: { error in lock.withLock { errors.append(error) } })
+        var delivery: [String] = []
+        client.start(onTranscript: { _, _ in }, onError: { error in
+            lock.withLock { errors.append(error); delivery.append("error") }
+        })
         let didStart = await eventually { socket.state == .running }
         XCTAssertTrue(didStart)
         socket.emit(#"{"type":"turn.end","results":[{"transcript":"kept"}]}"#)
-        let finish = Task { await client.finishAndWait() }
+        let finish = Task {
+            let text = await client.finishAndWait()
+            lock.withLock { delivery.append("finish") }
+            return text
+        }
         let didSendClose = await eventually { textMessages(socket).contains(#"{"type":"close"}"#) }
         XCTAssertTrue(didSendClose)
 
@@ -71,6 +78,9 @@ final class CartesiaLiveClientReceiveFailureTests: XCTestCase {
         XCTAssertTrue(didFinish)
         let transcript = await finish.value
         XCTAssertEqual(transcript, "kept")
-        XCTAssertTrue(lock.withLock { errors.isEmpty })
+        XCTAssertEqual(lock.withLock { delivery }, ["error", "finish"])
+        XCTAssertEqual(lock.withLock { errors.count }, 1)
+        XCTAssertEqual(lock.withLock { (errors.first as NSError?)?.domain }, NSPOSIXErrorDomain)
+        XCTAssertEqual(lock.withLock { (errors.first as NSError?)?.code }, 57)
     }
 }

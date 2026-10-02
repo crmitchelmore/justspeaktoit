@@ -49,29 +49,30 @@ extension CartesiaLiveClient {
             guard isCurrent(active), active.receiveGeneration == generation else { return false }
             if case .failure(let error) = result {
                 if WebSocketErrorFilter.isSpuriousDisconnect(error) {
-                    ignoreSpuriousDisconnect(active, connection, &effects)
+                    ignoreSpuriousDisconnect(error, active, connection, &effects)
                 } else {
                     closed(by: error, active, &effects)
                 }
                 return false
             }
             active.ignoredReceiveFailures.reset()
+            active.pendingReceiveFailure = nil
             if let event { apply(event, active, &effects) }
             return isCurrent(active)
         }
     }
 
     /// A spurious ENOTCONN re-arms the receive shortly instead of ending the
-    /// run. One that persists means the socket is gone: once the server has
-    /// the close command that is how its closure surfaced, and otherwise the
-    /// transport stalled.
+    /// run. One that persists means the transport failed. Sending `close`
+    /// does not prove the peer answered with a normal closure.
     private func ignoreSpuriousDisconnect(
-        _ active: CartesiaLiveRun, _ connection: any StreamingWebSocketConnection,
+        _ error: Error, _ active: CartesiaLiveRun, _ connection: any StreamingWebSocketConnection,
         _ effects: inout CartesiaLiveEffects
     ) {
+        active.pendingReceiveFailure = error
         guard active.ignoredReceiveFailures.allowsRetry() else {
             if active.closeSent {
-                closed(by: CartesiaLostSocketClosure(), active, &effects)
+                closed(by: error, active, &effects)
             } else {
                 fail(active, stalledError, &effects)
             }
@@ -177,10 +178,4 @@ extension CartesiaLiveClient {
         log("Stream completed")
         retire(active, &effects)
     }
-}
-
-/// The lost socket of a stream the server already had `close` for: it ends
-/// the finish exactly as the server's normal closure would.
-private struct CartesiaLostSocketClosure: StreamingWebSocketCloseReporting {
-    var webSocketCloseCode: Int? { CartesiaLiveProtocol.normalClosureCode }
 }

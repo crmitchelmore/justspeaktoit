@@ -67,6 +67,9 @@ final class MacHistorySyncAdapter: HistorySyncDelegate {
             let entry = item.toSyncable()
             do {
                 try await HistorySyncEngine.shared.upload(entry: entry)
+            } catch is HistorySyncDisabledError {
+                // History sync is off: the item stays pending and uploads if
+                // sync is turned back on.
             } catch {
                 log.error("History upload failed: \(error.localizedDescription)")
             }

@@ -122,6 +122,20 @@ final class ComparisonSyncTests: XCTestCase {
         XCTAssertTrue(transport.requestedTokens.isEmpty)
     }
 
+    func testSync_whenICloudDataSyncIsSwitchedOff_doesNothing() async {
+        defaults.set(false, forKey: SyncConfiguration.dataSyncEnabledKey)
+        let transport = FakeComparisonTransport(pages: [.empty])
+        let delegate = FakeComparisonDelegate(pending: [ModelComparisonRevision(round: makeRound())])
+        let engine = await makeEngine(transport: transport, delegate: delegate)
+
+        await engine.sync()
+
+        XCTAssertTrue(transport.uploaded.isEmpty)
+        XCTAssertTrue(transport.requestedTokens.isEmpty)
+        XCTAssertNil(engine.lastError, "Off is a choice, not a failure")
+        XCTAssertEqual(delegate.pendingRevisions().count, 1)
+    }
+
     func testUpload_prefersANewerRemoteCopy() async {
         let local = makeRound()
         var remote = local

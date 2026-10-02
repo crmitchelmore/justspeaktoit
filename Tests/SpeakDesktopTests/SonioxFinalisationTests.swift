@@ -16,6 +16,8 @@ extension SonioxPortableLifecycleTests {
         await fixture.settle { socket.binary.count == 1 }
         XCTAssertEqual(socket.binary.count, 1, "The queued audio drains before end-of-stream")
         socket.completeSend()
+        XCTAssertEqual(socket.controls.last, SonioxLiveFixture.finalize, "Finalize follows the drained audio")
+        socket.completeSend()
         await fixture.settle { socket.binary.count == 2 }
         XCTAssertEqual(socket.binary.last, Data(), "The end-of-stream frame is empty")
         socket.completeSend()
@@ -36,6 +38,8 @@ extension SonioxPortableLifecycleTests {
         let socket = fixture.socket
         socket.emit(Self.tokens([(text: "Final ", final: true), (text: "words", final: false)]))
         fixture.client.stop()
+        XCTAssertEqual(socket.controls.last, SonioxLiveFixture.finalize, "Stop finalizes before end-of-stream")
+        socket.completeSend()
         XCTAssertEqual(socket.binary.last, Data(), "Stop flushes with the end-of-stream frame")
         socket.completeSend()
         socket.emit(Self.tokens([(text: "words.", final: true)]))
@@ -53,7 +57,7 @@ extension SonioxPortableLifecycleTests {
         let socket = fixture.socket
         socket.emit(Self.tokens([(text: "Only final.", final: true)]))
         let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { socket.binary.last == Data() }
+        await fixture.awaitEndOfStream()
         socket.completeSend()
         // Transport delivery is not the provider's finished acknowledgement.
         socket.fail()

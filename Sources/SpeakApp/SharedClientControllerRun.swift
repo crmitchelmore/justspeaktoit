@@ -10,39 +10,57 @@ final class SharedClientControllerRun: @unchecked Sendable {
         let text: String
         let confirmedText: String
         let isFinal: Bool
+        let confidence: Double?
         let error: Error?
     }
 
     let modelIdentifier: String
+    /// The client reports utterance boundaries itself, so none is inferred
+    /// from a final.
+    let hasExplicitBoundaries: Bool
     private let lock = NSLock()
     private var accumulator: TranscriptAccumulator
     private var text = ""
     private var isFinal = false
+    private var confidence: Double?
     private var error: Error?
     private var reportedError = false
     private var revision: UInt64 = 0
     private var transcriptRevision: UInt64 = 0
     private var closed = false
 
-    init(shape: TranscriptFinalShape, modelIdentifier: String) {
+    init(shape: TranscriptFinalShape, modelIdentifier: String, hasExplicitBoundaries: Bool = false) {
         accumulator = TranscriptAccumulator(shape: shape)
         self.modelIdentifier = modelIdentifier
+        self.hasExplicitBoundaries = hasExplicitBoundaries
     }
 
     var snapshot: Snapshot { lock.withLock { current } }
 
-    func receive(_ text: String, isFinal: Bool) -> Snapshot? {
+    /// Whether this recording still accepts provider events.
+    var isOpen: Bool { lock.withLock { !closed } }
+
+    /// Folds one provider update. A client's authoritative `projection`
+    /// replaces the folded text instead of being appended to it.
+    func receive(_ text: String, isFinal: Bool, projection: StreamingTranscriptSnapshot? = nil) -> Snapshot? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
+        let authoritative = projection?.resolvedDisplayText != nil
+        guard !value.isEmpty || authoritative else { return nil }
         return lock.withLock {
             guard !closed else { return nil }
-            if isFinal {
+            if authoritative {
+                let display = SharedTranscriptProjection.apply(
+                    eventText: value, isFinal: isFinal, snapshot: projection, accumulator: &accumulator
+                ) ?? accumulator.text
+                if error == nil || self.text.isEmpty { self.text = display }
+            } else if isFinal {
                 accumulator.append(final: value)
                 if error == nil || self.text.isEmpty { self.text = accumulator.text }
             } else {
                 self.text = accumulator.display(withInterim: value)
             }
             self.isFinal = isFinal && error == nil
+            confidence = projection?.latestUpdateConfidence
             revision += 1
             transcriptRevision = revision
             return current
@@ -58,7 +76,9 @@ final class SharedClientControllerRun: @unchecked Sendable {
         }
     }
 
-    func finish(whole: String?, cancelled: Bool) -> Snapshot {
+    /// Adopts the finish result. A healthy finish then takes the client's
+    /// final `projection`, when it has one, as the whole session's text.
+    func finish(whole: String?, cancelled: Bool, projection: StreamingTranscriptSnapshot? = nil) -> Snapshot {
         lock.withLock {
             let previousText = text
             let previousFinal = isFinal
@@ -69,6 +89,13 @@ final class SharedClientControllerRun: @unchecked Sendable {
                 // Keep the existing draft separately without prefix/length guesses.
                 if (error == nil && !closed) || text.isEmpty { text = accumulator.text }
                 isFinal = error == nil && !closed
+            }
+            if error == nil, !closed, let projection,
+               let resolved = projection.resolvedDisplayText?.trimmingCharacters(in: .whitespacesAndNewlines),
+               projection.confirmedText != nil || !resolved.isEmpty {
+                accumulator.replace(with: resolved)
+                text = resolved
+                isFinal = true
             }
             revision += 1
             if text != previousText || isFinal != previousFinal { transcriptRevision = revision }
@@ -98,7 +125,7 @@ final class SharedClientControllerRun: @unchecked Sendable {
     private var current: Snapshot {
         Snapshot(
             revision: revision, transcriptRevision: transcriptRevision, text: text,
-            confirmedText: accumulator.text, isFinal: isFinal, error: error
+            confirmedText: accumulator.text, isFinal: isFinal, confidence: confidence, error: error
         )
     }
 }

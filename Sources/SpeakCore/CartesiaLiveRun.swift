@@ -56,6 +56,10 @@ final class CartesiaLiveRun: @unchecked Sendable {
     /// are real speech that only `turn.end` would confirm.
     var openTurnDraft: String?
     var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
+    /// Each confirmed turn, in order: the snapshot's segments.
+    var confirmedSegments: [String] = []
+    /// Consecutive spurious ENOTCONN receive failures, bounded in time.
+    var ignoredReceiveFailures: IgnoredReceiveFailureWindow
     /// Deliveries held back while a finish runs. A healthy finish returns them
     /// in its whole transcript; a failed one releases them before its error,
     /// so the host's visible draft keeps every word the server emitted.
@@ -80,8 +84,9 @@ final class CartesiaLiveRun: @unchecked Sendable {
     var deliveringFailure = false
     var lateWaiters: [CheckedContinuation<String?, Never>] = []
 
-    init(sampleRate: Int) {
+    init(sampleRate: Int, ignoredReceiveWindow: TimeInterval = IgnoredReceiveFailureWindow.defaultWindow) {
         maximumBytes = max(Int(Double(max(sampleRate, 1) * 2) * CartesiaLiveClient.bufferedAudioSeconds), 1)
+        ignoredReceiveFailures = IgnoredReceiveFailureWindow(window: ignoredReceiveWindow)
     }
 
     /// Frames admitted and not yet completed: the queue plus any audio in flight.
@@ -90,6 +95,18 @@ final class CartesiaLiveRun: @unchecked Sendable {
     /// The confirmed transcript so far, or `nil` when no turn has ended with
     /// words: the shape `finishAndWait()` returns.
     var transcript: String? { accumulated.transcriptOrNil }
+
+    /// Confirmed turns and the open turn's latest words, kept apart.
+    var snapshot: StreamingTranscriptSnapshot {
+        let draft = openTurnDraft?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return StreamingTranscriptSnapshot(
+            confirmedText: accumulated.text,
+            pendingInterim: draft,
+            displayText: [accumulated.text, draft].filter { !$0.isEmpty }.joined(separator: " "),
+            segments: confirmedSegments.map { TranscriptionSegment(startTime: 0, endTime: 0, text: $0) },
+            isTerminal: phase == .closed
+        )
+    }
 }
 
 /// Work decided under the client's lock and performed after it is released:

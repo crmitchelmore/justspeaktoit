@@ -36,7 +36,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     /// Bounds readiness, all queued sends and both a pending and trailing commit.
     public static let finishDrainBudget = finishReadyBudget + sendDeadline + 2 * finishBudget
     /// Exposes the active client's bound to platform lifecycle watchdogs.
-    public var finalisationBudget: TimeInterval? { Self.finishDrainBudget }
+    public var finalisationBudget: TimeInterval? { timing.overall }
     /// Queued frames are bounded by count as well as by the five-second byte budget.
     public static let maximumQueuedFrames = 256
 
@@ -48,6 +48,8 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
     let sampleRate: Int
     private let makeConnection: ConnectionFactory
     private let schedule: Scheduler
+    /// Readiness, commit and finish bounds; the documented statics in production.
+    let timing: Timing
     private let queue = DispatchQueue(label: "ElevenLabsLiveClient.state")
     private let queueKey = DispatchSpecificKey<Bool>()
     private var run: ElevenLabsLiveRun
@@ -68,7 +70,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
         )
     }
 
-    public init(
+    public convenience init(
         apiKey: String,
         modelID: String = "scribe_v2_realtime",
         language: String? = nil,
@@ -78,10 +80,26 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
         }
     ) {
+        self.init(
+            apiKey: apiKey, modelID: modelID, language: language, sampleRate: sampleRate,
+            timing: .production, makeConnection: makeConnection, schedule: schedule
+        )
+    }
+
+    init(
+        apiKey: String,
+        modelID: String,
+        language: String?,
+        sampleRate: Int,
+        timing: Timing,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler
+    ) {
         self.apiKey = apiKey
         self.modelID = modelID
         self.language = language
         self.sampleRate = sampleRate
+        self.timing = timing
         self.makeConnection = makeConnection
         self.schedule = schedule
         self.run = ElevenLabsLiveRun(sampleRate: sampleRate)
@@ -127,7 +145,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                 self.synchronized { if self.isCurrent(active) { self.log("WebSocket handshake completed") } }
             }
             receive(active)
-            after(Self.readyDeadline, active) { client, active in
+            after(timing.startup, active) { client, active in
                 if !active.ready { client.fail(ElevenLabsLiveError.connectionFailed, active) }
             }
             for audio in opening {
@@ -197,7 +215,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                         close(active)
                         return
                     }
-                    after(Self.finishDrainBudget, active) { client, active in
+                    after(timing.overall, active) { client, active in
                         client.fail(ElevenLabsStreamingError.missingCompletion, active)
                     }
                     if active.ready {
@@ -205,7 +223,7 @@ public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient,
                     } else {
                         // Stop before `session_started`: keep the admitted audio
                         // and bound the wait for readiness so a finish can't hang.
-                        after(Self.finishReadyBudget, active) { client, active in
+                        after(timing.readiness, active) { client, active in
                             if !active.ready { client.fail(ElevenLabsStreamingError.sessionNotReady, active) }
                         }
                     }
@@ -241,8 +259,15 @@ extension ElevenLabsLiveClient {
                 guard self.isCurrent(active) else { return }
                 switch result {
                 case .failure(let error):
+                    // A spurious ENOTCONN re-arms the receive; one that
+                    // persists is a stalled transport.
+                    guard !WebSocketErrorFilter.isSpuriousDisconnect(error) else {
+                        if !self.rearmReceive(active) { self.fail(self.stalledError, active) }
+                        return
+                    }
                     self.fail(error, active)
                 case .success(let message):
+                    active.ignoredReceiveFailures.reset()
                     switch message {
                     case .text(let text): self.parse(text, active)
                     case .binary(let data):
@@ -252,6 +277,12 @@ extension ElevenLabsLiveClient {
                 }
             }
         }
+    }
+
+    private func rearmReceive(_ active: ElevenLabsLiveRun) -> Bool {
+        guard active.ignoredReceiveFailures.allowsRetry() else { return false }
+        after(IgnoredReceiveFailureWindow.retryDelay, active) { client, active in client.receive(active) }
+        return true
     }
 
     private func parse(_ json: String, _ active: ElevenLabsLiveRun) {
@@ -264,14 +295,14 @@ extension ElevenLabsLiveClient {
             guard active.phase != .finishing, !text.isEmpty else { return }
             active.onTranscript?(text, false)
         case .committedTranscript(let text):
-            handleCommitted(text, active)
+            handleCommitted(text, timestamped: false, active)
+        case .committedTranscriptWithTimestamps(let text):
+            handleCommitted(text, timestamped: true, active)
         case .authError:
             fail(StreamingClientError.invalidAPIKey(provider: "ElevenLabs"), active)
         case .serverError(let type, let message):
             fail(ElevenLabsStreamingError.serverError(type: type, message: message), active)
-        case .warning:
-            break
-        case .ignored:
+        case .warning, .ignored:
             break
         }
     }
@@ -284,7 +315,10 @@ extension ElevenLabsLiveClient {
         pump(active)
     }
 
-    private func handleCommitted(_ text: String, _ active: ElevenLabsLiveRun) {
+    private func handleCommitted(_ text: String, timestamped: Bool, _ active: ElevenLabsLiveRun) {
+        // Timestamp enrichment repeats a segment it follows: never a second
+        // utterance, and never another commit's acknowledgement.
+        guard !active.finalTwins.isTwin(timestamped: timestamped) else { return }
         // The offline parser seam preserves existing transcript tests. A
         // live socket, however, must only finalise its one owned commit.
         if active.phase == .idle {
@@ -354,30 +388,5 @@ extension ElevenLabsLiveClient {
         #if canImport(os) && !SPEAK_PORTABLE_CORE
         SpeakLogger.logger(category: "ElevenLabsLiveClient").info("\(event, privacy: .public)")
         #endif
-    }
-}
-
-// MARK: - Error Types
-
-/// Legacy ElevenLabs connection errors. Retained with the same cases and
-/// descriptions the app and its tests already depend on; streaming-specific
-/// failures use ``ElevenLabsStreamingError`` and the shared ``StreamingClientError``.
-public enum ElevenLabsLiveError: LocalizedError {
-    case invalidURL
-    case connectionFailed
-    case sendFailed
-    case missingAPIKey
-
-    public var errorDescription: String? {
-        switch self {
-        case .invalidURL:
-            return "Failed to construct ElevenLabs WebSocket URL"
-        case .connectionFailed:
-            return "Failed to establish WebSocket connection to ElevenLabs"
-        case .sendFailed:
-            return "Failed to send audio data to ElevenLabs"
-        case .missingAPIKey:
-            return "ElevenLabs API key is missing. Please configure it in Settings."
-        }
     }
 }

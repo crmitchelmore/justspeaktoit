@@ -15,9 +15,11 @@ import os.log
 /// bounded queue and sent one at a time behind the configuration. Soniox streams
 /// token batches — `is_final` tokens are confirmed once and accumulated, and the
 /// non-final tail is redisplayed on top of them, so the live transcript grows
-/// monotonically. Finalisation drains the queue, sends the empty end-of-stream
-/// frame (which flushes buffered audio and finalises pending tokens), and waits
-/// for the `finished` response within a bounded budget. The transport is
+/// monotonically. An endpoint or finalize marker delivers the confirmed
+/// transcript once as a final. Finalisation drains the queue, sends `finalize`
+/// and then the empty end-of-stream frame (which flushes buffered audio and
+/// finalises pending tokens), and waits for the `finished` response within a
+/// bounded budget. The transport is
 /// injectable; framing, admission and lifecycle stay here so the platforms
 /// cannot drift.
 ///
@@ -45,6 +47,9 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     let makeConnection: ConnectionFactory
     private let schedule: Scheduler
     private var finishTimeout: TimeInterval = SonioxLiveClient.finishDeadline
+    /// Per-send and handshake bounds; the documented statics in production.
+    var sendTimeout: TimeInterval = SonioxLiveClient.sendDeadline
+    var readyTimeout: TimeInterval = SonioxLiveClient.readyDeadline
     private let queue = DispatchQueue(label: "SonioxLiveClient.state")
     private let queueKey = DispatchSpecificKey<Bool>()
     private let ownedSession: URLSession?
@@ -241,6 +246,9 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         active.deliverWhileFinishing = deliverCallbacks
         if !active.endOfStreamSent,
            !active.outgoing.contains(where: { if case .endOfStream = $0 { return true }; return false }) {
+            // Pending audio, then `finalize`, then end-of-stream; only the
+            // server's `finished` response completes the run.
+            active.outgoing.append(.finalize)
             active.outgoing.append(.endOfStream)
         }
         pump(active)

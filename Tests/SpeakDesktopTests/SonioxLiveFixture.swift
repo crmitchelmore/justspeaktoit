@@ -38,6 +38,23 @@ final class SonioxLiveFixture: @unchecked Sendable {
         XCTFail("No \(seconds)s deadline was scheduled")
     }
 
+    /// The control a finish sends after the drained audio and before end-of-stream.
+    static let finalize = #"{"type":"finalize"}"#
+
+    /// Completes the `finalize` send a finish makes ahead of end-of-stream.
+    func completeFinalize(on socket: AssemblyAITestSocket? = nil) async {
+        let socket = socket ?? self.socket
+        await settle { socket.controls.last == Self.finalize }
+        socket.completeSend()
+    }
+
+    /// Completes the finish's `finalize` send, then waits for end-of-stream.
+    func awaitEndOfStream(on socket: AssemblyAITestSocket? = nil) async {
+        let socket = socket ?? self.socket
+        await completeFinalize(on: socket)
+        await settle { socket.binary.last == Data() }
+    }
+
     func settle(_ predicate: () -> Bool) async {
         for _ in 0..<400 {
             if predicate() { return }

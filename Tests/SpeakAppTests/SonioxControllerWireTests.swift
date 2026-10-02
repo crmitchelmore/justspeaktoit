@@ -58,6 +58,8 @@ final class SonioxControllerWireTests: XCTestCase {
         await self.waitUntil { fixture.clock.delays.contains(SonioxControllerClient.finishTimeout) }
         XCTAssertEqual(fixture.socket.binary, [pcm])
         fixture.socket.completeSend()
+        XCTAssertEqual(fixture.socket.controls.last, #"{"type":"finalize"}"#, "Finalize follows the drained audio")
+        fixture.socket.completeSend()
         XCTAssertEqual(fixture.socket.binary, [pcm, Data()])
         fixture.socket.completeSend()
         fixture.socket.emit(#"{"tokens":[{"text":" world.","is_final":true}],"finished":true}"#)

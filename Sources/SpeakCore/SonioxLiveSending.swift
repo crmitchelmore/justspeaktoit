@@ -2,7 +2,7 @@ import Foundation
 
 extension SonioxLiveClient {
 
-    private enum Payload: Sendable { case config, audio(Int), endOfStream }
+    private enum Payload: Sendable { case config, audio(Int), finalize, endOfStream }
 
     /// Exactly one send is in flight. The configuration frame needs only the
     /// open socket; audio and the end-of-stream frame follow behind it.
@@ -21,6 +21,10 @@ extension SonioxLiveClient {
             payload = .audio(data.count)
             active.queuedAudioBytes -= data.count
             active.queuedAudioFrames -= 1
+        case .finalize:
+            guard active.configSent else { return }
+            message = .text(Self.finalizeJSON)
+            payload = .finalize
         case .endOfStream:
             guard active.configSent else { return }
             message = .binary(Data())
@@ -37,7 +41,7 @@ extension SonioxLiveClient {
             guard let self, let active else { return }
             self.synchronized { self.completeSend(error, payload: payload, sendID: sendID, active: active) }
         }
-        after(Self.sendDeadline, active) { client, active in
+        after(sendTimeout, active) { client, active in
             if active.sending, active.sendID == sendID { client.fail(client.stalledError, active) }
         }
     }
@@ -46,15 +50,13 @@ extension SonioxLiveClient {
         guard isCurrent(active), active.sending, active.sendID == sendID else { return }
         active.sending = false
         if case .audio(let bytes) = payload { active.budget.release(bytes) }
-        if let error {
+        // A spurious ENOTCONN on a send is ignored, as it always has been: the
+        // receive side decides whether the socket is really gone.
+        if let error, !WebSocketErrorFilter.isSpuriousDisconnect(error) {
             fail(error, active)
             return
         }
-        switch payload {
-        case .config: active.configSent = true
-        case .audio: break
-        case .endOfStream: break
-        }
+        if case .config = payload { active.configSent = true }
         pump(active)
     }
 }

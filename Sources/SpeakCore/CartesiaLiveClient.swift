@@ -2,9 +2,6 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-#if canImport(os) && !SPEAK_PORTABLE_CORE
-import os.log
-#endif
 
 // MARK: - Cartesia Live Client (portable, injected transport)
 
@@ -24,7 +21,8 @@ import os.log
 ///
 /// State lives under one lock that is never held across a transport call, a
 /// host callback, a scheduler call or a continuation resume.
-public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
+public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient, @unchecked Sendable {
     /// Each `turn.end` is one completed turn, delivered once.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
     /// `close` has the model process every buffered sample, so words can still
@@ -37,8 +35,8 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
     /// drain of admitted audio, `close` and the server's closure. A healthy
     /// stream ends on the closure itself; nothing sleeps.
     public static let finishBudget: TimeInterval = 8
-    /// Exposes `finishBudget` to host lifecycle watchdogs.
-    public var finalisationBudget: TimeInterval? { Self.finishBudget }
+    /// Exposes this client's finish bound to host lifecycle watchdogs.
+    public var finalisationBudget: TimeInterval? { timing.finish }
     /// A finish that lands before the handshake waits at most this long for it.
     static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
     /// The handshake must complete within this bound of `start()`.
@@ -51,13 +49,16 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
     /// Frames that may be queued or in flight, alongside the byte bound.
     static let maximumQueuedFrames = 256
 
-    private let apiKey: String
-    private let model: String
-    private let sampleRate: Int
+    let apiKey: String
+    let model: String
+    let sampleRate: Int
     private let makeConnection: ConnectionFactory
     let schedule: Scheduler
-    private let lock = NSLock()
+    let timing: Timing
+    let lock = NSLock()
     private(set) var run: CartesiaLiveRun
+    /// Kept for the boundary contract; see `onUtteranceBoundary`.
+    var boundaryCallback: ((String) -> Void)?
 
     public convenience init(
         apiKey: String,
@@ -71,21 +72,42 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
         )
     }
 
-    public init(
+    /// `postStopFinalizeBudget` and `stopGracePeriod` come from
+    /// ``LiveClientOptions``. The server's normal closure still ends a healthy
+    /// finish; they only widen the bound on waiting for it.
+    public convenience init(
         apiKey: String,
         model: String = "ink-2",
         sampleRate: Int = 16_000,
+        postStopFinalizeBudget: TimeInterval? = nil,
+        stopGracePeriod: TimeInterval = 0,
         makeConnection: @escaping ConnectionFactory,
         schedule: @escaping Scheduler = { seconds, action in
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
         }
     ) {
+        self.init(
+            apiKey: apiKey, model: model, sampleRate: sampleRate,
+            timing: Timing(postStopFinalizeBudget: postStopFinalizeBudget, stopGracePeriod: stopGracePeriod),
+            makeConnection: makeConnection, schedule: schedule
+        )
+    }
+
+    init(
+        apiKey: String,
+        model: String,
+        sampleRate: Int,
+        timing: Timing,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler
+    ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.model = model
         self.sampleRate = sampleRate
+        self.timing = timing
         self.makeConnection = makeConnection
         self.schedule = schedule
-        self.run = CartesiaLiveRun(sampleRate: sampleRate)
+        self.run = CartesiaLiveRun(sampleRate: sampleRate, ignoredReceiveWindow: timing.ignoredReceiveWindow)
     }
 
     deinit { run.connection?.cancel() }
@@ -100,7 +122,7 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
                 active = run
             } else {
                 retire(run, &effects)
-                active = CartesiaLiveRun(sampleRate: sampleRate)
+                active = CartesiaLiveRun(sampleRate: sampleRate, ignoredReceiveWindow: timing.ignoredReceiveWindow)
                 run = active
             }
             active.phase = .connecting
@@ -255,140 +277,5 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient, @
             return claim(active, &effects)
         }
         if let outbound { drive(outbound) }
-    }
-}
-
-// MARK: - Run lifecycle
-
-extension CartesiaLiveClient {
-    var stalledError: Error { StreamingClientError.transportStalled(provider: "Cartesia") }
-
-    /// Finish callers waiting on the active run, including those held while a
-    /// failure is delivered; lets tests observe that a finish has registered
-    /// without sleeping.
-    var pendingFinishes: Int { withState { _ in run.waiters.count + run.lateWaiters.count } }
-
-    /// Runs `body` under the lock, then performs the effects it recorded.
-    func withState<Value>(_ body: (inout CartesiaLiveEffects) -> Value) -> Value {
-        var effects = CartesiaLiveEffects()
-        let value = lock.withLock { body(&effects) }
-        effects.perform()
-        return value
-    }
-
-    func isCurrent(_ active: CartesiaLiveRun) -> Bool { active === run && active.phase != .closed }
-
-    /// Records the handshake, from the transport or the `connected` frame.
-    /// Returns whether this call opened the run.
-    func recordOpen(_ active: CartesiaLiveRun) -> Bool {
-        guard isCurrent(active), active.connection != nil, !active.opened else { return false }
-        active.opened = true
-        if active.phase == .connecting { active.phase = .streaming }
-        log("WebSocket handshake completed")
-        return true
-    }
-
-    /// Retires the run at once, then, outside the lock, publishes the failure
-    /// before any finish caller of this run returns: those already waiting and
-    /// those that join while it is being delivered. Transcripts already on their
-    /// way to the host arrive first: the report waits for them and is released
-    /// by the last one to return, on its thread, so no caller blocks on a host
-    /// callback. Words a finish had withheld follow, so the host's visible draft
-    /// keeps everything the server sent, while finish callers receive confirmed
-    /// text only. A callback that starts a new session cannot be touched by
-    /// this cleanup: the run is detached, and only its own callers are released.
-    func fail(_ active: CartesiaLiveRun, _ error: Error, _ effects: inout CartesiaLiveEffects) {
-        guard isCurrent(active) else { return }
-        let onTranscript = active.onTranscript
-        let onError = active.onError
-        let finals = active.withheldFinals
-        let draft = active.withheldDraft
-        let waiters = active.waiters
-        let transcript = active.transcript
-        active.waiters.removeAll()
-        active.deliveringFailure = true
-        retire(active, &effects)
-        log("Session failed")
-        let report = {
-            if let onTranscript {
-                finals.forEach { onTranscript($0, true) }
-                if let draft { onTranscript(draft, false) }
-            }
-            onError?(error)
-            waiters.forEach { $0.resume(returning: transcript) }
-            self.withState { effects in self.endFailureDelivery(active, &effects) }
-        }
-        if active.transcriptsInFlight > 0 {
-            active.deferredFailureReport = report
-        } else {
-            effects.add(report)
-        }
-    }
-
-    /// A transcript callback returned. The last one out releases a failure
-    /// report that was waiting behind it, on this thread and outside the lock.
-    func transcriptReturned(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
-        active.transcriptsInFlight -= 1
-        guard active.transcriptsInFlight == 0, let report = active.deferredFailureReport else { return }
-        active.deferredFailureReport = nil
-        effects.add(report)
-    }
-
-    /// The error is out: callers that joined while it was being delivered return.
-    private func endFailureDelivery(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
-        active.deliveringFailure = false
-        let late = active.lateWaiters
-        let transcript = active.transcript
-        active.lateWaiters.removeAll()
-        effects.add { late.forEach { $0.resume(returning: transcript) } }
-    }
-
-    /// Ends the run for good: its socket is cancelled, admitted audio and its
-    /// budget are released, callbacks are dropped and every waiter resumes with
-    /// the confirmed transcript.
-    func retire(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
-        guard active.phase != .closed else { return }
-        active.phase = .closed
-        let connection = active.connection
-        let waiters = active.waiters
-        let transcript = active.transcript
-        active.connection = nil
-        active.outgoing.removeAll()
-        active.admittedBytes = 0
-        active.inFlightAudioBytes = 0
-        active.sending = false
-        active.waiters.removeAll()
-        active.withheldFinals.removeAll()
-        active.withheldDraft = nil
-        active.onTranscript = nil
-        active.onError = nil
-        effects.add {
-            connection?.cancel()
-            waiters.forEach { $0.resume(returning: transcript) }
-        }
-    }
-
-    /// Arms a deadline owned by `active`. It acts only while that run is still
-    /// current, so a late timer cannot touch a stopped or replacement run.
-    func after(
-        _ seconds: TimeInterval, _ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects,
-        action: @escaping @Sendable (CartesiaLiveClient, CartesiaLiveRun, inout CartesiaLiveEffects) -> Void
-    ) {
-        let schedule = self.schedule
-        effects.add {
-            schedule(seconds) { [weak self, weak active] in
-                guard let self, let active else { return }
-                self.withState { effects in
-                    if self.isCurrent(active) { action(self, active, &effects) }
-                }
-            }
-        }
-    }
-
-    /// Lifecycle events only: never a key, audio or transcript text.
-    func log(_ event: String) {
-        #if canImport(os) && !SPEAK_PORTABLE_CORE
-        SpeakLogger.logger(category: "CartesiaLiveClient").info("\(event, privacy: .public)")
-        #endif
     }
 }

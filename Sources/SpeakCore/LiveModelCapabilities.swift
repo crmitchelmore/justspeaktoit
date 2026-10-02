@@ -113,7 +113,8 @@ extension ModelCatalog {
         // its query or `config` message, so a selected language is reported as
         // unavailable rather than sent.
         "cartesia/ink-2-streaming": LiveModelCapabilities(
-            supportedSpeedModes: [.instant, .livePolish]
+            supportedSpeedModes: [.instant, .livePolish],
+            postStopFinalizeBudget: 1.5
         ),
         // Gladia's trailing finals and `end_session` follow `stop_recording`.
         // The macOS Gladia controller waits this window after its own

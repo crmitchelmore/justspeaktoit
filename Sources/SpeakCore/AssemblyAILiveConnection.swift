@@ -6,11 +6,7 @@ import FoundationNetworking
 extension AssemblyAILiveClient {
     func connect(_ active: AssemblyAILiveRun, host: AssemblyAIStreamingEndpoint) {
         guard isCurrent(active), active.phase != .finishing else { return }
-        guard let url = AssemblyAIStreamingRequest.url(
-            endpoint: host, apiKey: apiKey, sampleRate: sampleRate, speechModel: speechModel
-        ) else { fail(StreamingClientError.invalidURL, active); return }
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "Authorization")
+        guard let request = makeRequest(endpoint: host) else { fail(StreamingClientError.invalidURL, active); return }
         let attempt = AssemblyAILiveRun.Attempt(connection: makeConnection(request), host: host)
         active.attempt = attempt
         attempt.connection.resume { [weak self, weak active, weak attempt] in
@@ -47,8 +43,14 @@ extension AssemblyAILiveClient {
             self.synchronized {
                 guard self.isCurrent(active, attempt) else { return }
                 switch result {
-                case .failure(let error): self.transportFailed(error, active, attempt)
+                case .failure(let error):
+                    // A spurious ENOTCONN, typically around the handshake, re-arms
+                    // the receive. It never ends the session or spends the one
+                    // EU-to-global fallback; only one that persists does.
+                    if WebSocketErrorFilter.isSpuriousDisconnect(error), self.rearmReceive(active, attempt) { return }
+                    self.transportFailed(error, active, attempt)
                 case .success(let message):
+                    attempt.ignoredReceiveFailures.reset()
                     let data: Data
                     switch message {
                     case .text(let text): data = Data(text.utf8)
@@ -59,6 +61,17 @@ extension AssemblyAILiveClient {
                 }
             }
         }
+    }
+
+    /// Re-arms the receive shortly after an ignorable failure, or answers
+    /// false once such failures have persisted past their window.
+    private func rearmReceive(_ active: AssemblyAILiveRun, _ attempt: AssemblyAILiveRun.Attempt) -> Bool {
+        guard attempt.ignoredReceiveFailures.allowsRetry() else { return false }
+        after(IgnoredReceiveFailureWindow.retryDelay, active) { [weak attempt] client, active in
+            guard let attempt else { return }
+            client.receive(active, attempt)
+        }
+        return true
     }
 
     private func parse(_ data: Data, _ active: AssemblyAILiveRun, _ attempt: AssemblyAILiveRun.Attempt) {
@@ -88,6 +101,12 @@ extension AssemblyAILiveClient {
         // A callback may itself call stop(). Its triggering Turn predates
         // ForceEndpoint and must not count as the response to that new request.
         let endingWhenReceived = active.ending
+        // The provider's closed utterance is an explicit boundary, reported
+        // during a finish too, ahead of the turn's transcript update.
+        if let utterance = turn.utterance?.trimmingCharacters(in: .whitespacesAndNewlines), !utterance.isEmpty {
+            onUtteranceBoundary?(utterance)
+            guard isCurrent(active, attempt) else { return }
+        }
         if active.phase != .finishing || active.deliverWhileFinishing {
             active.onTranscript?(update.displayText, false)
         }
@@ -96,7 +115,7 @@ extension AssemblyAILiveClient {
         if update.finalizedTurn, active.phase == .finishing,
            endingWhenReceived == .forceInFlight || endingWhenReceived == .awaitingFinal {
             if active.ending == .forceInFlight { active.finalAfterForce = true }
-            if active.ending == .awaitingFinal { active.ending = .terminateReady; pump(active) }
+            if active.ending == .awaitingFinal { holdTerminateForGrace(active) }
         }
     }
 }

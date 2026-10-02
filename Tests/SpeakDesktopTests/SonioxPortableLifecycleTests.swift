@@ -182,6 +182,7 @@ final class SonioxPortableLifecycleTests: XCTestCase {
         socket.completeSend() // config
         XCTAssertEqual(socket.binary, [opening], "The opening audio survives a stop before ready")
         socket.completeSend()
+        socket.completeSend() // finalize
         XCTAssertEqual(socket.binary.last, Data(), "End-of-stream follows the drained opening audio")
         socket.completeSend()
         socket.emit(Self.tokens([(text: "Opening words.", final: true)]))
@@ -264,7 +265,7 @@ final class SonioxPortableLifecycleTests: XCTestCase {
         fixture.becomeReady()
         fixture.socket.emit(Self.tokens([(text: "First.", final: true)]))
         let firstFinish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { fixture.socket.binary.last == Data() }
+        await fixture.awaitEndOfStream()
         fixture.socket.completeSend()
         fixture.socket.emit(Self.finished())
         let first = await firstFinish.value
@@ -276,7 +277,7 @@ final class SonioxPortableLifecycleTests: XCTestCase {
         second.completeSend()
         second.emit(Self.tokens([(text: "Second.", final: true)]))
         let secondFinish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { second.binary.last == Data() }
+        await fixture.awaitEndOfStream(on: second)
         second.completeSend()
         second.emit(Self.finished())
         let transcript = await secondFinish.value

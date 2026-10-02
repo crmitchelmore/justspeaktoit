@@ -14,14 +14,14 @@ extension CartesiaLiveClient {
                     return true
                 }
                 guard !handedBack else { return }
-                if self.handle(result, generation, active) { self.receive(active, connection) }
+                if self.handle(result, generation, active, connection) { self.receive(active, connection) }
             }
             let handedBack: Result<StreamingWebSocketMessage, Error>? = withState { _ in
                 active.receiveArming = false
                 defer { active.synchronousReceive = nil }
                 return active.synchronousReceive
             }
-            guard let result = handedBack, handle(result, generation, active) else { return }
+            guard let result = handedBack, handle(result, generation, active, connection) else { return }
         }
     }
 
@@ -36,7 +36,8 @@ extension CartesiaLiveClient {
     /// Applies one receive result and answers whether the loop continues.
     /// Frames are decoded before the lock is taken.
     private func handle(
-        _ result: Result<StreamingWebSocketMessage, Error>, _ generation: UInt64, _ active: CartesiaLiveRun
+        _ result: Result<StreamingWebSocketMessage, Error>, _ generation: UInt64, _ active: CartesiaLiveRun,
+        _ connection: any StreamingWebSocketConnection
     ) -> Bool {
         let event: CartesiaTurnEvent?
         switch result {
@@ -47,11 +48,37 @@ extension CartesiaLiveClient {
         return withState { effects in
             guard isCurrent(active), active.receiveGeneration == generation else { return false }
             if case .failure(let error) = result {
-                closed(by: error, active, &effects)
+                if WebSocketErrorFilter.isSpuriousDisconnect(error) {
+                    ignoreSpuriousDisconnect(active, connection, &effects)
+                } else {
+                    closed(by: error, active, &effects)
+                }
                 return false
             }
+            active.ignoredReceiveFailures.reset()
             if let event { apply(event, active, &effects) }
             return isCurrent(active)
+        }
+    }
+
+    /// A spurious ENOTCONN re-arms the receive shortly instead of ending the
+    /// run. One that persists means the socket is gone: once the server has
+    /// the close command that is how its closure surfaced, and otherwise the
+    /// transport stalled.
+    private func ignoreSpuriousDisconnect(
+        _ active: CartesiaLiveRun, _ connection: any StreamingWebSocketConnection,
+        _ effects: inout CartesiaLiveEffects
+    ) {
+        guard active.ignoredReceiveFailures.allowsRetry() else {
+            if active.closeSent {
+                closed(by: CartesiaLostSocketClosure(), active, &effects)
+            } else {
+                fail(active, stalledError, &effects)
+            }
+            return
+        }
+        after(IgnoredReceiveFailureWindow.retryDelay, active, &effects) { client, active, effects in
+            effects.add { client.receive(active, connection) }
         }
     }
 
@@ -93,6 +120,7 @@ extension CartesiaLiveClient {
         active.withheldDraft = nil
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         active.accumulated.append(final: text)
+        active.confirmedSegments.append(text.trimmingCharacters(in: .whitespacesAndNewlines))
         guard active.phase != .finishing else {
             active.withheldFinals.append(text)
             return
@@ -148,4 +176,10 @@ extension CartesiaLiveClient {
         log("Stream completed")
         retire(active, &effects)
     }
+}
+
+/// The lost socket of a stream the server already had `close` for: it ends
+/// the finish exactly as the server's normal closure would.
+private struct CartesiaLostSocketClosure: StreamingWebSocketCloseReporting {
+    var webSocketCloseCode: Int? { CartesiaLiveProtocol.normalClosureCode }
 }

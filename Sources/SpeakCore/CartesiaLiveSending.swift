@@ -96,7 +96,7 @@ extension CartesiaLiveClient {
         active.sending = true
         active.sendGeneration += 1
         let generation = active.sendGeneration
-        after(Self.sendDeadline, active, &effects) { client, active, effects in
+        after(timing.send, active, &effects) { client, active, effects in
             guard active.sending, active.sendGeneration == generation else { return }
             client.fail(active, client.stalledError, &effects)
         }
@@ -113,7 +113,9 @@ extension CartesiaLiveClient {
             active.sending = false
             active.admittedBytes -= active.inFlightAudioBytes
             active.inFlightAudioBytes = 0
-            if let error {
+            // A spurious ENOTCONN on a send is ignored, as it always has been:
+            // the receive side decides whether the socket is really gone.
+            if let error, !WebSocketErrorFilter.isSpuriousDisconnect(error) {
                 fail(active, CartesiaLiveProtocol.connectionError(error), &effects)
                 return nil
             }
@@ -130,11 +132,12 @@ extension CartesiaLiveClient {
     /// Stop sequencing: every admitted frame is sent and completed, then
     /// `{"type":"close"}`, then the server's closure ends the stream. Audio held
     /// while the socket opens waits for the handshake within
-    /// `finishReadyBudget`, and one deadline bounds the whole finish.
+    /// `finishReadyBudget`, and one deadline (`finishBudget`, widened by any
+    /// stop options) bounds the whole finish.
     func beginFinish(_ active: CartesiaLiveRun, _ effects: inout CartesiaLiveEffects) {
         guard active.phase != .finishing else { return }
         active.phase = .finishing
-        after(Self.finishBudget, active, &effects) { client, active, effects in
+        after(timing.finish, active, &effects) { client, active, effects in
             let error: Error = active.closeDelivered ? CartesiaStreamingError.missingCompletion : client.stalledError
             client.fail(active, error, &effects)
         }

@@ -4,12 +4,16 @@ import Foundation
 /// the one permitted EU-to-global retry. All fields use the client's state queue.
 final class AssemblyAILiveRun: @unchecked Sendable {
     enum Phase { case idle, connecting, active, finishing, closed }
-    enum Ending { case none, forceInFlight, awaitingFinal, terminateReady, terminateInFlight, sent }
+    /// `grace` holds Terminate for the caller's stop grace period once the
+    /// trailing formatted turn arrived or its budget elapsed.
+    enum Ending { case none, forceInFlight, awaitingFinal, grace, terminateReady, terminateInFlight, sent }
     final class Attempt: @unchecked Sendable {
         let connection: any StreamingWebSocketConnection
         let host: AssemblyAIStreamingEndpoint
         var didOpen = false
         var didBegin = false
+        /// Spurious ENOTCONN re-arms the receive instead of failing the socket.
+        var ignoredReceiveFailures = IgnoredReceiveFailureWindow()
         init(connection: any StreamingWebSocketConnection, host: AssemblyAIStreamingEndpoint) {
             self.connection = connection
             self.host = host
@@ -43,6 +47,10 @@ final class AssemblyAILiveRun: @unchecked Sendable {
         let text = assembler.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
     }
+
+    /// Audio still waits for this attempt's `Begin`, so the oldest queued
+    /// frames may make room for newer ones instead of failing the run.
+    var awaitingBegin: Bool { !(attempt?.didBegin ?? false) }
 }
 
 enum AssemblyAIStreamingError: LocalizedError {

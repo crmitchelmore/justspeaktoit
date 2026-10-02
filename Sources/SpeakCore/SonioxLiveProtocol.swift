@@ -17,6 +17,8 @@ import FoundationNetworking
 extension SonioxLiveClient {
     static let webSocketHost = "stt-rt.soniox.com"
     static let webSocketPath = "/transcribe-websocket"
+    /// Manual finalization: every pending token is confirmed and `<fin>` follows.
+    static let finalizeJSON = #"{"type":"finalize"}"#
 
     /// `wss://stt-rt.soniox.com/transcribe-websocket`. The API key travels in
     /// the first configuration frame, never in the URL, so the request carries

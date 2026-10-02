@@ -28,12 +28,21 @@ extension AssemblyAILiveClient {
         guard isCurrent(active, attempt), active.sending, active.sendID == sendID else { return }
         active.sending = false
         if case .audio(let bytes) = payload { active.budget.release(bytes) }
-        if let error { transportFailed(error, active, attempt); return }
+        // A spurious ENOTCONN on a send is ignored, as it always has been: the
+        // receive side decides whether the socket is really gone.
+        if let error, !WebSocketErrorFilter.isSpuriousDisconnect(error) {
+            transportFailed(error, active, attempt)
+            return
+        }
         switch payload {
         case .audio: pump(active)
         case .forceEndpoint:
-            active.ending = active.finalAfterForce ? .terminateReady : .awaitingFinal
-            if active.finalAfterForce { pump(active) } else { waitForFormattedTurn(active) }
+            if active.finalAfterForce {
+                holdTerminateForGrace(active)
+            } else {
+                active.ending = .awaitingFinal
+                waitForFormattedTurn(active)
+            }
         case .terminate:
             active.ending = .sent
             after(3, active) { client, active in client.close(active) }
@@ -59,11 +68,27 @@ extension AssemblyAILiveClient {
         return (message, payload)
     }
 
+    /// Waits up to `postStopFinalizeBudget` for the formatted turn that answers
+    /// `ForceEndpoint`; a missing turn still terminates within the bound.
     private func waitForFormattedTurn(_ active: AssemblyAILiveRun) {
-        let budget = ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal35ProStreamingID)
-            .postStopFinalizeBudget
-        after(budget, active) { client, active in
+        guard postStopFinalizeBudget > 0 else { holdTerminateForGrace(active); return }
+        after(postStopFinalizeBudget, active) { client, active in
             guard active.ending == .awaitingFinal else { return }
+            client.holdTerminateForGrace(active)
+        }
+    }
+
+    /// The trailing turn is in, or its budget elapsed. `Terminate` follows
+    /// after the caller's stop grace, immediately when there is none.
+    func holdTerminateForGrace(_ active: AssemblyAILiveRun) {
+        guard stopGracePeriod > 0 else {
+            active.ending = .terminateReady
+            pump(active)
+            return
+        }
+        active.ending = .grace
+        after(stopGracePeriod, active) { client, active in
+            guard active.ending == .grace else { return }
             active.ending = .terminateReady
             client.pump(active)
         }

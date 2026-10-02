@@ -14,6 +14,9 @@ final class SonioxLiveRun: @unchecked Sendable {
     enum Outbound: Sendable {
         case config(String)
         case audio(Data)
+        /// `{"type":"finalize"}`: the server confirms every pending token and
+        /// marks it with `<fin>` before end-of-stream.
+        case finalize
         /// The empty end-of-stream frame: the server finalizes any pending
         /// tokens, emits `finished`, and closes.
         case endOfStream
@@ -43,6 +46,12 @@ final class SonioxLiveRun: @unchecked Sendable {
     /// ever grows; the non-final tail is displayed on top of it but never
     /// stored here.
     var accumulatedFinalText = ""
+    /// Bumped by every frame that confirms new words; an endpoint or finalize
+    /// marker delivers the transcript as a final only when it moved.
+    var finalVersion = 0
+    var deliveredFinalVersion = 0
+    /// Consecutive spurious ENOTCONN receive failures, bounded in time.
+    var ignoredReceiveFailures = IgnoredReceiveFailureWindow()
 
     var waiters: [CheckedContinuation<String?, Never>] = []
     var onTranscript: ((String, Bool) -> Void)?

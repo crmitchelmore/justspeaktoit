@@ -22,6 +22,10 @@ final class ElevenLabsLiveRun: @unchecked Sendable {
     /// A response can precede its send completion; both must succeed before
     /// another segment is sent or graceful finish is acknowledged.
     var commitFinalReceived = false
+    /// Pairs each `committed_transcript` with its timestamped twin.
+    var finalTwins = ElevenLabsFinalTwinTracker()
+    /// Consecutive spurious ENOTCONN receive failures, bounded in time.
+    var ignoredReceiveFailures = IgnoredReceiveFailureWindow()
     let sendBudget: StreamingAudioSendBudget
     var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
     var waiters: [CheckedContinuation<String?, Never>] = []

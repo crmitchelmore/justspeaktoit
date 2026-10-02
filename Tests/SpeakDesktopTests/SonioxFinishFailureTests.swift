@@ -10,7 +10,7 @@ final class SonioxFinishFailureTests: XCTestCase {
             fixture.becomeReady()
             fixture.socket.emit(#"{"tokens":[{"text":"Saved.","is_final":true}]}"#)
             let finish = Task { await fixture.client.finishAndWait() }
-            await fixture.settle { fixture.socket.binary.last == Data() }
+            await fixture.awaitEndOfStream()
             fixture.socket.completeSend()
             fixture.socket.emit("{\"error_code\":\(code),\"error_message\":\"service failed\"}")
             let text = await finish.value
@@ -25,7 +25,8 @@ final class SonioxFinishFailureTests: XCTestCase {
         fixture.becomeReady()
         let finish = Task { await fixture.client.finishAndWait() }
         await fixture.waitForScheduled(SonioxLiveClient.finishDeadline)
-        fixture.socket.completeSend()
+        await fixture.completeFinalize()
+        fixture.socket.completeSend() // end-of-stream
         fixture.clock.fire(SonioxLiveClient.finishDeadline)
         _ = await finish.value
         XCTAssertEqual(fixture.events.errors.first as? SonioxStreamingError, .missingCompletion)
@@ -36,7 +37,7 @@ final class SonioxFinishFailureTests: XCTestCase {
         fixture.start()
         fixture.becomeReady()
         let finish = Task { await fixture.client.finishAndWait() }
-        await fixture.settle { fixture.socket.binary.last == Data() }
+        await fixture.awaitEndOfStream()
         fixture.socket.completeSend(URLError(.networkConnectionLost))
         _ = await finish.value
         XCTAssertEqual(fixture.events.errors.count, 1)
@@ -47,6 +48,9 @@ final class SonioxFinishFailureTests: XCTestCase {
         fixture.start()
         fixture.becomeReady()
         fixture.socket.onSend = { message in
+            if case .text(SonioxLiveFixture.finalize) = message {
+                DispatchQueue.global().async { fixture.socket.completeSend() }
+            }
             if case .binary(let data) = message, data.isEmpty {
                 fixture.socket.emit(#"{"tokens":[{"text":"Complete.","is_final":true}],"finished":true}"#)
             }

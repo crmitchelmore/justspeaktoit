@@ -66,6 +66,9 @@ public enum ElevenLabsRealtimeEvent: Equatable, Sendable {
     case partialTranscript(String)
     /// A finalised segment. ElevenLabs segments are standalone and concatenated.
     case committedTranscript(String)
+    /// The same segment with word timestamps. With timestamps enabled both
+    /// forms arrive for one segment, and either may arrive alone.
+    case committedTranscriptWithTimestamps(String)
     /// The key was rejected or lacks speech-to-text (Scribe) access.
     case authError(String)
     /// A non-authentication server error that ends the session.
@@ -97,9 +100,9 @@ public enum ElevenLabsRealtimeEvent: Equatable, Sendable {
         case "committed_transcript":
             return .committedTranscript(text)
         case "committed_transcript_with_timestamps":
-            // Additional metadata for an already delivered segment. Text-only
-            // consumers must not append it as another utterance.
-            return .ignored(type: messageType)
+            // Usually metadata for a segment already delivered; the client
+            // pairs the two forms so a segment never counts twice.
+            return .committedTranscriptWithTimestamps(text)
         case "auth_error":
             return .authError(object["error"] as? String ?? messageType)
         case "warning":
@@ -137,6 +140,31 @@ public enum ElevenLabsStreamingError: LocalizedError, Equatable, Sendable {
             return "ElevenLabs returned an unrequested transcription segment. The recording is available to retry."
         case .missingCompletion:
             return "ElevenLabs did not confirm the completed transcription. The recording is available to retry."
+        }
+    }
+}
+
+// MARK: - Error Types
+
+/// Legacy ElevenLabs connection errors. Retained with the same cases and
+/// descriptions the app and its tests already depend on; streaming-specific
+/// failures use ``ElevenLabsStreamingError`` and the shared ``StreamingClientError``.
+public enum ElevenLabsLiveError: LocalizedError {
+    case invalidURL
+    case connectionFailed
+    case sendFailed
+    case missingAPIKey
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL:
+            return "Failed to construct ElevenLabs WebSocket URL"
+        case .connectionFailed:
+            return "Failed to establish WebSocket connection to ElevenLabs"
+        case .sendFailed:
+            return "Failed to send audio data to ElevenLabs"
+        case .missingAPIKey:
+            return "ElevenLabs API key is missing. Please configure it in Settings."
         }
     }
 }

@@ -21,7 +21,7 @@ extension SonioxLiveClient {
             }
         }
         receive(active, connection)
-        after(Self.readyDeadline, active) { client, active in
+        after(readyTimeout, active) { client, active in
             if !active.didOpen { client.fail(SonioxStreamingError.connectionFailed, active) }
         }
     }
@@ -34,10 +34,17 @@ extension SonioxLiveClient {
                 guard self.isCurrent(active) else { return }
                 switch result {
                 case .failure(let error):
+                    // A spurious ENOTCONN re-arms the receive; one that
+                    // persists is a stalled transport.
+                    guard !WebSocketErrorFilter.isSpuriousDisconnect(error) else {
+                        if !self.rearmReceive(active, connection) { self.fail(self.stalledError, active) }
+                        return
+                    }
                     // Only `finished` proves completion. A dropped socket at
                     // any earlier phase must preserve text as a failed run.
                     self.fail(self.mapReceiveError(error), active)
                 case .success(let message):
+                    active.ignoredReceiveFailures.reset()
                     let text: String?
                     switch message {
                     case .text(let value): text = value
@@ -50,6 +57,12 @@ extension SonioxLiveClient {
         }
     }
 
+    private func rearmReceive(_ active: SonioxLiveRun, _ connection: any StreamingWebSocketConnection) -> Bool {
+        guard active.ignoredReceiveFailures.allowsRetry() else { return false }
+        after(IgnoredReceiveFailureWindow.retryDelay, active) { client, active in client.receive(active, connection) }
+        return true
+    }
+
     // MARK: - Frame handling
 
     func handle(_ frame: SonioxLiveFrame, _ active: SonioxLiveRun) {
@@ -60,12 +73,14 @@ extension SonioxLiveClient {
         }
 
         active.accumulatedFinalText.append(frame.newFinalText)
+        if !frame.newFinalText.isEmpty { active.finalVersion += 1 }
         // Interims flow only while streaming. During a finish the whole
         // transcript is either returned by `finishAndWait` or delivered once as
         // a final by `settleFinish`, so nothing is doubled.
         if active.phase == .active {
             let display = active.display(nonFinalTail: frame.nonFinalText)
             if !display.isEmpty { active.onTranscript?(display, false) }
+            deliverMarkedFinal(frame, active)
         }
 
         if frame.finished {
@@ -78,5 +93,17 @@ extension SonioxLiveClient {
                 fail(SonioxStreamingError.unexpectedCompletion, active)
             }
         }
+    }
+}
+
+extension SonioxLiveClient {
+    /// An endpoint (`<end>`) or finalize (`<fin>`) marker closes an utterance:
+    /// the confirmed transcript is delivered once as a final, and a repeated
+    /// marker with no new words delivers nothing.
+    func deliverMarkedFinal(_ frame: SonioxLiveFrame, _ active: SonioxLiveRun) {
+        guard frame.finalized, isCurrent(active), active.phase == .active,
+              active.finalVersion > active.deliveredFinalVersion, let whole = active.transcript else { return }
+        active.deliveredFinalVersion = active.finalVersion
+        active.onTranscript?(whole, true)
     }
 }

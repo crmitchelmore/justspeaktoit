@@ -145,7 +145,9 @@ enum CartesiaTurnEvent: Equatable {
         switch type {
         case "connected": self = .connected
         case "turn.start": self = .turnStart
-        case "turn.update": self = .turnUpdate(transcript)
+        // `transcript` is the earlier integration's undocumented event, still
+        // read as the open turn's draft, as that parser read it.
+        case "turn.update", "transcript": self = .turnUpdate(transcript)
         case "turn.eager_end": self = .turnEagerEnd(transcript)
         case "turn.resume": self = .turnResume
         case "turn.end": self = .turnEnd(transcript)

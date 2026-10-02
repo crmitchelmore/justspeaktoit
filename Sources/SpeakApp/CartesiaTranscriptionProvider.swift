@@ -65,7 +65,7 @@ struct CartesiaTranscriptionProvider: TranscriptionProvider {
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
-    request.setValue(CartesiaLiveTranscriber.apiVersion, forHTTPHeaderField: "Cartesia-Version")
+    request.setValue(CartesiaLiveClient.apiVersion, forHTTPHeaderField: "Cartesia-Version")
 
     do {
       let (data, response) = try await session.data(for: request)

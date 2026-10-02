@@ -24,9 +24,11 @@ extension ElevenLabsLiveClient {
                 guard self.isCurrent(active), active.sendID == sendID else { return }
                 active.sending = false
                 active.sendBudget.release(audioBytes)
-                if let error { self.fail(error, active); return }
+                // A spurious ENOTCONN on a send is ignored, as it always has
+                // been: the receive side decides whether the socket is gone.
+                if let error, !WebSocketErrorFilter.isSpuriousDisconnect(error) { self.fail(error, active); return }
                 if let commit, !active.commitFinalReceived {
-                    self.after(Self.finishBudget, active) { client, active in
+                    self.after(self.timing.postCommitDrain, active) { client, active in
                         if active.pendingCommit == commit {
                             client.fail(ElevenLabsStreamingError.missingCompletion, active)
                         }

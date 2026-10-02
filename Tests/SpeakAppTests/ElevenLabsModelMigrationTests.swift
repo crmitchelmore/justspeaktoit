@@ -67,7 +67,7 @@ final class ElevenLabsModelMigrationTests: XCTestCase {
 
     func testTTSModels_currentCatalogueListsOnlySupportedModels() {
         let ids = ElevenLabsTTSModels.all.map(\.id)
-        XCTAssertEqual(ids, ["eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"])
+        XCTAssertEqual(ids, ["eleven_v4", "eleven_v3", "eleven_multilingual_v2", "eleven_flash_v2_5"])
         XCTAssertFalse(ids.contains("eleven_turbo_v2_5"))
     }
 

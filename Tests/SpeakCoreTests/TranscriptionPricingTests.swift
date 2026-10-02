@@ -29,6 +29,8 @@ final class TranscriptionPricingTests: XCTestCase {
                        Decimal(string: "0.22")! / 60)
         XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe-v2-streaming"),
                        Decimal(string: "0.39")! / 60)
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: "elevenlabs/scribe_v2_medical"),
+                       Decimal(string: "0.22")! / 60)
     }
 
     func testExactIdsWinOverProviderPrefixes() {

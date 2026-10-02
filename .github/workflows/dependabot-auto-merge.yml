@@ -1,0 +1,103 @@
+name: Dependabot auto-merge
+
+# Squash-merges a Dependabot pull request once every check on its head commit
+# has passed. Only patch and minor updates qualify; major updates, and pull
+# requests carrying non-merge commits from anyone other than Dependabot, stay
+# open for review. Runs after each pull-request workflow finishes, so the last one to
+# finish green triggers the merge.
+#
+# Merges made with GITHUB_TOKEN do not trigger push workflows on the default
+# branch; the bump ships with the next ordinary push.
+
+on:
+  workflow_run:
+    workflows: ["CI", "CodeQL", "Conformance PR Review", "Tessl Code Review"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+  statuses: read
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Merge when every check has passed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr=$(gh pr list -R "$REPO" --head "$BRANCH" --state open \
+            --json number,headRefOid,author \
+            --jq ".[] | select(.headRefOid == \"$SHA\" and (.author.login | test(\"dependabot\"))) | .number")
+          if [ -z "$pr" ]; then
+            echo "No open Dependabot pull request at $SHA."; exit 0
+          fi
+
+          # Merges of the base branch are fine; any other commit must be Dependabot's.
+          others=$(gh api --paginate "repos/$REPO/pulls/$pr/commits?per_page=100" \
+            --jq '.[] | select((.parents | length) == 1 and .author.login != "dependabot[bot]") | .sha' | wc -l)
+          if [ "$others" -ne 0 ]; then
+            echo "#$pr has commits from someone other than Dependabot; leaving it for review."; exit 0
+          fi
+
+          messages=$(gh api --paginate "repos/$REPO/pulls/$pr/commits?per_page=100" \
+            --jq '.[] | select(.author.login == "dependabot[bot]") | .commit.message')
+          types=$(grep -o 'update-type: version-update:semver-[a-z]*' <<<"$messages" | sort -u || true)
+          if [ -z "$types" ]; then
+            echo "#$pr has no update-type metadata; leaving it for review."; exit 0
+          fi
+          if grep -q 'semver-major' <<<"$types"; then
+            echo "#$pr includes a major update; leaving it for review."; exit 0
+          fi
+          # Below 1.0 a minor bump can break; treat 0.x -> 0.y as major.
+          if grep -oE 'from v?0\.[0-9]+[^ ]* to v?[0-9]+\.[0-9]+' <<<"$messages" \
+            | awk '{ split($2, a, "."); split($4, b, "."); sub(/^v/, "", a[1]); sub(/^v/, "", b[1]);
+                     if (a[1] != b[1] || a[2] != b[2]) found = 1 } END { exit !found }'; then
+            echo "#$pr includes a 0.x minor update; leaving it for review."; exit 0
+          fi
+
+          ok='^(success|skipped|neutral)$'
+          passed=0
+          while read -r status conclusion; do
+            [ -z "$status" ] && continue
+            if [ "$status" != completed ]; then echo "Checks still running on #$pr."; exit 0; fi
+            if ! [[ "$conclusion" =~ $ok ]]; then echo "#$pr has a $conclusion check; not merging."; exit 0; fi
+            [ "$conclusion" = success ] && passed=$((passed + 1))
+          done < <(
+            gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" \
+              --jq '.workflow_runs[] | "\(.status) \(.conclusion // "none")"'
+            gh api --paginate "repos/$REPO/commits/$SHA/check-runs?per_page=100" \
+              --jq '.check_runs[] | "\(.status) \(.conclusion // "none")"'
+          )
+          read -r count state < <(gh api "repos/$REPO/commits/$SHA/status" --jq '"\(.total_count) \(.state)"')
+          if [ "$count" != 0 ] && [ "$state" != success ]; then
+            echo "#$pr commit status is $state; not merging."; exit 0
+          fi
+          if [ "$passed" = 0 ]; then
+            echo "#$pr has no passing checks; not merging."; exit 0
+          fi
+
+          if gh pr merge "$pr" -R "$REPO" --squash --match-head-commit "$SHA"; then
+            echo "Merged #$pr ($types)."
+          else
+            echo "::warning::Could not merge #$pr; asking Dependabot to rebase."
+            gh pr comment "$pr" -R "$REPO" --body "@dependabot rebase" || true
+          fi

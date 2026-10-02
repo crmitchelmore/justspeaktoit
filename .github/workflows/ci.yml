@@ -278,7 +278,7 @@ jobs:
     name: Build iOS Library
     # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
     runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-latest"]') }}
-    timeout-minutes: 50
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -320,37 +320,6 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/SpeakiOS.xcresult" \
             -skipPackagePluginValidation \
             2>&1 | tee "$RUNNER_TEMP/ios-tests.log" | tail -50
-
-      - name: "TEMP: stress HandsFreeSceneLifecycleTests"
-        # Temporary evidence step for the unowned-harness race; dropped before merge.
-        if: ${{ !cancelled() }}
-        run: |
-          # A second test session after the UI tests can hang before the runner
-          # connects, so start from a freshly booted simulator and retry once
-          # only when no test case ran at all.
-          for attempt in 1 2; do
-            xcrun simctl shutdown "$SIMULATOR_ID" || true
-            xcrun simctl boot "$SIMULATOR_ID" || true
-            xcrun simctl bootstatus "$SIMULATOR_ID" -b
-            log="$RUNNER_TEMP/ios-stress-$attempt.log"
-            status=0
-            xcodebuild test-without-building \
-              -workspace "Just Speak to It.xcworkspace" \
-              -scheme SpeakiOS \
-              -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
-              -only-testing:SpeakiOSTests/HandsFreeSceneLifecycleTests \
-              -test-iterations 200 \
-              -run-tests-until-failure \
-              -skipPackagePluginValidation \
-              > "$log" 2>&1 || status=$?
-            passed=$(grep -cE "HandsFreeSceneLifecycleTests test[A-Za-z_]+\]' passed" "$log" || true)
-            failed=$(grep -cE "HandsFreeSceneLifecycleTests test[A-Za-z_]+\]' failed" "$log" || true)
-            echo "attempt $attempt: xcodebuild exit status $status, passed cases $passed, failed cases $failed"
-            grep -nE "Fatal error|Restarting after|error: -\[|with [0-9]+ failures|hung before" "$log" | head -40 || true
-            tail -25 "$log"
-            if [ "$passed" -gt 0 ] || [ "$failed" -gt 0 ]; then break; fi
-          done
-          exit "$status"
 
       - name: Label these results as simulator, not device
         if: ${{ always() }}

@@ -140,6 +140,100 @@ function Wait-PathState([string] $Path, [bool] $Present, [int] $Seconds) {
     return ((Test-Path -LiteralPath $Path) -eq $Present)
 }
 
+# Failure evidence only: read in a separate, time-bounded job. This never
+# removes packages/files, changes the assertion, or proves absence of every
+# possible OS reference. Unreadable, truncated and timed-out observations stay
+# explicit; file contents and process command lines are not collected.
+function Get-PreviousPackageDiagnostics([string] $PackageName, [string] $PackageFullName, [string] $Location) {
+    $result = [ordered]@{ packageFullName = $PackageFullName; location = $Location
+        timeoutSeconds = 30; state = 'not-started'; observations = @(); error = $null }
+    $job = $null
+    try {
+        $job = Start-Job -ArgumentList $PackageName, $PackageFullName, $Location -ScriptBlock {
+            param($PackageName, $PackageFullName, $Location)
+            $ErrorActionPreference = 'Stop'
+            foreach ($kind in @('registrations', 'provisioning', 'directory', 'processReferences')) {
+                $section = [ordered]@{ kind = $kind; rows = @(); truncated = $false; error = $null }
+                try {
+                    switch ($kind) {
+                        'registrations' {
+                            $items = @(Get-AppxPackage -AllUsers -Name $PackageName | Select-Object -First 33)
+                            $section.truncated = $items.Count -gt 32
+                            $section.rows = @($items | Select-Object -First 32 | ForEach-Object {
+                                $users = @($_.PackageUserInformation)
+                                [ordered]@{ packageFullName = $_.PackageFullName; installLocation = $_.InstallLocation
+                                    isPreviousVersion = $_.PackageFullName -eq $PackageFullName; status = [string] $_.Status
+                                    isPartiallyStaged = $_.IsPartiallyStaged; usersTruncated = $users.Count -gt 32
+                                    users = @($users | Select-Object -First 32 | ForEach-Object {
+                                        [ordered]@{ userSid = [string] $_.UserSecurityId; installState = [string] $_.InstallState }
+                                    }) }
+                            })
+                        }
+                        'provisioning' {
+                            $items = @(Get-AppxProvisionedPackage -Online | Where-Object {
+                                $_.DisplayName -eq $PackageName } | Select-Object -First 33)
+                            $section.truncated = $items.Count -gt 32
+                            $section.rows = @($items | Select-Object -First 32 | ForEach-Object {
+                                [ordered]@{ packageName = $_.PackageName; version = [string] $_.Version
+                                    architecture = [string] $_.Architecture }
+                            })
+                        }
+                        'directory' {
+                            $section.present = Test-Path -LiteralPath $Location
+                            $section.scope = 'Immediate children only; no recursion or file contents'
+                            if ($section.present) {
+                                $items = @(Get-ChildItem -LiteralPath $Location -Force | Select-Object -First 257)
+                                $section.truncated = $items.Count -gt 256
+                                $section.rows = @($items | Select-Object -First 256 | ForEach-Object {
+                                    [ordered]@{ name = $_.Name; directory = $_.PSIsContainer
+                                        length = $(if ($_.PSIsContainer) { $null } else { $_.Length })
+                                        attributes = [string] $_.Attributes }
+                                })
+                            }
+                        }
+                        'processReferences' {
+                            $section.scope = 'Sampled process images/modules only; not kernel handles or all package graph references'
+                            $section.unreadableProcessIds = @()
+                            $section.unreadableCount = 0
+                            $section.truncatedModuleLists = 0
+                            $items = @(Get-Process | Select-Object -First 257)
+                            $section.truncated = $items.Count -gt 256
+                            $section.sampledProcessCount = [math]::Min($items.Count, 256)
+                            $prefix = $Location.TrimEnd('\') + '\'
+                            foreach ($process in ($items | Select-Object -First 256)) {
+                                try {
+                                    $modules = @($process.Modules | Select-Object -First 257)
+                                    if ($modules.Count -gt 256) { $section.truncatedModuleLists++ }
+                                    foreach ($module in ($modules | Select-Object -First 256)) {
+                                        if ($module.FileName.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                                            if ($section.rows.Count -lt 64) {
+                                                $section.rows += [ordered]@{ processId = $process.Id; path = $module.FileName }
+                                            } else { $section.truncated = $true }
+                                        }
+                                    }
+                                } catch {
+                                    $section.unreadableCount++
+                                    if ($section.unreadableProcessIds.Count -lt 32) { $section.unreadableProcessIds += $process.Id }
+                                } finally { $process.Dispose() }
+                            }
+                        }
+                    }
+                } catch { $section.error = $_.Exception.Message.Substring(0, [math]::Min(512, $_.Exception.Message.Length)) }
+                # Emit each completed section so earlier evidence survives a later timeout.
+                $section
+            }
+        }
+        $null = Wait-Job -Job $job -Timeout 30
+        $result.state = [string] $job.State
+        if ($job.State -ne 'Completed') { Stop-Job -Job $job }
+        $result.observations = @(Receive-Job -Job $job -ErrorAction SilentlyContinue)
+    } catch { $result.error = $_.Exception.Message.Substring(0, [math]::Min(512, $_.Exception.Message.Length)) }
+    finally {
+        if ($job) { Remove-Job -Job $job -Force -ErrorAction SilentlyContinue }
+    }
+    return $result
+}
+
 # --- certificates -----------------------------------------------------------------------------
 function New-EphemeralCertificate([string] $Role) {
     Assert-JstiAdmitted $script:ledger
@@ -760,6 +854,9 @@ try {
     Assert-UserData 'The upgraded launch' 'recovered'
     Add-Check 'The previous version''s files are removed after the upgrade' (
         $previousLocation -and (Wait-PathState $previousLocation $false 120)) $previousLocation
+    if (-not $report.checks[$report.checks.Count - 1].passed) {
+        $report.previousVersionDiagnostics = Get-PreviousPackageDiagnostics $name $base.packageFullName $previousLocation
+    }
 
     # --- phase 5: uninstall keeps data; reinstall finds it ----------------------------------------------
     Assert-Removed 'The upgraded version' $installed

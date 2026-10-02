@@ -10,7 +10,7 @@ final class ComparisonFileSampleTests: XCTestCase {
         try Data(repeating: 0, count: 4 * 1_024 * 1_024).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let task = Task.detached { () throws -> Void in
+        let task = Task.detached { () throws in
             // Cancel from inside so the sampler starts already cancelled,
             // independent of scheduling order.
             withUnsafeCurrentTask { $0?.cancel() }

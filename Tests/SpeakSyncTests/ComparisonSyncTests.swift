@@ -181,7 +181,7 @@ final class ComparisonSyncTests: XCTestCase {
         )
         object.removeValue(forKey: "entries")
         let stripped = try JSONSerialization.data(withJSONObject: object)
-        record["payload"] = String(decoding: stripped, as: UTF8.self)
+        record["payload"] = try XCTUnwrap(String(bytes: stripped, encoding: .utf8))
         XCTAssertNil(ComparisonSyncRecord.round(from: record))
         XCTAssertThrowsError(
             try ComparisonSyncRecord.revision(from: record),

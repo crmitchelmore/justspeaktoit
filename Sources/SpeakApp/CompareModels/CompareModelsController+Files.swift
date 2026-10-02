@@ -24,6 +24,7 @@ extension CompareModelsController {
         await runFile(urls[0])
     }
 
+    // swiftlint:disable:next function_body_length
     func runFile(_ url: URL) async {
         guard canStart else {
             errorMessage = ComparisonRunError.noUsableModels.localizedDescription

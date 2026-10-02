@@ -95,6 +95,22 @@ final class DesktopCloudSyncPassTests: DesktopCloudSyncTestCase {
         XCTAssertNil(cursor, "a cancelled pass advanced its cursor")
     }
 
+    func testAPassThatCannotReadHistoryFailsInsteadOfFindingNothingToUpload() async throws {
+        let local = try await localRecording(text: "recorded on this pc")
+        let (service, state) = try await signedInService()
+        // History is replaced by a plain file, so its records cannot be listed.
+        let history = directory.appendingPathComponent("History")
+        try FileManager.default.removeItem(at: history)
+        try Data("not a folder".utf8).write(to: history)
+
+        let report = await service.sync()
+
+        XCTAssertNotNil(report.error, "an unreadable History is not an empty one")
+        XCTAssertNil(server.recordFields(zone: syncZone, recordName: local.id.uuidString))
+        let succeeded = await state.current.lastSuccessfulSync
+        XCTAssertNil(succeeded, "a pass that could not read History is not a successful sync")
+    }
+
     func testATriggerDuringAPassRunsOneMoreValidatedPassAfterIt() async throws {
         seedMacHistory(server, id: UUID(), raw: "from the mac", updatedAt: fixtureDate(50))
         let gate = ChangeGate()

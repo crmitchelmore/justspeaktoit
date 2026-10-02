@@ -123,36 +123,33 @@ public actor DesktopHistorySyncStore: HistorySyncStore {
         self.onChanges = onChanges
     }
 
-    public func pendingEntries() async -> [SyncableHistoryEntry] {
-        guard let all = try? await records.readableRecords() else { return [] }
+    /// Throws when History or the sync state cannot be read or saved, so the
+    /// pass fails visibly instead of finishing with nothing uploaded.
+    public func pendingEntries() async throws -> [SyncableHistoryEntry] {
+        let all = try await records.readableRecords()
         let syncable = all.filter(DesktopHistorySyncProjection.isSyncable)
         let stamp = DesktopHistorySyncProjection.roundedToMilliseconds(now())
-        let observed: [UUID: DesktopCloudSyncState.HistoryEntry]
-        do {
-            observed = try await state.update { state in
-                for record in syncable {
-                    let fingerprint = DesktopHistorySyncProjection.fingerprint(
-                        DesktopHistorySyncProjection.entry(for: record, updatedAt: stamp, origin: origin)
+        let observed: [UUID: DesktopCloudSyncState.HistoryEntry] = try await state.update { state in
+            for record in syncable {
+                let fingerprint = DesktopHistorySyncProjection.fingerprint(
+                    DesktopHistorySyncProjection.entry(for: record, updatedAt: stamp, origin: origin)
+                )
+                if var entry = state.history[record.id] {
+                    guard entry.observed != fingerprint else { continue }
+                    entry.observed = fingerprint
+                    entry.updatedAt = max(stamp, entry.updatedAt)
+                    state.history[record.id] = entry
+                } else {
+                    // First sight: a record that predates sync keeps its
+                    // creation time, so any existing remote copy wins.
+                    state.history[record.id] = DesktopCloudSyncState.HistoryEntry(
+                        acknowledged: nil,
+                        observed: fingerprint,
+                        updatedAt: DesktopHistorySyncProjection.roundedToMilliseconds(record.createdAt)
                     )
-                    if var entry = state.history[record.id] {
-                        guard entry.observed != fingerprint else { continue }
-                        entry.observed = fingerprint
-                        entry.updatedAt = max(stamp, entry.updatedAt)
-                        state.history[record.id] = entry
-                    } else {
-                        // First sight: a record that predates sync keeps its
-                        // creation time, so any existing remote copy wins.
-                        state.history[record.id] = DesktopCloudSyncState.HistoryEntry(
-                            acknowledged: nil,
-                            observed: fingerprint,
-                            updatedAt: DesktopHistorySyncProjection.roundedToMilliseconds(record.createdAt)
-                        )
-                    }
                 }
-                return state.history
             }
-        } catch {
-            return []
+            return state.history
         }
         var pending: [SyncableHistoryEntry] = []
         for record in syncable {

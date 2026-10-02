@@ -57,8 +57,9 @@ public protocol HistorySyncTransport: AnyObject {
 /// adapts its main-actor `HistorySyncDelegate`, and a desktop host implements
 /// this directly without a UI run loop.
 public protocol HistorySyncStore: AnyObject {
-    /// Local entries that are not currently acknowledged by CloudKit.
-    func pendingEntries() async -> [SyncableHistoryEntry]
+    /// Local entries that are not currently acknowledged by CloudKit. Throws
+    /// when History cannot be read, so the pass fails rather than finding none.
+    func pendingEntries() async throws -> [SyncableHistoryEntry]
     /// Reconcile a new, duplicate, or updated entry from CloudKit.
     func didReceiveRemoteEntry(_ entry: SyncableHistoryEntry) async
     /// Reconcile a CloudKit tombstone.
@@ -188,7 +189,7 @@ public final class HistorySyncCoordinator {
         store: (any HistorySyncStore)?,
         isolation: isolated (any Actor)? = #isolation
     ) async {
-        let pendingCount = await store?.pendingEntries().count ?? 0
+        let pendingCount = (try? await store?.pendingEntries())?.count ?? 0
         await set(\.pendingUploadCount, pendingCount, .pendingUploadCount, isolation: isolation)
         await set(\.pendingDownloadCount, 0, .pendingDownloadCount, isolation: isolation)
 
@@ -242,7 +243,7 @@ public final class HistorySyncCoordinator {
         try await admitted(isolation: isolation) {}
         let result = await transport.upload(entries: [entry])
         try await applyUploadResult(result, store: store, isolation: isolation)
-        let pendingCount = await store.pendingEntries().count
+        let pendingCount = (try? await store.pendingEntries())?.count ?? status.pendingUploadCount
         await set(\.pendingUploadCount, pendingCount, .pendingUploadCount, isolation: isolation)
         if let error = result.failures[entry.id] {
             let syncError = SyncError.cloudKit(error)
@@ -274,7 +275,7 @@ public final class HistorySyncCoordinator {
             try await fetchRemoteChanges(store: store, isolation: isolation)
             try await uploadPendingEntries(store: store, isolation: isolation)
             await set(\.pendingDownloadCount, 0, .pendingDownloadCount, isolation: isolation)
-            let pendingCount = await store.pendingEntries().count
+            let pendingCount = try await store.pendingEntries().count
             await set(\.pendingUploadCount, pendingCount, .pendingUploadCount, isolation: isolation)
             guard status.pendingUploadCount == 0 else {
                 throw SyncError.reconciliationIncomplete(status.pendingUploadCount)
@@ -283,7 +284,7 @@ public final class HistorySyncCoordinator {
             events?(.passCompleted)
         } catch {
             await set(\.error, error, .error, isolation: isolation)
-            let pendingCount = await store.pendingEntries().count
+            let pendingCount = (try? await store.pendingEntries())?.count ?? status.pendingUploadCount
             await set(\.pendingUploadCount, pendingCount, .pendingUploadCount, isolation: isolation)
             events?(.passFailed(error))
         }
@@ -350,7 +351,7 @@ public final class HistorySyncCoordinator {
         isolation: isolated (any Actor)?
     ) async throws {
         while true {
-            let pending = await store.pendingEntries()
+            let pending = try await store.pendingEntries()
             await set(\.pendingUploadCount, pending.count, .pendingUploadCount, isolation: isolation)
             guard !pending.isEmpty else { return }
 
@@ -358,7 +359,7 @@ public final class HistorySyncCoordinator {
             try await admitted(isolation: isolation) {}
             let result = await transport.upload(entries: batch)
             try await applyUploadResult(result, store: store, isolation: isolation)
-            let remaining = await store.pendingEntries().count
+            let remaining = try await store.pendingEntries().count
             await set(\.pendingUploadCount, remaining, .pendingUploadCount, isolation: isolation)
 
             if !result.failures.isEmpty {

@@ -22,6 +22,7 @@ final class PrivacyStorageDisclosureTests: XCTestCase {
             PrivacyStorageDisclosure.apiKeyStorage,
             PrivacyStorageDisclosure.apiKeySync,
             PrivacyStorageDisclosure.historySync,
+            PrivacyStorageDisclosure.historySyncOff,
             PrivacyStorageDisclosure.historySyncCondition,
             PrivacyStorageDisclosure.apiKeySyncCondition
         ]
@@ -50,6 +51,18 @@ final class PrivacyStorageDisclosureTests: XCTestCase {
         XCTAssertTrue(copy.contains("private CloudKit database"), copy)
         XCTAssertTrue(copy.contains("automatically"), copy)
         XCTAssertTrue(copy.contains("signed in to iCloud"), copy)
+        XCTAssertTrue(copy.contains("on by default"), copy)
+        XCTAssertTrue(copy.contains("turn it off"), copy)
+    }
+
+    /// Off must not read as "deleted from iCloud": the switch stops traffic,
+    /// it does not remove what is already there.
+    func testHistorySyncOff_saysWhatStaysWhereAndWhatHappensOnReEnable() {
+        let copy = PrivacyStorageDisclosure.historySyncOff
+        XCTAssertTrue(copy.contains("stays on this device"), copy)
+        XCTAssertTrue(copy.contains("already in iCloud stays there"), copy)
+        XCTAssertTrue(copy.contains("does not remove it from iCloud"), copy)
+        XCTAssertTrue(copy.contains("uploads History saved while it was off"), copy)
     }
 
     func testDisclosures_neverAttributeKeySyncToICloudKeychain() {

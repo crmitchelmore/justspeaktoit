@@ -9,8 +9,9 @@ import Foundation
 /// - Encrypted API-Key Sync (`CloudKitKeySync`) is opt-in and writes only
 ///   passphrase-encrypted ciphertext to the private CloudKit database;
 /// - History (`HistorySyncEngine`) syncs raw and cleaned-up transcript text to
-///   the private CloudKit database when the iCloud account is available at launch,
-///   with no in-app switch.
+///   the private CloudKit database while the per-device iCloud History Sync
+///   switch is on (the default) and the iCloud account is available. Off stops
+///   every upload, download and delete.
 ///
 /// The base Keychain item is deliberately not iCloud Keychain synchronizable, so
 /// none of this copy may describe keys as syncing through iCloud Keychain.
@@ -27,10 +28,16 @@ public enum PrivacyStorageDisclosure {
         + "sync passphrase before they are saved to your private CloudKit database. They cannot be read "
         + "without that passphrase, which is never uploaded."
 
-    /// Automatic History sync, including transcript text.
+    /// History sync, including transcript text, and the switch that stops it.
     public static let historySync =
-        "History, including transcript text, syncs to your private CloudKit database automatically "
-        + "when this device is signed in to iCloud."
+        "History, including transcript text, syncs automatically to your private CloudKit database while "
+        + "iCloud History Sync is on and this device is signed in to iCloud. It is on by default; turn it "
+        + "off in Settings › Sync to keep History on this device."
+
+    /// Shown in place of sync status while iCloud History Sync is off.
+    public static let historySyncOff =
+        "History stays on this device. Anything already in iCloud stays there, and deleting History here "
+        + "does not remove it from iCloud. Turning sync back on uploads History saved while it was off."
 
     /// Short right-hand value for the History row of a network-activity list.
     public static let historySyncCondition = "When signed in to iCloud"

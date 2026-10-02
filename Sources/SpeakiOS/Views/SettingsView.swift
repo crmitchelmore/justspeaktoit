@@ -18,7 +18,8 @@ import OSLog
 public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Sendable {
     /// Resolve the destination at stop time (issue #1008): the field the Just
     /// Speak keyboard is open in when there is one, otherwise the clipboard.
-    /// Every capture also goes to History and iCloud, whichever lane runs.
+    /// Every capture also goes to History, and to iCloud while iCloud History
+    /// Sync is on, whichever lane runs.
     ///
     /// There is no "Mac" branch: see `AutoDestinationPolicy` for why the phone
     /// cannot tell a reachable Mac from a configured one.
@@ -53,8 +54,8 @@ public enum HardwareTriggerDestination: String, CaseIterable, Identifiable, Send
         switch self {
         case .auto:
             return "Decided when recording stops: straight into the field if the Just Speak keyboard is open "
-                + "there, otherwise the clipboard. Either way it is saved to History and pushed to iCloud, "
-                + "and the Live Activity says which one happened."
+                + "there, otherwise the clipboard. Either way it is saved to History (and iCloud, when iCloud "
+                + "History Sync is on), and the Live Activity says which one happened."
         case .clipboard:
             return "Transcript is copied to the clipboard immediately when recording stops."
         case .clipboardAndPostProcess:
@@ -1089,6 +1090,8 @@ public struct SettingsView: View {
     }
 
     @StateObject private var settings = AppSettings.shared
+    /// Observed so the Sync section's status rows follow the iCloud History switch.
+    @ObservedObject private var historySync = HistorySyncEngine.shared
     @Environment(\.openURL) private var openURL
     @Environment(\.openClawEnabled) private var openClawEnabled
     @Environment(\.iOSKeyboardEnabled) private var iOSKeyboardEnabled
@@ -1464,10 +1467,11 @@ public struct SettingsView: View {
 
                 CloudKitKeySyncSettingsSection()
 
-                // Sync status
-                let syncStatus = SyncStatus.current(
-                    iCloudCloudKitAvailable: HistorySyncEngine.shared.state.isCloudAvailable
-                )
+                // Sync status. With iCloud History Sync off the preferred path
+                // is Bonjour or local only, whatever iCloud itself offers.
+                let syncStatus = historySync.isSyncEnabled
+                    ? SyncStatus.current(iCloudCloudKitAvailable: historySync.state.isCloudAvailable)
+                    : SyncStatus()
 
                 if usesInlineDensityLayout {
                     compactSyncStatus(syncStatus)
@@ -2624,6 +2628,7 @@ struct PrivacyView: View {
     /// the moment a model, post-processing toggle or voice is changed elsewhere.
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var openClaw = OpenClawSettings.shared
+    @ObservedObject private var historySync = HistorySyncEngine.shared
 
     /// The user's effective workflow, projected from the live settings.
     private var summary: PrivacyWorkflowSummary {
@@ -2741,7 +2746,10 @@ struct PrivacyView: View {
                     InfoRow(label: provider, value: "During voice output")
                 }
                 InfoRow(label: "Send to Mac", value: "Local network only")
-                InfoRow(label: "iCloud History", value: PrivacyStorageDisclosure.historySyncCondition)
+                InfoRow(
+                    label: "iCloud History",
+                    value: historySync.isSyncEnabled ? PrivacyStorageDisclosure.historySyncCondition : "Off"
+                )
                 InfoRow(label: "API-Key Sync", value: PrivacyStorageDisclosure.apiKeySyncCondition)
                 Text(PrivacyStorageDisclosure.historySync)
                     .foregroundStyle(.secondary)
@@ -2887,24 +2895,30 @@ struct PermissionRow: View {
 
 struct CloudKitSyncSettingsSection: View {
     @ObservedObject private var syncEngine = HistorySyncEngine.shared
+    /// Observed separately: the engine republishes only its own properties, so
+    /// an availability result that lands after the toggle flips would
+    /// otherwise not refresh this section.
+    @ObservedObject private var syncState = HistorySyncEngine.shared.state
     @StateObject private var historyManager = iOSHistoryManager.shared
     @State private var isSyncing = false
 
     var body: some View {
-        let availability = SyncAvailability.current(iCloudCloudKitAvailable: syncEngine.state.isCloudAvailable)
+        let availability = SyncAvailability.current(iCloudCloudKitAvailable: syncState.isCloudAvailable)
 
-        // CloudKit status
-        HStack {
+        // The per-device switch: off keeps History on this iPhone only.
+        Toggle(isOn: Binding(
+            get: { syncEngine.isSyncEnabled },
+            set: { newValue in syncEngine.setSyncEnabled(newValue) }
+        )) {
             Label("iCloud History Sync", systemImage: "icloud")
-            Spacer()
-            Text(availability.iCloudCloudKitAvailable ? "Active" : "Unavailable")
-                .foregroundStyle(
-                    availability.iCloudCloudKitAvailable ? .green : .secondary
-                )
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("iCloudHistorySyncToggle")
 
-        if availability.iCloudCloudKitAvailable {
+        if !syncEngine.isSyncEnabled {
+            Text(PrivacyStorageDisclosure.historySyncOff)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else if availability.iCloudCloudKitAvailable {
             // Sync counts
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

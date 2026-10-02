@@ -79,6 +79,17 @@ public final class SyncState: ObservableObject {
     public init() {}
 }
 
+/// Thrown by single-entry uploads and deletes while iCloud History sync is
+/// turned off. The entry stays unacknowledged, so it uploads if sync is turned
+/// back on.
+public struct HistorySyncDisabledError: LocalizedError, Equatable, Sendable {
+    public init() {}
+
+    public var errorDescription: String? {
+        "iCloud History sync is off, so this change stays on this device."
+    }
+}
+
 /// Errors that can occur during sync.
 public enum SyncError: LocalizedError {
     case cloudUnavailable

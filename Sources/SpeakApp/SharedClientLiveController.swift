@@ -138,9 +138,9 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     if Task.isCancelled, active.cancel() { activeClient.cancel() }
     guard run === active, client === activeClient else { return }
     let captureDuration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
-    let final = (activeClient as? StreamingTranscriptSnapshotProviding)?
+    let finalSnapshot = (activeClient as? StreamingTranscriptSnapshotProviding)?
       .transcriptSnapshot(captureDuration: captureDuration)
-    var snapshot = active.finish(whole: whole, cancelled: Task.isCancelled, projection: final)
+    var snapshot = active.finish(whole: whole, cancelled: Task.isCancelled, projection: finalSnapshot)
     // Read the synchronous state before retiring identity. Queued provider
     // errors must reach the owner before a stop can be mistaken for success.
     apply(snapshot, from: active, terminal: true)
@@ -154,9 +154,10 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     isRunning = false
     if snapshot.error == nil {
       delegate?.liveTranscriber(self, didFinishWith: TranscriptionResult(
-        text: snapshot.text, segments: final?.segments ?? [], confidence: final?.confidence,
-        duration: final?.duration ?? captureDuration,
-        modelIdentifier: active.modelIdentifier, cost: final?.cost, rawPayload: final?.rawPayload, debugInfo: nil
+        text: snapshot.text, segments: finalSnapshot?.segments ?? [], confidence: finalSnapshot?.confidence,
+        duration: finalSnapshot?.duration ?? captureDuration,
+        modelIdentifier: active.modelIdentifier, cost: finalSnapshot?.cost,
+        rawPayload: finalSnapshot?.rawPayload, debugInfo: nil
       ))
     }
     client = nil

@@ -191,7 +191,9 @@ public struct WindowsEnvelopeCryptography: SyncEnvelopeCryptography {
 }
 
 /// A 127.0.0.1-only HTTP listener: the Apple ID sign-in callback, and the
-/// loopback fake server in tests.
+/// loopback fake server in tests. A connection that closes, or sends no
+/// complete request within `requestWindow`, is dropped and listening goes on,
+/// so an idle browser preconnection cannot hold or end the callback.
 public final class WindowsLoopbackListener: @unchecked Sendable {
     public struct Connection: @unchecked Sendable {
         fileprivate let handle: OpaquePointer
@@ -238,10 +240,11 @@ public final class WindowsLoopbackListener: @unchecked Sendable {
     private var handle: OpaquePointer?
     public let port: UInt16
 
-    public init(port: UInt16 = 0) throws {
+    public init(port: UInt16 = 0, requestWindow: Duration = .seconds(5)) throws {
         var bound: UInt16 = 0
         var error = [CChar](repeating: 0, count: 512)
-        guard let handle = jsti_loopback_listen(port, &bound, &error, error.count) else {
+        let window = Self.milliseconds(requestWindow)
+        guard let handle = jsti_loopback_listen(port, window, &bound, &error, error.count) else {
             throw Failure.native(String(cString: error))
         }
         self.handle = handle
@@ -250,7 +253,7 @@ public final class WindowsLoopbackListener: @unchecked Sendable {
 
     /// Waits off the calling thread for one complete request.
     public func accept(timeout: Duration) async throws -> Connection {
-        let milliseconds = Int32(max(0, min(Int64(Int32.max), timeout.components.seconds * 1000)))
+        let milliseconds = Self.milliseconds(timeout)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
@@ -289,4 +292,11 @@ public final class WindowsLoopbackListener: @unchecked Sendable {
     }
 
     deinit { close() }
+
+    private static func milliseconds(_ duration: Duration) -> Int32 {
+        let (seconds, attoseconds) = duration.components
+        let total = seconds.multipliedReportingOverflow(by: 1_000)
+        guard !total.overflow else { return seconds < 0 ? 0 : Int32.max }
+        return Int32(clamping: max(0, total.partialValue + attoseconds / 1_000_000_000_000_000))
+    }
 }

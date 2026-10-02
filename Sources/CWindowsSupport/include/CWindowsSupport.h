@@ -686,11 +686,13 @@ void jsti_http_request_destroy(JSTIHTTPRequest *request);
 /* A one-connection-at-a-time HTTP listener on 127.0.0.1, for the Apple ID
  * sign-in callback and for loopback test servers. port 0 picks a free port.
  * accept waits up to timeout for one complete request (at most 1 MiB):
- * 0 success, 1 timeout, 3 cancelled, -1 failure. respond writes raw bytes and
+ * 0 success, 1 timeout, 3 cancelled, -1 failure. A connection that closes, or
+ * sends no complete request within request_window_milliseconds (0: five
+ * seconds), is dropped and listening goes on. respond writes raw bytes and
  * closes the connection. */
 typedef struct JSTILoopbackListener JSTILoopbackListener;
 typedef struct JSTILoopbackConnection JSTILoopbackConnection;
-JSTILoopbackListener *jsti_loopback_listen(uint16_t port, uint16_t *bound_port,
+JSTILoopbackListener *jsti_loopback_listen(uint16_t port, int request_window_milliseconds, uint16_t *bound_port,
                                            char *error, size_t error_capacity);
 int jsti_loopback_accept(JSTILoopbackListener *listener, int timeout_milliseconds,
                          JSTILoopbackConnection **connection, char *error, size_t error_capacity);

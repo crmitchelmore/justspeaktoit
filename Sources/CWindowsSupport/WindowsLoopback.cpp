@@ -14,12 +14,16 @@
 // A minimal HTTP/1.1 listener bound to 127.0.0.1 only. It serves one
 // connection at a time: the Apple ID sign-in callback, or a loopback fake
 // server in tests. Nothing outside this machine can connect to it, and each
-// connection can report which user's process opened it.
+// connection can report which user's process opened it. A connection that
+// closes, or sends no complete request within the request window, is dropped
+// and listening goes on, as LinuxLoopback.c does, so an idle or abandoned
+// browser preconnection cannot hold or end the callback.
 
 struct JSTILoopbackListener {
     std::mutex mutex;
     SOCKET socket = INVALID_SOCKET;
     WSAEVENT cancelEvent = WSA_INVALID_EVENT;
+    DWORD requestWindow = 5000;
     bool started = false;
 };
 
@@ -30,8 +34,18 @@ struct JSTILoopbackConnection {
 
 namespace {
 constexpr size_t requestLimit = 1024 * 1024;
+// Outcomes of a wait or a request read. `dropped` never leaves this file.
+enum : int { ready = 0, timedOut = 1, dropped = 2, cancelled = 3, failed = -1 };
+constexpr ULONGLONG noDeadline = ~0ULL;
 
 std::string socketError(const char *operation) { return jsti::systemError(operation, WSAGetLastError()); }
+
+// Milliseconds left until `deadline`, a GetTickCount64 instant.
+DWORD remainingUntil(ULONGLONG deadline) {
+    if (deadline == noDeadline) return WSA_INFINITE;
+    const ULONGLONG now = GetTickCount64();
+    return now >= deadline ? 0 : static_cast<DWORD>(std::min<ULONGLONG>(deadline - now, WSA_INFINITE - 1));
+}
 
 // Bytes a complete request occupies once its header block is known, 0 before
 // that, or SIZE_MAX when it declares a body over the limit (which a size_t
@@ -77,6 +91,32 @@ int waitFor(JSTILoopbackListener &listener, SOCKET socket, long events, DWORD ti
     u_long blocking = 0;
     ioctlsocket(socket, FIONBIO, &blocking);
     return result;
+}
+
+// Reads one complete request before `deadline`: ready, dropped when the peer
+// closed early, sent too much or not all of it in time, cancelled or failed.
+int readRequest(JSTILoopbackListener &listener, SOCKET peer, std::vector<uint8_t> &request, ULONGLONG deadline) {
+    char buffer[16 * 1024];
+    int outcome = dropped;
+    for (;;) {
+        const size_t expected = expectedLength(request);
+        if (expected == SIZE_MAX || request.size() > requestLimit) break;
+        if (expected && request.size() >= expected) {
+            outcome = ready;
+            break;
+        }
+        const int readable = waitFor(listener, peer, FD_READ | FD_CLOSE, remainingUntil(deadline));
+        if (readable == timedOut) break;
+        if (readable != ready) {
+            outcome = readable;
+            break;
+        }
+        const int received = recv(peer, buffer, sizeof(buffer), 0);
+        if (received <= 0) break;
+        request.insert(request.end(), buffer, buffer + received);
+    }
+    SecureZeroMemory(buffer, sizeof(buffer));
+    return outcome;
 }
 
 // A process's user SID, copied out of its token; empty when unreadable.
@@ -141,7 +181,8 @@ bool isMapped(const UCHAR address[16], const in_addr &ipv4) {
 }
 } // namespace
 
-JSTILoopbackListener *jsti_loopback_listen(uint16_t port, uint16_t *boundPort, char *error, size_t capacity) {
+JSTILoopbackListener *jsti_loopback_listen(uint16_t port, int requestWindow, uint16_t *boundPort, char *error,
+                                           size_t capacity) {
     WSADATA data{};
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) {
         jsti::fail("Windows Sockets could not start.", error, capacity);
@@ -150,6 +191,7 @@ JSTILoopbackListener *jsti_loopback_listen(uint16_t port, uint16_t *boundPort, c
     auto *listener = new (std::nothrow) JSTILoopbackListener();
     if (!listener) { WSACleanup(); jsti::fail("Out of memory.", error, capacity); return nullptr; }
     listener->started = true;
+    if (requestWindow > 0) listener->requestWindow = static_cast<DWORD>(requestWindow);
     listener->cancelEvent = WSACreateEvent();
     listener->socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     sockaddr_in address{};
@@ -181,43 +223,34 @@ int jsti_loopback_accept(JSTILoopbackListener *listener, int timeout, JSTILoopba
                          char *error, size_t capacity) {
     if (!listener || !connection) return jsti::fail("Invalid loopback request.", error, capacity);
     *connection = nullptr;
-    const DWORD wait = timeout < 0 ? WSA_INFINITE : static_cast<DWORD>(timeout);
-    const ULONGLONG deadline = GetTickCount64() + (timeout < 0 ? 0 : static_cast<ULONGLONG>(timeout));
-    const int accepted = waitFor(*listener, listener->socket, FD_ACCEPT, wait);
-    if (accepted != 0) {
-        if (accepted < 0) jsti::fail(socketError("Waiting for a loopback connection"), error, capacity);
-        return accepted;
-    }
-    SOCKET peer = accept(listener->socket, nullptr, nullptr);
-    if (peer == INVALID_SOCKET) return jsti::fail(socketError("Accepting a loopback connection"), error, capacity);
-    auto *result = new (std::nothrow) JSTILoopbackConnection();
-    if (!result) { closesocket(peer); return jsti::fail("Out of memory.", error, capacity); }
-    result->socket = peer;
-    char buffer[16 * 1024];
+    const ULONGLONG deadline = timeout < 0 ? noDeadline : GetTickCount64() + static_cast<ULONGLONG>(timeout);
     for (;;) {
-        const size_t expected = expectedLength(result->request);
-        if (expected != SIZE_MAX && expected && result->request.size() >= expected) break;
-        if (expected == SIZE_MAX || result->request.size() > requestLimit) {
-            jsti_loopback_connection_destroy(result);
-            return jsti::fail("The loopback request is too large.", error, capacity);
+        const int accepted = waitFor(*listener, listener->socket, FD_ACCEPT, remainingUntil(deadline));
+        if (accepted != ready) {
+            if (accepted == failed) jsti::fail(socketError("Waiting for a loopback connection"), error, capacity);
+            return accepted;
         }
-        const ULONGLONG now = GetTickCount64();
-        const DWORD remaining = timeout < 0 ? WSA_INFINITE : (now >= deadline ? 0 : static_cast<DWORD>(deadline - now));
-        const int readable = waitFor(*listener, peer, FD_READ | FD_CLOSE, remaining);
-        if (readable != 0) {
-            jsti_loopback_connection_destroy(result);
-            if (readable < 0) jsti::fail(socketError("Reading a loopback request"), error, capacity);
-            return readable;
+        SOCKET peer = accept(listener->socket, nullptr, nullptr);
+        if (peer == INVALID_SOCKET) {
+            // The peer gave up between the readiness signal and the accept.
+            if (WSAGetLastError() == WSAECONNRESET) continue;
+            return jsti::fail(socketError("Accepting a loopback connection"), error, capacity);
         }
-        const int received = recv(peer, buffer, sizeof(buffer), 0);
-        if (received <= 0) {
-            jsti_loopback_connection_destroy(result);
-            return jsti::fail("The loopback connection closed before its request was complete.", error, capacity);
+        auto *result = new (std::nothrow) JSTILoopbackConnection();
+        if (!result) { closesocket(peer); return jsti::fail("Out of memory.", error, capacity); }
+        result->socket = peer;
+        const ULONGLONG window = GetTickCount64() + listener->requestWindow;
+        const int outcome = readRequest(*listener, peer, result->request, deadline < window ? deadline : window);
+        if (outcome == ready) {
+            *connection = result;
+            return ready;
         }
-        result->request.insert(result->request.end(), buffer, buffer + received);
+        const std::string message = outcome == failed ? socketError("Reading a loopback request") : std::string();
+        jsti_loopback_connection_destroy(result);
+        if (outcome == failed) return jsti::fail(message, error, capacity);
+        if (outcome == cancelled) return cancelled;
+        // Dropped: the overall deadline, if it has passed, ends the next wait.
     }
-    *connection = result;
-    return 0;
 }
 
 const uint8_t *jsti_loopback_request(const JSTILoopbackConnection *connection, size_t *count) {

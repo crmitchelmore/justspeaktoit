@@ -132,9 +132,12 @@ when all of these hold:
   `http` address.
 
 A refused request gets a 403 page and waiting goes on, so it can neither
-complete nor cut short the sign-in; other paths still get a 404. The listener
-still runs only during sign-in, for at most ten minutes, and closes at the
-first accepted callback.
+complete nor cut short the sign-in; other paths still get a 404. On both
+platforms a connection that closes, declares a body over 1 MiB, or sends no
+complete request within five seconds is dropped and listening goes on, so an
+idle or abandoned browser preconnection can neither hold nor end the
+callback. The listener still runs only during sign-in, for at most ten
+minutes, and closes at the first accepted callback.
 
 What remains:
 
@@ -257,7 +260,9 @@ What remains:
   fake over a real loopback socket through WinHTTP, checks the sign-in callback
   (including that its TCP-table owner is this user) and cancellation, and
   holds CNG to the independent PBKDF2 and AES-GCM vectors that the Apple
-  implementation also meets.
+  implementation also meets. `WindowsLoopbackListenerTests` has idle,
+  abandoned and oversized connections dropped while the callback still
+  arrives.
 - The Windows executable's `--self-test` runs `WindowsPostProcessingSelfTest`:
   the post-processing dialog's Apply through the real controller and settings
   queue with a synthetic sync key hook, covering a typed and a blank key, a

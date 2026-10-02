@@ -73,7 +73,7 @@ final class SonioxControllerWireTests: XCTestCase {
         XCTAssertNil(fixture.adapter.snapshot.error)
     }
 
-    func testMacDeadlineFailsVisiblyAndKeepsConfirmedTextBeforeReturning() async {
+    func testMacDeadlineReturnsTheConfirmedTextWithoutAnError() async {
         let fixture = SonioxControllerFixture()
         fixture.start()
         fixture.ready()
@@ -86,9 +86,10 @@ final class SonioxControllerWireTests: XCTestCase {
         fixture.socket.completeSend()
         fixture.clock.fire(3.5)
         let snapshot = await finished.value
-        XCTAssertEqual(snapshot.text, "Confirmed. trailing draft")
+        // The finish deadline completes the session with what it has.
+        XCTAssertEqual(snapshot.text, "Confirmed.")
         XCTAssertEqual(snapshot.confirmedText, "Confirmed.")
-        XCTAssertNotNil(snapshot.error)
+        XCTAssertNil(snapshot.error)
         XCTAssertTrue(fixture.socket.isCancelled)
     }
 

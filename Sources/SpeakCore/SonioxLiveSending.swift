@@ -41,8 +41,11 @@ extension SonioxLiveClient {
             guard let self, let active else { return }
             self.synchronized { self.completeSend(error, payload: payload, sendID: sendID, active: active) }
         }
+        // A finish is bounded by its own deadline, which returns what it has.
         after(sendTimeout, active) { client, active in
-            if active.sending, active.sendID == sendID { client.fail(client.stalledError, active) }
+            if active.sending, active.sendID == sendID, active.phase != .finishing {
+                client.fail(client.stalledError, active)
+            }
         }
     }
 

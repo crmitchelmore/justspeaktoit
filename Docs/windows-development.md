@@ -299,9 +299,10 @@ tests, five optional skips and zero failures**; its isolated corrected source
 also passed 78 focused Apple tests, including the 25 existing client tests.
 Adding the corrected Soniox client brought the combined portable suite to
 **466 tests, five optional skips and zero failures**. Its focused normal Apple
-gate passed 160 tests. Soniox disconnects, server errors and missing terminal
-responses now retain confirmed text for recovery and report failure before
-finalisation returns. Physical provider acceptance remains separate.
+gate passed 160 tests. Soniox disconnects and server errors retain confirmed
+text for recovery and report failure before finalisation returns; a missing
+terminal response ends the finish at its deadline with the confirmed text.
+Physical provider acceptance remains separate.
 
 ## Window
 

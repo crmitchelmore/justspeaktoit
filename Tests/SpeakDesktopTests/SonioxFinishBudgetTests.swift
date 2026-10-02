@@ -28,8 +28,10 @@ final class SonioxFinishBudgetTests: XCTestCase {
         client.stop()
         XCTAssertEqual(clock.pending(3.5), 1)
         XCTAssertEqual(clock.pending(8), 0)
+        clock.fire(SonioxLiveClient.sendDeadline)
+        XCTAssertTrue(events.errors.isEmpty, "A finish is bounded by its own deadline")
         clock.fire(3.5)
-        XCTAssertEqual(events.errors.count, 1)
+        XCTAssertTrue(events.errors.isEmpty, "The deadline returns what the finish has")
         XCTAssertEqual(socket.binary.count, 1, "A stuck audio send must not be overtaken by end-of-stream")
         XCTAssertEqual(socket.cancels, 1)
     }

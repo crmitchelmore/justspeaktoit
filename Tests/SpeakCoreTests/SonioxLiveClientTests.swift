@@ -11,8 +11,7 @@ final class SonioxLiveClientTests: XCTestCase {
             socketFactory: factory.make
         )
         client.start(onTranscript: { _, _ in }, onError: { _ in })
-        // Whole 16-bit samples only: the client refuses a partial sample.
-        client.sendAudio(Data([1, 2]))
+        client.sendAudio(Data([1, 2, 3]))
         let condition1 = await eventually { socket.messages.count == 2 }
         XCTAssertTrue(condition1)
         async let result = client.finishAndWait()
@@ -31,7 +30,7 @@ final class SonioxLiveClientTests: XCTestCase {
         guard case .string(let config) = socket.messages[0] else { return XCTFail("configuration must be text") }
         XCTAssertEqual(try json(config)["api_key"] as? String, "test-key")
         guard case .data(let pcm) = socket.messages[1] else { return XCTFail("PCM must be binary") }
-        XCTAssertEqual(pcm, Data([1, 2]))
+        XCTAssertEqual(pcm, Data([1, 2, 3]))
         guard case .string(let finalize) = socket.messages[2] else { return XCTFail("finalize must be text") }
         XCTAssertEqual(try json(finalize)["type"] as? String, "finalize")
         guard case .data(let eos) = socket.messages[3] else { return XCTFail("EOS must be binary") }

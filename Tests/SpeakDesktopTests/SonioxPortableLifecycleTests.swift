@@ -122,13 +122,14 @@ final class SonioxPortableLifecycleTests: XCTestCase {
         XCTAssertTrue(socket.controls.isEmpty, "A stalled run never handshakes")
     }
 
-    func testOddLengthPCMFailsVisiblyAndInvalidRateAndMissingKeyNeverOpen() {
+    func testOddLengthPCMIsSentAsCapturedAndInvalidRateAndMissingKeyNeverOpen() {
         let odd = SonioxLiveFixture()
         odd.start()
         odd.becomeReady()
-        odd.client.sendAudio(Data([1]))
-        XCTAssertEqual(odd.events.errors.first as? SonioxStreamingError, .invalidPCM)
-        XCTAssertEqual(odd.socket.cancels, 1)
+        odd.client.sendAudio(Data([1, 2, 3]))
+        XCTAssertEqual(odd.socket.binary, [Data([1, 2, 3])])
+        XCTAssertTrue(odd.events.errors.isEmpty)
+        odd.client.cancel()
 
         let rate = SonioxLiveFixture(sampleRate: 0)
         rate.start()
@@ -193,18 +194,18 @@ final class SonioxPortableLifecycleTests: XCTestCase {
         XCTAssertTrue(fixture.events.errors.isEmpty)
     }
 
-    func testStopBeforeReadyFailsVisiblyWhenTheHandshakeNeverArrives() async {
+    func testStopBeforeReadyEndsAtTheFinishDeadlineWhenTheHandshakeNeverArrives() async {
         let fixture = SonioxLiveFixture()
         fixture.start()
         fixture.client.sendAudio(Data(repeating: 1, count: 3_200))
         let finish = Task { await fixture.client.finishAndWait() }
         await fixture.waitForScheduled(SonioxLiveClient.finishDeadline)
+        fixture.clock.fire(SonioxLiveClient.readyDeadline)
+        XCTAssertTrue(fixture.events.errors.isEmpty, "A finish is bounded by its own deadline")
         fixture.clock.fire(SonioxLiveClient.finishDeadline)
         let transcript = await finish.value
         XCTAssertNil(transcript)
-        guard case StreamingClientError.transportStalled? = fixture.events.errors.first else {
-            return XCTFail("Expected a visible transport stall")
-        }
+        XCTAssertTrue(fixture.events.errors.isEmpty, "The deadline returns what the finish has")
         XCTAssertEqual(fixture.socket.cancels, 1)
     }
 

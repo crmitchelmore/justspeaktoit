@@ -19,17 +19,20 @@ final class SonioxFinishFailureTests: XCTestCase {
         }
     }
 
-    func testMissingFinishedFailsBeforeFinishReturns() async {
+    func testMissingFinishedEndsTheFinishAtItsDeadlineWithWhatItHas() async {
         let fixture = SonioxLiveFixture()
         fixture.start()
         fixture.becomeReady()
+        fixture.socket.emit(#"{"tokens":[{"text":"Kept.","is_final":true}]}"#)
         let finish = Task { await fixture.client.finishAndWait() }
         await fixture.waitForScheduled(SonioxLiveClient.finishDeadline)
         await fixture.completeFinalize()
         fixture.socket.completeSend() // end-of-stream
         fixture.clock.fire(SonioxLiveClient.finishDeadline)
-        _ = await finish.value
-        XCTAssertEqual(fixture.events.errors.first as? SonioxStreamingError, .missingCompletion)
+        let text = await finish.value
+        XCTAssertEqual(text, "Kept.")
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        XCTAssertEqual(fixture.socket.cancels, 1)
     }
 
     func testEndOfStreamSendFailureIsNotSuccess() async {
@@ -62,26 +65,31 @@ final class SonioxFinishFailureTests: XCTestCase {
         XCTAssertTrue(fixture.events.errors.isEmpty, "Late transport cleanup cannot fail the closed run")
     }
 
-    func testUnexpectedFinishedDuringCaptureFailsVisibly() async {
+    func testFinishedDuringCaptureCompletesTheSessionAfterDeliveringItsFinal() async {
         let fixture = SonioxLiveFixture()
         fixture.start()
         fixture.becomeReady()
         fixture.socket.emit(#"{"tokens":[{"text":"Saved.","is_final":true}],"finished":true}"#)
-        XCTAssertEqual(fixture.events.errors.first as? SonioxStreamingError, .unexpectedCompletion)
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        XCTAssertEqual(fixture.events.texts, ["Saved.", "Saved."])
+        XCTAssertEqual(fixture.events.finals, [false, true])
+        XCTAssertEqual(fixture.socket.cancels, 1)
         let text = await fixture.client.finishAndWait()
-        XCTAssertEqual(text, "Saved.")
+        XCTAssertEqual(text, "Saved.", "The completed session's transcript is retained")
     }
 
-    func testFinishedWhileAudioStillDrainingIsNotSuccess() async {
+    func testFinishedWhileAudioStillDrainingCompletesTheFinish() async {
         let fixture = SonioxLiveFixture()
         fixture.start()
         fixture.becomeReady()
         fixture.client.sendAudio(Data(repeating: 1, count: 3_200))
         let finish = Task { await fixture.client.finishAndWait() }
         await fixture.waitForScheduled(SonioxLiveClient.finishDeadline)
-        fixture.socket.emit(#"{"tokens":[],"finished":true}"#)
-        _ = await finish.value
-        XCTAssertEqual(fixture.events.errors.first as? SonioxStreamingError, .unexpectedCompletion)
+        fixture.socket.emit(#"{"tokens":[{"text":"Early.","is_final":true}],"finished":true}"#)
+        let text = await finish.value
+        XCTAssertEqual(text, "Early.")
+        XCTAssertTrue(fixture.events.errors.isEmpty)
+        XCTAssertEqual(fixture.socket.cancels, 1)
     }
 
     func testAutomaticAndBlankLanguageSelectionsOmitTheHint() throws {

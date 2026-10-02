@@ -21,8 +21,11 @@ extension SonioxLiveClient {
             }
         }
         receive(active, connection)
+        // A finish is bounded by its own deadline, which returns what it has.
         after(readyTimeout, active) { client, active in
-            if !active.didOpen { client.fail(SonioxStreamingError.connectionFailed, active) }
+            if !active.didOpen, active.phase != .finishing {
+                client.fail(SonioxStreamingError.connectionFailed, active)
+            }
         }
     }
 
@@ -83,14 +86,15 @@ extension SonioxLiveClient {
             deliverMarkedFinal(frame, active)
         }
 
+        // `finished` completes the session whenever it arrives. While
+        // recording, words it confirmed since the last final are delivered as
+        // one first; a finish returns them instead.
         if frame.finished {
-            if active.phase == .finishing, active.endOfStreamSent {
+            if active.phase == .finishing {
                 settleFinish(active)
-            } else if active.connection == nil {
-                // Preserve the socket-free parser seam for existing contracts.
-                close(active)
             } else {
-                fail(SonioxStreamingError.unexpectedCompletion, active)
+                deliverConfirmedFinal(active)
+                close(active)
             }
         }
     }
@@ -101,7 +105,14 @@ extension SonioxLiveClient {
     /// the confirmed transcript is delivered once as a final, and a repeated
     /// marker with no new words delivers nothing.
     func deliverMarkedFinal(_ frame: SonioxLiveFrame, _ active: SonioxLiveRun) {
-        guard frame.finalized, isCurrent(active), active.phase == .active,
+        guard frame.finalized else { return }
+        deliverConfirmedFinal(active)
+    }
+
+    /// Delivers the confirmed transcript as a final once per new confirmation,
+    /// while recording only.
+    func deliverConfirmedFinal(_ active: SonioxLiveRun) {
+        guard isCurrent(active), active.phase == .active,
               active.finalVersion > active.deliveredFinalVersion, let whole = active.transcript else { return }
         active.deliveredFinalVersion = active.finalVersion
         active.onTranscript?(whole, true)

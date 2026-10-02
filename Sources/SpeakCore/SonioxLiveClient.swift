@@ -19,9 +19,10 @@ import os.log
 /// transcript once as a final. Finalisation drains the queue, sends `finalize`
 /// and then the empty end-of-stream frame (which flushes buffered audio and
 /// finalises pending tokens), and waits for the `finished` response within a
-/// bounded budget. The transport is
-/// injectable; framing, admission and lifecycle stay here so the platforms
-/// cannot drift.
+/// bounded budget. `finished` completes the session whenever it arrives, even
+/// while recording; a finish that reaches its budget returns what it has. The
+/// transport is injectable; framing, admission and lifecycle stay here so the
+/// platforms cannot drift.
 ///
 /// Conforms to ``FinalizingStreamingTranscriptionClient``. `finalShape` is
 /// `.cumulativeTranscript`: every `onTranscript` delivery restates the whole
@@ -35,7 +36,8 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
     static let readyDeadline: TimeInterval = 10
     /// A single send that has not completed by then means the transport stalled.
     static let sendDeadline: TimeInterval = 5
-    /// Drain, end-of-stream and the `finished` response are bounded together.
+    /// Drain, end-of-stream and the `finished` response are bounded together;
+    /// a finish that reaches it returns what it has.
     static let finishDeadline: TimeInterval = 8
     /// Queued frames are bounded by count as well as by the byte budget.
     static let maximumQueuedFrames = 256
@@ -171,7 +173,6 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
             let active = run
             if active.phase == .idle { preroll.append(audioData); return }
             guard active.phase == .connecting || active.phase == .active else { return }
-            guard audioData.count.isMultiple(of: 2) else { fail(SonioxStreamingError.invalidPCM, active); return }
             guard !active.overflowReported else { return }
             guard admitAudio(audioData, into: active) else {
                 active.overflowReported = true
@@ -235,9 +236,10 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
 
     // MARK: - Finalisation
 
-    /// Drains admitted PCM, then sends the empty end-of-stream frame that
-    /// flushes buffered audio and finalises pending tokens. Only `finished`
-    /// completes a run successfully; disconnects and deadlines fail visibly.
+    /// Drains admitted PCM, then sends `finalize` and the empty end-of-stream
+    /// frame that flushes buffered audio and finalises pending tokens, then
+    /// waits for `finished`. The finish deadline completes the run with the
+    /// text it has; only a disconnect or a provider error fails it.
     private func beginFinish(_ active: SonioxLiveRun, deliverCallbacks: Bool) {
         guard isCurrent(active), active.connection != nil else { close(active); return }
         if !deliverCallbacks { active.deliverWhileFinishing = false }
@@ -246,22 +248,19 @@ public final class SonioxLiveClient: FinalizingStreamingTranscriptionClient, @un
         active.deliverWhileFinishing = deliverCallbacks
         if !active.endOfStreamSent,
            !active.outgoing.contains(where: { if case .endOfStream = $0 { return true }; return false }) {
-            // Pending audio, then `finalize`, then end-of-stream; only the
-            // server's `finished` response completes the run.
+            // Pending audio, then `finalize`, then end-of-stream, then the
+            // server's `finished` response.
             active.outgoing.append(.finalize)
             active.outgoing.append(.endOfStream)
         }
         pump(active)
-        after(finishTimeout, active) { client, active in
-            let error = active.endOfStreamSent && !active.sending
-                ? SonioxStreamingError.missingCompletion : client.stalledError
-            client.fail(error, active)
-        }
+        after(finishTimeout, active) { client, active in client.settleFinish(active) }
     }
 
-    /// Ends a finishing run: delivers the whole transcript as a final when the
-    /// graceful `stop()` asked for callbacks, then closes. `close` resolves the
-    /// `finishAndWait` waiters with the same transcript.
+    /// Ends a finishing run, on `finished` or at the finish deadline: delivers
+    /// the whole transcript as a final when the graceful `stop()` asked for
+    /// callbacks, then closes. `close` resolves the `finishAndWait` waiters,
+    /// and later calls until the next `start()`, with the same transcript.
     func settleFinish(_ active: SonioxLiveRun) {
         guard isCurrent(active), active.phase == .finishing else { return }
         if active.deliverWhileFinishing, let whole = active.transcript {

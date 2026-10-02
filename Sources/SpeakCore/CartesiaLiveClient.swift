@@ -121,8 +121,9 @@ public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
     }
 
     public func stop() {
-        queue.async { [weak self] in
-            guard let self, let run = self.run else { return }
+        // An admitted stop owns its cleanup even if the caller releases the client.
+        queue.async { [self] in
+            guard let run = self.run else { return }
             self.complete(run, closeCode: .goingAway)
         }
     }

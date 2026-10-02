@@ -216,31 +216,40 @@ private final class Harness {
         let sessions = KeyboardInstantDictationStore(defaults: defaults)
         _ = sessions.start(enabling: true)
         coordinator = KeyboardInstantDictationCoordinator(sessionStore: sessions, handoffStore: app)
+        // Weak captures: `cleanUp()` releases the gates, so a drain or polish
+        // can resume after the test has released this harness.
         coordinator.finalisation = .init(
-            isRunning: { [unowned self] in self.running },
+            isRunning: { [weak self] in self?.running ?? false },
             partialText: { "Captured partial" },
-            stop: { [unowned self] in
+            stop: { [weak self] in
+                guard let self else { return Harness.result(text: "") }
                 self.stops += 1
                 self.running = false
                 let text = self.resultText
                 await self.drain.wait()
-                return TranscriptionResult(
-                    text: text, segments: [], confidence: nil, duration: 3,
-                    modelIdentifier: "test-model", cost: nil, rawPayload: nil, debugInfo: nil
-                )
+                return Harness.result(text: text)
             },
-            cancel: { [unowned self] in self.running = false },
-            polish: { [unowned self] _, _ in
+            cancel: { [weak self] in self?.running = false },
+            polish: { [weak self] _, _ in
+                guard let self else { throw CancellationError() }
                 self.polishes += 1
                 await self.polish.wait()
                 if self.polishFails { throw PostProcessingError.emptyResult }
                 return "Polished words"
             },
-            save: { [unowned self] text, result in
+            save: { [weak self] text, result in
+                guard let self else { return }
                 self.savedTexts.append(text)
                 self.history.recordTranscription(text: text, model: result.modelIdentifier, duration: result.duration)
             },
-            resumeReadiness: { [unowned self] in self.resumptions += 1 }
+            resumeReadiness: { [weak self] in self?.resumptions += 1 }
+        )
+    }
+
+    private static func result(text: String) -> TranscriptionResult {
+        TranscriptionResult(
+            text: text, segments: [], confidence: nil, duration: 3,
+            modelIdentifier: "test-model", cost: nil, rawPayload: nil, debugInfo: nil
         )
     }
 

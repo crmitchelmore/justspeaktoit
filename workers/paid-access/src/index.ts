@@ -11,6 +11,7 @@ import { ApiError, errorResponse, jsonResponse } from './http.js';
 import { ConfigurationError, type Env } from './env.js';
 import { authenticate, createContext } from './context.js';
 import { describeError } from './logging.js';
+import { operationError } from './routes/settlement.js';
 import { Repository } from './data/repository.js';
 import { handleAppleSignIn, handleRefresh, handleSignOut } from './routes/auth.js';
 import {
@@ -38,6 +39,9 @@ export default {
     await new Repository(env.DB).pruneExpiredRequestClaims(Math.floor(controller.scheduledTime / 1000));
   },
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const isSettledOperation = request.method === 'POST'
+      && ['/v1/paid/transcribe/batch', '/v1/paid/post-process'].includes(url.pathname);
     const context = (() => {
       try {
         return createContext(request, env);
@@ -53,13 +57,13 @@ export default {
     })();
 
     if (context === null) {
+      if (isSettledOperation) return errorResponse(operationError(request), crypto.randomUUID());
       return new Response(
         JSON.stringify({ error: { code: 'internal_error', message: 'Service is misconfigured' } }),
         { status: 500, headers: { 'content-type': 'application/json' } },
       );
     }
 
-    const url = new URL(request.url);
     const route = `${request.method} ${url.pathname}` as Route;
 
     try {
@@ -115,6 +119,11 @@ export default {
           throw new ApiError('not_found', 'No such endpoint');
       }
     } catch (error) {
+      if (isSettledOperation && (!(error instanceof ApiError)
+        || ['unauthorized', 'internal_error', 'upstream_error', 'upstream_timeout', 'conflict'].includes(error.code))) {
+        return errorResponse(operationError(request, error instanceof ApiError && error.code === 'conflict'
+          ? 'conflict' : 'outcome_unknown'), context.correlationId);
+      }
       if (error instanceof ApiError) {
         if (error.status >= 500) {
           context.logger.error('request.failed', { code: error.code, status: error.status });

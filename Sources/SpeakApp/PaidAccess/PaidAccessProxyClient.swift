@@ -8,8 +8,8 @@ import SpeakCore
 ///
 /// The delegation is the point: this wrapper sits in the composition root in
 /// front of `OpenRouterAPIClient`, so a user who never subscribes gets byte-for-byte
-/// the previous behaviour, and a subscriber whose server call fails transiently
-/// silently drops back to their own configuration rather than losing dictation.
+/// the previous behaviour. Confirmed pre-dispatch refusal can fall back; an
+/// uncertain submitted operation never silently spends again.
 actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
 
   /// The bring-your-own-key client every non-paid request goes to.
@@ -69,13 +69,25 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
   ///
   /// Wider than ``PaidAccessError/permitsSilentFallback`` by exactly one case:
   /// `unsupportedOperation` is still an error worth surfacing in Settings — the
-  /// server publishes no paid route for that operation — but it must not cost
-  /// the user a recording they have already made. Failing a request is never
-  /// the right answer when the user's own key or an on-device model can finish
-  /// it.
+  /// server publishes no paid route for that operation before any submission.
+  /// Submitted transport failures use a separate non-fallback outcome.
   private static func completesThroughFallback(_ error: PaidAccessError) -> Bool {
     if case .unsupportedOperation = error { return true }
     return error.permitsSilentFallback
+  }
+
+  /// Only explicit pre-dispatch refusals may cross to a second provider.
+  private static func submittedError(_ error: Error, key: String) -> Error {
+    guard let paid = error as? PaidAccessError else {
+      return PaidAccessError.operationOutcome(.unknown, idempotencyKey: key, correlationID: nil)
+    }
+    switch paid {
+    case .entitlementRequired, .quotaExceeded, .paidRoutingDisabled, .requestNotStarted,
+         .alreadyProcessed, .operationOutcome:
+      return paid
+    default:
+      return PaidAccessError.operationOutcome(.unknown, idempotencyKey: key, correlationID: nil)
+    }
   }
 
   // MARK: - Chat
@@ -101,22 +113,21 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
       }
 
       let text = Self.userText(from: messages)
-      let result = try await self.paidClient.postProcess(
-        session: resolved.session,
-        text: text,
-        systemPrompt: systemPrompt,
-        temperature: temperature,
-        // Each call is its own attempt: nothing here retries, and a timeout
-        // falls back to the user's own client rather than trying again. Reusing
-        // a key across calls would refuse a second, deliberate cleanup of the
-        // same text — which is ordinary use, not a duplicate.
-        idempotencyKey: PaidAccessHTTPClient.idempotencyKey(
-          operation: .postProcessing,
-          attemptID: UUID().uuidString,
-          parameters: [resolved.route.model, systemPrompt ?? "", String(temperature)],
-          payload: Data(text.utf8)
-        )
+      let key = PaidAccessHTTPClient.idempotencyKey(
+        operation: .postProcessing,
+        attemptID: UUID().uuidString,
+        parameters: [resolved.route.model, systemPrompt ?? "", String(temperature)],
+        payload: Data(text.utf8)
       )
+      let result: String
+      do {
+        result = try await self.paidClient.postProcess(
+          session: resolved.session, text: text, systemPrompt: systemPrompt,
+          temperature: temperature, idempotencyKey: key
+        )
+      } catch {
+        throw Self.submittedError(error, key: key)
+      }
       return ChatResponse(
         messages: [ChatMessage(role: .assistant, content: result)],
         finishReason: "stop",
@@ -222,20 +233,21 @@ actor PaidAccessProxyClient: StreamingChatLLMClient, BatchTranscriptionClient {
         return try await self.fallback.transcribeFile(at: url, model: model, language: language)
       }
 
-      let text = try await self.paidClient.transcribe(
-        session: resolved.session,
-        audio: audio,
-        contentType: contentType,
-        language: language,
-        // A recording is a natural attempt identity: transcribing the same file
-        // again is a retry, recording the same words afresh is a new request.
-        idempotencyKey: PaidAccessHTTPClient.idempotencyKey(
-          operation: .batchTranscription,
-          attemptID: Self.attemptID(for: url),
-          parameters: [resolved.route.model, contentType, language ?? ""],
-          payload: audio
-        )
+      let key = PaidAccessHTTPClient.idempotencyKey(
+        operation: .batchTranscription,
+        attemptID: Self.attemptID(for: url),
+        parameters: [resolved.route.model, contentType, language ?? ""],
+        payload: audio
       )
+      let text: String
+      do {
+        text = try await self.paidClient.transcribe(
+          session: resolved.session, audio: audio, contentType: contentType,
+          language: language, idempotencyKey: key
+        )
+      } catch {
+        throw Self.submittedError(error, key: key)
+      }
       let duration = await Self.audioDuration(of: url)
       return TranscriptionResult(
         text: text,

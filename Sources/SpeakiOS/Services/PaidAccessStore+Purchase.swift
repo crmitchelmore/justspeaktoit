@@ -136,6 +136,7 @@ extension PaidAccessStore {
     }
 
     func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
+        guard PaidAccessFeature.isAvailableOnIOS else { return }
         let generation = self.sessions.generation
         guard let session = await self.currentSession() else { return }
         if await self.syncIfSubscription(result, session: session, generation: generation),

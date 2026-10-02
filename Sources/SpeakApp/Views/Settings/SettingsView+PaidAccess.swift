@@ -108,7 +108,7 @@ extension SettingsView {
 
       if let usage = paidAccess.entitlement.usage, usage.audioSecondsLimit > 0 {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Included dictation used this month")
+          Text("Included dictation allowance this month")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
           ProgressView(value: usage.audioFractionUsed)
@@ -116,6 +116,12 @@ extension SettingsView {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
+      }
+
+      if let usage = paidAccess.entitlement.usage, usage.tokensLimit > 0 {
+        Text(usage.tokenAllowanceSummary)
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
 
       if !paidAccess.entitlement.isActive() {
@@ -234,7 +240,9 @@ extension SettingsView {
   private static func usageSummary(for usage: PaidUsageSnapshot) -> String {
     let used = Int(usage.audioSecondsUsed / 60)
     let limit = Int(usage.audioSecondsLimit / 60)
-    return "\(used) of \(limit) minutes"
+    let total = "\(used) of \(limit) minutes of allowance in use"
+    guard let measured = usage.audioSecondsMeasured, let held = usage.audioSecondsHeld else { return total }
+    return total + " (\(measured) seconds measured; \(held) seconds held)"
   }
 
   // MARK: - Model-picker visibility

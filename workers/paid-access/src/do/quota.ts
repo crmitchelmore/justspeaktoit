@@ -4,19 +4,26 @@
  * One Durable Object instance per user gives us a single-threaded serialisation
  * point, which is what makes reserve/finalise correct: two devices starting a
  * long recording at the same moment cannot both pass a check-then-act race, and
- * a crashed client cannot leak a reservation forever because reservations carry
- * a lease that expires.
+ * unconsumed permits expire safely. A possibly dispatched batch/post operation
+ * retains its allowance hold until a measured result is known.
  *
  * Quota is never trusted from the client. Callers reserve an upper bound before
  * work starts and finalise with the *measured* amount afterwards; the delta is
  * released back.
  */
 
+import { Repository } from '../data/repository.js';
+import type { Env } from '../env.js';
+import {
+  PENDING_PREFIX, receiptKey, pendingKey,
+  type SettlementReceipt, type SettlementRequest, type SettlementResponse,
+} from './settlement.js';
+
 export interface QuotaLimits {
   readonly monthlyAudioSeconds: number;
   readonly monthlyTokens: number;
   readonly maxConcurrentSessions: number;
-  /** How long an unfinalised reservation is honoured before being reclaimed. */
+  /** Dispatch-permit lease; expiry does not release possibly dispatched operation holds. */
   readonly leaseSeconds: number;
 }
 
@@ -62,6 +69,10 @@ export interface QuotaSnapshot {
   readonly tokensLimit: number;
   readonly activeSessions: number;
   readonly maxConcurrentSessions: number;
+  readonly audioSecondsMeasured?: number;
+  readonly audioSecondsHeld: number;
+  readonly tokensMeasured?: number;
+  readonly tokensHeld: number;
 }
 
 export type QuotaResponse =
@@ -76,12 +87,14 @@ interface Reservation {
   readonly units: number;
   readonly countsAsSession: boolean;
   readonly expiresAt: number;
+  readonly operationKey?: string;
 }
 
 interface PeriodState {
   period: string;
   audioSecondsCommitted: number;
   tokensCommitted: number;
+  measuredKnown?: boolean;
 }
 
 /**
@@ -103,7 +116,7 @@ const EXPIRED_PREFIX = 'expired:';
 export class QuotaDurableObject implements DurableObject {
   private readonly state: DurableObjectState;
 
-  constructor(state: DurableObjectState) {
+  constructor(state: DurableObjectState, private readonly env: Env) {
     this.state = state;
   }
 
@@ -111,16 +124,25 @@ export class QuotaDurableObject implements DurableObject {
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
     }
-    let body: QuotaRequest;
+    let body: QuotaRequest | SettlementRequest;
     try {
       body = (await request.json());
     } catch {
       return new Response('Bad Request', { status: 400 });
     }
 
+    if (body.kind === 'operation_reconcile') {
+      await this.reconcile(body.idempotencyKey);
+      return Response.json(await this.state.blockConcurrencyWhile(async () => ({
+        ok: true, receipt: await this.operationLookup(body.idempotencyKey, Math.floor(Date.now() / 1000)),
+      })));
+    }
+    if (body.kind.startsWith('operation_')) {
+      return Response.json(await this.state.blockConcurrencyWhile(() => this.operation(body as SettlementRequest)));
+    }
     // `blockConcurrencyWhile` is what makes reserve/finalise atomic against
     // other requests for the same user.
-    const response = await this.state.blockConcurrencyWhile(() => this.handle(body));
+    const response = await this.state.blockConcurrencyWhile(() => this.handle(body as QuotaRequest));
     return Response.json(response);
   }
 
@@ -152,13 +174,15 @@ export class QuotaDurableObject implements DurableObject {
     }
     // A new billing period starts at zero; the ledger in D1 remains the durable
     // record of what came before.
-    return { period, audioSecondsCommitted: 0, tokensCommitted: 0 };
+    return { period, audioSecondsCommitted: 0, tokensCommitted: 0, measuredKnown: true };
   }
 
   /**
-   * Returns the reservations still under lease, committing any that expired.
+   * Returns active reservations, retaining unknown keyed operation holds.
    *
-   * A lease expires only when nothing finalised or released it — a crashed
+   * Keyed operations revoke unused permits or retain unknown holds. The legacy
+   * live reservation policy below remains unchanged:
+   * a lease expires only when nothing finalised or released it — a crashed
    * Worker, a device that vanished mid-session. The reserved amount was the
    * agreed upper bound for that work, so committing it is the only outcome that
    * cannot hand the usage away for free; anything genuinely smaller would have
@@ -168,14 +192,35 @@ export class QuotaDurableObject implements DurableObject {
     const stored = (await this.state.storage.get<Reservation[]>(RESERVATIONS_KEY)) ?? [];
     const live: Reservation[] = [];
     const expired: Reservation[] = [];
+    const receiptUpdates: Record<string, SettlementReceipt> = {};
     for (const reservation of stored) {
-      (reservation.expiresAt > nowSeconds ? live : expired).push(reservation);
+      if (reservation.operationKey !== undefined && reservation.expiresAt <= nowSeconds) {
+        const key = receiptKey(reservation.operationKey);
+        const receipt = await this.state.storage.get<SettlementReceipt>(key);
+        if (receipt?.phase === 'reserved') {
+          receiptUpdates[key] = { ...receipt, phase: 'not_started', revision: receipt.revision + 1,
+            updatedAt: nowSeconds };
+          continue;
+        }
+        if (receipt?.phase === 'provider_started') {
+          receiptUpdates[key] = { ...receipt, phase: 'outcome_unknown', revision: receipt.revision + 1,
+            updatedAt: nowSeconds };
+        }
+        // A missing receipt is not proof of unused quota: keep the hold fail-closed.
+        live.push(reservation);
+      } else {
+        (reservation.expiresAt > nowSeconds ? live : expired).push(reservation);
+      }
+    }
+    if (Object.keys(receiptUpdates).length > 0) {
+      await this.state.storage.put({ ...receiptUpdates, [RESERVATIONS_KEY]: live.concat(expired) });
     }
     if (expired.length > 0) {
       const periods: Record<string, PeriodState> = {};
       for (const reservation of expired) {
         const key = QuotaDurableObject.periodKey(reservation.period);
         const period = periods[key] ?? await this.loadPeriod(reservation.period);
+        period.measuredKnown = false;
         if (reservation.unitKind === 'audio_seconds') period.audioSecondsCommitted += reservation.units;
         else period.tokensCommitted += reservation.units;
         periods[key] = period;
@@ -215,6 +260,10 @@ export class QuotaDurableObject implements DurableObject {
       audioSecondsUsed: period.audioSecondsCommitted + reservedAudio,
       audioSecondsLimit: limits.monthlyAudioSeconds,
       tokensUsed: period.tokensCommitted + reservedTokens,
+      audioSecondsMeasured: period.measuredKnown === true ? period.audioSecondsCommitted : undefined,
+      audioSecondsHeld: reservedAudio,
+      tokensMeasured: period.measuredKnown === true ? period.tokensCommitted : undefined,
+      tokensHeld: reservedTokens,
       tokensLimit: limits.monthlyTokens,
       // Concurrency is a live-now property, so it counts every open lease
       // regardless of which billing period it was taken in.
@@ -283,6 +332,7 @@ export class QuotaDurableObject implements DurableObject {
     if (reservation === undefined) {
       return { ok: true, snapshot: this.snapshot(await this.latestPeriod(), reservations, ZERO_LIMITS) };
     }
+    if (reservation.operationKey !== undefined) throw new Error('Owned operation requires settlement');
     const remaining = reservations.filter((entry) => entry.id !== request.reservationId);
     const period = await this.loadPeriod(reservation.period);
     // Only trusted Worker code can settle. Keep actual token overruns visible;
@@ -302,6 +352,9 @@ export class QuotaDurableObject implements DurableObject {
 
   private async release(request: ReleaseRequest): Promise<QuotaResponse> {
     const reservations = await this.loadReservations(request.nowSeconds);
+    if (reservations.some((entry) => entry.id === request.reservationId && entry.operationKey !== undefined)) {
+      throw new Error('Owned operation requires cancellation');
+    }
     const remaining = reservations.filter((entry) => entry.id !== request.reservationId);
     await this.state.storage.put(RESERVATIONS_KEY, remaining);
     return {
@@ -310,9 +363,153 @@ export class QuotaDurableObject implements DurableObject {
     };
   }
 
+  private async operationLookup(key: string, now: number): Promise<SettlementReceipt | null> {
+    await this.loadReservations(now);
+    return (await this.state.storage.get<SettlementReceipt>(receiptKey(key))) ?? null;
+  }
+
+  private async operation(request: SettlementRequest): Promise<SettlementResponse> {
+    if (request.kind === 'operation_reconcile') throw new Error('Reconciliation must run outside the storage gate');
+    const receipt = await this.operationLookup(request.idempotencyKey, request.nowSeconds);
+    if (request.kind === 'operation_lookup') return { ok: true, receipt };
+    if (request.kind === 'operation_reserve') {
+      if (receipt !== null) return { ok: false, receipt, reason: 'conflict' };
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(request.idempotencyKey)
+        || !Number.isSafeInteger(request.units) || request.units < 0) throw new Error('Invalid admission');
+      const reservations = await this.loadReservations(request.nowSeconds);
+      const period = await this.loadPeriod(request.period);
+      const snapshot = this.snapshot(period, reservations, request.limits);
+      const occupied = request.unitKind === 'tokens' ? snapshot.tokensUsed : snapshot.audioSecondsUsed;
+      const limit = request.unitKind === 'tokens' ? request.limits.monthlyTokens : request.limits.monthlyAudioSeconds;
+      if (occupied + request.units > limit) return { ok: false, receipt: null, reason: 'quota_exceeded' };
+      const next: SettlementReceipt = {
+        schemaVersion: 1, userId: request.userId, idempotencyKey: request.idempotencyKey,
+        operation: request.operation, reservationId: crypto.randomUUID(), ledgerEntryId: crypto.randomUUID(),
+        ownerId: request.ownerId, provider: request.provider, model: request.model, unitKind: request.unitKind,
+        billingPeriod: request.period, reservedUnits: request.units, phase: 'reserved', revision: 1,
+        createdAt: request.nowSeconds, updatedAt: request.nowSeconds,
+        expiresAt: request.nowSeconds + request.limits.leaseSeconds,
+        correlationId: request.correlationId, reconcileAttempts: 0,
+      };
+      await this.state.storage.put({
+        [receiptKey(next.idempotencyKey)]: next,
+        [QuotaDurableObject.periodKey(period.period)]: period,
+        [LATEST_PERIOD_KEY]: period.period,
+        [RESERVATIONS_KEY]: [...reservations, { id: next.reservationId, period: next.billingPeriod,
+          unitKind: next.unitKind, units: next.reservedUnits, countsAsSession: false,
+          expiresAt: next.expiresAt, operationKey: next.idempotencyKey }],
+      });
+      return { ok: true, receipt: next };
+    }
+    if (receipt === null || receipt.ownerId !== request.ownerId) return { ok: false, receipt, reason: 'conflict' };
+    if (request.kind === 'operation_measure' && (receipt.phase === 'ledger_pending' || receipt.phase === 'settled')) {
+      return { ok: receipt.actualUnits === request.actualUnits && receipt.measuredAt === request.measuredAt,
+        receipt, reason: 'conflict' };
+    }
+    if (receipt.revision !== request.revision) return { ok: false, receipt, reason: 'conflict' };
+    const next: SettlementReceipt = { ...receipt, revision: receipt.revision + 1, updatedAt: request.nowSeconds };
+    if (request.kind === 'operation_start' && receipt.phase === 'reserved') {
+      next.phase = 'provider_started';
+    } else if (request.kind === 'operation_unknown' && (receipt.phase === 'provider_started'
+      || receipt.phase === 'outcome_unknown')) {
+      next.phase = 'outcome_unknown';
+    } else if (request.kind === 'operation_cancel' && receipt.phase === 'reserved') {
+      next.phase = 'not_started';
+      const reservations = await this.loadReservations(request.nowSeconds);
+      await this.state.storage.put({ [receiptKey(next.idempotencyKey)]: next,
+        [RESERVATIONS_KEY]: reservations.filter((entry) => entry.id !== next.reservationId) });
+      return { ok: true, receipt: next };
+    } else if (request.kind === 'operation_measure' && (receipt.phase === 'provider_started'
+      || receipt.phase === 'outcome_unknown')) {
+      if (!Number.isSafeInteger(request.actualUnits) || request.actualUnits < 0
+        || !Number.isSafeInteger(request.measuredAt) || request.measuredAt < receipt.createdAt
+        || (receipt.unitKind === 'audio_seconds' && request.actualUnits > receipt.reservedUnits)) {
+        return { ok: false, receipt, reason: 'conflict' };
+      }
+      const reservations = await this.loadReservations(request.nowSeconds);
+      const period = await this.loadPeriod(receipt.billingPeriod);
+      if (receipt.unitKind === 'tokens') period.tokensCommitted += request.actualUnits;
+      else period.audioSecondsCommitted += request.actualUnits;
+      next.phase = 'ledger_pending'; next.actualUnits = request.actualUnits;
+      next.measuredAt = request.measuredAt; next.nextReconcileAt = request.nowSeconds + 30;
+      // Retry is installed before the durable measurement; an extra empty alarm is harmless.
+      await this.ensureAlarm(next.nextReconcileAt);
+      await this.state.storage.put({ [receiptKey(next.idempotencyKey)]: next,
+        [pendingKey(next)]: next.idempotencyKey,
+        [QuotaDurableObject.periodKey(period.period)]: period,
+        [RESERVATIONS_KEY]: reservations.filter((entry) => entry.id !== next.reservationId) });
+      return { ok: true, receipt: next };
+    } else return { ok: false, receipt, reason: 'conflict' };
+    await this.state.storage.put(receiptKey(next.idempotencyKey), next);
+    return { ok: true, receipt: next };
+  }
+
+  private async ensureAlarm(atSeconds: number): Promise<void> {
+    const existing = await this.state.storage.getAlarm();
+    const at = Math.max(Date.now() + 1, atSeconds * 1000);
+    if (existing === null || existing > at) await this.state.storage.setAlarm(at);
+  }
+
+  private async reconcile(key: string): Promise<void> {
+    const receipt = await this.state.blockConcurrencyWhile(() =>
+      this.state.storage.get<SettlementReceipt>(receiptKey(key)));
+    if (receipt?.phase !== 'ledger_pending' || receipt.lastFailure === 'ledger_conflict') return;
+    let result: 'matched' | 'conflict' | 'unavailable';
+    try {
+      result = await new Repository(this.env.DB).reconcileUsage({ ledgerEntryId: receipt.ledgerEntryId,
+        userId: receipt.userId, idempotencyKey: receipt.idempotencyKey, operation: receipt.operation,
+        provider: receipt.provider, model: receipt.model, unitKind: receipt.unitKind,
+        units: receipt.actualUnits!, billingPeriod: receipt.billingPeriod,
+        correlationId: receipt.correlationId, measuredAt: receipt.measuredAt! });
+    } catch { result = 'unavailable'; }
+    await this.state.blockConcurrencyWhile(async () => {
+      const current = await this.state.storage.get<SettlementReceipt>(receiptKey(key));
+      if (current?.phase !== 'ledger_pending' || current.revision !== receipt.revision) return;
+      const now = Math.floor(Date.now() / 1000);
+      const next: SettlementReceipt = { ...current, revision: current.revision + 1, updatedAt: now,
+        reconcileAttempts: current.reconcileAttempts + 1 };
+      if (result === 'matched') {
+        next.phase = 'settled'; delete next.lastFailure; delete next.nextReconcileAt;
+      } else if (result === 'conflict') {
+        next.lastFailure = 'ledger_conflict'; delete next.nextReconcileAt;
+      } else {
+        next.lastFailure = 'ledger_unavailable';
+        next.nextReconcileAt = now + Math.min(900, 30 * 2 ** Math.min(5, next.reconcileAttempts - 1));
+        await this.ensureAlarm(next.nextReconcileAt);
+      }
+      await this.state.storage.put({ [receiptKey(key)]: next,
+        ...(next.nextReconcileAt === undefined ? {} : { [pendingKey(next)]: key }) });
+      if (pendingKey(receipt) !== pendingKey(next)) await this.state.storage.delete(pendingKey(receipt));
+    });
+    // Claims are only a projection. Their failure cannot undo durable settlement.
+    if (result === 'matched') {
+      await new Repository(this.env.DB).completeRequestClaim({ userId: receipt.userId,
+        idempotencyKey: key, nowSeconds: Math.floor(Date.now() / 1000) }).catch(() => undefined);
+    }
+  }
+
+  async alarm(): Promise<void> {
+    const pending = await this.state.storage.list<string>({ prefix: PENDING_PREFIX, limit: 25 });
+    for (const [marker, key] of pending) {
+      const receipt = await this.state.storage.get<SettlementReceipt>(receiptKey(key));
+      if (receipt?.phase !== 'ledger_pending' || receipt.nextReconcileAt === undefined
+        || pendingKey(receipt) !== marker) {
+        await this.state.storage.delete(marker);
+      } else if (receipt.nextReconcileAt <= Math.floor(Date.now() / 1000)) {
+        await this.reconcile(key);
+      }
+    }
+    await this.state.blockConcurrencyWhile(async () => {
+      const first = await this.state.storage.list<string>({ prefix: PENDING_PREFIX, limit: 1 });
+      const marker = first.keys().next().value as string | undefined;
+      if (marker !== undefined) await this.ensureAlarm(Number(marker.slice(PENDING_PREFIX.length).split(':')[0]));
+      // Do not delete a different request's newly installed alarm.
+    });
+  }
+
   private async status(request: StatusRequest): Promise<QuotaResponse> {
-    // Sweep before reading, so a lease that expired since the last call is
-    // reported as committed usage rather than as nothing at all.
+    // Sweep before reading so expired permits and retained unknown holds are
+    // reflected alongside the unchanged legacy live-expiry accounting.
     const reservations = await this.loadReservations(request.nowSeconds);
     const period = await this.loadPeriod(request.period);
     return { ok: true, snapshot: this.snapshot(period, reservations, request.limits) };

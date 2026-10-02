@@ -1,5 +1,7 @@
 # Paid Access operations runbook
 
+**Current gate:** paid access remains disabled and uncommissioned. External identity, products, privacy operations and staging qualification are still required; these instructions do not authorise activation.
+
 Use this runbook to set up, deploy, verify, and operate the paid access tier. The Worker source and its developer notes live in [`workers/paid-access/README.md`](../workers/paid-access/README.md); user-facing data handling is in [`paid-access-privacy.md`](paid-access-privacy.md).
 
 ## Overview
@@ -17,12 +19,14 @@ PAID_ACCESS_BASE_URL=https://your-staging-worker.example \
 ```
 
 `TUIST_PAID_ACCESS=1` defines the `PAID_ACCESS` Swift condition. Without it the
-subscription card is hidden, entitlement restore is skipped, and paid routing
-refuses to activate even if old preferences say otherwise. `PAID_ACCESS_BASE_URL`
+subscription card is hidden, entitlement restore and automatic StoreKit observation
+are skipped, transaction updates are ignored, and paid routing refuses to activate
+even if old preferences say otherwise. `PAID_ACCESS_BASE_URL`
 is honoured only by such internal builds; public builds always use the production
-endpoint.
+endpoint. The flag does not commission a signed paid product: shipping entitlements
+remain unchanged, and identity, signing, products and staging require separate proof.
 
-**Local models and bring-your-own (BYO) API keys remain the default and stay fully supported.** Paid access buys convenience, not capability: it unlocks no feature, model quality tier, or output that a BYO or local user cannot already reach. Every operational decision below follows from that. If paid routing is degraded or switched off, the correct client behaviour is to fall back to BYO keys or local models, not to lose the feature.
+**Local models and bring-your-own (BYO) API keys remain the default and stay fully supported.** Paid access buys convenience, not capability: it unlocks no feature, model quality tier, or output that a BYO or local user cannot already reach. Every operational decision below follows from that. Confirmed pre-dispatch refusals can use BYO keys or local models. A possibly dispatched operation never silently falls back or retries a provider.
 
 | Property | Value |
 | --- | --- |
@@ -30,7 +34,7 @@ endpoint.
 | Package | `workers/paid-access/` (TypeScript) |
 | Production route | `api.justspeaktoit.com/*` |
 | Environments | default (development), `staging`, `production` |
-| Identity | Sign in with Apple, shared across channels and devices |
+| Identity | Verified Apple identity server contract; supported channel-specific sign-in flows remain uncommissioned |
 | Billing | Stripe (direct-download macOS) or StoreKit 2 (App Store builds) |
 | D1 database | `paid-access` (staging: `paid-access-staging`) |
 
@@ -100,9 +104,9 @@ The dashed path matters: BYO and local users never contact our servers. Only pai
 
 The client selects controls for its build channel. The Worker requires a caller-declared `direct` channel for Stripe endpoints; that field does not independently attest the installed build. Build/channel identity qualification remains open.
 
-**iOS does not sell paid access yet.** `PaidAccessStore` compiles and can hold an entitlement bought on a Mac, but nothing on iOS routes work through it — `iOSBatchTranscriber`, `VoiceSummariser` and `PostProcessingView` all go straight to the user's own key or an on-device model. The purchase UI is therefore switched off behind `PaidAccessFeature.isAvailableOnIOS` (`Sources/SpeakiOS/Services/PaidAccessStore.swift`) so nobody is charged for routing that does not happen. Wire those three call sites through a proxy client, then flip that constant.
+**iOS does not sell paid access yet.** `PaidAccessStore` compiles and can hold an entitlement bought on a Mac, but nothing on iOS routes work through it — `iOSBatchTranscriber`, `VoiceSummariser` and `PostProcessingView` all go straight to the user's own key or an on-device model. The purchase UI is therefore switched off behind `PaidAccessFeature.isAvailableOnIOS` (`Sources/SpeakiOS/Services/PaidAccessStore.swift`) so nobody is charged for routing that does not happen. Routing those three call sites through a proxy client is necessary; supported identity, signing, products and staging must also be qualified before enabling that constant. Automatic StoreKit observation and transaction handlers remain off with it.
 
-Identity is shared. The same Apple account signing in on a direct-download Mac and on an iPhone resolves to one user row and one entitlement, whichever channel paid for it. A user who subscribes through Stripe on a Mac is entitled on their iPhone without a second purchase.
+The server contract maps the same verified Apple account to one user row and entitlement across channels. This does not establish a working direct-download Mac sign-in flow or qualified cross-channel access. Native Sign in with Apple is unsupported for Developer ID apps ([Apple DTS](https://developer.apple.com/forums/thread/793244)); a supported direct-distribution identity flow remains a separate commissioning decision.
 
 ## External product setup
 
@@ -139,9 +143,9 @@ npx wrangler d1 create paid-access-staging
 
 ### Apple Developer
 
-- [ ] Enable the **Sign in with Apple** capability for the iOS app id and both macOS app ids.
-- [ ] If the direct-download macOS build uses the web sign-in flow, create the Services ID `com.justspeaktoit.signin`.
-- [ ] Confirm every audience in use appears in `APPLE_IDENTITY_AUDIENCES`, and every native bundle id in `APPLE_BUNDLE_IDS`.
+- [ ] Separately commission supported native Sign in with Apple for App Store builds, including authorised App IDs, matching provisioning profiles and signed-artifact verification. Ordinary shipping entitlements currently omit this capability.
+- [ ] Resolve and qualify a supported direct-distribution identity flow before enabling paid access for Developer ID builds. Native Sign in with Apple is unsupported there; this source recovery does not add a web flow, signing variant or capability.
+- [ ] After the identity flow is approved, confirm every audience in use appears in `APPLE_IDENTITY_AUDIENCES`, and every native bundle id in `APPLE_BUNDLE_IDS`.
 
 An identity token whose audience is missing from `APPLE_IDENTITY_AUDIENCES` is rejected with `unauthorized`. That is the most common cause of "sign-in works on iPhone but not on Mac".
 
@@ -193,7 +197,7 @@ npm run migrations:remote     # wrangler d1 migrations apply paid-access --remot
 npx wrangler d1 migrations list paid-access --remote
 ```
 
-`0001_init.sql` creates `users`, `auth_sessions`, `billing_customers`, `entitlements`, `entitlement_events`, `webhook_events`, `usage_ledger`, `request_claims` and `audit_events`, plus triggers that make `entitlement_events`, `usage_ledger` and `audit_events` reject `UPDATE` and `DELETE`. Idempotency comes from three UNIQUE constraints: `webhook_events(provider, event_id)`, `usage_ledger(user_id, idempotency_key)` and `request_claims(user_id, idempotency_key)`. `request_claims` rows carry `expires_at`, but expiry is applied on read only — nothing deletes them, so they accumulate until an operator purges them (see Retention below).
+`0001_init.sql` creates `users`, `auth_sessions`, `billing_customers`, `entitlements`, `entitlement_events`, `webhook_events`, `usage_ledger`, `request_claims` and `audit_events`, plus triggers that make `entitlement_events`, `usage_ledger` and `audit_events` reject `UPDATE` and `DELETE`. Idempotency comes from three UNIQUE constraints: `webhook_events(provider, event_id)`, `usage_ledger(user_id, idempotency_key)` and `request_claims(user_id, idempotency_key)`. Later migrations and the existing scheduled handler prune expired `request_claims` in bounded batches. Permanent usage history and quota-object settlement receipts continue to block duplicate logical operations after claim expiry.
 
 Apply migrations before deploying the Worker version that depends on them.
 
@@ -251,7 +255,7 @@ hold a concurrency slot indefinitely and cannot under-report usage.
 
 ## Quotas
 
-Quotas are enforced by `QuotaDurableObject` with a reserve → finalise/release lease lifecycle, one instance per user.
+Quotas are enforced by one `QuotaDurableObject` per user. Batch and post-processing use a retained, metadata-only operation receipt: a one-shot dispatch permit, atomic measured quota/receipt settlement, then idempotent D1 reconciliation. Unknown provider outcomes hold allowance without claiming measured usage or dispatching again. See the [settlement contract](../workers/paid-access/README.md#batch-and-post-processing-settlement-contract). The existing live-session lifecycle is unchanged.
 
 | Var | Default | Meaning |
 | --- | --- | --- |
@@ -287,10 +291,12 @@ Expected behaviour while it is on:
 
 | Surface | Behaviour |
 | --- | --- |
-| `/v1/paid/*` | HTTP 503, error code `paid_routing_disabled` |
+| Fresh batch/post operations with verified absent history | HTTP 503, `paid_routing_disabled`; no provider permit |
+| Retained or uncertain batch/post operations | Existing non-fallback state takes precedence; no second dispatch |
+| Legacy live endpoints | Existing kill-switch behaviour unchanged |
 | `/v1/entitlement`, `/v1/auth/*`, `/v1/billing/*`, `/v1/webhooks/*` | Unaffected; entitlements continue to update |
-| Clients | Fall back to BYO keys or local models. Nothing is silently downgraded to a different paid model |
-| Usage ledger | No new rows for blocked requests; existing history untouched |
+| Clients | Only confirmed pre-dispatch refusals can fall back. Submitted uncertainty never silently spends again |
+| Usage ledger | No usage for newly refused operations; previously admitted measured receipts may still reconcile. Existing history stays append-only |
 
 To restore, set it back to `"false"` and redeploy. Record the incident window; refunds or credits are a Stripe/App Store action, not a database edit.
 
@@ -303,6 +309,8 @@ npx wrangler rollback <version-id> --env production --message "Reason for the ro
 ```
 
 `wrangler rollback` takes a **version** id, not a deployment id. Use `wrangler versions list` to find it; `wrangler deployments list --env production` shows what has actually been served.
+
+**Settlement compatibility is a rollout boundary.** Do not mix old and new batch/post writers or roll back past this receipt contract while retained operations exist. Old writers do not understand its holds or non-fallback outcomes; prefer a reviewed forward repair. A kill switch does not erase previously admitted work.
 
 **D1 migrations are not rolled back.** A Worker rollback reverts code only; the schema stays where it is. If a migration is wrong, write a forward migration that corrects it and deploy that. Never hand-edit a deployed schema, and never attempt to reverse an append-only table.
 
@@ -341,13 +349,13 @@ Run these in order after a production deploy. Each is a separate gate; a green e
    npx wrangler secret list --env production
    ```
 
-5. **Stripe checkout, test mode.** Sign in on a direct-download macOS build, start a subscription, and complete checkout with a Stripe test card. Confirm the redirect to `STRIPE_SUCCESS_URL`, then confirm `/v1/entitlement` reports an active entitlement.
+5. **Stripe checkout, test mode.** Only after a supported direct-distribution identity flow is separately commissioned, sign in on that macOS build, start a subscription, and complete checkout with a Stripe test card. Confirm the redirect to `STRIPE_SUCCESS_URL`, then confirm `/v1/entitlement` reports an active entitlement.
 
 6. **Customer Portal.** From the same account, open the portal and confirm it loads and shows the subscription.
 
-7. **TestFlight sandbox purchase.** On a TestFlight build, buy `com.justspeaktoit.paid.monthly` with a sandbox Apple Account, confirm `/v1/billing/storekit/sync` succeeds and `/v1/entitlement` reports an active entitlement.
+7. **TestFlight sandbox purchase.** After supported native identity, signing and products are commissioned, on the opt-in TestFlight build, buy `com.justspeaktoit.paid.monthly` with a sandbox Apple Account, confirm `/v1/billing/storekit/sync` succeeds and `/v1/entitlement` reports an active entitlement.
 
-8. **Cross-channel identity.** Sign in with the same Apple account on the other platform and confirm the entitlement is already present without a second purchase.
+8. **Cross-channel identity.** After each supported channel identity flow is commissioned, sign in with the same Apple account on the other platform and confirm the entitlement is already present without a second purchase.
 
 9. **A real paid request meters.** Run one recorded (batch) transcription and one post-processing request from the app, then:
 
@@ -397,7 +405,7 @@ Triage guidance:
 | "I paid but the app says I'm not subscribed" | `webhook_events` for the delivery, then `entitlement_events` for the transition. Resend the webhook from Stripe or App Store Connect rather than editing rows |
 | Sign-in fails on one platform only | `APPLE_IDENTITY_AUDIENCES` and `APPLE_BUNDLE_IDS` for that build's audience |
 | Paid requests return 402 | `entitlements.current_period_end` — the period may have closed |
-| Paid requests return 429 | `usage_ledger` totals for the period, or concurrent sessions against `MAX_CONCURRENT_SESSIONS` |
+| Paid requests return 429 | Check the quota DO's occupied allowance and held amounts for the original billing period, plus measured `usage_ledger` totals. Unknown provider outcomes can hold allowance without a ledger row; live concurrency also checks `MAX_CONCURRENT_SESSIONS` |
 | Paid requests return 503 | `PAID_ROUTING_DISABLED` in the deployed environment |
 | A user reports a failed request | Ask for the `x-correlation-id` only. Never ask for audio or transcript text; we do not hold it |
 
@@ -405,16 +413,16 @@ To grant, extend or revoke access manually, apply a `manual`-source entitlement 
 
 ### Retention
 
-**None of this is implemented.** There is no scheduled Worker, no purge job, and no delete endpoint: every row the service writes stays until an operator removes it by hand with `wrangler d1 execute`. The table below is the intended policy and the manual procedure for applying it, not a description of what the service currently does. [`paid-access-privacy.md`](paid-access-privacy.md) deliberately publishes no retention periods for that reason — do not add them there until a job enforces them.
+**These periods are proposals, not implemented retention.** The existing scheduled Worker prunes expired request claims only. It never prunes usage history or quota-object settlement receipts. There is no delete or manual settlement endpoint; append-only history rejects deletion. The table below is historical intended policy, not permission to purge durable idempotency evidence. [`paid-access-privacy.md`](paid-access-privacy.md) publishes the actual indefinite/manual position.
 
 | Table | Intended retention | Operator action (manual) |
 | --- | --- | --- |
 | `auth_sessions` | 90 days after `revoked_at` or `expires_at` | Monthly purge of rows past both |
-| `usage_ledger` | 24 months from the end of `billing_period` | Monthly purge of older periods |
+| `usage_ledger` | Historical proposal: 24 months | DELETE is rejected by append-only triggers; no qualified purge procedure |
 | `entitlement_events` | 7 years from the end of the subscription | Retained for billing audit; never edited |
-| `entitlements` | 7 years from the end of the subscription | Retained for billing audit; never edited |
-| `audit_events` | 24 months | Monthly purge of older rows |
-| `request_claims` | 30 days after `expires_at` (rows can hold a stored response body) | Monthly purge of rows past `expires_at`; expiry is enforced on read only, never by deletion |
-| `users` | Life of the account, then 30 days | On a deletion request, clear `apple_sub` and `email` and disable the account within 30 days |
+| `entitlements` | Historical proposal: 7 years | Mutable current entitlement state, updated from verified transitions; `entitlement_events` is the separate append-only history |
+| `audit_events` | Historical proposal: 24 months | DELETE is rejected by append-only triggers; no qualified purge procedure |
+| `request_claims` | Existing short-lived operational claim expiry | Existing scheduled bounded purge; no response content. Never delete retained settlement receipts or usage history to permit a retry |
+| `users` | No implemented deletion schedule | Account anonymisation/deletion is unimplemented and unqualified. `apple_sub` is required and unique; do not clear it or promise a timetable |
 
-Deletion and access requests arrive at **privacy@justspeaktoit.com**, the address published in [`paid-access-privacy.md`](paid-access-privacy.md). Handling a deletion request means disabling the account, revoking its sessions, and clearing the Apple identifier and email address, by hand; the append-only billing history stays, without identifiers that tie it to a person. The privacy notice promises no turnaround, because nothing here guarantees one — answer promptly, and do not publish a deadline until the work is automated.
+Deletion and access requests arrive at **privacy@justspeaktoit.com**, the address published in [`paid-access-privacy.md`](paid-access-privacy.md). A supported account anonymisation/deletion procedure has not been implemented or qualified; schema constraints mean clearing the Apple identifier is not a valid documented operation. Privacy operations remain a commissioning gate, with no promised turnaround or automatic deletion. Previously admitted work and settlement reconciliation may still complete after session revocation.

@@ -87,7 +87,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
     self.settings = settings
     super.init()
 
-    if self.billingChannel == .storeKit {
+    if PaidAccessFeature.isEnabled && self.billingChannel == .storeKit {
       // Renewals, refunds and family-sharing changes arrive here without any
       // user action, so the entitlement stays correct between launches.
       self.transactionListener = Task { [weak self] in
@@ -534,6 +534,7 @@ final class PaidAccessManager: NSObject, ObservableObject { // swiftlint:disable
   }
 
   private func handleTransactionUpdate(_ result: VerificationResult<Transaction>) async {
+    guard PaidAccessFeature.isEnabled else { return }
     let generation = self.sessions.generation
     guard let session = await self.currentSession() else { return }
     let didSync = await self.syncIfSubscription(result, session: session, generation: generation)

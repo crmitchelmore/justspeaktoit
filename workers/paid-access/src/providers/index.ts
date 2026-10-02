@@ -36,6 +36,7 @@ export interface PostProcessingRequest {
 }
 
 export interface PostProcessingResult {
+  readonly usageMeasured: boolean;
   readonly text: string;
   readonly promptTokens: number;
   readonly completionTokens: number;
@@ -70,8 +71,12 @@ async function readCompletion(response: Response): Promise<PostProcessingResult>
   if (typeof text !== 'string') {
     throw new ApiError('upstream_error', 'Provider returned no completion text');
   }
+  const prompt = decoded.usage?.prompt_tokens;
+  const completion = decoded.usage?.completion_tokens;
   return {
     text,
+    usageMeasured: Number.isSafeInteger(prompt) && (prompt ?? -1) >= 0
+      && Number.isSafeInteger(completion) && (completion ?? -1) >= 0,
     promptTokens: decoded.usage?.prompt_tokens ?? 0,
     completionTokens: decoded.usage?.completion_tokens ?? 0,
   };

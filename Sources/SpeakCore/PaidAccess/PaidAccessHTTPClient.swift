@@ -73,8 +73,15 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         do {
             return try JSONDecoder.paidAccess.decode(Response.self, from: data)
         } catch {
-            throw PaidAccessError.invalidResponse
+            throw Self.submissionUncertainty(request) ?? PaidAccessError.invalidResponse
         }
+    }
+
+    private static func submissionUncertainty(_ request: URLRequest) -> PaidAccessError? {
+        guard request.value(forHTTPHeaderField: "X-Paid-Settlement-Contract") == "1",
+              let key = request.value(forHTTPHeaderField: "Idempotency-Key") else { return nil }
+        return .operationOutcome(.unknown, idempotencyKey: key,
+                                 correlationID: request.value(forHTTPHeaderField: "X-Correlation-ID"))
     }
 
     private func sendExpectingData(_ request: URLRequest) async throws -> Data {
@@ -83,14 +90,19 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         do {
             (data, response) = try await self.session.data(for: request)
         } catch {
-            throw PaidAccessError.network(error.localizedDescription)
+            throw Self.submissionUncertainty(request) ?? PaidAccessError.network(error.localizedDescription)
         }
 
         guard let http = response as? HTTPURLResponse else {
-            throw PaidAccessError.invalidResponse
+            throw Self.submissionUncertainty(request) ?? PaidAccessError.invalidResponse
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw Self.error(forStatus: http.statusCode, body: data)
+            throw Self.error(
+                forStatus: http.statusCode, body: data,
+                submittedOperation: Self.submissionUncertainty(request) == nil ? nil
+                    : request.value(forHTTPHeaderField: "Idempotency-Key"),
+                correlationID: request.value(forHTTPHeaderField: "X-Correlation-ID")
+            )
         }
         return data
     }
@@ -100,21 +112,51 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
     /// Response bodies are parsed for the machine-readable `code` only; the
     /// human message is not echoed because upstream messages can contain
     /// request content.
-    static func error(forStatus statusCode: Int, body: Data) -> PaidAccessError {
+    static func error(
+        forStatus statusCode: Int, body: Data,
+        submittedOperation: String? = nil, correlationID: String? = nil
+    ) -> PaidAccessError {
         let code = (try? JSONDecoder().decode(ErrorEnvelope.self, from: body))?.error.code
+        let unknown = PaidAccessError.operationOutcome(
+            .unknown, idempotencyKey: submittedOperation ?? "", correlationID: correlationID
+        )
+        if let retained = Self.settlementError(
+            for: code, submittedOperation: submittedOperation, correlationID: correlationID, unknown: unknown
+        ) {
+            return retained
+        }
         switch code {
         case "entitlement_required": return .entitlementRequired
         case "quota_exceeded": return .quotaExceeded
         case "too_many_sessions": return .tooManySessions
         case "paid_routing_disabled": return .paidRoutingDisabled
-        case "unauthorized": return .notSignedIn
+        case "unauthorized": return submittedOperation == nil ? .notSignedIn : unknown
         case "already_processed": return .alreadyProcessed
         case "forbidden":
             return .billingChannelUnavailable(
                 "This build cannot use that payment method."
             )
         default:
+            if submittedOperation != nil { return unknown }
             return statusCode == 401 ? .notSignedIn : .serviceUnavailable(statusCode: statusCode)
+        }
+    }
+
+    private static func settlementError(
+        for code: String?, submittedOperation: String?, correlationID: String?, unknown: PaidAccessError
+    ) -> PaidAccessError? {
+        switch code {
+        case "request_in_progress":
+            return .operationOutcome(
+                .inProgress, idempotencyKey: submittedOperation ?? "", correlationID: correlationID
+            )
+        case "settlement_pending":
+            return .operationOutcome(
+                .settlementPending, idempotencyKey: submittedOperation ?? "", correlationID: correlationID
+            )
+        case "outcome_unknown": return unknown
+        case "request_not_started": return .requestNotStarted
+        default: return nil
         }
     }
 
@@ -241,6 +283,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
         )
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.setValue("1", forHTTPHeaderField: "X-Paid-Settlement-Contract")
         request.httpBody = audio
         return try await self.send(request, as: TextResponse.self).text
     }
@@ -258,6 +301,7 @@ public struct PaidAccessHTTPClient: PaidAccessClienting { // swiftlint:disable:t
             session: session
         )
         request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.setValue("1", forHTTPHeaderField: "X-Paid-Settlement-Contract")
         var body: [String: Any] = [
             "operation": PaidOperation.postProcessing.rawValue,
             "text": text,
@@ -386,6 +430,10 @@ struct UsagePayload: Decodable {
     let tokensLimit: Int
     let activeSessions: Int
     let maxConcurrentSessions: Int
+    let audioSecondsMeasured: Int?
+    let audioSecondsHeld: Int?
+    let tokensMeasured: Int?
+    let tokensHeld: Int?
 
     enum CodingKeys: String, CodingKey {
         case period
@@ -395,6 +443,10 @@ struct UsagePayload: Decodable {
         case tokensLimit = "tokens_limit"
         case activeSessions = "active_sessions"
         case maxConcurrentSessions = "max_concurrent_sessions"
+        case audioSecondsMeasured = "audio_seconds_measured"
+        case audioSecondsHeld = "audio_seconds_held"
+        case tokensMeasured = "tokens_measured"
+        case tokensHeld = "tokens_held"
     }
 
     var snapshot: PaidUsageSnapshot {
@@ -405,7 +457,11 @@ struct UsagePayload: Decodable {
             tokensUsed: self.tokensUsed,
             tokensLimit: self.tokensLimit,
             activeSessions: self.activeSessions,
-            maxConcurrentSessions: self.maxConcurrentSessions
+            maxConcurrentSessions: self.maxConcurrentSessions,
+            audioSecondsMeasured: self.audioSecondsMeasured,
+            audioSecondsHeld: self.audioSecondsHeld,
+            tokensMeasured: self.tokensMeasured,
+            tokensHeld: self.tokensHeld
         )
     }
 }

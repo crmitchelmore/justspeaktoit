@@ -1,5 +1,7 @@
 # Paid Access: what it does and what data it uses
 
+This document describes the authored, disabled paid-access implementation. External identity, billing products, privacy operations and staging qualification remain open; this is not a launch or commissioning claim.
+
 This document covers the optional paid access subscription only. General app data handling is in [`PRIVACY.md`](PRIVACY.md). Operators should also read [`paid-access.md`](paid-access.md).
 
 ## You do not need to subscribe
@@ -42,9 +44,12 @@ If an operation has no supported paid route, the request is completed through yo
 | Your email address, if Apple shares it | Yes | Yes, if provided |
 | Subscription state and its history | Yes | Yes, append-only |
 | Metered usage counts (audio seconds, token counts) | Yes | Yes, append-only |
+| Operation and settlement metadata | Yes | Yes; opaque request/reservation identifiers, route, billing period, allowance hold, measured counts when known, status and timestamps |
 | Sign-in session records | Yes | Yes; refresh tokens are stored only as a SHA-256 hash |
 
 Audio and transcript text pass through our server in memory and are not written to any database, object store, or log. What reaches our usage records is a count — how many seconds of audio, how many tokens — never the content those numbers describe.
+
+The per-account quota service retains metadata-only settlement receipts. A receipt may be waiting for the usage ledger, or may hold allowance because a provider started and its measured outcome is unknown. A hold is not reported as measured usage. Explicit zero usage releases the hold and records zero; missing usage does neither. No receipt stores audio, prompts, transcript text or provider response content.
 
 Your subscription history and usage records are append-only: they can be added to but not edited or deleted, including by us. That makes billing auditable. It also means a correction is recorded as a new entry rather than by rewriting the past.
 
@@ -52,14 +57,14 @@ Your subscription history and usage records are append-only: they can be added t
 
 Audio, transcript text, and post-processing prompts are never written down at all, so there is nothing to keep: they exist only in memory for the duration of the request.
 
-Everything in the "Retained by us" column above is kept **until we remove it by hand**. We do not run any automatic expiry, purge, or deletion job over it, and there is no delete endpoint in the service. (The one thing that does expire on its own is a short-lived record used to stop a retried request being billed twice; it holds no audio or text.) We would rather tell you that than publish a retention schedule the software does not enforce.
+Identity and settlement metadata have no automatic deletion schedule and remain until manual intervention. Append-only subscription and usage history cannot be deleted through the service. Short-lived request claims are pruned automatically; retained settlement receipts and usage history continue to prevent the same logical operation being dispatched or charged again after those claims expire. There is no delete or manual settlement endpoint. Unknown provider outcomes require an operator decision before commissioning; the service does not invent a charge, release the hold or retry the provider automatically.
 
 Two consequences worth being explicit about:
 
 - **Subscription history, usage counts, and audit records cannot be deleted, by you or by us.** The database physically rejects updates and deletions on those tables, which is what makes billing auditable. They contain counts and state transitions — never audio or transcript text.
-- **Your identity records — the Apple user identifier, your email address if Apple shared it, and your sign-in sessions — can be removed**, because they are ordinary rows. Removing them is a manual operation.
+- **A supported account anonymisation/deletion procedure is not implemented or qualified.** Required identity fields and relationships mean we cannot describe clearing ordinary rows as a supported removal process. This remains a gate before commissioning.
 
-To ask for that, email **privacy@justspeaktoit.com** from the address linked to your account, or quote a recent `x-correlation-id`. The same address handles questions about what we hold. We will act on requests, but we are not going to promise a fixed turnaround we have not built the tooling to guarantee.
+To ask for that, email **privacy@justspeaktoit.com** from the address linked to your account, or quote a recent `x-correlation-id`. The same address handles questions about what we hold. A supported handling procedure must be qualified before commissioning; this source does not establish a deletion timetable.
 
 If none of this appeals, the alternative is complete and always available: use a local model or your own API key, and no record of any kind is created on our side.
 
@@ -113,7 +118,7 @@ When you cancel, paid access continues until the end of the period you have alre
 
 At any time, in the app's transcription and post-processing settings, choose a local model or a provider you hold a key for. That is the whole procedure.
 
-Switching away from paid access requires no contact with our server, no permission, and no waiting period. It works while your subscription is still active, after it lapses, while you are offline, and if our server is unavailable. If paid access is ever degraded or switched off for operational reasons, the app is expected to fall back to exactly this path — the feature does not disappear with it.
+Switching away from paid access requires no contact with our server, no permission, and no waiting period. It works while your subscription is still active, after it lapses, while you are offline, and if our server is unavailable. A confirmed refusal before provider dispatch can fall back to your configured path. Once a submitted request may have reached a provider, an uncertain response stops that operation and retains its request identity rather than silently sending it to another provider. Choosing a different route for a genuinely new operation remains available.
 
 ## FAQ
 
@@ -136,17 +141,17 @@ Not inherently. It runs a fixed, current set of models chosen for good general r
 It depends on how much you dictate. It is a flat monthly or yearly cost with a monthly allowance; your own key is metered by the provider. Heavy users of a cheap model may pay less with their own key, and local models cost nothing.
 
 **What happens if I run out of my monthly allowance?**
-Paid routing stops until the next period. The app completes the request with the model you had configured — your own key, or an on-device model — rather than charging you extra or losing what you dictated.
+A new operation refused before provider dispatch can use your configured model — your own key, or an on-device model. Existing in-progress or uncertain operations retain their identity and do not dispatch again. Settings distinguish occupied allowance from measured usage and outstanding holds; an older service may not supply that breakdown.
 
 **What happens if your server is down?**
-The same thing: the app falls back to your own key or an on-device model, and your dictation completes. Local models and your own keys never involve our server at all.
+If a submitted operation loses its response, the app reports an uncertain outcome and does not silently spend again through your own key. A confirmed pre-dispatch refusal may fall back. Local models and your own keys remain available for new operations without involving our server.
 
 **Can you delete my account data?**
-Your identity records — Apple user identifier, email address, sign-in sessions — can be removed on request; that is a manual operation, not an automated one, and we do not quote a turnaround for it. Subscription and usage history cannot be removed at all: the database rejects deletions on those tables so that billing stays auditable. It contains counts and state transitions, never audio or transcript text. Cancel your subscription, sign out, and nothing further is recorded about you.
+A supported account anonymisation/deletion procedure is not implemented or qualified and remains a commissioning gate. Subscription and usage history reject deletion and contain counts and state transitions, never audio or transcript text. New paid requests require a valid session; cancelling or signing out does not erase prior records, and previously admitted work or settlement reconciliation may still complete.
 
 **Who do I contact about this?**
 Email **privacy@justspeaktoit.com**.
 
 ---
 
-*Last updated: August 2026*
+*Last updated: 2 October 2026 (authored, disabled source)*

@@ -6,6 +6,7 @@
  * half-right at a call site.
  */
 
+import type { SettlementRequest, SettlementResponse, SettlementReceipt, OperationAdmission } from './do/settlement.js';
 import { ApiError } from './http.js';
 import type {
   QuotaLimits,
@@ -40,7 +41,7 @@ export class QuotaSettlement {
     return this.namespace.get(this.namespace.idFromName(`user:${userId}`));
   }
 
-  protected async call(userId: string, body: unknown): Promise<QuotaResponse> {
+  protected async call<T = QuotaResponse>(userId: string, body: unknown): Promise<T> {
     const response = await this.stub(userId).fetch('https://quota.invalid/', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -122,6 +123,18 @@ export class QuotaClient extends QuotaSettlement {
       throw new ApiError('internal_error', 'Quota service returned no reservation');
     }
     return { reservationId: result.reservationId, snapshot: result.snapshot };
+  }
+
+  async operation(userId: string, request: SettlementRequest): Promise<SettlementResponse> {
+    return this.call<SettlementResponse>(userId, request);
+  }
+
+  async operationReceipt(userId: string, key: string, nowSeconds: number): Promise<SettlementReceipt | null> {
+    return (await this.operation(userId, { kind: 'operation_lookup', idempotencyKey: key, nowSeconds })).receipt;
+  }
+
+  async reserveOperation(input: OperationAdmission): Promise<SettlementResponse> {
+    return this.operation(input.userId, { ...input, kind: 'operation_reserve', limits: this.limits });
   }
 
   async status(userId: string, period: string, nowSeconds: number): Promise<QuotaSnapshot> {

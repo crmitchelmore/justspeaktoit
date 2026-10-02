@@ -1,5 +1,6 @@
 import Foundation
 import SpeakCore
+import SpeakTestSupport
 import XCTest
 
 @testable import SpeakApp
@@ -16,10 +17,8 @@ final class PaidAccessBuildFlagTests: XCTestCase {
 
 /// The fallback paths through ``PaidAccessProxyClient``.
 ///
-/// These are the paths worth the most cover. Paid access is a convenience layer,
-/// so every way it can fail has to end with the user's own client finishing the
-/// work — a dictation the user has already spoken must never be lost because our
-/// server, our routing table or our file conversion let them down.
+/// Confirmed pre-dispatch refusals preserve the configured fallback. Submitted
+/// uncertainty stops the operation rather than silently spending again.
 final class PaidAccessProxyClientTests: XCTestCase {
 
     // MARK: - Doubles
@@ -27,6 +26,7 @@ final class PaidAccessProxyClientTests: XCTestCase {
     /// Stands in for the bring-your-own-key client, recording whether it ran.
     private actor StubFallback: PaidAccessFallbackClient {
         private(set) var transcribeCallCount = 0
+        private(set) var chatCallCount = 0
         private(set) var lastTranscribedURL: URL?
         let transcript: String
 
@@ -40,7 +40,8 @@ final class PaidAccessProxyClientTests: XCTestCase {
             model: String,
             temperature: Double
         ) async throws -> ChatResponse {
-            ChatResponse(
+            self.chatCallCount += 1
+            return ChatResponse(
                 messages: [ChatMessage(role: .assistant, content: self.transcript)],
                 finishReason: "stop",
                 cost: nil,
@@ -291,5 +292,91 @@ final class PaidAccessProxyClientTests: XCTestCase {
         )
 
         XCTAssertEqual(response.messages.last?.content, "Cleaned up locally.")
+    }
+}
+
+extension PaidAccessProxyClientTests {
+    func testSubmittedUncertaintyNeverCallsFallbackButConfirmedPreDispatchRefusalDoes() async throws {
+        for batch in [false, true] {
+            for code in ["outcome_unknown", "settlement_pending", "request_in_progress", "already_processed",
+                         "unauthorized", "transport", "malformed", "paid_routing_disabled"] {
+                try await self.assertSubmittedFallback(code: code, batch: batch)
+            }
+        }
+    }
+
+    private func assertSubmittedFallback(code: String, batch: Bool) async throws {
+        let transport = StubURLProtocol.makeSession()
+        defer { transport.invalidateAndCancel(); StubURLProtocol.reset() }
+        let client = PaidAccessHTTPClient(baseURL: URL(string: "https://synthetic.invalid")!, session: transport)
+        let entitlement = self.entitlement()
+        let account = self.entitledSession()
+        let operation: PaidOperation = batch ? .batchTranscription : .postProcessing
+        let policy = PaidRoutingPolicy(version: "fixture", routes: [PaidRoute(
+            operation: operation, provider: "openrouter", model: "fixed-provider-model", displayName: "Fixed"
+        )])
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { request in
+            if code == "transport" { return .fail(URLError(.networkConnectionLost)) }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
+            let body = code == "malformed" ? "not-json" : "{\"error\":{\"code\":\"\(code)\"}}"
+            return .respond(response, Data(body.utf8))
+        }
+        let fallback = StubFallback(transcript: "configured fallback")
+        let proxy = PaidAccessProxyClient(fallback: fallback, paidClient: client,
+                                         sessionProvider: { account }, routerProvider: {
+            PaidAccessRouter(entitlement: entitlement, policy: policy, isPaidRoutingPreferred: true)
+        })
+        do {
+            let text: String
+            if batch {
+                let wav = self.scratch.appendingPathComponent("original-attempt.wav")
+                try Data("synthetic WAV upload".utf8).write(to: wav)
+                text = try await proxy.transcribeFile(at: wav, model: "fixed-provider-model", language: nil).text
+            } else {
+                text = try await proxy.sendChat(systemPrompt: nil,
+                    messages: [ChatMessage(role: .user, content: "fixture")],
+                    model: "fixed-provider-model", temperature: 0.2).messages.last?.content ?? ""
+            }
+            XCTAssertEqual(code, "paid_routing_disabled")
+            XCTAssertEqual(text, "configured fallback")
+        } catch let error as PaidAccessError {
+            XCTAssertNotEqual(code, "paid_routing_disabled")
+            XCTAssertFalse(error.permitsSilentFallback)
+        }
+        let fallbackCalls: Int
+        if batch {
+            fallbackCalls = await fallback.transcribeCallCount
+        } else {
+            fallbackCalls = await fallback.chatCallCount
+        }
+        XCTAssertEqual(fallbackCalls, code == "paid_routing_disabled" ? 1 : 0, code)
+        XCTAssertEqual(StubURLProtocol.recordedRequests.count, 1)
+    }
+
+    func testLocalMissingSessionFallsBackWithoutHandingAnythingToTransport() async throws {
+        let transport = StubURLProtocol.makeSession()
+        defer { transport.invalidateAndCancel(); StubURLProtocol.reset() }
+        StubURLProtocol.reset()
+        StubURLProtocol.handler = { _ in
+            XCTFail("A locally missing session must never submit an operation")
+            return .fail(URLError(.badServerResponse))
+        }
+        let fallback = StubFallback(transcript: "configured fallback")
+        let entitlement = self.entitlement()
+        let policy = PaidRoutingPolicy(version: "fixture", routes: [PaidRoute(
+            operation: .postProcessing, provider: "openrouter", model: "fixed-provider-model", displayName: "Fixed"
+        )])
+        let proxy = PaidAccessProxyClient(fallback: fallback,
+            paidClient: PaidAccessHTTPClient(baseURL: URL(string: "https://synthetic.invalid")!, session: transport),
+            sessionProvider: { nil }, routerProvider: {
+                PaidAccessRouter(entitlement: entitlement, policy: policy, isPaidRoutingPreferred: true)
+            })
+        let result = try await proxy.sendChat(systemPrompt: nil,
+            messages: [ChatMessage(role: .user, content: "fixture")], model: "fixed-provider-model", temperature: 0.2)
+        XCTAssertEqual(result.messages.last?.content, "configured fallback")
+        let calls = await fallback.chatCallCount
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(StubURLProtocol.recordedRequests.isEmpty)
     }
 }

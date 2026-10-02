@@ -117,11 +117,22 @@ public struct PaidAccessSettingsView: View {
                     ProgressView(value: usage.audioFractionUsed)
                     Text(
                         "\(usage.audioSecondsUsed / 60) of \(usage.audioSecondsLimit / 60) "
-                            + "included minutes used this month"
+                            + "included minutes of allowance in use"
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    if let measured = usage.audioSecondsMeasured, let held = usage.audioSecondsHeld {
+                        Text("\(measured) seconds measured; \(held) seconds held")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+
+            if let usage = self.store.entitlement.usage, usage.tokensLimit > 0 {
+                Text(usage.tokenAllowanceSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // Buying is switched off while iOS paid routing is unwired — see

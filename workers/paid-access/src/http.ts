@@ -15,6 +15,10 @@ export type ErrorCode =
   | 'not_found'
   | 'conflict'
   | 'already_processed'
+  | 'request_in_progress'
+  | 'settlement_pending'
+  | 'outcome_unknown'
+  | 'request_not_started'
   | 'payload_too_large'
   | 'quota_exceeded'
   | 'too_many_sessions'
@@ -34,6 +38,10 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   // The work was done and charged once. Distinct from `conflict` so the client
   // can tell "already finished, do not retry" from "still running, try later".
   already_processed: 409,
+  request_in_progress: 409,
+  settlement_pending: 409,
+  outcome_unknown: 409,
+  request_not_started: 409,
   payload_too_large: 413,
   quota_exceeded: 429,
   too_many_sessions: 429,

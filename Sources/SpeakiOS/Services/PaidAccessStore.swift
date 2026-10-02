@@ -20,12 +20,11 @@ import UIKit
 /// Selling a subscription in that state would charge for routing that does not
 /// exist, and hiding the model pickers would strand the user with neither a
 /// picker nor a paid route. So the purchase and routing UI is switched off
-/// here, and the code below stays compiled so that wiring those three call
-/// sites through a proxy client — as macOS does with `PaidAccessProxyClient` —
-/// plus flipping this one constant, is the whole change.
+/// here, including automatic StoreKit observation. Routing those three call
+/// sites through a proxy client is still required. Supported identity, signing,
+/// products and staging qualification are separate commissioning gates.
 public enum PaidAccessFeature {
-    /// Flip to `true` in the same change that routes the three call sites above
-    /// through the paid service.
+    /// Keep disabled until routing and the separate commissioning gates pass.
     public static let isAvailableOnIOS = false
 }
 
@@ -33,8 +32,8 @@ public enum PaidAccessFeature {
 ///
 /// iOS always ships through the App Store, so billing is always StoreKit; the
 /// Stripe path exists only for the direct-download Mac build. Identity is
-/// shared, so signing in here with the same Apple account picks up a
-/// subscription bought on a Mac and vice versa.
+/// represented by the same server account contract across channels; supported
+/// sign-in flows and cross-channel entitlement access remain uncommissioned.
 ///
 /// Nothing here is required to dictate: on-device transcription and personal
 /// API keys keep working with no account at all.
@@ -92,10 +91,12 @@ public final class PaidAccessStore: NSObject, ObservableObject {
         self.paidRoutingEnabled = UserDefaults.standard.bool(forKey: "paidAccessRoutingEnabled")
         super.init()
 
-        self.transactionListener = Task { [weak self] in
-            for await update in Transaction.updates {
-                guard let self else { return }
-                await self.handleTransactionUpdate(update)
+        if PaidAccessFeature.isAvailableOnIOS {
+            self.transactionListener = Task { [weak self] in
+                for await update in Transaction.updates {
+                    guard let self else { return }
+                    await self.handleTransactionUpdate(update)
+                }
             }
         }
     }

@@ -90,6 +90,7 @@ async function postProcess(
       authorization: `Bearer ${token}`,
       'content-type': 'application/json',
       'idempotency-key': IDEMPOTENCY_KEY,
+      'x-paid-settlement-contract': '1',
       ...headers,
     },
     body: JSON.stringify(body),
@@ -131,6 +132,7 @@ async function transcribeBatch(token: string, audio: Uint8Array): Promise<Respon
       authorization: `Bearer ${token}`,
       'content-type': 'audio/wav',
       'idempotency-key': IDEMPOTENCY_KEY,
+      'x-paid-settlement-contract': '1',
     },
     body: audio,
   });
@@ -313,6 +315,7 @@ describe('paid routing request validation', () => {
         authorization: `Bearer ${await tokenFor(userId)}`,
         'content-type': 'application/json',
         'idempotency-key': IDEMPOTENCY_KEY,
+        'x-paid-settlement-contract': '1',
       },
       body: '{}',
     });
@@ -473,6 +476,7 @@ describe('paid routing usage accounting', () => {
         authorization: `Bearer ${await tokenFor(userId)}`,
         'content-type': 'audio/mp4',
         'idempotency-key': IDEMPOTENCY_KEY,
+        'x-paid-settlement-contract': '1',
       },
       body: new Uint8Array(64_000),
     });
@@ -486,7 +490,7 @@ describe('paid routing usage accounting', () => {
     expect(usage?.total).toBe(0);
   });
 
-  it('releases the reservation when the provider fails', async () => {
+  it('retains an unmeasured allowance hold when the provider outcome is uncertain', async () => {
     const userId = await seedEntitledUser();
     fetchMock
       .get('https://openrouter.ai')
@@ -497,9 +501,10 @@ describe('paid routing usage accounting', () => {
       operation: 'post_processing',
       text: 'hello world',
     });
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: 'outcome_unknown' } });
 
-    // No usage is recorded for a failed call, and the reservation is returned.
+    // A provider failure does not prove no work occurred. No estimate is recorded; the hold remains.
     const usage = await env.DB.prepare(
       'SELECT COUNT(*) AS total FROM usage_ledger WHERE user_id = ?1',
     )
@@ -510,8 +515,10 @@ describe('paid routing usage accounting', () => {
     const entitlement = await SELF.fetch('https://api.test/v1/entitlement', {
       headers: { authorization: `Bearer ${await tokenFor(userId)}` },
     });
-    const body = (await entitlement.json()) as { usage: { tokens_used: number } };
-    expect(body.usage.tokens_used).toBe(0);
+    const body = (await entitlement.json()) as { usage: { tokens_used: number; tokens_measured: number; tokens_held: number } };
+    expect(body.usage.tokens_measured).toBe(0);
+    expect(body.usage.tokens_held).toBeGreaterThan(0);
+    expect(body.usage.tokens_used).toBe(body.usage.tokens_held);
   });
 
   it('reports paid routing as available for an entitled account', async () => {

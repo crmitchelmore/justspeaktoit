@@ -706,6 +706,32 @@ export class Repository {
     return (result.meta.changes ?? 0) > 0;
   }
 
+  /** Exact immutable projection of a quota DO receipt; retries never create new identity. */
+  async reconcileUsage(input: {
+    ledgerEntryId: string; userId: string; idempotencyKey: string; operation: PaidOperationName;
+    provider: string; model: string; unitKind: 'audio_seconds' | 'tokens'; units: number;
+    billingPeriod: string; correlationId: string; measuredAt: number;
+  }): Promise<'matched' | 'conflict'> {
+    await this.db.prepare(
+      `INSERT INTO usage_ledger
+         (id, user_id, idempotency_key, operation, provider, model,
+          unit_kind, units, billing_period, correlation_id, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+       ON CONFLICT (user_id, idempotency_key) DO NOTHING`,
+    ).bind(input.ledgerEntryId, input.userId, input.idempotencyKey, input.operation,
+      input.provider, input.model, input.unitKind, input.units, input.billingPeriod,
+      input.correlationId, input.measuredAt).run();
+    const row = await this.db.prepare(
+      `SELECT id, operation, provider, model, unit_kind, units, billing_period, correlation_id, created_at
+       FROM usage_ledger WHERE user_id = ?1 AND idempotency_key = ?2`,
+    ).bind(input.userId, input.idempotencyKey).first<Record<string, unknown>>();
+    return row !== null && row.id === input.ledgerEntryId && row.operation === input.operation
+      && row.provider === input.provider && row.model === input.model && row.unit_kind === input.unitKind
+      && row.units === input.units && row.billing_period === input.billingPeriod
+      && row.correlation_id === input.correlationId && row.created_at === input.measuredAt
+      ? 'matched' : 'conflict';
+  }
+
   async usageTotals(
     userId: string,
     period: string,

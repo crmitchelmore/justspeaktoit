@@ -61,7 +61,7 @@ public enum PaidBillingProvider: String, Codable, Sendable {
     }
 }
 
-/// A snapshot of how much of the plan's included usage has been consumed.
+/// Allowance occupancy, with an optional verified measured/held breakdown.
 public struct PaidUsageSnapshot: Codable, Hashable, Sendable {
     public let period: String
     public let audioSecondsUsed: Int
@@ -70,6 +70,10 @@ public struct PaidUsageSnapshot: Codable, Hashable, Sendable {
     public let tokensLimit: Int
     public let activeSessions: Int
     public let maxConcurrentSessions: Int
+    public let audioSecondsMeasured: Int?
+    public let audioSecondsHeld: Int?
+    public let tokensMeasured: Int?
+    public let tokensHeld: Int?
 
     public init(
         period: String,
@@ -78,7 +82,11 @@ public struct PaidUsageSnapshot: Codable, Hashable, Sendable {
         tokensUsed: Int,
         tokensLimit: Int,
         activeSessions: Int,
-        maxConcurrentSessions: Int
+        maxConcurrentSessions: Int,
+        audioSecondsMeasured: Int? = nil,
+        audioSecondsHeld: Int? = nil,
+        tokensMeasured: Int? = nil,
+        tokensHeld: Int? = nil
     ) {
         self.period = period
         self.audioSecondsUsed = audioSecondsUsed
@@ -87,9 +95,20 @@ public struct PaidUsageSnapshot: Codable, Hashable, Sendable {
         self.tokensLimit = tokensLimit
         self.activeSessions = activeSessions
         self.maxConcurrentSessions = maxConcurrentSessions
+        self.audioSecondsMeasured = audioSecondsMeasured
+        self.audioSecondsHeld = audioSecondsHeld
+        self.tokensMeasured = tokensMeasured
+        self.tokensHeld = tokensHeld
     }
 
-    /// Fraction of the monthly audio allowance consumed, clamped to `0...1`.
+    /// Occupied tokens include holds; the optional breakdown never deducts them twice.
+    public var tokenAllowanceSummary: String {
+        let total = "\(self.tokensUsed) of \(self.tokensLimit) tokens of allowance in use"
+        guard let measured = self.tokensMeasured, let held = self.tokensHeld else { return total }
+        return total + " (\(measured) measured; \(held) held)"
+    }
+
+    /// Fraction of the monthly audio allowance occupied, clamped to `0...1`.
     public var audioFractionUsed: Double {
         guard self.audioSecondsLimit > 0 else { return 0 }
         return min(1, Double(self.audioSecondsUsed) / Double(self.audioSecondsLimit))
@@ -279,9 +298,13 @@ public struct PaidAccessState: Codable, Hashable, Sendable {
 
 /// Failures from the paid-access service.
 ///
-/// Every case is recoverable by falling back to the user's own keys or a local
-/// model, which is the behaviour the apps implement: paid access is a
-/// convenience layer, never a dependency.
+/// A submitted operation must never silently spend again when its outcome is uncertain.
+public enum PaidOperationOutcome: String, Sendable, Equatable {
+    case inProgress
+    case settlementPending
+    case unknown
+}
+
 public enum PaidAccessError: LocalizedError, Sendable, Equatable {
     case notSignedIn
     case entitlementRequired
@@ -292,9 +315,11 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
     case unsupportedOperation(PaidOperation)
     case paidRoutingDisabled
     case billingChannelUnavailable(String)
-    /// This attempt was already sent and has completed or is still running.
-    /// The service keeps no transcripts, so there is no stored result to return.
+    /// A retained or uncertain attempt cannot be safely sent again.
+    /// This compatibility code does not establish completion or a measured charge.
     case alreadyProcessed
+    case requestNotStarted
+    case operationOutcome(PaidOperationOutcome, idempotencyKey: String, correlationID: String?)
     case serviceUnavailable(statusCode: Int)
     case invalidResponse
     case network(String)
@@ -315,8 +340,12 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
             return "Subscription routing is temporarily unavailable. Your own API keys and local models still work."
         case .billingChannelUnavailable(let reason):
             return reason
+        case .requestNotStarted:
+            return "That request did not start. Your configured model can complete it."
+        case .operationOutcome:
+            return "That request may already have run. It will not be sent again automatically."
         case .alreadyProcessed:
-            return "That request was already sent and was not charged again."
+            return "That request may already have run. It will not be sent again automatically."
         case .serviceUnavailable(let statusCode):
             return "The subscription service is unavailable (status \(statusCode))."
         case .invalidResponse:
@@ -334,15 +363,12 @@ public enum PaidAccessError: LocalizedError, Sendable, Equatable {
         // configuration, so the request completes through their own key exactly
         // as the error message promises.
         case .notSignedIn, .entitlementRequired, .paidRoutingDisabled, .serviceUnavailable,
-             .network, .quotaExceeded:
+             .network, .quotaExceeded, .requestNotStarted:
             return true
-        // `alreadyProcessed` deliberately does not fall back. The work was done
-        // and paid for once; quietly re-running it through the user's own key
-        // would spend their money to paper over our lost response. Telling them
-        // is the honest answer, and it cannot loop — the second attempt is what
-        // produced this.
+        // Retained or uncertain outcomes cannot prove that a second provider
+        // would be safe. Preserve the operation instead of silently spending again.
         case .tooManySessions, .unsupportedOperation, .billingChannelUnavailable,
-             .invalidResponse, .alreadyProcessed:
+             .invalidResponse, .alreadyProcessed, .operationOutcome:
             return false
         }
     }

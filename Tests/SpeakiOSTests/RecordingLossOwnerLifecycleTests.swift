@@ -27,11 +27,14 @@ final class RecordingLossOwnerLifecycleTests: XCTestCase {
             owner.recorder.writeBuffer(buffer)
             await fulfillment(of: [written], timeout: 2)
             owner.recorder.didWriteBufferHook = nil
+            let persistenceIssue = expectation(description: "writer issue delivered: \(kind)")
+            owner.recorder.onPersistenceIssue = { diagnostics in
+                lateCallback(diagnostics)
+                persistenceIssue.fulfill()
+            }
             owner.recorder.beforeFileWrite = { throw CocoaError(.fileWriteOutOfSpace) }
             for _ in 0..<4 { owner.recorder.writeBuffer(buffer) }
-            for _ in 0..<100 where owner.reporting.currentReport.snapshot.persistence.isComplete {
-                try await Task.sleep(for: .milliseconds(10))
-            }
+            await fulfillment(of: [persistenceIssue], timeout: 5)
             owner.reporting.deliverWarningIfNeeded()
             owner.reporting.deliverWarningIfNeeded()
             XCTAssertEqual(warnings.count, 1, kind)

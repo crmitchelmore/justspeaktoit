@@ -113,7 +113,8 @@ reasoning written down, because they look like yes and are not:
   issue #776 ships opt-in PostHog to iOS.
 - **History and API keys in iCloud.** History, including transcript text,
   syncs to the user's own private CloudKit database automatically when the
-  device is signed in to iCloud. Encrypted API-Key Sync is opt-in and writes
+  device is signed in to iCloud, unless the user turns off iCloud History Sync
+  in Settings › Sync, which keeps History on the device. Encrypted API-Key Sync is opt-in and writes
   only passphrase-encrypted keys to the same private database. No app settings
   sync through iCloud. Data in the user's own iCloud account is not developer
   collection.

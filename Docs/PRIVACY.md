@@ -88,7 +88,10 @@ down the screen are reference material describing what the app *can* use, not wh
 - **Cloud transcription providers**: When actively transcribing with a cloud model
 - **Send to Mac**: Only on your local network (no internet required)
 - **iCloud History**: History, including raw and cleaned-up transcript text, syncs to your private CloudKit database
-  automatically when the device is signed in to iCloud (macOS builds without iCloud support do not sync)
+  automatically when the device is signed in to iCloud (macOS builds without iCloud support do not sync). It is on by
+  default and can be turned off per device: on iOS in Settings → Sync → iCloud History Sync, and on Mac in Settings →
+  General → iCloud Sync, which also covers Compare Models results. Off means nothing is uploaded, downloaded or deleted
+  in iCloud; History already there stays, and turning sync back on uploads what was saved while it was off.
 - **Encrypted API-Key Sync**: Only after you turn it on with a sync passphrase (iOS and Mac App Store builds)
 
 ### What is sent to cloud providers?

@@ -167,17 +167,19 @@ private final class OverflowOwnerFixture {
         AppSettings.shared.liveActivitiesEnabled = false
         transcriber = OpenAIRealtimeLiveTranscriber(
             audioSessionManager: AudioSessionManager(),
-            makeClient: { [unowned self] in
+            // Weak captures: the transcriber's tasks can call back after the
+            // test has released this fixture.
+            makeClient: { [weak self] in
                 let socket = OverflowTestSocket()
-                self.socket = socket
+                self?.socket = socket
                 let client = OpenAIRealtimeWebSocketClient(
                     apiKey: "synthetic-test-key", model: "gpt-live-transcribe", language: nil, sampleRate: 24_000,
                     makeSocket: { _ in socket }
                 )
-                self.client = client
+                self?.client = client
                 return client
             },
-            startCapture: { [unowned self] recorder in
+            startCapture: { [weak self] recorder in
                 // 48 kHz is the native capture rate the AAC safety writer accepts on
                 // the simulator; the 24 kHz PCM the client sees is synthetic anyway.
                 let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
@@ -187,7 +189,7 @@ private final class OverflowOwnerFixture {
                     buffer.floatChannelData?[0][frame] = Float(sin(Double(frame) * 0.1)) * 0.25
                 }
                 let url = try recorder.startRecording(format: format)
-                self.recordingURLs.append(url)
+                self?.recordingURLs.append(url)
                 recorder.writeBuffer(buffer)
             }
         )
@@ -200,7 +202,10 @@ private final class OverflowOwnerFixture {
             sharedState: shared, historyManager: history,
             polishClipboard: PolishClipboard(pasteboard: pasteboard),
             hasPolishingKey: { false }, polish: { text, _, _ in text },
-            sessionFactory: { [unowned self] in try IOSTranscriptionSession(openAI: self.transcriber) }
+            sessionFactory: { [weak self] in
+                guard let self else { throw CancellationError() }
+                return try IOSTranscriptionSession(openAI: self.transcriber)
+            }
         )
     }
 

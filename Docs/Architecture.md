@@ -106,6 +106,10 @@ once in `SpeakWatchCore`; those package dependencies are module arrows, while th
 `SPEAK_PORTABLE_CORE=1` or `SPEAK_WINDOWS_TARGET=1` is set. It compiles the canonical `SpeakCore` sources without
 Apple-only packages; an Apple adapter must be listed in `appleCoreSources` to be left out, so new domain files reach
 every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
+Paid-access models, routing, session lifecycle and client/storage protocols remain shared.
+Only its CryptoKit HTTP adapter, AVFoundation WAV converter and StoreKit adapter are
+excluded; the Keychain implementation inside the client contract file is guarded by
+`!SPEAK_PORTABLE_CORE`. This source boundary does not enable paid access on any platform.
 
 | Target | Kind | Direct internal dependencies / role |
 | --- | --- | --- |

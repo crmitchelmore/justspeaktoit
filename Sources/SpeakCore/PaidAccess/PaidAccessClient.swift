@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // MARK: - Session
 
@@ -63,6 +66,7 @@ public protocol PaidAccessSessionStoring: Sendable {
     func clearSession() async
 }
 
+#if !SPEAK_PORTABLE_CORE
 /// Keychain-backed session storage.
 public struct KeychainPaidAccessSessionStore: PaidAccessSessionStoring {
     public static let identifier = "paidaccess.session"
@@ -93,6 +97,8 @@ public struct KeychainPaidAccessSessionStore: PaidAccessSessionStoring {
         try? await self.storage.removeSecret(identifier: Self.identifier)
     }
 }
+
+#endif
 
 // MARK: - Client protocol
 

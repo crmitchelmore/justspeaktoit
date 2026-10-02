@@ -64,6 +64,7 @@ final class AssemblyAITestSocket: StreamingWebSocketConnection, @unchecked Senda
     }
     func emit(_ text: String) { receiveResult(.success(.text(text))) }
     func fail() { receiveResult(.failure(URLError(.networkConnectionLost))) }
+    func fail(with error: Error) { receiveResult(.failure(error)) }
     private func receiveResult(_ result: Result<StreamingWebSocketMessage, Error>) {
         let callback = lock.withLock { let value = receiver; receiver = nil; return value }
         callback?(result)

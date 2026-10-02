@@ -15,14 +15,15 @@ final class LocalTranscriptionStarterPresetTests: XCTestCase {
     XCTAssertEqual(whisperKitModel(in: presets)?.id, "local/whisperkit/large-v3-turbo")
   }
 
-  func testRecommendedBatchPresets_onlyIncludeLeadingWhisperKitModel() {
+  func testRecommendedBatchPresets_preferPhononOnSupportedPlatform() {
     let presets = LocalTranscriptionStarterPreset.recommended(
       for: .batch,
       availableModels: ModelCatalog.localTranscription,
       supportsParakeet: true
     )
 
-    XCTAssertEqual(presets.map(\.id), [.whisperKitBatch])
+    XCTAssertEqual(presets.map(\.id), PhononLocalModels.isSupportedOnCurrentPlatform
+      ? [.phononBatch, .whisperKitBatch] : [.whisperKitBatch])
     XCTAssertEqual(whisperKitModel(in: presets)?.id, "local/whisperkit/large-v3-turbo")
   }
 

@@ -683,6 +683,7 @@ extension SettingsView {
               localModelBadge("Selected", tint: .blue)
             }
           }
+          if preset.id == .phononBatch { phononAttribution }
           Text(preset.detail)
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -720,7 +721,7 @@ extension SettingsView {
       Text("\(Int(fluidAudioModels.downloadProgress * 100))%")
         .font(.caption2.monospacedDigit())
         .foregroundStyle(.secondary)
-    case .whisperKit:
+    case .whisperKit, .phonon:
       ProgressView()
         .controlSize(.small)
       Text("Configuring")
@@ -748,7 +749,7 @@ extension SettingsView {
       case .installed: return .installed
       case .failed(let message): return .failed(message)
       }
-    case .whisperKit(let model):
+    case .whisperKit(let model), .phonon(let model):
       switch localModels.installState(for: model.id) {
       case .notInstalled: return .notInstalled
       case .installing: return .installing
@@ -766,7 +767,7 @@ extension SettingsView {
     switch preset.engine {
     case .parakeet:
       return settings.localStreamingModelSource == FluidAudioParakeetModel.id
-    case .whisperKit(let model):
+    case .whisperKit(let model), .phonon(let model):
       if preset.mode == .streaming {
         return settings.localStreamingModelSource == WhisperKitStreamingModel.id(for: model)
       }
@@ -796,16 +797,24 @@ extension SettingsView {
     case .parakeet:
       await fluidAudioModels.install()
       return fluidAudioModels.installState == .installed
-    case .whisperKit(let model):
+    case .whisperKit(let model), .phonon(let model):
       await localModels.install(model)
       return localModels.isInstalled(model.id)
     }
   }
 
+  private var phononAttribution: some View {
+    HStack {
+      Link("Model & attribution", destination: URL(string: "https://huggingface.co/FermionResearch/Phonon-2")!)
+      Link("CC-BY-4.0", destination: URL(string: "https://creativecommons.org/licenses/by/4.0/")!)
+    }
+    .font(.caption2)
+  }
+
   private func starterPresetIcon(for preset: LocalTranscriptionStarterPreset) -> String {
     switch preset.engine {
     case .parakeet: return "waveform.badge.mic"
-    case .whisperKit: return preset.mode == .streaming ? "waveform" : "doc.text.magnifyingglass"
+    case .whisperKit, .phonon: return preset.mode == .streaming ? "waveform" : "doc.text.magnifyingglass"
     }
   }
 
@@ -863,6 +872,7 @@ extension SettingsView {
             tint: model.supportsLiveStreaming ? Color.brandAccentDeep : Color.secondary
           )
         }
+        if model.engine == .phonon { phononAttribution }
         Text(model.description)
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -944,7 +954,7 @@ extension SettingsView {
           ? "Download a local batch model"
           : "Download a local streaming model",
         detail: settings.localTranscriptionMode == .batch
-          ? "WhisperKit/Core ML models run locally after recording stops."
+          ? "Downloaded models transcribe locally after recording stops."
           : "Choose Parakeet or an installed WhisperKit model; both run in-process with Core ML."
       )
       localModelStep(

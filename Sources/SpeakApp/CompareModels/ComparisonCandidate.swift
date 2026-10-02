@@ -121,7 +121,7 @@ enum ComparisonCandidateResolver {
     }
 
     private static func localCandidates(_ environment: Environment) -> [ComparisonCandidate] {
-        ModelCatalog.localTranscription.map { model in
+        ModelCatalog.availableLocalTranscription.map { model in
             ComparisonCandidate(
                 modelID: model.id,
                 displayName: model.displayName,

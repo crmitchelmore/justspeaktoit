@@ -665,7 +665,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             tags: [.fast, .quality],
             supportsLiveStreaming: true
         )
-    ]
+    ] + [PhononLocalModels.phonon2]
 
     public static let localTranscriptionOptions: [Option] = localTranscription.map(\.option)
 

@@ -177,6 +177,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
             encoding: .utf8
         )
+        let appSettings = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Settings/AppSettings.swift"),
+            encoding: .utf8
+        )
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
         XCTAssertTrue(manifest.contains("if isIOSKeyboardEnabled {"))
@@ -204,7 +208,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(app.contains("guard FeatureFlags.iOSKeyboardEnabled else"))
         XCTAssertTrue(app.contains("KeyboardInstantDictationStore.shared.setEnabled(false)"))
         XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
-        XCTAssertTrue(settings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
+        XCTAssertTrue(appSettings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
     }
 
     func testWatchAppBuildFeature_isOffByDefault() throws {

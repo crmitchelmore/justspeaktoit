@@ -98,7 +98,7 @@ extension AssemblyAILiveClient {
         guard attempt.didBegin,
               let turn = try? JSONDecoder().decode(AssemblyAIStreamingTurn.self, from: data),
               let update = active.assembler.consume(turn) else { return }
-        // A callback may itself call stop(). Its triggering Turn predates
+        // A callback may itself start a finish. Its triggering Turn predates
         // ForceEndpoint and must not count as the response to that new request.
         let endingWhenReceived = active.ending
         // The provider's closed utterance is an explicit boundary, reported
@@ -107,7 +107,7 @@ extension AssemblyAILiveClient {
             onUtteranceBoundary?(utterance)
             guard isCurrent(active, attempt) else { return }
         }
-        if active.phase != .finishing || active.deliverWhileFinishing {
+        if active.phase != .finishing {
             active.onTranscript?(update.displayText, false)
         }
         // Callback clients may synchronously cancel/start another session.

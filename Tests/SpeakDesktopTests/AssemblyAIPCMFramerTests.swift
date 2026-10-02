@@ -29,6 +29,17 @@ final class AssemblyAIPCMFramerTests: XCTestCase {
         XCTAssertNil(framer.finish())
     }
 
+    func testSplitSampleCarriesOverAndAnOddTailIsPaddedToAWholeSample() {
+        var framer = AssemblyAIPCMFramer(sampleRate: 16_000)
+        XCTAssertTrue(framer.append(Data([7])).isEmpty)
+        XCTAssertEqual(framer.append(Data(repeating: 8, count: 3_199)), [Data([7]) + Data(repeating: 8, count: 3_199)])
+        XCTAssertTrue(framer.append(Data(repeating: 9, count: 1_601)).isEmpty)
+        let tail = framer.finish()
+        XCTAssertEqual(tail?.count, 1_602)
+        XCTAssertEqual(tail?.prefix(1_601), Data(repeating: 9, count: 1_601))
+        XCTAssertEqual(tail?.last, 0)
+    }
+
     func testAlternateRatesKeepFiftyMillisecondMinimumAndHundredMillisecondPreferredFrames() {
         for rate in [8_000, 16_000, 24_000, 44_100, 48_000] {
             var framer = AssemblyAIPCMFramer(sampleRate: rate)

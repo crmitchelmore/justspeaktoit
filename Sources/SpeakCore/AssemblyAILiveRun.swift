@@ -26,7 +26,6 @@ final class AssemblyAILiveRun: @unchecked Sendable {
     var attemptedFallback = false
     var hasAudio = false
     var finalAfterForce = false
-    var deliverWhileFinishing = false
     var outgoing: [Data] = []
     var sending = false
     var sendID: UInt64 = 0
@@ -54,10 +53,9 @@ final class AssemblyAILiveRun: @unchecked Sendable {
 }
 
 enum AssemblyAIStreamingError: LocalizedError {
-    case invalidPCM, invalidSampleRate, beginTimeout, serverFailure
+    case invalidSampleRate, beginTimeout, serverFailure
     var errorDescription: String? {
         switch self {
-        case .invalidPCM: return "AssemblyAI requires complete 16-bit PCM samples."
         case .invalidSampleRate: return "The AssemblyAI audio sample rate is invalid."
         case .beginTimeout: return "AssemblyAI did not acknowledge the streaming session in time."
         case .serverFailure: return "AssemblyAI reported a streaming error. Check the selected model and credentials."

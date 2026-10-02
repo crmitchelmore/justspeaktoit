@@ -137,9 +137,6 @@ final class AssemblyAILiveClientTests: XCTestCase {
         let didStartFirst = await eventually { firstSocket.state == .running }
         XCTAssertTrue(didStartFirst)
         firstSocket.emit(#"{"type":"Begin"}"#)
-        // A session that sent no audio terminates without ForceEndpoint, so
-        // this run streams some before finishing.
-        client.sendAudio(Data(repeating: 0, count: 3_200))
         let firstFinish = Task { await client.finishAndWait() }
         let didForce = await eventually {
             textMessages(firstSocket).contains(#"{"type":"ForceEndpoint"}"#)
@@ -197,8 +194,7 @@ final class AssemblyAILiveClientTests: XCTestCase {
         for index in 0..<50 {
             client.sendAudio(Data(repeating: UInt8(index), count: 3_200))
         }
-        // Whole 16-bit samples only: the client refuses a partial sample.
-        client.sendAudio(Data(repeating: 50, count: 3_198))
+        client.sendAudio(Data(repeating: 50, count: 3_199))
         socket.emit(#"{"type":"Begin"}"#)
         let sentBoundedAudio = await eventually { socket.messages.count == 49 }
         XCTAssertTrue(sentBoundedAudio)
@@ -206,7 +202,7 @@ final class AssemblyAILiveClientTests: XCTestCase {
             return XCTFail("Expected buffered PCM")
         }
         XCTAssertEqual(first.first, 1)
-        client.sendAudio(Data([50, 50]))
+        client.sendAudio(Data([50]))
         let sentResidual = await eventually { socket.messages.count == 50 }
         XCTAssertTrue(sentResidual)
     }

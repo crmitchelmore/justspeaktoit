@@ -22,11 +22,12 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         fixture.client.cancel()
     }
 
-    func testOnlyOneAudioSendIsInFlightAndTailIsPaddedBeforeForceEndpoint() {
+    func testOnlyOneAudioSendIsInFlightAndTailIsPaddedBeforeForceEndpoint() async {
         let fixture = begun()
         let socket = fixture.factory.sockets[0]
         fixture.client.sendAudio(Data(repeating: 17, count: 3210))
-        fixture.client.stop()
+        let finish = Task { await fixture.client.finishAndWait() }
+        await settle { fixture.clock.pending(AssemblyAILiveClient.finishDeadline) == 2 }
         XCTAssertEqual(socket.binary.map(\.count), [3200])
         XCTAssertTrue(socket.controls.isEmpty)
         socket.completeSend()
@@ -37,6 +38,7 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         socket.completeSend()
         XCTAssertEqual(socket.controls, [#"{"type":"ForceEndpoint"}"#])
         fixture.client.cancel()
+        _ = await finish.value
     }
 
     func testFinishDrainsThenWaitsForFormattedTurnBeforeTerminate() async {
@@ -63,28 +65,30 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         XCTAssertEqual(socket.cancels, 1)
     }
 
-    func testGracefulStopKeepsExistingCumulativeCallbackSemantics() {
+    func testStopIsImmediateAndKeepsTheTextReceivedSoFar() async {
         let fixture = begun()
         let socket = fixture.factory.sockets[0]
-        fixture.client.sendAudio(Data(repeating: 0, count: 3200))
-        socket.completeSend()
-        fixture.client.stop()
-        socket.completeSend()
         socket.emit(Self.turn("Final words.", order: 0))
+        fixture.client.sendAudio(Data(repeating: 0, count: 3200))
+        fixture.client.stop()
+        XCTAssertEqual(socket.cancels, 1)
+        XCTAssertTrue(socket.controls.isEmpty, "No ForceEndpoint or Terminate follows an immediate stop")
+        socket.completeSend()
+        socket.emit(Self.turn("Late.", order: 1))
         XCTAssertEqual(fixture.events.texts, ["Final words."])
         XCTAssertEqual(fixture.events.finals, [false])
-        XCTAssertEqual(socket.controls.last, #"{"type":"Terminate"}"#)
-        socket.completeSend()
-        socket.emit(#"{"type":"Termination"}"#)
-        XCTAssertEqual(socket.cancels, 1)
+        let text = await fixture.client.finishAndWait()
+        XCTAssertEqual(text, "Final words.")
+        XCTAssertTrue(fixture.events.errors.isEmpty)
     }
 
-    func testEndpointAndTerminationWaitsHaveBoundedFallbacks() {
+    func testEndpointAndTerminationWaitsHaveBoundedFallbacks() async {
         let fixture = begun()
         let socket = fixture.factory.sockets[0]
         fixture.client.sendAudio(Data(repeating: 0, count: 3200))
         socket.completeSend()
-        fixture.client.stop()
+        let finish = Task { await fixture.client.finishAndWait() }
+        await settle { socket.controls == [#"{"type":"ForceEndpoint"}"#] }
         socket.completeSend()
         fixture.clock.fire(ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal35ProStreamingID)
             .postStopFinalizeBudget)
@@ -93,6 +97,7 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         fixture.clock.fire(3)
         XCTAssertEqual(socket.cancels, 1)
         XCTAssertTrue(fixture.events.errors.isEmpty)
+        _ = await finish.value
     }
 
     func testEUFailureRetriesGlobalOnceAndRetainsPreBeginPCM() {
@@ -152,14 +157,17 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         XCTAssertEqual(fixture.factory.sockets[0].cancels, 1)
     }
 
-    func testMissingKeyOddPCMAndSendStallFailVisibly() {
+    func testMissingKeyAndSendStallFailVisiblyWhileASplitSampleCarriesOver() {
         let missing = AssemblyAILiveFixture(key: " \n")
         missing.start()
         XCTAssertTrue(missing.factory.sockets.isEmpty)
         XCTAssertEqual(missing.events.errors.count, 1)
         let odd = begun()
         odd.client.sendAudio(Data([1]))
-        XCTAssertEqual(odd.events.errors.count, 1)
+        odd.client.sendAudio(Data(repeating: 2, count: 3199))
+        XCTAssertTrue(odd.events.errors.isEmpty, "A chunk need not hold whole samples")
+        XCTAssertEqual(odd.factory.sockets[0].binary, [Data([1]) + Data(repeating: 2, count: 3199)])
+        odd.client.cancel()
         let stalled = begun()
         stalled.client.sendAudio(Data(repeating: 0, count: 3200))
         stalled.clock.fire(5)
@@ -190,6 +198,14 @@ final class AssemblyAIPortableLifecycleTests: XCTestCase {
         let text = await fixture.client.finishAndWait()
         XCTAssertEqual(text, "Corrected. Next.")
         XCTAssertEqual(fixture.events.texts, ["first", "First.", "Corrected.", "Corrected. Next."])
+    }
+
+    private func settle(_ predicate: () -> Bool) async {
+        for _ in 0..<400 {
+            if predicate() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(predicate(), "Condition did not settle")
     }
 
     private func begun() -> AssemblyAILiveFixture {

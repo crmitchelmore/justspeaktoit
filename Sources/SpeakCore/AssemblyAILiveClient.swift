@@ -101,6 +101,23 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
         queue.setSpecific(key: queueKey, value: true)
     }
 
+    /// Test seam: real-time scheduling with short, explicit stop options.
+    convenience init(
+        apiKey: String = "test-key",
+        speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        sampleRate: Int = 16_000,
+        keyterms: [String] = [],
+        postStopFinalizeBudget: TimeInterval = 0.1,
+        stopGracePeriod: TimeInterval = 0,
+        socketFactory: @escaping ConnectionFactory
+    ) {
+        self.init(
+            apiKey: apiKey, speechModel: speechModel, sampleRate: sampleRate, keyterms: keyterms,
+            postStopFinalizeBudget: postStopFinalizeBudget, stopGracePeriod: stopGracePeriod,
+            makeConnection: socketFactory
+        )
+    }
+
     deinit { run.attempt?.connection.cancel() }
 
     public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
@@ -124,12 +141,13 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
     /// Audio waiting for `Begin` keeps the newest five seconds: the oldest
     /// frames make room, as the established client did. Once the session has
     /// begun, a backlog beyond the budget is a stalled transport instead.
+    /// Capture chunks are repacked into 100 ms frames, so a chunk need not hold
+    /// whole samples: a split sample is completed by the next chunk.
     public func sendAudio(_ data: Data) {
         guard !data.isEmpty else { return }
         synchronized {
             let active = run
             guard active.phase == .connecting || active.phase == .active else { return }
-            guard data.count.isMultiple(of: 2) else { fail(AssemblyAIStreamingError.invalidPCM, active); return }
             while !active.budget.admit(data.count) {
                 guard active.awaitingBegin, !active.outgoing.isEmpty else { fail(stalledError, active); return }
                 active.budget.release(active.outgoing.removeFirst().count)
@@ -140,11 +158,12 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
         }
     }
 
-    /// Preserve the established graceful stop entry point for Apple callers.
-    /// Final Turn callbacks remain cumulative and continue during its short drain.
-    public func stop() { synchronized { beginFinish(run, deliverCallbacks: true) } }
+    /// Immediate stop: the socket closes at once and any finish waiting on
+    /// this session returns the text received so far. Graceful callers use
+    /// `finishAndWait()`.
+    public func stop() { synchronized { close(run) } }
 
-    /// Immediate abort for hosts that distinguish cancellation from finalisation.
+    /// The same immediate abort, for hosts that distinguish cancellation.
     public func cancel() { synchronized { close(run) } }
 
     public func finishAndWait() async -> String? {
@@ -163,7 +182,7 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
                         return
                     }
                     active.waiters.append(continuation)
-                    beginFinish(active, deliverCallbacks: false)
+                    beginFinish(active)
                 }
             }
         } onCancel: { [weak self, weak active] in
@@ -177,21 +196,22 @@ public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
         synchronized { run.assembler.snapshot(terminal: run.phase == .closed) }
     }
 
-    func beginFinish(_ active: AssemblyAILiveRun, deliverCallbacks: Bool) {
+    /// Stop sequencing: admitted audio, then `ForceEndpoint`, then the trailing
+    /// formatted turn (or its budget), then the stop grace, then `Terminate`.
+    /// Once the session has begun a finish always forces the endpoint, so a
+    /// turn the provider is still forming is confirmed.
+    func beginFinish(_ active: AssemblyAILiveRun) {
         guard isCurrent(active), let attempt = active.attempt else { close(active); return }
-        if !deliverCallbacks { active.deliverWhileFinishing = false }
         guard active.phase != .finishing else { return }
         // Nothing was admitted and no turn can arrive before `Begin`: there is
         // nothing to finalise, so the socket closes without control frames.
         guard attempt.didBegin || active.hasAudio else { close(active); return }
         active.phase = .finishing
-        active.deliverWhileFinishing = deliverCallbacks
         let held = active.framer.bufferedByteCount
         if let tail = active.framer.finish() {
             guard active.budget.admit(tail.count - held) else { fail(stalledError, active); return }
             active.outgoing.append(tail)
         }
-        if !active.hasAudio { active.ending = .terminateReady }
         pump(active)
         after(Self.finishDeadline + stopGracePeriod, active) { client, active in
             if active.ending == .sent { client.close(active) } else { client.fail(client.stalledError, active) }

@@ -1,8 +1,9 @@
 import Foundation
 
-/// Buffers less than 100 ms between calls. The client admits PCM into its total
-/// byte budget before framing. Final nonempty tails are padded to the API's
-/// 50 ms minimum; an empty recording never creates an artificial audio frame.
+/// Buffers less than 100 ms between calls, including a sample split across two
+/// capture chunks. The client admits PCM into its total byte budget before
+/// framing. Final nonempty tails are padded to the API's 50 ms minimum and to a
+/// whole sample; an empty recording never creates an artificial audio frame.
 struct AssemblyAIPCMFramer {
     let minimumBytes: Int
     let preferredBytes: Int
@@ -31,6 +32,7 @@ struct AssemblyAIPCMFramer {
     mutating func finish() -> Data? {
         guard !pending.isEmpty else { return nil }
         if pending.count < minimumBytes { pending.append(Data(repeating: 0, count: minimumBytes - pending.count)) }
+        if !pending.count.isMultiple(of: 2) { pending.append(0) }
         let result = pending
         pending = Data()
         return result

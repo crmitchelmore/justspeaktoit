@@ -11,33 +11,6 @@ import XCTest
 /// these tests pin the projection rather than any hand-written copy.
 final class PrivacyDisclosureTests: XCTestCase {
 
-    // MARK: - Fixtures
-
-    private func inputs(
-        usesBatchTranscription: Bool = false,
-        liveModel: String = AppleLocalModels.speechTranscriberModelID,
-        batchModel: String = ModelCatalog.defaultBatchTranscriptionModel,
-        postProcessingEnabled: Bool = false,
-        postProcessingModel: String = ModelCatalog.defaultPostProcessingModel,
-        voiceOutputEnabled: Bool = false,
-        voiceOutputProvider: VoiceOutputProvider = .soniox,
-        analyzerFallbackAllowed: Bool = true,
-        strictAppleRecognitionRequired: Bool = true
-    ) -> PrivacyWorkflowInputs {
-        var value = PrivacyWorkflowInputs(
-            usesBatchTranscription: usesBatchTranscription,
-            liveTranscriptionModelID: liveModel,
-            batchTranscriptionModelID: batchModel,
-            postProcessingEnabled: postProcessingEnabled,
-            postProcessingModelID: postProcessingModel,
-            voiceOutputEnabled: voiceOutputEnabled,
-            voiceOutputProvider: voiceOutputProvider
-        )
-        value.appleSpeechAnalyzerFallbackAllowed = analyzerFallbackAllowed
-        value.appleSpeechRequiresOnDeviceRecognition = strictAppleRecognitionRequired
-        return value
-    }
-
     // MARK: - Transcription
 
     func testSpeechAnalyzerLiveModelStaysOnDevice() {
@@ -335,5 +308,35 @@ final class PrivacyDisclosureTests: XCTestCase {
         XCTAssertFalse(batch.transcription.isConditionalCloud)
         XCTAssertEqual(batch.activeRecipients, ["OpenRouter"])
     }
+}
+
+private extension PrivacyDisclosureTests {
+    // MARK: - Fixtures
+
+    private func inputs(
+        usesBatchTranscription: Bool = false,
+        liveModel: String = AppleLocalModels.speechTranscriberModelID,
+        batchModel: String = ModelCatalog.defaultBatchTranscriptionModel,
+        postProcessingEnabled: Bool = false,
+        postProcessingModel: String = ModelCatalog.defaultPostProcessingModel,
+        voiceOutputEnabled: Bool = false,
+        voiceOutputProvider: VoiceOutputProvider = .soniox,
+        analyzerFallbackAllowed: Bool = true,
+        strictAppleRecognitionRequired: Bool = true
+    ) -> PrivacyWorkflowInputs {
+        var value = PrivacyWorkflowInputs(
+            usesBatchTranscription: usesBatchTranscription,
+            liveTranscriptionModelID: liveModel,
+            batchTranscriptionModelID: batchModel,
+            postProcessingEnabled: postProcessingEnabled,
+            postProcessingModelID: postProcessingModel,
+            voiceOutputEnabled: voiceOutputEnabled,
+            voiceOutputProvider: voiceOutputProvider
+        )
+        value.appleSpeechAnalyzerFallbackAllowed = analyzerFallbackAllowed
+        value.appleSpeechRequiresOnDeviceRecognition = strictAppleRecognitionRequired
+        return value
+    }
+
 }
 #endif

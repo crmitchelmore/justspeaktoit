@@ -108,7 +108,7 @@ extension DesktopHostController {
 
     /// The live, on-device or remote batch slot restores this model when the
     /// user switches Source or Mode again.
-    package func rememberModelSlot() {
+    package static func rememberModelSlot(in settings: inout Settings) {
         if DesktopHostModels.isLive(settings.model) {
             settings.liveModel = settings.model
         } else if DesktopHostModels.isLocal(settings.model) {

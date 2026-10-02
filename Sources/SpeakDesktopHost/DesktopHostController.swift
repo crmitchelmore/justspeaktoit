@@ -143,12 +143,15 @@ package actor DesktopHostController<Platform: DesktopHostPlatform> {
     ) async {
         guard isReady, !busy, !closed, DesktopHostModels.all.indices.contains(modelIndex) else { return }
         cancelOutput()
-        selectModel(modelIndex)
+        let selected = selectModel(modelIndex)
         selectMicrophone(deviceID)
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
         if recording != nil { await stopAndTranscribe(); return }
+        // Never record with a model other than the one chosen; why it could
+        // not be saved stays shown.
+        guard selected else { return }
         do {
             // Wait for acknowledged silence, while slow decoder release stays
             // off this actor. Busy prevents another capture during suspension.
@@ -234,7 +237,7 @@ extension DesktopHostController {
               DesktopHostModels.all.indices.contains(modelIndex),
               !DesktopHostModels.isLive(DesktopHostModels.all[modelIndex].id) else { return }
         cancelOutput()
-        selectModel(modelIndex)
+        guard selectModel(modelIndex) else { return }
         busy = true
         activeOperations += 1
         defer { busy = false; finishOperation() }
@@ -326,21 +329,35 @@ extension DesktopHostController {
         } catch { update(error.localizedDescription, state: 0) }
     }
 
-    package func selectModel(_ index: Int) {
-        guard !closed, !busy, recording == nil, DesktopHostModels.all.indices.contains(index) else { return }
-        let changed = settings.model != DesktopHostModels.all[index].id
-        settings.model = DesktopHostModels.all[index].id
-        rememberModelSlot()
-        do {
-            try JSONEncoder().encode(settings).write(
-                to: directory.appendingPathComponent("settings.json"), options: .atomic
-            )
-            let hint = DesktopHostModels.provider(for: settings.model)?.apiKeyIdentifier
-                == AzureSpeechConfiguration.credentialIdentifier
-                ? DesktopHostAzureResource.selectionHint(for: settings.model) : ""
-            if changed { publishModelCatalog(modelCatalog.snapshot) }
-            update("Selected \(DesktopHostModels.all[index].displayName).\(hint)")
-        } catch { update("Could not save settings: \(error.localizedDescription)") }
+    /// Uses the model once it is saved; an unchanged choice writes nothing.
+    /// Returns false when the choice is refused or cannot be saved, and the
+    /// previous model stays in use.
+    @discardableResult
+    package func selectModel(_ index: Int) -> Bool {
+        guard !closed, !busy, recording == nil, DesktopHostModels.all.indices.contains(index) else { return false }
+        let model = DesktopHostModels.all[index]
+        var chosen = settings
+        chosen.model = model.id
+        Self.rememberModelSlot(in: &chosen)
+        if chosen.model != settings.model || chosen.batchModel != settings.batchModel
+            || chosen.liveModel != settings.liveModel || chosen.localModel != settings.localModel {
+            do {
+                try effects.writeSettings(
+                    JSONEncoder().encode(chosen), to: directory.appendingPathComponent("settings.json")
+                )
+            } catch {
+                update("Could not save settings: \(error.localizedDescription)")
+                return false
+            }
+            let switched = chosen.model != settings.model
+            settings = chosen
+            if switched { publishModelCatalog(modelCatalog.snapshot) }
+        }
+        let hint = DesktopHostModels.provider(for: model.id)?.apiKeyIdentifier
+            == AzureSpeechConfiguration.credentialIdentifier
+            ? DesktopHostAzureResource.selectionHint(for: model.id) : ""
+        update("Selected \(model.displayName).\(hint)")
+        return true
     }
 
     /// Text and version are the immutable display snapshot from the Copy click;

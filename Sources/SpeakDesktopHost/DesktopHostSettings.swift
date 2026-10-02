@@ -10,9 +10,10 @@ extension DesktopHostController {
         guard canUseHistory else { return }
         var changed = settings
         changed.microphoneDeviceID = identifier.isEmpty ? nil : identifier
+        guard changed.microphoneDeviceID != settings.microphoneDeviceID else { return }
         do {
-            try JSONEncoder().encode(changed).write(
-                to: directory.appendingPathComponent("settings.json"), options: .atomic
+            try effects.writeSettings(
+                JSONEncoder().encode(changed), to: directory.appendingPathComponent("settings.json")
             )
             settings = changed
         } catch { update("Could not save the microphone choice: \(error.localizedDescription)") }

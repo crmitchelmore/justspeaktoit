@@ -47,6 +47,67 @@ final class SharedMultipartUploadStagingTests: XCTestCase {
         owner.removeUploadBodyFile(at: directoryAlias.appendingPathComponent(body.lastPathComponent))
         XCTAssertFalse(FileManager.default.fileExists(atPath: body.path))
     }
+
+    func testCreationThroughDirectoryAliasKeepsCanonicalClaimsUntilOwnerRemoval() throws {
+        let (directory, alias) = try aliasedDirectory()
+        let owner = staging(alias)
+        let other = staging(directory)
+        let body = try owner.createUploadBodyFile(providerID: "openai")
+        let canonicalBody = directory.appendingPathComponent(body.lastPathComponent)
+        defer { owner.removeUploadBodyFile(at: canonicalBody) }
+
+        other.removeUploadBodyFile(at: canonicalBody)
+        other.purgeStaleUploads(now: .distantFuture)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: canonicalBody.path))
+        owner.removeUploadBodyFile(at: canonicalBody)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: canonicalBody.path))
+
+        try Data("abandoned fixture".utf8).write(to: canonicalBody)
+        other.purgeStaleUploads(now: .distantFuture)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: canonicalBody.path))
+    }
+
+    func testReplacingOwnedLocationWithFinalSymlinkCannotReleaseItsClaim() throws {
+        let directory = temporaryDirectory()
+        let owner = staging(directory)
+        let body = try owner.createUploadBodyFile(providerID: "openai")
+        let target = try owner.createUploadBodyFile(providerID: "mistral")
+        defer {
+            owner.removeUploadBodyFile(at: body)
+            owner.removeUploadBodyFile(at: target)
+        }
+        let saved = directory.appendingPathComponent("saved-body")
+        try FileManager.default.moveItem(at: body, to: saved)
+        try FileManager.default.createSymbolicLink(at: body, withDestinationURL: target)
+
+        owner.removeUploadBodyFile(at: body)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: body.path), target.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.path))
+        try FileManager.default.removeItem(at: body)
+        try FileManager.default.moveItem(at: saved, to: body)
+        staging(directory).purgeStaleUploads(now: .distantFuture)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: body.path), "The refused alias must retain the claim")
+        owner.removeUploadBodyFile(at: body)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: body.path))
+    }
+
+    func testFailedCreationThroughDirectoryAliasReleasesTheCanonicalClaim() throws {
+        for throwsError in [false, true] {
+            let (directory, alias) = try aliasedDirectory()
+            let failing = SharedMultipartUploadStaging(directory: alias, securityPolicy: .init(
+                prepareDirectory: Self.fixturePolicy.prepareDirectory,
+                createFile: { url, manager in
+                    XCTAssertTrue(manager.createFile(atPath: url.path, contents: Data("fixture".utf8)))
+                    if throwsError { throw PolicyError.denied }
+                    return false
+                }
+            ))
+            XCTAssertThrowsError(try failing.createUploadBodyFile(providerID: "mistral"))
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 1)
+            staging(directory).purgeStaleUploads(now: .distantFuture)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+        }
+    }
     #endif
 
     func testPolicyFailurePreventsScanningOrCreatingFiles() throws {
@@ -174,6 +235,15 @@ private extension SharedMultipartUploadStagingTests {
     }
 
     #if !os(Windows)
+    func aliasedDirectory() throws -> (directory: URL, alias: URL) {
+        let root = temporaryDirectory()
+        let directory = root.appendingPathComponent("uploads", isDirectory: true)
+        let alias = root.appendingPathComponent("directory-alias", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: directory)
+        return (directory, alias)
+    }
+
     func permissions(_ url: URL) throws -> Int? {
         try (FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue
     }

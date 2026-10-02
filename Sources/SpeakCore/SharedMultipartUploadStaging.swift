@@ -119,10 +119,12 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
     url.pathExtension == "multipart" && url.lastPathComponent.contains("-upload-")
   }
 
-  /// `contentsOfDirectory(at:)` resolves symlinks (`/var` → `/private/var`), so
-  /// claims are keyed by the fully resolved path.
+  /// Resolve the existing parent, keeping the final filename lexical. Resolving
+  /// the whole path before creation can retain a Windows short parent name,
+  /// then expand it only after the file exists, losing the original claim.
   private static func claimKey(for url: URL) -> String {
-    let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+    let path = url.deletingLastPathComponent().standardizedFileURL
+      .resolvingSymlinksInPath().appendingPathComponent(url.lastPathComponent).path
     #if os(Windows)
     return path.lowercased()
     #else
@@ -147,14 +149,13 @@ public final class SharedMultipartUploadStaging: @unchecked Sendable {
   private func releaseClaimIfOwned(_ url: URL) -> Bool {
     Self.claims.lock.withLock {
       let key = Self.claimKey(for: url)
-      let locationURL = url.deletingLastPathComponent().standardizedFileURL
-        .resolvingSymlinksInPath().appendingPathComponent(url.lastPathComponent)
+      let resolvedPath = url.standardizedFileURL.resolvingSymlinksInPath().path
       #if os(Windows)
-      let location = locationURL.path.lowercased()
+      let resolvedTarget = resolvedPath.lowercased()
       #else
-      let location = locationURL.path
+      let resolvedTarget = resolvedPath
       #endif
-      guard location == key, Self.claims.owners[key] == ownerID else { return false }
+      guard resolvedTarget == key, Self.claims.owners[key] == ownerID else { return false }
       Self.claims.owners.removeValue(forKey: key)
       return true
     }

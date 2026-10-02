@@ -75,7 +75,7 @@ public final class MultipartUploadStaging: @unchecked Sendable {
 
   /// Removes an upload body this instance created and still claims, and releases
   /// that claim. Any other URL (a source recording, another instance's body, a
-  /// path that merely resolves into the staging directory, or a body already
+  /// final-component symlink to a claimed body, or a body already
   /// released) is refused and left untouched, so this public cleanup can never
   /// delete a file it does not own. A failed removal is logged (never the
   /// contents) and retried by a later purge pass once stale.
@@ -172,7 +172,14 @@ public final class MultipartUploadStaging: @unchecked Sendable {
   private func releaseClaimIfOwned(_ url: URL) -> Bool {
     self.lock.lock()
     defer { self.lock.unlock() }
-    return self.claimedPaths.remove(Self.claimKey(for: url)) != nil
+    let key = Self.claimKey(for: url)
+    // Resolve directory aliases such as /var -> /private/var, but an alias of
+    // the final file is not the body we created. Removing that alias would
+    // otherwise release the real body's claim while leaving it on disk.
+    let location = url.deletingLastPathComponent().standardizedFileURL
+      .resolvingSymlinksInPath().appendingPathComponent(url.lastPathComponent).path
+    guard location == key else { return false }
+    return self.claimedPaths.remove(key) != nil
   }
 
   private func currentClaims() -> Set<String> {

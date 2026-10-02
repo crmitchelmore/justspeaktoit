@@ -165,6 +165,36 @@ final class MultipartUploadStagingTests: XCTestCase {
     XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
   }
 
+  func testRemoveUploadBodyFile_refusesSymlinkWithoutReleasingTheRealBody() throws {
+    let staging = makeStaging()
+    let body = try staging.createUploadBodyFile(providerID: "mistral")
+    defer { staging.removeUploadBodyFile(at: body) }
+    let alias = directory.deletingLastPathComponent()
+      .appendingPathComponent("outside-alias-\(UUID().uuidString)")
+    try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: body)
+    defer { try? FileManager.default.removeItem(at: alias) }
+
+    staging.removeUploadBodyFile(at: alias)
+    staging.purgeStaleUploads(now: Date().addingTimeInterval(7_200))
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: alias.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: body.path))
+  }
+
+  func testRemoveUploadBodyFile_acceptsDirectoryAliasOfTheOwnedBody() throws {
+    let staging = makeStaging()
+    let body = try staging.createUploadBodyFile(providerID: "mistral")
+    let alias = directory.deletingLastPathComponent()
+      .appendingPathComponent("directory-alias-\(UUID().uuidString)")
+    try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: directory)
+    defer { try? FileManager.default.removeItem(at: alias) }
+
+    staging.removeUploadBodyFile(at: alias.appendingPathComponent(body.lastPathComponent))
+
+    XCTAssertFalse(FileManager.default.fileExists(atPath: body.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: alias.path))
+  }
+
   func testCreateUploadBodyFile_keepsATraversingProviderIDInsideTheStagingDirectory() throws {
     let staging = makeStaging()
 

@@ -14,8 +14,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/FluidInference/FluidAudio.git",
       "state" : {
-        "revision" : "19600a485baa4998812e4654b70d2bab8f2c9949",
-        "version" : "0.15.5"
+        "revision" : "21493f8dac5a97e65742e6ff26f42f164c2fda0f",
+        "version" : "0.17.4"
       }
     },
     {
@@ -32,8 +32,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/getsentry/sentry-cocoa.git",
       "state" : {
-        "revision" : "aaf96c4a417d30208b3c25d90910d6156ddc973d",
-        "version" : "9.27.0"
+        "revision" : "d9df1c4e8d8466c7f8b3c56150378927dadf1b8e",
+        "version" : "9.29.0"
       }
     },
     {
@@ -41,8 +41,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sparkle-project/Sparkle.git",
       "state" : {
-        "revision" : "ac2def288cbff5cfc7df3ffef6abdf45b72bcb0a",
-        "version" : "2.9.6"
+        "revision" : "eef1a539a373c1f1a320624b1130fc5de7b2e100",
+        "version" : "2.10.0"
       }
     },
     {
@@ -68,8 +68,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/pointfreeco/swift-snapshot-testing.git",
       "state" : {
-        "revision" : "98ba2e1a302c405dd8752e9fcacef0d5f500cac9",
-        "version" : "1.19.5"
+        "revision" : "28e5de025e3fd98991791bfbf83023ab3708da03",
+        "version" : "1.19.6"
       }
     },
     {

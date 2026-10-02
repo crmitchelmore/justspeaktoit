@@ -50,6 +50,12 @@ test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
 	ruby scripts/tests/release_apple_test.rb
 	ruby scripts/tests/create_ios_app_store_profile_test.rb
 	python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-bundle -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-cross -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-package -p 'test_*.py' -v
 	python3 scripts/generate-release-train-config.py --check
 
 .PHONY: release

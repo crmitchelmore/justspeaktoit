@@ -44,13 +44,21 @@ test('tooling gate delegates to the complete local discovery target', () => {
   assert.doesNotMatch(workflow, /Tests\/ReleaseNotesTests|scripts\/release-train\.test\.mjs/);
 });
 
+const platformPythonTestRoots = [
+  'scripts/linux-local-runtime', 'scripts/windows-local-runtime', 'scripts/windows-bundle',
+  'scripts/windows-cross', 'scripts/windows-cloudkit', 'scripts/windows-package',
+];
+const platformPythonCommand = root => `\tpython3 -B -m unittest discover -s ${root} -p 'test_*.py' -v\n`;
+
 function toolingTestIsDiscovered(path, trackedFiles, makefileText) {
-  // `unittest discover -s scripts/tests` loads identifier-named test_*.py modules and
+  const toolingRecipe = makefileText.match(/^test-tooling:[^\n]*\n((?:\t[^\n]*\n)*)/m)?.[1] ?? '';
+  // `unittest discover -s <root>` loads identifier-named test_*.py modules and
   // recurses only into regular packages (directories with __init__.py) below the start.
-  const discoveredByUnittest = path => {
-    const match = path.match(/^scripts\/tests\/((?:[^/]+\/)*)test_\w*\.py$/);
+  const discoveredByUnittest = (path, root) => {
+    if (!path.startsWith(`${root}/`)) return false;
+    const match = path.slice(root.length + 1).match(/^((?:[^/]+\/)*)test_\w*\.py$/);
     if (!match) return false;
-    let directory = 'scripts/tests';
+    let directory = root;
     for (const part of match[1].split('/').filter(Boolean)) {
       directory += `/${part}`;
       if (!trackedFiles.has(`${directory}/__init__.py`)) return false;
@@ -58,7 +66,9 @@ function toolingTestIsDiscovered(path, trackedFiles, makefileText) {
     return true;
   };
   return /^scripts\/tests\/[^/]+\.test\.mjs$/.test(path)
-    || discoveredByUnittest(path)
+    || discoveredByUnittest(path, 'scripts/tests')
+    || platformPythonTestRoots.some(root => toolingRecipe.includes(platformPythonCommand(root))
+      && discoveredByUnittest(path, root))
     || (path === '.github/scripts/dependabot-merge.test.mjs'
       && makefileText.includes(`\tnode --test ${path}\n`))
     || (/^scripts\/tests\/[^/]+_test\.rb$/.test(path) && makefileText.includes(`\truby ${path}\n`));
@@ -73,6 +83,27 @@ test('dependency policy discovery requires its exact execution command', () => {
     'listing or tracking the dependency test alone must not count as execution');
   assert.equal(toolingTestIsDiscovered('.github/scripts/unwired.test.mjs', tracked, makefile), false,
     'other tests beside the dependency policy still need explicit execution');
+});
+
+test('platform Python discovery requires each actual execution command', () => {
+  for (const root of platformPythonTestRoots) {
+    const path = `${root}/test_fixture.py`;
+    const tracked = new Set([path]);
+    const command = platformPythonCommand(root);
+    assert.equal(toolingTestIsDiscovered(path, tracked, makefile), true, root);
+    assert.equal(toolingTestIsDiscovered(path, tracked, makefile.replace(command, '')), false,
+      `${root}: removing the command must remove coverage`);
+    assert.equal(toolingTestIsDiscovered(path, tracked, makefile.replace(command, `\t# ${command.trim()}\n`)), false,
+      `${root}: a commented command must not count as execution`);
+    assert.equal(toolingTestIsDiscovered(path, tracked, `${makefile.replace(command, '')}\nunwired-target:\n${command}`), false,
+      `${root}: a command in an uncalled target must not count as execution`);
+    assert.equal(toolingTestIsDiscovered(`${root}/nested/test_fixture.py`, tracked, makefile), false,
+      `${root}: unittest does not recurse into a directory without __init__.py`);
+    tracked.add(`${root}/nested/__init__.py`);
+    assert.equal(toolingTestIsDiscovered(`${root}/nested/test_fixture.py`, tracked, makefile), true);
+  }
+  assert.equal(toolingTestIsDiscovered('scripts/unwired/test_fixture.py', new Set(), makefile), false,
+    'another tooling directory needs its own execution command');
 });
 
 test('every tracked tooling test is discovered by make test-tooling', () => {

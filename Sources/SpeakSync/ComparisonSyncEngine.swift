@@ -68,6 +68,11 @@ public final class ComparisonSyncEngine: ObservableObject {
 
     public func sync() async {
         guard delegate != nil else { return }
+        // Shares History's per-device switch: off keeps results on this device.
+        guard SyncConfiguration.isDataSyncEnabled(in: defaults) else {
+            lastError = nil
+            return
+        }
         guard !isSyncing else { followUpRequested = true; return }
         isSyncing = true
         defer { isSyncing = false }

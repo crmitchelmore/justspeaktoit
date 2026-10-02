@@ -260,8 +260,9 @@ final class HistorySyncEngineGuardTests: XCTestCase {
 
 // MARK: - Fakes
 
+/// Shared with `HistorySyncSwitchTests`.
 @MainActor
-private final class RecordingTransport: HistorySyncTransport {
+final class RecordingTransport: HistorySyncTransport {
     private(set) var fetchCount = 0
     private(set) var uploadedBatches: [[UUID]] = []
     private(set) var deletedIDs: [UUID] = []
@@ -293,8 +294,9 @@ private final class RecordingTransport: HistorySyncTransport {
     }
 }
 
+/// Shared with `HistorySyncSwitchTests`.
 @MainActor
-private final class AckingDelegate: HistorySyncDelegate {
+final class AckingDelegate: HistorySyncDelegate {
     private var entriesByID: [UUID: SyncableHistoryEntry]
     private(set) var acknowledgedIDs: Set<UUID> = []
     private(set) var receivedEntries: [SyncableHistoryEntry] = []

@@ -153,7 +153,7 @@ if !iosActiveCompilationConditions.isEmpty {
 // two flavours: Developer ID / direct download (default) and Mac App Store. Generate
 // with `TUIST_APP_STORE=1 tuist generate` to produce a sandboxed App Store build: it
 // defines the `APP_STORE` Swift active compilation condition (gates Sparkle self-update
-// and external executable model runtimes — see Sources/SpeakCore/DistributionChannel.swift)
+// and external executable model runtimes — see SpeakCore's DistributionChannel.swift)
 // and selects the sandboxed entitlements file.
 //
 // NOTE: the env var MUST be `TUIST_`-prefixed. Tuist only forwards environment variables
@@ -451,26 +451,21 @@ let watchAppTarget: Target = .target(
         // in JustSpeakWatch/WatchRecordingRuntime.swift.
         "UIBackgroundModes": ["audio"]
     ]),
-    // The watch target cannot depend on the SpeakCore package product
+    // The watch targets cannot depend on the SpeakCore package product
     // (several transitive package manifests do not declare watchOS support),
-    // so it compiles the shared watch files directly. Pure Foundation;
-    // unit-tested via SpeakCoreTests. `JustSpeakWatchShared` is the source the
-    // watch app and its widget extension both compile.
+    // so they link SpeakWatchCore: the shared Foundation-only watch types,
+    // with no package dependencies (issue #1123). Unit-tested via
+    // SpeakWatchCoreTests. `JustSpeakWatchShared` is the source the watch app
+    // and its widget extension both compile.
     sources: [
         "JustSpeakWatch/**",
-        "JustSpeakWatchShared/**",
-        "Sources/SpeakCore/WatchCaptureProtocol.swift",
-        "Sources/SpeakCore/WatchComplicationState.swift",
-        "Sources/SpeakCore/WatchRecordingLifecycle.swift",
-        "Sources/SpeakCore/WatchRecordingToggleSerialiser.swift",
-        "Sources/SpeakCore/WatchSharedContainer.swift",
-        "Sources/SpeakCore/ReleaseTrain.swift",
-        "Sources/SpeakCore/ReleaseTrainCatalogue.swift"
+        "JustSpeakWatchShared/**"
     ],
     resources: ["JustSpeakWatch/Assets.xcassets"],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatch/JustSpeakWatch.entitlements"))),
     dependencies: [
-        .target(name: "JustSpeakWatchWidgetExtension")
+        .target(name: "JustSpeakWatchWidgetExtension"),
+        .package(product: "SpeakWatchCore")
     ],
     settings: .settings(base: watchAppSettings)
 )
@@ -489,14 +484,12 @@ let watchWidgetTarget: Target = .target(
     infoPlist: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/Info.plist"))),
     sources: [
         "JustSpeakWatchWidget/**",
-        "JustSpeakWatchShared/**",
-        "Sources/SpeakCore/WatchCaptureProtocol.swift",
-        "Sources/SpeakCore/WatchComplicationState.swift",
-        "Sources/SpeakCore/WatchSharedContainer.swift",
-        "Sources/SpeakCore/ReleaseTrain.swift",
-        "Sources/SpeakCore/ReleaseTrainCatalogue.swift"
+        "JustSpeakWatchShared/**"
     ],
     entitlements: .file(path: .relativeToRoot(trainPlistPath("JustSpeakWatchWidget/JustSpeakWatchWidget.entitlements"))),
+    dependencies: [
+        .package(product: "SpeakWatchCore")
+    ],
     settings: .settings(base: watchWidgetSettings)
 )
 

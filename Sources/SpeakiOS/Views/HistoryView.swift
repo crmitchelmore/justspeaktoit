@@ -191,9 +191,11 @@ public struct HistoryView: View {
                         item: item,
                         isSynced: historyManager.isSynced(item),
                         isReprocessing: historyManager.isReprocessing(item),
-                        onCopyRaw: { UIPasteboard.general.string = item.transcription },
+                        onCopyRaw: { TranscriptClipboard.shared.copy(item.transcription) },
                         onCopyPolished: {
-                            UIPasteboard.general.string = item.postProcessedTranscription ?? item.transcription
+                            TranscriptClipboard.shared.copy(
+                                item.postProcessedTranscription ?? item.transcription
+                            )
                         },
                         onReprocess: { Task { await historyManager.reprocess(item) } },
                         onDelete: { historyManager.remove(item) }
@@ -207,7 +209,7 @@ public struct HistoryView: View {
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
                         Button {
-                            UIPasteboard.general.string = item.bestText
+                            TranscriptClipboard.shared.copy(item.bestText)
                         } label: {
                             Label("Copy", systemImage: "doc.on.doc")
                         }

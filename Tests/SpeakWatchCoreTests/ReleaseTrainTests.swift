@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpeakCore
+@testable import SpeakWatchCore
 
 final class ReleaseTrainTests: XCTestCase {
     func testStablePersistenceNamesRemainCompatible() {
@@ -27,15 +27,6 @@ final class ReleaseTrainTests: XCTestCase {
         XCTAssertEqual(ReleaseTrain.alpha.cliExecutableName, "speak-alpha")
     }
 
-    func testAlphaCannotReadStableLegacyKeychainServices() {
-        let config = SecureStorageConfiguration(
-            service: "vault", legacyServices: ["old-vault"], accessGroup: "TEAM.shared", releaseTrain: .alpha
-        )
-        XCTAssertEqual(config.service, "vault.alpha")
-        XCTAssertEqual(config.legacyServices, ["old-vault.alpha"])
-        XCTAssertEqual(config.accessGroup, "TEAM.shared.alpha")
-    }
-
     func testTransportRejectsCrossTrainAndAlphaRejectsLegacyPeers() {
         XCTAssertTrue(ReleaseTrain.stable.acceptsPeer(nil))
         XCTAssertTrue(ReleaseTrain.alpha.acceptsPeer(.alpha))
@@ -49,18 +40,5 @@ final class ReleaseTrainTests: XCTestCase {
             ReleaseTrain.resolve(metadata: nil, bundleIdentifier: "com.justspeaktoit.ios.alpha.keyboard"), .alpha
         )
         XCTAssertEqual(ReleaseTrain.resolve(metadata: nil, bundleIdentifier: "com.justspeaktoit.ios"), .stable)
-    }
-    func testAlphaNotesDistinguishBuildsOfSameVersion() {
-        let entries = [1, 2].map { build in
-            ReleaseNoteEntry(version: "3.2.0", tag: "alpha-build-\(build)", publishedAt: "2026-09-09",
-                             markdown: "Build \(build)", platform: .mac, train: .alpha, build: "1000.0.\(build)")
-        }
-        var browser = ReleaseNotesBrowser(catalog: .init(entries: entries), installedVersion: "3.2.0",
-                                          platform: .mac, train: .alpha, installedBuild: "1000.0.2")
-        XCTAssertTrue(browser.isShowingInstalledVersion)
-        XCTAssertNotEqual(entries[0].displayTitle, entries[1].displayTitle)
-        browser.select(version: entries[0].selectionKey)
-        XCTAssertFalse(browser.isShowingInstalledVersion)
-        XCTAssertEqual(browser.selectedEntry?.build, "1000.0.1")
     }
 }

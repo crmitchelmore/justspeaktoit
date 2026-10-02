@@ -16,7 +16,11 @@ extension TTSProvider {
             let model = GroqTTSCatalog.resolvedVoice(forID: voiceID ?? "").model
             return Decimal(characterCount) * model.costPerThousandCharacters / 1000
         }
-        if self == .azure, voiceID?.contains(":MAI-Voice-") == true { return nil }
+        // MAI voices are priced per model; an MAI model with no published rate
+        // stays unknown rather than borrowing the neural-voice price.
+        if self == .azure, let voiceID, AzureMAIVoiceCatalog.isMAIVoice(voiceID) {
+            return AzureMAIVoiceCatalog.estimatedCost(forVoiceID: voiceID, characterCount: characterCount)
+        }
         guard let rate = costPerThousandCharacters(quality: quality) else { return nil }
         return Decimal(characterCount) * rate / 1000
     }

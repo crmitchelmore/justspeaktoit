@@ -3,9 +3,9 @@ import Foundation
 // MARK: - Watch Complication State
 //
 // What the watch face shows, and how the complication asks for a recording.
-// Pure Foundation (no WidgetKit, no SwiftUI) so the same file compiles in
-// SpeakCore and is included by direct source reference in both watchOS
-// targets: the app writes these payloads, the widget extension reads them.
+// Pure Foundation (no WidgetKit, no SwiftUI) in SpeakWatchCore, which both
+// watchOS targets link: the app writes these payloads, the widget extension
+// reads them.
 
 /// The single piece of state a watch face shows for Just Speak to It.
 public enum WatchComplicationState: String, Codable, CaseIterable, Sendable {
@@ -37,9 +37,10 @@ public enum WatchComplicationState: String, Codable, CaseIterable, Sendable {
 
     /// Adds recorder failures to the published state without hiding a partial
     /// capture that was successfully persisted for delivery after an
-    /// interruption. Kept internal because it is composition policy for the
-    /// watch publisher, not part of the cross-platform payload contract.
-    static func state(
+    /// interruption. Composition policy for the watch publisher, not part of
+    /// the cross-platform payload contract; public only because the watch app
+    /// consumes it across the SpeakWatchCore module boundary.
+    public static func state(
         isRecording: Bool,
         hasRecordingError: Bool,
         latestCaptureStatus: WatchCaptureStatus?
@@ -266,9 +267,10 @@ public struct WatchRecordingRequest: Codable, Equatable, Sendable {
     public static let freshnessWindow: TimeInterval = 30
 
     /// Ownership of one request moved away from the producer's canonical path.
-    /// Internal so only the hand-off implementation and its tests can handle a
-    /// claim without consuming it.
-    struct Claim: Sendable {
+    /// Opaque: only `claim(from:)` can create one and only `consume(_:now:from:)`
+    /// can read it. Public because the watch app performs the hand-off across
+    /// the SpeakWatchCore module boundary.
+    public struct Claim: Sendable {
         fileprivate let fileName: String
     }
 
@@ -312,7 +314,7 @@ public struct WatchRecordingRequest: Codable, Equatable, Sendable {
 
     /// Atomically takes ownership of the pending path. New posts can recreate
     /// their own paths without being removed when this claim is consumed.
-    static func claim(from container: WatchSharedContainer = .shared) -> Claim? {
+    public static func claim(from container: WatchSharedContainer = .shared) -> Claim? {
         let candidates = [fileName] + container.names(prefixedBy: pendingFilePrefix)
         for candidate in candidates {
             let claimedName = "\(processingFilePrefix)\(UUID().uuidString).json"
@@ -324,7 +326,7 @@ public struct WatchRecordingRequest: Codable, Equatable, Sendable {
     }
 
     /// Decodes and removes one previously claimed request.
-    static func consume(
+    public static func consume(
         _ claim: Claim,
         now: Date = Date(),
         from container: WatchSharedContainer = .shared

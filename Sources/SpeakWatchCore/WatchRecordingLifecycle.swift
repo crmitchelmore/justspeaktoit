@@ -5,9 +5,9 @@ import Foundation
 // Persists enough state to recover a recording after process termination and
 // decides what happens to the audio captured so far when recording ends.
 //
-// Pure Foundation, no AVFoundation: the watch app target compiles this file by
-// direct source reference (like `WatchCaptureProtocol.swift`) and the rules are
-// unit-tested in `SpeakCoreTests` without watch hardware.
+// Pure Foundation, no AVFoundation: the watch app links it through
+// SpeakWatchCore (like `WatchCaptureProtocol.swift`) and the rules are
+// unit-tested in `SpeakWatchCoreTests` without watch hardware.
 //
 // The rule that matters: an interrupted or OS-terminated recording is *not*
 // thrown away. Anything long enough to be worth transcribing goes into the

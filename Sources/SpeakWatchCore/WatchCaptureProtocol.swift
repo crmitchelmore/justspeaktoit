@@ -3,10 +3,9 @@ import Foundation
 // MARK: - Watch Capture Protocol
 //
 // Shared wire types for Apple Watch → iPhone audio capture hand-off over
-// WatchConnectivity. Pure Foundation so the same file compiles in SpeakCore
-// (mac/iOS) and is included by direct source reference in the watchOS app
-// target, which cannot depend on the package graph (several transitive
-// package manifests do not declare watchOS support).
+// WatchConnectivity. Pure Foundation in SpeakWatchCore, which has no package
+// dependencies so the watchOS targets can link it (several other package
+// manifests do not declare watchOS support). SpeakCore re-exports it.
 //
 // Wire format: the envelope travels as a JSON string inside the
 // `WCSessionFileTransfer` metadata dictionary; the acknowledgement travels

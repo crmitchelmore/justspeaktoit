@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpeakCore
+@testable import SpeakWatchCore
 
 final class WatchComplicationStateTests: XCTestCase {
     // ISO8601 (the payload date format) has whole-second precision, so use a

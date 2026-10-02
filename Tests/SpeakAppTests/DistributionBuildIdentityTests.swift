@@ -177,6 +177,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
             encoding: .utf8
         )
+        let appSettings = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Settings/AppSettings.swift"),
+            encoding: .utf8
+        )
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
         XCTAssertTrue(manifest.contains("if isIOSKeyboardEnabled {"))
@@ -204,7 +208,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(app.contains("guard FeatureFlags.iOSKeyboardEnabled else"))
         XCTAssertTrue(app.contains("KeyboardInstantDictationStore.shared.setEnabled(false)"))
         XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
-        XCTAssertTrue(settings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
+        XCTAssertTrue(appSettings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
     }
 
     func testWatchAppBuildFeature_isOffByDefault() throws {
@@ -242,7 +246,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(
             watchTarget.contains("\"WKCompanionAppBundleIdentifier\": .string(trainValue(\"iosBundleIdentifier\"))")
         )
-        XCTAssertTrue(watchTarget.contains("\"Sources/SpeakCore/WatchCaptureProtocol.swift\""))
+        // Shared watch types come from the dependency-free SpeakWatchCore
+        // product, not from SpeakCore files compiled by path (issue #1123).
+        XCTAssertTrue(watchTarget.contains(".package(product: \"SpeakWatchCore\")"))
+        XCTAssertFalse(watchTarget.contains("\"Sources/SpeakCore/"))
     }
 
     func testWatchComplication_shipsOnlyWithTheWatchAppFeatureFlag() throws {
@@ -273,10 +280,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(widgetTarget.contains("product: .appExtension"))
         XCTAssertTrue(watchTarget.contains(".target(name: \"JustSpeakWatchWidgetExtension\")"))
         // Both watch targets compile the shared intent and read the same
-        // App Group container.
+        // App Group container, which SpeakWatchCore provides.
         for target in [widgetTarget, watchTarget] {
             XCTAssertTrue(target.contains("\"JustSpeakWatchShared/**\""))
-            XCTAssertTrue(target.contains("\"Sources/SpeakCore/WatchSharedContainer.swift\""))
+            XCTAssertTrue(target.contains(".package(product: \"SpeakWatchCore\")"))
         }
         XCTAssertTrue(manifest.contains("\"$(inherited) WATCH_WIDGET_EXTENSION\""))
         XCTAssertTrue(entitlements.contains("<string>group.com.justspeaktoit.watch</string>"))

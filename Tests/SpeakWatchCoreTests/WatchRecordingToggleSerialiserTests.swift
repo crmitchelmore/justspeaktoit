@@ -1,5 +1,5 @@
 import XCTest
-@testable import SpeakCore
+@testable import SpeakWatchCore
 
 @MainActor
 final class WatchRecordingToggleSerialiserTests: XCTestCase {

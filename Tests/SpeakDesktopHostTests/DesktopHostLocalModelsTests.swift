@@ -177,17 +177,29 @@ final class DesktopHostLocalModelsTests: XCTestCase {
         XCTAssertEqual(runtime.releasedPaths, [file.path], "The runtime freed only the removed model")
     }
 
-    func testARuntimeThatCannotStartIsReportedAndKeptFromRecording() async throws {
+    func testARuntimeThatCannotStartIsReportedAndOpenedAgainOnTheNextUse() async throws {
         try await download(tiny)
         FakeLocalState.shared.runtimeOpenFailure = "libwhisper.so.1 is damaged."
         let speech = try wave((0..<16_000).map { Int16(($0 % 40) * 400 - 8_000) })
-        do {
-            _ = try await controller.transcribeLocally(speech, model: tiny.catalogueID, language: nil)
-            XCTFail("A runtime that could not start transcribed")
-        } catch {}
+        let failure = "The on-device speech runtime could not start: libwhisper.so.1 is damaged."
+        for _ in 0..<2 {
+            do {
+                _ = try await controller.transcribeLocally(speech, model: tiny.catalogueID, language: nil)
+                XCTFail("A runtime that could not start transcribed")
+            } catch {
+                XCTAssertEqual(error.localizedDescription, failure)
+            }
+            XCTAssertTrue(FakeLocalState.shared.status.hasPrefix(failure))
+        }
+
+        // Repaired, as by an install that finished: the next use opens it
+        // without a restart, and Local models stops showing the failure.
+        FakeLocalState.shared.runtimeOpenFailure = nil
         let readiness = await controller.localReadiness(tiny.catalogueID)
-        XCTAssertEqual(readiness, "The on-device speech runtime could not start: libwhisper.so.1 is damaged.")
-        XCTAssertTrue(FakeLocalState.shared.status.hasPrefix("The on-device speech runtime could not start"))
+        XCTAssertNil(readiness, "A failed start refused every later use")
+        let result = try await controller.transcribeLocally(speech, model: tiny.catalogueID, language: nil)
+        XCTAssertEqual(result.text, "Local words from Whisper Tiny.")
+        XCTAssertFalse(FakeLocalState.shared.status.contains("could not start"))
     }
 
     func testTheGPUChoiceIsSaved() async throws {

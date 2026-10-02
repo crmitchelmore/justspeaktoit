@@ -23,7 +23,9 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
 
     package var localUseGPU: Bool { settings.localUseGPU ?? true }
 
-    /// Why an on-device model cannot run now, or nil when it can.
+    /// Why an on-device model cannot run now, or nil when it can. A runtime
+    /// that failed to start is not a reason: the next use opens it again, so a
+    /// library that was being installed or repaired needs no restart.
     package func localReadiness(_ model: String) -> String? {
         guard let spec = DesktopLocalTranscription.model(for: model, host: Platform.localModelHost) else {
             return "This on-device model is not available in this \(Platform.displayName) build."
@@ -32,26 +34,28 @@ extension DesktopHostController where Platform: DesktopHostLocalModelPlatform {
             return "\(spec.displayName) is being removed from \(Platform.localDeviceName)."
         }
         if let missing = Platform.localRuntimeMissing { return missing }
-        if let failure = localModels.runtimeFailure { return failure }
         guard localInstaller.state(of: .init(spec)) == .installed else {
             return "\(spec.displayName) is not downloaded yet. Open Local models to download it."
         }
         return nil
     }
 
-    /// Loads the runtime once, off the actor.
+    /// Loads the runtime off the actor and keeps it once it opens. A failed
+    /// open is shown in Local models and tried again on the next use.
     package func localRuntime() async throws -> Platform.LocalRuntime {
         if let runtime = localModels.runtime { return runtime }
         let allowGPU = localUseGPU
         do {
             let runtime = try await Task.detached { try Platform.openLocalRuntime(allowGPU: allowGPU) }.value
             localModels.runtime = runtime
+            localModels.runtimeFailure = nil
             publishLocalModels()
             return runtime
         } catch {
-            localModels.runtimeFailure = "The on-device speech runtime could not start: \(error.localizedDescription)"
+            let failure = "The on-device speech runtime could not start: \(error.localizedDescription)"
+            localModels.runtimeFailure = failure
             publishLocalModels()
-            throw error
+            throw DesktopHostError(message: failure)
         }
     }
 

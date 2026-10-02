@@ -4,6 +4,8 @@ import Foundation
 import SpeakCore
 import os.log
 
+// swiftlint:disable file_length
+
 /// Delegate protocol that platforms implement to reconcile synced entries.
 @MainActor
 public protocol HistorySyncDelegate: AnyObject {
@@ -84,6 +86,11 @@ enum HistoryChangeReconciler {
 public final class HistorySyncEngine: ObservableObject {
     @Published public private(set) var state = SyncState()
 
+    /// This device's iCloud History sync switch, persisted under
+    /// `SyncConfiguration.dataSyncEnabledKey`. Off stops every fetch, upload
+    /// and delete, so History stays on this device.
+    @Published public private(set) var isSyncEnabled: Bool
+
     public static let shared = HistorySyncEngine()
 
     private weak var delegate: HistorySyncDelegate?
@@ -110,11 +117,18 @@ public final class HistorySyncEngine: ObservableObject {
         self.transport = transport
         self.defaults = defaults
         self.delegate = delegate
+        self.isSyncEnabled = SyncConfiguration.isDataSyncEnabled(in: defaults)
         state.isCloudAvailable = cloudAvailable
     }
 
     public func initialize(delegate: HistorySyncDelegate) async {
         self.delegate = delegate
+        // Off means no CloudKit traffic at all, not even zone or subscription
+        // setup; turning sync on later runs that setup first.
+        guard isSyncEnabled else {
+            log.info("History sync is off; History stays on this device")
+            return
+        }
         await checkCloudAvailability()
         if state.isCloudAvailable {
             await setupCloudKitInfrastructure()
@@ -132,6 +146,11 @@ public final class HistorySyncEngine: ObservableObject {
         state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
         state.pendingDownloadCount = 0
 
+        guard isSyncEnabled else {
+            state.error = nil
+            log.info("Sync requested but History sync is off")
+            return
+        }
         guard state.isCloudAvailable else {
             state.error = SyncError.cloudUnavailable
             log.warning("Sync requested but iCloud unavailable")
@@ -156,7 +175,7 @@ public final class HistorySyncEngine: ObservableObject {
             followUpRequested = false
             await runReconciliationPass()
             passes += 1
-        } while followUpRequested && passes < Self.maxCoalescedPasses
+        } while followUpRequested && isSyncEnabled && passes < Self.maxCoalescedPasses
     }
 
     /// An upper bound on back-to-back passes, so a burst of triggers cannot
@@ -167,6 +186,8 @@ public final class HistorySyncEngine: ObservableObject {
     private func runReconciliationPass() async {
         do {
             try await fetchRemoteChanges()
+            // Turned off mid-pass: upload nothing more.
+            guard isSyncEnabled else { return }
             try await uploadPendingEntries()
             state.pendingDownloadCount = 0
             state.pendingUploadCount = delegate?.pendingEntries().count ?? 0
@@ -184,6 +205,9 @@ public final class HistorySyncEngine: ObservableObject {
 
     /// Upload a single entry and acknowledge it only after CloudKit confirms it.
     public func upload(entry: SyncableHistoryEntry) async throws {
+        guard isSyncEnabled else {
+            throw HistorySyncDisabledError()
+        }
         guard state.isCloudAvailable else {
             throw SyncError.cloudUnavailable
         }
@@ -207,7 +231,12 @@ public final class HistorySyncEngine: ObservableObject {
         log.debug("Uploaded entry: \(entry.id.uuidString)")
     }
 
+    /// While sync is off a local delete stays local: the iCloud copy is kept,
+    /// and is not removed if sync is turned back on.
     public func delete(entryID: UUID) async throws {
+        guard isSyncEnabled else {
+            throw HistorySyncDisabledError()
+        }
         guard state.isCloudAvailable else {
             throw SyncError.cloudUnavailable
         }
@@ -348,5 +377,45 @@ public final class HistorySyncEngine: ObservableObject {
         if !result.acknowledgedIDs.isEmpty {
             await delegate?.didAcknowledgeSyncedEntries(ids: result.acknowledgedIDs)
         }
+    }
+}
+
+// MARK: - Sync switch
+
+// In this file so it can reach the engine's private state while keeping the
+// class body within the type-length limit.
+@MainActor
+extension HistorySyncEngine {
+    /// Turns iCloud History sync on or off for this device and remembers the
+    /// choice. Turning it off is immediate: nothing more is fetched, uploaded
+    /// or deleted, and History already in iCloud is left as it is. Turning it
+    /// on returns the task that sets CloudKit up if needed and runs a catch-up
+    /// pass, which uploads History saved while sync was off.
+    @discardableResult
+    public func setSyncEnabled(_ enabled: Bool) -> Task<Void, Never>? {
+        guard enabled != isSyncEnabled else { return nil }
+        isSyncEnabled = enabled
+        defaults.set(enabled, forKey: SyncConfiguration.dataSyncEnabledKey)
+        guard enabled else {
+            state.error = nil
+            state.pendingDownloadCount = 0
+            log.info("History sync turned off; History stays on this device")
+            return nil
+        }
+        log.info("History sync turned on")
+        return Task { await self.resumeAfterEnabling() }
+    }
+
+    /// Without a delegate there is nothing to reconcile yet; `initialize`
+    /// does this work when the platform store starts.
+    private func resumeAfterEnabling() async {
+        guard delegate != nil else { return }
+        if !state.isCloudAvailable {
+            // Launched with sync off, so availability was never checked.
+            await checkCloudAvailability()
+            guard state.isCloudAvailable else { return }
+            await setupCloudKitInfrastructure()
+        }
+        await sync()
     }
 }

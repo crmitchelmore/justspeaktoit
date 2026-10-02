@@ -133,7 +133,7 @@ public struct HistoryView: View {
         if syncEngine.state.isSyncing {
             ProgressView()
                 .controlSize(.small)
-        } else if syncEngine.state.isCloudAvailable {
+        } else if syncEngine.isSyncEnabled && syncEngine.state.isCloudAvailable {
             Image(systemName: "icloud.fill")
                 .foregroundStyle(.green)
                 .font(.caption)
@@ -172,7 +172,7 @@ public struct HistoryView: View {
 
     private var historyList: some View {
         List {
-            if syncEngine.state.isCloudAvailable {
+            if syncEngine.isSyncEnabled && syncEngine.state.isCloudAvailable {
                 Section {
                     SyncStatusBanner(
                         syncEngine: syncEngine,

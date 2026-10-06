@@ -19,6 +19,9 @@ Onboarding enables the chosen batch model only after installation succeeds and
 the user presses Next with Local selected. Downloading alone never changes
 recording or cleanup settings. Switching to Remote or skipping preserves the
 current setup; completing Remote restores the remembered remote routing.
+Remote submission rechecks the location, provider, key and onboarding step after
+both validation and credential storage, so navigating or changing a choice during
+either operation cannot commit stale routing or advance the old submission.
 Failures are shown with a retry action and leave the previous configuration
 usable. Back, Skip and the location picker stay available during installation.
 The UI explicitly states that leaving lets installation continue in Settings;

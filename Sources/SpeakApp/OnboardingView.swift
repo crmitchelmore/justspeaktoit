@@ -138,6 +138,7 @@ final class OnboardingState: ObservableObject {
     @Published var transcriptionLocation: AppSettings.TranscriptionLocation = .remote
     @Published var configuredLocalPreset: LocalTranscriptionStarterPreset?
     @Published var isConfiguringLocalModel = false
+    @Published private(set) var isCompletingRemoteSetup = false
     private var localConfigurationID: UUID?
     
     // Test recording state
@@ -235,24 +236,10 @@ final class OnboardingState: ObservableObject {
     }
     
     func saveAPIKey() async throws {
-        try await secureStorage.storeSecret(apiKey, identifier: selectedProvider.keychainIdentifier)
+        let identifier = selectedProvider.keychainIdentifier
+        try await secureStorage.storeSecret(apiKey, identifier: identifier)
         // Register the key identifier so it shows up in settings
-        settings.registerAPIKeyIdentifier(selectedProvider.keychainIdentifier)
-
-        // If the chosen provider offers live streaming, make it the active
-        // transcription engine straight away so the key the user just added is
-        // actually used. Deepgram (and other streaming providers) default to
-        // no post-processing for the fastest, cleanest live experience.
-        //
-        // Only switch when the user is still on the untouched default (Apple
-        // on-device speech) so re-running onboarding never clobbers a returning
-        // user's deliberately configured model / batch / post-processing setup.
-        if let liveModel = selectedProvider.defaultLiveTranscriptionModel,
-           AppleLocalModels.isAppleSpeechModel(settings.liveTranscriptionModel) {
-            settings.transcriptionMode = .liveNative
-            settings.liveTranscriptionModel = liveModel
-            settings.postProcessingEnabled = false
-        }
+        settings.registerAPIKeyIdentifier(identifier)
     }
 
     func skipAPIKeySetup() {
@@ -308,7 +295,42 @@ final class OnboardingState: ObservableObject {
     }
 
     func completeRemoteModelSetup() {
+        // Preserve an existing remote model, but use the new provider when the
+        // live slot is still Apple's default. Commit routing only after awaits.
+        if let liveModel = selectedProvider.defaultLiveTranscriptionModel,
+           AppleLocalModels.isAppleSpeechModel(settings.liveTranscriptionModel) {
+            settings.liveTranscriptionModel = liveModel
+            settings.postProcessingEnabled = false
+        }
         settings.selectTranscriptionLocation(.remote)
+    }
+
+    func completeRemoteSetup(
+        validate: () async -> Bool,
+        save: () async throws -> Void
+    ) async -> Bool {
+        guard transcriptionLocation == .remote, !isCompletingRemoteSetup else { return false }
+        isCompletingRemoteSetup = true
+        defer { isCompletingRemoteSetup = false }
+        let provider = selectedProvider
+        let key = apiKey
+        let step = currentStep
+        let matchesSubmission = {
+            self.transcriptionLocation == .remote && self.selectedProvider == provider
+                && self.apiKey == key && self.currentStep == step && !Task.isCancelled
+        }
+        guard await validate(), matchesSubmission() else { return false }
+        do {
+            try await save()
+        } catch {
+            if matchesSubmission() {
+                validationError = "Failed to save: \(error.localizedDescription)"
+            }
+            return false
+        }
+        guard matchesSubmission() else { return false }
+        completeRemoteModelSetup()
+        return true
     }
 
     static func disableUnavailablePostProcessing(in settings: AppSettings) {
@@ -475,6 +497,7 @@ struct OnboardingView: View {
     }
 
     private var canAdvance: Bool {
+        guard !state.isCompletingRemoteSetup else { return false }
         switch state.currentStep {
         case .welcome:
             return true
@@ -533,18 +556,15 @@ struct OnboardingView: View {
     private func finishTranscriptionSetup() async {
         guard canAdvance else { return }
         if state.transcriptionLocation == .remote {
-            guard await state.validateAPIKey() else { return }
-            do {
-                try await state.saveAPIKey()
-                state.completeRemoteModelSetup()
-                AppEnvironment.shared?.capture(.providerConfigured(
-                    provider: state.selectedProvider.analyticsProviderType,
-                    method: .manual
-                ))
-            } catch {
-                state.validationError = "Failed to save: \(error.localizedDescription)"
-                return
-            }
+            let completed = await state.completeRemoteSetup(
+                validate: { await state.validateAPIKey() },
+                save: { try await state.saveAPIKey() }
+            )
+            guard completed else { return }
+            AppEnvironment.shared?.capture(.providerConfigured(
+                provider: state.selectedProvider.analyticsProviderType,
+                method: .manual
+            ))
         } else {
             guard state.completeLocalModelSetup() else { return }
         }

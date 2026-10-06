@@ -238,3 +238,102 @@ final class OnboardingStateTests: XCTestCase {
         ).first { $0.id == .whisperKitBatch })
     }
 }
+
+extension OnboardingStateTests {
+    @MainActor
+    func testRemoteSetup_changedLocationDuringValidationDoesNotSaveOrCommit() async throws {
+        let state = try makeState()
+        state.transcriptionLocation = .remote
+        let previousMode = state.settings.transcriptionMode
+        var didSave = false
+
+        let completed = await state.completeRemoteSetup(
+            validate: {
+                await Task.yield()
+                state.transcriptionLocation = .local
+                return true
+            },
+            save: { didSave = true }
+        )
+
+        XCTAssertFalse(completed)
+        XCTAssertFalse(didSave)
+        XCTAssertFalse(state.isCompletingRemoteSetup)
+        XCTAssertEqual(state.settings.transcriptionMode, previousMode)
+    }
+
+    @MainActor
+    func testRemoteSetup_changedLocationDuringSaveDoesNotCommit() async throws {
+        let state = try makeState()
+        state.transcriptionLocation = .remote
+        let previousMode = state.settings.transcriptionMode
+        let previousModel = state.settings.liveTranscriptionModel
+
+        let completed = await state.completeRemoteSetup(
+            validate: { true },
+            save: {
+                await Task.yield()
+                state.transcriptionLocation = .local
+            }
+        )
+
+        XCTAssertFalse(completed)
+        XCTAssertFalse(state.isCompletingRemoteSetup)
+        XCTAssertEqual(state.settings.transcriptionMode, previousMode)
+        XCTAssertEqual(state.settings.liveTranscriptionModel, previousModel)
+    }
+
+    @MainActor
+    func testRemoteSetup_changedProviderKeyOrStepDoesNotCommit() async throws {
+        for change in 0..<3 {
+            let state = try makeState()
+            state.transcriptionLocation = .remote
+            state.currentStep = .apiKey
+            let previousMode = state.settings.transcriptionMode
+            let completed = await state.completeRemoteSetup(
+                validate: { true },
+                save: {
+                    await Task.yield()
+                    switch change {
+                    case 0: state.selectedProvider = .openai
+                    case 1: state.apiKey = "changed-test-key"
+                    default: state.currentStep = .complete
+                    }
+                }
+            )
+            XCTAssertFalse(completed)
+            XCTAssertEqual(state.settings.transcriptionMode, previousMode)
+        }
+    }
+
+    @MainActor
+    func testRemoteSetup_unchangedSubmissionCommitsOnceAndRejectsOverlap() async throws {
+        let state = try makeState()
+        state.transcriptionLocation = .remote
+        state.settings.selectRemoteTranscriptionMode(.batch)
+        state.settings.selectLocalTranscriptionSource(.apple)
+        var saveCount = 0
+
+        let completed = await state.completeRemoteSetup(
+            validate: {
+                XCTAssertTrue(state.isCompletingRemoteSetup)
+                let overlapping = await state.completeRemoteSetup(
+                    validate: {
+                        XCTFail("Must reject overlapping submission")
+                        return true
+                    },
+                    save: { XCTFail("Must not save twice") }
+                )
+                XCTAssertFalse(overlapping)
+                return true
+            },
+            save: { saveCount += 1 }
+        )
+
+        XCTAssertTrue(completed)
+        XCTAssertEqual(saveCount, 1)
+        XCTAssertEqual(state.settings.transcriptionMode, .batchRemote)
+        XCTAssertEqual(state.settings.rememberedRemoteTranscriptionMode, .batch)
+        XCTAssertFalse(state.isCompletingRemoteSetup)
+    }
+}

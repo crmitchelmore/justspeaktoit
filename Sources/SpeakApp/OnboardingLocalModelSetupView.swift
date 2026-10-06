@@ -4,7 +4,6 @@ import SwiftUI
 struct OnboardingLocalModelSetupView: View {
     @ObservedObject var state: OnboardingState
     @ObservedObject private var localModels = LocalModelManager.shared
-    @State private var downloadTask: Task<Void, Never>?
 
     private var presets: [LocalTranscriptionStarterPreset] {
         LocalTranscriptionStarterPreset.recommended(
@@ -18,9 +17,17 @@ struct OnboardingLocalModelSetupView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Download a model. No account or API key needed.")
                 .font(.headline)
-            Text("Audio stays on this Mac. These models transcribe after recording stops. "
+            Text("This default setup transcribes on this Mac after recording stops. "
                 + "The first download needs internet; dictation then works offline.")
                 .font(.callout)
+                .foregroundStyle(.secondary)
+            Text("Existing per-app profiles can override this setup, including cloud transcription "
+                + "or cleanup. Review them in Settings > Profiles.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Your recording setup changes only when you press Next. Skip keeps your current setup. "
+                + "Downloads continue in Settings if you leave; you do not need to wait here.")
+                .font(.caption)
                 .foregroundStyle(.secondary)
 
             ForEach(presets) { preset in
@@ -39,7 +46,7 @@ struct OnboardingLocalModelSetupView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 40)
-        .onDisappear { downloadTask?.cancel() }
+        .onDisappear { state.leaveLocalModelSetup() }
     }
 
     private func presetRow(_ preset: LocalTranscriptionStarterPreset) -> some View {
@@ -66,14 +73,14 @@ struct OnboardingLocalModelSetupView: View {
                 .font(.caption)
             }
             HStack {
-                if state.isConfiguringLocalModel {
+                if isInstalling(preset) {
                     ProgressView().controlSize(.small)
                     Text("Downloading and preparing...")
                         .font(.caption)
                 }
                 Spacer()
                 Button(actionTitle(for: preset)) {
-                    downloadTask = Task {
+                    Task {
                         await state.configureLocalModel(preset) {
                             switch preset.engine {
                             case .whisperKit(let model), .phonon(let model):
@@ -88,9 +95,19 @@ struct OnboardingLocalModelSetupView: View {
                     }
                 }
                 .buttonStyle(.bordered)
-                .disabled(state.isConfiguringLocalModel || state.configuredLocalPreset == preset)
+                .disabled(state.isConfiguringLocalModel || isInstalling(preset)
+                    || state.configuredLocalPreset == preset)
                 .accessibilityIdentifier("onboardingLocalModel-\(preset.id.rawValue)")
             }
+        }
+    }
+
+    private func isInstalling(_ preset: LocalTranscriptionStarterPreset) -> Bool {
+        switch preset.engine {
+        case .whisperKit(let model), .phonon(let model):
+            return localModels.installState(for: model.id) == .installing
+        case .parakeet:
+            return false
         }
     }
 

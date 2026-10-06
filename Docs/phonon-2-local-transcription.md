@@ -15,12 +15,22 @@ where its runtime is unsupported. Model names and sizes come from the canonical
 catalogue; the compact preset chooses an available WhisperKit model under 200 MB
 without duplicating the primary recommendation.
 
-Onboarding enables the chosen batch model only after installation succeeds.
+Onboarding enables the chosen batch model only after installation succeeds and
+the user presses Next with Local selected. Downloading alone never changes
+recording or cleanup settings. Switching to Remote or skipping preserves the
+current setup; completing Remote restores the remembered remote routing.
 Failures are shown with a retry action and leave the previous configuration
-usable. Cloud post-processing is disabled for this local-only setup even when a
-cloud key already exists; local cleanup remains available. Downloads need an
-internet connection, but subsequent transcription does not. Settings also offers
-the compact choice for local streaming.
+usable. Back, Skip and the location picker stay available during installation.
+The UI explicitly states that leaving lets installation continue in Settings;
+an abandoned onboarding request cannot stage or activate a late result, or clear
+a newer request's progress.
+
+Cloud post-processing is disabled for the default local setup even when a cloud
+key already exists; local cleanup remains available. This is not an app-wide
+offline lock: the onboarding UI warns that existing per-app profiles may override
+transcription and cleanup, including cloud providers, and directs users to
+Settings > Profiles. Downloads need an internet connection, but subsequent local
+transcription does not. Settings also offers the compact choice for local streaming.
 
 ## Runtime and storage
 

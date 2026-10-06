@@ -6,7 +6,7 @@ import XCTest
 
 final class OnboardingStateTests: XCTestCase {
     @MainActor
-    func testLocalSetup_waitsForInstallationAndDisablesCloudCleanup() async throws {
+    func testLocalSetup_waitsForInstallationAndConfirmationBeforeChangingSettings() async throws {
         let state = try makeState()
         state.settings.postProcessingEnabled = true
         state.settings.postProcessingModel = "openai/gpt-5-mini"
@@ -22,6 +22,9 @@ final class OnboardingStateTests: XCTestCase {
         }
 
         XCTAssertEqual(state.configuredLocalPreset, preset)
+        XCTAssertEqual(state.settings.transcriptionMode, previousMode)
+        XCTAssertTrue(state.settings.postProcessingEnabled)
+        XCTAssertTrue(state.completeLocalModelSetup())
         XCTAssertEqual(state.settings.transcriptionMode, .localModel)
         XCTAssertEqual(state.settings.localTranscriptionMode, .batch)
         XCTAssertEqual(state.settings.localTranscriptionModel, "local/whisperkit/large-v3-turbo")
@@ -59,7 +62,74 @@ final class OnboardingStateTests: XCTestCase {
         state.settings.postProcessingEnabled = true
         state.settings.postProcessingModel = "local/post-processing/rules"
         await state.configureLocalModel(try batchPreset()) { .installed }
+        XCTAssertTrue(state.completeLocalModelSetup())
         XCTAssertTrue(state.settings.postProcessingEnabled)
+    }
+
+    @MainActor
+    func testLocalDownload_thenRemoteOrSkipDoesNotChangeRecordingOrCleanup() async throws {
+        let state = try makeState()
+        state.settings.selectRemoteTranscriptionMode(.batch)
+        state.settings.postProcessingModel = "openai/gpt-5-mini"
+        state.settings.postProcessingEnabled = true
+        state.settings.registerAPIKeyIdentifier("openrouter.apiKey")
+        await state.configureLocalModel(try batchPreset()) { .installed }
+
+        state.transcriptionLocation = .remote
+        state.skipAPIKeySetup()
+
+        XCTAssertEqual(state.settings.transcriptionMode, .batchRemote)
+        XCTAssertTrue(state.settings.postProcessingEnabled)
+        XCTAssertFalse(state.completeLocalModelSetup(), "A remote choice cannot commit a downloaded local preset")
+        state.completeRemoteModelSetup()
+        XCTAssertEqual(state.settings.transcriptionMode, .batchRemote)
+        XCTAssertEqual(state.settings.rememberedRemoteTranscriptionMode, .batch)
+    }
+
+    @MainActor
+    func testRemoteCompletion_restoresRememberedModeAfterConfirmedLocalSetup() async throws {
+        let state = try makeState()
+        state.settings.selectRemoteTranscriptionMode(.batch)
+        await state.configureLocalModel(try batchPreset()) { .installed }
+        XCTAssertTrue(state.completeLocalModelSetup())
+
+        state.transcriptionLocation = .remote
+        state.completeRemoteModelSetup()
+
+        XCTAssertEqual(state.settings.transcriptionMode, .batchRemote)
+        XCTAssertEqual(state.settings.rememberedRemoteTranscriptionMode, .batch)
+    }
+
+    @MainActor
+    func testLocalSetup_leavingDuringDownloadIgnoresLateCompletion() async throws {
+        let state = try makeState()
+        let previousMode = state.settings.transcriptionMode
+        await state.configureLocalModel(try batchPreset()) {
+            state.leaveLocalModelSetup()
+            XCTAssertFalse(state.isConfiguringLocalModel, "Navigation must not wait for the installer")
+            return .installed
+        }
+        XCTAssertNil(state.configuredLocalPreset)
+        XCTAssertEqual(state.settings.transcriptionMode, previousMode)
+    }
+
+    @MainActor
+    func testLocalSetup_abandonedRequestDoesNotReplaceNewerChoice() async throws {
+        let state = try makeState()
+        let presets = LocalTranscriptionStarterPreset.recommended(
+            for: .batch, availableModels: ModelCatalog.localTranscription, supportsParakeet: false
+        )
+        let compact = try XCTUnwrap(presets.first { $0.id == .whisperKitCompactBatch })
+        await state.configureLocalModel(try batchPreset()) {
+            state.leaveLocalModelSetup()
+            await state.configureLocalModel(compact) { .installed }
+            return .installed
+        }
+
+        XCTAssertEqual(state.configuredLocalPreset, compact)
+        XCTAssertFalse(state.isConfiguringLocalModel)
+        XCTAssertTrue(state.completeLocalModelSetup())
+        XCTAssertEqual(state.settings.localTranscriptionModel, "local/whisperkit/base")
     }
 
     @MainActor
@@ -150,7 +220,7 @@ final class OnboardingStateTests: XCTestCase {
     private func makeState() throws -> OnboardingState {
         let host = try makeWireUpTestHost()
         let environment = WireUp.bootstrap(options: host.options())
-        return OnboardingState(
+        let state = OnboardingState(
             permissionsManager: environment.permissions,
             secureStorage: environment.secureStorage,
             settings: environment.settings,
@@ -158,6 +228,8 @@ final class OnboardingStateTests: XCTestCase {
             audioFileManager: environment.audio,
             transcriptionManager: environment.transcription
         )
+        state.transcriptionLocation = .local
+        return state
     }
 
     private func batchPreset() throws -> LocalTranscriptionStarterPreset {

@@ -138,6 +138,7 @@ final class OnboardingState: ObservableObject {
     @Published var transcriptionLocation: AppSettings.TranscriptionLocation = .remote
     @Published var configuredLocalPreset: LocalTranscriptionStarterPreset?
     @Published var isConfiguringLocalModel = false
+    private var localConfigurationID: UUID?
     
     // Test recording state
     @Published var isTestRecording = false
@@ -265,24 +266,49 @@ final class OnboardingState: ObservableObject {
         prepare: () async -> LocalModelManager.InstallState
     ) async {
         guard !isConfiguringLocalModel else { return }
+        let configurationID = UUID()
+        localConfigurationID = configurationID
         isConfiguringLocalModel = true
         validationError = nil
-        defer { isConfiguringLocalModel = false }
+        defer {
+            if localConfigurationID == configurationID {
+                isConfiguringLocalModel = false
+                localConfigurationID = nil
+            }
+        }
         let installState = await prepare()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, localConfigurationID == configurationID else { return }
         switch installState {
         case .installed:
-            preset.activate(in: settings)
-            // A local-only setup must not send transcripts to cloud cleanup.
-            if !PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
-                settings.postProcessingEnabled = false
-            }
             configuredLocalPreset = preset
         case .failed(let message):
             validationError = "Could not configure \(preset.displayName): \(message). Try downloading again."
         case .notInstalled, .installing:
             validationError = "\(preset.displayName) is not ready yet. Finish downloading before continuing."
         }
+    }
+
+    func leaveLocalModelSetup() {
+        localConfigurationID = nil
+        isConfiguringLocalModel = false
+    }
+
+    @discardableResult
+    func completeLocalModelSetup() -> Bool {
+        guard transcriptionLocation == .local, !isConfiguringLocalModel,
+              let preset = configuredLocalPreset else {
+            validationError = "Choose and download a local model before continuing."
+            return false
+        }
+        preset.activate(in: settings)
+        if !PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+            settings.postProcessingEnabled = false
+        }
+        return true
+    }
+
+    func completeRemoteModelSetup() {
+        settings.selectTranscriptionLocation(.remote)
     }
 
     static func disableUnavailablePostProcessing(in settings: AppSettings) {
@@ -393,7 +419,6 @@ struct OnboardingView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("onboardingBackButton")
-                    .disabled(state.isConfiguringLocalModel)
                 }
 
                 Spacer()
@@ -409,7 +434,6 @@ struct OnboardingView: View {
                     .buttonStyle(.plain)
                     .foregroundColor(.secondary)
                     .accessibilityIdentifier("onboardingSkipButton")
-                    .disabled(state.isConfiguringLocalModel)
                 }
                 
                 if state.currentStep == .complete {
@@ -512,6 +536,7 @@ struct OnboardingView: View {
             guard await state.validateAPIKey() else { return }
             do {
                 try await state.saveAPIKey()
+                state.completeRemoteModelSetup()
                 AppEnvironment.shared?.capture(.providerConfigured(
                     provider: state.selectedProvider.analyticsProviderType,
                     method: .manual
@@ -520,6 +545,8 @@ struct OnboardingView: View {
                 state.validationError = "Failed to save: \(error.localizedDescription)"
                 return
             }
+        } else {
+            guard state.completeLocalModelSetup() else { return }
         }
         withAnimation {
             state.currentStep = state.selectedHotKey != .fnKey ? .testRecording : .complete
@@ -728,11 +755,11 @@ struct APIKeyStepView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 40)
-                .disabled(state.isConfiguringLocalModel)
                 .accessibilityIdentifier("onboardingTranscriptionLocationPicker")
                 .onChange(of: state.transcriptionLocation) { _, location in
                     state.validationError = nil
                     if location == .remote {
+                        state.leaveLocalModelSetup()
                         state.configuredLocalPreset = nil
                     }
                 }

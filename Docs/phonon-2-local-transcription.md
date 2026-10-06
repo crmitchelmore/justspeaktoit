@@ -6,6 +6,22 @@ Download installs the runtime and model, verifies an offline decode, then select
 Phonon-2. WhisperKit remains the multilingual option and the App Store/Intel choice.
 This integration does not add Phonon streaming or iOS support.
 
+macOS onboarding's transcription setup offers **Local** and **Remote** directly.
+Local uses the same starter presets as Settings: Phonon-2 (~164 MB of weights,
+English only, additional runtime), WhisperKit Large v3 Turbo (~632 MB,
+multilingual accuracy), and a compact WhisperKit model (currently Base, ~145 MB,
+less storage/memory but lower accuracy on difficult speech). Phonon is omitted
+where its runtime is unsupported. Model names and sizes come from the canonical
+catalogue; the compact preset chooses an available WhisperKit model under 200 MB
+without duplicating the primary recommendation.
+
+Onboarding enables the chosen batch model only after installation succeeds.
+Failures are shown with a retry action and leave the previous configuration
+usable. Cloud post-processing is disabled for this local-only setup even when a
+cloud key already exists; local cleanup remains available. Downloads need an
+internet connection, but subsequent transcription does not. Settings also offers
+the compact choice for local streaming.
+
 ## Runtime and storage
 
 The canonical entry is `PhononLocalModels.phonon2` in SpeakCore, with ID

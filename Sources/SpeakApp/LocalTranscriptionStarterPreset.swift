@@ -6,6 +6,8 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
     case whisperKitStreaming
     case phononBatch
     case whisperKitBatch
+    case whisperKitCompactBatch
+    case whisperKitCompactStreaming
   }
 
   enum Engine: Equatable {
@@ -70,10 +72,33 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
           )
         )
       }
-      return presets
+      return presets + compactPresets(for: mode, availableModels: availableModels, excluding: whisperKitModel)
     case .batch:
       return batchPresets(availableModels: availableModels, whisperKitModel: whisperKitModel)
+        + compactPresets(for: mode, availableModels: availableModels, excluding: whisperKitModel)
     }
+  }
+
+  private static func compactPresets(
+    for mode: AppSettings.LocalTranscriptionMode,
+    availableModels: [LocalTranscriptionModel],
+    excluding preferredModel: LocalTranscriptionModel?
+  ) -> [Self] {
+    guard let model = availableModels.filter({
+      $0.engine == .whisperKit && $0.id != preferredModel?.id
+        && $0.approximateSizeMB > 0 && $0.approximateSizeMB <= 200
+        && (mode == .batch || $0.supportsLiveStreaming)
+    }).max(by: { $0.approximateSizeMB < $1.approximateSizeMB }) else { return [] }
+    return [Self(
+      id: mode == .batch ? .whisperKitCompactBatch : .whisperKitCompactStreaming,
+      mode: mode,
+      engine: .whisperKit(model),
+      recommendation: "Smaller download",
+      detail: "Multilingual dictation with less storage and memory than the larger WhisperKit model. "
+        + "Trades accuracy on accents, noise and complex speech for a lighter setup.",
+      runtime: "WhisperKit / Core ML",
+      approximateSizeMB: model.approximateSizeMB
+    )]
   }
 
   private static func batchPresets(
@@ -104,7 +129,7 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
   /// that is not installed make every recording fail.
   @MainActor
   func activate(in settings: AppSettings) {
-    settings.transcriptionMode = .localModel
+    settings.selectLocalTranscriptionSource(.downloaded)
     settings.localTranscriptionMode = mode
 
     switch engine {

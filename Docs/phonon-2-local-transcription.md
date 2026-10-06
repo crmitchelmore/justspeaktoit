@@ -6,6 +6,35 @@ Download installs the runtime and model, verifies an offline decode, then select
 Phonon-2. WhisperKit remains the multilingual option and the App Store/Intel choice.
 This integration does not add Phonon streaming or iOS support.
 
+macOS onboarding's transcription setup offers **Local** and **Remote** directly.
+Local uses the same starter presets as Settings: Phonon-2 (~164 MB of weights,
+English only, additional runtime), WhisperKit Large v3 Turbo (~632 MB,
+multilingual accuracy), and a compact WhisperKit model (currently Base, ~145 MB,
+less storage/memory but lower accuracy on difficult speech). Phonon is omitted
+where its runtime is unsupported. Model names and sizes come from the canonical
+catalogue; the compact preset chooses an available WhisperKit model under 200 MB
+without duplicating the primary recommendation.
+
+Onboarding enables the chosen batch model only after installation succeeds and
+the user presses Next with Local selected. Downloading alone never changes
+recording or cleanup settings. Switching to Remote or skipping preserves the
+current setup; completing Remote restores the remembered remote routing.
+Remote submission rechecks the location, provider, key and onboarding step after
+both validation and credential storage, so navigating or changing a choice during
+either operation cannot commit stale routing or advance the old submission.
+Failures are shown with a retry action and leave the previous configuration
+usable. Back, Skip and the location picker stay available during installation.
+The UI explicitly states that leaving lets installation continue in Settings;
+an abandoned onboarding request cannot stage or activate a late result, or clear
+a newer request's progress.
+
+Cloud post-processing is disabled for the default local setup even when a cloud
+key already exists; local cleanup remains available. This is not an app-wide
+offline lock: the onboarding UI warns that existing per-app profiles may override
+transcription and cleanup, including cloud providers, and directs users to
+Settings > Profiles. Downloads need an internet connection, but subsequent local
+transcription does not. Settings also offers the compact choice for local streaming.
+
 ## Runtime and storage
 
 The canonical entry is `PhononLocalModels.phonon2` in SpeakCore, with ID

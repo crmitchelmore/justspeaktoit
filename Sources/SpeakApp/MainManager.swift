@@ -135,6 +135,10 @@ final class MainManager: ObservableObject {
   /// Tracks whether the HUD window is visible to skip unnecessary UI updates
   var isHUDOccluded: Bool = false
   var occlusionObserver: NSObjectProtocol?
+  /// Holds the HUD clock and start cue until real audio arrives (see
+  /// `MainManager+AudioArrival`).
+  var audioArrivalGate: RecordingAudioArrivalGate?
+  weak var audioArrivalSession: ActiveSession?
 
   struct RetryData {
     let transcriptionResult: TranscriptionResult
@@ -757,6 +761,18 @@ final class MainManager: ObservableObject {
       }
       // A standby build must finish before the microphone opens beside it.
       await keyPressPrimer.settleStandby()
+      // A hands-free capture always moves the HUD to the recording pane, even
+      // when the user hides the HUD for their own sessions: the armed pane
+      // otherwise claims the app only listens while it in fact records.
+      // Showing that the microphone captures is a privacy duty, not a taste.
+      let showsHUD = appSettings.showHUDDuringSessions || trigger == .handsFree
+      if showsHUD {
+        // Up straight away as "Getting ready"; its clock starts only when the
+        // microphone delivers real audio, never while words can't be heard.
+        permissionsManager.refresh(.microphone)
+        hudManager.updateCaptureHealth(buildCaptureHealthSnapshot())
+        hudManager.beginRecording(profileName: profileApplier.activeProfileName, awaitingAudio: true)
+      }
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak self] in self?.activeSession === session },
         prepareStream: prepareStream,
@@ -782,22 +798,16 @@ final class MainManager: ObservableObject {
               description: "Recording started via \(gesture.rawValue)"
             )
           )
-          // A hands-free capture always moves the HUD to the recording pane,
-          // even when the user hides the HUD for their own sessions: the armed
-          // pane otherwise claims the app only listens while it in fact
-          // records. Showing that the microphone captures is a privacy duty,
-          // not a taste.
-          if self.appSettings.showHUDDuringSessions || trigger == .handsFree {
-            self.permissionsManager.refresh(.microphone)
+          if showsHUD {
             self.hudManager.updateCaptureHealth(self.buildCaptureHealthSnapshot())
-            self.hudManager.beginRecording(profileName: self.profileApplier.activeProfileName)
           }
+          self.beginAwaitingAudio(for: session)
           self.startAudioLevelMonitoring()
         },
         discardCapture: { [weak self] in await self?.discardStartedCapture() },
         startStream: startStream,
         discardStream: { [weak self] in self?.transcriptionManager.cancelLiveTranscription() },
-        playCue: { [weak self] in self?.playRecordingStartCue(for: session) }
+        playCue: { [weak self] in self?.requestRecordingStartCue(for: session) }
       )
       let timeline = try await sequencer.run()
       await liveInputPreparation.finish()
@@ -806,6 +816,7 @@ final class MainManager: ObservableObject {
       return .started
     } catch is RecordingStartAbort {
       await liveInputPreparation.finish(startFailed: true)
+      hudManager.cancelAwaitingAudio()
       // Not a failure: the session ended while startup was suspended, and the
       // sequencer has already torn down whatever it brought up. Touching the
       // shared failure path here would clobber the session that replaced it.
@@ -828,7 +839,7 @@ final class MainManager: ObservableObject {
   /// Plays the "recording started" cue, unless the user already stopped (or a
   /// newer session replaced this one) while capture was coming up — a late cue
   /// after the stop cue would be worse than no cue at all.
-  private func playRecordingStartCue(for session: ActiveSession) {
+  func playRecordingStartCue(for session: ActiveSession) {
     guard self.activeSession === session, self.state == .recording else {
       self.logger.info("Skipping start cue: session ended before capture was ready")
       return

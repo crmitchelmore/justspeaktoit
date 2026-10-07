@@ -711,8 +711,10 @@ final class MainManager: ObservableObject {
         : nil
       // The live engine's input node is built before the recorder opens the
       // microphone; built afterwards it stalled stream start (and the cue) by
-      // ~3 s on Bluetooth inputs. See `LiveInputEngineStore`.
+      // ~3 s on Bluetooth inputs. See `LiveInputEngineStore`. Routes that
+      // capture through their own engine (WhisperKit) would never claim it.
       let prepareStream: RecordingStartSequencer.Step? = audioFileManager.requiresPhysicalInput
+        && transcriptionManager.liveRouteUsesLiveInputEngine
         ? { await liveInputPreparation.prepare() }
         : nil
       let sequencer = RecordingStartSequencer(

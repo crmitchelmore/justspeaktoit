@@ -397,6 +397,13 @@ extension TranscriptionManager {
     return appSettings.batchTranscriptionModel
   }
 
+  /// Whether the live route for the current mode captures through
+  /// `LiveInputEngines.shared`; record-start prepares an engine only then.
+  var liveRouteUsesLiveInputEngine: Bool {
+    guard let model = try? liveTranscriptionModelForCurrentMode() else { return false }
+    return liveController.usesLiveInputEngine(for: model)
+  }
+
   private func liveTranscriptionModelForCurrentMode() throws -> String {
     var availableStreamingSourceIDs = Set(
       LocalModelManager.shared.availableModels

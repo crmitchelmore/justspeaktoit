@@ -14,31 +14,32 @@ final class LiveInputEngineStoreTests: XCTestCase {
     }
 
     private final class Environment {
-        var now: TimeInterval = 100
         var inputDeviceID: UInt32? = 42
         var enginesMade = 0
     }
 
-    private func makeStore(_ environment: Environment, maximumAge: TimeInterval = 5)
-        -> LiveInputEngineStore<FakeEngine> {
+    private func makeStore(_ environment: Environment) -> LiveInputEngineStore<FakeEngine> {
         LiveInputEngineStore(
             makeEngine: {
                 environment.enginesMade += 1
                 return FakeEngine()
             },
             primeInput: { $0.inputPrimed = true },
-            currentInputDeviceID: { environment.inputDeviceID },
-            uptime: { environment.now },
-            maximumAge: maximumAge
+            currentInputDeviceID: { environment.inputDeviceID }
         )
+    }
+
+    private func prepared(_ store: LiveInputEngineStore<FakeEngine>) -> LiveInputEngineStore<FakeEngine>.Token {
+        let token = store.beginPreparation()
+        store.prepare(token)
+        return token
     }
 
     func testMakeEngine_HandsOutThePreparedEngineWithItsInputAlreadyBuilt() {
         // Arrange
         let environment = Environment()
         let store = makeStore(environment)
-        store.prepare()
-        environment.now += 0.3
+        _ = prepared(store)
 
         // Act
         let engine = store.makeEngine()
@@ -53,7 +54,7 @@ final class LiveInputEngineStoreTests: XCTestCase {
         // Arrange
         let environment = Environment()
         let store = makeStore(environment)
-        store.prepare()
+        _ = prepared(store)
         let first = store.makeEngine()
 
         // Act
@@ -83,7 +84,7 @@ final class LiveInputEngineStoreTests: XCTestCase {
         // the wrong microphone.
         let environment = Environment()
         let store = makeStore(environment)
-        store.prepare()
+        _ = prepared(store)
         environment.inputDeviceID = 7
 
         // Act
@@ -94,12 +95,27 @@ final class LiveInputEngineStoreTests: XCTestCase {
         XCTAssertEqual(environment.enginesMade, 2)
     }
 
-    func testMakeEngine_WithAStalePreparation_BuildsAFreshEngine() {
+    func testMakeEngine_WhenTheInputDeviceIsUnknown_NeverReusesThePreparedEngine() {
+        // Arrange: two failed device lookups are not evidence of the same device.
+        let environment = Environment()
+        environment.inputDeviceID = nil
+        let store = makeStore(environment)
+        _ = prepared(store)
+
+        // Act
+        let engine = store.makeEngine()
+
+        // Assert
+        XCTAssertFalse(engine.inputPrimed)
+        XCTAssertFalse(store.hasPreparedEngine)
+    }
+
+    func testMakeEngine_WhenTheDeviceBecomesUnknownAfterPreparation_BuildsAFreshEngine() {
         // Arrange
         let environment = Environment()
-        let store = makeStore(environment, maximumAge: 5)
-        store.prepare()
-        environment.now += 5.1
+        let store = makeStore(environment)
+        _ = prepared(store)
+        environment.inputDeviceID = nil
 
         // Act
         let engine = store.makeEngine()
@@ -108,18 +124,127 @@ final class LiveInputEngineStoreTests: XCTestCase {
         XCTAssertFalse(engine.inputPrimed)
     }
 
+    func testMakeEngine_AfterASlowColdModelLoad_StillHandsOutThePreparedEngine() {
+        // Arrange: FluidAudio and sherpa-onnx claim the engine only after their
+        // model has loaded, which can take many seconds on a cold start. The
+        // store has no clock: the preparation stays valid until its start ends.
+        let environment = Environment()
+        let store = makeStore(environment)
+        _ = prepared(store)
+        _ = store.hasPreparedEngine // other starts' work must not expire it either
+
+        // Act
+        let engine = store.makeEngine()
+
+        // Assert
+        XCTAssertTrue(engine.inputPrimed)
+    }
+
+    func testPrepare_WithAStaleToken_DoesNotInstallItsEngine() {
+        // Arrange: an abandoned start's input-node build finishes after a newer
+        // start has already prepared its own engine.
+        let environment = Environment()
+        let store = makeStore(environment)
+        let stale = store.beginPreparation()
+        let current = prepared(store)
+
+        // Act
+        store.prepare(stale)
+        let engine = store.makeEngine()
+
+        // Assert
+        XCTAssertTrue(engine.inputPrimed)
+        XCTAssertEqual(environment.enginesMade, 2)
+        store.discard(current)
+    }
+
+    func testPrepare_WithAStaleTokenAndNoNewerEngine_LeavesTheStoreEmpty() {
+        // Arrange
+        let environment = Environment()
+        let store = makeStore(environment)
+        let stale = store.beginPreparation()
+        _ = store.beginPreparation()
+
+        // Act
+        store.prepare(stale)
+
+        // Assert
+        XCTAssertFalse(store.hasPreparedEngine)
+    }
+
     func testDiscard_DropsAnUnclaimedEngine() {
         // Arrange
         let environment = Environment()
         let store = makeStore(environment)
-        store.prepare()
+        let token = prepared(store)
 
         // Act
-        store.discard()
+        store.discard(token)
 
         // Assert
         XCTAssertFalse(store.hasPreparedEngine)
         XCTAssertFalse(store.makeEngine().inputPrimed)
+    }
+
+    func testDiscard_WithAStaleToken_KeepsTheCurrentPreparation() {
+        // Arrange: the abandoned start finishes after its replacement prepared.
+        let environment = Environment()
+        let store = makeStore(environment)
+        let stale = prepared(store)
+        _ = prepared(store)
+
+        // Act
+        store.discard(stale)
+
+        // Assert
+        XCTAssertTrue(store.hasPreparedEngine)
+        XCTAssertTrue(store.makeEngine().inputPrimed)
+    }
+
+    func testRestore_AfterAFailedStart_HandsTheEngineToTheFallbackController() {
+        // Arrange: SpeechAnalyzer claimed the prepared engine, then failed; the
+        // legacy Apple Speech fallback starts beside the running recorder.
+        let environment = Environment()
+        let store = makeStore(environment)
+        _ = prepared(store)
+        let failed = store.makeEngine()
+
+        // Act
+        store.restore(failed)
+        let fallback = store.makeEngine()
+
+        // Assert
+        XCTAssertTrue(fallback === failed)
+        XCTAssertEqual(environment.enginesMade, 1)
+    }
+
+    func testRestore_AfterThePreparationEnded_IsIgnored() {
+        // Arrange
+        let environment = Environment()
+        let store = makeStore(environment)
+        let token = prepared(store)
+        let claimed = store.makeEngine()
+        store.discard(token)
+
+        // Act
+        store.restore(claimed)
+
+        // Assert
+        XCTAssertFalse(store.hasPreparedEngine)
+    }
+
+    func testRestore_OfAnEngineTheStoreDidNotPrepare_IsIgnored() {
+        // Arrange
+        let environment = Environment()
+        let store = makeStore(environment)
+        _ = prepared(store)
+        _ = store.makeEngine()
+
+        // Act
+        store.restore(FakeEngine())
+
+        // Assert
+        XCTAssertFalse(store.hasPreparedEngine)
     }
 }
 
@@ -174,5 +299,14 @@ final class LiveInputEngineSourceGuardTests: XCTestCase {
         // Assert
         XCTAssertTrue(text.contains("prepareStream: prepareStream"))
         XCTAssertTrue(text.contains("liveInputPreparation.prepare()"))
+        XCTAssertTrue(text.contains("transcriptionManager.liveRouteUsesLiveInputEngine"))
+    }
+
+    func testSpeechAnalyzerStartFailure_ReturnsItsEngineForTheFallback() throws {
+        // Act
+        let text = try source("AppleSpeechAnalyzerLiveController.swift")
+
+        // Assert
+        XCTAssertTrue(text.contains("LiveInputEngines.shared.restore(audioEngine)"))
     }
 }

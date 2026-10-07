@@ -62,6 +62,10 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     } catch {
       audioEngine.stop()
       audioEngine.inputNode.removeTap(onBus: 0)
+      // The legacy Apple Speech fallback starts beside the running recorder;
+      // give it this engine's already-built input node rather than letting it
+      // build one there, which brings the Bluetooth start stall back.
+      LiveInputEngines.shared.restore(audioEngine)
       await audioDeviceManager.endUsingPreferredInput(session: inputSession)
       throw error
     }

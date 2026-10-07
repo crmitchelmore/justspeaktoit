@@ -382,7 +382,8 @@ struct ModelPicker: View {
     .onChange(of: selection) { _, newValue in
       // Only a user choice writes through. Selections that merely mirror the
       // bound value, or show that it is not one of these options, must not.
-      if newValue.isEmpty || newValue.caseInsensitiveCompare(value) == .orderedSame {
+      let mirroredValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      if newValue.isEmpty || newValue.caseInsensitiveCompare(mirroredValue) == .orderedSame {
         return
       }
       if newValue == ModelCatalog.customOptionID {

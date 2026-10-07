@@ -27,3 +27,6 @@ API breakage: enumelement DictationProfileIssue.duplicateProfile has been added 
 API breakage: enumelement DictationProfileIssue.invalidSelection has been added as a new enum case
 API breakage: enumelement DictationProfileIssue.invalidWindowsExecutablePath has been added as a new enum case
 API breakage: enumelement DictationProfileMatcher.Kind.windowsExecutablePath has been added as a new enum case
+# Record-start timelines gain a checkpoint proving the live input was built
+# before capture opened the microphone (the ~3 s Bluetooth stall, #1188).
+API breakage: enumelement RecordingStartStage.streamInputPrepared has been added as a new enum case

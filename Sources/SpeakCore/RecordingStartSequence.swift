@@ -141,6 +141,30 @@ public struct RecordingStartSequencer {
         self.playCue = playCue
     }
 
+    @available(*, deprecated, message: "Pass prepareStream so the live input is built before capture opens the mic.")
+    @_disfavoredOverload
+    public init(
+        now: @escaping () -> Date = Date.init,
+        isSessionCurrent: @escaping () -> Bool = { true },
+        startCapture: @escaping Step,
+        discardCapture: Teardown? = nil,
+        startStream: Step?,
+        discardStream: Teardown? = nil,
+        playCue: @escaping () -> Void
+    ) {
+        self.init(
+            now: now,
+            isSessionCurrent: isSessionCurrent,
+            prepareStream: nil,
+            discardPreparedStream: nil,
+            startCapture: startCapture,
+            discardCapture: discardCapture,
+            startStream: startStream,
+            discardStream: discardStream,
+            playCue: playCue
+        )
+    }
+
     /// Prepares the live input (when there is a stream), brings capture up and
     /// only then plays the cue. Any failure propagates
     /// with the cue unplayed — the user is never told a failed session started.

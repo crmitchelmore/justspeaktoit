@@ -7,8 +7,8 @@ import os.log
 // MARK: - Soniox Live Controller
 
 // swiftlint:disable type_body_length
-/// Wraps SonioxLiveTranscriber to conform to LiveTranscriptionController protocol.
-final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxFinalizationDelegate {
+/// Native capture with a thin adapter over the shared SonioxLiveClient.
+final class SonioxLiveController: NSObject, LiveTranscriptionController {
   weak var delegate: LiveTranscriptionSessionDelegate?
   private(set) var isRunning: Bool = false
 
@@ -16,23 +16,20 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   private let permissionsManager: PermissionsManager
   private let audioDeviceManager: AudioInputDeviceManager
   private let secureStorage: SecureAppStorage
-  private var transcriber: SonioxLiveTranscriber?
+  private var transcriber: SonioxControllerClient?
   private var currentLanguage: String?
   private var currentModel: String?
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var audioEngine = AVAudioEngine()
   private let logger = SpeakLogger.logger(category: "SonioxLiveController")
   private let audioProcessor = SonioxAudioProcessor()
+  private var isStarting = false
   private var hasFinished: Bool = false
 
   private let targetSampleRate: Double = 16000
   private var targetFormat: AVAudioFormat?
   private var streamingStartTime: Date?
-  private var finalSegments: [TranscriptionSegment] = []
-  private var currentInterim: String = ""
-  private var fullTranscript: String = ""
-  private var stopContinuation: CheckedContinuation<Void, Never>?
-  private var stopGeneration = LiveTranscriptionStopGeneration()
+  private var reportedFailure = false
 
   init(
     appSettings: AppSettings,
@@ -54,6 +51,9 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length
   func start() async throws {
+    guard !isStarting, transcriber == nil else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+    isStarting = true
+    defer { isStarting = false }
     guard await ensurePermissions() else {
       throw TranscriptionManagerError.microphonePermissionMissing
     }
@@ -90,14 +90,13 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
         modelID = "stt-rt-v5"
       }
 
-      let newTranscriber = SonioxLiveTranscriber(
+      let newTranscriber = SonioxControllerClient(
         apiKey: apiKey,
         model: modelID,
         language: currentLanguage,
         sampleRate: 16000
       )
       transcriber = newTranscriber
-      newTranscriber.finalizationDelegate = self
 
       newTranscriber.start(
         onTranscript: { [weak self, weak newTranscriber] text, isFinal in
@@ -106,7 +105,8 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
             // Cached controllers are reused between recordings, so a message
             // queued by the previous stream can land here after the next
             // recording started. Only the current stream owns this state.
-            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
+            guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber),
+                  !self.hasFinished else { return }
             self.handleTranscript(text: text, isFinal: isFinal)
           }
         },
@@ -114,19 +114,12 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
           Task { @MainActor [weak self, weak newTranscriber] in
             guard let self else { return }
             guard LiveTranscriptionRun.isCurrent(newTranscriber, activeStream: self.transcriber) else { return }
-            // Always release a pending stop() continuation so we don't burn the
-            // 2s timeout when an error/close arrives during shutdown.
-            if let continuation = self.stopContinuation {
-              self.stopContinuation = nil
-              continuation.resume()
-            }
-            if !self.isRunning { return }
-            self.delegate?.liveTranscriber(self, didFail: error)
+            await self.handleStreamError(error, from: newTranscriber)
           }
         }
       )
 
-      audioProcessor.setRunning(true)
+      audioProcessor.setRunning(true, stream: newTranscriber)
       let processor = audioProcessor
       let log = logger
       inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { buffer, _ in
@@ -140,6 +133,10 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       }
 
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      // A stop can finish while a bad-device retry awaits. Keep another start
+      // out until this attempt has retired, then clean up its engine normally.
+      guard !hasFinished else { throw CancellationError() }
+      if let error = newTranscriber.snapshot.error { throw error }
       isRunning = true
       streamingStartTime = Date()
     } catch {
@@ -149,97 +146,64 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
   }
 
   private func handleTranscript(text: String, isFinal: Bool) {
-    if isFinal {
-      let segment = TranscriptionSegment(startTime: 0, endTime: 0, text: text)
-      finalSegments.append(segment)
-      fullTranscript = finalSegments.map(\.text).joined(separator: " ")
-      currentInterim = ""
-      delegate?.liveTranscriber(self, didUpdatePartial: fullTranscript)
-
-      // Resume the stop() continuation if we're shutting down.
-      if hasFinished, let continuation = stopContinuation {
-        stopContinuation = nil
-        continuation.resume()
-      }
-    } else {
-      currentInterim = text
-      let displayText = fullTranscript.isEmpty
-        ? currentInterim
-        : fullTranscript + " " + currentInterim
-      delegate?.liveTranscriber(self, didUpdatePartial: displayText)
-    }
+    // Every shared Soniox update restates the whole recording. Appending it
+    // to earlier finals duplicates confirmed words and punctuation revisions.
+    delegate?.liveTranscriber(self, didUpdatePartial: text)
   }
 
-  // MARK: - SonioxFinalizationDelegate
-
-  nonisolated func sonioxDidFinishStream(_ transcriber: SonioxLiveTranscriber) {
-    Task { @MainActor [weak self, weak transcriber] in
-      guard let self else { return }
-      guard LiveTranscriptionRun.isCurrent(transcriber, activeStream: self.transcriber) else { return }
-      if let continuation = self.stopContinuation {
-        self.stopContinuation = nil
-        continuation.resume()
-      }
-    }
+  private func handleStreamError(_ error: Error, from active: SonioxControllerClient?) async {
+    guard let active, LiveTranscriptionRun.isCurrent(active, activeStream: transcriber) else { return }
+    // Startup inspects the synchronous error snapshot after the engine settles
+    // and throws through its existing cleanup path before reporting success.
+    guard isRunning || hasFinished else { return }
+    audioEngine.stop()
+    audioEngine.inputNode.removeTap(onBus: 0)
+    isRunning = false
+    audioProcessor.setRunning(false)
+    active.cancel()
+    await endActiveInputSession()
+    guard LiveTranscriptionRun.isCurrent(active, activeStream: transcriber), !reportedFailure else { return }
+    reportedFailure = true
+    delegate?.liveTranscriber(self, didUpdatePartial: active.snapshot.text)
+    delegate?.liveTranscriber(self, didFail: error)
   }
 
   func stop() async {
-    guard isRunning else { return }
-    guard !hasFinished else { return }
+    guard let active = transcriber, !hasFinished else { return }
     hasFinished = true
-
     audioEngine.stop()
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
 
-    if let transcriber {
-      audioProcessor.drainConverterTail()
-      audioProcessor.flushPendingAudio(to: transcriber)
-      await transcriber.waitForPendingSends()
-      audioProcessor.setRunning(false)
-      await applyLiveStopGrace(appSettings.liveStopGracePeriod)
-      // Ask Soniox to finalize any in-flight non-final tokens so the trailing
-      // words of the utterance get returned as final tokens. The server replies
-      // with a `<fin>` marker token (handled in parseResponse) which fires the
-      // SonioxFinalizationDelegate and resumes the continuation below.
-      transcriber.sendFinalize()
-
-      // Wait for `<fin>`/`finished:true` or a 2s timeout. Both paths nil-out
-      // stopContinuation idempotently.
-      let generation = stopGeneration.begin()
-      await withCheckedContinuation { continuation in
-        stopContinuation = continuation
-        Task { @MainActor [weak self] in
-          try? await Task.sleep(for: .seconds(2))
-          guard let self,
-            self.stopGeneration.isCurrent(generation),
-            let cont = self.stopContinuation
-          else { return }
-          self.stopContinuation = nil
-          cont.resume()
-        }
+    audioProcessor.drainConverterTail()
+    audioProcessor.flushPendingAudio(to: active)
+    audioProcessor.setRunning(false)
+    await applyLiveStopGrace(appSettings.liveStopGracePeriod)
+    guard LiveTranscriptionRun.isCurrent(active, activeStream: transcriber) else { return }
+    // The shared client drains sends, sends end-of-stream and waits for the
+    // server's finished response. The adapter's 3.5 s deadline preserves the
+    // previous total failure budget without a healthy fixed finalisation wait.
+    let snapshot = await active.finishAndWait()
+    guard LiveTranscriptionRun.isCurrent(active, activeStream: transcriber) else { return }
+    let result = buildFinalResult(snapshot)
+    active.cancel()
+    await endActiveInputSession()
+    guard LiveTranscriptionRun.isCurrent(active, activeStream: transcriber) else { return }
+    transcriber = nil
+    if let error = snapshot.error {
+      if !reportedFailure {
+        reportedFailure = true
+        delegate?.liveTranscriber(self, didUpdatePartial: snapshot.text)
+        delegate?.liveTranscriber(self, didFail: error)
       }
-
-      // Now flush any accumulated finals (covers the timeout path) and close.
-      transcriber.flushFinal()
-      transcriber.signalEndOfStream()
-      transcriber.stop()
     } else {
-      audioProcessor.setRunning(false)
-    }
-
-    let result = buildFinalResult()
-    await MainActor.run {
       delegate?.liveTranscriber(self, didFinishWith: result)
     }
-
-    await endActiveInputSession()
-    transcriber = nil
   }
 
   private final class SonioxAudioProcessor: @unchecked Sendable {
-    private static let preferredChunkBytes = SonioxLiveTranscriber.preferredChunkBytes
-    private static let minimumChunkBytes = SonioxLiveTranscriber.minimumChunkBytes
+    private static let preferredChunkBytes = SonioxControllerClient.preferredChunkBytes
+    private static let minimumChunkBytes = SonioxControllerClient.minimumChunkBytes
 
     private let queue = DispatchQueue(label: "com.speak.app.soniox.audioProcessing")
     private let copyBufferPool = LivePCMBufferPool(
@@ -248,13 +212,15 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       label: "soniox"
     )
     private var isRunning: Bool = false
+    private var activeStreamID: ObjectIdentifier?
     private let converterCache = LiveConverterCache()
     private var reusableOutputBuffer: AVAudioPCMBuffer?
     private var pendingPCMData = Data()
 
-    func setRunning(_ running: Bool) {
+    func setRunning(_ running: Bool, stream: SonioxControllerClient? = nil) {
       queue.sync {
         isRunning = running
+        activeStreamID = running ? stream.map(ObjectIdentifier.init) : nil
         if !running {
           converterCache.reset()
           reusableOutputBuffer = nil
@@ -274,7 +240,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       }
     }
 
-    func flushPendingAudio(to transcriber: SonioxLiveTranscriber) {
+    func flushPendingAudio(to transcriber: SonioxControllerClient) {
       queue.sync {
         guard !pendingPCMData.isEmpty else { return }
         var offset = 0
@@ -300,14 +266,14 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       _ buffer: AVAudioPCMBuffer,
       inputFormat: AVAudioFormat,
       outputFormat: AVAudioFormat,
-      transcriber: SonioxLiveTranscriber,
+      transcriber: SonioxControllerClient,
       logger: Logger
     ) {
       guard let copied = copyPCMBuffer(buffer) else { return }
       queue.async { [weak self] in
         guard let self else { return }
         defer { self.copyBufferPool.recycle(copied) }
-        guard self.isRunning else { return }
+        guard self.isRunning, self.activeStreamID == ObjectIdentifier(transcriber) else { return }
         self.processAndSendAudio(
           copied, from: inputFormat, to: outputFormat,
           transcriber: transcriber, logger: logger
@@ -336,7 +302,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController, SonioxF
       _ buffer: AVAudioPCMBuffer,
       from inputFormat: AVAudioFormat,
       to outputFormat: AVAudioFormat,
-      transcriber: SonioxLiveTranscriber,
+      transcriber: SonioxControllerClient,
       logger: Logger
     ) {
       guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
@@ -415,12 +381,9 @@ private extension SonioxLiveController {
   func resetStartState() {
     transcriber = nil
     targetFormat = nil
-    finalSegments = []
-    currentInterim = ""
-    fullTranscript = ""
+    reportedFailure = false
     streamingStartTime = nil
     hasFinished = false
-    stopContinuation = nil
     isRunning = false
   }
 
@@ -429,27 +392,22 @@ private extension SonioxLiveController {
     audioEngine.inputNode.removeTap(onBus: 0)
     isRunning = false
     audioProcessor.setRunning(false)
-    transcriber?.stop()
+    transcriber?.cancel()
     transcriber = nil
     targetFormat = nil
     streamingStartTime = nil
-    currentInterim = ""
-    finalSegments = []
-    fullTranscript = ""
+    reportedFailure = false
     await endActiveInputSession()
   }
 
-  func buildFinalResult() -> TranscriptionResult {
-    var text = finalSegments.map(\.text).joined(separator: " ")
-    let trimmedInterim = currentInterim.trimmingCharacters(in: .whitespacesAndNewlines)
-    if !trimmedInterim.isEmpty {
-      if !text.isEmpty { text += " " }
-      text += trimmedInterim
-    }
+  func buildFinalResult(_ snapshot: SonioxControllerClient.Snapshot) -> TranscriptionResult {
+    let segments = snapshot.confirmedText.isEmpty ? [] : [
+      TranscriptionSegment(startTime: 0, endTime: 0, text: snapshot.confirmedText)
+    ]
     let streamingDuration = streamingStartTime.map { Date().timeIntervalSince($0) } ?? 0
     return TranscriptionResult(
-      text: text,
-      segments: finalSegments,
+      text: snapshot.text,
+      segments: segments,
       confidence: nil,
       duration: streamingDuration,
       modelIdentifier: currentModel ?? "soniox/stt-rt-v5-streaming",

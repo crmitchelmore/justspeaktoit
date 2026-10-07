@@ -36,47 +36,24 @@ public struct SyncableHistoryEntry: Codable, Identifiable, Sendable {
     }
 }
 
-/// Observable sync state for UI updates.
-@MainActor
-public final class SyncState: ObservableObject {
-    /// Whether sync is currently in progress.
-    @Published public var isSyncing = false
-
-    /// Last successful sync time.
-    @Published public var lastSyncTime: Date?
-
-    /// Current sync error, if any.
-    @Published public var error: Error?
-
-    /// Number of entries pending upload.
-    @Published public var pendingUploadCount = 0
-
-    /// Number of entries pending download.
-    @Published public var pendingDownloadCount = 0
-
-    /// Whether iCloud is available.
-    @Published public var isCloudAvailable = false
-
-    /// User-friendly status message.
-    public var statusMessage: String {
-        if !isCloudAvailable {
-            return "iCloud unavailable"
-        }
-        if isSyncing {
-            return "Syncing..."
-        }
-        if let error {
-            return "Sync error: \(error.localizedDescription)"
-        }
-        if let lastSync = lastSyncTime {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .abbreviated
-            return "Synced \(formatter.localizedString(for: lastSync, relativeTo: Date()))"
-        }
-        return "Not synced"
+/// The upload conflict rule every History transport applies after looking up
+/// the existing record: a CloudKit copy at least as new as the local entry is
+/// acknowledged and reconciled locally instead of being overwritten.
+enum HistoryConflictPolicy {
+    static func remoteWins(_ remote: SyncableHistoryEntry, over local: SyncableHistoryEntry) -> Bool {
+        remote.updatedAt >= local.updatedAt
     }
+}
 
+/// Thrown by single-entry uploads and deletes while iCloud History sync is
+/// turned off. The entry stays unacknowledged, so it uploads if sync is turned
+/// back on.
+public struct HistorySyncDisabledError: LocalizedError, Equatable, Sendable {
     public init() {}
+
+    public var errorDescription: String? {
+        "iCloud History sync is off, so this change stays on this device."
+    }
 }
 
 /// Errors that can occur during sync.

@@ -1,0 +1,31 @@
+{
+  "name": "@justspeaktoit/paid-access-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Paid Access backend for Just Speak to It — entitlements, billing and provider proxying on Cloudflare Workers.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrations:local": "wrangler d1 migrations apply paid-access --local",
+    "migrations:remote": "wrangler d1 migrations apply paid-access --remote"
+  },
+  "dependencies": {
+    "jose": "^6.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.9.14",
+    "@cloudflare/workers-types": "^5.20260804.1",
+    "@eslint/js": "^9.32.0",
+    "@types/node": "^26.2.0",
+    "eslint": "^9.32.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.38.0",
+    "vitest": "~3.2.4",
+    "wrangler": "^4.28.0"
+  }
+}

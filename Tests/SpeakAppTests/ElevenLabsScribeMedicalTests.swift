@@ -14,9 +14,12 @@ final class ElevenLabsScribeMedicalTests: XCTestCase {
     }
 
     func testTranscribeFile_sendsMedicalModelID_forScribeV2Medical() async throws {
+        let capturedBody = MedicalRequestBody()
         StubURLProtocol.handler = { request in
-            .ok(Data(#"{"text":"blood pressure","language_code":"en","words":null}"#.utf8),
-                url: try XCTUnwrap(request.url))
+            // Consume the real upload stream while its staged file is still owned.
+            await capturedBody.record(request)
+            return .ok(Data(#"{"text":"blood pressure","language_code":"en","words":null}"#.utf8),
+                       url: try XCTUnwrap(request.url))
         }
         let provider = ElevenLabsTranscriptionProvider(session: StubURLProtocol.makeSession())
         let audioURL = FileManager.default.temporaryDirectory
@@ -34,10 +37,19 @@ final class ElevenLabsScribeMedicalTests: XCTestCase {
 
         let request = try XCTUnwrap(StubURLProtocol.lastRequest)
         XCTAssertEqual(request.url?.path, "/v1/speech-to-text")
-        let body = String(data: StubURLProtocol.body(of: request), encoding: .utf8) ?? ""
+        let bytes = await capturedBody.value
+        let body = String(data: try XCTUnwrap(bytes), encoding: .utf8) ?? ""
         XCTAssertTrue(
             body.contains("name=\"model_id\"\r\n\r\nscribe_v2_medical\r\n"),
             "ElevenLabs expects the bare scribe_v2_medical id in the model_id form field"
         )
+    }
+}
+
+private actor MedicalRequestBody {
+    private(set) var value: Data?
+
+    func record(_ request: URLRequest) {
+        value = StubURLProtocol.body(of: request)
     }
 }

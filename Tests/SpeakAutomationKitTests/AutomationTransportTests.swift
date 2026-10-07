@@ -23,8 +23,8 @@ final class AutomationTransportTests: XCTestCase {
     }
 
     func testClientResponseGrace_outlivesTheCommandDeadline() {
-        XCTAssertGreaterThan(UnixSocketAutomationClient.responseGracePeriod, 0)
-        XCTAssertLessThanOrEqual(UnixSocketAutomationClient.responseGracePeriod, 2)
+        XCTAssertGreaterThan(AutomationClientTiming.responseGracePeriod, 0)
+        XCTAssertLessThanOrEqual(AutomationClientTiming.responseGracePeriod, 2)
     }
 
     func testResponse_roundTripsWithISO8601Dates() throws {
@@ -147,6 +147,9 @@ final class AutomationTransportTests: XCTestCase {
         XCTAssertThrowsError(try AutomationFraming.payloadLength(from: Data([0, 1])))
     }
 
+    // The Mac endpoint is a UNIX socket; Windows uses a named pipe, covered
+    // by the Windows platform tests.
+    #if canImport(Darwin)
     // MARK: - Endpoint
 
     func testSocketPath_honoursTheEnvironmentOverride() {
@@ -232,6 +235,8 @@ final class AutomationTransportTests: XCTestCase {
         }
     }
 
+    #endif
+
     // MARK: - Secret hygiene
 
     func testWireTypes_carryNoCredentialFields() throws {
@@ -248,6 +253,7 @@ final class AutomationTransportTests: XCTestCase {
     }
 }
 
+#if canImport(Darwin)
 /// Pins the Application Support directory so socket-path tests do not depend on
 /// the length of the running user's home directory.
 private final class FixedSupportDirectoryFileManager: FileManager {
@@ -263,3 +269,4 @@ private final class FixedSupportDirectoryFileManager: FileManager {
         [URL(fileURLWithPath: self.base, isDirectory: true)]
     }
 }
+#endif

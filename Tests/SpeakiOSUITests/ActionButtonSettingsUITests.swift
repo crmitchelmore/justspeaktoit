@@ -24,7 +24,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     }
 
     func testActionButtonDestinationCanBeConfigured() {
-        app.buttons["Settings"].tap()
+        openSettings()
 
         let hardwareTriggerLink = app.buttons["hardwareTriggerSettingsLink"]
         XCTAssertTrue(scrollUpUntilExists(hardwareTriggerLink), "hardwareTriggerSettingsLink not found in Settings")
@@ -56,7 +56,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     }
 
     func testModelPickersExposeCredentialReadiness() {
-        app.buttons["Settings"].tap()
+        openSettings()
 
         let locationPicker = app.segmentedControls["transcriptionLocationPicker"]
         XCTAssertTrue(scrollUpUntilExists(locationPicker), "transcriptionLocationPicker not found in Settings")
@@ -101,7 +101,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
 
     #if IOS_KEYBOARD_FEATURE
     func testKeyboardOnboardingExplainsSupportedSetup() {
-        app.buttons["Settings"].tap()
+        openSettings()
 
         let keyboardSetupLink = app.buttons["keyboardSetupLink"]
         XCTAssertTrue(scrollUpUntilExists(keyboardSetupLink), "keyboardSetupLink not found in Settings")
@@ -120,7 +120,7 @@ final class ActionButtonSettingsUITests: XCTestCase {
     }
     #else
     func testKeyboardOnboardingIsHiddenWhenFeatureIsDisabled() {
-        app.buttons["Settings"].tap()
+        openSettings()
 
         // Proving absence is the one place a long wait is pure cost.
         XCTAssertFalse(
@@ -129,6 +129,27 @@ final class ActionButtonSettingsUITests: XCTestCase {
         )
     }
     #endif
+
+    /// Opens Settings from the main screen's toolbar link and waits for its
+    /// navigation bar, so a failure names this step instead of a Settings row
+    /// (and the absence test cannot pass on the main screen).
+    ///
+    /// On a cold simulator the first tap after launch can be synthesised so
+    /// slowly that the app never acts on it: in run 36936506087 it took about
+    /// 9s (0.3s in the next test) and every later snapshot still showed the
+    /// main screen with this link on it. Such a tap is repeated. Once Settings
+    /// is open the root toolbar link is gone, so no extra tap is sent.
+    private func openSettings(attempts: Int = 3) {
+        let settingsLink = app.buttons["settingsNavLink"]
+        let settingsBar = app.navigationBars["Settings"]
+        for _ in 0..<attempts {
+            if settingsBar.exists { return }
+            guard settingsLink.waitForExistence(timeout: Self.elementTimeout) else { break }
+            settingsLink.tap()
+            if settingsBar.waitForExistence(timeout: Self.elementTimeout) { return }
+        }
+        XCTAssertTrue(settingsBar.exists, "Settings did not open from settingsNavLink after \(attempts) taps")
+    }
 
     /// Waits for `element`, swiping up between attempts. The first wait covers a
     /// screen that is still laying out; the settle wait covers the scroll

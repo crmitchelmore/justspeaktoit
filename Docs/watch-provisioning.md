@@ -30,7 +30,7 @@ App Group containers are per-device, so the watch pair needs its own
 registration. The container holds `captures.json` (the capture queue),
 `watch-complication.json` (what the face renders) and
 `watch-recording-request.pending-*.json` (face taps waiting for the app to perform them) —
-see `Sources/SpeakCore/WatchSharedContainer.swift`.
+see `Sources/SpeakWatchCore/WatchSharedContainer.swift`.
 
 Without the entitlement the app still records and transfers normally: the
 shared container resolver falls back to Application Support and the

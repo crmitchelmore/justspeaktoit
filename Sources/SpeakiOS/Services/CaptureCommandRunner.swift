@@ -228,8 +228,9 @@ public enum CaptureCommandRunner {
             context: "Capture command start",
             logger: SpeakLogger.transcription
         )
+        let presentation = CaptureStartFailurePresentation.make(for: error)
         let disposition = CaptureStartFailurePolicy.disposition(
-            errorDescription: error.localizedDescription,
+            errorDescription: presentation.message,
             isCancellation: error is CancellationError,
             laterCaptureInFlight: laterCaptureInFlight,
             microphoneOwnedElsewhere: microphoneOwnedElsewhere
@@ -239,11 +240,8 @@ public enum CaptureCommandRunner {
             SpeakLogger.transcription.info(
                 "Capture start failure not shown: \(reason.rawValue, privacy: .public)"
             )
-        case .surface(let message):
-            // The policy's message, not the original error: that is where a
-            // blank or padded `localizedDescription` has already been replaced
-            // by the fallback or trimmed. The original is in the log above.
-            publish(CaptureStartFailurePolicy.PresentedFailure(message: message))
+        case .surface:
+            publish(presentation)
         }
         return disposition
     }

@@ -1,517 +1,382 @@
-// swiftlint:disable file_length
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(os) && !SPEAK_PORTABLE_CORE
 import os.log
+#endif
 
-// MARK: - ElevenLabs Live Client (Cross-platform WebSocket)
+// MARK: - ElevenLabs Live Client (portable, injected transport)
 
-/// Cross-platform ElevenLabs WebSocket client for live speech-to-text.
-/// Works on both macOS and iOS.
+/// Shared ElevenLabs Scribe v2 realtime client used by macOS, iOS and Windows.
+///
+/// One `/v1/speech-to-text/realtime` socket per run, with the server's VAD
+/// committing segments while recording. Audio is sent as base64
+/// `input_audio_chunk` frames, one at a time and only after the server's
+/// `session_started` frame; until then the newest five seconds wait in the
+/// pre-roll. Every committed segment, from the VAD or from the finish, counts
+/// once: a timestamped twin never adds it a second time. A finish drains the
+/// admitted audio, sends one manual commit and reads the finals that follow for
+/// a bounded post-commit window, because VAD commits carry no correlation id
+/// that could mark the commit's own answer. The transport is injectable;
+/// framing, admission and lifecycle stay here so the platforms cannot drift.
 public final class ElevenLabsLiveClient: FinalizingStreamingTranscriptionClient, @unchecked Sendable {
-    /// Final shape: FINAL_TRANSCRIPT events carry the newly finalised segment only.
+    /// Each `committed_transcript` is a newly finalised segment, so finals append.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+
+    /// Handshake plus `session_started` must land within this bound.
+    public static let readyDeadline: TimeInterval = 10
+    /// A single send that has not completed by then means the transport stalled.
+    public static let sendDeadline: TimeInterval = 5
+    /// A finish that lands before readiness waits at most this long for it.
+    public static let finishReadyBudget: TimeInterval = StreamingSessionReadiness.defaultBudget
+    /// The post-commit window: how long a finish reads finals once its manual
+    /// commit is sent.
+    public static let finishBudget: TimeInterval = 1.5
+    /// Bounds the whole finish, which returns what it has by then: the wait
+    /// for readiness, the drain of admitted audio (one send deadline), then the
+    /// commit's send and its post-commit window (one finish budget each).
+    public static let finishDrainBudget = finishReadyBudget + sendDeadline + 2 * finishBudget
+    /// Exposes the active client's bound to platform lifecycle watchdogs.
+    public var finalisationBudget: TimeInterval? { timing.overall }
+    /// Queued frames are bounded by count as well as by the five-second byte budget.
+    public static let maximumQueuedFrames = 256
 
     private let apiKey: String
     private let modelID: String
     private let language: String?
-    /// PCM16 rate of the audio the caller streams in; only used to size and
-    /// report the pre-roll, since the endpoint takes the rate from the stream.
-    private let sampleRate: Int
-    private let session: URLSession
-    private let logger = SpeakLogger.logger(category: "ElevenLabsLiveClient")
-    private let stateLock = NSLock()
-
-    // Guarded by `stateLock`: mutated by the caller while URLSession callbacks read them.
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isStopping: Bool = false
-    /// Guarded by `stateLock`: the session's full transcript, folded from the
-    /// finals ElevenLabs streams. `finishAndWait()` returns this, per the
-    /// `FinalizingStreamingTranscriptionClient` contract.
-    private var accumulated = TranscriptAccumulator(shape: .standaloneSegments)
-
-    /// Bounded post-stop drain state: while `finishAndWait()` is pending, the
-    /// trailing final is folded in and the full transcript is handed to the
-    /// waiter instead of `onTranscript`, so the caller never sees the same
-    /// words twice.
-    private let finishLock = NSLock()
-    private var finishContinuation: CheckedContinuation<String?, Never>?
-    private static let finishDrainBudget: TimeInterval = 1.0
-
-    /// Holds audio captured between the recording cue and the socket reaching
-    /// `.running`, then replays it in order (issue #641). Sized from the rate
-    /// the caller is actually feeding us, so the budget is the intended
-    /// duration rather than a guess.
+    /// PCM16 rate the caller streams in; it is declared to the endpoint and used
+    /// to size the send budget and pre-roll.
+    let sampleRate: Int
+    private let makeConnection: ConnectionFactory
+    private let schedule: Scheduler
+    /// Readiness, commit and finish bounds; the documented statics in production.
+    let timing: Timing
+    private let queue = DispatchQueue(label: "ElevenLabsLiveClient.state")
+    private let queueKey = DispatchSpecificKey<Bool>()
+    private var run: ElevenLabsLiveRun
+    /// Holds audio captured before `start()` opens a run (issue #641) and, as
+    /// the established Mac transcriber did, the newest five seconds captured
+    /// before `session_started`; both are replayed in capture order once the
+    /// session starts.
     let preroll: StreamingAudioPreroll
 
-    public init(
+    public convenience init(
         apiKey: String,
         modelID: String = "scribe_v2_realtime",
         language: String? = nil,
         sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
         session: URLSession = .shared
     ) {
+        self.init(
+            apiKey: apiKey, modelID: modelID, language: language, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
+        )
+    }
+
+    public convenience init(
+        apiKey: String,
+        modelID: String = "scribe_v2_realtime",
+        language: String? = nil,
+        sampleRate: Int = LiveTranscriptionProviderID.elevenlabs.expectedSampleRate,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.init(
+            apiKey: apiKey, modelID: modelID, language: language, sampleRate: sampleRate,
+            timing: .production, makeConnection: makeConnection, schedule: schedule
+        )
+    }
+
+    init(
+        apiKey: String,
+        modelID: String,
+        language: String?,
+        sampleRate: Int,
+        timing: Timing,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler
+    ) {
         self.apiKey = apiKey
         self.modelID = modelID
         self.language = language
         self.sampleRate = sampleRate
-        self.session = session
-        self.preroll = StreamingAudioPreroll(sampleRate: sampleRate)
+        self.timing = timing
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.run = ElevenLabsLiveRun(sampleRate: sampleRate)
+        let budgetRate = ElevenLabsLiveProtocol.supportedSampleRates.contains(sampleRate)
+            ? sampleRate : LiveTranscriptionProviderID.elevenlabs.expectedSampleRate
+        self.preroll = StreamingAudioPreroll(sampleRate: budgetRate)
+        queue.setSpecific(key: queueKey, value: true)
     }
 
-    /// Starts a live transcription session.
-    /// - Parameters:
-    ///   - onTranscript: Called with transcript text and whether it's final.
-    ///   - onError: Called when an error occurs.
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        withStateLock {
-            isStopping = false
-            accumulated.reset()
-            self.onTranscript = onTranscript
-            self.onError = onError
-        }
-        preroll.reset()
+    deinit { run.connection?.cancel() }
 
-        var urlComponents = URLComponents(string: "wss://api.elevenlabs.io/v1/speech-to-text/stream")!
-        var queryItems = [URLQueryItem(name: "model_id", value: modelID)]
+    // MARK: - StreamingTranscriptionClient
 
-        if let language {
-            queryItems.append(URLQueryItem(name: "language_code", value: language.localeLanguageCode))
-        }
-
-        urlComponents.queryItems = queryItems
-
-        guard let url = urlComponents.url else {
-            onError(ElevenLabsLiveError.invalidURL)
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-
-        let task = session.webSocketTask(with: request)
-        // `stop()` can land while the task is being created; publishing
-        // unconditionally would resurrect a session the caller already ended.
-        let published = withStateLock { () -> Bool in
-            guard !isStopping else { return false }
-            webSocketTask = task
-            return true
-        }
-        guard published else {
-            task.cancel(with: .goingAway, reason: nil)
-            return
-        }
-        task.resume()
-
-        logger.info("ElevenLabs WebSocket connection started")
-        receiveMessages()
-    }
-
-    /// Sends raw PCM Int16 audio data to the transcription service.
-    ///
-    /// Audio captured before the socket is running is parked in the pre-roll
-    /// buffer and replayed, in order, on the first send that finds a live
-    /// transport — so speech that starts with the cue is never dropped.
-    public func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else {
-            bufferPrerollAudio(audioData)
-            return
-        }
-
-        flushPreroll(to: task)
-        transmit(audioData, on: task)
-    }
-
-    /// Parks pre-connection audio unless the session is already stopping, in
-    /// which case there is nothing left to replay it to.
-    private func bufferPrerollAudio(_ audioData: Data) {
-        guard !isStoppingState() else { return }
-        preroll.append(audioData)
-    }
-
-    /// Replays audio captured before the transport was ready.
-    private func flushPreroll(to task: URLSessionWebSocketTask) {
-        let held = preroll.drain()
-        guard !held.isEmpty else { return }
-        let bytes = held.reduce(0) { $0 + $1.count }
-        let leadingMilliseconds = Int((Double(bytes) / 2.0 / Double(max(sampleRate, 1))) * 1000)
-        logger.info(
-            "ElevenLabs: replaying \(held.count) pre-roll chunks (\(leadingMilliseconds) ms of leading audio)"
-        )
-        for chunk in held {
-            transmit(chunk, on: task)
-        }
-    }
-
-    private func transmit(_ audioData: Data, on task: URLSessionWebSocketTask) {
-        // Send the caller's `Data` straight through. Copying it into a pooled
-        // buffer only to hand that buffer back while the send is still in
-        // flight forced a copy-on-write (plus a memset) per chunk, because
-        // `returnBuffer` zeroes storage the queued message still references.
-        task.send(.data(audioData)) { [weak self] error in
-            guard let self else { return }
-
-            if let error {
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
-                    return
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        synchronized {
+            let opening = run.phase == .idle ? preroll.drain() : []
+            close(run)
+            let active = ElevenLabsLiveRun(sampleRate: sampleRate)
+            run = active
+            active.onTranscript = onTranscript
+            active.onError = onError
+            let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { fail(ElevenLabsLiveError.missingAPIKey, active); return }
+            guard ElevenLabsLiveProtocol.supportedSampleRates.contains(sampleRate) else {
+                fail(ElevenLabsStreamingError.invalidSampleRate(sampleRate), active)
+                return
+            }
+            guard let url = ElevenLabsLiveProtocol.webSocketURL(
+                modelID: modelID, language: language, sampleRate: sampleRate
+            ) else {
+                fail(ElevenLabsLiveError.invalidURL, active)
+                return
+            }
+            var request = URLRequest(url: url)
+            request.setValue(key, forHTTPHeaderField: "xi-api-key")
+            let connection = makeConnection(request)
+            active.connection = connection
+            active.phase = .connecting
+            connection.resume { [weak self, weak active] in
+                guard let self, let active else { return }
+                // ElevenLabs sends no client hello: audio waits for the server's
+                // `session_started`, so the open handshake is only logged here.
+                self.synchronized { if self.isCurrent(active) { self.log("WebSocket handshake completed") } }
+            }
+            receive(active)
+            // A finish has its own, shorter readiness bound.
+            after(timing.startup, active) { client, active in
+                if !active.ready, active.phase != .finishing {
+                    client.fail(ElevenLabsLiveError.connectionFailed, active)
                 }
-                self.logger.error("Failed to send audio: \(error.localizedDescription)")
-                self.currentOnError()?(error)
+            }
+            // Audio offered before this first run waits for `session_started`,
+            // ahead of anything captured later.
+            opening.forEach(preroll.append)
+        }
+    }
+
+    /// Audio captured before `session_started` waits in the pre-roll, which
+    /// keeps the newest five seconds. Once the session has started, admission is
+    /// synchronous and bounded: at most five seconds of PCM may be queued or in
+    /// flight and at most `maximumQueuedFrames` frames may wait. Exceeding
+    /// either is a transport stall, reported once, rather than silently grown.
+    public func sendAudio(_ audioData: Data) {
+        guard !audioData.isEmpty else { return }
+        synchronized {
+            let active = run
+            switch active.phase {
+            case .idle:
+                preroll.append(audioData)
+            case .connecting, .active:
+                guard active.ready else { preroll.append(audioData); return }
+                enqueueAudio(audioData, active)
+            case .finishing, .closed:
+                return
             }
         }
     }
 
-    /// Sends Float32 audio samples converted to Int16 linear PCM.
-    ///
-    /// Routed through ``sendAudio(_:)`` so pre-connection audio gets the same
-    /// pre-roll treatment as the PCM path.
-    /// - Parameters:
-    ///   - samples: Array of Float32 audio samples (-1.0 to 1.0).
-    ///   - frameCount: Number of frames to send.
+    /// Float32 samples converted to Int16 PCM, routed through ``sendAudio(_:)``.
     public func sendAudioSamples(_ samples: UnsafePointer<Float>, frameCount: Int) {
         sendAudio(PCM16Converter.data(from: samples, frameCount: frameCount))
     }
 
-    /// The streaming endpoint has no documented end-of-stream frame, so
-    /// `finishAndWait()` cannot flush audio ElevenLabs hasn't transcribed yet —
-    /// callers with nothing outstanding should close immediately.
-    public var finishFlushesBufferedAudio: Bool { false }
+    /// The finish's manual commit flushes audio the server's VAD has not yet
+    /// committed. Shared consumers must always allow that finalisation path.
+    public var finishFlushesBufferedAudio: Bool { true }
 
-    /// Graceful stop: waits (bounded) for the trailing final transcript before
-    /// closing the socket, so words spoken just before stop aren't lost. The
-    /// streaming endpoint has no documented end-of-stream frame, so this is a
-    /// bounded wait only.
-    ///
-    /// Returns the session's **full** transcript (every final ElevenLabs sent,
-    /// including any that arrived during the wait), or `nil` when nothing was
-    /// transcribed. A trailing final consumed here is not also delivered
-    /// through `onTranscript`.
+    /// Drains the admitted audio, sends one manual commit and reads the finals
+    /// that follow for the post-commit window, all inside `finishDrainBudget`.
+    /// Returns the session's full transcript, or `nil` when nothing was
+    /// transcribed; finals consumed here are not also delivered through
+    /// `onTranscript`. A finish that reaches a bound returns what it has.
     public func finishAndWait() async -> String? {
-        guard currentWebSocketTask()?.state == .running else {
-            stop()
-            return fullTranscript()
-        }
-
-        let transcript: String? = await withCheckedContinuation { continuation in
-            finishLock.lock()
-            finishContinuation = continuation
-            finishLock.unlock()
-
-            // Anything still parked from the connecting window belongs in the
-            // stream before we wait for the trailing final.
-            if let task = currentWebSocketTask(), task.state == .running {
-                flushPreroll(to: task)
-            }
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.finishDrainBudget) { [weak self] in
-                self?.resolveFinish()
-            }
-        }
-        stop()
-        return transcript
-    }
-
-    /// Stops the transcription session.
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            isStopping = true
-            let task = webSocketTask
-            webSocketTask = nil
-            return task
-        }
-        let unsentPreroll = preroll.snapshot
-        if unsentPreroll.byteCount > 0 {
-            logger.warning(
-                "ElevenLabs: discarding \(unsentPreroll.chunkCount) pre-roll chunks — transport never became ready"
-            )
-        }
-        preroll.reset()
-        task?.cancel(with: .normalClosure, reason: nil)
-        resolveFinish()
-        logger.info("ElevenLabs WebSocket connection closed")
-    }
-
-    /// Check if the client is currently connected.
-    public var isConnected: Bool {
-        currentWebSocketTask()?.state == .running
-    }
-
-    // MARK: - Private
-
-    private func receiveMessages() {
-        guard let task = currentWebSocketTask() else { return }
-        task.receive { [weak self] result in
-            guard let self else { return }
-
-            switch result {
-            case .success(let message):
-                self.handleMessage(message)
-                self.receiveMessages()
-
-            case .failure(let error):
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) {
-                    return
+        let active = synchronized { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                synchronized {
+                    guard isCurrent(active), active.connection != nil else {
+                        if active === run { close(active) }
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    if Task.isCancelled {
+                        close(active)
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    active.waiters.append(continuation)
+                    beginFinish(active)
                 }
-                self.logger.error("WebSocket receive error: \(error.localizedDescription)")
-                self.currentOnError()?(error)
+            }
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { self.close(active) } }
+        }
+    }
+
+    /// Immediate abort; text received so far stays available to `finishAndWait`.
+    public func stop() { synchronized { close(run) } }
+    public func cancel() { synchronized { close(run) } }
+
+    public var isConnected: Bool { synchronized { isCurrent(run) && run.ready } }
+
+    /// Same receive parser the socket loop uses, exposed so contract tests can
+    /// drive the client without a live transport.
+    func parseTranscriptResponse(_ json: String) { synchronized { parse(json, run) } }
+
+}
+
+extension ElevenLabsLiveClient {
+
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "ElevenLabs") }
+
+    private func receive(_ active: ElevenLabsLiveRun) {
+        guard isCurrent(active), let connection = active.connection else { return }
+        connection.receive { [weak self, weak active] result in
+            guard let self, let active else { return }
+            self.synchronized {
+                guard self.isCurrent(active) else { return }
+                switch result {
+                case .failure(let error):
+                    // A spurious ENOTCONN re-arms the receive; one that
+                    // persists is a stalled transport.
+                    guard !WebSocketErrorFilter.isSpuriousDisconnect(error) else {
+                        if !self.rearmReceive(active) { self.fail(self.stalledError, active) }
+                        return
+                    }
+                    self.fail(error, active)
+                case .success(let message):
+                    active.ignoredReceiveFailures.reset()
+                    switch message {
+                    case .text(let text): self.parse(text, active)
+                    case .binary(let data):
+                        if let text = String(data: data, encoding: .utf8) { self.parse(text, active) }
+                    }
+                    self.receive(active)
+                }
             }
         }
     }
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-        switch message {
-        case .string(let text):
-            parseTranscriptResponse(text)
-        case .data(let data):
-            if let text = String(data: data, encoding: .utf8) {
-                parseTranscriptResponse(text)
-            }
-        @unknown default:
+    private func rearmReceive(_ active: ElevenLabsLiveRun) -> Bool {
+        guard active.ignoredReceiveFailures.allowsRetry() else { return false }
+        after(IgnoredReceiveFailureWindow.retryDelay, active) { client, active in client.receive(active) }
+        return true
+    }
+
+    private func parse(_ json: String, _ active: ElevenLabsLiveRun) {
+        guard active === run, active.phase != .closed else { return }
+        guard let event = ElevenLabsRealtimeEvent.parse(json) else { return }
+        switch event {
+        case .sessionStarted:
+            markReady(active)
+        case .partialTranscript(let text):
+            guard active.phase != .finishing, !text.isEmpty else { return }
+            active.onTranscript?(text, false)
+        case .committedTranscript(let text):
+            handleCommitted(text, timestamped: false, active)
+        case .committedTranscriptWithTimestamps(let text):
+            handleCommitted(text, timestamped: true, active)
+        case .authError:
+            fail(StreamingClientError.invalidAPIKey(provider: "ElevenLabs"), active)
+        case .serverError(let type, let message):
+            fail(ElevenLabsStreamingError.serverError(type: type, message: message), active)
+        case .warning, .ignored:
             break
         }
     }
 
-    /// Feeds one raw provider frame through the receive path. The WebSocket
-    /// loop is the only production caller; tests use it to drive the client
-    /// without a live socket.
-    func parseTranscriptResponse(_ json: String) {
-        guard let data = json.data(using: .utf8) else { return }
-
-        do {
-            let response = try JSONDecoder().decode(ElevenLabsStreamResponse.self, from: data)
-
-            guard let transcript = response.transcript, !transcript.isEmpty else {
-                return
-            }
-
-            let isFinal = response.speechEventType == "FINAL_TRANSCRIPT"
-            if isFinal {
-                withStateLock { accumulated.append(final: transcript) }
-                if resolveFinish() {
-                    // Trailing final consumed by finishAndWait(), which returns
-                    // the whole transcript; delivering it again through
-                    // onTranscript would double it for callers that append.
-                    return
-                }
-            }
-            currentOnTranscript()?(transcript, isFinal)
-
-        } catch {
-            logger.debug("Failed to parse transcript response: \(error.localizedDescription)")
+    /// Releases the audio held for the handshake, in capture order, and the
+    /// commit of a finish that was waiting for it.
+    private func markReady(_ active: ElevenLabsLiveRun) {
+        // The offline parser seam has no session for the pre-roll to join.
+        guard !active.ready, active.phase != .idle else { return }
+        active.ready = true
+        if active.phase == .connecting { active.phase = .active }
+        log("Session started")
+        for audio in preroll.drain() {
+            // Nothing was admitted before readiness, and the pre-roll holds at
+            // most the same five seconds as the send budget.
+            guard active.sendBudget.admit(audio.count) else { fail(stalledError, active); return }
+            active.outgoing.append(.audio(audio))
         }
+        if active.phase == .finishing { queueCommit(active) }
+        pump(active)
     }
 
-    /// Resumes a pending `finishAndWait()` exactly once with the session's full
-    /// transcript. Returns whether a waiter consumed it.
-    @discardableResult
-    private func resolveFinish() -> Bool {
-        finishLock.lock()
-        let continuation = finishContinuation
-        finishContinuation = nil
-        finishLock.unlock()
-        guard let continuation else { return false }
-        continuation.resume(returning: fullTranscript())
-        return true
+    /// Every committed segment counts once, from the VAD while recording or
+    /// from the finish's commit: no commit carries a correlation id. A
+    /// timestamped twin repeats the segment it pairs with and never adds it
+    /// again; either form arriving alone still counts.
+    private func handleCommitted(_ text: String, timestamped: Bool, _ active: ElevenLabsLiveRun) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !active.finalTwins.isTwin(timestamped: timestamped) else { return }
+        active.accumulated.append(final: text)
+        // A segment that lands during the finish is returned by it instead.
+        if active.phase != .finishing { active.onTranscript?(text, true) }
     }
 
-    private func fullTranscript() -> String? { withStateLock { accumulated.transcriptOrNil } }
-
-    @discardableResult
-    private func withStateLock<T>(_ block: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return block()
+    func fail(_ error: Error, _ active: ElevenLabsLiveRun) {
+        guard active === run, active.phase != .closed else { return }
+        let onError = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        close(active)
+        log("Session failed")
+        // Publish the failure before finish returns. The closed run owns these
+        // waiters even when the callback starts a replacement session.
+        onError?(error)
+        waiters.forEach { $0.resume(returning: transcript) }
     }
 
-    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func isStoppingState() -> Bool { withStateLock { isStopping } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-}
-
-// MARK: - Response Models
-
-private struct ElevenLabsStreamResponse: Decodable {
-    /// "PARTIAL_TRANSCRIPT" or "FINAL_TRANSCRIPT"
-    let speechEventType: String?
-    let transcript: String?
-
-    enum CodingKeys: String, CodingKey {
-        case speechEventType = "speech_event_type"
-        case transcript
+    func close(_ active: ElevenLabsLiveRun) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        let connection = active.connection
+        active.connection = nil
+        active.outgoing.removeAll(keepingCapacity: false)
+        active.sendBudget.reset()
+        active.sending = false
+        if active === run { preroll.reset() }
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        connection?.cancel()
+        waiters.forEach { $0.resume(returning: transcript) }
+        active.onTranscript = nil
+        active.onError = nil
     }
-}
 
-// MARK: - Error Types
+    func isCurrent(_ active: ElevenLabsLiveRun) -> Bool { active === run && active.phase != .closed }
 
-public enum ElevenLabsLiveError: LocalizedError {
-    case invalidURL
-    case connectionFailed
-    case sendFailed
-    case missingAPIKey
-
-    public var errorDescription: String? {
-        switch self {
-        case .invalidURL:
-            return "Failed to construct ElevenLabs WebSocket URL"
-        case .connectionFailed:
-            return "Failed to establish WebSocket connection to ElevenLabs"
-        case .sendFailed:
-            return "Failed to send audio data to ElevenLabs"
-        case .missingAPIKey:
-            return "ElevenLabs API key is missing. Please configure it in Settings."
-        }
-    }
-}
-
-// MARK: - API Key Validation
-
-public struct ElevenLabsSTTAPIKeyValidator {
-    /// Batch Scribe model used for the access probe. ElevenLabs removed
-    /// `scribe_v1` on 2026-07-09, so probing with it now fails for every key.
-    public static let defaultProbeModelID = "scribe_v2"
-
-    private let session: URLSession
-    private let modelID: String
-    private let baseURL = URL(string: "https://api.elevenlabs.io/v1")!
-
-    public init(
-        session: URLSession = .shared,
-        modelID: String = ElevenLabsSTTAPIKeyValidator.defaultProbeModelID
+    func after(
+        _ seconds: TimeInterval, _ active: ElevenLabsLiveRun,
+        action: @escaping @Sendable (ElevenLabsLiveClient, ElevenLabsLiveRun) -> Void
     ) {
-        self.session = session
-        self.modelID = modelID
-    }
-
-    /// Validates that an ElevenLabs API key is valid and has Scribe speech-to-text access.
-    public func validate(_ key: String) async -> APIKeyValidationResult {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return .failure(message: "API key is empty")
-        }
-
-        let request = makeUserRequest(apiKey: trimmed)
-
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                return .failure(
-                    message: "Received a non-HTTP response",
-                    debug: debugSnapshot(request: request)
-                )
-            }
-
-            let debug = debugSnapshot(request: request, response: http, data: data)
-            guard http.statusCode != 401 else {
-                return .failure(message: "Invalid API key", debug: debug)
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                return .failure(message: "HTTP \(http.statusCode) while validating key", debug: debug)
-            }
-        } catch {
-            return .failure(
-                message: "Validation failed: \(error.localizedDescription)",
-                debug: debugSnapshot(request: request, error: error)
-            )
-        }
-
-        return await validateScribeAccess(apiKey: trimmed)
-    }
-
-    private func makeUserRequest(apiKey: String) -> URLRequest {
-        let url = baseURL.appendingPathComponent("user")
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-        return request
-    }
-
-    private func makeScribeProbeRequest(apiKey: String) -> URLRequest {
-        let url = baseURL.appendingPathComponent("speech-to-text")
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data(
-            """
-            --\(boundary)\r
-            Content-Disposition: form-data; name="model_id"\r
-            \r
-            \(modelID)\r
-            --\(boundary)--\r
-            """.utf8
-        )
-        return request
-    }
-
-    private func validateScribeAccess(apiKey: String) async -> APIKeyValidationResult {
-        let request = makeScribeProbeRequest(apiKey: apiKey)
-
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                return .failure(
-                    message: "Received a non-HTTP response from Scribe",
-                    debug: debugSnapshot(request: request)
-                )
-            }
-
-            let debug = debugSnapshot(request: request, response: http, data: data)
-            if http.statusCode == 403 {
-                return .failure(
-                    message: "API key does not have Scribe (speech-to-text) access. Use a key with both "
-                        + "TTS and Scribe permissions.",
-                    debug: debug
-                )
-            }
-            if http.statusCode == 401 {
-                return .failure(message: "Invalid API key", debug: debug)
-            }
-            if isAcceptedScribeProbeStatus(http.statusCode) {
-                return .success(
-                    message: "ElevenLabs API key is valid for Text-to-Speech and Scribe transcription",
-                    debug: debug
-                )
-            }
-
-            return .failure(message: "HTTP \(http.statusCode) while probing Scribe access", debug: debug)
-        } catch {
-            return .failure(
-                message: "Scribe validation failed: \(error.localizedDescription)",
-                debug: debugSnapshot(request: request, error: error)
-            )
+        schedule(seconds) { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { action(self, active) } }
         }
     }
 
-    private func isAcceptedScribeProbeStatus(_ statusCode: Int) -> Bool {
-        (200..<300).contains(statusCode) || statusCode == 400 || statusCode == 415 || statusCode == 422
+    func synchronized<Value>(_ action: () -> Value) -> Value {
+        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
+        return queue.sync(execute: action)
     }
 
-    private func debugSnapshot(
-        request: URLRequest,
-        response: HTTPURLResponse? = nil,
-        data: Data? = nil,
-        error: Error? = nil
-    ) -> APIKeyValidationDebugSnapshot {
-        APIKeyValidationDebugSnapshot(
-            url: request.url?.absoluteString ?? "",
-            method: request.httpMethod ?? "GET",
-            requestHeaders: request.allHTTPHeaderFields ?? [:],
-            requestBody: request.httpBody.flatMap { String(data: $0, encoding: .utf8) },
-            statusCode: response?.statusCode,
-            responseHeaders: response.map { headers in
-                headers.allHeaderFields.reduce(into: [String: String]()) { partialResult, entry in
-                    guard let key = entry.key as? String else { return }
-                    partialResult[key] = String(describing: entry.value)
-                }
-
-            } ?? [:],
-            responseBody: data.flatMap { String(data: $0, encoding: .utf8) },
-            errorDescription: error?.localizedDescription
-        )
+    private func log(_ event: String) {
+        #if canImport(os) && !SPEAK_PORTABLE_CORE
+        SpeakLogger.logger(category: "ElevenLabsLiveClient").info("\(event, privacy: .public)")
+        #endif
     }
 }

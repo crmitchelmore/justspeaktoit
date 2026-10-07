@@ -36,16 +36,15 @@ final class CaptureStartFailureVisibilityTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        published = []
+        self.published = []
     }
 
     func testDeniedMicrophonePermissionIsPublishedWithItsActionableMessage() {
         XCTAssertTrue(surface(iOSTranscriptionError.permissionDenied(.microphone)))
-        XCTAssertEqual(published.count, 1)
-        XCTAssertEqual(
-            published.first?.localizedDescription,
-            iOSTranscriptionError.permissionDenied(.microphone).localizedDescription
-        )
+        XCTAssertEqual(self.published.count, 1)
+        let presentation = self.published.first as? CaptureStartFailurePresentation
+        XCTAssertEqual(presentation?.code, "start_permission_microphone")
+        XCTAssertEqual(presentation?.recovery, .appPermissions)
     }
 
     func testMissingLiveActivityIsPublishedRatherThanOnlyLogged() {
@@ -53,7 +52,20 @@ final class CaptureStartFailureVisibilityTests: XCTestCase {
         // Activity to run under; the capture genuinely did not begin, and the
         // message tells the user which setting to turn on.
         XCTAssertTrue(surface(iOSTranscriptionError.liveActivityUnavailable))
-        XCTAssertEqual(published.count, 1)
+        XCTAssertEqual(self.published.count, 1)
+        XCTAssertEqual(
+            (self.published.first as? CaptureStartFailurePresentation)?.recovery,
+            .appPermissions
+        )
+    }
+
+    func testMissingKeyPublishesCredentialRecoveryWithoutItsProviderIdentifier() {
+        XCTAssertTrue(self.surface(StreamingClientError.missingAPIKey(provider: "private-provider-id")))
+        XCTAssertEqual(self.published.count, 1)
+        let presentation = self.published.first as? CaptureStartFailurePresentation
+        XCTAssertEqual(presentation?.code, "start_missing_api_key")
+        XCTAssertEqual(presentation?.recovery, .credentials)
+        XCTAssertFalse(presentation?.message.contains("private-provider-id") == true)
     }
 
     /// The disposition, not just the silence: `dictate` reads this to answer
@@ -76,10 +88,10 @@ final class CaptureStartFailureVisibilityTests: XCTestCase {
 
         XCTAssertTrue(surface(BlankError()))
         let published = try XCTUnwrap(self.published.first)
+        XCTAssertEqual((published as? CaptureStartFailurePresentation)?.code, "start_unknown")
         XCTAssertEqual(
             published.localizedDescription,
-            CaptureLinkFailure.recordingFailed.localizedDescription,
-            "A failure with nothing quotable must still say the recording did not start"
+            "Recording couldn't start. Try again, or open the app to check your setup."
         )
         XCTAssertFalse(published.localizedDescription.isEmpty)
     }

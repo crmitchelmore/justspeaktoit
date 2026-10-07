@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import SpeakWatchCore
 
 /// Starts (or stops) a watch recording from the watch face on watchOS 11+.
 ///

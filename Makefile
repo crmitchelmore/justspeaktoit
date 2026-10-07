@@ -1,4 +1,5 @@
 SWIFT_FLAGS ?=
+BENCH_ARGS ?=
 ARCHIVE_PATH ?= ~/Desktop/JustSpeakToIt.xcarchive
 EXPORT_PATH ?= ~/Desktop/JustSpeakToIt-AppStore
 # Provisioning profile used for Mac App Store manual signing. Project.swift only applies
@@ -42,6 +43,21 @@ test-release: ## Run tests in release configuration
 .PHONY: test-all
 test-all: test test-release ## Run tests in both debug and release
 
+.PHONY: test-tooling
+test-tooling: ## Run all Node, Ruby, Python and release-config tooling tests
+	node --test scripts/tests/*.test.mjs
+	node --test .github/scripts/dependabot-merge.test.mjs
+	ruby scripts/tests/release_apple_test.rb
+	ruby scripts/tests/create_ios_app_store_profile_test.rb
+	python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/linux-local-runtime -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-bundle -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-cross -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-cloudkit -p 'test_*.py' -v
+	python3 -B -m unittest discover -s scripts/windows-package -p 'test_*.py' -v
+	python3 scripts/generate-release-train-config.py --check
+
 .PHONY: release
 release: ## Build optimized release binary
 	swift build -c release $(SWIFT_FLAGS)
@@ -82,6 +98,10 @@ update-tooling: ## Intentionally upgrade the lint toolchain pinned in Tooling/Pa
 verify-checksums: ## Verify binary XCFramework and package checksums
 	./scripts/verify-checksums.sh
 
+.PHONY: bench
+bench: ## Run the isolated local-transcription benchmark (pass arguments with BENCH_ARGS)
+	swift run --package-path Benchmarks/LocalTranscription local-transcription-benchmark $(BENCH_ARGS)
+
 .PHONY: install-hooks
 install-hooks: ## Install git hooks for pre-push verification
 	git config core.hooksPath .githooks
@@ -103,6 +123,18 @@ archive: ## Create Xcode archive of the direct/Developer ID flavour
 		-archivePath $(ARCHIVE_PATH) \
 		archive
 	@echo "Archive created at $(ARCHIVE_PATH)"
+
+.PHONY: paid-access-test-build
+paid-access-test-build: ## Build a local direct-download app with paid access explicitly enabled
+	@echo "Generating Chris/internal paid-access flavour..."
+	TUIST_PAID_ACCESS=1 TUIST_APP_STORE=0 tuist generate --no-open
+	xcodebuild -workspace "Just Speak to It.xcworkspace" \
+		-scheme "SpeakApp" \
+		-configuration Debug \
+		-destination "platform=macOS" \
+		-derivedDataPath .build/paid-access-test \
+		build
+	@echo "Paid-access test app: .build/paid-access-test/Build/Products/Debug/JustSpeakToIt.app"
 
 .PHONY: archive-appstore
 archive-appstore: ## Regenerate the App Store flavour and create its Xcode archive

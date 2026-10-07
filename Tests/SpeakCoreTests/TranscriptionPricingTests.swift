@@ -34,6 +34,11 @@ final class TranscriptionPricingTests: XCTestCase {
     }
 
     func testExactIdsWinOverProviderPrefixes() {
+        // MAI-Transcribe-2 is far cheaper than the Azure fallback rate.
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: AzureTranscriptionModels.mai2),
+                       Decimal(string: "0.10")! / 60)
+        XCTAssertEqual(TranscriptionPricing.pricePerMinuteUSD(modelID: AzureTranscriptionModels.fast),
+                       Decimal(string: "1.00")! / 60)
         XCTAssertEqual(
             TranscriptionPricing.pricePerMinuteUSD(modelID: AssemblyAIModels.universal35ProStreamingID),
             Decimal(string: "0.15")! / 60

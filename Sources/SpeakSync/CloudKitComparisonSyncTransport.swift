@@ -42,9 +42,10 @@ final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
         operation.recordWasChangedBlock = { _, result in
             switch result {
             case .success(let record):
-                guard record.recordType == ComparisonSyncRecord.recordType else { return }
                 do {
-                    accumulator.append(change: .revision(try ComparisonSyncRecord.revision(from: record)))
+                    if let change = try ComparisonRecordCodec.change(from: CloudKitRecordFields(record)) {
+                        accumulator.append(change: change)
+                    }
                 } catch {
                     // Do not consume unknown versions: a compatible build must replay this page.
                     accumulator.append(error: error)
@@ -54,9 +55,8 @@ final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
             }
         }
         operation.recordWithIDWasDeletedBlock = { recordID, recordType in
-            if recordType == ComparisonSyncRecord.recordType,
-               let id = ComparisonSyncRecord.roundID(fromRecordName: recordID.recordName) {
-                accumulator.append(change: .deleted(id))
+            if let change = ComparisonRecordCodec.deletion(recordName: recordID.recordName, recordType: recordType) {
+                accumulator.append(change: change)
             }
         }
         operation.recordZoneChangeTokensUpdatedBlock = { _, token, _ in
@@ -89,8 +89,7 @@ final class CloudKitComparisonSyncTransport: ComparisonSyncTransport {
                 }
                 if let existing {
                     let remote = try ComparisonSyncRecord.revision(from: existing)
-                    if remote.updatedAt > revision.updatedAt
-                        || (remote.updatedAt == revision.updatedAt && remote.round == nil) {
+                    if ComparisonConflictPolicy.remoteWins(remote, over: revision) {
                         result.remote.append(remote)
                         continue
                     }

@@ -45,7 +45,7 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
 
                 if let existingRecord,
                    let remoteEntry = SyncRecord.entry(from: existingRecord),
-                   remoteEntry.updatedAt >= entry.updatedAt {
+                   HistoryConflictPolicy.remoteWins(remoteEntry, over: entry) {
                     acknowledgedIDs.insert(entry.id)
                     remoteEntries.append(remoteEntry)
                     continue
@@ -94,8 +94,8 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
             recordZoneIDs: [SyncConfiguration.zoneID],
             configurationsByRecordZoneID: [SyncConfiguration.zoneID: config]
         )
-        // Consume one explicit page at a time. HistorySyncEngine advances the
-        // token only after every page has been reconciled locally.
+        // Consume one explicit page at a time. The shared coordinator saves
+        // each page's token only after that page has been committed locally.
         operation.fetchAllChanges = false
         return operation
     }
@@ -106,22 +106,19 @@ final class CloudKitHistorySyncTransport: HistorySyncTransport {
     ) {
         operation.recordWasChangedBlock = { _, result in
             switch result {
-            case .success(let record) where record.recordType == SyncConfiguration.recordType:
-                if let entry = SyncRecord.entry(from: record) {
-                    accumulator.append(change: .changed(entry))
-                }
-            case .success:
+            case .success(let record):
                 // Other record types share the zone (for example encrypted
                 // secrets) and belong to their own reconciliation subsystem.
-                break
+                if let change = HistoryRecordCodec.change(from: CloudKitRecordFields(record)) {
+                    accumulator.append(change: change)
+                }
             case .failure(let error):
                 accumulator.append(error: error)
             }
         }
         operation.recordWithIDWasDeletedBlock = { recordID, recordType in
-            if recordType == SyncConfiguration.recordType,
-               let id = UUID(uuidString: recordID.recordName) {
-                accumulator.append(change: .deleted(id))
+            if let change = HistoryRecordCodec.deletion(recordName: recordID.recordName, recordType: recordType) {
+                accumulator.append(change: change)
             }
         }
         operation.recordZoneChangeTokensUpdatedBlock = { _, token, _ in

@@ -146,7 +146,9 @@ public enum CaptureParameterResolution {
     /// in batch mode however the app is configured. `false` when the model is
     /// available live, which leaves the configured mode alone.
     public static func requiresBatchMode(_ modelID: String) -> Bool {
-        let isLive = (ModelCatalog.liveTranscription + ModelCatalog.localTranscriptionOptions)
+        let localLiveOptions = ModelCatalog.localTranscription
+            .filter(\.supportsLiveStreaming).map(\.option)
+        let isLive = (ModelCatalog.liveTranscription + localLiveOptions)
             .contains { $0.id.lowercased() == modelID.lowercased() }
         return !isLive
     }

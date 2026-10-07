@@ -1,4 +1,5 @@
 import Foundation
+import SpeakWatchCore
 import WidgetKit
 
 /// Mirrors the two pieces of state a watch face cares about — is a recording

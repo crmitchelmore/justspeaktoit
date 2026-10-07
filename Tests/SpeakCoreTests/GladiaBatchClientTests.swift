@@ -35,6 +35,12 @@ final class GladiaBatchClientTests: XCTestCase {
             XCTAssertEqual(config["languages"] as? [String], [])
             XCTAssertEqual(config["code_switching"] as? Bool, true)
         }
+
+        // A language Gladia does not list detects instead of failing the job.
+        let unlisted = GladiaBatchClient.requestBody(audioURL: "u", language: "yue_HK")
+        let unlistedConfig = try XCTUnwrap(unlisted["language_config"] as? [String: Any])
+        XCTAssertEqual(unlistedConfig["languages"] as? [String], [])
+        XCTAssertEqual(unlistedConfig["code_switching"] as? Bool, true)
     }
 
     func testUnsupportedContainerIsRejectedBeforeAnyUpload() async {

@@ -10,6 +10,8 @@ import os.log
 public final class GestureDetector {
   public var configuration: HotKeyConfiguration
   public var onGesture: ((HotKeyEvent) -> Void)?
+  /// Raw press edges, delivered before the gesture for the same edge.
+  public var onPress: ((HotKeyPressEvent) -> Void)?
 
   private let log = Logger(subsystem: HotKeyLogging.subsystem, category: "GestureDetector")
 
@@ -34,6 +36,7 @@ public final class GestureDetector {
     holdFired = false
     pendingSingleTapWorkItem?.cancel()
     scheduleHoldTimer(source: source)
+    onPress?(HotKeyPressEvent(phase: .pressed, source: source))
   }
 
   /// Call when the monitored key is released.
@@ -45,6 +48,7 @@ public final class GestureDetector {
     holdTimer = nil
 
     let now = ProcessInfo.processInfo.systemUptime
+    onPress?(HotKeyPressEvent(phase: .released, uptime: now, source: source))
     if holdFired {
       holdFired = false
       fire(.holdEnd, source: source)
@@ -100,6 +104,7 @@ public final class GestureDetector {
     lastDoubleTapFireTime = 0
     doubleTapCooldownDeadline = 0
 
+    onPress?(HotKeyPressEvent(phase: .reset, source: source))
     if hadHoldInProgress {
       log.info("Ending an in-progress hold because the detector was reset")
       fire(.holdEnd, source: source)

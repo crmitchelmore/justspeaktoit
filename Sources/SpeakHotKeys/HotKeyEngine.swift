@@ -45,12 +45,16 @@ public final class HotKeyEngine: ObservableObject {
   private let fnBackend = FnKeyBackend()
   private let carbonBackend = CarbonKeyBackend()
   private var listeners: [HotKeyGesture: [UUID: (HotKeyEvent) -> Void]] = [:]
+  private var pressListeners: [UUID: (HotKeyPressEvent) -> Void] = [:]
 
   public init(configuration: HotKeyConfiguration = HotKeyConfiguration()) {
     self.gestureDetector = GestureDetector(configuration: configuration)
 
     gestureDetector.onGesture = { [weak self] event in
       self?.fireListeners(event: event)
+    }
+    gestureDetector.onPress = { [weak self] event in
+      self?.pressListeners.values.forEach { $0(event) }
     }
 
     fnBackend.onKeyDown = { [weak self] source in
@@ -137,6 +141,20 @@ public final class HotKeyEngine: ObservableObject {
   /// Unregister a previously registered handler.
   public func unregister(_ token: HotKeyListenerToken) {
     listeners[token.gesture]?[token.id] = nil
+  }
+
+  /// Register a handler for raw press edges (down, up, reset). Edges arrive
+  /// before the gesture they produce and never change gesture semantics.
+  @discardableResult
+  public func registerPress(handler: @escaping (HotKeyPressEvent) -> Void) -> HotKeyPressListenerToken {
+    let id = UUID()
+    pressListeners[id] = handler
+    return HotKeyPressListenerToken(id: id)
+  }
+
+  /// Unregister a press-edge handler.
+  public func unregister(_ token: HotKeyPressListenerToken) {
+    pressListeners[token.id] = nil
   }
 
   // MARK: - Private

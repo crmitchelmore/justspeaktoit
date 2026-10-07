@@ -313,6 +313,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case silenceDuration
     case connectionPreWarmingEnabled
     case audioPreWarmingEnabled
+    case warmMicrophoneOnKeyPress
     case postProcessingStreamingEnabled
     case hudSizePreference
     case showLiveTranscriptInHUD
@@ -904,6 +905,15 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     didSet { store(audioPreWarmingEnabled, key: .audioPreWarmingEnabled) }
   }
 
+  /// Opens the microphone the moment the dictation hotkey goes down, instead
+  /// of once the hold is recognised, and closes it again if the press does
+  /// not become a recording. Hides the hold threshold and a Bluetooth
+  /// headset's switch to call mode inside the press. Accidental taps briefly
+  /// show the microphone indicator.
+  @Published var warmMicrophoneOnKeyPress: Bool {
+    didSet { store(warmMicrophoneOnKeyPress, key: .warmMicrophoneOnKeyPress) }
+  }
+
   @Published var postProcessingStreamingEnabled: Bool {
     didSet { store(postProcessingStreamingEnabled, key: .postProcessingStreamingEnabled) }
   }
@@ -1341,6 +1351,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
       defaults.object(forKey: DefaultsKey.connectionPreWarmingEnabled.rawValue) as? Bool ?? true
     audioPreWarmingEnabled =
       defaults.object(forKey: DefaultsKey.audioPreWarmingEnabled.rawValue) as? Bool ?? true
+    warmMicrophoneOnKeyPress =
+      defaults.object(forKey: DefaultsKey.warmMicrophoneOnKeyPress.rawValue) as? Bool ?? true
     postProcessingStreamingEnabled =
       defaults.object(forKey: DefaultsKey.postProcessingStreamingEnabled.rawValue) as? Bool ?? true
 
@@ -1517,6 +1529,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.silenceDuration = restored.silenceDuration
     self.connectionPreWarmingEnabled = restored.connectionPreWarmingEnabled
     self.audioPreWarmingEnabled = restored.audioPreWarmingEnabled
+    self.warmMicrophoneOnKeyPress = restored.warmMicrophoneOnKeyPress
     self.postProcessingStreamingEnabled = restored.postProcessingStreamingEnabled
     self.hudSizePreference = restored.hudSizePreference
     self.speedMode = restored.speedMode

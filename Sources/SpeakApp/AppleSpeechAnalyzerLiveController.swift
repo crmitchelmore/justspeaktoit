@@ -113,14 +113,20 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
         sourceFormat: inputFormat,
         targetFormat: session.audioFormat
       )
-      inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-        guard let converted = converter.convert(buffer) else { return }
-        session.send(converted)
-      }
-      for buffer in preRollBuffers {
+      // Pre-roll goes first: a key-down primed engine is already running, so
+      // the tap delivers live audio as soon as it is installed.
+      // A fallback engine on another device can have another format; the
+      // converter only accepts its source format.
+      for buffer in preRollBuffers
+      where buffer.format.sampleRate == inputFormat.sampleRate
+        && buffer.format.channelCount == inputFormat.channelCount {
         if let converted = converter.convert(buffer) {
           session.send(converted)
         }
+      }
+      inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+        guard let converted = converter.convert(buffer) else { return }
+        session.send(converted)
       }
       try await startAudioEngineAfterInputDeviceSettles(audioEngine)
       analyzerSession = session

@@ -35,10 +35,23 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
     fileprivate let generation: UInt64
   }
 
+  /// Lifecycle callbacks for an engine the store adopted instead of building
+  /// (the key-down primer's already-running engine, see `PrimedLiveInput`).
+  struct AdoptionHooks {
+    /// Runs before the engine reaches a controller, so the controller's own tap
+    /// never meets the primer's (a second `installTap` on a bus throws).
+    let willHandOut: (Engine) -> Void
+    /// Runs when the store drops the engine without handing it out. It must
+    /// stop the engine: a running engine holds the microphone open, and a fresh
+    /// input node built beside it stalls for seconds on Bluetooth inputs.
+    let release: (Engine) -> Void
+  }
+
   private struct Prepared {
     let engine: Engine
     let inputDeviceID: InputDeviceID
     let generation: UInt64
+    var hooks: AdoptionHooks?
   }
 
   private let lock = NSLock()
@@ -64,11 +77,14 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
   /// Starts a new preparation, retiring any earlier one and its engine.
   func beginPreparation() -> Token {
     lock.lock()
-    defer { lock.unlock() }
     generation &+= 1
+    let retired = prepared
     prepared = nil
     claimed = nil
-    return Token(generation: generation)
+    let token = Token(generation: generation)
+    lock.unlock()
+    Self.release(retired)
+    return token
   }
 
   /// Builds an engine and its input node now. Never starts the engine, so the
@@ -79,9 +95,41 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
     primeInput(engine)
     guard let inputDeviceID = currentInputDeviceID() else { return }
     lock.lock()
-    defer { lock.unlock() }
-    guard token.generation == generation else { return }
+    guard token.generation == generation else {
+      lock.unlock()
+      return
+    }
+    let replaced = prepared
     prepared = Prepared(engine: engine, inputDeviceID: inputDeviceID, generation: token.generation)
+    lock.unlock()
+    Self.release(replaced)
+  }
+
+  /// Installs an engine built (and possibly already started) elsewhere as
+  /// `token`'s prepared engine. Returns false — leaving the engine with the
+  /// caller, who must release it — when `token` is no longer current.
+  @discardableResult
+  func adopt(
+    _ engine: Engine,
+    inputDeviceID: InputDeviceID,
+    token: Token,
+    hooks: AdoptionHooks
+  ) -> Bool {
+    lock.lock()
+    guard token.generation == generation else {
+      lock.unlock()
+      return false
+    }
+    let replaced = prepared
+    prepared = Prepared(
+      engine: engine,
+      inputDeviceID: inputDeviceID,
+      generation: token.generation,
+      hooks: hooks
+    )
+    lock.unlock()
+    Self.release(replaced)
+    return true
   }
 
   /// The prepared engine when it still matches the current input device;
@@ -96,7 +144,14 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
     }
     claimed = usable
     lock.unlock()
-    return usable?.engine ?? makeFreshEngine()
+    if let usable {
+      usable.hooks?.willHandOut(usable.engine)
+      return usable.engine
+    }
+    // Stopped before the fresh build: an adopted engine may still hold the
+    // microphone open, and the fresh input node must not be built beside it.
+    Self.release(entry)
+    return makeFreshEngine()
   }
 
   /// Gives back a prepared engine whose controller failed to start, so the
@@ -115,10 +170,21 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
   /// stale token leaves the current preparation untouched.
   func discard(_ token: Token) {
     lock.lock()
-    defer { lock.unlock() }
-    guard token.generation == generation else { return }
+    guard token.generation == generation else {
+      lock.unlock()
+      return
+    }
+    let retired = prepared
     prepared = nil
     claimed = nil
+    lock.unlock()
+    Self.release(retired)
+  }
+
+  /// Hooks run outside the lock: stopping an engine can block on Core Audio.
+  private static func release(_ entry: Prepared?) {
+    guard let entry, let hooks = entry.hooks else { return }
+    hooks.release(entry.engine)
   }
 
   var hasPreparedEngine: Bool {
@@ -142,10 +208,18 @@ final class LiveInputPreparation {
   private let engines: LiveInputEngineStore<AVAudioEngine>
   private var inputSession: AudioInputDeviceManager.SessionContext?
   private var token: LiveInputEngineStore<AVAudioEngine>.Token?
+  private let primed: PrimedLiveInputReservation?
 
-  init(deviceManager: AudioInputDeviceManager, engines: LiveInputEngineStore<AVAudioEngine>) {
+  /// - Parameter primed: the microphone the hotkey press already opened, if
+  ///   any. Its running engine is handed on instead of building a new one.
+  init(
+    deviceManager: AudioInputDeviceManager,
+    engines: LiveInputEngineStore<AVAudioEngine>,
+    primed: PrimedLiveInputReservation? = nil
+  ) {
     self.deviceManager = deviceManager
     self.engines = engines
+    self.primed = primed
   }
 
   func prepare() async {
@@ -153,6 +227,7 @@ final class LiveInputPreparation {
     // start resuming late can never retire a newer start's preparation.
     let token = engines.beginPreparation()
     self.token = token
+    if await adoptPrimedInput(token: token) { return }
     if inputSession == nil {
       inputSession = await deviceManager.beginUsingPreferredInput()
     }
@@ -161,6 +236,27 @@ final class LiveInputPreparation {
     // thread so the HUD stays responsive. The token stops this build from
     // installing its engine if a newer start has begun meanwhile.
     await Task.detached(priority: .userInitiated) { engines.prepare(token) }.value
+  }
+
+  /// Hands the key-down primer's running engine, and the input session it
+  /// opened, to this start. The primer's microphone is already open, so this
+  /// start must never build an input node of its own beside it.
+  private func adoptPrimedInput(token: LiveInputEngineStore<AVAudioEngine>.Token) async -> Bool {
+    guard let primed, let capture = await primed.value, let handover = capture.handOver() else {
+      return false
+    }
+    if inputSession == nil {
+      inputSession = handover.inputSession
+    } else if let extra = handover.inputSession {
+      await deviceManager.endUsingPreferredInput(session: extra)
+    }
+    if engines.adopt(handover.engine, inputDeviceID: handover.inputDeviceID, token: token, hooks: handover.hooks) {
+      return true
+    }
+    // A newer start owns the store. Stop the primed engine before this start
+    // falls back to building its own input node.
+    handover.hooks.release(handover.engine)
+    return false
   }
 
   /// Releases the input session and any engine no controller claimed. Safe to
@@ -203,6 +299,16 @@ enum LiveInputEngines {
   static let shared = LiveInputEngineStore<AVAudioEngine>(
     makeEngine: { AVAudioEngine() },
     primeInput: { _ = $0.inputNode },
+    currentInputDeviceID: { defaultInputDeviceID() }
+  )
+
+  /// The idle engine the key-down primer starts (see `PrimedLiveInput`).
+  static let standby = LiveInputStandby<AVAudioEngine>(
+    makeEngine: {
+      let engine = AVAudioEngine()
+      _ = engine.inputNode
+      return engine
+    },
     currentInputDeviceID: { defaultInputDeviceID() }
   )
 

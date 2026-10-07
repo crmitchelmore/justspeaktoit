@@ -60,7 +60,7 @@ final class SonioxLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await sonioxAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
     resetStartState()
 
     do {

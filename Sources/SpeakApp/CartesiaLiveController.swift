@@ -57,7 +57,7 @@ final class CartesiaLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await cartesiaAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
     resetStartState()
 
     do {

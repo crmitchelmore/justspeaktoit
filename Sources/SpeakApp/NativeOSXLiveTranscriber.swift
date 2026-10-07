@@ -121,7 +121,7 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     // Bind a fresh engine to the now-selected default input device. Reusing a
     // long-lived engine across device changes leaves it pointing at a stale HAL
     // device and `start()` then fails with kAudioHardwareBadDeviceError.
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
 
     let localeIdentifier = currentLocaleIdentifier ?? appSettings.resolvedPreferredLocaleIdentifier
 

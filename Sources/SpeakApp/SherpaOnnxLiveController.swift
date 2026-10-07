@@ -132,7 +132,7 @@ final class SherpaOnnxLiveController: NSObject, LiveTranscriptionController {
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
     activeInputSession = sessionContext
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
 
     do {
       let inputNode = audioEngine.inputNode

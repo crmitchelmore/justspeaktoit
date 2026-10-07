@@ -58,7 +58,7 @@ final class GladiaLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await gladiaAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
     resetStartState()
 
     do {

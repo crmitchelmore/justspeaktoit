@@ -183,6 +183,12 @@ final class SwitchingLiveTranscriber: LiveTranscriptionController {
     }
   }
 
+  /// Whether `model`'s controller captures through `LiveInputEngines.shared`,
+  /// i.e. whether preparing a live input engine before capture is worthwhile.
+  func usesLiveInputEngine(for model: String) -> Bool {
+    controller(for: model) is LiveInputEngineConsumer
+  }
+
   func controller(for model: String) -> any LiveTranscriptionController {
     if let controllerOverride { return controllerOverride(model) }
     if AppleLocalModels.isSpeechAnalyzerModel(model) {

@@ -1188,7 +1188,7 @@ final class MainManager: ObservableObject {
               debugDescription: message
             )
           )
-          hudManager.finishFailure(headline: "Delivery failed", message: message)
+          hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
           state = .failed(message)
           lastErrorMessage = message
           pendingDeliveryRemedy = deliveryRemedy
@@ -1296,6 +1296,16 @@ final class MainManager: ObservableObject {
       )
       cleanupAfterFailure(message: error.localizedDescription, preserveFile: true)
     }
+  }
+
+  /// HUD headline for a one-shot delivery that did not insert text. Holding
+  /// the transcript back because the user left the original app is the
+  /// configured behaviour, not a failure.
+  static func deliveryFailureHeadline(for error: Error) -> String {
+    if case .originalApplicationNotInFront = error as? TextOutputError {
+      return "Not inserted"
+    }
+    return "Delivery failed"
   }
 
   /// The remedy, if any, for a one-shot delivery outcome under the current settings.
@@ -1486,7 +1496,7 @@ final class MainManager: ObservableObject {
             debugDescription: message
           )
         )
-        hudManager.finishFailure(headline: "Delivery failed", message: message)
+        hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
         state = .failed(message)
         lastErrorMessage = message
         pendingDeliveryRemedy = deliveryRemedy

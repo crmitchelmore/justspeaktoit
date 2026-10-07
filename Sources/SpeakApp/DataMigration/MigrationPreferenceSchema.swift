@@ -5,7 +5,6 @@ import SpeakHotKeys
 @MainActor
 enum MigrationPreferenceSchema {
     static let booleans: Set<String> = [
-        "allowInsertionIntoOtherApps",
         "analyticsEnabled",
         "audioPreWarmingEnabled",
         "autoCorrectionsEnabled",

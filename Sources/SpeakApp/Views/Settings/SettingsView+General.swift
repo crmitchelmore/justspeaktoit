@@ -127,16 +127,23 @@ extension SettingsView {
           }
           VStack(alignment: .leading, spacing: 8) {
             if DistributionChannel.current.supportsAccessibilityTextInsertion {
-              settingsToggle(
-                DeliverySettingsRemedy.allowInsertionIntoOtherAppsSettingName,
-                isOn: settingsBinding(\AppSettings.allowInsertionIntoOtherApps),
-                tint: .brandLagoon
-              )
+              Picker(
+                AppSettings.AppSwitchDelivery.settingName,
+                selection: settingsBinding(\AppSettings.appSwitchDelivery)
+              ) {
+                ForEach(AppSettings.AppSwitchDelivery.allCases) { option in
+                  Text(option.displayName).tag(option)
+                }
+              }
+              .settingsMenuPicker()
               .speakTooltip(
-                "Off by default. When off, a transcript only goes to the app where recording started, "
-                  + "even if you switch apps before it is ready. When on, it goes to the app you're "
-                  + "using when it is ready."
+                "Choose what happens if you move to another app while Speak is still transcribing."
               )
+              .accessibilityLabel("App switch delivery picker")
+              Text(settings.appSwitchDelivery.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
               settingsToggle(
                 "Restore clipboard after paste",
                 isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),

@@ -43,12 +43,12 @@ struct TextOutputResult {
   /// (issue #673).
   let insertedRange: VoiceEditTextRange?
   /// The app/field delivery actually used when it was redirected away from the
-  /// captured target because the user had switched apps and allowed insertion
-  /// into other apps. Nil when delivery used the requested target.
+  /// captured target because the user had switched apps and chose to insert
+  /// into the app they're in now. Nil when delivery used the requested target.
   var redirectedTarget: TextOutputTarget?
   /// True when, at delivery time, the user was in a different app from the one
-  /// where recording started (or that app had quit). Delivery still targeted
-  /// the original app because insertion into other apps is turned off.
+  /// where recording started (or that app had quit) and delivery still
+  /// targeted the original app, as configured.
   var focusMovedToOtherApplication = false
 
   init(
@@ -204,7 +204,9 @@ enum TextOutputError: LocalizedError {
   case pasteShortcutUnavailable
   case capturedFieldUnavailable
   case capturedFieldChanged
-
+  /// The user switched away from the app where recording started and chose
+  /// to insert only while that app is in front. Carries the app's name.
+  case originalApplicationNotInFront(String?)
   var errorDescription: String? {
     switch self {
     case .accessibilityPermissionMissing:
@@ -226,6 +228,9 @@ enum TextOutputError: LocalizedError {
         + "The transcript was kept on the clipboard."
     case .capturedFieldChanged:
       return "The focused field changed since recording started. "
+        + "The transcript was kept on the clipboard."
+    case .originalApplicationNotInFront(let name):
+      return "You'd switched away from \(name ?? "the app where recording started"), so nothing was inserted. "
         + "The transcript was kept on the clipboard."
     }
   }
@@ -595,29 +600,86 @@ struct SmartTextOutput: TextOutputting {
       return deliver(text: text, target: nil)
     }
     let frontmostProcessIdentifier = NSWorkspace.shared.frontmostApplication?.processIdentifier
-    let focusMoved = Self.focusMovedToOtherApplication(
+    let decision = Self.appSwitchDecision(
+      policy: appSettings.appSwitchDelivery,
       capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost(
         frontmostProcessIdentifier: frontmostProcessIdentifier
       ),
+      capturedApplicationIsRunning: target.isApplicationRunning,
       frontmostProcessIdentifier: frontmostProcessIdentifier
     )
-    guard focusMoved else {
-      return deliver(text: text, target: target)
-    }
-    guard appSettings.allowInsertionIntoOtherApps else {
+    switch decision {
+    case .deliverToOriginal(let focusMoved):
       var result = deliver(text: text, target: target)
-      result.focusMovedToOtherApplication = true
+      result.focusMovedToOtherApplication = focusMoved
       return result
+    case .deliverToCurrentApp:
+      let current = TextOutputTarget.capture()
+      let originalApp = target.applicationName ?? "unknown"
+      let currentApp = current.applicationName ?? "unknown"
+      logger.info(
+        "Focus moved from \(originalApp, privacy: .public) to \(currentApp, privacy: .public); delivering there"
+      )
+      var result = deliver(text: text, target: current)
+      result.redirectedTarget = current
+      return result
+    case .keepOnClipboard:
+      logger.info("Original app is not in front; keeping the transcript on the clipboard")
+      return keepOnClipboard(text: text, originalApplicationName: target.applicationName)
     }
-    let current = TextOutputTarget.capture()
-    let originalApp = target.applicationName ?? "unknown"
-    let currentApp = current.applicationName ?? "unknown"
-    logger.info(
-      "Focus moved from \(originalApp, privacy: .public) to \(currentApp, privacy: .public); delivering there"
+  }
+
+  enum AppSwitchDecision: Equatable {
+    /// Deliver to the captured target. `focusMoved` is true when the user is
+    /// in another app, so the message can say where the text went.
+    case deliverToOriginal(focusMoved: Bool)
+    case deliverToCurrentApp
+    case keepOnClipboard
+  }
+
+  /// Applies the user's "If you switch apps" setting to where the user is now.
+  static func appSwitchDecision(
+    policy: AppSettings.AppSwitchDelivery,
+    capturedApplicationIsFrontmost: Bool,
+    capturedApplicationIsRunning: Bool,
+    frontmostProcessIdentifier: pid_t?,
+    ownProcessIdentifier: pid_t = ProcessInfo.processInfo.processIdentifier
+  ) -> AppSwitchDecision {
+    switch policy {
+    case .onlyIfOriginalAppInFront:
+      // Strict: anything other than the original app in front — including
+      // Speak's own windows — means "don't insert". A quit app still goes
+      // through delivery, which reports it as unavailable.
+      guard capturedApplicationIsFrontmost || !capturedApplicationIsRunning else {
+        return .keepOnClipboard
+      }
+      return .deliverToOriginal(focusMoved: false)
+    case .originalApp, .currentApp:
+      let focusMoved = focusMovedToOtherApplication(
+        capturedApplicationIsFrontmost: capturedApplicationIsFrontmost,
+        frontmostProcessIdentifier: frontmostProcessIdentifier,
+        ownProcessIdentifier: ownProcessIdentifier
+      )
+      if focusMoved, policy == .currentApp {
+        return .deliverToCurrentApp
+      }
+      return .deliverToOriginal(focusMoved: focusMoved)
+    }
+  }
+
+  private func keepOnClipboard(text: String, originalApplicationName: String?) -> TextOutputResult {
+    guard PasteTextOutput.hasDeliverableText(text) else {
+      return TextOutputResult(method: .none, error: nil)
+    }
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    guard pasteboard.setString(text, forType: .string) else {
+      return TextOutputResult(method: .none, error: TextOutputError.clipboardWriteFailed)
+    }
+    return TextOutputResult(
+      method: .clipboard,
+      error: TextOutputError.originalApplicationNotInFront(originalApplicationName)
     )
-    var result = deliver(text: text, target: current)
-    result.redirectedTarget = current
-    return result
   }
 
   /// Whether the user is now in a different app from the one captured when

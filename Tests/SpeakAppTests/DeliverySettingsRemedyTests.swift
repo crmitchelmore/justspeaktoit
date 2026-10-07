@@ -4,60 +4,15 @@ import XCTest
 
 @MainActor
 final class DeliverySettingsRemedyTests: XCTestCase {
-  private let ownPID: pid_t = 100
-  private let otherPID: pid_t = 200
-
   private func configuration(
-    allowOtherApps: Bool = false,
+    appSwitch: AppSettings.AppSwitchDelivery = .originalApp,
     method: AppSettings.TextOutputMethod = .smart,
     streaming: Bool = false
   ) -> DeliverySettingsRemedy.Configuration {
     DeliverySettingsRemedy.Configuration(
-      allowInsertionIntoOtherApps: allowOtherApps,
+      appSwitchDelivery: appSwitch,
       textOutputMethod: method,
       streamingInsertionEnabled: streaming
-    )
-  }
-
-  // MARK: - Focus moved to another app
-
-  func testFocusMoved_capturedAppStillFrontmost_ReturnsFalse() {
-    XCTAssertFalse(
-      SmartTextOutput.focusMovedToOtherApplication(
-        capturedApplicationIsFrontmost: true,
-        frontmostProcessIdentifier: otherPID,
-        ownProcessIdentifier: ownPID
-      )
-    )
-  }
-
-  func testFocusMoved_otherAppFrontmost_ReturnsTrue() {
-    XCTAssertTrue(
-      SmartTextOutput.focusMovedToOtherApplication(
-        capturedApplicationIsFrontmost: false,
-        frontmostProcessIdentifier: otherPID,
-        ownProcessIdentifier: ownPID
-      )
-    )
-  }
-
-  func testFocusMoved_speakFrontmost_ReturnsFalse() {
-    XCTAssertFalse(
-      SmartTextOutput.focusMovedToOtherApplication(
-        capturedApplicationIsFrontmost: false,
-        frontmostProcessIdentifier: ownPID,
-        ownProcessIdentifier: ownPID
-      )
-    )
-  }
-
-  func testFocusMoved_noFrontmostApp_ReturnsFalse() {
-    XCTAssertFalse(
-      SmartTextOutput.focusMovedToOtherApplication(
-        capturedApplicationIsFrontmost: false,
-        frontmostProcessIdentifier: nil,
-        ownProcessIdentifier: ownPID
-      )
     )
   }
 
@@ -74,7 +29,7 @@ final class DeliverySettingsRemedyTests: XCTestCase {
     )
   }
 
-  func testForOutput_focusMovedWithSettingOff_SuggestsAllowingOtherApps() {
+  func testForOutput_focusMovedToOriginalApp_SuggestsCurrentApp() {
     XCTAssertEqual(
       DeliverySettingsRemedy.forOutput(
         error: nil,
@@ -82,7 +37,7 @@ final class DeliverySettingsRemedyTests: XCTestCase {
         focusMovedToOtherApplication: true,
         configuration: configuration()
       ),
-      .allowInsertionIntoOtherApps
+      .useAppSwitchDelivery(.currentApp)
     )
     XCTAssertEqual(
       DeliverySettingsRemedy.forOutput(
@@ -91,22 +46,34 @@ final class DeliverySettingsRemedyTests: XCTestCase {
         focusMovedToOtherApplication: true,
         configuration: configuration()
       ),
-      .allowInsertionIntoOtherApps
+      .useAppSwitchDelivery(.currentApp)
     )
   }
 
-  func testForOutput_focusMovedWithSettingOn_ReturnsNil() {
+  func testForOutput_focusMovedWithCurrentApp_ReturnsNil() {
     XCTAssertNil(
       DeliverySettingsRemedy.forOutput(
         error: nil,
         warning: nil,
         focusMovedToOtherApplication: true,
-        configuration: configuration(allowOtherApps: true)
+        configuration: configuration(appSwitch: .currentApp)
       )
     )
   }
 
-  func testForOutput_originalAppQuit_SuggestsAllowingOtherAppsOnlyWhenOff() {
+  func testForOutput_heldBackBecauseOriginalAppNotInFront_SuggestsOriginalApp() {
+    XCTAssertEqual(
+      DeliverySettingsRemedy.forOutput(
+        error: TextOutputError.originalApplicationNotInFront("Notes"),
+        warning: nil,
+        focusMovedToOtherApplication: false,
+        configuration: configuration(appSwitch: .onlyIfOriginalAppInFront)
+      ),
+      .useAppSwitchDelivery(.originalApp)
+    )
+  }
+
+  func testForOutput_originalAppQuit_SuggestsCurrentAppUnlessAlreadyChosen() {
     XCTAssertEqual(
       DeliverySettingsRemedy.forOutput(
         error: TextOutputError.targetApplicationUnavailable,
@@ -114,14 +81,23 @@ final class DeliverySettingsRemedyTests: XCTestCase {
         focusMovedToOtherApplication: false,
         configuration: configuration()
       ),
-      .allowInsertionIntoOtherApps
+      .useAppSwitchDelivery(.currentApp)
+    )
+    XCTAssertEqual(
+      DeliverySettingsRemedy.forOutput(
+        error: TextOutputError.targetApplicationUnavailable,
+        warning: nil,
+        focusMovedToOtherApplication: false,
+        configuration: configuration(appSwitch: .onlyIfOriginalAppInFront)
+      ),
+      .useAppSwitchDelivery(.currentApp)
     )
     XCTAssertNil(
       DeliverySettingsRemedy.forOutput(
         error: TextOutputError.targetApplicationUnavailable,
         warning: nil,
         focusMovedToOtherApplication: false,
-        configuration: configuration(allowOtherApps: true)
+        configuration: configuration(appSwitch: .currentApp)
       )
     )
   }
@@ -203,11 +179,12 @@ final class DeliverySettingsRemedyTests: XCTestCase {
   // MARK: - Messages
 
   func testAnnotate_appendsSettingHint() {
-    let message = DeliverySettingsRemedy.allowInsertionIntoOtherApps.annotate(
+    let message = DeliverySettingsRemedy.useAppSwitchDelivery(.currentApp).annotate(
       TextOutputError.targetApplicationUnavailable.localizedDescription
     )
     XCTAssertTrue(message.hasPrefix("The original app is no longer available."))
-    XCTAssertTrue(message.contains(DeliverySettingsRemedy.allowInsertionIntoOtherAppsSettingName))
+    XCTAssertTrue(message.contains(AppSettings.AppSwitchDelivery.settingName))
+    XCTAssertTrue(message.contains(AppSettings.AppSwitchDelivery.currentApp.displayName))
     XCTAssertTrue(message.contains("Settings › General"))
   }
 
@@ -222,12 +199,12 @@ final class DeliverySettingsRemedyTests: XCTestCase {
       warning: TextOutputError.capturedFieldChanged,
       focusMovedToOtherApplication: true,
       destination: "Notes",
-      remedy: .allowInsertionIntoOtherApps
+      remedy: .useAppSwitchDelivery(.currentApp)
     )
     XCTAssertEqual(
       note,
       "Sent to Notes, where recording started. "
-        + DeliverySettingsRemedy.allowInsertionIntoOtherApps.hint
+        + DeliverySettingsRemedy.useAppSwitchDelivery(.currentApp).hint
     )
   }
 
@@ -255,11 +232,12 @@ final class DeliverySettingsRemedyTests: XCTestCase {
     settings.textOutputMethod = .accessibilityOnly
     settings.streamingInsertionEnabled = true
 
-    DeliverySettingsRemedy.allowInsertionIntoOtherApps.apply(settings: settings, permissions: permissions)
+    DeliverySettingsRemedy.useAppSwitchDelivery(.onlyIfOriginalAppInFront)
+      .apply(settings: settings, permissions: permissions)
     DeliverySettingsRemedy.useSmartTextOutput.apply(settings: settings, permissions: permissions)
     DeliverySettingsRemedy.disableStreamingInsertion.apply(settings: settings, permissions: permissions)
 
-    XCTAssertTrue(settings.allowInsertionIntoOtherApps)
+    XCTAssertEqual(settings.appSwitchDelivery, .onlyIfOriginalAppInFront)
     XCTAssertEqual(settings.textOutputMethod, .smart)
     XCTAssertFalse(settings.streamingInsertionEnabled)
   }

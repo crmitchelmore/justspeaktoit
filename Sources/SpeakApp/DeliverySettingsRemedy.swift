@@ -5,8 +5,9 @@ import Foundation
 /// delivered. Delivery messages append `hint`, and the menu bar offers
 /// `menuTitle` to make the change in one click.
 enum DeliverySettingsRemedy: Equatable {
-  /// Follow the user to the app they switched to before the transcript was ready.
-  case allowInsertionIntoOtherApps
+  /// Pick a different answer to "If you switch apps before the transcript is
+  /// ready". Carries the option that would have delivered this transcript.
+  case useAppSwitchDelivery(AppSettings.AppSwitchDelivery)
   /// Direct insertion needs Accessibility access.
   case grantAccessibilityPermission
   /// Accessibility-only output has no clipboard fallback; Smart does.
@@ -16,31 +17,29 @@ enum DeliverySettingsRemedy: Equatable {
 
   /// The settings that decide which remedy, if any, applies.
   struct Configuration: Equatable {
-    var allowInsertionIntoOtherApps: Bool
+    var appSwitchDelivery: AppSettings.AppSwitchDelivery
     var textOutputMethod: AppSettings.TextOutputMethod
     var streamingInsertionEnabled: Bool
 
     @MainActor
     init(settings: AppSettings) {
       self.init(
-        allowInsertionIntoOtherApps: settings.allowInsertionIntoOtherApps,
+        appSwitchDelivery: settings.appSwitchDelivery,
         textOutputMethod: settings.textOutputMethod,
         streamingInsertionEnabled: settings.streamingInsertionEnabled
       )
     }
 
     init(
-      allowInsertionIntoOtherApps: Bool,
+      appSwitchDelivery: AppSettings.AppSwitchDelivery,
       textOutputMethod: AppSettings.TextOutputMethod,
       streamingInsertionEnabled: Bool
     ) {
-      self.allowInsertionIntoOtherApps = allowInsertionIntoOtherApps
+      self.appSwitchDelivery = appSwitchDelivery
       self.textOutputMethod = textOutputMethod
       self.streamingInsertionEnabled = streamingInsertionEnabled
     }
   }
-
-  static let allowInsertionIntoOtherAppsSettingName = "Insert into the app you switch to"
 
   /// The remedy for a one-shot delivery outcome, or nil when delivery worked
   /// as configured or no setting would have changed the outcome.
@@ -50,13 +49,15 @@ enum DeliverySettingsRemedy: Equatable {
     focusMovedToOtherApplication: Bool,
     configuration: Configuration
   ) -> DeliverySettingsRemedy? {
-    if focusMovedToOtherApplication, !configuration.allowInsertionIntoOtherApps {
-      return .allowInsertionIntoOtherApps
+    if focusMovedToOtherApplication, configuration.appSwitchDelivery != .currentApp {
+      return .useAppSwitchDelivery(.currentApp)
     }
     guard let outputError = (error ?? warning) as? TextOutputError else { return nil }
     switch outputError {
+    case .originalApplicationNotInFront:
+      return .useAppSwitchDelivery(.originalApp)
     case .targetApplicationUnavailable:
-      return configuration.allowInsertionIntoOtherApps ? nil : .allowInsertionIntoOtherApps
+      return configuration.appSwitchDelivery == .currentApp ? nil : .useAppSwitchDelivery(.currentApp)
     case .accessibilityPermissionMissing:
       return .grantAccessibilityPermission
     case .unableToFindFocusedElement, .unableToSetValue, .unableToVerifyInsertion,
@@ -87,9 +88,9 @@ enum DeliverySettingsRemedy: Equatable {
   /// setting to change and where.
   var hint: String {
     switch self {
-    case .allowInsertionIntoOtherApps:
-      return "To insert into the app you're using instead, turn on "
-        + "“\(Self.allowInsertionIntoOtherAppsSettingName)” in Settings › General, or from the menu bar."
+    case .useAppSwitchDelivery(let option):
+      return "You can change this: set “\(AppSettings.AppSwitchDelivery.settingName)” to "
+        + "“\(option.displayName)” in Settings › General, or from the menu bar."
     case .grantAccessibilityPermission:
       return "Grant Accessibility access in Settings › Permissions, or from the menu bar."
     case .useSmartTextOutput:
@@ -103,8 +104,8 @@ enum DeliverySettingsRemedy: Equatable {
   /// The menu bar action that applies the remedy.
   var menuTitle: String {
     switch self {
-    case .allowInsertionIntoOtherApps:
-      return "Turn On “\(Self.allowInsertionIntoOtherAppsSettingName)”"
+    case .useAppSwitchDelivery(let option):
+      return "When Switching Apps: \(option.displayName)"
     case .grantAccessibilityPermission:
       return "Grant Accessibility Access…"
     case .useSmartTextOutput:
@@ -124,8 +125,8 @@ enum DeliverySettingsRemedy: Equatable {
   @MainActor
   func apply(settings: AppSettings, permissions: PermissionsManager) {
     switch self {
-    case .allowInsertionIntoOtherApps:
-      settings.allowInsertionIntoOtherApps = true
+    case .useAppSwitchDelivery(let option):
+      settings.appSwitchDelivery = option
     case .grantAccessibilityPermission:
       permissions.openSettings(for: .accessibility)
     case .useSmartTextOutput:

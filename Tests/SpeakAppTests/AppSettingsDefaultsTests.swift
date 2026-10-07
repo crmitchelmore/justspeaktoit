@@ -307,17 +307,23 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
-    func testCoreDefaults_allowInsertionIntoOtherAppsIsFalse() {
+    func testCoreDefaults_appSwitchDeliveryIsOriginalApp() {
         let settings = AppSettings(defaults: defaults)
-        XCTAssertFalse(settings.allowInsertionIntoOtherApps)
+        XCTAssertEqual(settings.appSwitchDelivery, .originalApp)
     }
 
     @MainActor
-    func testAllowInsertionIntoOtherApps_persistsAcrossInstances() {
-        let settings = AppSettings(defaults: defaults)
-        settings.allowInsertionIntoOtherApps = true
+    func testAppSwitchDelivery_persistsAcrossInstances() {
+        for option in AppSettings.AppSwitchDelivery.allCases {
+            AppSettings(defaults: defaults).appSwitchDelivery = option
+            XCTAssertEqual(AppSettings(defaults: defaults).appSwitchDelivery, option)
+        }
+    }
 
-        XCTAssertTrue(AppSettings(defaults: defaults).allowInsertionIntoOtherApps)
+    @MainActor
+    func testAppSwitchDelivery_unknownStoredValueFallsBackToOriginalApp() {
+        defaults.set("somewhereElse", forKey: "appSwitchDelivery")
+        XCTAssertEqual(AppSettings(defaults: defaults).appSwitchDelivery, .originalApp)
     }
 
     @MainActor

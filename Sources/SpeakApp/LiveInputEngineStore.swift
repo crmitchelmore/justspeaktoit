@@ -168,17 +168,24 @@ final class LiveInputEngineStore<Engine: AnyObject>: @unchecked Sendable {
 
   /// Drops the engine of `token`'s preparation if no controller claimed it. A
   /// stale token leaves the current preparation untouched.
-  func discard(_ token: Token) {
+  ///
+  /// - Parameter releasingClaimed: also release an *adopted* engine a
+  ///   controller claimed. Pass it only when the start failed or was abandoned:
+  ///   a controller that threw before capture may have left the primer's
+  ///   running engine open, and nothing else would ever stop it.
+  func discard(_ token: Token, releasingClaimed: Bool = false) {
     lock.lock()
     guard token.generation == generation else {
       lock.unlock()
       return
     }
     let retired = prepared
+    let abandoned = releasingClaimed ? claimed : nil
     prepared = nil
     claimed = nil
     lock.unlock()
     Self.release(retired)
+    Self.release(abandoned)
   }
 
   /// Hooks run outside the lock: stopping an engine can block on Core Audio.
@@ -261,9 +268,13 @@ final class LiveInputPreparation {
 
   /// Releases the input session and any engine no controller claimed. Safe to
   /// call more than once.
-  func finish() async {
+  ///
+  /// - Parameter startFailed: the start failed or was abandoned. An adopted
+  ///   (already running) engine a controller claimed is then stopped too, in
+  ///   case that controller threw before taking ownership of it.
+  func finish(startFailed: Bool = false) async {
     if let token {
-      engines.discard(token)
+      engines.discard(token, releasingClaimed: startFailed)
       self.token = nil
     }
     guard let inputSession else { return }

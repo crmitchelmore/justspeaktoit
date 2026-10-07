@@ -118,18 +118,20 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
 
-    // Bind a fresh engine to the now-selected default input device. Reusing a
-    // long-lived engine across device changes leaves it pointing at a stale HAL
-    // device and `start()` then fails with kAudioHardwareBadDeviceError.
-    audioEngine = LiveInputEngines.shared.makeEngine()
-
     let localeIdentifier = currentLocaleIdentifier ?? appSettings.resolvedPreferredLocaleIdentifier
 
+    // Checked before claiming an engine: the claimed engine can be the key-down
+    // primer's running one, and an unavailable recognizer would strand it open.
     guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw TranscriptionManagerError.recognizerUnavailable
     }
     speechRecognizer = recognizer
+
+    // Bind a fresh engine to the now-selected default input device. Reusing a
+    // long-lived engine across device changes leaves it pointing at a stale HAL
+    // device and `start()` then fails with kAudioHardwareBadDeviceError.
+    audioEngine = LiveInputEngines.shared.makeEngine()
 
     request = makeRecognitionRequest(for: recognizer)
 
@@ -137,6 +139,8 @@ final class NativeOSXLiveTranscriber: NSObject, LiveTranscriptionController {
     inputNode.removeTap(onBus: 0)
     let format = inputNode.outputFormat(forBus: 0)
     guard audioInputFormatIsUsable(format) else {
+      // The claimed engine may already be running (the key-down primer's).
+      audioEngine.stop()
       await audioDeviceManager.endUsingPreferredInput(session: sessionContext)
       throw TranscriptionManagerError.noUsableAudioInput
     }

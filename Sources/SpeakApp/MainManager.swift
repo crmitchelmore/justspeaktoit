@@ -760,7 +760,7 @@ final class MainManager: ObservableObject {
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak self] in self?.activeSession === session },
         prepareStream: prepareStream,
-        discardPreparedStream: { await liveInputPreparation.finish() },
+        discardPreparedStream: { await liveInputPreparation.finish(startFailed: true) },
         startCapture: { [weak self] in
           guard let self else { return }
           let recording = try await self.audioFileManager.startRecording(
@@ -805,14 +805,14 @@ final class MainManager: ObservableObject {
       await recordKeyDownLatency(for: session, primedInput: primedInput)
       return .started
     } catch is RecordingStartAbort {
-      await liveInputPreparation.finish()
+      await liveInputPreparation.finish(startFailed: true)
       // Not a failure: the session ended while startup was suspended, and the
       // sequencer has already torn down whatever it brought up. Touching the
       // shared failure path here would clobber the session that replaced it.
       logger.info("Recording start abandoned: the session ended before capture was ready")
       return .rejected(.captureFailed)
     } catch {
-      await liveInputPreparation.finish()
+      await liveInputPreparation.finish(startFailed: true)
       session.errors.append(
         HistoryError(
           phase: .recording,

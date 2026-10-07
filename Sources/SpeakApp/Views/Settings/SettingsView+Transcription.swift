@@ -645,8 +645,8 @@ extension SettingsView {
             .font(.subheadline.weight(.semibold))
           Text(
             settings.localTranscriptionMode == .streaming
-              ? "Choose fast English streaming or high-quality multilingual streaming."
-              : "Use the recommended high-quality model after each recording finishes."
+              ? "Choose fast English streaming, multilingual accuracy, or a smaller download."
+              : "Choose English accuracy, multilingual quality, or a smaller download for finished recordings."
           )
             .font(.caption)
             .foregroundStyle(.secondary)

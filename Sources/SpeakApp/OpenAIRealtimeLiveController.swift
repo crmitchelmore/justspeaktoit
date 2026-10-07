@@ -77,7 +77,7 @@ final class OpenAIRealtimeLiveController: NSObject, LiveTranscriptionController 
 
     let sessionContext = await audioDeviceManager.beginUsingPreferredInput()
     activeInputSession = sessionContext
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
 
     transcriber = nil
     targetFormat = nil

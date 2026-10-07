@@ -71,7 +71,7 @@ final class DeepgramLiveController: NSObject, LiveTranscriptionController {
 
     let apiKey = try await deepgramAPIKey()
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
     resetStartState()
 
     do {

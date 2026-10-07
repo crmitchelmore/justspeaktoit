@@ -690,6 +690,10 @@ final class MainManager: ObservableObject {
     // Claim the recorder staged while idle. Returns nil — and the cold path
     // runs — whenever the environment moved since it was staged.
     let warmContext = captureWarmer?.claimWarmContext()
+    let liveInputPreparation = LiveInputPreparation(
+      deviceManager: audioInputDeviceManager,
+      engines: LiveInputEngines.shared
+    )
 
     do {
       // Issue #641: the start cue is played by the sequencer *after* capture is
@@ -705,8 +709,18 @@ final class MainManager: ObservableObject {
           )
         }
         : nil
+      // The live engine's input node is built before the recorder opens the
+      // microphone; built afterwards it stalled stream start (and the cue) by
+      // ~3 s on Bluetooth inputs. See `LiveInputEngineStore`. Routes that
+      // capture through their own engine (WhisperKit) would never claim it.
+      let prepareStream: RecordingStartSequencer.Step? = audioFileManager.requiresPhysicalInput
+        && transcriptionManager.liveRouteUsesLiveInputEngine
+        ? { await liveInputPreparation.prepare() }
+        : nil
       let sequencer = RecordingStartSequencer(
         isSessionCurrent: { [weak self] in self?.activeSession === session },
+        prepareStream: prepareStream,
+        discardPreparedStream: { await liveInputPreparation.finish() },
         startCapture: { [weak self] in
           guard let self else { return }
           let recording = try await self.audioFileManager.startRecording(
@@ -746,15 +760,18 @@ final class MainManager: ObservableObject {
         playCue: { [weak self] in self?.playRecordingStartCue(for: session) }
       )
       let timeline = try await sequencer.run()
+      await liveInputPreparation.finish()
       recordStartTimeline(for: session, timeline: timeline)
       return .started
     } catch is RecordingStartAbort {
+      await liveInputPreparation.finish()
       // Not a failure: the session ended while startup was suspended, and the
       // sequencer has already torn down whatever it brought up. Touching the
       // shared failure path here would clobber the session that replaced it.
       logger.info("Recording start abandoned: the session ended before capture was ready")
       return .rejected(.captureFailed)
     } catch {
+      await liveInputPreparation.finish()
       session.errors.append(
         HistoryError(
           phase: .recording,

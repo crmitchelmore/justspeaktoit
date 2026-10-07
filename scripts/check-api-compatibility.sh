@@ -138,7 +138,7 @@ fi
 # rendered findings, so the filtering is done here against the same text the
 # report prints. See the allowlist file for what may be listed.
 ALLOWLIST="$(dirname "$0")/api-breakage-allowlist.txt"
-findings=$(grep -o 'API breakage: .*' <<< "$output" | sort -u)
+findings=$(grep -o 'API breakage: .*' <<< "$output" | sed -E 's/ \[#[A-Za-z0-9-]+\]$//' | sort -u)
 allowed=""
 if [[ -f "$ALLOWLIST" ]]; then
     allowed=$(grep -v '^[[:space:]]*#' "$ALLOWLIST" | grep -v '^[[:space:]]*$')

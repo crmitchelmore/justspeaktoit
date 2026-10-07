@@ -76,11 +76,12 @@ test('every Apple build cache isolates architecture, host and workspace, includi
 });
 
 const simulatorPreparation = jobBodies['build-ios'].match(
-  /- name: Prepare iOS Simulator\n        timeout-minutes: 5\n        run: \|\n([\s\S]*?)(?=\n      - name:)/,
+  /- name: Select iOS Simulator\n        run: \|\n([\s\S]*?)(?=\n      - name:)/,
 )?.[1].replace(/^          /gm, '');
-assert.ok(simulatorPreparation, 'simulator preparation must have a bounded readiness step');
+assert.ok(simulatorPreparation, 'simulator selection must reject unavailable devices');
+const iosPreparation = readFileSync(new URL('../prepare-ios-ci.py', import.meta.url), 'utf8');
 
-function prepareSimulator(devices, bootExit = 0) {
+function prepareSimulator(devices) {
   const directory = mkdtempSync(join(tmpdir(), 'ios-ci-readiness-'));
   const environmentFile = join(directory, 'environment');
   try {
@@ -88,9 +89,6 @@ function prepareSimulator(devices, bootExit = 0) {
       xcrun() {
         if [[ "$*" == "simctl list devices available -j" ]]; then
           printf '%s\\n' "$SIM_DEVICES_JSON"
-        elif [[ "$1 $2" == "simctl bootstatus" ]]; then
-          printf 'READINESS %s\\n' "$*"
-          return "$BOOT_EXIT"
         else
           echo "Unexpected simulator command" >&2
           return 64
@@ -103,7 +101,6 @@ function prepareSimulator(devices, bootExit = 0) {
         ...process.env,
         GITHUB_ENV: environmentFile,
         SIM_DEVICES_JSON: JSON.stringify({ devices }),
-        BOOT_EXIT: String(bootExit),
       },
     });
     assert.ifError(result.error);
@@ -113,12 +110,14 @@ function prepareSimulator(devices, bootExit = 0) {
   }
 }
 
-test('iOS simulator readiness precedes compilation without extending the job budget or dropping tests', () => {
+test('iOS preparation overlaps compilation without extending the job budget or dropping tests', () => {
   const body = jobBodies['build-ios'];
   assert.match(body, /^\s+timeout-minutes: 30$/m);
-  assert.ok(body.indexOf('Prepare iOS Simulator') < body.indexOf('- name: Build iOS Library'));
-  assert.ok(body.indexOf('Prepare iOS Simulator') < body.indexOf('- name: Generate iOS App Project'));
-  assert.match(body, /swift build --disable-dependency-cache --target SpeakiOSLib/);
+  assert.ok(body.indexOf('Select iOS Simulator') < body.indexOf('- name: Build iOS Library'));
+  assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
+  assert.match(iosPreparation, /\["swift", "build", "--disable-dependency-cache", "--target", "SpeakiOSLib"\]/);
+  assert.match(iosPreparation, /\["tuist", "generate", "--no-open"\]/);
+  assert.match(iosPreparation, /environment\["TUIST_IOS_KEYBOARD"\] = "1"/);
   assert.match(body, /xcodebuild test/);
   assert.match(body, /-only-testing:SpeakiOSTests/);
   assert.match(body, /-only-testing:SpeakiOSUITests/);
@@ -126,7 +125,7 @@ test('iOS simulator readiness precedes compilation without extending the job bud
   assert.match(body, /Build watchOS App \(feature-flagged\)/);
 });
 
-test('iOS preparation prefers an available Pro and waits before publishing the destination', () => {
+test('iOS selection prefers an available Pro before starting preparation', () => {
   const result = prepareSimulator({ runtime: [
     { name: 'iPhone 17 Pro', udid: 'unavailable', isAvailable: false },
     { name: 'iPhone 16', udid: 'fallback', isAvailable: true },
@@ -134,7 +133,6 @@ test('iOS preparation prefers an available Pro and waits before publishing the d
   ] });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.environment, 'SIMULATOR_ID=preferred\n');
-  assert.match(result.stdout, /READINESS simctl bootstatus preferred -b/);
 });
 
 test('iOS preparation falls back to an available iPhone, not a watch', () => {
@@ -146,17 +144,12 @@ test('iOS preparation falls back to an available iPhone, not a watch', () => {
   assert.equal(result.environment, 'SIMULATOR_ID=fallback\n');
 });
 
-test('missing simulator and failed boot explicitly fail instead of publishing a usable destination', () => {
+test('missing simulator explicitly fails instead of publishing a usable destination', () => {
   const missing = prepareSimulator({ runtime: [] });
   assert.equal(missing.status, 1);
   assert.match(missing.stdout, /::error::No available iPhone simulator/);
   assert.doesNotMatch(missing.stdout, /READINESS/);
   assert.equal(missing.environment, null);
-  const failed = prepareSimulator({ runtime: [
-    { name: 'iPhone 17 Pro', udid: 'preferred', isAvailable: true },
-  ] }, 42);
-  assert.equal(failed.status, 42);
-  assert.equal(failed.environment, null);
 });
 
 const predicate = aggregate.match(/name: Reject unsuccessful CI gates\n        if: >-\n([\s\S]*?)\n        env:/)?.[1];

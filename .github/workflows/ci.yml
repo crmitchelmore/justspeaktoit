@@ -290,8 +290,7 @@ jobs:
       - name: Install Tuist
         run: brew install tuist
 
-      - name: Prepare iOS Simulator
-        timeout-minutes: 5
+      - name: Select iOS Simulator
         run: |
           set -euo pipefail
           if ! SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -er \
@@ -300,18 +299,12 @@ jobs:
             echo "::error::No available iPhone simulator could be selected."
             exit 1
           fi
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
       - name: Build iOS Library
-        run: swift build --disable-dependency-cache --target SpeakiOSLib
-
-      - name: Generate iOS App Project
-        # CI includes the keyboard in its shipping handoff-only shape so the
-        # extension and its flow tests compile without enabling direct capture.
-        env:
-          TUIST_IOS_KEYBOARD: "1"
-        run: tuist generate --no-open
+        # Boot overlaps compilation; readiness is required before XCTest.
+        # Project generation retains the shipping handoff-only keyboard shape.
+        run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
 
       - name: Test iOS App and Action Button Settings
         id: ios-tests

@@ -8,6 +8,71 @@ import { assessCIGates as assessOracle } from '../verify-ci-gates.mjs';
 const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const makefile = readFileSync(new URL('../../Makefile', import.meta.url), 'utf8');
 const aggregate = workflow.slice(workflow.indexOf('\n  required-macos:'));
+const jobBodies = Object.fromEntries([...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n([\s\S]*?)(?=^  [a-z][a-z0-9-]+:\n|$(?![\s\S]))/gm)]
+  .map(([, id, body]) => [id, body]));
+const appleJobs = [
+  'build-macos', 'release-validation', 'api-compatibility', 'lint',
+  'build-ios', 'build-ios-keyboard', 'core-journey-e2e', 'core-journey-fixture-ui',
+];
+
+function route(id, github, vars = {}) {
+  const expression = jobBodies[id].match(/runs-on: \$\{\{ (.+) \}\}/)?.[1];
+  assert.ok(expression, `${id}: must retain guarded routing`);
+  return new Function('github', 'vars', 'fromJSON', `return (${expression});`)(github, vars, JSON.parse);
+}
+
+function routingContext(event = 'pull_request', repository = 'crmitchelmore/justspeaktoit', number = 1200) {
+  return {
+    event_name: event, ref: 'refs/heads/main', sha: 'merge-sha', repository: 'crmitchelmore/justspeaktoit',
+    event: { number, pull_request: { head: { sha: 'head-sha', repo: { full_name: repository } } } },
+  };
+}
+
+test('all compatible Apple CI lanes default to standard same-OS hosted Intel', () => {
+  for (const id of appleJobs) {
+    for (const event of ['pull_request', 'push']) {
+      assert.deepEqual(route(id, routingContext(event)), ['macos-26-intel'], id);
+    }
+  }
+  assert.doesNotMatch(workflow, /macos-latest|macos-26-(?:large|xlarge)/);
+});
+
+test('native pool still requires the exact reviewed source and trusted event', () => {
+  for (const id of ['build-macos', 'api-compatibility']) {
+    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
+      ['jsti-macos-build', 'macOS']);
+    assert.deepEqual(route(id, routingContext(), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
+      ['macos-26-intel'], 'PR approval must match the source head, not merge SHA');
+    assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo'), { JSTI_NATIVE_APPROVED_SHA: 'head-sha' }),
+      ['macos-26-intel'], 'forks cannot enter the native pool');
+    assert.deepEqual(route(id, routingContext('push'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
+      ['jsti-macos-build', 'macOS']);
+    assert.deepEqual(route(id, { ...routingContext('push'), ref: 'refs/heads/feature' },
+      { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }), ['macos-26-intel']);
+    assert.deepEqual(route(id, routingContext('workflow_dispatch'), { JSTI_NATIVE_APPROVED_SHA: 'merge-sha' }),
+      ['macos-26-intel']);
+  }
+});
+
+test('historical owner-approved native route retains its source and event guards', () => {
+  for (const id of appleJobs.filter(id => !['build-macos', 'api-compatibility'].includes(id))) {
+    assert.deepEqual(route(id, routingContext('pull_request', 'crmitchelmore/justspeaktoit', 1038)),
+      ['bravo-mini-local', 'macOS', 'ARM64']);
+    assert.deepEqual(route(id, routingContext('pull_request', 'fork/repo', 1038)), ['macos-26-intel']);
+    assert.deepEqual(route(id, routingContext('push', 'crmitchelmore/justspeaktoit', 1038)), ['macos-26-intel']);
+  }
+});
+
+test('every Apple build cache isolates architecture, host and workspace, including restore prefixes', () => {
+  const cacheLines = workflow.match(/^\s+(?:key:|restore-keys:).*(?:\n\s+\$\{\{[^\n]+)?/gm);
+  assert.equal(cacheLines.length, 7, 'three Swift keys and restore prefixes plus the lint tooling key');
+  for (const line of cacheLines) {
+    assert.ok(line.includes('${{ runner.arch }}'), line);
+    assert.ok(line.includes("${{ runner.environment == 'self-hosted' && runner.name || 'hosted' }}"), line);
+    assert.ok(line.includes('${{ github.workspace }}'), line);
+  }
+});
+
 const predicate = aggregate.match(/name: Reject unsuccessful CI gates\n        if: >-\n([\s\S]*?)\n        env:/)?.[1];
 assert.ok(predicate, 'must test the actual workflow rejection predicate');
 // GitHub property names permit hyphens; adapt those paths for local evaluation.

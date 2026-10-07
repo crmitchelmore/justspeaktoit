@@ -15,7 +15,8 @@ function fixture(t, executable, options = {}) {
   mkdirSync(join(app, 'Contents', 'MacOS'), { recursive: true });
   const name = options.name ?? 'JustSpeakToIt';
   writeFileSync(join(app, 'Contents', 'Info.plist'), `<?xml version="1.0"?><plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>${name}</string></dict></plist>`);
+<key>CFBundleExecutable</key><string>${name}</string>
+<key>CFBundleIdentifier</key><string>com.example.launch-fixture</string></dict></plist>`);
   writeFileSync(join(app, 'Contents', 'MacOS', name), `#!/usr/bin/env bash
 export FIXTURE_LAUNCH_TIME="$(python3 -c 'from datetime import datetime; print(datetime.now().astimezone().isoformat())')"
 ${executable}
@@ -39,13 +40,17 @@ from datetime import datetime,timedelta
 from pathlib import Path
 pid,path,destination=sys.argv[1:4]
 launch=datetime.fromisoformat(os.environ['FIXTURE_LAUNCH_TIME'])
-if len(sys.argv)>4: launch+=timedelta(seconds=60)
+mode=sys.argv[4] if len(sys.argv)>4 else ""
+if mode=="future": launch+=timedelta(seconds=60)
+reported_path="/Users/USER/*/"+"/".join(Path(path).parts[-4:]) if mode in ("redacted","wrong-identity") else path
+bundle_id="wrong.bundle" if mode=="wrong-identity" else "com.example.launch-fixture"
 capture=launch+timedelta(milliseconds=1)
 secret="PRIVATE_SIGNING_SENTINEL"
 if destination.endswith(".crash"):
  text=f"Process: fixture [{pid}]\\nPath: {path}\\nDate/Time: {capture.strftime('%Y-%m-%d %H:%M:%S.%f %z')}\\nException Type: EXC_BAD_ACCESS\\nSecret: {secret}\\n"
 else:
- text=json.dumps({"pid":int(pid),"procPath":path,"procLaunch":launch.strftime('%Y-%m-%d %H:%M:%S.%f %z'),"captureTime":capture.strftime('%Y-%m-%d %H:%M:%S.%f %z'),
+ text=json.dumps({"pid":int(pid),"procPath":reported_path,"procName":Path(path).name,"bundleInfo":{"CFBundleIdentifier":bundle_id},
+  "procLaunch":launch.strftime('%Y-%m-%d %H:%M:%S.%f %z'),"captureTime":capture.strftime('%Y-%m-%d %H:%M:%S.%f %z'),
   "exception":{"type":"EXC_BAD_ACCESS","rawCodes":[1,0],"secret":secret},
   "usedImages":[{"name":secret,"uuid":secret},{"name":"libswiftCore.dylib","uuid":"12345678-1234-1234-1234-123456789012"}],
   "threads":[{"triggered":True,"name":secret,"frames":[{"imageIndex":1,"imageOffset":123,"symbol":secret},{"imageIndex":0,"imageOffset":456}]}],
@@ -257,6 +262,18 @@ exit 42
   const stats = JSON.parse(readFileSync(join(result.diagnostics, 'collection.json'))).crashReports;
   assert.equal(stats.identityRejected, 2);
   assert.equal(stats.reportsRetained, 0);
+});
+
+test('accepts native Apple path redaction only with matching bundle and process identity', t => {
+  const result = fixture(t, `
+reports="$HOME/Library/Logs/DiagnosticReports"
+python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-redacted.ips" redacted
+python3 "$REPORT_WRITER" "$$" "$0" "$reports/JustSpeakToIt-wrong-identity.ips" wrong-identity
+exit 42
+`);
+  const stats = JSON.parse(readFileSync(join(result.diagnostics, 'collection.json'))).crashReports;
+  assert.equal(stats.reportsRetained, 1);
+  assert.equal(stats.identityRejected, 1);
 });
 
 test('bounds report discovery and total reads before parsing a directory flood', t => {

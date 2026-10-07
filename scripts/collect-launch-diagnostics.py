@@ -38,6 +38,18 @@ def timestamp(value):
         return None
 
 
+def matches_path(path, process_name, bundle_id, args):
+    if path == args.executable:
+        return True
+    # Apple replaces the user-owned prefix in native reports with /Users/USER/*.
+    # Only accept that specific redaction with the full bundle suffix and the
+    # separately recorded bundle/process identity, never an arbitrary basename.
+    suffix = f"/{Path(args.executable).parents[2].name}/Contents/MacOS/{args.name}"
+    return (isinstance(path, str) and path.startswith("/Users/USER/*/")
+            and path.endswith(suffix) and process_name == args.name
+            and bool(args.bundle_id) and bundle_id == args.bundle_id)
+
+
 def project_report(data, suffix, args):
     text = data.decode("utf-8", errors="replace")
     if suffix == ".crash":
@@ -48,7 +60,9 @@ def project_report(data, suffix, args):
                 fields[key.strip()] = value.strip()
         pid = re.search(r"\[(\d+)\]$", fields.get("Process", ""))
         crash_time = timestamp(fields.get("Date/Time"))
-        if (not pid or int(pid[1]) != args.pid or fields.get("Path") != args.executable
+        name = fields.get("Process", "").partition(" [")[0]
+        if (not pid or int(pid[1]) != args.pid
+                or not matches_path(fields.get("Path"), name, fields.get("Identifier"), args)
                 or crash_time is None or not args.start <= crash_time <= args.end):
             return None
         exception = fields.get("Exception Type", "").split(" ")[0]
@@ -65,7 +79,9 @@ def project_report(data, suffix, args):
         return None
     launch = timestamp(report.get("procLaunch"))
     capture = timestamp(report.get("captureTime"))
-    if (report.get("pid") != args.pid or report.get("procPath") != args.executable
+    if (report.get("pid") != args.pid
+            or not matches_path(report.get("procPath"), report.get("procName"),
+                                report.get("bundleInfo", {}).get("CFBundleIdentifier"), args)
             or launch is None or not args.start - 1 <= launch <= min(args.start + 1, args.end)
             or capture is None or not args.start <= capture <= args.end):
         return None
@@ -197,6 +213,7 @@ def main():
     parser.add_argument("--pid", type=int, required=True)
     parser.add_argument("--name", required=True)
     parser.add_argument("--executable", required=True)
+    parser.add_argument("--bundle-id", default="")
     parser.add_argument("--marker", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--stdout", type=Path, required=True)

@@ -65,6 +65,14 @@ if [ ! -x "$APP_EXECUTABLE" ]; then
     exit 1
 fi
 PROCESS_NAME="$(basename "$APP_EXECUTABLE")"
+APP_BUNDLE_ID="$(python3 - "$APP_PATH" <<'PYTHON'
+import pathlib, plistlib, sys
+path = pathlib.Path(sys.argv[1])
+if path.suffix == '.app':
+    with (path / 'Contents/Info.plist').open('rb') as handle:
+        print(plistlib.load(handle).get('CFBundleIdentifier', ''))
+PYTHON
+)"
 APP_PID=""
 CRASH_MARKER="$(mktemp "${TMPDIR:-/tmp}/verify-launch.XXXXXX")"
 PROCESS_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/verify-launch-output.XXXXXX")"
@@ -122,6 +130,7 @@ collect_failure_diagnostics() {
     python3 -B "$(dirname "$0")/collect-launch-diagnostics.py" \
         --pid "$CHILD_PID" --name "$PROCESS_NAME" --marker "$CRASH_MARKER" \
         --executable "$APP_EXECUTABLE" --start-ns "$LAUNCH_START_NS" --end-ns "$FAILURE_END_NS" \
+        --bundle-id "$APP_BUNDLE_ID" \
         --stdout "$PROCESS_OUTPUT" --output "$DIAGNOSTICS_DIR" \
         --wait "${VERIFY_LAUNCH_DIAGNOSTICS_WAIT:-10}" \
         || echo "⚠️ Launch diagnostic collection failed"

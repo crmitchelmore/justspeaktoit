@@ -86,6 +86,8 @@ Free-form symbols, messages, environment, paths and arbitrary report text are
 not uploaded. Modern reports must match the executable path, PID and launch
 timestamp, and have a capture timestamp within the observed launch interval;
 legacy reports must match path/PID and a crash timestamp within that interval.
+For Apple's `/Users/USER/*/` path redaction, the complete app/executable suffix,
+process name and the bundle identifier recorded before launch must also match.
 The log query uses the recorded launch interval and executable path as well as
 PID, rather than a sliding post-exit window. Reports with missing identity
 fields are rejected explicitly. These checks reduce PID-reuse misattribution;

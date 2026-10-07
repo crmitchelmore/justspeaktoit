@@ -143,6 +143,7 @@
     <h2>Optional cloud services</h2>
     <p>When you choose a cloud transcription, post-processing, text-to-speech, or OpenClaw service, the app sends the audio, transcript, prompt, or message needed to perform that feature directly to the provider you configured. This may include providers such as Deepgram, ElevenLabs, Meta Model API, or OpenAI. Their handling of that data is governed by their privacy policies and your account settings.</p>
     <p>JustSpeakToIt does not operate an intermediary server that receives or stores your recordings or transcripts. Cloud features use credentials you provide and can be avoided by using supported local options.</p>
+    <p>If you explicitly configure the optional Azure loopback proxy, transcription audio first goes to that separate process on your own Mac, which forwards it to Azure using your Azure CLI sign-in. This is a user-operated relay, not a JustSpeakToIt service. Plaintext loopback assumes a trusted machine: it does not authenticate the local server, so do not use it on an untrusted host.</p>
 
     <h2>API keys and credentials</h2>
     <p>Provider API keys are stored in Apple Keychain. When you use a cloud service, the app sends that provider its key with each request to authenticate it. If you turn on key sync, supported credentials are encrypted on your device with your sync passphrase before being written to your private CloudKit database. We do not receive or sell your keys.</p>

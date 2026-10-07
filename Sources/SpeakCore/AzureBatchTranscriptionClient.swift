@@ -57,12 +57,31 @@ public struct AzureBatchTranscriptionClient: Sendable {
         }
         if !keywords.isEmpty { definition["phraseList"] = ["phrases": Array(keywords.prefix(100))] }
         let boundary = "Azure-\(UUID().uuidString)"
+        let definitionData = try JSONSerialization.data(withJSONObject: definition)
+        let definitionHeader = Data.azurePartHeader(
+            name: "definition", contentType: "application/json", boundary: boundary
+        )
+        let audioHeader = Data.azurePartHeader(
+            name: "audio", filename: "recording.wav", contentType: "audio/wav", boundary: boundary
+        )
+        let end = Data("--\(boundary)--\r\n".utf8)
+        if origin.scheme == "http" {
+            guard definitionData.count <= 64 * 1024,
+                  audio.count + definitionData.count + definitionHeader.count
+                  + audioHeader.count + end.count + 4 <= 32 * 1024 * 1024 else {
+                throw AzureSpeechError.configuration(
+                    "The local Azure proxy accepts multipart recordings up to 32 MiB."
+                )
+            }
+        }
         var body = Data()
-        body.appendAzurePart(name: "definition", contentType: "application/json",
-                             data: try JSONSerialization.data(withJSONObject: definition), boundary: boundary)
-        body.appendAzurePart(name: "audio", filename: "recording.wav", contentType: "audio/wav",
-                             data: audio, boundary: boundary)
-        body.append(Data("--\(boundary)--\r\n".utf8))
+        body.append(definitionHeader)
+        body.append(definitionData)
+        body.append(Data("\r\n".utf8))
+        body.append(audioHeader)
+        body.append(audio)
+        body.append(Data("\r\n".utf8))
+        body.append(end)
         var request = URLRequest(url: components.url!, timeoutInterval: 180)
         request.httpMethod = "POST"
         request.setValue(key, forHTTPHeaderField: "Ocp-Apim-Subscription-Key")
@@ -106,16 +125,15 @@ public struct AzureBatchTranscriptionClient: Sendable {
 }
 
 private extension Data {
-    mutating func appendAzurePart(
+    static func azurePartHeader(
         name: String,
         filename: String? = nil,
         contentType: String,
-        data: Data,
         boundary: String
-    ) {
+    ) -> Data {
         var header = "--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\""
         if let filename { header += "; filename=\"\(filename)\"" }
         header += "\r\nContent-Type: \(contentType)\r\n\r\n"
-        append(Data(header.utf8)); append(data); append(Data("\r\n".utf8))
+        return Data(header.utf8)
     }
 }

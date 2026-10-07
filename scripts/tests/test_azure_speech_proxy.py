@@ -233,6 +233,20 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertEqual(self.transport.calls[0][2], body)
 
+    def test_saturation_returns_explicit_503(self):
+        for _ in range(4):
+            self.server.slots.acquire()
+        try:
+            self.assertEqual(self.request("/health", body=None)[0], 503)
+        finally:
+            for _ in range(4):
+                self.server.slots.release()
+
+    def test_upload_has_a_total_deadline(self):
+        with patch.object(proxy, "MAX_UPLOAD_SECONDS", 0):
+            self.assertEqual(self.request()[0], 408)
+        self.assertEqual(self.transport.calls, [])
+
 
 class ConfigurationTests(unittest.TestCase):
     def test_only_fixed_azure_https_origins(self):
@@ -398,6 +412,18 @@ class TransportTests(unittest.TestCase):
             finally:
                 for connection in (client, sender, server, peer):
                     connection.close()
+
+    def test_response_deadline_interrupts_a_dripping_read(self):
+        response = self.response()
+        interrupted = threading.Event()
+        response.fp.raw._sock.shutdown.side_effect = lambda _: interrupted.set()
+        response.read.side_effect = lambda _: (interrupted.wait(1), b"partial")[1]
+        self.transport.opener.open.return_value = response
+        with patch.object(proxy, "MAX_RESPONSE_SECONDS", 0.02):
+            with self.assertRaises(proxy.ProxyError) as caught:
+                self.transport.forward("GET", "/tts/cognitiveservices/voices/list", b"", None)
+        self.assertEqual(caught.exception.status, 504)
+        self.assertTrue(interrupted.is_set())
 
 
 if __name__ == "__main__":

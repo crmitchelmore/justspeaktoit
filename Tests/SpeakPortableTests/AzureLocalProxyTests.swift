@@ -102,6 +102,19 @@ final class AzureLocalProxyTests: XCTestCase {
         }
     }
 
+    func testProxyUploadLimit_includesMultipartOverheadBeforeConstructingBody() throws {
+        let origin = try AzureSpeechConfiguration.batchResourceURL("http://127.0.0.1:8765")
+        XCTAssertThrowsError(try AzureBatchTranscriptionClient.request(
+            origin: origin, key: token, audio: Data(repeating: 0, count: 32 * 1024 * 1024),
+            model: AzureTranscriptionModels.fast, language: nil, keywords: []
+        ))
+        let request = try AzureBatchTranscriptionClient.request(
+            origin: origin, key: token, audio: Data(repeating: 0, count: 32 * 1024 * 1024 - 1024),
+            model: AzureTranscriptionModels.fast, language: nil, keywords: []
+        )
+        XCTAssertLessThanOrEqual(try XCTUnwrap(request.httpBody).count, 32 * 1024 * 1024)
+    }
+
     func testConfiguredProxy_streamsSyntheticAudioAndFinalisesWithRealClient() async throws {
         let env = ProcessInfo.processInfo.environment
         guard env["JSTI_AZURE_PROXY_STREAMING"] == "1",

@@ -121,6 +121,15 @@ token and the fixed inference request, never the local token.
 Do not omit the local token: loopback alone does not prevent another
 local process or a browser from attempting to spend your Azure quota.
 
+This is a **trusted-machine development tool**, not a security boundary against
+malicious local software. Plaintext loopback does not authenticate the server:
+another process occupying the configured port could receive the local token and
+recording. A health response checks compatibility, not server identity. Start the
+intended proxy before configuring the app, keep the token private, and do not use
+this transport on an untrusted/shared host. It never exposes an Entra token to the
+app. Capture, resampling and local-model inference remain native and in-process;
+only explicitly selected Azure cloud requests use this user-operated relay.
+
 Only these native-client routes are accepted:
 
 | Local route | Upstream route |
@@ -147,6 +156,9 @@ uploads are limited to 32 MiB. Unsupported models, options and oversized uploads
 are rejected explicitly. Azure error status codes are preserved for bad inputs,
 authentication and rate limits without returning provider bodies that might
 contain recordings or credentials.
+Uploads have a 30-second total receive deadline; upstream response bodies have
+a 180-second total deadline. Saturated admission returns HTTP 503. The app checks
+the complete multipart size before constructing or sending an oversized upload.
 
 Voice Live tunnels native WebSocket frames over certificate-validated TLS to the
 same resource's Foundry host. It preserves the existing shared client's readiness,

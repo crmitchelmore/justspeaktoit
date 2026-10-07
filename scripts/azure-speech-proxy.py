@@ -33,6 +33,8 @@ import xml.etree.ElementTree as ET
 MAX_REQUEST = 64 * 1024
 MAX_TRANSCRIPTION_REQUEST = 32 * 1024 * 1024
 MAX_RESPONSE = 32 * 1024 * 1024
+MAX_UPLOAD_SECONDS = 30
+MAX_RESPONSE_SECONDS = 180
 TRANSCRIPTION_PATH = "/speechtotext/transcriptions:transcribe?api-version=2025-10-15"
 STREAMING_PATH = "/voice-live/realtime?api-version=2026-04-10&model=gpt-4.1"
 MAX_STREAM_SECONDS = 3600
@@ -136,6 +138,35 @@ class AzureCLIToken:
 class NoRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, file, code, message, headers, new_url):
         return None
+
+
+def bounded_response(response):
+    expired = threading.Event()
+    # Closing HTTPResponse can wait on its buffered-reader lock. Shut down the
+    # underlying stdlib socket instead, so the deadline interrupts a blocked read.
+    connection = response.fp.raw._sock
+
+    def expire():
+        expired.set()
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass  # The peer may have already closed the socket.
+
+    timer = threading.Timer(MAX_RESPONSE_SECONDS, expire)
+    timer.daemon = True
+    timer.start()
+    try:
+        data = response.read(MAX_RESPONSE + 1)
+        if expired.is_set():
+            raise ProxyError(504, "Azure response deadline reached.")
+        return data
+    except (OSError, http.client.HTTPException) as error:
+        if expired.is_set():
+            raise ProxyError(504, "Azure response deadline reached.") from error
+        raise
+    finally:
+        timer.cancel()
 
 
 def websocket_accept(key):
@@ -316,7 +347,7 @@ class AzureTransport:
             )
             try:
                 with self.opener.open(request, timeout=180) as response:
-                    data = response.read(MAX_RESPONSE + 1)
+                    data = bounded_response(response)
                     if len(data) > MAX_RESPONSE:
                         raise ProxyError(502, "Azure response exceeds the local proxy limit.")
                     if not data:
@@ -350,7 +381,16 @@ class ProxyServer(http.server.ThreadingHTTPServer):
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):
-            request.close()
+            try:
+                request.settimeout(0.05)
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
+                    b"Connection: close\r\nRetry-After: 1\r\n\r\n"
+                )
+            except OSError:
+                pass
+            finally:
+                request.close()
             return
         try:
             super().process_request(request, client_address)
@@ -438,11 +478,18 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             content_type = None
             if self.command == "POST":
                 chunks = bytearray()
+                deadline = time.monotonic() + MAX_UPLOAD_SECONDS
                 while len(chunks) < length:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ProxyError(408, "Upload deadline reached.")
+                    self.connection.settimeout(min(15, remaining))
                     chunk = self.rfile.read(min(64 * 1024, length - len(chunks)))
                     if not chunk:
                         break
                     chunks.extend(chunk)
+                if time.monotonic() >= deadline:
+                    raise ProxyError(408, "Upload deadline reached.")
                 body = bytes(chunks)
                 if len(body) != length or not body:
                     raise ProxyError(400, "A complete request body is required.")

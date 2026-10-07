@@ -290,16 +290,21 @@ jobs:
       - name: Install Tuist
         run: brew install tuist
 
+      - name: Prepare iOS Simulator
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          if ! SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -er \
+            '([.devices[][] | select(.isAvailable and .name == "iPhone 17 Pro")][0].udid) //
+             ([.devices[][] | select(.isAvailable and (.name | startswith("iPhone")))][0].udid)'); then
+            echo "::error::No available iPhone simulator could be selected."
+            exit 1
+          fi
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+
       - name: Build iOS Library
         run: swift build --disable-dependency-cache --target SpeakiOSLib
-
-      - name: Select iOS Simulator
-        run: |
-          SIMULATOR_ID=$(xcrun simctl list devices available -j | jq -r \
-            '([.devices[][] | select(.name == "iPhone 17 Pro")][0].udid) //
-             ([.devices[][] | select(.name | startswith("iPhone"))][0].udid)')
-          test -n "$SIMULATOR_ID"
-          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
       - name: Generate iOS App Project
         # CI includes the keyboard in its shipping handoff-only shape so the

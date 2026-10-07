@@ -84,6 +84,7 @@ final class StatusBarController {
       }
       .store(in: &cancellables)
 
+    observeDeliveryRemedy()
     observeHandsFreeState()
 
     appSettings.$compactStatusBarIcon
@@ -111,6 +112,16 @@ final class StatusBarController {
       .store(in: &cancellables)
   }
 
+  private func observeDeliveryRemedy() {
+    mainManager.$pendingDeliveryRemedy
+      .removeDuplicates()
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.refresh()
+      }
+      .store(in: &cancellables)
+  }
+
   private func refresh() {
     statusItem.menu = buildMenu()
   }
@@ -123,6 +134,18 @@ final class StatusBarController {
     headline.title = "Speak"
     headline.isEnabled = false
     menu.addItem(headline)
+
+    if let remedy = mainManager.pendingDeliveryRemedy {
+      let remedyItem = NSMenuItem(
+        title: remedy.menuTitle,
+        action: #selector(applyDeliveryRemedy),
+        keyEquivalent: ""
+      )
+      remedyItem.target = self
+      remedyItem.toolTip = remedy.hint
+      remedyItem.setAccessibilityIdentifier("statusBarDeliveryRemedyItem")
+      menu.addItem(remedyItem)
+    }
 
     let modelItem = NSMenuItem()
     modelItem.title = "Mode: \(appSettings.effectiveTranscriptionModeDisplayName)"
@@ -293,6 +316,10 @@ final class StatusBarController {
     if case .processing = mainManager.state { return }
     if case .delivering = mainManager.state { return }
     mainManager.toggleRecordingFromUI()
+  }
+
+  @objc private func applyDeliveryRemedy() {
+    mainManager.applyPendingDeliveryRemedy()
   }
 
   @objc private func reconnectHotKey() {

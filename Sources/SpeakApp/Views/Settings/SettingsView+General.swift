@@ -128,6 +128,16 @@ extension SettingsView {
           VStack(alignment: .leading, spacing: 8) {
             if DistributionChannel.current.supportsAccessibilityTextInsertion {
               settingsToggle(
+                DeliverySettingsRemedy.allowInsertionIntoOtherAppsSettingName,
+                isOn: settingsBinding(\AppSettings.allowInsertionIntoOtherApps),
+                tint: .brandLagoon
+              )
+              .speakTooltip(
+                "Off by default. When off, a transcript only goes to the app where recording started, "
+                  + "even if you switch apps before it is ready. When on, it goes to the app you're "
+                  + "using when it is ready."
+              )
+              settingsToggle(
                 "Restore clipboard after paste",
                 isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
                 tint: .brandLagoon

@@ -307,6 +307,20 @@ final class AppSettingsDefaultsTests: XCTestCase {
     }
 
     @MainActor
+    func testCoreDefaults_allowInsertionIntoOtherAppsIsFalse() {
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.allowInsertionIntoOtherApps)
+    }
+
+    @MainActor
+    func testAllowInsertionIntoOtherApps_persistsAcrossInstances() {
+        let settings = AppSettings(defaults: defaults)
+        settings.allowInsertionIntoOtherApps = true
+
+        XCTAssertTrue(AppSettings(defaults: defaults).allowInsertionIntoOtherApps)
+    }
+
+    @MainActor
     func testCoreDefaults_showSidebarShortcutHintsIsTrue() {
         let settings = AppSettings(defaults: defaults)
         XCTAssertTrue(settings.showSidebarShortcutHints)

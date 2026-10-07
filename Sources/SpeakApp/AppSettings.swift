@@ -279,6 +279,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     case postProcessingIncludeContextTags
     case textOutputMethod
     case restoreClipboard
+    case allowInsertionIntoOtherApps
     case showHUD
     case appVisibility
     case showStatusBarIconInDockOnly
@@ -651,6 +652,14 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
 
   @Published var restoreClipboardAfterPaste: Bool {
     didSet { store(restoreClipboardAfterPaste, key: .restoreClipboard) }
+  }
+
+  /// When on, a transcript goes to whichever app is frontmost at delivery time
+  /// if the user has switched away from (or quit) the app where recording
+  /// started. Off by default: the transcript then only ever goes to the
+  /// original app, or stays on the clipboard.
+  @Published var allowInsertionIntoOtherApps: Bool {
+    didSet { store(allowInsertionIntoOtherApps, key: .allowInsertionIntoOtherApps) }
   }
 
   @Published var showHUDDuringSessions: Bool {
@@ -1248,6 +1257,8 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
           ?? AccessibilityInsertionMode.insertAtCursor.rawValue) ?? .insertAtCursor
     restoreClipboardAfterPaste =
       defaults.object(forKey: DefaultsKey.restoreClipboard.rawValue) as? Bool ?? true
+    allowInsertionIntoOtherApps =
+      defaults.object(forKey: DefaultsKey.allowInsertionIntoOtherApps.rawValue) as? Bool ?? false
     showHUDDuringSessions = defaults.object(forKey: DefaultsKey.showHUD.rawValue) as? Bool ?? true
     showLiveTranscriptInHUD =
       defaults.object(forKey: DefaultsKey.showLiveTranscriptInHUD.rawValue) as? Bool ?? true
@@ -1473,6 +1484,7 @@ final class AppSettings: ObservableObject { // swiftlint:disable:this type_body_
     self.textOutputMethod = restored.textOutputMethod
     self.accessibilityInsertionMode = restored.accessibilityInsertionMode
     self.restoreClipboardAfterPaste = restored.restoreClipboardAfterPaste
+    self.allowInsertionIntoOtherApps = restored.allowInsertionIntoOtherApps
     self.showHUDDuringSessions = restored.showHUDDuringSessions
     self.showLiveTranscriptInHUD = restored.showLiveTranscriptInHUD
   }

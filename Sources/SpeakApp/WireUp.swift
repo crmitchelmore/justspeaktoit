@@ -450,7 +450,13 @@ extension AppEnvironment {
     let output = SmartTextOutput(permissionsManager: permissions, appSettings: settings)
     let result = output.output(text: text)
     if let error = result.error {
-      hud.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
+      let remedy = DeliverySettingsRemedy.forOutput(
+        error: error,
+        warning: nil,
+        focusMovedToOtherApplication: false,
+        configuration: DeliverySettingsRemedy.Configuration(settings: settings)
+      )
+      hud.finishFailure(headline: "Delivery failed", message: remedy.annotate(error.localizedDescription))
     }
   }
 }

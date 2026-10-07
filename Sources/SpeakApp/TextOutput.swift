@@ -42,6 +42,14 @@ struct TextOutputResult {
   /// tell. Voice Edit's "last dictation" fallback edits this exact range
   /// (issue #673).
   let insertedRange: VoiceEditTextRange?
+  /// The app/field delivery actually used when it was redirected away from the
+  /// captured target because the user had switched apps and allowed insertion
+  /// into other apps. Nil when delivery used the requested target.
+  var redirectedTarget: TextOutputTarget?
+  /// True when, at delivery time, the user was in a different app from the one
+  /// where recording started (or that app had quit). Delivery still targeted
+  /// the original app because insertion into other apps is turned off.
+  var focusMovedToOtherApplication = false
 
   init(
     method: HistoryTrigger.OutputMethod,
@@ -583,6 +591,54 @@ struct SmartTextOutput: TextOutputting {
       return clipboardOutput.output(text: text, target: target)
     }
 
+    guard let target else {
+      return deliver(text: text, target: nil)
+    }
+    let frontmostProcessIdentifier = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    let focusMoved = Self.focusMovedToOtherApplication(
+      capturedApplicationIsFrontmost: target.capturedApplicationIsFrontmost(
+        frontmostProcessIdentifier: frontmostProcessIdentifier
+      ),
+      frontmostProcessIdentifier: frontmostProcessIdentifier
+    )
+    guard focusMoved else {
+      return deliver(text: text, target: target)
+    }
+    guard appSettings.allowInsertionIntoOtherApps else {
+      var result = deliver(text: text, target: target)
+      result.focusMovedToOtherApplication = true
+      return result
+    }
+    let current = TextOutputTarget.capture()
+    let originalApp = target.applicationName ?? "unknown"
+    let currentApp = current.applicationName ?? "unknown"
+    logger.info(
+      "Focus moved from \(originalApp, privacy: .public) to \(currentApp, privacy: .public); delivering there"
+    )
+    var result = deliver(text: text, target: current)
+    result.redirectedTarget = current
+    return result
+  }
+
+  /// Whether the user is now in a different app from the one captured when
+  /// recording started (or that app has quit). Speak's own windows do not
+  /// count: activating the menu bar or the main window is not a choice of a
+  /// new destination.
+  static func focusMovedToOtherApplication(
+    capturedApplicationIsFrontmost: Bool,
+    frontmostProcessIdentifier: pid_t?,
+    ownProcessIdentifier: pid_t = ProcessInfo.processInfo.processIdentifier
+  ) -> Bool {
+    guard !capturedApplicationIsFrontmost,
+          let frontmostProcessIdentifier,
+          frontmostProcessIdentifier != ownProcessIdentifier
+    else {
+      return false
+    }
+    return true
+  }
+
+  private func deliver(text: String, target: TextOutputTarget?) -> TextOutputResult {
     switch appSettings.textOutputMethod {
     case .accessibilityOnly:
       return accessibilityOutput.output(text: text, target: target)

@@ -213,6 +213,20 @@ final class MainManager: ObservableObject {
       }
       .store(in: &cancellables)
 
+    // @Published emits before the value is stored; hopping to the run loop
+    // lets the reconciliation read the new settings.
+    Publishers.CombineLatest4(
+      appSettings.$appSwitchDelivery,
+      appSettings.$textOutputMethod,
+      appSettings.$streamingInsertionEnabled,
+      permissionsManager.$statuses
+    )
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.reconcilePendingDeliveryRemedy()
+      }
+      .store(in: &cancellables)
+
     transcriptionManager.$liveTranscript
       .receive(on: RunLoop.main)
       .sink { [weak self] snapshot in
@@ -1185,7 +1199,7 @@ final class MainManager: ObservableObject {
             HistoryError(
               phase: .output,
               message: "Failed to deliver text",
-              debugDescription: message
+              debugDescription: deliveryRemedy.annotate(Self.historySafeDescription(of: error))
             )
           )
           hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
@@ -1211,7 +1225,7 @@ final class MainManager: ObservableObject {
           HistoryError(
             phase: .output,
             message: "Failed to deliver text",
-            debugDescription: message
+            debugDescription: remedy.annotate(Self.historySafeDescription(of: error))
           )
         )
         hudManager.finishFailure(headline: "Delivery failed", message: message)
@@ -1251,11 +1265,16 @@ final class MainManager: ObservableObject {
         destination: appName,
         remedy: deliveryRemedy
       )
-      if let deliveryNote {
-        session.events.append(
-          HistoryEvent(kind: .outputDelivered, description: "Delivery warning: \(deliveryNote)")
-        )
-      }
+      // History can be exported to a public issue, so its copy names no app.
+      recordDeliveryWarning(
+        Self.deliveryNote(
+          warning: outputWarning,
+          focusMovedToOtherApplication: focusMovedToOtherApplication,
+          destination: nil,
+          remedy: deliveryRemedy
+        ),
+        on: session
+      )
       session.destination = appName
       session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
       if let summary = session.personalCorrections {
@@ -1299,13 +1318,21 @@ final class MainManager: ObservableObject {
   }
 
   /// HUD headline for a one-shot delivery that did not insert text. Holding
-  /// the transcript back because the user left the original app is the
-  /// configured behaviour, not a failure.
+  /// the transcript back because the user left the app it was going to is a
+  /// safety choice, not a failure.
   static func deliveryFailureHeadline(for error: Error) -> String {
-    if case .originalApplicationNotInFront = error as? TextOutputError {
+    switch error as? TextOutputError {
+    case .originalApplicationNotInFront, .destinationApplicationChanged:
       return "Not inserted"
+    default:
+      return "Delivery failed"
     }
-    return "Delivery failed"
+  }
+
+  /// Error text for History. History can be exported to a public GitHub
+  /// issue, so it must not name the user's apps.
+  static func historySafeDescription(of error: Error) -> String {
+    (error as? TextOutputError)?.historySafeDescription ?? error.localizedDescription
   }
 
   /// The remedy, if any, for a one-shot delivery outcome under the current settings.
@@ -1329,8 +1356,8 @@ final class MainManager: ObservableObject {
   ) -> String? {
     let base: String
     if focusMovedToOtherApplication {
-      let app = destination ?? "the original app"
-      base = "Sent to \(app), where recording started."
+      base = destination.map { "Sent to \($0), where recording started." }
+        ?? "Sent to the app where recording started."
     } else if let warning {
       base = warning.localizedDescription
     } else {
@@ -1493,7 +1520,7 @@ final class MainManager: ObservableObject {
           HistoryError(
             phase: .output,
             message: "Failed to deliver text",
-            debugDescription: message
+            debugDescription: deliveryRemedy.annotate(Self.historySafeDescription(of: error))
           )
         )
         hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
@@ -1512,7 +1539,15 @@ final class MainManager: ObservableObject {
           destination: appName,
           remedy: deliveryRemedy
         )
-        recordDeliveryWarning(deliveryNote, on: session)
+        recordDeliveryWarning(
+          Self.deliveryNote(
+            warning: outputResult.warning,
+            focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
+            destination: nil,
+            remedy: deliveryRemedy
+          ),
+          on: session
+        )
         session.events.append(
           HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
         )
@@ -1562,6 +1597,25 @@ final class MainManager: ObservableObject {
 
   private static func retryDeliverySuccessMessage(note: String?) -> String {
     note.map { "Retry delivered — \($0)" } ?? "Retry Delivered"
+  }
+
+  /// Offers a remedy for a delivery made outside a recording session, such as
+  /// pasting the last transcript.
+  func offerDeliveryRemedy(_ remedy: DeliverySettingsRemedy?) {
+    pendingDeliveryRemedy = remedy
+  }
+
+  /// Drops the offered remedy once the user has made that change some other
+  /// way (Settings, System Settings), so the menu never offers a no-op.
+  func reconcilePendingDeliveryRemedy() {
+    guard let remedy = pendingDeliveryRemedy else { return }
+    let satisfied = remedy.isSatisfied(
+      configuration: DeliverySettingsRemedy.Configuration(settings: appSettings),
+      accessibilityGranted: permissionsManager.status(for: .accessibility).isGranted
+    )
+    if satisfied {
+      pendingDeliveryRemedy = nil
+    }
   }
 
   /// Applies the setting change offered after the last delivery, then forgets it.

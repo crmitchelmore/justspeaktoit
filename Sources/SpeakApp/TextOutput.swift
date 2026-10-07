@@ -85,6 +85,11 @@ struct TextOutputTarget {
   let bundleIdentifier: String?
   let applicationLaunchDate: Date?
   let focusedElement: AXUIElement?
+  /// Set when this target was chosen because it was the frontmost app at
+  /// delivery time (the "app you're in now" option). Every sink rechecks
+  /// that it is still frontmost immediately before writing, so a second app
+  /// switch cannot redirect the transcript into an app the user has left.
+  var requiresFrontmostAtDelivery = false
 
   static func capture() -> TextOutputTarget {
     let application = NSWorkspace.shared.frontmostApplication
@@ -181,6 +186,21 @@ struct TextOutputTarget {
     }
     return processIdentifier == frontmostProcessIdentifier
   }
+
+  /// Fails closed when a redirected destination is no longer frontmost.
+  func destinationChangedError(
+    frontmostProcessIdentifier: pid_t? = NSWorkspace.shared.frontmostApplication?.processIdentifier
+  ) -> TextOutputError? {
+    guard requiresFrontmostAtDelivery else { return nil }
+    return Self.destinationChangedError(
+      requiresFrontmost: true,
+      isFrontmost: capturedApplicationIsFrontmost(frontmostProcessIdentifier: frontmostProcessIdentifier)
+    )
+  }
+
+  static func destinationChangedError(requiresFrontmost: Bool, isFrontmost: Bool) -> TextOutputError? {
+    requiresFrontmost && !isFrontmost ? .destinationApplicationChanged : nil
+  }
 }
 
 @MainActor
@@ -207,6 +227,9 @@ enum TextOutputError: LocalizedError {
   /// The user switched away from the app where recording started and chose
   /// to insert only while that app is in front. Carries the app's name.
   case originalApplicationNotInFront(String?)
+  /// Delivery was redirected to the app in front, but the user switched apps
+  /// again before the text could be written.
+  case destinationApplicationChanged
   var errorDescription: String? {
     switch self {
     case .accessibilityPermissionMissing:
@@ -232,7 +255,19 @@ enum TextOutputError: LocalizedError {
     case .originalApplicationNotInFront(let name):
       return "You'd switched away from \(name ?? "the app where recording started"), so nothing was inserted. "
         + "The transcript was kept on the clipboard."
+    case .destinationApplicationChanged:
+      return "You switched apps again before the transcript could be inserted, so nothing was inserted. "
+        + "The transcript was kept on the clipboard."
     }
+  }
+
+  /// The description without app names, for History and anything exported
+  /// from it (such as public GitHub issue prefills).
+  var historySafeDescription: String {
+    if case .originalApplicationNotInFront = self {
+      return Self.originalApplicationNotInFront(nil).errorDescription ?? ""
+    }
+    return errorDescription ?? ""
   }
 }
 
@@ -265,6 +300,10 @@ struct AccessibilityTextOutput: TextOutputting {
       focusedElement = element
     case .failure(let error):
       return TextOutputResult(method: .none, error: error)
+    }
+
+    if let changed = target?.destinationChangedError() {
+      return TextOutputResult(method: .none, error: changed)
     }
 
     switch appSettings.accessibilityInsertionMode {
@@ -408,6 +447,11 @@ struct PasteTextOutput: TextOutputting {
       // where the selection started.
       if deliveryWarning == nil {
         insertedRange = pasteLandingRange(in: target, for: text)
+      }
+      // The transcript is already on the clipboard and no restore is
+      // scheduled, so failing closed here leaves it there.
+      if let changed = target?.destinationChangedError() {
+        return TextOutputResult(method: .clipboard, error: changed)
       }
       guard simulatePasteShortcut(destination: destination) else {
         return TextOutputResult(method: .clipboard, error: TextOutputError.pasteShortcutUnavailable)
@@ -614,19 +658,49 @@ struct SmartTextOutput: TextOutputting {
       result.focusMovedToOtherApplication = focusMoved
       return result
     case .deliverToCurrentApp:
-      let current = TextOutputTarget.capture()
-      let originalApp = target.applicationName ?? "unknown"
-      let currentApp = current.applicationName ?? "unknown"
-      logger.info(
-        "Focus moved from \(originalApp, privacy: .public) to \(currentApp, privacy: .public); delivering there"
-      )
-      var result = deliver(text: text, target: current)
-      result.redirectedTarget = current
-      return result
+      return deliverToCurrentApp(text: text, originalTarget: target)
     case .keepOnClipboard:
       logger.info("Original app is not in front; keeping the transcript on the clipboard")
-      return keepOnClipboard(text: text, originalApplicationName: target.applicationName)
+      return keepOnClipboard(
+        text: text,
+        error: .originalApplicationNotInFront(target.applicationName)
+      )
     }
+  }
+
+  private func deliverToCurrentApp(text: String, originalTarget: TextOutputTarget) -> TextOutputResult {
+    var current = TextOutputTarget.capture()
+    current.requiresFrontmostAtDelivery = true
+    guard Self.isUsableRedirectDestination(processIdentifier: current.processIdentifier) else {
+      logger.info("No other app is in front any more; keeping the transcript on the clipboard")
+      return keepOnClipboard(text: text, error: .destinationApplicationChanged)
+    }
+    let originalApp = originalTarget.applicationName ?? "unknown"
+    let currentApp = current.applicationName ?? "unknown"
+    logger.info(
+      "Focus moved from \(originalApp, privacy: .public) to \(currentApp, privacy: .public); delivering there"
+    )
+    var result = deliver(text: text, target: current)
+    if case .destinationApplicationChanged? = result.error as? TextOutputError {
+      logger.info("Focus moved again before insertion; keeping the transcript on the clipboard")
+      // Accessibility-only delivery never touched the clipboard.
+      if result.method != .clipboard {
+        result = keepOnClipboard(text: text, error: .destinationApplicationChanged)
+      }
+      return result
+    }
+    result.redirectedTarget = current
+    return result
+  }
+
+  /// A redirect needs a real app other than Speak in front; anything else
+  /// means the user moved on and there is no safe destination.
+  static func isUsableRedirectDestination(
+    processIdentifier: pid_t?,
+    ownProcessIdentifier: pid_t = ProcessInfo.processInfo.processIdentifier
+  ) -> Bool {
+    guard let processIdentifier else { return false }
+    return processIdentifier != ownProcessIdentifier
   }
 
   enum AppSwitchDecision: Equatable {
@@ -667,7 +741,7 @@ struct SmartTextOutput: TextOutputting {
     }
   }
 
-  private func keepOnClipboard(text: String, originalApplicationName: String?) -> TextOutputResult {
+  private func keepOnClipboard(text: String, error: TextOutputError) -> TextOutputResult {
     guard PasteTextOutput.hasDeliverableText(text) else {
       return TextOutputResult(method: .none, error: nil)
     }
@@ -676,10 +750,7 @@ struct SmartTextOutput: TextOutputting {
     guard pasteboard.setString(text, forType: .string) else {
       return TextOutputResult(method: .none, error: TextOutputError.clipboardWriteFailed)
     }
-    return TextOutputResult(
-      method: .clipboard,
-      error: TextOutputError.originalApplicationNotInFront(originalApplicationName)
-    )
+    return TextOutputResult(method: .clipboard, error: error)
   }
 
   /// Whether the user is now in a different app from the one captured when

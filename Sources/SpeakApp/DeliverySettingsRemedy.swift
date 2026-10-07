@@ -42,17 +42,30 @@ enum DeliverySettingsRemedy: Equatable {
   }
 
   /// The remedy for a one-shot delivery outcome, or nil when delivery worked
-  /// as configured or no setting would have changed the outcome.
+  /// as configured or no setting would have changed the outcome. A failure
+  /// always decides the remedy: offering an app-switch change for, say, a
+  /// clipboard write failure would not have helped.
   static func forOutput(
     error: Error?,
     warning: Error?,
     focusMovedToOtherApplication: Bool,
     configuration: Configuration
   ) -> DeliverySettingsRemedy? {
+    if let error {
+      guard let outputError = error as? TextOutputError else { return nil }
+      return forOutputError(outputError, configuration: configuration)
+    }
     if focusMovedToOtherApplication, configuration.appSwitchDelivery != .currentApp {
       return .useAppSwitchDelivery(.currentApp)
     }
-    guard let outputError = (error ?? warning) as? TextOutputError else { return nil }
+    guard let outputWarning = warning as? TextOutputError else { return nil }
+    return forOutputError(outputWarning, configuration: configuration)
+  }
+
+  private static func forOutputError(
+    _ outputError: TextOutputError,
+    configuration: Configuration
+  ) -> DeliverySettingsRemedy? {
     switch outputError {
     case .originalApplicationNotInFront:
       return .useAppSwitchDelivery(.originalApp)
@@ -63,7 +76,9 @@ enum DeliverySettingsRemedy: Equatable {
     case .unableToFindFocusedElement, .unableToSetValue, .unableToVerifyInsertion,
       .capturedFieldUnavailable, .capturedFieldChanged:
       return configuration.textOutputMethod == .accessibilityOnly ? .useSmartTextOutput : nil
-    case .clipboardWriteFailed, .pasteShortcutUnavailable:
+    case .clipboardWriteFailed, .pasteShortcutUnavailable, .destinationApplicationChanged:
+      // No setting makes a second app switch, a pasteboard failure or a
+      // missing key event deliver safely.
       return nil
     }
   }
@@ -82,6 +97,21 @@ enum DeliverySettingsRemedy: Equatable {
       return .grantAccessibilityPermission
     }
     return nil
+  }
+
+  /// Whether the settings already say what this remedy would change them to,
+  /// so offering it again would do nothing.
+  func isSatisfied(configuration: Configuration, accessibilityGranted: Bool) -> Bool {
+    switch self {
+    case .useAppSwitchDelivery(let option):
+      return configuration.appSwitchDelivery == option
+    case .grantAccessibilityPermission:
+      return accessibilityGranted
+    case .useSmartTextOutput:
+      return configuration.textOutputMethod != .accessibilityOnly
+    case .disableStreamingInsertion:
+      return !configuration.streamingInsertionEnabled
+    }
   }
 
   /// One sentence appended to the HUD/History message telling the user which

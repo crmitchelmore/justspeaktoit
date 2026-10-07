@@ -456,7 +456,11 @@ extension AppEnvironment {
         focusMovedToOtherApplication: false,
         configuration: DeliverySettingsRemedy.Configuration(settings: settings)
       )
-      hud.finishFailure(headline: "Delivery failed", message: remedy.annotate(error.localizedDescription))
+      main.offerDeliveryRemedy(remedy)
+      hud.finishFailure(
+        headline: MainManager.deliveryFailureHeadline(for: error),
+        message: remedy.annotate(error.localizedDescription)
+      )
     }
   }
 }

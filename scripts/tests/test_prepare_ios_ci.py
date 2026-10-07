@@ -64,24 +64,14 @@ class PrepareIOSCITests(unittest.TestCase):
         ):
             MODULE.prepare("simulator")
 
-    def test_boot_overlaps_both_builds_and_is_joined_before_success(self):
+    def test_boot_overlaps_project_generation_and_is_joined_before_success(self):
         self.run_setup()
-        self.assertEqual([entry[0] for entry in self.events], ["boot", "swift", "tuist", "wait"])
+        self.assertEqual([entry[0] for entry in self.events], ["boot", "tuist", "wait"])
         self.assertEqual(self.events[0][1], Boot.args)
-        self.assertEqual(
-            self.events[1][1],
-            ["swift", "build", "--disable-dependency-cache", "--target", "SpeakiOSLib"],
-        )
-        self.assertEqual(self.events[2][1], ["tuist", "generate", "--no-open"])
-        self.assertEqual(self.events[2][2]["env"]["TUIST_IOS_KEYBOARD"], "1")
-        self.assertEqual(self.events[3], ("wait", 300))
+        self.assertEqual(self.events[1][1], ["tuist", "generate", "--no-open"])
+        self.assertEqual(self.events[1][2]["env"]["TUIST_IOS_KEYBOARD"], "1")
+        self.assertEqual(self.events[2], ("wait", 300))
         self.assertNotIn(("terminate",), self.events)
-
-    def test_library_failure_stops_owned_boot_and_never_generates_project(self):
-        with self.assertRaises(subprocess.CalledProcessError):
-            self.run_setup(failure="swift")
-        self.assertNotIn("tuist", [entry[0] for entry in self.events])
-        self.assertIn(("terminate",), self.events)
 
     def test_project_failure_stops_owned_boot(self):
         with self.assertRaises(subprocess.CalledProcessError):
@@ -94,14 +84,14 @@ class PrepareIOSCITests(unittest.TestCase):
             self.run_setup(boot_result=42)
 
     def test_readiness_timeout_fails_and_cleans_up_only_the_owned_process(self):
-        with self.assertRaisesRegex(RuntimeError, "five minutes after compilation"):
+        with self.assertRaisesRegex(RuntimeError, "five minutes after project generation"):
             self.run_setup(timeout=True)
         self.assertIn(("terminate",), self.events)
         self.assertEqual(self.boot.returncode, -15)
 
     def test_failed_build_kills_boot_that_ignores_termination(self):
         with self.assertRaises(subprocess.CalledProcessError):
-            self.run_setup(failure="swift", ignore=True)
+            self.run_setup(failure="tuist", ignore=True)
         self.assertEqual(self.events[-4:], [("terminate",), ("wait", 5), ("kill",), ("wait", 5)])
 
 

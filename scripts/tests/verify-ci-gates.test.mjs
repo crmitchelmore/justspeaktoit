@@ -56,6 +56,14 @@ test('native pool still requires the exact reviewed source and trusted event', (
   }
 });
 
+test('standalone iOS SwiftPM compilation stays hosted with no new native admission', () => {
+  const body = jobBodies['build-ios-swiftpm'];
+  assert.match(body, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(body, /^\s+timeout-minutes: 30$/m);
+  assert.match(body, /run: swift build --disable-dependency-cache --target SpeakiOSLib/);
+  assert.doesNotMatch(body, /if:|jsti-macos-build|bravo-mini-local/);
+});
+
 test('historical owner-approved native route retains its source and event guards', () => {
   for (const id of appleJobs.filter(id => !['build-macos', 'api-compatibility'].includes(id))) {
     assert.deepEqual(route(id, routingContext('pull_request', 'crmitchelmore/justspeaktoit', 1038)),
@@ -110,19 +118,30 @@ function prepareSimulator(devices) {
   }
 }
 
-test('iOS preparation overlaps compilation without extending the job budget or dropping tests', () => {
+test('iOS workloads are partitioned without extending budgets or dropping tests', () => {
   const body = jobBodies['build-ios'];
   assert.match(body, /^\s+timeout-minutes: 30$/m);
-  assert.ok(body.indexOf('Select iOS Simulator') < body.indexOf('- name: Build iOS Library'));
+  assert.ok(body.indexOf('Select iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator and Project'));
   assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
-  assert.match(iosPreparation, /\["swift", "build", "--disable-dependency-cache", "--target", "SpeakiOSLib"\]/);
+  assert.doesNotMatch(iosPreparation, /"swift"/);
   assert.match(iosPreparation, /\["tuist", "generate", "--no-open"\]/);
   assert.match(iosPreparation, /environment\["TUIST_IOS_KEYBOARD"\] = "1"/);
   assert.match(body, /xcodebuild test/);
   assert.match(body, /-only-testing:SpeakiOSTests/);
   assert.match(body, /-only-testing:SpeakiOSUITests/);
   assert.match(body, /verify-ios-test-evidence\.py/);
-  assert.match(body, /Build watchOS App \(feature-flagged\)/);
+  const devices = jobBodies['build-ios-keyboard'];
+  assert.match(devices, /^\s+timeout-minutes: 30$/m);
+  assert.match(devices, /Build Keyboard Extension, hand-off shape/);
+  assert.match(devices, /Build Keyboard Extension, direct-capture shape/);
+  assert.match(devices, /Build watchOS App \(feature-flagged\)/);
+  assert.match(devices, /TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate/);
+  assert.match(devices, /-scheme JustSpeakWatchApp/);
+  assert.match(devices, /-destination generic\/platform=watchOS/);
+  assert.match(devices, /-scheme SpeakiOS/);
+  assert.match(devices, /-destination generic\/platform=iOS/);
+  assert.match(aggregate, /^\s+- build-ios-swiftpm$/m);
+  assert.match(aggregate, /needs\.build-ios-swiftpm\.result != 'success'/);
 });
 
 test('iOS selection prefers an available Pro before starting preparation', () => {
@@ -265,7 +284,7 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
 
 function passing() {
   return Object.fromEntries([
-    'build-macos', 'build-ios', 'build-ios-keyboard', 'lint',
+    'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-keyboard', 'lint',
     'release-paths', 'release-validation', 'core-journey-e2e',
     'core-journey-fixture-ui', 'api-compatibility',
   ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true' } }]));

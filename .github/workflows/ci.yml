@@ -277,6 +277,17 @@ jobs:
       - name: Test (Release)
         run: python3 scripts/with-test-keychain.py swift test -c release
 
+  build-ios-swiftpm:
+    name: Build iOS Library (SwiftPM)
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build iOS Library
+        run: swift build --disable-dependency-cache --target SpeakiOSLib
+
   build-ios:
     name: Build iOS Library
     # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
@@ -301,8 +312,8 @@ jobs:
           fi
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
-      - name: Build iOS Library
-        # Boot overlaps compilation; readiness is required before XCTest.
+      - name: Prepare iOS Simulator and Project
+        # Boot overlaps project generation; readiness is required before XCTest.
         # Project generation retains the shipping handoff-only keyboard shape.
         run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
 
@@ -380,37 +391,6 @@ jobs:
             ${{ runner.temp }}/ios-tests.log
           if-no-files-found: ignore
 
-      - name: Build watchOS App (feature-flagged)
-        # The watch app target only exists when generated with
-        # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
-        # signing, so it is excluded from release builds). Build it unsigned
-        # here so the flagged target cannot rot. Cheap: eight small source
-        # files plus the dependency-free SpeakWatchCore package product. The
-        # watch-face complication extension is embedded in the app, so this
-        # step covers it too.
-        run: |
-          set -o pipefail
-          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme JustSpeakWatchApp \
-            -destination generic/platform=watchOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
-
-          # Compile the containing iOS app with WATCH_APP_FEATURE enabled to
-          # verify integration and embedding of the feature-flagged watch companion.
-          xcodebuild build \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakiOS \
-            -destination generic/platform=iOS \
-            CODE_SIGNING_ALLOWED=NO \
-            -skipPackagePluginValidation \
-            -quiet \
-            2>&1 | tail -30
-
   build-ios-keyboard:
     # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
     # not a required status check, so the rename costs nothing, and the old
@@ -468,6 +448,30 @@ jobs:
           xcodebuild build \
             -workspace "Just Speak to It.xcworkspace" \
             -scheme JustSpeakKeyboard \
+            -destination generic/platform=iOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
+      - name: Build watchOS App (feature-flagged)
+        # Keep unsigned device builds together, outside the simulator test budget.
+        # The containing iOS build also verifies watch companion embedding.
+        run: |
+          set -o pipefail
+          TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme JustSpeakWatchApp \
+            -destination generic/platform=watchOS \
+            CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation \
+            -quiet \
+            2>&1 | tail -30
+
+          xcodebuild build \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS \
             -destination generic/platform=iOS \
             CODE_SIGNING_ALLOWED=NO \
             -skipPackagePluginValidation \
@@ -561,6 +565,7 @@ jobs:
     needs:
       - build-macos
       - build-ios
+      - build-ios-swiftpm
       - build-ios-keyboard
       - lint
       - release-paths
@@ -577,6 +582,7 @@ jobs:
           always() && (
             needs.build-macos.result != 'success' ||
             needs.build-ios.result != 'success' ||
+            needs.build-ios-swiftpm.result != 'success' ||
             needs.build-ios-keyboard.result != 'success' ||
             needs.lint.result != 'success' ||
             needs.release-paths.result != 'success' ||

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Overlap simulator initialization with independent iOS compilation."""
+"""Overlap simulator initialization with iOS project generation."""
 
 import os
 import subprocess
@@ -9,14 +9,6 @@ import sys
 def prepare(simulator_id):
     boot = subprocess.Popen(["xcrun", "simctl", "bootstatus", simulator_id, "-b"])
     try:
-        print("Building the iOS library while the simulator initializes.", flush=True)
-        subprocess.run(
-            ["swift", "build", "--disable-dependency-cache", "--target", "SpeakiOSLib"],
-            check=True,
-        )
-        if boot.poll() not in (None, 0):
-            raise subprocess.CalledProcessError(boot.returncode, boot.args)
-
         print("Generating the shipping keyboard/app project.", flush=True)
         environment = os.environ.copy()
         environment["TUIST_IOS_KEYBOARD"] = "1"
@@ -28,7 +20,7 @@ def prepare(simulator_id):
             result = boot.wait(timeout=300)
         except subprocess.TimeoutExpired as error:
             raise RuntimeError(
-                "Simulator did not become ready within five minutes after compilation."
+                "Simulator did not become ready within five minutes after project generation."
             ) from error
         if result:
             raise subprocess.CalledProcessError(result, boot.args)

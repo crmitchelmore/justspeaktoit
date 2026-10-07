@@ -93,6 +93,77 @@ Azure rejects the unsigned zero values previously sent by the app.
 
 ## Verification
 
+### Local Entra proxy (TTS only)
+
+`scripts/azure-speech-proxy.py` is a dependency-free Python 3 bridge for
+subscriptions that disable Azure resource keys. Sign in with `az login` and
+grant the signed-in account **Cognitive Services Speech User** on the resource.
+The proxy uses Azure CLI's Speech-scoped Entra token, caches it in memory and
+refreshes it before expiry. It does not create an app registration, save an
+Entra token or change subscription authentication policies.
+
+Start it with an explicit subscription and custom resource endpoint:
+
+```bash
+python3 scripts/azure-speech-proxy.py \
+  --subscription YOUR_SUBSCRIPTION_ID \
+  --resource https://YOUR_RESOURCE.cognitiveservices.azure.com \
+  --token-file /path/to/private-directory/azure-proxy-token \
+  --port 8765
+```
+
+The parent directory must already exist. The token file is created with mode
+`600` and reused on restart. It is a local client credential, **not an Azure API
+key**. Keep it out of source control. Native clients send its value in
+`Ocp-Apim-Subscription-Key`; that header is consumed locally and never forwarded.
+Azure receives only an Entra bearer token, the SSML, the audio format and a fixed
+user agent. Do not omit the local token: loopback alone does not prevent another
+local process or a browser from attempting to spend your Azure quota.
+
+Only these native-client routes are accepted:
+
+| Local route | Upstream route |
+| --- | --- |
+| `POST /cognitiveservices/v1` | `/tts/cognitiveservices/v1` |
+| `GET /cognitiveservices/voices/list` | `/tts/cognitiveservices/voices/list` |
+| `GET /health` | Local readiness only; does not verify Azure model access |
+
+Synthesis uses the existing Azure SSML body and `X-Microsoft-OutputFormat`
+header. It supports the app's current MP3 and WAV formats. The server binds only
+to `127.0.0.1`, requires the exact Host header and local token, rejects browser
+requests, redirects, external SSML audio/lexicon references and arbitrary
+forwarding targets, and bounds request size, response size and concurrency.
+It never logs tokens, SSML or Azure response bodies. Errors are explicit;
+expired sign-in requires `az login` again. All inference still uses the selected
+corporate identity, subscription, permissions and applicable policies.
+
+**Installed Just Speak builds cannot use this proxy out of the box.** The
+existing Azure resource field is used by transcription, accepts only Azure HTTPS
+origins and is not consumed by `AzureSpeechVoiceAPI` for TTS. Voice output still
+constructs a regional Azure HTTPS endpoint and requires a saved credential.
+Do not paste a localhost URL or Entra token into that field.
+
+The proxy deliberately preserves the Azure TTS wire contract so an explicit
+macOS local-proxy connection option can reuse the current SSML and audio parser:
+route synthesis and voice listing to the loopback origin, save the local token
+in Keychain separately from the Azure key, and leave direct Azure, transcription,
+iOS and Stable settings unchanged. That app connection option is not included
+in this standalone proxy. No TLS interception or weakening of Azure endpoint
+validation is needed. Streaming and batch transcription are not implemented.
+
+Run the offline proxy checks with:
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_azure_speech_proxy.py' -v
+```
+
+On 7 October 2026, the loopback proxy returned HTTP 200 and valid WAV and MP3
+audio for both `en-US-Harper:MAI-Voice-2.1` and
+`en-US-Harper:MAI-Voice-2.1-Flash`, using a fixed synthetic phrase. Voice listing
+returned 958 entries. Incorrect local tokens returned 401 and browser-origin
+requests returned 403. These receipts verify native HTTP requests through the
+proxy, not integration with the installed app.
+
 Contract tests cover endpoint validation, secret-free URLs, multipart model
 selection, timing conversion, empty input, SSML escaping, MAI voice identity,
 streaming transcript ordering/deduplication and shared routing/credentials.

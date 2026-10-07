@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=JustSpeakToIt
+GenericName=Dictation
+Comment=Dictate into any app with cloud speech-to-text
+Exec=justspeaktoit
+Icon=com.justspeaktoit.JustSpeakToIt
+Terminal=false
+StartupNotify=true
+Categories=Utility;Accessibility;
+Keywords=dictation;speech;voice;transcription;speech-to-text;
+Actions=toggle-dictation;
+
+[Desktop Action toggle-dictation]
+Name=Start or Stop Dictation
+Exec=justspeaktoit --toggle

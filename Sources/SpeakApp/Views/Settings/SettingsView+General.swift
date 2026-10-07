@@ -516,6 +516,8 @@ extension SettingsView {
       }
       .speakTooltip("Use your iPhone as a wireless microphone. Transcribe on iPhone, text appears on Mac.")
 
+      ICloudSyncSettingsCard()
+
       SettingsCard(title: "Automation", systemImage: "terminal", tint: Color.brandLagoon) {
         VStack(alignment: .leading, spacing: 12) {
           Text(

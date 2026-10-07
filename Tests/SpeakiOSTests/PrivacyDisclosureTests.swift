@@ -11,31 +11,6 @@ import XCTest
 /// these tests pin the projection rather than any hand-written copy.
 final class PrivacyDisclosureTests: XCTestCase {
 
-    // MARK: - Fixtures
-
-    private func inputs(
-        usesBatchTranscription: Bool = false,
-        liveModel: String = AppleLocalModels.speechTranscriberModelID,
-        batchModel: String = ModelCatalog.defaultBatchTranscriptionModel,
-        postProcessingEnabled: Bool = false,
-        postProcessingModel: String = ModelCatalog.defaultPostProcessingModel,
-        voiceOutputEnabled: Bool = false,
-        voiceOutputProvider: VoiceOutputProvider = .soniox,
-        analyzerFallbackAllowed: Bool = false
-    ) -> PrivacyWorkflowInputs {
-        var value = PrivacyWorkflowInputs(
-            usesBatchTranscription: usesBatchTranscription,
-            liveTranscriptionModelID: liveModel,
-            batchTranscriptionModelID: batchModel,
-            postProcessingEnabled: postProcessingEnabled,
-            postProcessingModelID: postProcessingModel,
-            voiceOutputEnabled: voiceOutputEnabled,
-            voiceOutputProvider: voiceOutputProvider
-        )
-        value.appleSpeechAnalyzerFallbackAllowed = analyzerFallbackAllowed
-        return value
-    }
-
     // MARK: - Transcription
 
     func testSpeechAnalyzerLiveModelStaysOnDevice() {
@@ -51,16 +26,16 @@ final class PrivacyDisclosureTests: XCTestCase {
         )
     }
 
-    func testLegacyAppleSpeechDisclosesConditionalCloudFallback() {
+    func testStrictLegacyAppleSpeechStaysOnDevice() {
         let summary = PrivacyWorkflowSummary.make(inputs(liveModel: AppleLocalModels.legacySpeechModelID))
 
-        XCTAssertEqual(summary.transcription.destination, .cloud(providerName: "Apple"))
-        XCTAssertTrue(summary.transcription.isConditionalCloud)
-        XCTAssertEqual(summary.transcription.destinationLabel, "On device or Apple")
-        XCTAssertTrue(summary.transcription.destination.leavesDevice)
-        XCTAssertEqual(summary.activeRecipients, ["Apple"])
-        XCTAssertTrue(summary.transcription.detail.contains("may be sent to Apple"))
-        XCTAssertFalse(summary.transcription.detail.contains("it is not uploaded"))
+        XCTAssertEqual(summary.transcription.destination, .onDevice)
+        XCTAssertFalse(summary.transcription.isConditionalCloud)
+        XCTAssertEqual(summary.transcription.destinationLabel, "On device")
+        XCTAssertFalse(summary.transcription.destination.leavesDevice)
+        XCTAssertTrue(summary.activeRecipients.isEmpty)
+        XCTAssertFalse(summary.transcription.detail.contains("may be sent to Apple"))
+        XCTAssertTrue(summary.transcription.detail.contains("it is not uploaded"))
     }
 
     func testSpeechAnalyzerBatchModelsHaveNoConditionalCloudRecipient() {
@@ -72,20 +47,41 @@ final class PrivacyDisclosureTests: XCTestCase {
         }
     }
 
-    func testConditionalAppleRecipientIsListedAlongsideEnabledTextProviders() {
+    func testStrictAppleRouteStillDisclosesEnabledTextProviders() {
         let summary = PrivacyWorkflowSummary.make(inputs(
             liveModel: " \n" + AppleLocalModels.legacySpeechModelID + " ",
             postProcessingEnabled: true, voiceOutputEnabled: true, voiceOutputProvider: .soniox
         ))
-        XCTAssertEqual(summary.activeRecipients, ["Apple", "OpenRouter", VoiceOutputProvider.soniox.displayName])
+        XCTAssertEqual(summary.activeRecipients, ["OpenRouter", VoiceOutputProvider.soniox.displayName])
     }
 
-    func testLiveSpeechAnalyzerDisclosesItsPermittedLegacyFallback() {
-        for model in [AppleLocalModels.speechTranscriberModelID, AppleLocalModels.dictationTranscriberModelID] {
-            let summary = PrivacyWorkflowSummary.make(inputs(liveModel: model, analyzerFallbackAllowed: true))
+    func testNonStrictAppleRoutesRetainTheirPermittedCloudFallback() {
+        for model in [AppleLocalModels.legacySpeechModelID, AppleLocalModels.speechTranscriberModelID,
+                      AppleLocalModels.dictationTranscriberModelID] {
+            let value = inputs(liveModel: model, strictAppleRecognitionRequired: false)
+            XCTAssertTrue(value.appleSpeechAnalyzerFallbackAllowed)
+            let summary = PrivacyWorkflowSummary.make(value)
             XCTAssertEqual(summary.transcription.destination, .cloud(providerName: "Apple"))
+            XCTAssertTrue(summary.transcription.isConditionalCloud)
+            XCTAssertEqual(summary.transcription.destinationLabel, "On device or Apple")
             XCTAssertEqual(summary.activeRecipients, ["Apple"])
         }
+    }
+
+    func testDisablingAnalyzerFallbackDoesNotChangeNonStrictLegacyRouting() {
+        for model in [AppleLocalModels.speechTranscriberModelID, AppleLocalModels.dictationTranscriberModelID] {
+            let summary = PrivacyWorkflowSummary.make(inputs(
+                liveModel: model, analyzerFallbackAllowed: false, strictAppleRecognitionRequired: false
+            ))
+            XCTAssertEqual(summary.transcription.destination, .onDevice)
+            XCTAssertFalse(summary.transcription.isConditionalCloud)
+        }
+        let legacy = PrivacyWorkflowSummary.make(inputs(
+            liveModel: AppleLocalModels.legacySpeechModelID,
+            analyzerFallbackAllowed: false, strictAppleRecognitionRequired: false
+        ))
+        XCTAssertEqual(legacy.transcription.destination, .cloud(providerName: "Apple"))
+        XCTAssertTrue(legacy.transcription.isConditionalCloud)
     }
 
     func testPersistedLegacyBatchIDDisclosesTheIOSOpenRouterRoute() {
@@ -257,7 +253,9 @@ final class PrivacyDisclosureTests: XCTestCase {
             voiceOutputEnabled: false,
             voiceOutputProvider: .soniox
         )
-        XCTAssertEqual(summary.transcription.destination, .cloud(providerName: "Apple"))
+        XCTAssertEqual(summary.transcription.destination, .onDevice)
+        XCTAssertFalse(summary.transcription.isConditionalCloud)
+        XCTAssertTrue(summary.activeRecipients.isEmpty)
         XCTAssertEqual(summary.postProcessing.destination, .disabled)
 
         settings.selectedModel = "deepgram/nova-3-streaming"
@@ -275,5 +273,70 @@ final class PrivacyDisclosureTests: XCTestCase {
             .cloud(providerName: VoiceOutputProvider.deepgram.displayName)
         )
     }
+
+    @MainActor
+    func testSettingsBridgeMakesEveryAppleLiveModelStrictlyOnDevice() throws {
+        let suiteName = "PrivacyDisclosureTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(defaults: defaults, loadsSecureStorage: false)
+        settings.transcriptionMode = .streaming
+        settings.postProcessingEnabled = false
+
+        for model in [AppleLocalModels.legacySpeechModelID, AppleLocalModels.speechTranscriberModelID,
+                      AppleLocalModels.dictationTranscriberModelID] {
+            settings.selectedModel = model
+            let summary = PrivacyWorkflowSummary.make(
+                settings: settings, voiceOutputEnabled: false, voiceOutputProvider: .soniox
+            )
+            XCTAssertEqual(summary.transcription.destination, .onDevice, model)
+            XCTAssertFalse(summary.transcription.isConditionalCloud, model)
+            XCTAssertEqual(summary.transcription.destinationLabel, "On device", model)
+            XCTAssertTrue(summary.activeRecipients.isEmpty, model)
+            XCTAssertTrue(summary.transcription.detail.contains("it is not uploaded"), model)
+        }
+
+        // A persisted legacy batch ID is a distinct OpenRouter execution path;
+        // the strict live policy must not hide that upload.
+        settings.transcriptionMode = .batch
+        settings.batchTranscriptionModel = AppleLocalModels.legacySpeechModelID
+        let batch = PrivacyWorkflowSummary.make(
+            settings: settings, voiceOutputEnabled: false, voiceOutputProvider: .soniox
+        )
+        XCTAssertEqual(batch.transcription.destination, .cloud(providerName: "OpenRouter"))
+        XCTAssertFalse(batch.transcription.isConditionalCloud)
+        XCTAssertEqual(batch.activeRecipients, ["OpenRouter"])
+    }
+}
+
+private extension PrivacyDisclosureTests {
+    // MARK: - Fixtures
+
+    private func inputs(
+        usesBatchTranscription: Bool = false,
+        liveModel: String = AppleLocalModels.speechTranscriberModelID,
+        batchModel: String = ModelCatalog.defaultBatchTranscriptionModel,
+        postProcessingEnabled: Bool = false,
+        postProcessingModel: String = ModelCatalog.defaultPostProcessingModel,
+        voiceOutputEnabled: Bool = false,
+        voiceOutputProvider: VoiceOutputProvider = .soniox,
+        analyzerFallbackAllowed: Bool = true,
+        strictAppleRecognitionRequired: Bool = true
+    ) -> PrivacyWorkflowInputs {
+        var value = PrivacyWorkflowInputs(
+            usesBatchTranscription: usesBatchTranscription,
+            liveTranscriptionModelID: liveModel,
+            batchTranscriptionModelID: batchModel,
+            postProcessingEnabled: postProcessingEnabled,
+            postProcessingModelID: postProcessingModel,
+            voiceOutputEnabled: voiceOutputEnabled,
+            voiceOutputProvider: voiceOutputProvider
+        )
+        value.appleSpeechAnalyzerFallbackAllowed = analyzerFallbackAllowed
+        value.appleSpeechRequiresOnDeviceRecognition = strictAppleRecognitionRequired
+        return value
+    }
+
 }
 #endif

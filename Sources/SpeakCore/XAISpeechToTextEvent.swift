@@ -28,8 +28,8 @@ enum XAISpeechToTextEvent: Equatable {
             self = .created
         case "transcript.partial":
             guard let text = object["text"] as? String else { return nil }
-            let start = object["start"] as? Double
-            let channel = object["channel_index"] as? Int
+            let start = Self.seconds(object["start"])
+            let channel = Self.index(object["channel_index"])
             self = .partial(
                 text: text,
                 isFinal: object["is_final"] as? Bool ?? false,
@@ -42,6 +42,28 @@ enum XAISpeechToTextEvent: Equatable {
             self = .failure(message: object["message"] as? String ?? "Unknown xAI streaming error")
         default:
             return nil
+        }
+    }
+
+    /// JSON numbers arrive as `NSNumber` on Apple platforms but as `Int` or
+    /// `Double` from swift-corelibs-foundation, so a whole-second `start` must
+    /// read the same on every platform for the event identity to match.
+    private static func seconds(_ value: Any?) -> Double? {
+        switch value {
+        case let double as Double: return double
+        case let integer as Int: return Double(integer)
+        default: return nil
+        }
+    }
+
+    /// A channel index that is fractional, non-finite or outside `Int` is
+    /// unreadable rather than fatal: `Int(exactly:)` answers `nil` for all of
+    /// those, and the identity then falls back to channel 0 on every platform.
+    private static func index(_ value: Any?) -> Int? {
+        switch value {
+        case let integer as Int: return integer
+        case let double as Double: return Int(exactly: double)
+        default: return nil
         }
     }
 }

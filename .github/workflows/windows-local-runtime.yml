@@ -1,0 +1,60 @@
+name: Windows on-device runtime
+
+# Builds the pinned whisper.cpp runtime DLLs once per pin change and hands them
+# to the calling workflow. x64 (CPU variants and Vulkan) is the
+# `windows-local-runtime` artifact for windows.yml (native tests) and
+# windows-cross-proof.yml (runtime bundle and developer MSIX). ARM64 (one CPU
+# backend, built natively with clang) is `windows-local-runtime-arm64` for
+# windows-arm64.yml.
+on:
+  workflow_call:
+    inputs:
+      architecture:
+        description: Pinned architecture in scripts/windows-local-runtime/dependencies.json (x64 or arm64)
+        type: string
+        default: x64
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: ${{ inputs.architecture == 'arm64' && 'Build pinned whisper.cpp runtime (ARM64 CPU)' || 'Build pinned whisper.cpp runtime (CPU and Vulkan)' }}
+    runs-on: ${{ inputs.architecture == 'arm64' && 'windows-11-arm' || 'windows-2022' }}
+    timeout-minutes: ${{ inputs.architecture == 'arm64' && 45 || 90 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check the runtime pins
+        shell: pwsh
+        run: |
+          python -B -m unittest discover -s scripts/windows-local-runtime -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The DLLs depend only on these inputs; a changed pin, build script or
+      # import policy produces a new cache entry and a fresh build.
+      - name: Restore a runtime built from the same pins
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: local-runtime-output
+          key: whisper-runtime-${{ inputs.architecture }}-${{ hashFiles('scripts/windows-local-runtime/dependencies.json', 'scripts/windows-local-runtime/build-whisper-runtime.py', 'scripts/windows-bundle/runtime-policy.json', 'scripts/windows-bundle/windows_pe.py') }}
+      - name: Build whisper.cpp from the pinned commit
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          ARCHITECTURE: ${{ inputs.architecture }}
+        run: |
+          python -B scripts/windows-local-runtime/build-whisper-runtime.py --architecture $env:ARCHITECTURE `
+            --output local-runtime-output --work (Join-Path $env:RUNNER_TEMP 'whisper-runtime-work') --jobs 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Show the runtime manifest
+        shell: pwsh
+        run: Get-Content local-runtime-output/runtime-manifest.json
+      - name: Upload the runtime
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ${{ inputs.architecture == 'x64' && 'windows-local-runtime' || format('windows-local-runtime-{0}', inputs.architecture) }}
+          path: local-runtime-output/
+          if-no-files-found: error
+          retention-days: 14

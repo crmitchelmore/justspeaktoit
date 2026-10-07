@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Decodes a WebSocket frame into the JSON object a provider's event type
 /// parses. Text and binary frames are both accepted, because several services
@@ -17,13 +20,6 @@ enum StreamingFrameDecoding {
 }
 
 extension SpeechmaticsRealtimeEvent {
-    init?(message: URLSessionWebSocketTask.Message) {
-        guard let object = StreamingFrameDecoding.jsonObject(from: message) else { return nil }
-        self.init(object: object)
-    }
-}
-
-extension RevAIStreamingEvent {
     init?(message: URLSessionWebSocketTask.Message) {
         guard let object = StreamingFrameDecoding.jsonObject(from: message) else { return nil }
         self.init(object: object)

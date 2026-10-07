@@ -44,6 +44,9 @@ public enum TranscriptionLanguageCatalog {
               !identifier.isEmpty else {
             return automaticIdentifier
         }
+        if [automaticIdentifier, "auto"].contains(identifier.lowercased()) {
+            return automaticIdentifier
+        }
         return identifier
     }
 

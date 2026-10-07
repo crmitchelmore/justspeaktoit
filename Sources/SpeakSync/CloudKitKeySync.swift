@@ -9,30 +9,9 @@ import SpeakCore
 
 // swiftlint:disable file_length
 
-public struct EncryptedSecret: Equatable, Sendable {
-    public let identifier: String
-    public let ciphertext: Data
-    public let nonce: Data
-    public let tag: Data
-    public let updatedAt: Date
-    public let isDeleted: Bool
-
-    public init(
-        identifier: String,
-        ciphertext: Data,
-        nonce: Data,
-        tag: Data,
-        updatedAt: Date,
-        isDeleted: Bool = false
-    ) {
-        self.identifier = identifier
-        self.ciphertext = ciphertext
-        self.nonce = nonce
-        self.tag = tag
-        self.updatedAt = updatedAt
-        self.isDeleted = isDeleted
-    }
-}
+// `EncryptedSecret`, `CloudKitKeySyncError`, `KeySyncMetadata` and the envelope
+// parameters are portable and live in KeySyncEnvelope.swift; the record format
+// is `SyncSchema.EncryptedSecret` and `SyncSchema.KeySyncMetadata`.
 
 public struct CloudKitKeySyncStatus: Equatable, Sendable {
     public var isEnabled: Bool
@@ -69,47 +48,13 @@ public struct CloudKitKeySyncStatus: Equatable, Sendable {
     }
 }
 
-public enum CloudKitKeySyncError: LocalizedError, Equatable {
-    case cloudUnavailable
-    case missingPassphrase
-    case incorrectPassphrase
-    case encryptionFailed
-    case malformedRecord
-    case invalidChangeToken
-    case passphraseTooShort(minimumLength: Int)
-    case randomGenerationFailed
-    case notConfigured
-
-    public var errorDescription: String? {
-        switch self {
-        case .cloudUnavailable:
-            return "CloudKit is unavailable for this build, device, or iCloud account."
-        case .missingPassphrase:
-            return "Enter the API-key sync passphrase to join this device."
-        case .incorrectPassphrase:
-            return "The API-key sync passphrase is incorrect."
-        case .encryptionFailed:
-            return "Failed to encrypt or decrypt the API key."
-        case .malformedRecord:
-            return "CloudKit returned an invalid encrypted key record."
-        case .invalidChangeToken:
-            return "CloudKit returned an invalid synchronization token."
-        case .passphraseTooShort(let minimumLength):
-            return "Use an API-key sync passphrase with at least \(minimumLength) characters."
-        case .randomGenerationFailed:
-            return "Failed to generate secure random bytes for API-key sync."
-        case .notConfigured:
-            return "API-key sync has not finished configuring secure storage."
-        }
-    }
-}
-
+/// CryptoKit implementation of the `EncryptedSecretEnvelope` format.
 public enum EncryptedSecretCrypto {
-    private static let info = Data("justspeaktoit.api-key-sync.v1".utf8)
-    private static let verifierPlaintext = Data("justspeaktoit.api-key-sync.verifier.v1".utf8)
-    private static let keyByteCount = 32
-    private static let pbkdf2Iterations = 210_000
-    public static let minimumPassphraseLength = 12
+    private static let info = EncryptedSecretEnvelope.keyDerivationInfo
+    private static let verifierPlaintext = EncryptedSecretEnvelope.verifierPlaintext
+    private static let keyByteCount = EncryptedSecretEnvelope.keyByteCount
+    private static let pbkdf2Iterations = EncryptedSecretEnvelope.pbkdf2Iterations
+    public static let minimumPassphraseLength = EncryptedSecretEnvelope.minimumPassphraseLength
 
     /// Derives the local encryption key from a user-owned passphrase and a CloudKit-stored salt.
     /// The passphrase is never sent to CloudKit. CloudKit stores only the random salt and an
@@ -218,24 +163,10 @@ public enum EncryptedSecretCrypto {
 }
 
 public enum EncryptedSecretRecordMapper {
-    public static let recordType = "EncryptedSecret"
-
-    private enum FieldKey {
-        static let identifier = "identifier"
-        static let ciphertext = "ciphertext"
-        static let nonce = "nonce"
-        static let tag = "tag"
-        static let updatedAt = "updatedAt"
-        static let isDeleted = "isDeleted"
-    }
+    public static let recordType = SyncSchema.EncryptedSecret.recordType
 
     public static func recordName(for identifier: String) -> String {
-        let encoded = Data(identifier.utf8)
-            .base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-        return "secret-\(encoded)"
+        SyncSchema.EncryptedSecret.recordName(for: identifier)
     }
 
     public static func record(from secret: EncryptedSecret, existingRecord: CKRecord? = nil) -> CKRecord {
@@ -244,58 +175,19 @@ public enum EncryptedSecretRecordMapper {
             zoneID: SyncConfiguration.zoneID
         )
         let record = existingRecord ?? CKRecord(recordType: recordType, recordID: recordID)
-        record[FieldKey.identifier] = secret.identifier
-        record[FieldKey.ciphertext] = secret.ciphertext
-        record[FieldKey.nonce] = secret.nonce
-        record[FieldKey.tag] = secret.tag
-        record[FieldKey.updatedAt] = secret.updatedAt
-        record[FieldKey.isDeleted] = secret.isDeleted ? 1 : 0
+        var fields = CloudKitRecordFields(record)
+        fields.apply(EncryptedSecretRecordCodec.assignments(for: secret))
         return record
     }
 
     public static func secret(from record: CKRecord) -> EncryptedSecret? {
-        guard record.recordType == recordType,
-              let identifier = record[FieldKey.identifier] as? String,
-              let ciphertext = record[FieldKey.ciphertext] as? Data,
-              let nonce = record[FieldKey.nonce] as? Data,
-              let tag = record[FieldKey.tag] as? Data,
-              let updatedAt = record[FieldKey.updatedAt] as? Date else {
-            return nil
-        }
-        let deletedValue = record[FieldKey.isDeleted]
-        let isDeleted = (deletedValue as? Int) == 1 || (deletedValue as? Bool) == true
-        return EncryptedSecret(
-            identifier: identifier,
-            ciphertext: ciphertext,
-            nonce: nonce,
-            tag: tag,
-            updatedAt: updatedAt,
-            isDeleted: isDeleted
-        )
+        EncryptedSecretRecordCodec.secret(from: CloudKitRecordFields(record))
     }
-}
-
-private struct KeySyncMetadata {
-    let salt: Data
-    let verifierNonce: Data
-    let verifierCiphertext: Data
-    let verifierTag: Data
 }
 
 private enum KeySyncMetadataRecordMapper {
-    static let recordType = "EncryptedSecretMetadata"
-    static let recordName = "api-key-sync-metadata"
-
-    private enum FieldKey {
-        static let salt = "salt"
-        static let verifierNonce = "verifierNonce"
-        static let verifierCiphertext = "verifierCiphertext"
-        static let verifierTag = "verifierTag"
-        static let updatedAt = "updatedAt"
-    }
-
     static var recordID: CKRecord.ID {
-        CKRecord.ID(recordName: recordName, zoneID: SyncConfiguration.zoneID)
+        CKRecord.ID(recordName: SyncSchema.KeySyncMetadata.recordName, zoneID: SyncConfiguration.zoneID)
     }
 
     static func record(
@@ -303,29 +195,14 @@ private enum KeySyncMetadataRecordMapper {
         updatedAt: Date,
         existingRecord: CKRecord? = nil
     ) -> CKRecord {
-        let record = existingRecord ?? CKRecord(recordType: recordType, recordID: recordID)
-        record[FieldKey.salt] = metadata.salt
-        record[FieldKey.verifierNonce] = metadata.verifierNonce
-        record[FieldKey.verifierCiphertext] = metadata.verifierCiphertext
-        record[FieldKey.verifierTag] = metadata.verifierTag
-        record[FieldKey.updatedAt] = updatedAt
+        let record = existingRecord ?? CKRecord(recordType: SyncSchema.KeySyncMetadata.recordType, recordID: recordID)
+        var fields = CloudKitRecordFields(record)
+        fields.apply(KeySyncMetadataRecordCodec.assignments(for: metadata, updatedAt: updatedAt))
         return record
     }
 
     static func metadata(from record: CKRecord) -> KeySyncMetadata? {
-        guard record.recordType == recordType,
-              let salt = record[FieldKey.salt] as? Data,
-              let nonce = record[FieldKey.verifierNonce] as? Data,
-              let ciphertext = record[FieldKey.verifierCiphertext] as? Data,
-              let tag = record[FieldKey.verifierTag] as? Data else {
-            return nil
-        }
-        return KeySyncMetadata(
-            salt: salt,
-            verifierNonce: nonce,
-            verifierCiphertext: ciphertext,
-            verifierTag: tag
-        )
+        KeySyncMetadataRecordCodec.metadata(from: CloudKitRecordFields(record))
     }
 }
 
@@ -541,20 +418,8 @@ private final class KeySyncFetchAccumulator: @unchecked Sendable {
 public final class CloudKitKeySync: ObservableObject {
     public static let shared = CloudKitKeySync()
 
-    public nonisolated static let syncableIdentifiers: Set<String> = [
-        "deepgram.apiKey",
-        "openai.apiKey",
-        "openrouter.apiKey",
-        "elevenlabs.apiKey",
-        "cartesia.apiKey",
-        "assemblyai.apiKey",
-        "gladia.apiKey",
-        "google.apiKey",
-        "modulate.apiKey",
-        "soniox.apiKey",
-        "xai.apiKey",
-        "meta.apiKey"
-    ]
+    /// The credential identifiers API-key sync carries; see `SyncSchema.EncryptedSecret`.
+    public nonisolated static let syncableIdentifiers: Set<String> = SyncSchema.EncryptedSecret.syncableIdentifiers
 
     @Published public private(set) var status = CloudKitKeySyncStatus()
 
@@ -566,7 +431,7 @@ public final class CloudKitKeySync: ObservableObject {
     private static let pendingMutationPrefix = "speak.keysync.pending."
     private static let localDerivedKeyIdentifier = "cloudkitKeySync.derivedKey"
     private static let localUpdatedPrefix = "speak.keysync.localUpdatedAt."
-    private static let subscriptionID = "encrypted-secret-changes"
+    private static let subscriptionID = SyncSchema.EncryptedSecret.subscriptionID
     private static let localUploadDebounceNanoseconds: UInt64 = 750_000_000
     private static let localUploadInitialRetryNanoseconds: UInt64 = 2_000_000_000
     private static let localUploadMaximumRetryNanoseconds: UInt64 = 60_000_000_000
@@ -1209,7 +1074,7 @@ public final class CloudKitKeySync: ObservableObject {
             return key
         }
 
-        let salt = try randomData(byteCount: 32)
+        let salt = try randomData(byteCount: EncryptedSecretEnvelope.saltByteCount)
         let key = await EncryptedSecretCrypto.deriveKeyOffMainActor(passphrase: passphrase, salt: salt)
         let token = try EncryptedSecretCrypto.makeVerificationToken(key: key)
         let metadata = KeySyncMetadata(
@@ -1657,12 +1522,6 @@ public final class CloudKitKeySync: ObservableObject {
     }
 
     private func identifierFromRecordName(_ recordName: String) -> String? {
-        guard recordName.hasPrefix("secret-") else { return nil }
-        var encoded = String(recordName.dropFirst("secret-".count))
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        while encoded.count % 4 != 0 { encoded.append("=") }
-        guard let data = Data(base64Encoded: encoded) else { return nil }
-        return String(data: data, encoding: .utf8)
+        SyncSchema.EncryptedSecret.identifier(fromRecordName: recordName)
     }
 }

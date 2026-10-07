@@ -47,7 +47,7 @@ final class AzureSpeechTests: XCTestCase {
         let voice = try XCTUnwrap(JSONDecoder().decode([AzureSpeechVoice].self, from: data).first)
         XCTAssertTrue(voice.isMAI)
         XCTAssertEqual(voice.id, "azure/en-US-Harper:MAI-Voice-2-Flash")
-        XCTAssertEqual(voice.name, "Harper (MAI-Voice-2-Flash)")
+        XCTAssertEqual(voice.name, "Harper (en-US, MAI-Voice-2-Flash)")
     }
 
     func testMAISynthesis_preservesColonAndEscapesPlainText() throws {

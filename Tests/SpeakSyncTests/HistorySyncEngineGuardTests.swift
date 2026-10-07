@@ -260,17 +260,20 @@ final class HistorySyncEngineGuardTests: XCTestCase {
 
 // MARK: - Fakes
 
+/// Shared with `HistorySyncSwitchTests`.
 @MainActor
-private final class RecordingTransport: HistorySyncTransport {
+final class RecordingTransport: HistorySyncTransport {
     private(set) var fetchCount = 0
     private(set) var uploadedBatches: [[UUID]] = []
     private(set) var deletedIDs: [UUID] = []
     var uploadFailures: [UUID: Error] = [:]
     var remoteEntriesByID: [UUID: SyncableHistoryEntry] = [:]
     var deleteError: Error?
+    var onFetch: (() async -> Void)?
 
     func fetchChanges(after _: Data?) async throws -> HistoryChangePage {
         fetchCount += 1
+        if let onFetch { self.onFetch = nil; await onFetch() }
         return HistoryChangePage(changes: [], serverChangeTokenData: nil, moreComing: false)
     }
 
@@ -293,8 +296,9 @@ private final class RecordingTransport: HistorySyncTransport {
     }
 }
 
+/// Shared with `HistorySyncSwitchTests`.
 @MainActor
-private final class AckingDelegate: HistorySyncDelegate {
+final class AckingDelegate: HistorySyncDelegate {
     private var entriesByID: [UUID: SyncableHistoryEntry]
     private(set) var acknowledgedIDs: Set<UUID> = []
     private(set) var receivedEntries: [SyncableHistoryEntry] = []

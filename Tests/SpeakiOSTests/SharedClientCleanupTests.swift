@@ -204,7 +204,7 @@ final class SharedClientCleanupTests: XCTestCase {
         XCTAssertFalse(transcriber.isRunning)
     }
 
-    private func makeTranscriber() throws -> SharedClientLiveTranscriber {
+    func makeTranscriber() throws -> SharedClientLiveTranscriber {
         let manager = AudioSessionManager()
         manager.permissionStatus = { true }
         manager.configureRecording = {}
@@ -216,22 +216,29 @@ final class SharedClientCleanupTests: XCTestCase {
     }
 
 }
-private final class CleanupTestClient: FinalizingStreamingTranscriptionClient {
-    let finalShape: TranscriptFinalShape = .standaloneSegments
+final class CleanupTestClient: FinalizingStreamingTranscriptionClient {
+    var finalShape: TranscriptFinalShape = .standaloneSegments
     let finishFlushesBufferedAudio = true
     var transcript: ((String, Bool) -> Void)?
     var failure: ((Error) -> Void)?
     var finish: (() async -> String?)?
+    var finalisationBudget: TimeInterval?
+    var onStart: (() -> Void)?
+    var onCancel: (() -> Void)?
     var stops = 0
+    var cancels = 0
 
     func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
         transcript = onTranscript
         failure = onError
+        onStart?()
     }
 
     func sendAudio(_ audioData: Data) {}
 
     func stop() { stops += 1 }
+
+    func cancel() { cancels += 1; stop(); onCancel?() }
 
     func finishAndWait() async -> String? { await finish?() }
 }

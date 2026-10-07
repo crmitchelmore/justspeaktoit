@@ -14,6 +14,15 @@ import Foundation
 /// npm), which are official vendor code rather than official vendor reference.
 /// Every event model there is open to unknown fields, so this client parses
 /// leniently and ignores anything it does not recognise.
+///
+/// The session order follows `mistralai/client-python` at commit 80e32d2
+/// (`extra/realtime`, read 2026-09-22): read until `session.created` (an
+/// `error` first is a handshake failure), send `session.update` before any
+/// audio without waiting for `session.updated`, send each chunk as an awaited
+/// `input_audio.append`, then `input_audio.flush` and `input_audio.end`, and
+/// stop at `transcription.done` or `error`. Stopping at done cancels the
+/// sender (`transcribe_stream`), so a done supersedes a flush or end whose
+/// send is still pending.
 public enum MistralVoxtralRealtime {
     /// Streaming catalogue identifier. The dated model id is pinned rather than
     /// the `-latest` alias so a future realtime model cannot silently change
@@ -49,6 +58,10 @@ public enum MistralVoxtralRealtime {
     /// would hold a user's stop open past the bound they were promised.
     /// Missing the frame is not the same as losing the transcript — the deltas
     /// folded during the session are still returned.
+    ///
+    /// It is one whole deadline, armed when the finish begins: any wait for the
+    /// session to become ready, the drain of admitted audio, the flush, the end
+    /// and the wait for `transcription.done` all fit inside it.
     public static let finishBudget: TimeInterval = 3
 }
 
@@ -84,6 +97,48 @@ public enum MistralRealtimeError: LocalizedError, Equatable {
     }
 }
 
+/// Lifecycle failures of the live Voxtral stream itself, as opposed to the
+/// service's own `error` events (`MistralRealtimeError`). Each is reported
+/// rather than absorbed: a finish that did not reach `transcription.done`
+/// still returns the text folded so far for recovery, but must not look like a
+/// completed transcription.
+public enum MistralRealtimeStreamingError: LocalizedError, Equatable {
+    /// The socket did not open, or `session.created` did not arrive, in time,
+    /// so the session could never be configured and no audio was sent.
+    case sessionNotReady
+    /// All of the recording was sent and the flush left, but
+    /// `transcription.done` never followed: the finish deadline elapsed after
+    /// the end, or the socket failed first.
+    case missingCompletion
+    /// `transcription.done` arrived before every admitted append had been sent
+    /// and the flush had left, so audio the recording held may never have
+    /// been transcribed.
+    case unexpectedCompletion
+    /// PCM16 is two bytes per sample; an odd-length chunk would misalign every
+    /// sample after it.
+    case invalidPCM
+    /// More audio was offered before `start()` than the session's bounds can
+    /// hold. Reported by that start, because nothing is evicted silently.
+    case overflowBeforeStart
+
+    public var errorDescription: String? {
+        switch self {
+        case .sessionNotReady:
+            return "Mistral did not start the realtime transcription session in time."
+        case .missingCompletion:
+            return "Mistral did not confirm the completed transcription. The recording is available to retry."
+        case .unexpectedCompletion:
+            return "Mistral ended transcription before all recorded audio was sent. "
+                + "The recording is available to retry."
+        case .invalidPCM:
+            return "Mistral requires complete 16-bit PCM samples."
+        case .overflowBeforeStart:
+            return "More audio was captured before the Mistral session started than it can hold. "
+                + "The recording is available to retry."
+        }
+    }
+}
+
 /// One decoded Voxtral Realtime server event.
 ///
 /// Mistral's own event models are open to unknown fields and new event types,
@@ -115,5 +170,18 @@ enum MistralRealtimeEvent {
         default:
             return nil
         }
+    }
+
+    /// Decodes one complete message from the injected transport. Text and
+    /// binary messages both carry JSON; anything that is not a JSON object
+    /// decodes to `nil` and is ignored, as the SDK ignores it.
+    init?(message: StreamingWebSocketMessage) {
+        let data: Data
+        switch message {
+        case .text(let text): data = Data(text.utf8)
+        case .binary(let bytes): data = bytes
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        self.init(object: object)
     }
 }

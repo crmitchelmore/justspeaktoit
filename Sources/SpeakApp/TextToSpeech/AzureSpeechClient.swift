@@ -23,26 +23,16 @@ actor AzureSpeechClient: TextToSpeechClient {
       throw TTSError.apiKeyMissing(provider)
     }
 
-    let request = try AzureSpeechVoiceAPI.synthesisRequest(
-      credentials: credentials, text: text, voice: voice, format: outputFormat(for: settings),
-      speed: settings.speed, pitch: settings.pitch, useSSML: settings.useSSML
-    )
-
-    // Keep the subscription key inside the regional Azure origin on any redirect.
-    let redirects = BatchTranscriptionJob.OriginBoundRedirects(origin: request.url!)
-    let (data, response) = try await session.data(for: request, delegate: redirects)
-
-    guard let httpResponse = response as? HTTPURLResponse else {
-      throw TTSError.synthesisFailure("Invalid response")
-    }
-
-    if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-      throw AzureSpeechError.service(httpResponse.statusCode)
-    }
-
-    guard httpResponse.statusCode == 200 else {
-      let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-      throw TTSError.synthesisFailure("HTTP \(httpResponse.statusCode): \(errorMessage)")
+    // The shared transport keeps the subscription key inside the regional
+    // Azure origin on any redirect.
+    let data: Data
+    do {
+      data = try await AzureSpeechVoiceAPI(session: session).synthesize(
+        credentials: credentials, text: text, voice: voice, format: outputFormat(for: settings),
+        speed: settings.speed, pitch: settings.pitch, useSSML: settings.useSSML
+      )
+    } catch let error as AzureSpeechSynthesisError {
+      throw Self.ttsError(for: error, voice: voice)
     }
 
     // Save audio data to temporary file
@@ -51,8 +41,9 @@ actor AzureSpeechClient: TextToSpeechClient {
     // Calculate duration
     let duration = try await getAudioDuration(url: outputURL)
 
-    // Estimate cost (Azure pricing: ~$16 per 1M characters for neural voices)
-    let cost: Decimal? = voice.contains(":MAI-Voice-") ? nil : Decimal(text.count) * 16.0 / 1_000_000.0
+    // One pricing path: MAI voices are priced per model, neural voices at
+    // ~$16 per 1M characters.
+    let cost = provider.estimatedCost(characterCount: text.count, quality: settings.quality, voiceID: voice)
 
     return TTSResult(
       audioURL: outputURL,
@@ -72,10 +63,23 @@ actor AzureSpeechClient: TextToSpeechClient {
           !voices.isEmpty else {
       return VoiceCatalog.azureVoices
     }
-    return voices.map { voice in
-      TTSVoice(id: voice.id, name: voice.name, provider: .azure,
-               traits: voice.gender == "Female" ? [.female] : [.male], previewURL: nil)
+    let listed = voices.map(VoiceCatalog.azureListedVoice)
+    // Microsoft routes MAI-Voice-2.1 and Flash globally, so a regional listing
+    // that omits them does not mean the resource cannot use them.
+    let missing = AzureMAIVoiceCatalog.voicesMissing(fromListedIDs: Set(listed.map(\.id)))
+    return listed + missing.map(VoiceCatalog.azureMAIVoice)
+  }
+
+  /// Keeps Azure's own diagnostic. MAI access guidance is reserved for a
+  /// response whose text says the voice or model is unavailable; a malformed
+  /// request to an MAI voice is reported like any other.
+  static func ttsError(for error: AzureSpeechSynthesisError, voice: String) -> TTSError {
+    if AzureMAIVoiceCatalog.isMAIVoice(voice), error.indicatesUnavailableVoice {
+      return .providerAccessRequired(
+        .azure, reason: "this Speech resource cannot use this MAI voice. Azure said: \(error.detail)"
+      )
     }
+    return .synthesisFailure(error.localizedDescription)
   }
 
   func validateAPIKey(_ key: String) async -> APIKeyValidationResult {

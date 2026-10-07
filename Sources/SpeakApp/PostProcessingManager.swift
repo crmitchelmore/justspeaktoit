@@ -364,16 +364,32 @@ final class PostProcessingManager: ObservableObject {
       return true
     }
 
+    // Paid access wraps the OpenRouter client. When paid routing is actually
+    // serving this request no personal key is needed; otherwise fall through to
+    // the wrapped client so the "key required" warning stays truthful.
+    if let proxy = client as? PaidAccessProxyClient {
+      if await proxy.isPaidRoutingActive(configuredModel: resolvedModel) {
+        return true
+      }
+      return await Self.hasOpenRouterAccess(proxy.fallback, model: resolvedModel)
+    }
+
     guard let openRouterClient = client as? OpenRouterAPIClient else {
       return true
     }
 
-    let requiresRemote = await openRouterClient.requiresRemoteAccess(for: resolvedModel)
+    return await Self.hasOpenRouterAccess(openRouterClient, model: resolvedModel)
+  }
+
+  private static func hasOpenRouterAccess(
+    _ client: any PaidAccessFallbackClient,
+    model: String
+  ) async -> Bool {
+    let requiresRemote = await client.requiresRemoteAccess(for: model)
     if !requiresRemote {
       return true
     }
-
-    return await openRouterClient.hasStoredAPIKey()
+    return await client.hasStoredAPIKey()
   }
 
   static func isLocalPostProcessingModel(_ model: String) -> Bool {
@@ -398,47 +414,11 @@ final class PostProcessingManager: ObservableObject {
   }
 
   static func processLocally(_ text: String) -> String {
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return text }
-
-    var cleaned = trimmed.replacingOccurrences(
-      of: blankAudioMarkerPattern,
-      with: " ",
-      options: .regularExpression
-    )
-    cleaned = cleaned.replacingOccurrences(
-      of: #"[ \t]+"#,
-      with: " ",
-      options: .regularExpression
-    )
-    cleaned = cleaned.replacingOccurrences(
-      of: #"\s+([,.;:!?])"#,
-      with: "$1",
-      options: .regularExpression
-    )
-    cleaned = cleaned.replacingOccurrences(
-      of: #"([,.;:!?])([^\s\]\)"'])"#,
-      with: "$1 $2",
-      options: .regularExpression
-    )
-    cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-    guard let first = cleaned.first else { return cleaned }
-    let firstString = String(first)
-    let capitalizedFirst = firstString.uppercased()
-    if firstString != capitalizedFirst {
-      cleaned.replaceSubrange(cleaned.startIndex...cleaned.startIndex, with: capitalizedFirst)
-    }
-    return cleaned
+    TranscriptPostProcessingPolicy.processLocally(text)
   }
 
   static func isEffectivelyEmptyTranscript(_ text: String) -> Bool {
-    let withoutBlankAudioMarkers = text.replacingOccurrences(
-      of: blankAudioMarkerPattern,
-      with: " ",
-      options: .regularExpression
-    )
-    return withoutBlankAudioMarkers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    TranscriptPostProcessingPolicy.isEffectivelyEmptyTranscript(text)
   }
 
   private func basePrompt() -> String {
@@ -497,7 +477,10 @@ final class PostProcessingManager: ObservableObject {
 
     var directives: [String] = []
 
-    for canonical in canonicalToAliases.keys.sorted(by: { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }) {
+    let sortedCanonicalNames = canonicalToAliases.keys.sorted {
+      $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+    }
+    for canonical in sortedCanonicalNames {
       let aliases = canonicalToAliases[canonical]?.sorted() ?? []
       guard !aliases.isEmpty else { continue }
       let aliasList = aliases.joined(separator: ", ")
@@ -510,7 +493,8 @@ final class PostProcessingManager: ObservableObject {
         let confidenceLabel = confidenceDescription(suggestion.confidence)
         let reason = suggestion.reason ?? "manual rule"
         directives.append(
-          "Suggestion: Only change \"\(suggestion.alias)\" to \"\(suggestion.canonical)\" when the conversation matches (confidence: \(confidenceLabel), reason: \(reason))."
+          "Suggestion: Only change \"\(suggestion.alias)\" to \"\(suggestion.canonical)\" "
+            + "when the conversation matches (confidence: \(confidenceLabel), reason: \(reason))."
         )
       }
     }
@@ -538,6 +522,5 @@ final class PostProcessingManager: ObservableObject {
     return existing
   }
 
-  private static let blankAudioMarkerPattern = #"(?i)\s*\[blank_audio\]\s*"#
   // swiftlint:disable:next file_length
 }

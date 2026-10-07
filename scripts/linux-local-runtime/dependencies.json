@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "whisperCppPin": "scripts/windows-local-runtime/dependencies.json",
+  "architectures": {
+    "x86_64": {
+      "elfMachine": "Advanced Micro Devices X86-64",
+      "cmakeArguments": [
+        "-G", "Ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DWHISPER_BUILD_IS_DEV=OFF",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DCMAKE_SKIP_RPATH=ON",
+        "-DGGML_NATIVE=OFF",
+        "-DGGML_BACKEND_DL=ON",
+        "-DGGML_CPU_ALL_VARIANTS=ON",
+        "-DGGML_VULKAN=OFF",
+        "-DGGML_OPENMP=OFF",
+        "-DGGML_CCACHE=OFF",
+        "-DWHISPER_BUILD_EXAMPLES=OFF",
+        "-DWHISPER_BUILD_TESTS=OFF",
+        "-DWHISPER_BUILD_SERVER=OFF",
+        "-DWHISPER_SDL2=OFF",
+        "-DWHISPER_CURL=OFF"
+      ],
+      "requiredModules": ["libggml-base.so.0", "libggml.so.0", "libwhisper.so.1"],
+      "cpuVariantPattern": "^libggml-cpu-[a-z0-9_]+\\.so$",
+      "minimumCpuVariants": 8,
+      "systemLibraries": [
+        "libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1", "libdl.so.2", "libpthread.so.0",
+        "ld-linux-x86-64.so.2"
+      ]
+    }
+  },
+  "vulkan": {
+    "cmakeArguments": ["-DGGML_VULKAN=ON"],
+    "module": "libggml-vulkan.so",
+    "systemLibraries": ["libvulkan.so.1"],
+    "buildPackages": ["libvulkan-dev", "glslc"],
+    "note": "Optional (--vulkan). Needs the Vulkan headers and glslc at build time; libvulkan.so.1 comes from the user's graphics stack and is never bundled. Not built in CI: the runners have no GPU to test it."
+  },
+  "provenanceNotes": [
+    "The whisper.cpp repository, tag, commit, licence digest and JFK fixture are read from scripts/windows-local-runtime/dependencies.json, so the Windows and Linux runtimes are built from one pin and the vendored headers in Sources/CWindowsSupport/whisper-cpp describe both.",
+    "GGML_BACKEND_DL with GGML_CPU_ALL_VARIANTS builds one CPU backend per x86-64 feature level; LinuxWhisper.c loads the best one the CPU reports from the runtime directory only, never through GGML_BACKEND_PATH, the current directory or the library search path.",
+    "CMAKE_SKIP_RPATH leaves the libraries without RPATH or RUNPATH: the loader opens libggml-base, libggml and libwhisper by absolute path in dependency order, so their sonames resolve to those copies and nothing is searched for.",
+    "OpenMP is off, so no libgomp is needed; ggml's own thread pool runs the CPU backend.",
+    "Library hashes depend on the build image's compiler and C++ runtime, so each build records them in runtime-manifest.json with the compiler version. CI builds in the same pinned swift:6.2.3-noble image the app is tested in (glibc 2.39, libstdc++ from GCC 13)."
+  ]
+}

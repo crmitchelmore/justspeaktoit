@@ -128,7 +128,7 @@ jobs:
       - name: Verify portable source boundary
         run: python scripts/verify-portable-core-boundary.py
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime-arm64
           path: local-runtime
@@ -344,11 +344,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-arm64-app
           path: ${{ runner.temp }}/windows-arm64-app
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime-arm64
           path: ${{ runner.temp }}/windows-local-runtime-arm64
@@ -406,13 +406,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-runtime-bundle-arm64
           path: bundle
       # Only the JFK sample is used from the runtime artifact: the DLLs under
       # test are the bundled copies.
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime-arm64
           path: local-runtime
@@ -456,7 +456,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-runtime-bundle-arm64
           path: bundle

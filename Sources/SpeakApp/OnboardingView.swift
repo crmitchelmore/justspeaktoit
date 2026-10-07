@@ -135,6 +135,11 @@ final class OnboardingState: ObservableObject {
     private var permissionsObserver: AnyCancellable?
     @Published var selectedHotKey: HotKey = .fnKey
     @Published var hotKeyWasChosen = false
+    @Published var transcriptionLocation: AppSettings.TranscriptionLocation = .remote
+    @Published var configuredLocalPreset: LocalTranscriptionStarterPreset?
+    @Published var isConfiguringLocalModel = false
+    @Published private(set) var isCompletingRemoteSetup = false
+    private var localConfigurationID: UUID?
     
     // Test recording state
     @Published var isTestRecording = false
@@ -231,30 +236,101 @@ final class OnboardingState: ObservableObject {
     }
     
     func saveAPIKey() async throws {
-        try await secureStorage.storeSecret(apiKey, identifier: selectedProvider.keychainIdentifier)
+        let identifier = selectedProvider.keychainIdentifier
+        try await secureStorage.storeSecret(apiKey, identifier: identifier)
         // Register the key identifier so it shows up in settings
-        settings.registerAPIKeyIdentifier(selectedProvider.keychainIdentifier)
-
-        // If the chosen provider offers live streaming, make it the active
-        // transcription engine straight away so the key the user just added is
-        // actually used. Deepgram (and other streaming providers) default to
-        // no post-processing for the fastest, cleanest live experience.
-        //
-        // Only switch when the user is still on the untouched default (Apple
-        // on-device speech) so re-running onboarding never clobbers a returning
-        // user's deliberately configured model / batch / post-processing setup.
-        if let liveModel = selectedProvider.defaultLiveTranscriptionModel,
-           AppleLocalModels.isAppleSpeechModel(settings.liveTranscriptionModel) {
-            settings.transcriptionMode = .liveNative
-            settings.liveTranscriptionModel = liveModel
-            settings.postProcessingEnabled = false
-        }
+        settings.registerAPIKeyIdentifier(identifier)
     }
 
     func skipAPIKeySetup() {
         apiKey = ""
         validationError = nil
         Self.disableUnavailablePostProcessing(in: settings)
+    }
+
+    func configureLocalModel(
+        _ preset: LocalTranscriptionStarterPreset,
+        prepare: () async -> LocalModelManager.InstallState
+    ) async {
+        guard !isConfiguringLocalModel else { return }
+        let configurationID = UUID()
+        localConfigurationID = configurationID
+        isConfiguringLocalModel = true
+        validationError = nil
+        defer {
+            if localConfigurationID == configurationID {
+                isConfiguringLocalModel = false
+                localConfigurationID = nil
+            }
+        }
+        let installState = await prepare()
+        guard !Task.isCancelled, localConfigurationID == configurationID else { return }
+        switch installState {
+        case .installed:
+            configuredLocalPreset = preset
+        case .failed(let message):
+            validationError = "Could not configure \(preset.displayName): \(message). Try downloading again."
+        case .notInstalled, .installing:
+            validationError = "\(preset.displayName) is not ready yet. Finish downloading before continuing."
+        }
+    }
+
+    func leaveLocalModelSetup() {
+        localConfigurationID = nil
+        isConfiguringLocalModel = false
+    }
+
+    @discardableResult
+    func completeLocalModelSetup() -> Bool {
+        guard transcriptionLocation == .local, !isConfiguringLocalModel,
+              let preset = configuredLocalPreset else {
+            validationError = "Choose and download a local model before continuing."
+            return false
+        }
+        preset.activate(in: settings)
+        if !PostProcessingManager.isLocalPostProcessingModel(settings.postProcessingModel) {
+            settings.postProcessingEnabled = false
+        }
+        return true
+    }
+
+    func completeRemoteModelSetup() {
+        // Preserve an existing remote model, but use the new provider when the
+        // live slot is still Apple's default. Commit routing only after awaits.
+        if let liveModel = selectedProvider.defaultLiveTranscriptionModel,
+           AppleLocalModels.isAppleSpeechModel(settings.liveTranscriptionModel) {
+            settings.liveTranscriptionModel = liveModel
+            settings.postProcessingEnabled = false
+        }
+        settings.selectTranscriptionLocation(.remote)
+    }
+
+    func completeRemoteSetup(
+        validate: () async -> Bool,
+        save: () async throws -> Void
+    ) async -> Bool {
+        guard transcriptionLocation == .remote, !isCompletingRemoteSetup else { return false }
+        isCompletingRemoteSetup = true
+        defer { isCompletingRemoteSetup = false }
+        let provider = selectedProvider
+        let key = apiKey
+        let step = currentStep
+        let matchesSubmission = {
+            self.transcriptionLocation == .remote && self.selectedProvider == provider
+                && self.apiKey == key && self.currentStep == step && !Task.isCancelled
+        }
+        guard await validate(), matchesSubmission() else { return false }
+        do {
+            try await save()
+        } catch {
+            if matchesSubmission() {
+                validationError = "Failed to save: \(error.localizedDescription)"
+            }
+            return false
+        }
+        guard matchesSubmission() else { return false }
+        completeRemoteModelSetup()
+        return true
     }
 
     static func disableUnavailablePostProcessing(in settings: AppSettings) {
@@ -396,7 +472,7 @@ struct OnboardingView: View {
                     .controlSize(.large)
                     .accessibilityIdentifier("onboardingGetStartedButton")
                 } else {
-                    Button(state.currentStep == .apiKey ? "Save & Continue" : "Next") {
+                    Button(nextButtonTitle) {
                         Task {
                             await advanceStep()
                         }
@@ -416,7 +492,12 @@ struct OnboardingView: View {
         }
     }
     
+    private var nextButtonTitle: String {
+        state.currentStep == .apiKey && state.transcriptionLocation == .remote ? "Save & Continue" : "Next"
+    }
+
     private var canAdvance: Bool {
+        guard !state.isCompletingRemoteSetup else { return false }
         switch state.currentStep {
         case .welcome:
             return true
@@ -425,6 +506,9 @@ struct OnboardingView: View {
         case .hotkey:
             return true
         case .apiKey:
+            if state.transcriptionLocation == .local {
+                return state.configuredLocalPreset != nil && !state.isConfiguringLocalModel
+            }
             return !state.apiKey.isEmpty && !state.isValidating
         case .testRecording:
             return true
@@ -451,28 +535,7 @@ struct OnboardingView: View {
                 }
             }
         case .apiKey:
-            // Validate and save API key
-            let valid = await state.validateAPIKey()
-            if valid {
-                do {
-                    try await state.saveAPIKey()
-                    // Track provider configuration
-                    AppEnvironment.shared?.capture(.providerConfigured(
-                        provider: state.selectedProvider.analyticsProviderType,
-                        method: .manual
-                    ))
-                    withAnimation {
-                        // If using non-Fn hotkey, show test recording; otherwise go to complete
-                        if state.selectedHotKey != .fnKey {
-                            state.currentStep = .testRecording
-                        } else {
-                            state.currentStep = .complete
-                        }
-                    }
-                } catch {
-                    state.validationError = "Failed to save: \(error.localizedDescription)"
-                }
-            }
+            await finishTranscriptionSetup()
         case .testRecording:
             withAnimation {
                 state.currentStep = .complete
@@ -487,6 +550,26 @@ struct OnboardingView: View {
         // Track step completion for steps with an analytics mapping
         if let analyticsStep = completedStep.analyticsStep {
             AppEnvironment.shared?.capture(.onboardingStepCompleted(step: analyticsStep))
+        }
+    }
+
+    private func finishTranscriptionSetup() async {
+        guard canAdvance else { return }
+        if state.transcriptionLocation == .remote {
+            let completed = await state.completeRemoteSetup(
+                validate: { await state.validateAPIKey() },
+                save: { try await state.saveAPIKey() }
+            )
+            guard completed else { return }
+            AppEnvironment.shared?.capture(.providerConfigured(
+                provider: state.selectedProvider.analyticsProviderType,
+                method: .manual
+            ))
+        } else {
+            guard state.completeLocalModelSetup() else { return }
+        }
+        withAnimation {
+            state.currentStep = state.selectedHotKey != .fnKey ? .testRecording : .complete
         }
     }
 }
@@ -685,92 +768,113 @@ struct APIKeyStepView: View {
                 Text("Set Up Transcription")
                     .font(.title)
                     .fontWeight(.bold)
-                
-                // Provider selector
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Choose your transcription provider:")
-                        .font(.subheadline)
-                    
-                    Picker("Provider", selection: $state.selectedProvider) {
-                        ForEach(OnboardingProvider.allCases) { provider in
-                            Text(provider.pickerLabel).tag(provider)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: state.selectedProvider) { _, _ in
-                        state.apiKey = ""
-                        state.validationError = nil
+
+                Picker("Where transcription runs", selection: $state.transcriptionLocation) {
+                    Text("Local").tag(AppSettings.TranscriptionLocation.local)
+                    Text("Remote").tag(AppSettings.TranscriptionLocation.remote)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 40)
+                .accessibilityIdentifier("onboardingTranscriptionLocationPicker")
+                .onChange(of: state.transcriptionLocation) { _, location in
+                    state.validationError = nil
+                    if location == .remote {
+                        state.leaveLocalModelSetup()
+                        state.configuredLocalPreset = nil
                     }
                 }
-                .padding(.horizontal, 40)
-                
-                VStack(alignment: .leading, spacing: 14) {
-                    // Step 1: Sign up
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("1. Create a free account")
-                            .font(.headline)
-                        
-                        Link(destination: state.selectedProvider.signupURL) {
-                            HStack {
-                                Text("Sign up for \(state.selectedProvider.displayName)")
-                                Image(systemName: "arrow.up.right.square")
+
+                if state.transcriptionLocation == .local {
+                    OnboardingLocalModelSetupView(state: state)
+                } else {
+                    remoteSetup
+                }
+            }
+            .padding(.vertical, 10)
+        }
+    }
+
+    private var remoteSetup: some View {
+        VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Choose your transcription provider:")
+                    .font(.subheadline)
+
+                Picker("Provider", selection: $state.selectedProvider) {
+                    ForEach(OnboardingProvider.allCases) { provider in
+                        Text(provider.pickerLabel).tag(provider)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: state.selectedProvider) { _, _ in
+                    state.apiKey = ""
+                    state.validationError = nil
+                }
+            }
+            .padding(.horizontal, 40)
+
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("1. Create a free account")
+                        .font(.headline)
+
+                    Link(destination: state.selectedProvider.signupURL) {
+                        HStack {
+                            Text("Sign up for \(state.selectedProvider.displayName)")
+                            Image(systemName: "arrow.up.right.square")
+                        }
+                    }
+                    .font(.subheadline)
+
+                    if let credits = state.selectedProvider.freeCredits {
+                        Text(credits)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("2. Create an API key")
+                        .font(.headline)
+
+                    Text(state.selectedProvider.apiKeyInstructions)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("3. Paste your API key below")
+                        .font(.headline)
+
+                    SecureField("\(state.selectedProvider.displayName) API Key", text: $state.apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            Task {
+                                _ = await state.validateAPIKey()
                             }
                         }
-                        .font(.subheadline)
-                        
-                        if let credits = state.selectedProvider.freeCredits {
-                            Text(credits)
+
+                    if state.isValidating {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Validating…")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-                    }
-                    
-                    // Step 2: Create key
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("2. Create an API key")
-                            .font(.headline)
-                        
-                        Text(state.selectedProvider.apiKeyInstructions)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    // Step 3: Paste key
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("3. Paste your API key below")
-                            .font(.headline)
-                        
-                        SecureField("\(state.selectedProvider.displayName) API Key", text: $state.apiKey)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit {
-                                Task {
-                                    _ = await state.validateAPIKey()
-                                }
-                            }
-                        
-                        if state.isValidating {
-                            HStack {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                Text("Validating…")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else if let error = state.validationError {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
+                    } else if let error = state.validationError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.red)
                     }
                 }
-                .padding(.horizontal, 40)
-                
-                Text("You can add more providers or change settings later")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 8)
             }
-            .padding(.vertical, 10)
+            .padding(.horizontal, 40)
+
+            Text("You can add more providers or change settings later")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.top, 8)
         }
     }
 }
@@ -1090,7 +1194,14 @@ struct TestRecordingStepView: View {
 
 struct CompleteStepView: View {
     @ObservedObject var state: OnboardingState
+    @ObservedObject private var settings: AppSettings
     @Binding var isComplete: Bool
+
+    init(state: OnboardingState, isComplete: Binding<Bool>) {
+        self.state = state
+        self.settings = state.settings
+        self._isComplete = isComplete
+    }
     
     var body: some View {
         ScrollView(.vertical) {
@@ -1109,13 +1220,11 @@ struct CompleteStepView: View {
                 if AppEnvironment.shared?.analyticsAvailable == true {
                     Toggle(
                         "Share anonymous analytics",
-                        isOn: Binding(
-                            get: { state.settings.analyticsEnabled },
-                            set: { state.settings.analyticsEnabled = $0 }
-                        )
+                        isOn: $settings.analyticsEnabled
                     )
-                    .toggleStyle(.checkbox)
+                    .toggleStyle(.switch)
                     .font(.callout)
+                    .frame(maxWidth: 440, minHeight: 44)
                     .accessibilityIdentifier("onboardingAnalyticsConsentToggle")
                     Text(
                         "Optional. Never includes transcripts, audio, prompts, clipboard text, "

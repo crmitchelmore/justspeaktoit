@@ -2,7 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
-import SpeakCore
+@testable import SpeakCore
 import SpeakTestSupport
 import XCTest
 
@@ -101,4 +101,53 @@ final class AzureLocalProxyTests: XCTestCase {
             XCTAssertGreaterThan(result.duration, 0)
         }
     }
+
+    func testConfiguredProxy_streamsSyntheticAudioAndFinalisesWithRealClient() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["JSTI_AZURE_PROXY_STREAMING"] == "1",
+              let tokenFile = env["JSTI_AZURE_PROXY_TOKEN_FILE"],
+              let fixture = env["JSTI_AZURE_TEST_WAV"],
+              let endpoint = env["JSTI_AZURE_TEST_ENDPOINT"] else {
+            throw XCTSkip("Requires an explicitly configured streaming proxy and synthetic WAV.")
+        }
+        let localToken = try String(contentsOfFile: tokenFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let audio = try Data(contentsOf: URL(fileURLWithPath: fixture)).dropFirst(44)
+        let pcm = Data(audio) + Data(repeating: 0, count: 64_000)
+        for model in ["mai-transcribe", "azure-speech"] {
+            let events = AzureProxyStreamingEvents()
+            let client = AzureVoiceLiveClient(
+                credentials: "local-proxy/" + localToken, endpoint: endpoint,
+                model: model, language: "en-GB", sampleRate: 16_000
+            )
+            defer { client.stop() }
+            client.start(onTranscript: { text, _ in events.transcript(text) },
+                         onError: { events.fail($0.localizedDescription) })
+            let deadline = Date().addingTimeInterval(12)
+            while !client.isSessionReady && events.errors.isEmpty && Date() < deadline {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertTrue(client.isSessionReady, events.errors.joined(separator: "; "))
+            guard client.isSessionReady else { return }
+            for offset in stride(from: 0, to: pcm.count, by: 3_200) {
+                client.sendAudio(pcm.subdata(in: offset..<min(offset + 3_200, pcm.count)))
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            XCTAssertFalse(events.transcripts.isEmpty, "Live text must arrive before finish: \(model)")
+            let final = await client.finishAndWait()
+            XCTAssertTrue(final?.lowercased().contains("quick brown fox") == true, model)
+            XCTAssertTrue(final?.lowercased().contains("lazy dog") == true, model)
+            XCTAssertTrue(events.errors.isEmpty, events.errors.joined(separator: "; "))
+        }
+    }
+}
+
+private final class AzureProxyStreamingEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var texts: [String] = []
+    private var failures: [String] = []
+    var transcripts: [String] { self.lock.withLock { self.texts } }
+    var errors: [String] { self.lock.withLock { self.failures } }
+    func transcript(_ text: String) { self.lock.withLock { self.texts.append(text) } }
+    func fail(_ error: String) { self.lock.withLock { self.failures.append(error) } }
 }

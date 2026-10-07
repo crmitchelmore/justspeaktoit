@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import base64
+import socket
 from pathlib import Path
 import tempfile
 import threading
@@ -42,6 +44,21 @@ class FakeTransport:
         self.content_type = content_type
         return 200, "audio/wav", b"RIFFtestWAVE"
 
+    def open_streaming(self, key):
+        client, self.upstream_peer = socket.socketpair()
+        return TLSLikeSocket(client)
+
+
+class TLSLikeSocket:
+    def __init__(self, socket):
+        self.socket = socket
+
+    def pending(self):
+        return 0
+
+    def __getattr__(self, name):
+        return getattr(self.socket, name)
+
 
 class ProxyTests(unittest.TestCase):
     def setUp(self):
@@ -56,6 +73,8 @@ class ProxyTests(unittest.TestCase):
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+        if hasattr(self.transport, "upstream_peer"):
+            self.transport.upstream_peer.close()
 
     def request(self, path="/cognitiveservices/v1", body=SSML, extra=None):
         headers = {
@@ -162,6 +181,57 @@ class ProxyTests(unittest.TestCase):
             status, data = self.request()
         self.assertEqual(status, 503)
         self.assertIn("az login", json.loads(data)["error"])
+
+    def test_streaming_requires_its_own_header_and_real_upgrade(self):
+        self.assertEqual(self.request(proxy.STREAMING_PATH, body=None)[0], 401)
+        self.assertEqual(self.request(proxy.STREAMING_PATH, body=None, extra={
+            "api-key": self.token,
+        })[0], 400)
+        self.assertEqual(self.request(proxy.STREAMING_PATH + "&api-key=secret", body=None)[0], 404)
+
+    def test_websocket_upgrade_and_bidirectional_frame_relay(self):
+        key = base64.b64encode(b"synthetic-key-12").decode()
+        client = socket.create_connection(self.server.server_address, timeout=5)
+        client.settimeout(5)
+        self.addCleanup(client.close)
+        client.sendall((
+            "GET " + proxy.STREAMING_PATH + " HTTP/1.1\r\nHost: 127.0.0.1:"
+            + str(self.server.server_port) + "\r\napi-key: " + self.token
+            + "\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade"
+            + "\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: " + key + "\r\n\r\n"
+        ).encode())
+        status, headers = proxy.read_upgrade(client)
+        self.assertEqual(status, 101)
+        self.assertEqual(headers["Sec-WebSocket-Accept"], proxy.websocket_accept(key))
+        # The relay leaves masking and fragmentation intact for Azure to validate.
+        masked_frame = b"\x81\x82abcd" + bytes([ord("H") ^ ord("a"), ord("i") ^ ord("b")])
+        client.sendall(masked_frame)
+        peer = self.transport.upstream_peer
+        peer.settimeout(5)
+        self.assertEqual(peer.recv(100), masked_frame)
+        peer.sendall(b"\x81\x02Hi")
+        self.assertEqual(client.recv(100), b"\x81\x02Hi")
+        peer.sendall(b"\x88\x02\x03\xe8")
+        self.assertEqual(client.recv(100), b"\x88\x02\x03\xe8")
+        client.sendall(b"\x88\x82abcd" + bytes([3 ^ ord("a"), 232 ^ ord("b")]))
+
+    def test_http_upload_handles_short_reads_after_disabling_read_ahead(self):
+        client = socket.create_connection(self.server.server_address, timeout=5)
+        self.addCleanup(client.close)
+        body = b'<speak xmlns="http://www.w3.org/2001/10/synthesis"><voice name="test">Hi</voice></speak>'
+        client.sendall((
+            "POST /cognitiveservices/v1 HTTP/1.1\r\nHost: 127.0.0.1:"
+            + str(self.server.server_port) + "\r\nOcp-Apim-Subscription-Key: " + self.token
+            + "\r\nContent-Type: application/ssml+xml\r\nX-Microsoft-OutputFormat: "
+            + "riff-24khz-16bit-mono-pcm\r\nContent-Length: " + str(len(body)) + "\r\n\r\n"
+        ).encode())
+        client.sendall(body[:10])
+        time.sleep(0.02)
+        client.sendall(body[10:])
+        response = proxy.http.client.HTTPResponse(client)
+        response.begin()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.transport.calls[0][2], body)
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -286,6 +356,48 @@ class TransportTests(unittest.TestCase):
                 with self.assertRaises(proxy.ProxyError) as caught:
                     self.transport.forward("GET", "/tts/cognitiveservices/voices/list", b"", None)
                 self.assertEqual(caught.exception.status, 502)
+
+    def test_upstream_websocket_uses_fixed_resource_and_entra_not_local_key(self):
+        key = base64.b64encode(b"synthetic-key-12").decode()
+        header = ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                  "Connection: Upgrade\r\nSec-WebSocket-Accept: " + proxy.websocket_accept(key)
+                  + "\r\n\r\n").encode()
+        upstream = Mock()
+        upstream.recv.side_effect = [bytes([byte]) for byte in header]
+        self.transport.ssl_context = Mock()
+        self.transport.ssl_context.wrap_socket.return_value = upstream
+        with patch.object(proxy.socket, "create_connection") as connect:
+            self.assertIs(self.transport.open_streaming(key), upstream)
+        connect.assert_called_once_with(("test.services.ai.azure.com", 443), timeout=10)
+        request = upstream.sendall.call_args.args[0]
+        self.assertIn(b"Authorization: Bearer old-token\r\n", request)
+        self.assertNotIn(b"api-key:", request)
+        self.assertTrue(request.startswith(("GET " + proxy.STREAMING_PATH + " ").encode()))
+
+    def test_upstream_websocket_redirect_is_refused(self):
+        key = base64.b64encode(b"synthetic-key-12").decode()
+        upstream = Mock()
+        upstream.recv.side_effect = [bytes([byte]) for byte in b"HTTP/1.1 302 Found\r\n\r\n"]
+        self.transport.ssl_context = Mock()
+        self.transport.ssl_context.wrap_socket.return_value = upstream
+        with patch.object(proxy.socket, "create_connection"):
+            with self.assertRaises(proxy.ProxyError) as caught:
+                self.transport.open_streaming(key)
+        self.assertEqual(caught.exception.status, 502)
+        upstream.close.assert_called_once()
+
+    def test_streaming_is_bounded_by_duration_and_bytes(self):
+        for limit in ("MAX_STREAM_SECONDS", "MAX_STREAM_UPLOAD"):
+            client, sender = socket.socketpair()
+            server, peer = socket.socketpair()
+            try:
+                sender.sendall(b"bounded")
+                with patch.object(proxy, limit, 0):
+                    with self.assertRaises(proxy.ProxyError):
+                        proxy.relay_websocket(client, TLSLikeSocket(server))
+            finally:
+                for connection in (client, sender, server, peer):
+                    connection.close()
 
 
 if __name__ == "__main__":

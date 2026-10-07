@@ -19,7 +19,9 @@ extension DesktopHostController {
                         credentials: cleaned, endpoint: azureResourceEndpoint()
                     )
                 } else {
-                    _ = try AzureSpeechConfiguration(credentials: cleaned)
+                    _ = try AzureSpeechConfiguration.liveConnection(
+                        credentials: cleaned, endpoint: azureResourceEndpoint()
+                    )
                 }
             }
             if let saveByHand = cloudSync.saveKeyByHand {

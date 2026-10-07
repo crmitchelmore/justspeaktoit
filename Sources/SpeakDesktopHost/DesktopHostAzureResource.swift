@@ -9,7 +9,7 @@ import SpeakDesktop
 /// recorded audio uses it when it is set and the credential's region otherwise.
 package enum DesktopHostAzureResource {
     package static let invalidEndpoint = "Use the HTTPS endpoint from your resource\u{2019}s Keys and Endpoint page, "
-        + "or http://127.0.0.1:PORT for a batch-only local proxy, with no path."
+        + "or http://127.0.0.1:PORT for a local transcription proxy, with no path."
     package static let missingForLive = "Azure live transcription needs your Azure Speech resource endpoint. "
         + "Add it in Settings \u{2192} Azure Speech resource\u{2026}, or choose another model."
 
@@ -45,7 +45,7 @@ extension DesktopHostController {
         guard !azureResourceEndpoint().isEmpty else {
             throw DesktopHostError(message: DesktopHostAzureResource.missingForLive)
         }
-        _ = try AzureSpeechConfiguration.resourceURL(azureResourceEndpoint())
+        _ = try AzureSpeechConfiguration.batchResourceURL(azureResourceEndpoint())
     }
 
     /// Saves an entry `DesktopHostAzureResource.normalized` accepted.

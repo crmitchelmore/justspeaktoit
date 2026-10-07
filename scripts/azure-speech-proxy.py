@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Loopback-only Azure batch transcription and TTS bridge using Azure CLI sign-in."""
+"""Loopback-only Azure batch/live transcription and TTS bridge using Azure CLI sign-in."""
 
 import argparse
+import base64
 from email import policy
 from email.parser import BytesParser
+import hashlib
 import hmac
+import http.client
+import io
 import http.server
 import json
 import os
 from pathlib import Path
 import re
 import secrets
+import select
 import shutil
 import socket
 import ssl
@@ -29,6 +34,11 @@ MAX_REQUEST = 64 * 1024
 MAX_TRANSCRIPTION_REQUEST = 32 * 1024 * 1024
 MAX_RESPONSE = 32 * 1024 * 1024
 TRANSCRIPTION_PATH = "/speechtotext/transcriptions:transcribe?api-version=2025-10-15"
+STREAMING_PATH = "/voice-live/realtime?api-version=2026-04-10&model=gpt-4.1"
+MAX_STREAM_SECONDS = 3600
+MAX_STREAM_UPLOAD = 256 * 1024 * 1024
+MAX_STREAM_DOWNLOAD = 64 * 1024 * 1024
+WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 ROUTES = {
     ("POST", "/cognitiveservices/v1"): "/tts/cognitiveservices/v1",
     ("GET", "/cognitiveservices/voices/list"): "/tts/cognitiveservices/voices/list",
@@ -128,6 +138,57 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def websocket_accept(key):
+    return base64.b64encode(hashlib.sha1((key + WEBSOCKET_GUID).encode("ascii")).digest()).decode("ascii")
+
+
+def read_upgrade(socket):
+    data = bytearray()
+    deadline = time.monotonic() + 10
+    while not data.endswith(b"\r\n\r\n"):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProxyError(504, "Azure WebSocket handshake timed out.")
+        socket.settimeout(remaining)
+        chunk = socket.recv(1)
+        if not chunk or len(data) >= 16 * 1024:
+            raise ProxyError(502, "Azure WebSocket handshake was invalid or too large.")
+        data.extend(chunk)
+    first, _, rest = bytes(data).partition(b"\r\n")
+    pieces = first.split()
+    if len(pieces) < 2 or pieces[0] != b"HTTP/1.1" or not pieces[1].isdigit():
+        raise ProxyError(502, "Azure WebSocket handshake was invalid.")
+    headers = http.client.parse_headers(io.BytesIO(rest))
+    return int(pieces[1]), headers
+
+
+def relay_websocket(client, upstream):
+    """Opaque RFC6455 relay: masks, frames, fragments and close handshakes stay intact."""
+    client.settimeout(5)
+    upstream.settimeout(5)
+    started = time.monotonic()
+    last_activity = started
+    counts = {client: 0, upstream: 0}
+    limits = {client: MAX_STREAM_UPLOAD, upstream: MAX_STREAM_DOWNLOAD}
+    while True:
+        now = time.monotonic()
+        if now - started >= MAX_STREAM_SECONDS or now - last_activity >= 60:
+            raise ProxyError(504, "Streaming session duration or idle limit reached.")
+        # TLS may already have decrypted bytes even when its descriptor isn't readable.
+        readable = [upstream] if upstream.pending() else []
+        ready, _, _ = select.select([client, upstream], [], [], 0 if readable else 1)
+        for source in set(readable + ready):
+            chunk = source.recv(64 * 1024)
+            if not chunk:
+                return
+            counts[source] += len(chunk)
+            if counts[source] > limits[source]:
+                raise ProxyError(413, "Streaming session byte limit reached.")
+            destination = upstream if source is client else client
+            destination.sendall(chunk)
+            last_activity = time.monotonic()
+
+
 def validate_transcription(body, content_type):
     if not re.fullmatch(r"multipart/form-data;\s*boundary=[A-Za-z0-9_-]{1,70}", content_type):
         raise ProxyError(415, "Use multipart/form-data with an unquoted boundary.")
@@ -185,11 +246,61 @@ class AzureTransport:
         context = ssl.create_default_context()
         if sys.platform == "darwin":
             context.load_verify_locations(cafile="/etc/ssl/cert.pem")
+        self.ssl_context = context
         # Ignore environment proxy settings: credentials go directly to the fixed Azure origin.
         self.opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}), NoRedirects(),
             urllib.request.HTTPSHandler(context=context),
         )
+
+    def open_streaming(self, key):
+        # Voice Live uses the Foundry host for the same fixed custom-resource name.
+        host = urllib.parse.urlsplit(self.origin).hostname.replace(
+            ".cognitiveservices.azure.com", ".services.ai.azure.com",
+        )
+        for attempt in range(2):
+            token = self.tokens.get()
+            upstream = None
+            try:
+                raw = socket.create_connection((host, 443), timeout=10)
+                try:
+                    upstream = self.ssl_context.wrap_socket(raw, server_hostname=host)
+                except (OSError, ValueError):
+                    raw.close()
+                    raise
+                request = (
+                    "GET " + STREAMING_PATH + " HTTP/1.1\r\nHost: " + host
+                    + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13"
+                    + "\r\nSec-WebSocket-Key: " + key + "\r\nAuthorization: Bearer " + token
+                    + "\r\nUser-Agent: JustSpeakLocalProxy\r\n\r\n"
+                )
+                upstream.sendall(request.encode("ascii"))
+                status, headers = read_upgrade(upstream)
+                if status == 401 and attempt == 0:
+                    upstream.close()
+                    upstream = None
+                    self.tokens.invalidate(token)
+                    continue
+                if status in (401, 403):
+                    raise ProxyError(status, "Azure denied streaming access. Check sign-in and Speech permissions.")
+                if status == 429:
+                    raise ProxyError(429, "Azure Voice Live rate limit or quota reached.")
+                if (status != 101 or headers.get("Upgrade", "").lower() != "websocket"
+                        or "upgrade" not in [value.strip().lower()
+                                             for value in headers.get("Connection", "").split(",")]
+                        or headers.get_all("Sec-WebSocket-Accept") != [websocket_accept(key)]
+                        or headers.get("Sec-WebSocket-Extensions") is not None
+                        or headers.get("Sec-WebSocket-Protocol") is not None):
+                    raise ProxyError(502, "Azure WebSocket upgrade was refused or invalid.")
+                return upstream
+            except (OSError, ValueError, http.client.HTTPException) as error:
+                if upstream is not None:
+                    upstream.close()
+                raise ProxyError(502, "Azure WebSocket connection failed or timed out.") from error
+            except ProxyError:
+                if upstream is not None:
+                    upstream.close()
+                raise
 
     def forward(self, method, path, body, output_format, content_type=None):
         for attempt in range(2):
@@ -258,6 +369,9 @@ class ProxyServer(http.server.ThreadingHTTPServer):
 
 
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
+    # No read-ahead: after HTTP upgrade the relay reads directly from the socket.
+    rbufsize = 0
+
     def setup(self):
         self.request.settimeout(15)
         super().setup()
@@ -292,7 +406,9 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 raise ProxyError(403, "Only the exact loopback host is accepted.")
             if self.headers.get("Origin") is not None or self.headers.get("Sec-Fetch-Site") is not None:
                 raise ProxyError(403, "Browser requests are not supported.")
-            supplied = self.headers.get_all("Ocp-Apim-Subscription-Key") or []
+            streaming = self.command == "GET" and self.path == STREAMING_PATH
+            header = "api-key" if streaming else "Ocp-Apim-Subscription-Key"
+            supplied = self.headers.get_all(header) or []
             if len(supplied) != 1 or not hmac.compare_digest(
                     supplied[0].encode("utf-8"), self.server.token.encode("utf-8")):
                 raise ProxyError(401, "A local proxy token is required; this is not an Azure API key.")
@@ -308,8 +424,12 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                 raise ProxyError(413, "Request body exceeds the local proxy limit.")
             if self.command == "GET" and length:
                 raise ProxyError(400, "GET requests must not carry a body.")
+            if streaming:
+                self.handle_streaming()
+                return
             if self.command == "GET" and self.path == "/health":
-                self.respond(200, "application/json", b'{"status":"ready","scope":"batch-transcription-and-tts"}')
+                self.respond(200, "application/json",
+                             b'{"status":"ready","scope":"batch-transcription-and-tts","streaming":"voice-live"}')
                 return
             upstream = ROUTES.get((self.command, self.path))
             if upstream is None:
@@ -317,7 +437,13 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             body, output_format = b"", None
             content_type = None
             if self.command == "POST":
-                body = self.rfile.read(length)
+                chunks = bytearray()
+                while len(chunks) < length:
+                    chunk = self.rfile.read(min(64 * 1024, length - len(chunks)))
+                    if not chunk:
+                        break
+                    chunks.extend(chunk)
+                body = bytes(chunks)
                 if len(body) != length or not body:
                     raise ProxyError(400, "A complete request body is required.")
             if transcription:
@@ -353,6 +479,40 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             self.respond(error.status, "application/json", json.dumps({"error": str(error)}).encode())
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
             self.close_connection = True
+
+    def handle_streaming(self):
+        keys = self.headers.get_all("Sec-WebSocket-Key") or []
+        if (self.headers.get_all("Sec-WebSocket-Version") != ["13"]
+                or self.headers.get("Upgrade", "").lower() != "websocket"
+                or "upgrade" not in [value.strip().lower()
+                                     for value in self.headers.get("Connection", "").split(",")]
+                or len(keys) != 1):
+            raise ProxyError(400, "A WebSocket version 13 upgrade is required.")
+        try:
+            if len(base64.b64decode(keys[0], validate=True)) != 16:
+                raise ValueError("Invalid key length")
+        except (ValueError, base64.binascii.Error) as error:
+            raise ProxyError(400, "Invalid WebSocket handshake key.") from error
+        upstream = self.server.transport.open_streaming(keys[0])
+        self.close_connection = True
+        try:
+            self.protocol_version = "HTTP/1.1"
+            self.send_response(101)
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", websocket_accept(keys[0]))
+            self.end_headers()
+            self.wfile.flush()
+            try:
+                relay_websocket(self.connection, upstream)
+            except (OSError, ProxyError):
+                # A post-upgrade failure is a WebSocket failure, never an HTTP success.
+                try:
+                    self.connection.sendall(b"\x88\x02\x03\xf3")  # Close 1011, no provider text.
+                except OSError:
+                    pass
+        finally:
+            upstream.close()
 
 
 def main():

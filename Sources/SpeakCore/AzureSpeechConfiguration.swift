@@ -25,7 +25,9 @@ public struct AzureSpeechConfiguration: Sendable {
             throw AzureSpeechError.configuration("Enter your Azure key and region as key:region.")
         }
         guard allowProxyCredential || !key.hasPrefix(Self.proxyCredentialPrefix) else {
-            throw AzureSpeechError.configuration("Local proxy credentials support recorded-audio transcription only.")
+            throw AzureSpeechError.configuration(
+                "Use local proxy credentials through a configured transcription proxy."
+            )
         }
         self.apiKey = key
         self.region = region
@@ -66,7 +68,7 @@ public struct AzureSpeechConfiguration: Sendable {
         return url
     }
 
-    /// Recorded audio alone may use an explicitly configured IPv4 loopback proxy.
+    /// Transcription may use an explicitly configured IPv4 loopback proxy.
     /// Literal loopback avoids resolving a hostname to an unexpected address.
     public static func batchResourceURL(_ endpoint: String) throws -> URL {
         let value = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -111,6 +113,15 @@ public struct AzureSpeechConfiguration: Sendable {
             )
         }
         return (origin, config.apiKey)
+    }
+
+    public static func liveConnection(
+        credentials: String, endpoint: String
+    ) throws -> (origin: URL, apiKey: String) {
+        guard !endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AzureSpeechError.configuration("Add the HTTPS resource endpoint from Azure in API Keys settings.")
+        }
+        return try batchConnection(credentials: credentials, endpoint: endpoint)
     }
 }
 

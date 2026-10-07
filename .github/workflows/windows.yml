@@ -107,7 +107,7 @@ jobs:
       - name: Verify portable source boundary
         run: python scripts/verify-portable-core-boundary.py
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: windows-local-runtime
           path: local-runtime

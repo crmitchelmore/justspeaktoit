@@ -121,12 +121,29 @@ function prepareSimulator(devices) {
 test('iOS workloads are partitioned without extending budgets or dropping tests', () => {
   const body = jobBodies['build-ios'];
   assert.match(body, /^\s+timeout-minutes: 30$/m);
-  assert.ok(body.indexOf('Select iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator and Project'));
+  assert.ok(body.indexOf('Select iOS Simulator') < body.indexOf('- name: Prepare iOS Simulator'));
   assert.match(body, /python3 scripts\/prepare-ios-ci\.py "\$SIMULATOR_ID"/);
   assert.doesNotMatch(iosPreparation, /"swift"/);
-  assert.match(iosPreparation, /\["tuist", "generate", "--no-open"\]/);
-  assert.match(iosPreparation, /environment\["TUIST_IOS_KEYBOARD"\] = "1"/);
-  assert.match(body, /xcodebuild test/);
+  assert.doesNotMatch(iosPreparation, /"tuist"/);
+  assert.match(iosPreparation, /boot.wait\(timeout=600\)/);
+  assert.match(body, /xcodebuild test-without-building/);
+  assert.match(body, /needs: build-ios-test-products/);
+  assert.match(body, /artifact-ids: \$\{\{ needs.build-ios-test-products.outputs.artifact-id \}\}/);
+  assert.match(body, /scripts\/ios-test-products.py unpack/);
+  assert.match(body, /-testProductsPath "\$RUNNER_TEMP\/ios-test-products\/SpeakiOS.xctestproducts"/);
+  assert.match(body, /name: Upload complete iOS XCTest log separately\n\s+if: always\(\)/);
+  const products = jobBodies['build-ios-test-products'];
+  assert.match(products, /^\s+runs-on: macos-26-intel$/m);
+  assert.match(products, /^\s+timeout-minutes: 30$/m);
+  assert.match(products, /TUIST_IOS_KEYBOARD=1 tuist generate/);
+  assert.match(products, /xcodebuild build-for-testing/);
+  assert.match(products, /-only-testing:SpeakiOSTests/);
+  assert.match(products, /-only-testing:SpeakiOSUITests/);
+  assert.match(products, /ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO/);
+  assert.match(products, /scripts\/ios-test-products.py pack/);
+  assert.doesNotMatch(products, /simctl|bravo-mini-local|jsti-macos-build/);
+  assert.match(aggregate, /^\s+- build-ios-test-products$/m);
+  assert.match(aggregate, /needs\.build-ios-test-products\.result != 'success'/);
   assert.match(body, /-only-testing:SpeakiOSTests/);
   assert.match(body, /-only-testing:SpeakiOSUITests/);
   assert.match(body, /verify-ios-test-evidence\.py/);
@@ -284,7 +301,7 @@ test('every tracked tooling test is discovered by make test-tooling', () => {
 
 function passing() {
   return Object.fromEntries([
-    'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-keyboard', 'lint',
+    'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products', 'build-ios-keyboard', 'lint',
     'release-paths', 'release-validation', 'core-journey-e2e',
     'core-journey-fixture-ui', 'api-compatibility',
   ].map(id => [id, { result: 'success', outputs: { package: 'true', 'core-journey': 'true' } }]));

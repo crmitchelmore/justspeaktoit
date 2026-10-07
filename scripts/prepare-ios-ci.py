@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Overlap simulator initialization with iOS project generation."""
+"""Require bounded simulator readiness before running compiled XCTest products."""
 
-import os
 import subprocess
 import sys
 
@@ -9,18 +8,12 @@ import sys
 def prepare(simulator_id):
     boot = subprocess.Popen(["xcrun", "simctl", "bootstatus", simulator_id, "-b"])
     try:
-        print("Generating the shipping keyboard/app project.", flush=True)
-        environment = os.environ.copy()
-        environment["TUIST_IOS_KEYBOARD"] = "1"
-        subprocess.run(
-            ["tuist", "generate", "--no-open"], env=environment, check=True
-        )
         print("Waiting for simulator readiness before running XCTest.", flush=True)
         try:
-            result = boot.wait(timeout=300)
+            result = boot.wait(timeout=600)
         except subprocess.TimeoutExpired as error:
             raise RuntimeError(
-                "Simulator did not become ready within five minutes after project generation."
+                "Simulator did not become ready within ten minutes."
             ) from error
         if result:
             raise subprocess.CalledProcessError(result, boot.args)

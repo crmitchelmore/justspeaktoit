@@ -288,18 +288,74 @@ jobs:
       - name: Build iOS Library
         run: swift build --disable-dependency-cache --target SpeakiOSLib
 
+  build-ios-test-products:
+    name: Build iOS XCTest Products
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.products.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Tuist
+        run: brew install tuist
+      - name: Build complete simulator test products without booting a simulator
+        run: |
+          set -o pipefail
+          TUIST_IOS_KEYBOARD=1 tuist generate --no-open
+          xcodebuild build-for-testing \
+            -workspace "Just Speak to It.xcworkspace" \
+            -scheme SpeakiOS \
+            -destination "generic/platform=iOS Simulator" \
+            -only-testing:SpeakiOSTests \
+            -only-testing:SpeakiOSUITests \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            -testProductsPath "$RUNNER_TEMP/SpeakiOS.xctestproducts" \
+            -skipPackagePluginValidation \
+            2>&1 | tee "$RUNNER_TEMP/ios-build-tests.log" | tail -50
+          python3 scripts/ios-test-products.py pack \
+            "$RUNNER_TEMP/SpeakiOS.xctestproducts" "$RUNNER_TEMP/ios-test-products.tar.gz"
+      - name: Upload immutable test products
+        id: products
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-test-products-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-test-products.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload simulator compilation log
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-build-tests-log-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-build-tests.log
+          retention-days: 7
+          if-no-files-found: error
+
   build-ios:
     name: Build iOS Library
     # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
     runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 1038 && github.event.pull_request.head.repo.full_name == github.repository) && '["bravo-mini-local","macOS","ARM64"]' || '["macos-26-intel"]') }}
     timeout-minutes: 30
+    needs: build-ios-test-products
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Install Tuist
-        run: brew install tuist
+      - name: Download exact-source test products
+        uses: actions/download-artifact@v5
+        with:
+          artifact-ids: ${{ needs.build-ios-test-products.outputs.artifact-id }}
+          path: ${{ runner.temp }}/ios-test-products-download
+          merge-multiple: true
+
+      - name: Verify and restore iOS test products
+        run: |
+          python3 scripts/ios-test-products.py unpack \
+            "$RUNNER_TEMP/ios-test-products-download/ios-test-products.tar.gz" \
+            "$RUNNER_TEMP/ios-test-products"
 
       - name: Select iOS Simulator
         run: |
@@ -312,9 +368,7 @@ jobs:
           fi
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
-      - name: Prepare iOS Simulator and Project
-        # Boot overlaps project generation; readiness is required before XCTest.
-        # Project generation retains the shipping handoff-only keyboard shape.
+      - name: Prepare iOS Simulator
         run: python3 scripts/prepare-ios-ci.py "$SIMULATOR_ID"
 
       - name: Test iOS App and Action Button Settings
@@ -323,9 +377,8 @@ jobs:
         # names a failed test without the assertion that failed (issue #793).
         run: |
           set -o pipefail
-          xcodebuild test \
-            -workspace "Just Speak to It.xcworkspace" \
-            -scheme SpeakiOS \
+          xcodebuild test-without-building \
+            -testProductsPath "$RUNNER_TEMP/ios-test-products/SpeakiOS.xctestproducts" \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -only-testing:SpeakiOSTests \
             -only-testing:SpeakiOSUITests \
@@ -390,6 +443,15 @@ jobs:
             ${{ runner.temp }}/SpeakiOS.xcresult
             ${{ runner.temp }}/ios-tests.log
           if-no-files-found: ignore
+
+      - name: Upload complete iOS XCTest log separately
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-tests-log-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ios-tests.log
+          retention-days: 7
+          if-no-files-found: error
 
   build-ios-keyboard:
     # Renamed from "Build iOS Keyboard (direct capture)" (issue #991). It is
@@ -566,6 +628,7 @@ jobs:
       - build-macos
       - build-ios
       - build-ios-swiftpm
+      - build-ios-test-products
       - build-ios-keyboard
       - lint
       - release-paths
@@ -583,6 +646,7 @@ jobs:
             needs.build-macos.result != 'success' ||
             needs.build-ios.result != 'success' ||
             needs.build-ios-swiftpm.result != 'success' ||
+            needs.build-ios-test-products.result != 'success' ||
             needs.build-ios-keyboard.result != 'success' ||
             needs.lint.result != 'success' ||
             needs.release-paths.result != 'success' ||

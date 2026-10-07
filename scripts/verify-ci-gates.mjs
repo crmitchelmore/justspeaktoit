@@ -10,7 +10,10 @@ export function assessCIGates(needs, event) {
       errors.push(`${id}: expected success, got ${needs[id]?.result ?? 'missing'}`);
     }
   };
-  for (const id of ['build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-keyboard', 'lint', 'release-paths']) {
+  for (const id of [
+    'build-macos', 'build-ios', 'build-ios-swiftpm', 'build-ios-test-products',
+    'build-ios-keyboard', 'lint', 'release-paths',
+  ]) {
     requireSuccess(id);
   }
   const outputs = needs['release-paths']?.outputs ?? {};

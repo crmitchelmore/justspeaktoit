@@ -29,6 +29,9 @@ final class DesktopHostAzureResourceTests: XCTestCase {
             "https://example.cognitiveservices.azure.com"
         )
         XCTAssertEqual(try DesktopHostAzureResource.normalized("   "), "")
+        XCTAssertEqual(
+            try DesktopHostAzureResource.normalized(" http://127.0.0.1:8765 "), "http://127.0.0.1:8765"
+        )
         for rejected in [
             "http://example.cognitiveservices.azure.com",
             "https://example.com",
@@ -54,6 +57,13 @@ final class DesktopHostAzureResourceTests: XCTestCase {
         await controller.saveAzureResourceEndpoint("https://example.cognitiveservices.azure.com")
         try await controller.requireAzureResource(forLive: live)
         XCTAssertEqual(FakeLog.shared.allStatuses.last, "Azure Speech resource endpoint saved.")
+        await controller.saveAzureResourceEndpoint("http://127.0.0.1:8765")
+        do {
+            try await controller.requireAzureResource(forLive: live)
+            XCTFail("The batch-only proxy must not be accepted for live transcription.")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("HTTPS"))
+        }
     }
 
     func testTheSavedEndpointPersistsAndAnEmptyEntryClearsIt() async throws {

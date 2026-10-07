@@ -93,7 +93,7 @@ Azure rejects the unsigned zero values previously sent by the app.
 
 ## Verification
 
-### Local Entra proxy (TTS only)
+### Local Entra proxy (recorded-audio transcription and TTS)
 
 `scripts/azure-speech-proxy.py` is a dependency-free Python 3 bridge for
 subscriptions that disable Azure resource keys. Sign in with `az login` and
@@ -126,6 +126,7 @@ Only these native-client routes are accepted:
 | --- | --- |
 | `POST /cognitiveservices/v1` | `/tts/cognitiveservices/v1` |
 | `GET /cognitiveservices/voices/list` | `/tts/cognitiveservices/voices/list` |
+| `POST /speechtotext/transcriptions:transcribe?api-version=2025-10-15` | Same path and pinned API version |
 | `GET /health` | Local readiness only; does not verify Azure model access |
 
 Synthesis uses the existing Azure SSML body and `X-Microsoft-OutputFormat`
@@ -137,19 +138,40 @@ It never logs tokens, SSML or Azure response bodies. Errors are explicit;
 expired sign-in requires `az login` again. All inference still uses the selected
 corporate identity, subscription, permissions and applicable policies.
 
-**Installed Just Speak builds cannot use this proxy out of the box.** The
-existing Azure resource field is used by transcription, accepts only Azure HTTPS
-origins and is not consumed by `AzureSpeechVoiceAPI` for TTS. Voice output still
-constructs a regional Azure HTTPS endpoint and requires a saved credential.
-Do not paste a localhost URL or Entra token into that field.
+Recorded-audio transcription forwards the app's multipart WAV and definition
+unchanged. The proxy accepts Fast Transcription, MAI-Transcribe-2 and 1.5, optional
+locales and phrase lists; uploaded WAV files only, never audio URLs. Multipart
+uploads are limited to 32 MiB. Unsupported models, options and oversized uploads
+are rejected explicitly. Azure error status codes are preserved for bad inputs,
+authentication and rate limits without returning provider bodies that might
+contain recordings or credentials.
 
-The proxy deliberately preserves the Azure TTS wire contract so an explicit
-macOS local-proxy connection option can reuse the current SSML and audio parser:
-route synthesis and voice listing to the loopback origin, save the local token
-in Keychain separately from the Azure key, and leave direct Azure, transcription,
-iOS and Stable settings unchanged. That app connection option is not included
-in this standalone proxy. No TLS interception or weakening of Azure endpoint
-validation is needed. Streaming and batch transcription are not implemented.
+**Builds containing the local-proxy changes can use it for batch transcription:**
+
+1. Set **Azure resource endpoint** to `http://127.0.0.1:8765`.
+2. In **Azure Speech (Transcription)**, save `local-proxy/` followed by the value
+   of the private token file. This is the local proxy credential, not an Entra
+   token or Azure key; the existing Azure credential slot is used. It replaces
+   that build's Azure credential, so retain your direct Azure key separately if
+   you plan to switch back. Save the endpoint before validating the token.
+3. Select **Remote → Batch → Azure MAI-Transcribe-2 (Preview)**, or Azure Fast
+   Transcription, and use recorded-audio transcription.
+
+Only the literal IPv4 loopback origin with an explicit port is allowed; enter
+`127.0.0.1`, not `localhost`, a LAN address, a path or a query. The shared batch
+client requires the `local-proxy/` credential prefix before sending anything to
+loopback and strips it from the local request header. An ordinary Azure key is
+never sent to the proxy, and a proxy credential is never sent to Azure.
+Direct Azure HTTPS endpoint validation is unchanged. Live transcription and
+direct TTS reject proxy credentials with an explicit batch-only error.
+
+**Previously installed Alpha builds still reject loopback endpoints; an app
+update containing these changes is required.** No installed app or saved
+credentials are modified by running the script. Voice output in the app still
+uses its regional endpoint; the proxy's TTS routes remain usable by standalone
+native clients. WebSocket/live transcription is not implemented, and
+MAI-Transcribe-2-Streaming is a different API from the existing Voice Live route.
+No TLS interception, Entra app registration or API-key policy exemption is needed.
 
 Run the offline proxy checks with:
 
@@ -157,12 +179,29 @@ Run the offline proxy checks with:
 python3 -m unittest discover -s scripts/tests -p 'test_azure_speech_proxy.py' -v
 ```
 
+`AzureLocalProxyTests` runs the actual shared batch client against a stub to
+check credential isolation and multipart model selection. Its opt-in live test
+uses `JSTI_AZURE_PROXY_TOKEN_FILE`, `JSTI_AZURE_TEST_ENDPOINT` and
+`JSTI_AZURE_TEST_WAV` (a synthetic canonical 16 kHz PCM16 mono WAV containing
+"the quick brown fox jumps over the lazy dog"). With those explicitly configured,
+run `SPEAK_PORTABLE_CORE=1 swift test --filter AzureLocalProxyTests`; otherwise
+the live check is skipped and CI never reads credentials or spends Azure quota.
+Preserve `Package.resolved` when switching to the dependency-free portable graph.
+
 On 7 October 2026, the loopback proxy returned HTTP 200 and valid WAV and MP3
 audio for both `en-US-Harper:MAI-Voice-2.1` and
 `en-US-Harper:MAI-Voice-2.1-Flash`, using a fixed synthetic phrase. Voice listing
 returned 958 entries. Incorrect local tokens returned 401 and browser-origin
 requests returned 403. These receipts verify native HTTP requests through the
 proxy, not integration with the installed app.
+
+The upgraded proxy also transcribed a synthetic "the quick brown fox jumps over
+the lazy dog" recording through Fast Transcription, MAI-Transcribe-2 and
+MAI-Transcribe-1.5, each returning HTTP 200 and the complete expected phrase.
+The compiled shared `AzureBatchTranscriptionClient` separately passed the
+opt-in loopback test with Fast Transcription and MAI-Transcribe-2. The macOS app
+compiled with the endpoint/credential changes; the installed Alpha application
+was not replaced or configured by these checks.
 
 Contract tests cover endpoint validation, secret-free URLs, multipart model
 selection, timing conversion, empty input, SSML escaping, MAI voice identity,

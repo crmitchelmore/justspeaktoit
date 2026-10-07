@@ -13,9 +13,8 @@ public struct AzureBatchTranscriptionClient: Sendable {
     ) async throws -> TranscriptionResult {
         guard AzureTranscriptionModels.batchIDs.contains(model)
         else { throw AzureSpeechError.unsupportedModel }
-        let config = try AzureSpeechConfiguration(credentials: credentials)
-        let origin = endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? config.transcriptionURL : try AzureSpeechConfiguration.resourceURL(endpoint)
+        let connection = try AzureSpeechConfiguration.batchConnection(credentials: credentials, endpoint: endpoint)
+        let origin = connection.origin
         try Task.checkCancellation()
         let audio = try await MetaMuseAudioPreparer.prepareWAV(at: url)
         guard audio.data.count > 44 else { throw AzureSpeechError.emptyInput }
@@ -23,7 +22,7 @@ public struct AzureBatchTranscriptionClient: Sendable {
             throw AzureSpeechError.configuration("Azure accepts audio files smaller than 300 MB.")
         }
         let request = try Self.request(
-            origin: origin, key: config.apiKey, audio: audio.data, model: model, language: language,
+            origin: origin, key: connection.apiKey, audio: audio.data, model: model, language: language,
             keywords: keywords
         )
         // `Ocp-Apim-Subscription-Key` is a custom header URLSession does not

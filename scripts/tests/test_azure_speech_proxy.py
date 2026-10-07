@@ -20,12 +20,26 @@ SSML = b"""<speak xmlns="http://www.w3.org/2001/10/synthesis">
 <voice name="en-US-Harper:MAI-Voice-2.1">Test.</voice></speak>"""
 
 
+def transcription_body(definition=None, audio=None):
+    definition = definition if definition is not None else {
+        "enhancedMode": {"enabled": True, "model": "MAI-Transcribe-2"},
+        "locales": ["en-GB"], "phraseList": {"phrases": ["Just Speak"]},
+    }
+    audio = audio if audio is not None else b"RIFF" + b"\0" * 4 + b"WAVE" + b"\0" * 100
+    body = (b'--Azure-test\r\nContent-Disposition: form-data; name="definition"\r\n'
+            b"Content-Type: application/json\r\n\r\n" + json.dumps(definition).encode()
+            + b'\r\n--Azure-test\r\nContent-Disposition: form-data; name="audio"; filename="recording.wav"\r\n'
+            b"Content-Type: audio/wav\r\n\r\n" + audio + b"\r\n--Azure-test--\r\n")
+    return body
+
+
 class FakeTransport:
     def __init__(self):
         self.calls = []
 
-    def forward(self, method, path, body, output_format):
+    def forward(self, method, path, body, output_format, content_type=None):
         self.calls.append((method, path, body, output_format))
+        self.content_type = content_type
         return 200, "audio/wav", b"RIFFtestWAVE"
 
 
@@ -69,7 +83,7 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(self.transport.calls[0][1], "/tts/cognitiveservices/voices/list")
         status, data = self.request("/health", body=None)
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(data)["scope"], "tts-only")
+        self.assertEqual(json.loads(data)["scope"], "batch-transcription-and-tts")
 
     def test_wrong_token_is_rejected(self):
         for token in ("wrong", "\u00e9"):
@@ -89,6 +103,43 @@ class ProxyTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.request(path)[0], 404)
         self.assertFalse(self.transport.calls)
+
+    def test_batch_transcription_preserves_multipart_and_pinned_version(self):
+        body = transcription_body()
+        status, _ = self.request(proxy.TRANSCRIPTION_PATH, body=body, extra={
+            "Content-Type": "multipart/form-data; boundary=Azure-test",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(self.transport.calls, [("POST", proxy.TRANSCRIPTION_PATH, body, None)])
+        self.assertEqual(self.transport.content_type, "multipart/form-data; boundary=Azure-test")
+
+    def test_batch_rejects_urls_unknown_models_and_malformed_uploads(self):
+        for body in (
+            transcription_body({"audioUrl": "https://example.com/recording.wav"}),
+            transcription_body({"enhancedMode": {"enabled": True, "model": "unknown"}}),
+            transcription_body({"locales": "en-GB"}),
+            transcription_body({"phraseList": {"phrases": [""]}}),
+            transcription_body(audio=b"not a WAV"),
+            b"not multipart",
+            transcription_body().replace(b'name="definition"', b'name="audio"'),
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(self.request(proxy.TRANSCRIPTION_PATH, body=body, extra={
+                    "Content-Type": "multipart/form-data; boundary=Azure-test",
+                })[0], 400)
+        self.assertFalse(self.transport.calls)
+
+    def test_batch_accepts_fast_and_previous_mai_model(self):
+        for definition in ({}, {"enhancedMode": {"enabled": True, "model": "MAI-Transcribe-1.5"}}):
+            self.assertEqual(self.request(proxy.TRANSCRIPTION_PATH, body=transcription_body(definition), extra={
+                "Content-Type": "multipart/form-data; boundary=Azure-test",
+            })[0], 200)
+
+    def test_batch_upload_has_its_own_bounded_size(self):
+        with patch.object(proxy, "MAX_TRANSCRIPTION_REQUEST", 100):
+            self.assertEqual(self.request(proxy.TRANSCRIPTION_PATH, body=transcription_body(), extra={
+                "Content-Type": "multipart/form-data; boundary=Azure-test",
+            })[0], 413)
 
     def test_invalid_or_external_ssml_is_rejected(self):
         bodies = [b"invalid", b"", b"<speak>wrong namespace</speak>",

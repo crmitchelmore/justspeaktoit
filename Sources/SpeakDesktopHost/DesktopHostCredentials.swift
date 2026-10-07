@@ -13,7 +13,14 @@ extension DesktopHostController {
                   ) else { throw DesktopTranscriptionError.unsupportedModel }
             let cleaned = key.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleaned.isEmpty, provider.apiKeyIdentifier == AzureSpeechConfiguration.credentialIdentifier {
-                _ = try AzureSpeechConfiguration(credentials: cleaned)
+                let model = DesktopHostModels.all[modelIndex].id
+                if AzureTranscriptionModels.batchIDs.contains(model) {
+                    _ = try AzureSpeechConfiguration.batchConnection(
+                        credentials: cleaned, endpoint: azureResourceEndpoint()
+                    )
+                } else {
+                    _ = try AzureSpeechConfiguration(credentials: cleaned)
+                }
             }
             if let saveByHand = cloudSync.saveKeyByHand {
                 // With iCloud sync, the key and its "saved by hand" mark change in

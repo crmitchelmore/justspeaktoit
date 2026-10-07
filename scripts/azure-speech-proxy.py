@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Loopback-only Azure TTS bridge using Azure CLI's existing Entra sign-in."""
+"""Loopback-only Azure batch transcription and TTS bridge using Azure CLI sign-in."""
 
 import argparse
+from email import policy
+from email.parser import BytesParser
 import hmac
 import http.server
 import json
@@ -24,10 +26,13 @@ import xml.etree.ElementTree as ET
 
 
 MAX_REQUEST = 64 * 1024
+MAX_TRANSCRIPTION_REQUEST = 32 * 1024 * 1024
 MAX_RESPONSE = 32 * 1024 * 1024
+TRANSCRIPTION_PATH = "/speechtotext/transcriptions:transcribe?api-version=2025-10-15"
 ROUTES = {
     ("POST", "/cognitiveservices/v1"): "/tts/cognitiveservices/v1",
     ("GET", "/cognitiveservices/voices/list"): "/tts/cognitiveservices/voices/list",
+    ("POST", TRANSCRIPTION_PATH): TRANSCRIPTION_PATH,
 }
 FORMATS = {
     "riff-24khz-16bit-mono-pcm", "riff-48khz-16bit-mono-pcm",
@@ -123,6 +128,56 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def validate_transcription(body, content_type):
+    if not re.fullmatch(r"multipart/form-data;\s*boundary=[A-Za-z0-9_-]{1,70}", content_type):
+        raise ProxyError(415, "Use multipart/form-data with an unquoted boundary.")
+    message = BytesParser(policy=policy.default).parsebytes(
+        ("Content-Type: " + content_type + "\r\nMIME-Version: 1.0\r\n\r\n").encode("ascii") + body,
+    )
+    if not message.is_multipart() or message.defects:
+        raise ProxyError(400, "Invalid multipart transcription body.")
+    parts = {}
+    for part in message.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        if (name not in ("audio", "definition") or name in parts or part.is_multipart()
+                or part.defects or part.get_content_disposition() != "form-data"
+                or part.get("Content-Transfer-Encoding") is not None):
+            raise ProxyError(400, "Upload exactly one audio and one definition part.")
+        parts[name] = part
+    if set(parts) != {"audio", "definition"}:
+        raise ProxyError(400, "Upload exactly one audio and one definition part.")
+    audio = parts["audio"].get_payload(decode=True) or b""
+    if len(audio) <= 44 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        raise ProxyError(400, "Upload recorded WAV audio, not an audio URL.")
+    definition_bytes = parts["definition"].get_payload(decode=True) or b""
+    if len(definition_bytes) > MAX_REQUEST:
+        raise ProxyError(413, "Transcription definition exceeds the local proxy limit.")
+    try:
+        definition = json.loads(definition_bytes)
+    except (ValueError, UnicodeDecodeError) as error:
+        raise ProxyError(400, "Invalid transcription definition JSON.") from error
+    if not isinstance(definition, dict) or set(definition) - {"enhancedMode", "locales", "phraseList"}:
+        raise ProxyError(400, "Unsupported transcription definition options.")
+    enhanced = definition.get("enhancedMode")
+    if enhanced is not None and (
+            not isinstance(enhanced, dict) or set(enhanced) != {"enabled", "model"}
+            or enhanced["enabled"] is not True
+            or enhanced["model"] not in ("MAI-Transcribe-2", "MAI-Transcribe-1.5")):
+        raise ProxyError(400, "Choose MAI-Transcribe-2, MAI-Transcribe-1.5, or Fast Transcription.")
+    locales = definition.get("locales", [])
+    if not isinstance(locales, list) or len(locales) > 10 or any(
+            not isinstance(locale, str) or not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", locale)
+            for locale in locales):
+        raise ProxyError(400, "Invalid transcription locales.")
+    phrase_list = definition.get("phraseList", {"phrases": []})
+    if not isinstance(phrase_list, dict) or set(phrase_list) != {"phrases"}:
+        raise ProxyError(400, "Invalid transcription phrase list.")
+    phrases = phrase_list["phrases"]
+    if not isinstance(phrases, list) or len(phrases) > 100 or any(
+            not isinstance(phrase, str) or not phrase or len(phrase) > 1024 for phrase in phrases):
+        raise ProxyError(400, "Invalid transcription phrases.")
+
+
 class AzureTransport:
     def __init__(self, origin, tokens):
         self.origin = resource_origin(origin)
@@ -136,19 +191,20 @@ class AzureTransport:
             urllib.request.HTTPSHandler(context=context),
         )
 
-    def forward(self, method, path, body, output_format):
+    def forward(self, method, path, body, output_format, content_type=None):
         for attempt in range(2):
             token = self.tokens.get()
             headers = {"Authorization": "Bearer " + token, "User-Agent": "JustSpeakLocalProxy"}
             if method == "POST":
-                headers.update({"Content-Type": "application/ssml+xml",
-                                "X-Microsoft-OutputFormat": output_format})
+                headers["Content-Type"] = content_type or "application/ssml+xml"
+                if output_format is not None:
+                    headers["X-Microsoft-OutputFormat"] = output_format
             request = urllib.request.Request(
                 self.origin + path, data=body if method == "POST" else None,
                 headers=headers, method=method,
             )
             try:
-                with self.opener.open(request, timeout=120) as response:
+                with self.opener.open(request, timeout=180) as response:
                     data = response.read(MAX_RESPONSE + 1)
                     if len(data) > MAX_RESPONSE:
                         raise ProxyError(502, "Azure response exceeds the local proxy limit.")
@@ -166,7 +222,8 @@ class AzureTransport:
                     raise ProxyError(429, "Azure Speech rate limit or quota reached.")
                 if 300 <= error.code < 400:
                     raise ProxyError(502, "Azure redirect refused.")
-                raise ProxyError(502, "Azure Speech rejected the request (HTTP %d)." % error.code)
+                status = error.code if error.code in (400, 404, 413, 415, 422) else 502
+                raise ProxyError(status, "Azure Speech rejected the request (HTTP %d)." % error.code)
             except (urllib.error.URLError, TimeoutError, OSError) as error:
                 raise ProxyError(502, "Azure Speech connection failed or timed out.") from error
 
@@ -245,26 +302,33 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             if len(lengths) > 1 or (lengths and not re.fullmatch(r"[0-9]{1,8}", lengths[0])):
                 raise ProxyError(400, "Invalid Content-Length.")
             length = int(lengths[0]) if lengths else 0
-            if length > MAX_REQUEST:
-                raise ProxyError(413, "SSML exceeds the local proxy limit.")
+            transcription = self.command == "POST" and self.path == TRANSCRIPTION_PATH
+            limit = MAX_TRANSCRIPTION_REQUEST if transcription else MAX_REQUEST
+            if length > limit:
+                raise ProxyError(413, "Request body exceeds the local proxy limit.")
             if self.command == "GET" and length:
                 raise ProxyError(400, "GET requests must not carry a body.")
             if self.command == "GET" and self.path == "/health":
-                self.respond(200, "application/json", b'{"status":"ready","scope":"tts-only"}')
+                self.respond(200, "application/json", b'{"status":"ready","scope":"batch-transcription-and-tts"}')
                 return
             upstream = ROUTES.get((self.command, self.path))
             if upstream is None:
-                raise ProxyError(404, "Only Speech synthesis and voice listing are supported.")
+                raise ProxyError(404, "Only batch transcription, synthesis and voice listing are supported.")
             body, output_format = b"", None
+            content_type = None
             if self.command == "POST":
+                body = self.rfile.read(length)
+                if len(body) != length or not body:
+                    raise ProxyError(400, "A complete request body is required.")
+            if transcription:
+                content_type = self.headers.get("Content-Type", "")
+                validate_transcription(body, content_type)
+            elif self.command == "POST":
                 if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/ssml+xml":
                     raise ProxyError(415, "Use application/ssml+xml.")
                 output_format = self.headers.get("X-Microsoft-OutputFormat")
                 if output_format not in FORMATS:
                     raise ProxyError(400, "Unsupported audio output format.")
-                body = self.rfile.read(length)
-                if len(body) != length or not body:
-                    raise ProxyError(400, "A complete SSML body is required.")
                 if b"<!DOCTYPE" in body.upper() or b"<!ENTITY" in body.upper():
                     raise ProxyError(400, "XML declarations of entities or doctypes are not supported.")
                 try:
@@ -276,10 +340,15 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                     raise ProxyError(400, "Use the Speech synthesis SSML namespace.")
                 if any(node.tag.rsplit("}", 1)[-1] in ("audio", "lexicon") for node in root.iter()):
                     raise ProxyError(400, "External audio and lexicon references are not supported.")
-            status, content_type, data = self.server.transport.forward(
-                self.command, upstream, body, output_format,
-            )
-            self.respond(status, content_type, data)
+            if transcription:
+                status, response_type, data = self.server.transport.forward(
+                    self.command, upstream, body, output_format, content_type=content_type,
+                )
+            else:
+                status, response_type, data = self.server.transport.forward(
+                    self.command, upstream, body, output_format,
+                )
+            self.respond(status, response_type, data)
         except ProxyError as error:
             self.respond(error.status, "application/json", json.dumps({"error": str(error)}).encode())
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
@@ -305,7 +374,7 @@ def main():
         server = ProxyServer(args.port, local_token(args.token_file), transport)
     except (ValueError, OSError, ProxyError) as error:
         parser.exit(1, str(error) + "\n")
-    print("Azure TTS proxy ready at http://127.0.0.1:%d (local token required)." % args.port, flush=True)
+    print("Azure Speech proxy ready at http://127.0.0.1:%d (local token required)." % args.port, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public struct APIKeyValidationDebugSnapshot: Sendable, Equatable {
     public let url: String

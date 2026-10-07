@@ -1,14 +1,25 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Dedicated OpenRouter speech endpoints; credentials and audio/text bodies are never logged.
+///
+/// Transcription is Foundation-only and shared by every native host: the JSON reply is read
+/// through the bounded chunk transport and decoded in memory. Speech synthesis keeps its
+/// Apple-only temporary-file download in `OpenRouterAudioClient+Speech.swift`.
 public actor OpenRouterAudioClient {
     public typealias APIKeyProvider = @Sendable () async -> String?
     public static let transcriptionPrefix = OpenRouterTranscriptionSelection.prefix
+    /// A transcript reply larger than this is refused rather than buffered.
+    static let maximumTranscriptBytes = 2 * 1024 * 1024
+    /// Wall-clock bound for one audio request, in addition to the request's inactivity timeout.
+    static let requestDeadline: Duration = .seconds(120)
     private let apiKeyProvider: APIKeyProvider
-    private let session: URLSession
+    let session: URLSession
     private let maximumInputBytes: Int
-    private let maximumSpeechBytes: Int
-    private let temporaryDirectory: URL
+    let maximumSpeechBytes: Int
+    let temporaryDirectory: URL
 
     public init(
         apiKeyProvider: @escaping APIKeyProvider,
@@ -32,43 +43,18 @@ public actor OpenRouterAudioClient {
         try Task.checkCancellation()
         var request = try await makeRequest(path: "transcriptions", model: model)
         let payload = try transcriptionPayload(audioFileURL: audioFileURL, model: model, language: language)
-        request.httpBody = try JSONEncoder().encode(payload)
-        let file = try await download(request, limit: 2 * 1024 * 1024, speech: false)
-        defer { try? FileManager.default.removeItem(at: file) }
         try Task.checkCancellation()
-        guard let data = try? Data(contentsOf: file),
-              let decoded = try? JSONDecoder().decode(OpenRouterTranscriptionResponse.self, from: data)
-        else { throw OpenRouterAudioError.invalidResponse }
+        request.httpBody = try JSONEncoder().encode(payload)
+        try Task.checkCancellation()
+        let body = try await receiveJSON(request, limit: Self.maximumTranscriptBytes)
+        try Task.checkCancellation()
+        guard let decoded = try? JSONDecoder().decode(OpenRouterTranscriptionResponse.self, from: body) else {
+            throw OpenRouterAudioError.invalidResponse
+        }
         return decoded.result(model: OpenRouterTranscriptionSelection.identifier(for: model))
     }
 
-    public func synthesize(
-        text: String,
-        model: String,
-        voice: String?,
-        speed: Double? = nil
-    ) async throws -> OpenRouterSpeechResult {
-        try Task.checkCancellation()
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              text.utf8.count <= 64 * 1024,
-              voice.map(OpenRouterSpeechSelection.isValidVoice) ?? true,
-              speed.map({ $0.isFinite && (0.25...4).contains($0) }) ?? true
-        else { throw OpenRouterAudioError.invalidInput }
-        var request = try await makeRequest(path: "speech", model: model)
-        request.httpBody = try JSONEncoder().encode(
-            OpenRouterSpeechRequest(model: model, input: text, voice: voice, speed: speed)
-        )
-        let file = try await download(request, limit: maximumSpeechBytes, speech: true)
-        do {
-            try Task.checkCancellation()
-            return OpenRouterSpeechResult(audioURL: file)
-        } catch {
-            try? FileManager.default.removeItem(at: file)
-            throw error
-        }
-    }
-
-    private func makeRequest(path: String, model: String) async throws -> URLRequest {
+    func makeRequest(path: String, model: String) async throws -> URLRequest {
         guard OpenRouterSpeechSelection.isValidIdentifier(model) else {
             throw OpenRouterAudioError.invalidInput
         }
@@ -115,18 +101,41 @@ public actor OpenRouterAudioClient {
         )
     }
 
-    private func download(_ request: URLRequest, limit: Int, speech: Bool) async throws -> URL {
-        let destination = temporaryDirectory.appendingPathComponent("openrouter-\(UUID().uuidString).mp3")
+    /// Reads a JSON reply of at most `limit` bytes. Status and content type are checked on
+    /// the headers, so a provider error body is never downloaded or retained.
+    private func receiveJSON(_ request: URLRequest, limit: Int) async throws -> Data {
         do {
-            return try await OpenRouterAudioDownload.perform(
-                request: request, session: session, destination: destination, limit: limit, speech: speech
-            )
+            let response = try await OpenRouterBoundedResponseTransport.perform(
+                request, session: session, limit: limit, deadline: Self.requestDeadline
+            ) { http in
+                guard (200..<300).contains(http.statusCode) else {
+                    // Never retain or surface provider bodies: they can contain request text or credentials.
+                    throw OpenRouterAudioError.httpStatus(http.statusCode)
+                }
+                guard http.mimeType?.lowercased() == "application/json" else {
+                    throw OpenRouterAudioError.invalidResponse
+                }
+            }
+            guard !response.body.isEmpty else { throw OpenRouterAudioError.invalidResponse }
+            return response.body
         } catch {
-            try? FileManager.default.removeItem(at: destination)
-            if Task.isCancelled || (error as? URLError)?.code == .cancelled { throw CancellationError() }
-            if let audioError = error as? OpenRouterAudioError { throw audioError }
-            if (error as? URLError)?.code == .timedOut { throw OpenRouterAudioError.timedOut }
-            throw OpenRouterAudioError.transportFailure
+            throw Self.audioError(from: error)
         }
+    }
+
+    /// Maps transport outcomes onto the fixed, credential-free audio error vocabulary.
+    static func audioError(from error: Error) -> Error {
+        if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+            return CancellationError()
+        }
+        if let audioError = error as? OpenRouterAudioError { return audioError }
+        switch error as? OpenRouterBoundedResponseTransport.Failure {
+        case .responseTooLarge: return OpenRouterAudioError.responseTooLarge
+        case .timedOut: return OpenRouterAudioError.timedOut
+        case .invalidResponse: return OpenRouterAudioError.invalidResponse
+        case nil: break
+        }
+        if (error as? URLError)?.code == .timedOut { return OpenRouterAudioError.timedOut }
+        return OpenRouterAudioError.transportFailure
     }
 }

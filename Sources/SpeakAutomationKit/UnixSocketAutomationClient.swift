@@ -9,6 +9,13 @@ public protocol AutomationRequesting {
     func send(_ request: AutomationRequest) throws -> AutomationResponse
 }
 
+/// How long transport IO outlives the app-side command deadline, so the app can
+/// still encode and write its structured timeout reply. Shared by every client.
+enum AutomationClientTiming {
+    static let responseGracePeriod: TimeInterval = 1
+}
+
+#if canImport(Darwin)
 /// Blocking UNIX-domain-socket client.
 ///
 /// Blocking is deliberate: `speak` is a one-shot process and the MCP server
@@ -17,7 +24,7 @@ public protocol AutomationRequesting {
 public struct UnixSocketAutomationClient: AutomationRequesting {
     /// Socket IO must outlive the app-side command deadline long enough for the
     /// server to encode and write its structured timeout response.
-    static let responseGracePeriod: TimeInterval = 1
+    static let responseGracePeriod: TimeInterval = AutomationClientTiming.responseGracePeriod
 
     public let socketPath: String
 
@@ -26,34 +33,30 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
     }
 
     public func send(_ request: AutomationRequest) throws -> AutomationResponse {
-        let validated = try request.validated()
-        let payload = try AutomationCoding.encoder().encode(validated)
-        let frame = try AutomationFraming.frame(payload)
+        // Validated and framed before connecting, so a bad argument fails without
+        // a round trip; framing and decoding are shared with every transport.
+        let frame = try AutomationWireExchange.requestFrame(for: request)
 
-        let descriptor = try self.connect(timeout: validated.resolvedTimeout + Self.responseGracePeriod)
+        let descriptor = try self.connect(timeout: request.resolvedTimeout + Self.responseGracePeriod)
         defer { close(descriptor) }
 
-        try self.writeAll(descriptor: descriptor, data: frame)
-        let prefix = try self.readExactly(descriptor: descriptor, count: AutomationFraming.prefixLength)
-        let length = try AutomationFraming.payloadLength(from: prefix)
-        let body = try self.readExactly(descriptor: descriptor, count: length)
+        let stream = ConnectedSocket(client: self, descriptor: descriptor)
+        try stream.writeAll(frame)
+        return try AutomationWireExchange.readResponse(from: stream)
+    }
 
-        do {
-            let response = try AutomationCoding.decoder().decode(AutomationResponse.self, from: body)
-            guard response.schemaVersion == AutomationSchema.currentVersion else {
-                throw AutomationError(
-                    code: .schemaMismatch,
-                    message: "The app replied with automation schema v\(response.schemaVersion); "
-                        + "this speak build understands v\(AutomationSchema.currentVersion). Update the CLI."
-                )
-            }
-            return response
-        } catch let error as AutomationError {
-            throw error
-        } catch {
-            // Never echo the raw body: it is app-controlled and could contain
-            // transcript text the caller did not ask for.
-            throw AutomationError(code: .internalError, message: "Could not decode the app's automation reply.")
+    /// The connected socket as the shared exchange reads it, keeping this
+    /// client's errno-to-`AutomationError` mapping.
+    private struct ConnectedSocket: AutomationByteStream {
+        let client: UnixSocketAutomationClient
+        let descriptor: Int32
+
+        func readExactly(_ count: Int) throws -> Data {
+            try self.client.readExactly(descriptor: self.descriptor, count: count)
+        }
+
+        func writeAll(_ data: Data) throws {
+            try self.client.writeAll(descriptor: self.descriptor, data: data)
         }
     }
 
@@ -194,3 +197,4 @@ public struct UnixSocketAutomationClient: AutomationRequesting {
         return AutomationError(code: .internalError, message: "Automation socket failed while \(context).")
     }
 }
+#endif

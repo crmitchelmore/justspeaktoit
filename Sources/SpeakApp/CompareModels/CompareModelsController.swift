@@ -51,6 +51,7 @@ final class CompareModelsController: ObservableObject {
     var captureOwnershipHeld = false
     var runID = UUID()
     var fileTask: Task<[ModelComparisonEntry], Never>?
+    var sampleTask: Task<ModelComparisonSample, Error>?
     var captureLimitTask: Task<Void, Never>?
 
     static let selectionDefaultsKey = "compareModels.selectedModelIDs"
@@ -196,6 +197,8 @@ final class CompareModelsController: ObservableObject {
         runID = UUID()
         fileTask?.cancel()
         fileTask = nil
+        sampleTask?.cancel()
+        sampleTask = nil
         captureLimitTask?.cancel()
         captureLimitTask = nil
         await fanOut.cancel()

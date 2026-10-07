@@ -184,9 +184,16 @@ public enum ProviderBalanceFormatter {
         for snapshot: ProviderBalanceSnapshot,
         now: Date = Date()
     ) -> String {
+        #if canImport(Darwin)
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return "Checked \(formatter.localizedString(for: snapshot.refreshedAt, relativeTo: now))"
+        #else
+        // swift-corelibs has no RelativeDateTimeFormatter. An absolute timestamp
+        // still states when the value was verified without implying freshness.
+        let formatter = ISO8601DateFormatter()
+        return "Checked \(formatter.string(from: snapshot.refreshedAt))"
+        #endif
     }
 
     /// `Resets 1 October 2026`, where the provider reported a reset or expiry.

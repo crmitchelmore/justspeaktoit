@@ -85,6 +85,36 @@ final class InMemoryIdentifierRegistry: APIKeyIdentifierRegistry {
 /// macOS-specific wrapper around SpeakCore's SecureStorage.
 /// Maintains the existing API for backward compatibility.
 actor SecureAppStorage {
+    /// The user's vault. Its pre-rename predecessor is copied forward on first
+    /// load and retained, so older builds can still roll back.
+    static let productionConfiguration = vaultConfiguration(
+        service: "com.github.speakapp.credentials",
+        legacyServices: ["com.justspeaktoit.credentials"]
+    )
+
+    /// A vault with no predecessor, for tests and isolated launch profiles.
+    /// Loading it queries only `service`, so it can never read or copy the
+    /// user's keys from the production vault or its legacy service.
+    static func isolatedConfiguration(service: String) -> SecureStorageConfiguration {
+        vaultConfiguration(service: service, legacyServices: [])
+    }
+
+    /// The local Keychain is the vault for every Mac build. App Store builds
+    /// opt in to the separate passphrase-encrypted CloudKit sync layer; direct
+    /// builds remain local-only. Do not silently add iCloud Keychain as a third
+    /// API-key sync path.
+    static func vaultConfiguration(service: String, legacyServices: [String]) -> SecureStorageConfiguration {
+        SecureStorageConfiguration(
+            service: service,
+            masterAccount: "speak-app-secrets",
+            legacyServices: legacyServices,
+            accessGroup: nil,
+            synchronizable: false
+        )
+    }
+
+    /// The vault this storage opens: service names only, never secrets.
+    nonisolated let configuration: SecureStorageConfiguration
     private let storage: SecureStorage
     private nonisolated let permissionsManager: PermissionsManager
     private nonisolated let appSettings: AppSettings
@@ -92,22 +122,11 @@ actor SecureAppStorage {
     init(
         permissionsManager: PermissionsManager,
         appSettings: AppSettings,
-        keychainService: String = "com.github.speakapp.credentials"
+        configuration: SecureStorageConfiguration = SecureAppStorage.productionConfiguration
     ) {
         self.permissionsManager = permissionsManager
         self.appSettings = appSettings
-
-        // The local Keychain is the vault for every Mac build. App Store builds
-        // opt in to the separate passphrase-encrypted CloudKit sync layer; direct
-        // builds remain local-only. Do not silently add iCloud Keychain as a third
-        // API-key sync path.
-        let configuration = SecureStorageConfiguration(
-            service: keychainService,
-            masterAccount: "speak-app-secrets",
-            legacyServices: ["com.justspeaktoit.credentials"],
-            accessGroup: nil,
-            synchronizable: false
-        )
+        self.configuration = configuration
 
         // Configuration metadata only — never log secret values or identifiers here.
         if ProcessInfo.processInfo.environment["SPEAK_DEBUG_KEYCHAIN"] == "1" {
@@ -125,6 +144,15 @@ actor SecureAppStorage {
             configuration: configuration,
             permissionsChecker: PermissionsManagerBridge(permissionsManager: permissionsManager),
             identifierRegistry: appSettings
+        )
+    }
+
+    /// Opens the isolated vault named `keychainService`.
+    init(permissionsManager: PermissionsManager, appSettings: AppSettings, keychainService: String) {
+        self.init(
+            permissionsManager: permissionsManager,
+            appSettings: appSettings,
+            configuration: Self.isolatedConfiguration(service: keychainService)
         )
     }
 

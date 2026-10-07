@@ -1,38 +1,43 @@
 # Architecture
 
-This document describes the repository at commit `2ff982d` (12 September 2026). It is a current-state map, not a
-target architecture. Feature-gated targets are declarations in the build manifest; their presence does not prove that
-provisioning or distribution has been completed.
+This document describes the repository at commit `2ff982d` (12 September 2026), with the Windows and Linux desktop
+graph added on 24 September 2026. It is a current-state map, not a target architecture. Feature-gated targets are
+declarations in the build manifest; their presence does not prove that provisioning or distribution has been completed.
 
 ## Module and build map
 
-The repository has three build graphs:
+The repository has four build graphs:
 
-- [Package.swift](../Package.swift) owns reusable modules, the macOS executable, CLI, demo, benchmark and host tests.
+- [Package.swift](../Package.swift) owns reusable modules, the macOS executable, CLI, demo and host tests.
+  On Windows and Linux it declares the portable graph instead, with the desktop apps (see below).
 - [Project.swift](../Project.swift) owns generated Apple app, extension and UI-test targets. It consumes products from
   the local root package. [Workspace.swift](../Workspace.swift) generates the `Just Speak to It` workspace containing
   the root project; generated Xcode projects are not hand-maintained declarations.
 - [Tooling/Package.swift](../Tooling/Package.swift) is an independent SwiftLint dependency graph, isolated from the app
   and test resolver.
+- [Benchmarks/LocalTranscription/Package.swift](../Benchmarks/LocalTranscription/Package.swift) is the isolated local
+  transcription benchmark package. It consumes `SpeakCore` from the root package by path and pins its own graph in
+  `Benchmarks/LocalTranscription/Package.resolved` (issue #1120).
 
-The root package declares macOS 14 and iOS 17 as its package platforms. That declaration does not mean every target is
-host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `SpeakiOSLib` contains iOS-guarded code.
+The root package declares macOS 14, iOS 17 and watchOS 10 as its package platforms. That declaration does not mean every
+target is host-buildable for every platform: `SpeakApp` imports macOS frameworks, `SpeakiOSLib` contains iOS-guarded
+code, and only the dependency-free `SpeakWatchCore` is built for watchOS.
 
 ### Root Swift package
 
 | Target | Kind | Direct internal dependencies / role |
 | --- | --- | --- |
-| `CTranscribe` | binary | Remote transcribe.cpp XCFramework used only by the benchmark executable. |
 | `SpeakHotKeys` | library target | Global-hot-key implementation. |
-| `SpeakCore` | library target | Shared catalogues, protocols, models, capture policies and resources. |
+| `SpeakWatchCore` | library target | No dependencies; Foundation-only watch capture/complication types and `ReleaseTrain`, linked by the watch targets. |
+| `SpeakCore` | library target | Depends on `SpeakWatchCore` (re-exported); shared catalogues, protocols, models, capture policies and resources. |
 | `SpeakSync` | library target | Depends on `SpeakCore`; CloudKit history, comparison and encrypted-key sync. |
 | `SpeakiOSLib` | library target | Depends on `SpeakCore` and `SpeakSync`; iOS views and services. |
 | `SpeakAutomationKit` | library target | Depends on `SpeakCore`; CLI parsing, socket client and MCP server. |
 | `SpeakCLI` | executable target | Depends on `SpeakAutomationKit` and `SpeakCore`; product name `speak`. |
 | `SpeakApp` | executable target | Depends on `SpeakCore`, `SpeakSync`, `SpeakHotKeys` and external macOS packages. |
 | `SpeakHotKeysDemo` | executable target | Depends on `SpeakHotKeys`; development demo. |
-| `LocalTranscriptionBenchmarkKit` | library target | Depends on `SpeakCore`; benchmark measurement and result support. |
-| `LocalTranscriptionBenchmark` | executable target | Depends on the benchmark kit, WhisperKit and `CTranscribe`; product name `local-transcription-benchmark`. |
+| `SpeakWatchCoreTests` | test target | Tests `SpeakWatchCore`. |
+| `SpeakTestSupport` | library target | Test-only shared doubles under `Tests/SpeakTestSupport`; not shipped API. |
 | `SpeakCoreTests` | test target | Tests `SpeakCore`. |
 | `SpeakHotKeysTests` | test target | Tests `SpeakHotKeys`. |
 | `SpeakSyncTests` | test target | Tests `SpeakSync`. |
@@ -40,14 +45,14 @@ host-buildable for both platforms: `SpeakApp` imports macOS frameworks, while `S
 | `SpeakAppSnapshotTests` | test target | Tests `SpeakApp` with SnapshotTesting. |
 | `SpeakiOSTests` | test target | Host package tests for `SpeakiOSLib`. |
 | `SpeakAutomationKitTests` | test target | Tests `SpeakAutomationKit` and `SpeakCore`. |
-| `LocalTranscriptionBenchmarkTests` | test target | Tests the benchmark kit and its `SpeakCore` contract. |
 
-The products are `SpeakHotKeys`, `SpeakCore`, `SpeakSync`, `SpeakiOSLib`, `SpeakAutomationKit`, `SpeakApp`, `speak` and
-`local-transcription-benchmark`. The benchmark and `CTranscribe` are part of the root graph at this inspected base.
+The products are `SpeakHotKeys`, `SpeakCore`, `SpeakWatchCore`, `SpeakSync`, `SpeakiOSLib`, `SpeakAutomationKit`, `SpeakTestSupport`
+(test-only), `SpeakApp` and `speak`. The root graph does not contain the benchmark or `CTranscribe`.
 
 ```mermaid
 flowchart TD
-    Core[SpeakCore] --> Sync[SpeakSync]
+    WatchCore[SpeakWatchCore] --> Core[SpeakCore]
+    Core --> Sync[SpeakSync]
     Core --> IOSLib[SpeakiOSLib]
     Sync --> IOSLib
     Core --> Automation[SpeakAutomationKit]
@@ -59,6 +64,19 @@ flowchart TD
 
 Each arrow points from a dependency to the target that consumes it.
 
+### Local transcription benchmark package
+
+| Target | Kind | Direct dependencies / role |
+| --- | --- | --- |
+| `CTranscribe` | binary | Remote transcribe.cpp XCFramework; checksum verified by `make verify-checksums`. |
+| `LocalTranscriptionBenchmarkKit` | library target | Depends on root `SpeakCore`; benchmark measurement and result support. |
+| `LocalTranscriptionBenchmark` | executable target | Depends on the kit, `SpeakCore`, WhisperKit and `CTranscribe`; product `local-transcription-benchmark`. |
+| `LocalTranscriptionBenchmarkTests` | test target | Tests the benchmark kit, its `SpeakCore` contract and its argmax-oss-swift pin. |
+
+Run it with `make bench BENCH_ARGS='…'`. The path-filtered
+[local-transcription-benchmark.yml](../.github/workflows/local-transcription-benchmark.yml) workflow resolves, builds
+and tests it without model inference, and fails if its `Package.resolved` drifts.
+
 ### Tuist targets
 
 | Target | Product / deployment | Inclusion and direct local relationship |
@@ -68,8 +86,8 @@ Each arrow points from a dependency to the target that consumes it.
 | `JustSpeakToItWidgetExtension` | iOS extension, 17.0 | Always; consumes package `SpeakCore` and `SpeakiOSLib`. |
 | `JustSpeakKeyboard` | iOS extension, 17.0 | `TUIST_IOS_KEYBOARD`; consumes package `SpeakCore`. Direct capture has the separate `TUIST_IOS_KEYBOARD_DIRECT_CAPTURE` gate. |
 | `JustSpeakShare` | iOS extension, 17.0 | `TUIST_IOS_SHARE_EXTENSION`; consumes package `SpeakCore`. |
-| `JustSpeakWatchApp` | watchOS app, 10.0 | `TUIST_WATCH_APP`; embeds the watch widget and directly compiles selected `SpeakCore` files. |
-| `JustSpeakWatchWidgetExtension` | watchOS extension, 10.0 | Same Watch gate; directly compiles shared Watch and selected `SpeakCore` files. |
+| `JustSpeakWatchApp` | watchOS app, 10.0 | `TUIST_WATCH_APP`; embeds the watch widget and consumes package `SpeakWatchCore`. |
+| `JustSpeakWatchWidgetExtension` | watchOS extension, 10.0 | Same Watch gate; compiles `JustSpeakWatchShared` adapters and consumes package `SpeakWatchCore`. |
 | `CoreJourneyFixtureApp` | macOS app | Always; fixture used by UI tests. |
 | `SpeakAppUITests` | macOS UI tests | Always; depends on `SpeakApp` and `CoreJourneyFixtureApp`. |
 | `SpeakiOSUITests` | iOS UI tests, 17.0 | Always; depends on `SpeakiOS`. |
@@ -77,8 +95,55 @@ Each arrow points from a dependency to the target that consumes it.
 
 `SHOW_OPENCLAW_TAB` adds its iOS compilation condition. `TUIST_APP_STORE` selects the sandboxed macOS App Store
 identity and entitlement set; it is independent of `TUIST_RELEASE_TRAIN`, which selects Stable or Alpha identities.
-The Watch targets do not depend on the `SpeakCore` package product because transitive package manifests do not declare
-watchOS support. Their `Project.swift` source lists are direct shared-source inclusion, not module dependency arrows.
+The Watch targets consume the dependency-free `SpeakWatchCore` package product instead of `SpeakCore`, whose
+transitive package manifests do not declare watchOS support. Their `Project.swift` source lists include each
+target's app or extension sources and `JustSpeakWatchShared` adapters. The shared Watch domain sources compile
+once in `SpeakWatchCore`; those package dependencies are module arrows, while the adapter inclusion is not.
+
+### Portable, Windows and Linux graph
+
+[Package.swift](../Package.swift) switches to a portable graph on Windows and Linux, and on macOS when
+`SPEAK_PORTABLE_CORE=1` or `SPEAK_WINDOWS_TARGET=1` is set. It compiles the canonical `SpeakCore` sources without
+Apple-only packages; an Apple adapter must be listed in `appleCoreSources` to be left out, so new domain files reach
+every platform. `scripts/verify-portable-core-boundary.py` checks that boundary.
+Paid-access models, routing, session lifecycle and client/storage protocols remain shared.
+Only its CryptoKit HTTP adapter, AVFoundation WAV converter and StoreKit adapter are
+excluded; the Keychain implementation inside the client contract file is guarded by
+`!SPEAK_PORTABLE_CORE`. This source boundary does not enable paid access on any platform.
+
+| Target | Kind | Direct internal dependencies / role |
+| --- | --- | --- |
+| `SpeakCore` | library target | Portable build (`SPEAK_PORTABLE_CORE`) of the shared catalogues, provider clients and policies. |
+| `SpeakSync` | library target | Depends on `SpeakCore`; the portable CloudKit Web Services client and envelope formats. |
+| `SpeakDesktop` | library target | Depends on `SpeakCore`; desktop batch and live transcription routing, the recording store, History search and retry, post-processing, profiles and on-device model download, verification and ownership. |
+| `SpeakDesktopSync` | library target | Depends on `SpeakDesktop`, `SpeakSync` and `SpeakCore`; iCloud History sync and key import for desktop hosts. |
+| `SpeakDesktopHost` | library target | Depends on `SpeakCore`, `SpeakDesktop`, `SpeakDesktopSync` and `SpeakSync`; `DesktopHostController<Platform>`, the recording, History, playback, output, settings, Read aloud, on-device model and iCloud sync orchestration shared by the Windows and Linux apps behind `DesktopHostPlatform`. |
+| `CWindowsSupport`, `CWindowsAutomation` | C++ targets | `SPEAK_WINDOWS_TARGET`; Win32, WASAPI, Media Foundation, UI Automation, WinHTTP, CNG, Credential Manager and the run-time whisper.cpp loader. |
+| `SpeakWindowsPlatform` | library target | `SPEAK_WINDOWS_TARGET`; Swift over the Windows C++ ABI. |
+| `SpeakWindows` | executable target | `SPEAK_WINDOWS_TARGET`; the Windows app, `WindowsHostPlatform` and its self-tests. The product also ships `speak` (`SpeakCLI`) over a named pipe. |
+| `CLinuxSystem/*`, `CLinuxSupport` | system library and C targets | `SPEAK_LINUX_TARGET`; GTK 4/libadwaita, libpulse, libsecret, X11/XTest, GStreamer, OpenSSL libcrypto and the XDG portals behind the `jsti_*` ABI, plus the run-time whisper.cpp loader. |
+| `SpeakLinuxPlatform`, `SpeakLinuxWebSocket` | library targets | `SPEAK_LINUX_TARGET`; Swift over the Linux C ABI, and the SwiftNIO live-transcription transport. |
+| `SpeakLinux` | executable target | `SPEAK_LINUX_TARGET`; the Linux app, `LinuxHostPlatform` and its self-tests. |
+| `SpeakPortableTests`, `SpeakDesktopTests`, `SpeakDesktopHostTests`, `SpeakDesktopSyncTests`, `SpeakSyncTests` | test targets | Shared-core, desktop and host tests run on Linux, Windows and portable macOS. |
+| `SpeakWindowsPlatformTests`, `SpeakLinuxPlatformTests`, `SpeakLinuxWebSocketTests` | test targets | Platform adapter tests behind the matching target flag. |
+
+```mermaid
+flowchart TD
+    Core[SpeakCore] --> Desktop[SpeakDesktop]
+    Core --> Sync[SpeakSync]
+    Desktop --> DesktopSync[SpeakDesktopSync]
+    Sync --> DesktopSync
+    Desktop --> Host[SpeakDesktopHost]
+    DesktopSync --> Host
+    Host --> Windows[SpeakWindows]
+    Host --> Linux[SpeakLinux]
+    WinPlatform[SpeakWindowsPlatform] --> Windows
+    LinuxPlatform[SpeakLinuxPlatform] --> Linux
+```
+
+`scripts/typecheck-windows-swift.sh` compiles the Windows Swift targets against the shared host on a Linux or macOS
+host. Windows development, packaging and parity are described in [windows-development.md](windows-development.md);
+Linux in [linux-development.md](linux-development.md).
 
 ## Shared responsibilities
 
@@ -150,6 +215,24 @@ extensions, Live Activity result actions and background completions.
 All backends feed the service's common start, stop, cancellation, recording-safety, history and activity completion
 boundaries, but batch intentionally has no partial transcript. App Intents may launch and execute in the app process
 without the foreground scene, so scene construction is not the only lifecycle entry.
+
+## Windows and Linux runtime
+
+Each desktop app runs one native window on its UI thread and one `DesktopHostController` actor. The window reports
+events (record, import, History selection, settings Applies) to Swift; the controller owns recording, History,
+transcription, post-processing, output and settings, and pushes display state back through the host's setters, which
+are safe from any thread. Settings Applies are serialised on a settings queue. A recording fixes its target field,
+profile and text-output choice when it starts; History records are saved before any network request, and cancellation
+or closing keeps the audio.
+
+`DesktopHostPlatform` is the whole platform boundary: window presenter, credential store (Windows Credential Manager,
+the Secret Service keyring on Linux), private files, audio conversion, clipboard, output jobs, playback, Read aloud and
+on-device models. Platform-neutral rules such as model slots, the Azure Speech resource endpoint, key saving with the
+sync hooks, History retry routing, playback request ownership, the Read aloud controller, on-device model management
+and the iCloud sync flow live in `SpeakDesktopHost` or `SpeakDesktop`, so both hosts behave the same; each host
+supplies only its native pieces (player, whisper.cpp loader and digest, CloudKit transport, envelope cryptography,
+credential vault and loopback listener). Live transcription uses the shared clients over an injected WebSocket transport: WinHTTP on
+Windows and SwiftNIO on Linux.
 
 ## Extensions and companion surfaces
 

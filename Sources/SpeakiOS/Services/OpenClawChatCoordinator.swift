@@ -254,7 +254,10 @@ public final class OpenClawChatCoordinator: ObservableObject {
     public func startVoiceInput() async throws {
         guard !isRecording, !isProcessing, !isSpeaking else { return }
 
-        let coordinator = TranscriberCoordinator()
+        let coordinator = TranscriberCoordinator(
+            networkSnapshot: CaptureNetworkPathMonitor.liveSnapshotProvider(),
+            localRecognitionCapability: AppleLegacyRecognitionCapabilityProbe.capability(for:)
+        )
         self.transcriber = coordinator
         isRecording = true
         partialTranscript = ""

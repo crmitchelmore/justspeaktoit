@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// xAI's dedicated file-transcription endpoint, shared by macOS and iOS.
 ///

@@ -10,19 +10,20 @@ final class LocalTranscriptionStarterPresetTests: XCTestCase {
       supportsParakeet: true
     )
 
-    XCTAssertEqual(presets.map(\.id), [.parakeetStreaming, .whisperKitStreaming])
+    XCTAssertEqual(presets.map(\.id), [.parakeetStreaming, .whisperKitStreaming, .whisperKitCompactStreaming])
     XCTAssertEqual(presets.first?.displayName, FluidAudioParakeetModel.displayName)
     XCTAssertEqual(whisperKitModel(in: presets)?.id, "local/whisperkit/large-v3-turbo")
   }
 
-  func testRecommendedBatchPresets_onlyIncludeLeadingWhisperKitModel() {
+  func testRecommendedBatchPresets_preferPhononOnSupportedPlatform() {
     let presets = LocalTranscriptionStarterPreset.recommended(
       for: .batch,
       availableModels: ModelCatalog.localTranscription,
       supportsParakeet: true
     )
 
-    XCTAssertEqual(presets.map(\.id), [.whisperKitBatch])
+    XCTAssertEqual(presets.map(\.id), PhononLocalModels.isSupportedOnCurrentPlatform
+      ? [.phononBatch, .whisperKitBatch, .whisperKitCompactBatch] : [.whisperKitBatch, .whisperKitCompactBatch])
     XCTAssertEqual(whisperKitModel(in: presets)?.id, "local/whisperkit/large-v3-turbo")
   }
 
@@ -33,7 +34,34 @@ final class LocalTranscriptionStarterPresetTests: XCTestCase {
       supportsParakeet: false
     )
 
-    XCTAssertEqual(presets.map(\.id), [.whisperKitStreaming])
+    XCTAssertEqual(presets.map(\.id), [.whisperKitStreaming, .whisperKitCompactStreaming])
+  }
+
+  func testCompactPresets_useCanonicalModelMetadataAndOfferSmallerDownload() throws {
+    for mode in [AppSettings.LocalTranscriptionMode.batch, .streaming] {
+      let presets = LocalTranscriptionStarterPreset.recommended(
+        for: mode, availableModels: ModelCatalog.localTranscription, supportsParakeet: false
+      )
+      let compact = try XCTUnwrap(presets.last)
+      guard case .whisperKit(let model) = compact.engine else {
+        return XCTFail("The compact preset must use WhisperKit")
+      }
+      XCTAssertEqual(model, ModelCatalog.localTranscription.first { $0.id == "local/whisperkit/base" })
+      XCTAssertEqual(compact.approximateSizeMB, model.approximateSizeMB)
+      XCTAssertLessThan(compact.approximateSizeMB, try XCTUnwrap(presets.first).approximateSizeMB)
+      XCTAssertTrue(compact.detail.contains("Trades accuracy"))
+    }
+  }
+
+  func testCompactPresets_omitUnavailableModelsAndNeverDuplicatePrimary() {
+    let models = ModelCatalog.localTranscription.filter { $0.id == "local/whisperkit/base" }
+    let presets = LocalTranscriptionStarterPreset.recommended(
+      for: .batch, availableModels: models, supportsParakeet: false
+    )
+    XCTAssertEqual(presets.map(\.id), [.whisperKitBatch])
+    XCTAssertTrue(LocalTranscriptionStarterPreset.recommended(
+      for: .batch, availableModels: [], supportsParakeet: false
+    ).isEmpty)
   }
 
   func testPreferredWhisperKitModel_fallsBackToQualityAndFastModel() {

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// One `URLProtocol` stub for the whole test suite, replacing the per-file
 /// copies that each re-implemented "return this canned response, record the

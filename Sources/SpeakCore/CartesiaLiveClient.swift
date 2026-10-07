@@ -1,265 +1,258 @@
 import Foundation
-import os.log
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
-// MARK: - Cartesia Live Client (Cross-platform WebSocket)
+// MARK: - Cartesia Live Client (portable, injected transport)
 
-/// Cross-platform Cartesia Ink streaming speech-to-text client.
+/// Shared Cartesia Ink-2 streaming client. The iOS live path reaches it through
+/// `LiveTranscriptionClientFactory` and Windows through `DesktopLiveTranscription`;
+/// the macOS app still records through its own `CartesiaLiveController` and
+/// `CartesiaLiveTranscriber` and does not use this client yet.
 ///
-/// Shared by macOS and iOS: both feed it linear16 mono PCM captured by their own
-/// platform audio layer. Conforms to `StreamingTranscriptionClient`.
-public final class CartesiaLiveClient: StreamingTranscriptionClient, @unchecked Sendable {
-    /// Final shape: each is_final transcript event carries one finalised turn.
+/// One `/stt/turns/websocket` socket per run (see `CartesiaLiveProtocol`). PCM16
+/// mono is repacked into 100 ms frames and sent as one binary frame at a time
+/// once the socket has actually opened; until then the newest two seconds wait,
+/// the oldest making room. A graceful finish drains every admitted frame,
+/// sends exactly one `{"type":"close"}` and reads the remaining results until
+/// the server's normal closure or the post-stop budget, whichever comes first,
+/// then returns the whole session. The transport is injected
+/// (`URLSessionStreamingConnection` on Apple, WinHTTP on Windows); framing,
+/// admission and lifecycle stay here so the platforms cannot drift.
+///
+/// State lives under one lock that is never held across a transport call, a
+/// host callback, a scheduler call or a continuation resume.
+public final class CartesiaLiveClient: FinalizingStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient, @unchecked Sendable {
+    /// Each `turn.end` is one completed turn, delivered once.
     public let finalShape: TranscriptFinalShape = .standaloneSegments
+    /// `close` has the model process every buffered sample, so words can still
+    /// arrive after the last frame: a caller must always finish gracefully.
+    public let finishFlushesBufferedAudio = true
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-    private static let host = "api.cartesia.ai"
-    private static let path = "/stt/turns/websocket"
-    private static let apiVersion = "2026-03-01"
-    private static let preferredChunkBytes = 3_200
+    /// A finish must have drained its admitted audio, including any wait for
+    /// the handshake, and sent `close` within this bound.
+    public static let finishBudget: TimeInterval = 1.5
+    /// Exposes this client's finish bound to host lifecycle watchdogs: the
+    /// drain, then the post-stop budget and any stop grace after `close`.
+    public var finalisationBudget: TimeInterval? { timing.drain + timing.postClose }
+    /// The handshake must complete within this bound of `start()`.
+    static let readyDeadline: TimeInterval = 10
+    /// A single send that has not completed by then means the transport stalled.
+    static let sendDeadline: TimeInterval = 5
+    /// Seconds of PCM that may wait for the socket to open, the newest kept,
+    /// and that may be queued or in flight once it has.
+    static let bufferedAudioSeconds: Double = 2
 
-    private let apiKey: String
-    private let model: String
-    private let sampleRate: Int
-    private let session: URLSession
-    private let logger = SpeakLogger.logger(category: "CartesiaLiveClient")
-    private let stateLock = NSLock()
-    private let pendingSendGroup = DispatchGroup()
+    let apiKey: String
+    let model: String
+    let sampleRate: Int
+    private let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    let timing: Timing
+    let lock = NSLock()
+    private(set) var run: CartesiaLiveRun
+    /// Kept for the boundary contract; see `onUtteranceBoundary`.
+    var boundaryCallback: ((String) -> Void)?
 
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var pendingAudio = Data()
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isStopping = false
-
-    public init(
+    public convenience init(
         apiKey: String,
         model: String = "ink-2",
         sampleRate: Int = 16_000,
         session: URLSession = .shared
     ) {
-        self.apiKey = apiKey
+        self.init(
+            apiKey: apiKey, model: model, sampleRate: sampleRate,
+            makeConnection: { URLSessionStreamingConnection(session: session, request: $0) }
+        )
+    }
+
+    /// `postStopFinalizeBudget` and `stopGracePeriod` come from
+    /// ``LiveClientOptions`` and bound the read after `close`; the server's
+    /// normal closure ends a healthy finish sooner. Without a budget the
+    /// catalogue's Ink-2 post-stop budget applies.
+    public convenience init(
+        apiKey: String,
+        model: String = "ink-2",
+        sampleRate: Int = 16_000,
+        postStopFinalizeBudget: TimeInterval? = nil,
+        stopGracePeriod: TimeInterval = 0,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
+    ) {
+        self.init(
+            apiKey: apiKey, model: model, sampleRate: sampleRate,
+            timing: Timing(postStopFinalizeBudget: postStopFinalizeBudget, stopGracePeriod: stopGracePeriod),
+            makeConnection: makeConnection, schedule: schedule
+        )
+    }
+
+    init(
+        apiKey: String,
+        model: String,
+        sampleRate: Int,
+        timing: Timing,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler
+    ) {
+        self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.model = model
         self.sampleRate = sampleRate
-        self.session = session
+        self.timing = timing
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.run = CartesiaLiveRun(sampleRate: sampleRate, ignoredReceiveWindow: timing.ignoredReceiveWindow)
     }
 
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
-    ) {
-        withStateLock {
-            isStopping = false
-            self.onTranscript = onTranscript
-            self.onError = onError
+    deinit { run.connection?.cancel() }
+
+    // MARK: - StreamingTranscriptionClient
+
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        let opening: (CartesiaLiveRun, URLRequest)? = withState { effects in
+            let active: CartesiaLiveRun
+            if run.phase == .idle {
+                // Audio offered before the first start is already queued, in order.
+                active = run
+            } else {
+                retire(run, &effects)
+                active = CartesiaLiveRun(sampleRate: sampleRate, ignoredReceiveWindow: timing.ignoredReceiveWindow)
+                run = active
+            }
+            active.phase = .connecting
+            active.onTranscript = onTranscript
+            active.onError = onError
+            guard !apiKey.isEmpty else {
+                fail(active, StreamingClientError.missingAPIKey(provider: "Cartesia"), &effects)
+                return nil
+            }
+            guard let request = CartesiaLiveProtocol.webSocketRequest(
+                apiKey: apiKey, model: model, sampleRate: sampleRate
+            ) else {
+                fail(active, StreamingClientError.invalidURL, &effects)
+                return nil
+            }
+            after(Self.readyDeadline, active, &effects) { client, active, effects in
+                if !active.opened { client.fail(active, CartesiaStreamingError.sessionNotReady, &effects) }
+            }
+            return (active, request)
         }
-        connectWebSocket()
+        guard let opening else { return }
+        connect(opening.0, request: opening.1)
     }
 
+    /// Capture chunks are repacked into 100 ms frames, so a chunk need not hold
+    /// whole samples. While the socket opens, including before the first
+    /// `start()`, the newest `bufferedAudioSeconds` wait and the oldest frames
+    /// make room. Once it has opened, admission is bounded by the same amount
+    /// queued or in flight, and exceeding it is a stalled transport.
     public func sendAudio(_ audioData: Data) {
-        guard let task = currentWebSocketTask(), task.state == .running else {
-            bufferPendingAudio(audioData)
-            return
+        guard !audioData.isEmpty else { return }
+        let outbound: CartesiaOutbound? = withState { effects in
+            let active = run
+            guard active.phase == .idle || active.phase == .connecting || active.phase == .streaming else {
+                return nil
+            }
+            for frame in active.framer.append(audioData) {
+                guard admit(frame, active, &effects) else { return nil }
+            }
+            trimStartupAudio(active)
+            return claim(active, &effects)
         }
-        flushPendingAudio(to: task)
-        send(audioData, to: task)
+        if let outbound { drive(outbound) }
     }
 
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            return webSocketTask
-        }
-        guard let task else { return }
-        if task.state == .running {
-            task.cancel(with: .normalClosure, reason: nil)
-        }
-        withStateLock {
-            if webSocketTask === task { webSocketTask = nil }
+    /// Immediate teardown; `cancel()` is the same path. A pending handshake,
+    /// drain or finish is aborted at once and every waiter resumes with the
+    /// text received so far.
+    public func stop() { withState { retire(run, &$0) } }
+
+    public func cancel() { stop() }
+
+    /// Drains every admitted frame and the framer's padded tail, sends
+    /// `{"type":"close"}` once, then reads results until the server's normal
+    /// closure or the post-stop budget (plus any stop grace). Returns the whole
+    /// session transcript, confirmed turns and the open turn's words, or `nil`
+    /// when nothing has words; turns that end during the finish are folded into
+    /// it rather than also delivered through `onTranscript`. Later calls return
+    /// the same result until the next `start()`. A drain that cannot send
+    /// `close` within `finishBudget`, or a failed stream, publishes its error
+    /// before returning, also to callers that join while the error is being
+    /// delivered. Concurrent callers share one outcome; cancelling the calling
+    /// task aborts the session.
+    public func finishAndWait() async -> String? {
+        let active: CartesiaLiveRun = withState { _ in run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                withState { effects in join(active, continuation, &effects) }
+            }
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.withState { effects in if self.isCurrent(active) { self.retire(active, &effects) } }
         }
     }
 
-    // MARK: - Connection
+    // MARK: - Session
 
-    static func webSocketURL(model: String, sampleRate: Int) -> URL? {
-        var components = URLComponents()
-        components.scheme = "wss"
-        components.host = host
-        components.path = path
-        components.queryItems = [
-            URLQueryItem(name: "model", value: model),
-            URLQueryItem(name: "encoding", value: "pcm_s16le"),
-            URLQueryItem(name: "sample_rate", value: String(sampleRate)),
-            URLQueryItem(name: "cartesia_version", value: apiVersion)
-        ]
-        return components.url
+    private func join(
+        _ active: CartesiaLiveRun, _ continuation: CheckedContinuation<String?, Never>,
+        _ effects: inout CartesiaLiveEffects
+    ) {
+        let transcript = active.transcript
+        switch active.phase {
+        case .connecting, .streaming, .finishing:
+            guard !Task.isCancelled else {
+                retire(active, &effects)
+                effects.add { continuation.resume(returning: transcript) }
+                return
+            }
+            active.waiters.append(continuation)
+            beginFinish(active, &effects)
+        case .idle:
+            // Never started, so nothing was sent and nothing can be finished.
+            retire(active, &effects)
+            effects.add { continuation.resume(returning: transcript) }
+        case .closed:
+            // A failure still being published keeps late callers until its
+            // error is out, exactly like callers that were already waiting.
+            guard !active.deliveringFailure else {
+                active.lateWaiters.append(continuation)
+                return
+            }
+            effects.add { continuation.resume(returning: transcript) }
+        }
     }
 
-    private func connectWebSocket() {
-        guard let url = Self.webSocketURL(model: model, sampleRate: sampleRate) else {
-            currentOnError()?(StreamingClientError.invalidURL)
-            return
-        }
-
-        var request = URLRequest(url: url)
-        // Cartesia authenticates the WebSocket handshake with a Bearer token,
-        // matching the macOS provider implementation.
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue(Self.apiVersion, forHTTPHeaderField: "Cartesia-Version")
-
-        let task = session.webSocketTask(with: request)
-        let proceed = withStateLock { () -> Bool in
-            guard !isStopping else { return false }
-            webSocketTask = task
-            task.resume()
+    /// The connection is built and resumed outside the lock: the factory and
+    /// the transport may call back synchronously.
+    private func connect(_ active: CartesiaLiveRun, request: URLRequest) {
+        let connection = makeConnection(request)
+        let attached: Bool = withState { _ in
+            guard isCurrent(active), active.connection == nil else { return false }
+            active.connection = connection
             return true
         }
-        guard proceed else {
-            task.cancel(with: .goingAway, reason: nil)
+        guard attached else {
+            connection.cancel()
             return
         }
-        logger.info("Cartesia WebSocket connecting (model=\(self.model, privacy: .public))")
-        flushPendingAudio(to: task)
-        receiveMessages()
-    }
-
-    private func receiveMessages() {
-        guard let task = currentWebSocketTask() else { return }
-        task.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let message):
-                self.handleMessage(message)
-                self.receiveMessages()
-            case .failure(let error):
-                if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-                self.currentOnError()?(self.mapConnectionError(error))
-            }
+        log("WebSocket connecting")
+        connection.resume { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.markOpened(active)
         }
+        receive(active, connection)
     }
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-        switch message {
-        case .string(let text):
-            parseResponse(text)
-        case .data(let data):
-            if let text = String(data: data, encoding: .utf8) {
-                parseResponse(text)
-            }
-        @unknown default:
-            break
+    private func markOpened(_ active: CartesiaLiveRun) {
+        let outbound: CartesiaOutbound? = withState { effects in
+            guard recordOpen(active) else { return nil }
+            return claim(active, &effects)
         }
-    }
-
-    private func parseResponse(_ json: String) {
-        // Surface Cartesia `type: "error"` events instead of silently ignoring them.
-        if let data = json.data(using: .utf8),
-           let errorEvent = try? JSONDecoder().decode(CartesiaErrorEvent.self, from: data),
-           errorEvent.type == "error" {
-            let message = errorEvent.message ?? errorEvent.title ?? "Cartesia streaming error"
-            currentOnError()?(NSError(
-                domain: "Cartesia", code: errorEvent.statusCode ?? -1,
-                userInfo: [NSLocalizedDescriptionKey: message]
-            ))
-            return
-        }
-        guard let event = Self.transcriptEvent(from: json) else { return }
-        currentOnTranscript()?(event.text, event.isFinal)
-    }
-
-    static func transcriptEvent(from json: String) -> (text: String, isFinal: Bool)? {
-        guard
-            let data = json.data(using: .utf8),
-            let response = try? JSONDecoder().decode(CartesiaTurnResponse.self, from: data),
-            let transcript = response.transcriptText, !transcript.isEmpty
-        else {
-            return nil
-        }
-        return (transcript, response.type == "turn.end")
-    }
-
-    // MARK: - Sending
-
-    private func send(_ audioData: Data, to task: URLSessionWebSocketTask) {
-        let sendGroup = pendingSendGroup
-        sendGroup.enter()
-        task.send(.data(audioData)) { [weak self] error in
-            defer { sendGroup.leave() }
-            guard let self, let error else { return }
-            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-            self.currentOnError()?(self.mapConnectionError(error))
-        }
-    }
-
-    private func bufferPendingAudio(_ audioData: Data) {
-        withStateLock {
-            pendingAudio.append(audioData)
-            let maxBufferedBytes = Self.preferredChunkBytes * 20
-            if pendingAudio.count > maxBufferedBytes {
-                pendingAudio = Data(pendingAudio.suffix(maxBufferedBytes))
-            }
-        }
-    }
-
-    private func flushPendingAudio(to task: URLSessionWebSocketTask) {
-        let buffered = withStateLock { () -> Data in
-            let snapshot = pendingAudio
-            pendingAudio.removeAll(keepingCapacity: true)
-            return snapshot
-        }
-        guard !buffered.isEmpty else { return }
-        send(buffered, to: task)
-    }
-
-    // MARK: - Errors + state
-
-    private func mapConnectionError(_ error: Error) -> Error {
-        let nsError = error as NSError
-        let description = nsError.localizedDescription.lowercased()
-        if nsError.code == 401 || nsError.code == 403
-            || description.contains("401") || description.contains("403")
-            || description.contains("unauthorized") || description.contains("forbidden") {
-            return StreamingClientError.invalidAPIKey(provider: "Cartesia")
-        }
-        return error
-    }
-
-    private func withStateLock<T>(_ block: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return block()
-    }
-
-    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func isStoppingState() -> Bool { withStateLock { isStopping } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-}
-
-private struct CartesiaTurnResponse: Decodable {
-    struct TurnResult: Decodable {
-        let transcript: String?
-    }
-
-    let type: String
-    let transcript: String?
-    let results: [TurnResult]?
-
-    var transcriptText: String? {
-        if let transcript { return transcript }
-        return results?.compactMap(\.transcript).first { !$0.isEmpty }
-    }
-}
-
-private struct CartesiaErrorEvent: Decodable {
-    let type: String
-    let statusCode: Int?
-    let title: String?
-    let message: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case statusCode = "status_code"
-        case title
-        case message
+        if let outbound { drive(outbound) }
     }
 }

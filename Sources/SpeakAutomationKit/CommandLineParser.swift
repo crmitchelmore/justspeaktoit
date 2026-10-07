@@ -81,13 +81,22 @@ public enum CommandLineParser {
       mcp          Run a stdio MCP server exposing the same commands as tools.
 
     NOTES
-      All commands talk to the running Just Speak To It app over a local socket,
+      All commands talk to the running Just Speak To It app over a \(Self.localTransport),
       so API keys and provider configuration stay in the app. --json prints a
       stable, versioned envelope suitable for scripts and agents.
 
     EXIT CODES
       0 success   1 command failed   2 usage error   3 app not running
     """
+
+    /// How `speak` reaches the app on this platform, named in the usage text.
+    static var localTransport: String {
+        #if os(Windows)
+        return "local named pipe"
+        #else
+        return "local socket"
+        #endif
+    }
 
     /// Verbs that map straight onto a command plus the options they accept.
     /// Table-driven so adding a verb is data, not another branch.
@@ -249,11 +258,19 @@ public enum CommandLineParser {
         for path: String,
         currentDirectory: String = FileManager.default.currentDirectoryPath
     ) -> String {
+        #if os(Windows)
+        return self.windowsAbsolutePath(
+            for: path,
+            currentDirectory: currentDirectory,
+            homeDirectory: ProcessInfo.processInfo.environment["USERPROFILE"]
+        )
+        #else
         let expanded = NSString(string: path).expandingTildeInPath
         guard !expanded.hasPrefix("/") else { return expanded }
         return URL(fileURLWithPath: currentDirectory, isDirectory: true)
             .appendingPathComponent(expanded)
             .standardizedFileURL
             .path
+        #endif
     }
 }

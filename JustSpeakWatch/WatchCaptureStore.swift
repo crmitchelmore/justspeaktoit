@@ -1,4 +1,5 @@
 import Foundation
+import SpeakWatchCore
 import WatchConnectivity
 
 /// One capture as tracked (and persisted) on the watch.

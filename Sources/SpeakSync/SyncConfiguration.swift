@@ -6,19 +6,22 @@ import Security
 #endif
 
 /// Configuration for CloudKit sync operations.
+///
+/// Schema names forward to the portable `SyncSchema`, which the CloudKit Web
+/// Services transport shares; this type adds the native container and database.
 public enum SyncConfiguration {
     /// The CloudKit container identifier.
     #if os(iOS)
-    public static let containerIdentifier = ReleaseTrain.current.iosCloudContainer
+    public static let containerIdentifier = SyncContainerFamily.iOS.containerIdentifier(in: .current)
     #elseif os(macOS)
-    public static let containerIdentifier = ReleaseTrain.current.macCloudContainer
+    public static let containerIdentifier = SyncContainerFamily.macOS.containerIdentifier(in: .current)
     #endif
 
     /// The custom zone name for transcription history.
-    public static let zoneName = "TranscriptionHistoryZone"
+    public static let zoneName = SyncSchema.zoneName
 
     /// The record type for transcription history entries.
-    public static let recordType = "TranscriptionHistory"
+    public static let recordType = SyncSchema.History.recordType
 
     /// UserDefaults key for storing the last sync token.
     public static let syncTokenKey = "speak.sync.serverChangeToken"
@@ -29,11 +32,23 @@ public enum SyncConfiguration {
     /// UserDefaults key for tracking subscription creation.
     public static let subscriptionCreatedKey = "speak.sync.subscriptionCreated"
 
+    /// UserDefaults key for this device's iCloud data sync switch, which covers
+    /// History and, on Mac, Compare Models results. Encrypted API-Key Sync has
+    /// its own opt-in. Absent means on, so a device that synced before the
+    /// switch existed keeps syncing until the user turns it off.
+    public static let dataSyncEnabledKey = "speak.sync.iCloudDataSyncEnabled"
+
+    /// Whether this device takes part in iCloud data sync. Off keeps History
+    /// and comparison results on this device only.
+    public static func isDataSyncEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: dataSyncEnabledKey) as? Bool ?? true
+    }
+
     /// The database subscription whose pushes announce a history change.
-    public static let historySubscriptionID = "transcription-history-changes"
+    public static let historySubscriptionID = SyncSchema.History.subscriptionID
 
     /// Maximum number of entries to sync in a single batch.
-    public static let batchSize = 100
+    public static let batchSize = SyncSchema.batchSize
 
     /// The CloudKit container.
     /// Returns `nil` when CloudKit entitlements are missing (Developer ID builds).

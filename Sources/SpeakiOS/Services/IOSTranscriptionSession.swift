@@ -9,6 +9,7 @@ import SpeakCore
 @MainActor
 protocol IOSRecordingSession: AnyObject {
     var isBatch: Bool { get }
+    var stopCompletionTimeout: TimeInterval { get }
     var resolution: IOSTranscriptionSession.Resolution { get }
     var partialText: String { get }
     var confidence: Double? { get }
@@ -192,16 +193,13 @@ final class IOSTranscriptionSession: IOSRecordingSession {
         audioSessionManager: AudioSessionManager,
         batchAPIKey: String,
         liveAPIKey: (LiveTranscriptionRoute) -> String,
-        transcriptionKeywords: [String]
+        transcriptionKeywords: [String],
+        requiresStrictOnDeviceRecognition: Bool
     ) throws -> Backend {
         switch resolution.backend {
         case .batch:
-            let retainRecording: Bool
-            if case .batch(let shouldRetain) = mode {
-                retainRecording = shouldRetain
-            } else {
-                retainRecording = true
-            }
+            var retainRecording = true
+            if case .batch(let shouldRetain) = mode { retainRecording = shouldRetain }
             return .batch(
                 IOSBatchTranscriber(
                     audioSessionManager: audioSessionManager,
@@ -215,6 +213,8 @@ final class IOSTranscriptionSession: IOSRecordingSession {
             let transcriber = iOSLiveTranscriber(audioSessionManager: audioSessionManager)
             transcriber.modelID = resolution.modelID
             transcriber.language = language ?? Locale.current.identifier
+            transcriber.requiresStrictOnDeviceRecognition = requiresStrictOnDeviceRecognition
+                || resolution.route?.provider == .apple
             return .apple(transcriber)
         case .openAI:
             let route = try requiredRoute(for: resolution)
@@ -335,7 +335,6 @@ final class IOSTranscriptionSession: IOSRecordingSession {
             transcriber.onFirstInputBuffer = firstInputHandler
             transcriber.onStartupObservation = startupHandler
         }
-
     }
 }
 
@@ -349,7 +348,8 @@ extension IOSTranscriptionSession {
         audioSessionManager: AudioSessionManager,
         batchAPIKey: String,
         liveAPIKey: (LiveTranscriptionRoute) -> String,
-        transcriptionKeywords: [String] = []
+        transcriptionKeywords: [String] = [],
+        requiresStrictOnDeviceRecognition: Bool = false
     ) throws {
         let resolution = try Self.resolve(modelID: modelID, mode: mode)
         let backend = try Self.makeBackend(
@@ -359,7 +359,8 @@ extension IOSTranscriptionSession {
             audioSessionManager: audioSessionManager,
             batchAPIKey: batchAPIKey,
             liveAPIKey: liveAPIKey,
-            transcriptionKeywords: transcriptionKeywords
+            transcriptionKeywords: transcriptionKeywords,
+            requiresStrictOnDeviceRecognition: requiresStrictOnDeviceRecognition
         )
         self.init(resolution: resolution, language: language, backend: backend)
     }

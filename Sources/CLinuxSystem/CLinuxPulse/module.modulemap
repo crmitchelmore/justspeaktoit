@@ -1,0 +1,4 @@
+module CLinuxPulse [system] {
+    header "shim.h"
+    export *
+}

@@ -75,7 +75,7 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     if startCaptureAudio == nil {
       activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
     }
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
     let active = SharedClientControllerRun(
       shape: client.finalShape, modelIdentifier: route.modelID,
       hasExplicitBoundaries: client is UtteranceBoundaryStreamingClient

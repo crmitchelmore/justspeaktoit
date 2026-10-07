@@ -8,6 +8,11 @@ import Foundation
 public enum RecordingStartStage: String, Sendable, CaseIterable {
     /// The hot key / button was handled and the session was created.
     case triggered
+    /// The live-transcription input was built *before* local capture opened the
+    /// microphone. Building it afterwards stalled for ~3 s on Bluetooth inputs
+    /// while Core Audio settled the route the recorder had just changed.
+    /// Absent for batch/local-file sessions.
+    case streamInputPrepared
     /// Local audio capture is proven live (the recorder reports it is running).
     case captureReady
     /// The live-transcription audio tap is installed and the engine is running.
@@ -19,6 +24,7 @@ public enum RecordingStartStage: String, Sendable, CaseIterable {
     var diagnosticLabel: String {
         switch self {
         case .triggered: return "trigger"
+        case .streamInputPrepared: return "input-prepared"
         case .captureReady: return "capture-ready"
         case .streamReady: return "stream-ready"
         case .cuePlayed: return "cue"
@@ -59,6 +65,16 @@ public struct RecordingStartTimeline: Sendable, Equatable {
         return cue >= captureReady
     }
 
+    /// True unless a streaming session built its live input only after local
+    /// capture was already running — the ordering that stalled stream start by
+    /// ~3 s on Bluetooth inputs.
+    public var streamInputPrecededCapture: Bool {
+        guard self.timestamps[.streamReady] != nil else { return true }
+        guard let prepared = self.timestamps[.streamInputPrepared],
+              let captureReady = self.timestamps[.captureReady] else { return false }
+        return prepared <= captureReady
+    }
+
     /// Compact one-line summary for logs, e.g.
     /// `"capture-ready 82 ms, stream-ready 214 ms, cue 215 ms"`.
     public var diagnosticSummary: String {
@@ -95,6 +111,8 @@ public struct RecordingStartSequencer {
 
     private let now: () -> Date
     private let isSessionCurrent: () -> Bool
+    private let prepareStream: Step?
+    private let discardPreparedStream: Teardown?
     private let startCapture: Step
     private let discardCapture: Teardown?
     private let startStream: Step?
@@ -104,6 +122,8 @@ public struct RecordingStartSequencer {
     public init(
         now: @escaping () -> Date = Date.init,
         isSessionCurrent: @escaping () -> Bool = { true },
+        prepareStream: Step? = nil,
+        discardPreparedStream: Teardown? = nil,
         startCapture: @escaping Step,
         discardCapture: Teardown? = nil,
         startStream: Step?,
@@ -112,6 +132,8 @@ public struct RecordingStartSequencer {
     ) {
         self.now = now
         self.isSessionCurrent = isSessionCurrent
+        self.prepareStream = prepareStream
+        self.discardPreparedStream = discardPreparedStream
         self.startCapture = startCapture
         self.discardCapture = discardCapture
         self.startStream = startStream
@@ -119,7 +141,8 @@ public struct RecordingStartSequencer {
         self.playCue = playCue
     }
 
-    /// Brings capture up and only then plays the cue. Any failure propagates
+    /// Prepares the live input (when there is a stream), brings capture up and
+    /// only then plays the cue. Any failure propagates
     /// with the cue unplayed — the user is never told a failed session started.
     ///
     /// Both steps are awaits, and the user can stop (or start a replacement
@@ -130,13 +153,23 @@ public struct RecordingStartSequencer {
     public func run() async throws -> RecordingStartTimeline {
         var timeline = RecordingStartTimeline(triggeredAt: self.now())
 
+        // Only a session that streams has a live input to prepare. It must be
+        // built before capture opens the microphone: see `streamInputPrepared`.
+        if self.startStream != nil, let prepareStream = self.prepareStream {
+            try await prepareStream()
+            try await self.requireSessionIsCurrent(discarding: [self.discardPreparedStream])
+            timeline.mark(.streamInputPrepared, at: self.now())
+        }
+
         try await self.startCapture()
-        try await self.requireSessionIsCurrent(discarding: [self.discardCapture])
+        try await self.requireSessionIsCurrent(discarding: [self.discardCapture, self.discardPreparedStream])
         timeline.mark(.captureReady, at: self.now())
 
         if let startStream = self.startStream {
             try await startStream()
-            try await self.requireSessionIsCurrent(discarding: [self.discardStream, self.discardCapture])
+            try await self.requireSessionIsCurrent(
+                discarding: [self.discardStream, self.discardCapture, self.discardPreparedStream]
+            )
             timeline.mark(.streamReady, at: self.now())
         }
 

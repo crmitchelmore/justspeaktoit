@@ -76,7 +76,7 @@ final class ElevenLabsLiveController: NSObject, LiveTranscriptionController {
     let apiKey = try await elevenLabsAPIKey()
     guard !hasFinished, !Task.isCancelled else { throw CancellationError() }
     activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
 
     do {
       guard !hasFinished, !Task.isCancelled else { throw CancellationError() }

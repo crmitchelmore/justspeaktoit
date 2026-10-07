@@ -48,7 +48,7 @@ final class FluidAudioEngineCapture: FluidAudioAudioCapturing {
   private var audioEngine: AVAudioEngine?
 
   func start(onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void) async throws {
-    let audioEngine = AVAudioEngine()
+    let audioEngine = LiveInputEngines.shared.makeEngine()
     self.audioEngine = audioEngine
     let inputNode = audioEngine.inputNode
     inputNode.removeTap(onBus: 0)

@@ -53,7 +53,7 @@ final class AppleSpeechAnalyzerLiveController: LiveTranscriptionController {
     }
 
     let inputSession = await audioDeviceManager.beginUsingPreferredInput()
-    audioEngine = AVAudioEngine()
+    audioEngine = LiveInputEngines.shared.makeEngine()
     do {
       try await startSpeechAnalyzer(preRollBuffers: preRollBuffers)
       activeInputSession = inputSession

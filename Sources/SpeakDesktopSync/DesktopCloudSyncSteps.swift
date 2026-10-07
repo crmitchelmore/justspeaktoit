@@ -1,0 +1,123 @@
+import Foundation
+import SpeakSync
+
+/// A History pass on this device goes on only while its web session is the
+/// one the account was validated in and History sync is still turned on.
+/// Each step holds the session for its whole duration. Turning History off is
+/// noticed when the next step or request begins, so at most the step already
+/// under way completes.
+final class DesktopHistoryPassFence: HistorySyncPassFence {
+    private let session: CloudKitWebSessionFence
+    private let state: DesktopCloudSyncStateStore
+
+    init(session: CloudKitWebSessionFence, state: DesktopCloudSyncStateStore) {
+        self.session = session
+        self.state = state
+    }
+
+    func admit<Value>(
+        isolation: isolated (any Actor)?,
+        _ work: () async throws -> Value
+    ) async throws -> Value {
+        try await session.admit(isolation: isolation) {
+            guard await state.current.enabledFeatures.contains(.history) else {
+                throw CloudKitWebServicesError.consentRequired(.history)
+            }
+            return try await work()
+        }
+    }
+}
+
+/// The account-bound steps of API-key import, and saving a key by hand. Each
+/// runs on the sync state's actor, so none interleaves with another or with
+/// turning import off. An import step runs inside one update of the state,
+/// admitted by the pass's session fence, and is decided against the
+/// bookkeeping as it is at that moment. It changes the credential before the
+/// state is saved; if the state cannot be saved, the step throws and the
+/// credential change stays. Saving by hand saves its mark first instead, so
+/// a remote deletion never finds a typed key marked as imported.
+/// Key values pass only between the call and the credential vault; nothing
+/// here logs, reports or stores them anywhere else.
+enum DesktopKeyImport {
+    enum Change: Equatable, Sendable {
+        case imported
+        case removed
+    }
+
+    /// Stores the key-sync key derived from the passphrase and turns import on.
+    static func store(_ key: Data, in state: inout DesktopCloudSyncState, vault: any DesktopCredentialVault) throws {
+        try vault.writeCredential(key.base64EncodedString(), name: DesktopCloudSyncCredential.apiKeySyncKey)
+        state.enabledFeatures.insert(.apiKeys)
+    }
+
+    /// Applies one synced key if it is newer than what this device has
+    /// considered. A newer value is saved as imported; a newer deletion
+    /// removes the saved value only while it is still the imported one, never
+    /// a key saved by hand.
+    static func apply(
+        _ secret: CloudKitWebSyncedSecret,
+        to state: inout DesktopCloudSyncState,
+        vault: any DesktopCredentialVault
+    ) throws -> Change? {
+        try requireImport(state)
+        let known = state.importedKeys[secret.identifier]
+        if let known, known.lastRemoteUpdate >= secret.updatedAt { return nil }
+        var change: Change?
+        if let value = secret.value {
+            try vault.writeCredential(value, name: secret.identifier)
+            change = .imported
+        } else if known?.isImportedValue == true {
+            try vault.deleteCredential(secret.identifier)
+            change = .removed
+        }
+        state.importedKeys[secret.identifier] = DesktopCloudSyncState.ImportedKey(
+            lastRemoteUpdate: secret.updatedAt,
+            isImportedValue: secret.value != nil
+        )
+        return change
+    }
+
+    /// Forgets a key-sync key the account no longer accepts and turns import
+    /// off, so the user is asked for the passphrase again, unless another key
+    /// was stored after `encoded` was read. Returns whether it did.
+    static func forget(
+        _ encoded: String,
+        in state: inout DesktopCloudSyncState,
+        vault: any DesktopCredentialVault
+    ) throws -> Bool {
+        try requireImport(state)
+        guard try vault.readCredential(DesktopCloudSyncCredential.apiKeySyncKey) == encoded else { return false }
+        try? vault.deleteCredential(DesktopCloudSyncCredential.apiKeySyncKey)
+        state.enabledFeatures.remove(.apiKeys)
+        return true
+    }
+
+    /// Saves a key typed on this device, or removes it when `value` is empty,
+    /// and marks it saved by hand, so a later remote deletion leaves it alone.
+    /// The mark is saved first and the credential changes only then, on the
+    /// state's actor with nothing in between. So when the state cannot be
+    /// saved, the credential is left as it was. When the credential then
+    /// cannot be changed, the value already saved keeps the new mark: a remote
+    /// deletion no longer removes it, though a newer remote value still
+    /// replaces it.
+    static func saveByHand(
+        _ value: String,
+        identifier: String,
+        in store: isolated DesktopCloudSyncStateStore,
+        vault: any DesktopCredentialVault
+    ) throws {
+        try store.update { $0.importedKeys[identifier]?.isImportedValue = false }
+        if value.isEmpty {
+            try vault.deleteCredential(identifier)
+        } else {
+            try vault.writeCredential(value, name: identifier)
+        }
+    }
+
+    /// Import stops as soon as it is turned off.
+    private static func requireImport(_ state: DesktopCloudSyncState) throws {
+        guard state.enabledFeatures.contains(.apiKeys) else {
+            throw CloudKitWebServicesError.consentRequired(.apiKeys)
+        }
+    }
+}

@@ -10,6 +10,12 @@ echo "→ Resolving Swift package dependencies..."
 swift package resolve
 echo "✓ Package resolution OK"
 
+benchmark_package="Benchmarks/LocalTranscription"
+benchmark_manifest="$benchmark_package/Package.swift"
+echo "→ Resolving local-transcription benchmark dependencies..."
+swift package --package-path "$benchmark_package" resolve
+echo "✓ Benchmark package resolution OK"
+
 # Extract the complete multiline CTranscribe target declaration.
 target_block=$(
   awk '
@@ -22,7 +28,7 @@ target_block=$(
         block = ""
       }
     }
-  ' Package.swift
+  ' "$benchmark_manifest"
 )
 
 binary_url=$(
@@ -37,14 +43,15 @@ declared_checksum=$(
 )
 
 if [[ -z "$binary_url" || ! "$declared_checksum" =~ ^[0-9a-f]{64}$ ]]; then
-  echo "✗ Could not extract CTranscribe URL and checksum from Package.swift" >&2
+  echo "✗ Could not extract CTranscribe URL and checksum from $benchmark_manifest" >&2
   exit 1
 fi
 
 archive=$(mktemp "${TMPDIR:-/tmp}/CTranscribe.XXXXXX.zip")
 trap 'rm -f "$archive"' EXIT
 echo "→ Downloading CTranscribe artifact..."
-curl --fail --location --silent --show-error "$binary_url" --output "$archive"
+curl --fail --location --silent --show-error --connect-timeout 30 --max-time 600 --retry 3 \
+  "$binary_url" --output "$archive"
 actual_checksum=$(swift package compute-checksum "$archive")
 if [[ "$actual_checksum" != "$declared_checksum" ]]; then
   echo "✗ CTranscribe checksum mismatch" >&2

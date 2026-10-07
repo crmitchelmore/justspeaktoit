@@ -75,6 +75,8 @@ public enum TranscriptionPricing {
         "deepgram/base": rate("0.0145"),
         // https://elevenlabs.io/pricing/api (checked 2026-09-12).
         "elevenlabs/scribe_v2": perHour("0.22"),
+        // Scribe v2 Medical is billed at the Scribe v2 rate.
+        ModelCatalog.elevenLabsScribeV2MedicalBatchID: perHour("0.22"),
         "elevenlabs/scribe-v2-streaming": perHour("0.39"),
         // Modulate Velma: $0.03/hr batch, $0.025/hr English very-fast,
         // $0.06/hr streaming (matches ModulateTranscriptionProvider).
@@ -95,7 +97,12 @@ public enum TranscriptionPricing {
         "google/gemini-3.1-flash-lite": rate("0.00096"),
         "google/gemini-2.5-flash": rate("0.00192"),
         // Gladia: $0.612/hr pre-recorded, $0.75/hr real-time.
-        "gladia/solaria-1-streaming": perHour("0.75")
+        "gladia/solaria-1-streaming": perHour("0.75"),
+        // MAI-Transcribe-2 launch price: https://microsoft.ai/news/mai-transcribe-2
+        // (checked 2026-10-01). The offer ends on 31 December 2026 and no later
+        // rate is published yet; like every rate here this is maintained by
+        // hand, so replace it when Microsoft publishes the standard price.
+        AzureTranscriptionModels.mai2: perHour("0.10")
     ]
 
     private static let prefixRates: [(prefix: String, rate: Decimal)] = [

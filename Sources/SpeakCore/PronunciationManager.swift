@@ -14,7 +14,7 @@ public protocol PronunciationPhonemeCapable {
 /// Manages the pronunciation dictionary for TTS processing.
 /// Handles loading, saving, applying replacements, and import/export.
 @MainActor
-public final class PronunciationManager: ObservableObject { // swiftlint:disable:this type_body_length
+public final class PronunciationManager: ObservableObject {
     private static let storageKey = "pronunciationDictionary"
     private static let fileExtension = "json"
 
@@ -23,8 +23,9 @@ public final class PronunciationManager: ObservableObject { // swiftlint:disable
 
     private let defaults: UserDefaults
 
-    // Cache compiled NSRegularExpression instances; key = "<options.rawValue>:<pattern>"
-    private var regexCache: [String: NSRegularExpression] = [:]
+    // Owns the replacement semantics shared with portable voice output. Every
+    // compiled expression is kept for the manager's lifetime, as before.
+    let renderer = PronunciationRenderer(retention: .unbounded)
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -96,90 +97,7 @@ public final class PronunciationManager: ObservableObject { // swiftlint:disable
 
     /// Apply pronunciation replacements to text before TTS processing.
     public func applyReplacements(to text: String) -> String {
-        var result = text
-
-        for entry in entries {
-            if let replacement = entry.replacement, !replacement.isEmpty {
-                if entry.isRegex {
-                    result = applyRegexReplacement(
-                        text: result,
-                        pattern: entry.word,
-                        replacement: replacement,
-                        caseSensitive: entry.caseSensitive
-                    )
-                } else {
-                    result = applySimpleReplacement(
-                        text: result,
-                        word: entry.word,
-                        replacement: replacement,
-                        caseSensitive: entry.caseSensitive
-                    )
-                }
-            }
-        }
-
-        return result
-    }
-
-    private func applySimpleReplacement(
-        text: String,
-        word: String,
-        replacement: String,
-        caseSensitive: Bool
-    ) -> String {
-        if caseSensitive {
-            return text.replacingOccurrences(of: word, with: replacement)
-        } else {
-            // Case-insensitive replacement with word boundaries
-            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: word))\\b"
-            guard let regex = cachedRegex(pattern: pattern, options: .caseInsensitive) else {
-                return text
-            }
-
-            let range = NSRange(text.startIndex..., in: text)
-            return regex.stringByReplacingMatches(
-                in: text,
-                options: [],
-                range: range,
-                withTemplate: replacement
-            )
-        }
-    }
-
-    private func applyRegexReplacement(
-        text: String,
-        pattern: String,
-        replacement: String,
-        caseSensitive: Bool
-    ) -> String {
-        var options: NSRegularExpression.Options = []
-        if !caseSensitive {
-            options.insert(.caseInsensitive)
-        }
-
-        guard let regex = cachedRegex(pattern: pattern, options: options) else {
-            return text
-        }
-
-        let range = NSRange(text.startIndex..., in: text)
-        return regex.stringByReplacingMatches(
-            in: text,
-            options: [],
-            range: range,
-            withTemplate: replacement
-        )
-    }
-
-    private func cachedRegex(pattern: String, options: NSRegularExpression.Options) -> NSRegularExpression? {
-        let key = "\(options.rawValue):\(pattern)"
-        if let cached = regexCache[key] {
-            return cached
-        }
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
-            return nil
-        }
-        regexCache[key] = regex
-        return regex
+        renderer.applyReplacements(to: text, entries: entries)
     }
 
     // MARK: - SSML Support
@@ -205,7 +123,7 @@ public final class PronunciationManager: ObservableObject { // swiftlint:disable
                 // For regex entries, we can't easily apply phoneme tags
                 // Fall back to simple replacement
                 if let replacement = entry.replacement {
-                    result = applyRegexReplacement(
+                    result = renderer.applyRegexReplacement(
                         text: result,
                         pattern: entry.word,
                         replacement: replacement,
@@ -213,7 +131,7 @@ public final class PronunciationManager: ObservableObject { // swiftlint:disable
                     )
                 }
             } else {
-                result = applySimpleReplacement(
+                result = renderer.applySimpleReplacement(
                     text: result,
                     word: entry.word,
                     replacement: phonemeTag,

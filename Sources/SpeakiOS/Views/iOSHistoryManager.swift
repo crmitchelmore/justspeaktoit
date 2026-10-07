@@ -216,6 +216,9 @@ public final class iOSHistoryManager: ObservableObject {
                 try await HistorySyncEngine.shared.upload(entry: current.toSyncable())
                 syncedIDs.insert(item.id)
                 saveSyncedIDs()
+            } catch is HistorySyncDisabledError {
+                // History sync is off: the entry stays pending and uploads if
+                // sync is turned back on.
             } catch {
                 // Leave the item unsynced so a later full sync retries it,
                 // rather than marking it synced after a failed upload.
@@ -313,7 +316,8 @@ public final class iOSHistoryManager: ObservableObject {
     /// (issue #1007). Never a claim that a Mac received anything — the phone
     /// has no evidence of that (issue #952).
     public func macLaneOutcome(for item: iOSHistoryItem?) -> MacLaneOutcome {
-        guard item != nil, syncEnabled else { return .notAttempted }
+        // `.notAttempted` already means "history sync is off" in the receipt.
+        guard item != nil, syncEnabled, HistorySyncEngine.shared.isSyncEnabled else { return .notAttempted }
         return HistorySyncEngine.shared.state.isCloudAvailable ? .queuedForICloud : .iCloudUnavailable
     }
 

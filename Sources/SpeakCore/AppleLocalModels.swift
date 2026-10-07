@@ -1,12 +1,15 @@
 // AVFAudio types (AVAudioPCMBuffer, AVAudioConverter callbacks) predate
 // Sendable annotations; @preconcurrency downgrades those diagnostics.
+import Foundation
+
+#if canImport(AVFoundation) && canImport(Speech) && !SPEAK_PORTABLE_CORE
 @preconcurrency import AVFoundation
 import CoreMedia
-import Foundation
 import os
 import Speech
+#endif
 
-#if canImport(FoundationModels)
+#if canImport(FoundationModels) && !SPEAK_PORTABLE_CORE
 import FoundationModels
 #endif
 
@@ -17,9 +20,11 @@ public enum AppleLocalModels {
     public static let foundationModelID = "apple/local/FoundationModels"
 
     public static var supportsSpeechTranscriber: Bool {
+        #if canImport(Speech) && !SPEAK_PORTABLE_CORE
         if #available(macOS 26.0, iOS 26.0, *) {
             return SpeechTranscriber.isAvailable
         }
+        #endif
         return false
     }
 
@@ -27,9 +32,11 @@ public enum AppleLocalModels {
     /// 26 and does not require Apple Intelligence, but locale support is async;
     /// the shared SpeechAnalyzer module factory resolves that before dispatch.
     public static var supportsDictationTranscriber: Bool {
+        #if canImport(Speech) && !SPEAK_PORTABLE_CORE
         if #available(macOS 26.0, iOS 26.0, *) {
             return true
         }
+        #endif
         return false
     }
 
@@ -61,14 +68,16 @@ public enum AppleLocalModels {
     /// `SpeechDetector` ships with the OS 26 Speech framework, so support tracks
     /// the OS gate. Whether its assets install is decided when arming.
     public static var supportsSpeechDetector: Bool {
+        #if canImport(Speech) && !SPEAK_PORTABLE_CORE
         if #available(macOS 26.0, iOS 26.0, *) {
             return true
         }
+        #endif
         return false
     }
 
     public static var supportsFoundationModels: Bool {
-        #if canImport(FoundationModels)
+        #if canImport(FoundationModels) && !SPEAK_PORTABLE_CORE
         if #available(macOS 26.0, iOS 26.0, *) {
             return SystemLanguageModel.default.isAvailable
         }
@@ -123,6 +132,7 @@ public enum AppleLocalModelError: LocalizedError {
     }
 }
 
+#if canImport(AVFoundation) && canImport(Speech) && !SPEAK_PORTABLE_CORE
 @available(macOS 26.0, iOS 26.0, *)
 public final class AppleSpeechAudioConverter: @unchecked Sendable {
     private let converter: AVAudioConverter
@@ -174,6 +184,8 @@ public final class AppleSpeechAudioConverter: @unchecked Sendable {
     }
 }
 
+#endif
+
 public enum AppleFoundationModelPolisher {
     public static var isAvailable: Bool {
         AppleLocalModels.supportsFoundationModels
@@ -192,7 +204,7 @@ public enum AppleFoundationModelPolisher {
     /// decided the exact system prompt and user message; wrapping the text in
     /// the cleanup payload here would fight instructions like "summarise this".
     public static func respond(systemPrompt: String, userMessage: String) async throws -> String {
-        #if canImport(FoundationModels)
+        #if canImport(FoundationModels) && !SPEAK_PORTABLE_CORE
         if #available(macOS 26.0, iOS 26.0, *) {
             guard SystemLanguageModel.default.isAvailable else {
                 throw AppleLocalModelError.foundationModelUnavailable

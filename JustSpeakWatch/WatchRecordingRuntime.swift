@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import SpeakWatchCore
 
 /// Keeps a watch recording running once the wrist drops and the screen goes
 /// off, and reports when watchOS is about to take that runtime away.

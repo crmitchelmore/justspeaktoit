@@ -139,21 +139,21 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     public static let batchTranscription: [Option] =
         appleBatchTranscriptionOptions + [
         Option(
-            id: CartesiaBatchClient.catalogID, displayName: "Cartesia Ink Whisper (Batch)",
+            id: BatchTranscriptionModelIdentifiers.cartesiaInkWhisper, displayName: "Cartesia Ink Whisper (Batch)",
             description: "Multilingual file transcription. Choose the recording language; Automatic uses English.",
             estimatedLatencyMs: nil, latencyTier: .medium),
         Option(
-            id: GladiaBatchClient.catalogID, displayName: "Gladia Solaria-1 (Batch)",
+            id: BatchTranscriptionModelIdentifiers.gladiaSolaria, displayName: "Gladia Solaria-1 (Batch)",
             description: "Multilingual file transcription with per-utterance timings. "
                 + "Automatic detects the language and allows code switching.",
             estimatedLatencyMs: nil, latencyTier: .medium),
         Option(
-            id: SpeechmaticsBatchClient.enhancedCatalogID, displayName: "Speechmatics Enhanced (Batch)",
+            id: BatchTranscriptionModelIdentifiers.speechmaticsEnhanced, displayName: "Speechmatics Enhanced (Batch)",
             description: "Speechmatics' higher-accuracy file transcription tier, with word timings "
                 + "and automatic language identification.",
             estimatedLatencyMs: nil, latencyTier: .medium),
         Option(
-            id: SpeechmaticsBatchClient.standardCatalogID, displayName: "Speechmatics Standard (Batch)",
+            id: BatchTranscriptionModelIdentifiers.speechmaticsStandard, displayName: "Speechmatics Standard (Batch)",
             description: "Speechmatics' faster, lower-cost file transcription tier.",
             estimatedLatencyMs: nil, latencyTier: .fast),
         // Dedicated transcription providers (OpenAI, Rev.ai, etc.)
@@ -273,6 +273,11 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             id: elevenLabsScribeV2BatchID, displayName: "ElevenLabs Scribe v2",
             description: "ElevenLabs Scribe v2: high-accuracy speech-to-text across 90+ languages "
                 + "with word-level timestamps.",
+            estimatedLatencyMs: 800, latencyTier: .fast),
+        Option(
+            id: elevenLabsScribeV2MedicalBatchID, displayName: "ElevenLabs Scribe v2 Medical",
+            description: "Scribe v2 fine-tuned for clinical audio: fewer errors on medical terminology, "
+                + "with the same languages, pricing and word-level timestamps as Scribe v2.",
             estimatedLatencyMs: 800, latencyTier: .fast)
     ] + AzureTranscriptionModels.batchOptions
 
@@ -280,12 +285,37 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// `scribe_v1` (and its experimental variant) on 2026-07-09.
     public static let elevenLabsScribeV2BatchID = "elevenlabs/scribe_v2"
 
+    /// Scribe v2 specialised for medical and clinical audio (GA 2026-09-11).
+    /// Same Create transcript API and per-hour rate as Scribe v2.
+    public static let elevenLabsScribeV2MedicalBatchID = "elevenlabs/scribe_v2_medical"
+
     /// Retired ElevenLabs batch identifiers that must be migrated to Scribe v2
     /// when they are read back out of persisted settings.
     static let legacyElevenLabsBatchIDs: Set<String> = [
         "elevenlabs/scribe_v1",
         "elevenlabs/scribe_v1_experimental"
     ]
+
+    // Retired transcription identifiers are defined once, here, and read by
+    // both normalisers, so no host keeps its own list or resets a provider by
+    // prefix. Only identifiers that once shipped and were then replaced belong
+    // here; current entries and custom models are never listed.
+
+    /// Retired batch identifiers and the current entry each one now selects.
+    static let batchTranscriptionSuccessors: [String: String] = Dictionary(
+        AssemblyAIModels.legacyUniversal3BatchIDs.map { ($0, AssemblyAIModels.universal35ProBatchID) }
+            + legacyElevenLabsBatchIDs.map { ($0, elevenLabsScribeV2BatchID) },
+        uniquingKeysWith: { first, _ in first }
+    )
+
+    /// Retired live identifiers and the current entry each one now selects.
+    /// Nova-2 is Deepgram's only retired stream (the Nova-3 upgrade in #64):
+    /// Flux and any later `deepgram/` entry are current, so they never appear here.
+    static let liveTranscriptionSuccessors: [String: String] = Dictionary(
+        AssemblyAIModels.legacyUniversal3StreamingIDs.map { ($0, AssemblyAIModels.universal35ProStreamingID) }
+            + [("deepgram/nova-2-streaming", "deepgram/nova-3-streaming")],
+        uniquingKeysWith: { first, _ in first }
+    )
 
     public static let defaultBatchTranscriptionModel = "google/gemini-3.1-flash-lite"
 
@@ -381,11 +411,8 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
     /// Unknown identifiers remain valid because the Mac supports custom OpenRouter batch models.
     public static func normalizedBatchTranscriptionModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if AssemblyAIModels.legacyUniversal3BatchIDs.contains(trimmed) {
-            return AssemblyAIModels.universal35ProBatchID
-        }
-        if legacyElevenLabsBatchIDs.contains(trimmed) {
-            return elevenLabsScribeV2BatchID
+        if let successor = batchTranscriptionSuccessors[trimmed] {
+            return successor
         }
         if trimmed == AppleLocalModels.speechTranscriberModelID,
            !AppleLocalModels.supportsSpeechTranscriber {
@@ -656,7 +683,7 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
             tags: [.fast, .quality],
             supportsLiveStreaming: true
         )
-    ]
+    ] + [PhononLocalModels.phonon2]
 
     public static let localTranscriptionOptions: [Option] = localTranscription.map(\.option)
 
@@ -678,15 +705,14 @@ public struct ModelCatalog: Sendable { // swiftlint:disable:this type_body_lengt
         )]
     }()
 
+    /// Apple speech follows this device's preferred engine and retired streams
+    /// follow their successor. Current and custom remote identifiers are kept.
     public static func normalizedLiveTranscriptionModel(_ identifier: String?) -> String {
         let trimmed = identifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if AppleLocalModels.isAppleSpeechModel(trimmed) || trimmed.isEmpty {
             return AppleLocalModels.preferredSpeechModelID
         }
-        if AssemblyAIModels.legacyUniversal3StreamingIDs.contains(trimmed) {
-            return AssemblyAIModels.universal35ProStreamingID
-        }
-        return trimmed
+        return liveTranscriptionSuccessors[trimmed] ?? trimmed
     }
 
     public static let defaultPostProcessingModel = "openai/gpt-5-mini"

@@ -105,14 +105,16 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
     private func assertLateConfiguration(rearm: Bool) async {
         let harness = Harness()
         let configuring = expectation(description: "audio configuration suspended")
+        let returned = expectation(description: "late audio configuration returned")
         var configured: CheckedContinuation<Void, Never>?
         harness.manager.configureRecording = {
             await withCheckedContinuation { continuation in
                 configured = continuation
                 configuring.fulfill()
             }
+            returned.fulfill()
         }
-        await harness.coordinator.toggle()
+        let retiredStart = await harness.beginArming()
         await fulfillment(of: [configuring], timeout: 2)
         await harness.coordinator.sceneActivityChanged(isActive: false)?.value
         let deactivations = harness.deactivations
@@ -122,7 +124,8 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
             await harness.arm()
         }
         configured?.resume()
-        await Task { @MainActor in }.value
+        await retiredStart?.value
+        await fulfillment(of: [returned], timeout: 2)
         XCTAssertEqual(harness.deactivations, deactivations + (rearm ? 0 : 1))
         XCTAssertEqual(harness.coordinator.state, rearm ? .armed : .off)
         XCTAssertNil(harness.coordinator.failureMessage)
@@ -218,11 +221,20 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
         await harness.record()
         let finishing = harness.holdFinalisation()
         await harness.coordinator.finishCurrentUtterance()
+        let retiredFinalisation = harness.coordinator.finalisationTask
         await fulfillment(of: [finishing], timeout: 2)
         await harness.coordinator.disarm()
         await harness.record()
+        // Wait for the retired stop to hand its late failure back. A single
+        // main-actor hop can run before the resumed continuation does, which
+        // asserted before the failure arrived and let the test release the
+        // harness while that stop was still pending.
+        let returned = harness.expectStopReturn()
         harness.finish?.resume(returning: .failed(.captureFailed))
-        await Task { @MainActor in }.value
+        await retiredFinalisation?.value
+        // The retired owner did reach its rearm decision, and was refused.
+        XCTAssertEqual(harness.rearmAtCompletion, false)
+        await fulfillment(of: [returned], timeout: 2)
         XCTAssertEqual(harness.coordinator.state, .recording)
         XCTAssertNil(harness.coordinator.failureMessage)
         XCTAssertEqual(harness.cancels, 1)
@@ -233,14 +245,16 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
     private func assertRetiredArmDoesNotAffectNewSession(throwsError: Bool) async {
         let harness = Harness()
         let preparing = expectation(description: "detector preparing")
+        let returned = expectation(description: "retired detector start returned")
         var prepared: CheckedContinuation<Void, Error>?
         harness.coordinator.startDetectorCapture = {
+            defer { returned.fulfill() }
             try await withCheckedThrowingContinuation { continuation in
                 prepared = continuation
                 preparing.fulfill()
             }
         }
-        await harness.coordinator.toggle()
+        let retiredStart = await harness.beginArming()
         await fulfillment(of: [preparing], timeout: 2)
         await harness.coordinator.sceneActivityChanged(isActive: false)?.value
         XCTAssertEqual(harness.coordinator.state, .off)
@@ -253,15 +267,19 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
         } else {
             prepared?.resume()
         }
-        await Task { @MainActor in }.value
+        await retiredStart?.value
+        await fulfillment(of: [returned], timeout: 2)
         XCTAssertEqual(harness.coordinator.state, .armed)
         XCTAssertEqual(harness.deactivations, deactivations)
         XCTAssertNil(harness.coordinator.failureMessage)
         await harness.coordinator.disarm()
     }
+}
 
-    private func waitForState(_ state: HandsFreeDictationMachine.State,
-                              _ coordinator: IOSHandsFreeDictationCoordinator) async {
+private extension HandsFreeSceneLifecycleTests {
+    func waitForState(
+        _ state: HandsFreeDictationMachine.State, _ coordinator: IOSHandsFreeDictationCoordinator
+    ) async {
         let reached = expectation(description: "state \(state)")
         let observer = coordinator.$state.first { $0 == state }.sink { _ in reached.fulfill() }
         await fulfillment(of: [reached], timeout: 2)
@@ -269,6 +287,9 @@ final class HandsFreeSceneLifecycleTests: XCTestCase {
     }
 }
 
+// Boundaries capture the fixture unowned on purpose. A call after a test has
+// released it means the test returned without joining work it started; that
+// must fail loudly rather than be absorbed by a weak capture.
 @MainActor
 private final class Harness {
     let manager = AudioSessionManager()
@@ -283,14 +304,21 @@ private final class Harness {
     var rearmAtCompletion: Bool?
     var finish: CheckedContinuation<HandsFreeCaptureEndOutcome, Never>?
     var finishing: XCTestExpectation?
+    var stopReturned: XCTestExpectation?
     var startCapture: (() async -> HandsFreeCaptureStartOutcome)?
+    // The coordinator and its tasks can outlive this harness: a retired
+    // finalisation resumes whenever its continuation is scheduled. Callbacks
+    // capture the harness weakly, so a call in flight keeps it alive until it
+    // returns and a call that starts after the test released it does nothing.
     lazy var coordinator = IOSHandsFreeDictationCoordinator(
         audioSessionManager: manager,
-        startCapture: { [unowned self] _ in
+        startCapture: { [weak self] _ in
+            guard let self else { return .rejected(.captureFailed) }
             self.starts += 1
             return await self.startCapture?() ?? .started
         },
-        stopCapture: { [unowned self] shouldRearm in
+        stopCapture: { [weak self] shouldRearm in
+            guard let self else { return .failed(.captureFailed) }
             self.stops += 1
             let outcome: HandsFreeCaptureEndOutcome
             if let finishing = self.finishing {
@@ -301,11 +329,12 @@ private final class Harness {
             } else { outcome = .completed }
             self.rearmAtCompletion = shouldRearm()
             self.history.append(self.savedText)
+            self.stopReturned?.fulfill()
             return outcome
         },
-        cancelCapture: { [unowned self] in
-            self.cancels += 1
-            self.savedText = ""
+        cancelCapture: { [weak self] in
+            self?.cancels += 1
+            self?.savedText = ""
         },
         silenceDuration: { 2 },
         captureIsSupported: { true },
@@ -314,17 +343,26 @@ private final class Harness {
 
     init() {
         manager.permissionStatus = { true }
-        manager.configureRecording = { [unowned self] in self.configurations += 1 }
-        manager.deactivateRecording = { [unowned self] in self.deactivations += 1 }
+        manager.configureRecording = { [weak self] in self?.configurations += 1 }
+        manager.deactivateRecording = { [weak self] in self?.deactivations += 1 }
         coordinator.startDetectorCapture = {}
-        coordinator.resumeDetectorCapture = { [unowned self] in self.resumes += 1 }
+        coordinator.resumeDetectorCapture = { [weak self] in self?.resumes += 1 }
         coordinator.detectorIsRunning = { true }
         coordinator.inputIsUsable = { true }
     }
 
-    func arm() async {
+    /// Toggles arming on and returns its detector start. Retirement drops the
+    /// coordinator's reference, so a test keeps this one to join that exact
+    /// operation: a resumed boundary returns through the global executor, which
+    /// no fixed number of main-actor turns is guaranteed to wait for.
+    func beginArming() async -> Task<Void, Never>? {
         await coordinator.toggle()
-        await Task { @MainActor in }.value
+        XCTAssertNotNil(coordinator.armTask, "Arming must own a detector start")
+        return coordinator.armTask
+    }
+
+    func arm() async {
+        await beginArming()?.value
         XCTAssertEqual(coordinator.state, .armed)
     }
 
@@ -337,6 +375,14 @@ private final class Harness {
     func holdFinalisation() -> XCTestExpectation {
         let expectation = XCTestExpectation(description: "capture finalising")
         finishing = expectation
+        return expectation
+    }
+
+    /// Fulfilled when a stop hands its outcome back to the coordinator, so a
+    /// test can wait for a late result instead of guessing how many hops it takes.
+    func expectStopReturn() -> XCTestExpectation {
+        let expectation = XCTestExpectation(description: "capture stop returned")
+        stopReturned = expectation
         return expectation
     }
 }

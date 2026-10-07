@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 2,
+  "whisperCpp": {
+    "repository": "https://github.com/ggml-org/whisper.cpp",
+    "tag": "v1.9.4",
+    "commit": "927cfce34f31707e17f2bff35c349632fb9e2c3a",
+    "version": "1.9.4",
+    "license": "MIT",
+    "licenseSHA256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d",
+    "fixture": {
+      "path": "samples/jfk.wav",
+      "sha256": "59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e",
+      "bytes": 352078,
+      "expectedPhrase": "ask not what your country can do for you",
+      "note": "Public-domain speech sample from the pinned whisper.cpp source; used only by CI, never bundled."
+    }
+  },
+  "architectures": {
+    "x64": {
+      "runner": "windows-2022",
+      "vulkanSdk": {
+        "version": "1.4.357.0",
+        "name": "vulkansdk-windows-X64-1.4.357.0.exe",
+        "url": "https://sdk.lunarg.com/sdk/download/1.4.357.0/windows/vulkansdk-windows-X64-1.4.357.0.exe",
+        "sha256": "81f474711e9042f4cd22b31b2f7a8870db2e428b21586fb43dd80150be97310d",
+        "bytes": 287971024,
+        "use": "Build-time only: Vulkan headers, the vulkan-1 import library and glslc for ggml-vulkan's shaders. Nothing from the SDK is bundled; vulkan-1.dll comes from the user's GPU driver."
+      },
+      "developerEnvironment": null,
+      "cmakeArguments": [
+        "-G", "Visual Studio 17 2022", "-A", "x64",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DWHISPER_BUILD_IS_DEV=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DGGML_NATIVE=OFF",
+        "-DGGML_BACKEND_DL=ON",
+        "-DGGML_CPU_ALL_VARIANTS=ON",
+        "-DGGML_VULKAN=ON",
+        "-DGGML_OPENMP=OFF",
+        "-DGGML_CCACHE=OFF",
+        "-DWHISPER_BUILD_EXAMPLES=OFF",
+        "-DWHISPER_BUILD_TESTS=OFF",
+        "-DWHISPER_BUILD_SERVER=OFF",
+        "-DWHISPER_SDL2=OFF",
+        "-DWHISPER_CURL=OFF"
+      ],
+      "requiredModules": ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-vulkan.dll"],
+      "cpuVariantPattern": "^ggml-cpu-[a-z0-9]+\\.dll$",
+      "minimumCpuVariants": 4
+    },
+    "arm64": {
+      "runner": "windows-11-arm",
+      "vulkanSdk": null,
+      "developerEnvironment": "arm64",
+      "cmakeArguments": [
+        "-G", "Ninja Multi-Config",
+        "-DCMAKE_C_COMPILER=clang",
+        "-DCMAKE_CXX_COMPILER=clang++",
+        "-DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc",
+        "-DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DWHISPER_BUILD_IS_DEV=OFF",
+        "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+        "-DBUILD_SHARED_LIBS=ON",
+        "-DGGML_NATIVE=OFF",
+        "-DGGML_CPU_ARM_ARCH=armv8-a",
+        "-DGGML_BACKEND_DL=ON",
+        "-DGGML_CPU_ALL_VARIANTS=OFF",
+        "-DGGML_VULKAN=OFF",
+        "-DGGML_OPENMP=OFF",
+        "-DGGML_CCACHE=OFF",
+        "-DWHISPER_BUILD_EXAMPLES=OFF",
+        "-DWHISPER_BUILD_TESTS=OFF",
+        "-DWHISPER_BUILD_SERVER=OFF",
+        "-DWHISPER_SDL2=OFF",
+        "-DWHISPER_CURL=OFF"
+      ],
+      "requiredModules": ["whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"],
+      "cpuVariantPattern": null,
+      "minimumCpuVariants": 0
+    }
+  },
+  "provenanceNotes": [
+    "whisper.cpp is the runtime behind Buzz, Vibe, Speech Note and Whispering; its Vulkan backend covers NVIDIA, AMD and Intel GPUs, including integrated ones, and its CPU backend covers every x64 PC.",
+    "The x64 DLLs are built on a GitHub windows-2022 runner from the pinned commit, which the build verifies with git rev-parse, using the MSVC toolset of that image and the shared Visual C++ runtime the app already bundles. GGML_BACKEND_DL keeps the Vulkan backend a separately loaded DLL, so a PC without a Vulkan driver loads the CPU backend instead of failing to start.",
+    "OpenMP is off so no vcomp140.dll is needed; ggml's own thread pool runs the CPU backend.",
+    "The Vulkan SDK installer is pinned by URL, byte count and the SHA-256 LunarG publishes (https://vulkan.lunarg.com/sdk/sha/1.4.357.0/windows/vulkansdk-windows-X64-1.4.357.0.exe.json), which matched the downloaded bytes on 2026-09-23.",
+    "The ARM64 DLLs are built natively on a GitHub windows-11-arm runner inside that image's Visual Studio ARM64 developer environment. ggml refuses MSVC for ARM (\"MSVC is not supported for ARM, use clang\"), so the image's clang targets arm64-pc-windows-msvc with Ninja, following upstream's cmake/arm64-windows-llvm.cmake, and links the same shared Visual C++ runtime.",
+    "ARM64 is CPU only. GGML_CPU_ALL_VARIANTS stops with \"Unsupported ARM target OS\" for Windows in this ggml, so ARM64 ships one ggml-cpu.dll instead of run-time selected variants. GGML_CPU_ARM_ARCH=armv8-a keeps it to the base ARMv8-A instruction set every Windows ARM64 PC runs; upstream's toolchain file uses armv8.7-a and fast floating-point math, which would stop older PCs and change numerics. No Vulkan backend is built: upstream publishes Windows ARM64 CPU, OpenCL (Adreno) and CUDA builds but no Vulkan build, LunarG's ARM64 SDK (https://vulkan.lunarg.com/sdk/sha/1.4.357.0/warm/vulkansdk-windows-ARM64-1.4.357.0.exe.json) is not pinned here, and the hosted ARM64 runners have no GPU to test one.",
+    "Output DLL hashes depend on the runner's compiler, so each build records them in runtime-manifest.json with the compiler version; the bundle and package authenticate the DLLs against that manifest and the manifest's pins against this file."
+  ]
+}

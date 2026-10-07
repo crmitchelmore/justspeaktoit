@@ -1,337 +1,293 @@
 import Foundation
-import os.log
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
-// MARK: - AssemblyAI Live Client (Cross-platform WebSocket)
-
-/// Cross-platform AssemblyAI Universal-3.5 Pro Streaming v3 client.
+/// Universal-3.5 Pro's shared streaming client. The transport is replaceable;
+/// request construction, turn assembly, PCM framing and shutdown remain shared.
 ///
-/// Shared by macOS and iOS. AssemblyAI emits incremental `Turn` frames (each
-/// carrying the full running turn text) and one formatted end-of-turn frame.
-/// This client folds the controller-side
-/// turn assembly in: finalised turns are tracked by `turn_order`, combined with
-/// the current interim, and emitted as a clean cumulative `(text, isFinal=false)`
-/// so it can drive the generic iOS transcriber (which captures the latest text).
-/// Conforms to ``StreamingTranscriptionClient``.
-public final class AssemblyAILiveClient: StreamingTranscriptionClient, @unchecked Sendable {
-    /// Final shape: this client emits a cumulative display string assembled from turns.
+/// Settings-derived options reach it through ``LiveClientOptions``: keyterms
+/// bias recognition, `postStopFinalizeBudget` bounds the wait for the trailing
+/// formatted turn after `ForceEndpoint`, and `stopGracePeriod` holds
+/// `Terminate` for the caller's grace after that turn. A finish returns the
+/// whole session; the provider's closed utterances are explicit boundaries.
+public final class AssemblyAILiveClient: FinalizingStreamingTranscriptionClient,
+    StreamingTranscriptSnapshotProviding, UtteranceBoundaryStreamingClient, @unchecked Sendable {
     public let finalShape: TranscriptFinalShape = .cumulativeTranscript
+    /// A finish drains every admitted frame before `ForceEndpoint`.
+    public let finishFlushesBufferedAudio = true
+    public typealias ConnectionFactory = @Sendable (URLRequest) -> any StreamingWebSocketConnection
+    public typealias Scheduler = @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
 
-    private static let beginTimeoutSeconds: Double = 8
-    private static let terminationTimeoutSeconds: Double = 3
-    private static let preBeginByteLimit = 16_000 * 2 * 5 // 5s of 16kHz PCM16
-    private let apiKey: String
-    private let speechModel: String
-    private let sampleRate: Int
-    private let session: URLSession
-    private let logger = SpeakLogger.logger(category: "AssemblyAILiveClient")
-    private let stateLock = NSLock()
+    /// Draining, `ForceEndpoint`, the trailing turn and `Terminate` must all
+    /// fit in this bound (plus any stop grace).
+    static let finishDeadline: TimeInterval = 8
+    static var defaultPostStopFinalizeBudget: TimeInterval {
+        ModelCatalog.liveCapabilities(for: AssemblyAIModels.universal35ProStreamingID).postStopFinalizeBudget
+    }
 
-    private var webSocketTask: URLSessionWebSocketTask?
-    private var onTranscript: ((String, Bool) -> Void)?
-    private var onError: ((Error) -> Void)?
-    private var isStopping = false
-    private var sessionDidBegin = false
-    private var hasAttemptedHostFallback = false
-    private var currentHost: AssemblyAIStreamingEndpoint = .global
-    private var preBeginAudio: [Data] = []
+    let apiKey: String
+    let speechModel: String
+    let sampleRate: Int
+    let keyterms: [String]
+    let postStopFinalizeBudget: TimeInterval
+    let stopGracePeriod: TimeInterval
+    let makeConnection: ConnectionFactory
+    let schedule: Scheduler
+    private let queue = DispatchQueue(label: "AssemblyAILiveClient.state")
+    private let queueKey = DispatchSpecificKey<Bool>()
+    var run: AssemblyAILiveRun
+    private var boundaryCallback: ((String) -> Void)?
 
-    private var transcriptAssembler = AssemblyAIStreamingTranscriptAssembler()
+    /// Called with each utterance the provider closes, during a finish too.
+    public var onUtteranceBoundary: ((String) -> Void)? {
+        get { synchronized { boundaryCallback } }
+        set { synchronized { boundaryCallback = newValue } }
+    }
+
+    /// A stop grace extends the finish beyond the host's default watchdog.
+    public var finalisationBudget: TimeInterval? {
+        stopGracePeriod > 0 ? Self.finishDeadline + stopGracePeriod : nil
+    }
+
+    public convenience init(
+        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        sampleRate: Int = 16_000, session: URLSession? = nil
+    ) {
+        self.init(apiKey: apiKey, speechModel: speechModel, sampleRate: sampleRate, session: session, keyterms: [])
+    }
+
+    public convenience init(
+        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        sampleRate: Int = 16_000, session: URLSession? = nil, keyterms: [String]
+    ) {
+        self.init(
+            apiKey: apiKey, speechModel: speechModel, sampleRate: sampleRate, session: session,
+            keyterms: keyterms, postStopFinalizeBudget: Self.defaultPostStopFinalizeBudget, stopGracePeriod: 0
+        )
+    }
+
+    public convenience init(
+        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        sampleRate: Int = 16_000, session: URLSession? = nil, keyterms: [String],
+        postStopFinalizeBudget: TimeInterval, stopGracePeriod: TimeInterval
+    ) {
+        let transportSession = session ?? Self.makeSession()
+        self.init(
+            apiKey: apiKey, speechModel: speechModel, sampleRate: sampleRate, keyterms: keyterms,
+            postStopFinalizeBudget: postStopFinalizeBudget, stopGracePeriod: stopGracePeriod,
+            makeConnection: { URLSessionStreamingConnection(session: transportSession, request: $0) }
+        )
+    }
 
     public init(
-        apiKey: String,
-        speechModel: String = AssemblyAIModels.universal35ProAPIName,
-        sampleRate: Int = 16_000,
-        session: URLSession? = nil
+        apiKey: String, speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        sampleRate: Int = 16_000, keyterms: [String] = [],
+        postStopFinalizeBudget: TimeInterval? = nil, stopGracePeriod: TimeInterval = 0,
+        makeConnection: @escaping ConnectionFactory,
+        schedule: @escaping Scheduler = { seconds, action in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: action)
+        }
     ) {
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.speechModel = speechModel
         self.sampleRate = sampleRate
-        if let session {
-            self.session = session
-        } else {
-            let config = URLSessionConfiguration.default
-            config.waitsForConnectivity = true
-            config.timeoutIntervalForRequest = 30
-            self.session = URLSession(configuration: config)
-        }
+        self.keyterms = keyterms
+        self.postStopFinalizeBudget = postStopFinalizeBudget.map(Self.sanitized) ?? Self.defaultPostStopFinalizeBudget
+        self.stopGracePeriod = Self.sanitized(stopGracePeriod)
+        self.makeConnection = makeConnection
+        self.schedule = schedule
+        self.run = AssemblyAILiveRun(sampleRate: sampleRate)
+        queue.setSpecific(key: queueKey, value: true)
     }
 
-    public func start(
-        onTranscript: @escaping (String, Bool) -> Void,
-        onError: @escaping (Error) -> Void
+    /// Test seam: real-time scheduling with short, explicit stop options.
+    convenience init(
+        apiKey: String = "test-key",
+        speechModel: String = AssemblyAIModels.universal35ProAPIName,
+        sampleRate: Int = 16_000,
+        keyterms: [String] = [],
+        postStopFinalizeBudget: TimeInterval = 0.1,
+        stopGracePeriod: TimeInterval = 0,
+        socketFactory: @escaping ConnectionFactory
     ) {
-        withStateLock {
-            isStopping = false
-            sessionDidBegin = false
-            hasAttemptedHostFallback = false
-            currentHost = .europe
-            preBeginAudio = []
-            transcriptAssembler = AssemblyAIStreamingTranscriptAssembler()
-            self.onTranscript = onTranscript
-            self.onError = onError
-        }
-        // Connect to the EU host first and fall back to global on a pre-Begin
-        // failure — this ordering is the more reliable one in practice.
-        connect(using: .europe)
+        self.init(
+            apiKey: apiKey, speechModel: speechModel, sampleRate: sampleRate, keyterms: keyterms,
+            postStopFinalizeBudget: postStopFinalizeBudget, stopGracePeriod: stopGracePeriod,
+            makeConnection: socketFactory
+        )
     }
 
-    public func sendAudio(_ audioData: Data) {
-        let (task, didBegin) = withStateLock { (webSocketTask, sessionDidBegin) }
-        guard let task, task.state == .running, didBegin else {
-            withStateLock {
-                preBeginAudio.append(audioData)
-                var total = preBeginAudio.reduce(0) { $0 + $1.count }
-                while total > Self.preBeginByteLimit, !preBeginAudio.isEmpty {
-                    total -= preBeginAudio.removeFirst().count
+    deinit { run.attempt?.connection.cancel() }
+
+    public func start(onTranscript: @escaping (String, Bool) -> Void, onError: @escaping (Error) -> Void) {
+        synchronized {
+            close(run)
+            let active = AssemblyAILiveRun(sampleRate: sampleRate)
+            run = active
+            active.onTranscript = onTranscript
+            active.onError = onError
+            guard !apiKey.isEmpty else {
+                fail(StreamingClientError.missingAPIKey(provider: "AssemblyAI"), active); return
+            }
+            guard (1...192_000).contains(sampleRate) else {
+                fail(AssemblyAIStreamingError.invalidSampleRate, active); return
+            }
+            active.phase = .connecting
+            connect(active, host: .europe)
+        }
+    }
+
+    /// Audio waiting for `Begin` keeps the newest five seconds: the oldest
+    /// frames make room, as the established client did. Once the session has
+    /// begun, a backlog beyond the budget is a stalled transport instead.
+    /// Capture chunks are repacked into 100 ms frames, so a chunk need not hold
+    /// whole samples: a split sample is completed by the next chunk.
+    public func sendAudio(_ data: Data) {
+        guard !data.isEmpty else { return }
+        synchronized {
+            let active = run
+            guard active.phase == .connecting || active.phase == .active else { return }
+            while !active.budget.admit(data.count) {
+                guard active.awaitingBegin, !active.outgoing.isEmpty else { fail(stalledError, active); return }
+                active.budget.release(active.outgoing.removeFirst().count)
+            }
+            active.hasAudio = true
+            active.outgoing.append(contentsOf: active.framer.append(data))
+            pump(active)
+        }
+    }
+
+    /// Immediate stop: the socket closes at once and any finish waiting on
+    /// this session returns the text received so far. Graceful callers use
+    /// `finishAndWait()`.
+    public func stop() { synchronized { close(run) } }
+
+    /// The same immediate abort, for hosts that distinguish cancellation.
+    public func cancel() { synchronized { close(run) } }
+
+    public func finishAndWait() async -> String? {
+        let active = synchronized { run }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                synchronized {
+                    guard isCurrent(active), active.attempt != nil else {
+                        if active === run { close(active) }
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    if Task.isCancelled {
+                        close(active)
+                        continuation.resume(returning: active.transcript)
+                        return
+                    }
+                    active.waiters.append(continuation)
+                    beginFinish(active)
                 }
             }
-            return
-        }
-        send(audioData, on: task)
-    }
-
-    public func stop() {
-        let task = withStateLock { () -> URLSessionWebSocketTask? in
-            guard !isStopping else { return nil }
-            isStopping = true
-            return webSocketTask
-        }
-        guard let task, task.state == .running else { return }
-        // Terminate flushes in-flight audio. Keep receiving until the server's
-        // final Termination frame; closing here would silently discard it.
-        task.send(.string(#"{"type":"Terminate"}"#)) { [weak self] error in
-            guard let self else { return }
-            if error != nil {
-                self.completeTermination(for: task)
-                return
-            }
-            self.scheduleTerminationTimeout(for: task)
+        } onCancel: { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { self.close(active) } }
         }
     }
 
-    private func scheduleTerminationTimeout(for task: URLSessionWebSocketTask) {
-        DispatchQueue.global().asyncAfter(deadline: .now() + Self.terminationTimeoutSeconds) { [weak self, weak task] in
-            guard let self, let task else { return }
-            self.completeTermination(for: task)
+    /// The current session, or the last one until the next `start()`.
+    public func transcriptSnapshot(captureDuration _: TimeInterval) -> StreamingTranscriptSnapshot {
+        synchronized { run.assembler.snapshot(terminal: run.phase == .closed) }
+    }
+
+    /// Stop sequencing: admitted audio, then `ForceEndpoint`, then the trailing
+    /// formatted turn (or its budget), then the stop grace, then `Terminate`.
+    /// Once the session has begun a finish always forces the endpoint, so a
+    /// turn the provider is still forming is confirmed.
+    func beginFinish(_ active: AssemblyAILiveRun) {
+        guard isCurrent(active), let attempt = active.attempt else { close(active); return }
+        guard active.phase != .finishing else { return }
+        // Nothing was admitted and no turn can arrive before `Begin`: there is
+        // nothing to finalise, so the socket closes without control frames.
+        guard attempt.didBegin || active.hasAudio else { close(active); return }
+        active.phase = .finishing
+        let held = active.framer.bufferedByteCount
+        if let tail = active.framer.finish() {
+            guard active.budget.admit(tail.count - held) else { fail(stalledError, active); return }
+            active.outgoing.append(tail)
+        }
+        pump(active)
+        after(Self.finishDeadline + stopGracePeriod, active) { client, active in
+            if active.ending == .sent { client.close(active) } else { client.fail(client.stalledError, active) }
         }
     }
 
-    private func completeTermination(for task: URLSessionWebSocketTask) {
-        let shouldClose = withStateLock { () -> Bool in
-            guard webSocketTask === task else { return false }
-            webSocketTask = nil
-            return true
-        }
-        if shouldClose {
-            task.cancel(with: .normalClosure, reason: nil)
+    var stalledError: Error { StreamingClientError.transportStalled(provider: "AssemblyAI") }
+
+    func fail(_ error: Error, _ active: AssemblyAILiveRun) {
+        guard isCurrent(active) else { return }
+        let callback = active.onError
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        let transcript = active.transcript
+        close(active)
+        // Publish failure before finish returns. The run is already detached,
+        // so an error callback may safely start a replacement session.
+        callback?(error)
+        waiters.forEach { $0.resume(returning: transcript) }
+    }
+
+    func close(_ active: AssemblyAILiveRun) {
+        guard active.phase != .closed else { return }
+        active.phase = .closed
+        let attempt = active.attempt
+        active.attempt = nil
+        active.outgoing.removeAll()
+        active.framer.reset()
+        active.budget.reset()
+        active.sending = false
+        let waiters = active.waiters
+        active.waiters.removeAll()
+        attempt?.connection.cancel()
+        waiters.forEach { $0.resume(returning: active.transcript) }
+        active.onTranscript = nil
+        active.onError = nil
+    }
+
+    func isCurrent(_ active: AssemblyAILiveRun, _ attempt: AssemblyAILiveRun.Attempt? = nil) -> Bool {
+        active === run && active.phase != .closed && (attempt == nil || active.attempt === attempt)
+    }
+
+    func after(_ seconds: TimeInterval, _ active: AssemblyAILiveRun,
+               action: @escaping @Sendable (AssemblyAILiveClient, AssemblyAILiveRun) -> Void) {
+        schedule(seconds) { [weak self, weak active] in
+            guard let self, let active else { return }
+            self.synchronized { if self.isCurrent(active) { action(self, active) } }
         }
     }
 
-    // MARK: - Connection
+    func synchronized<Value>(_ action: () -> Value) -> Value {
+        if DispatchQueue.getSpecific(key: queueKey) == true { return action() }
+        return queue.sync(execute: action)
+    }
 
-    private func connect(using host: AssemblyAIStreamingEndpoint) {
+    /// The handshake request for `endpoint`, carrying the session's keyterms.
+    func makeRequest(endpoint: AssemblyAIStreamingEndpoint) -> URLRequest? {
         guard let url = AssemblyAIStreamingRequest.url(
-            endpoint: host,
-            apiKey: apiKey,
-            sampleRate: sampleRate,
-            speechModel: speechModel
-        ) else {
-            currentOnError()?(StreamingClientError.invalidURL)
-            return
-        }
-
+            endpoint: endpoint, apiKey: apiKey, sampleRate: sampleRate,
+            speechModel: speechModel, keyterms: keyterms
+        ) else { return nil }
         var request = URLRequest(url: url)
         request.setValue(apiKey, forHTTPHeaderField: "Authorization")
-
-        let task = session.webSocketTask(with: request)
-        let proceed = withStateLock { () -> Bool in
-            guard !isStopping else { return false }
-            currentHost = host
-            webSocketTask = task
-            return true
-        }
-        guard proceed else {
-            task.cancel(with: .goingAway, reason: nil)
-            return
-        }
-        task.resume()
-        receiveMessages()
-        scheduleBeginTimeout(for: task)
+        return request
     }
 
-    private func scheduleBeginTimeout(for task: URLSessionWebSocketTask) {
-        DispatchQueue.global().asyncAfter(deadline: .now() + Self.beginTimeoutSeconds) { [weak self, weak task] in
-            guard let self, let task else { return }
-            let fire = self.withStateLock { () -> Bool in
-                guard !self.sessionDidBegin, !self.isStopping, self.webSocketTask === task else { return false }
-                self.isStopping = true
-                return true
-            }
-            guard fire else { return }
-            task.cancel(with: .goingAway, reason: nil)
-            self.currentOnError()?(NSError(
-                domain: "AssemblyAI", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "AssemblyAI session did not start (Begin timeout)."]
-            ))
-        }
+    static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        #if !canImport(FoundationNetworking)
+        configuration.waitsForConnectivity = true
+        #endif
+        configuration.timeoutIntervalForRequest = 30
+        return URLSession(configuration: configuration)
     }
 
-    private func send(_ audioData: Data, on task: URLSessionWebSocketTask) {
-        task.send(.data(audioData)) { [weak self] error in
-            guard let self, let error else { return }
-            if self.isStoppingState() || WebSocketErrorFilter.shouldIgnore(error) { return }
-            self.currentOnError()?(error)
-        }
-    }
-
-    private func flushPreBeginAudio() {
-        let (task, frames) = withStateLock { () -> (URLSessionWebSocketTask?, [Data]) in
-            let pending = preBeginAudio
-            preBeginAudio = []
-            return (webSocketTask, pending)
-        }
-        guard let task, task.state == .running else { return }
-        for frame in frames { send(frame, on: task) }
-    }
-
-    private func receiveMessages() {
-        guard let task = currentWebSocketTask() else { return }
-        task.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let message):
-                self.handleMessage(message)
-                self.receiveMessages()
-            case .failure(let error):
-                if self.isStoppingState() { return }
-                // Spurious ENOTCONN around the handshake: re-arm instead of failing.
-                if WebSocketErrorFilter.shouldIgnore(error) {
-                    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.01) { [weak self] in
-                        self?.receiveMessages()
-                    }
-                    return
-                }
-                if self.retryWithFallbackIfNeeded(after: error) { return }
-                self.currentOnError()?(error)
-            }
-        }
-    }
-
-    private func retryWithFallbackIfNeeded(after error: Error) -> Bool {
-        var taskToCancel: URLSessionWebSocketTask?
-        var fallback: AssemblyAIStreamingEndpoint = .global
-        let shouldRetry = withStateLock { () -> Bool in
-            guard !isStopping, !hasAttemptedHostFallback, !sessionDidBegin else { return false }
-            hasAttemptedHostFallback = true
-            fallback = (currentHost == .europe) ? .global : .europe
-            taskToCancel = webSocketTask
-            webSocketTask = nil
-            return true
-        }
-        guard shouldRetry else { return false }
-        taskToCancel?.cancel(with: .goingAway, reason: nil)
-        connect(using: fallback)
-        return true
-    }
-
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-        switch message {
-        case .string(let text):
-            parseResponse(text)
-        case .data(let data):
-            if let text = String(data: data, encoding: .utf8) { parseResponse(text) }
-        @unknown default:
-            break
-        }
-    }
-
-    private func parseResponse(_ json: String) {
-        guard let data = json.data(using: .utf8),
-              let envelope = try? JSONDecoder().decode(AssemblyAIEnvelope.self, from: data) else {
-            return
-        }
-        let type = envelope.type ?? (envelope.turn_order != nil ? "Turn" : "")
-        switch type {
-        case "Turn":
-            if let turn = try? JSONDecoder().decode(AssemblyAIStreamingTurn.self, from: data) {
-                handleTurn(turn)
-            }
-        case "Begin":
-            withStateLock { sessionDidBegin = true }
-            flushPreBeginAudio()
-        case "Termination":
-            if let task = currentWebSocketTask() {
-                completeTermination(for: task)
-            }
-        default:
-            break
-        }
-    }
-
-    private func handleTurn(_ turn: AssemblyAIStreamingTurn) {
-        guard let update = withStateLock({ transcriptAssembler.consume(turn) }) else { return }
-        // This client emits a cumulative display string rather than per-turn
-        // deltas, so the generic iOS wrapper must replace its text in both cases.
-        currentOnTranscript()?(update.displayText, false)
-    }
-
-    private func withStateLock<T>(_ block: () -> T) -> T {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return block()
-    }
-
-    private func currentWebSocketTask() -> URLSessionWebSocketTask? { withStateLock { webSocketTask } }
-    private func isStoppingState() -> Bool { withStateLock { isStopping } }
-    private func currentOnTranscript() -> ((String, Bool) -> Void)? { withStateLock { onTranscript } }
-    private func currentOnError() -> ((Error) -> Void)? { withStateLock { onError } }
-}
-
-private struct AssemblyAIEnvelope: Decodable {
-    let type: String?
-    let turn_order: Int? // swiftlint:disable:this identifier_name
-}
-
-struct AssemblyAIStreamingTurn: Decodable {
-    let turn_order: Int // swiftlint:disable:this identifier_name
-    let turn_is_formatted: Bool // swiftlint:disable:this identifier_name
-    let end_of_turn: Bool // swiftlint:disable:this identifier_name
-    let transcript: String
-}
-
-struct AssemblyAIStreamingTranscriptUpdate: Equatable {
-    let displayText: String
-    let finalizedTurn: Bool
-}
-
-struct AssemblyAIStreamingTranscriptAssembler {
-    private var finalTexts: [String] = []
-    private var finalIndexByTurnOrder: [Int: Int] = [:]
-    private var fullTranscript = ""
-    private var currentInterim = ""
-
-    mutating func consume(_ turn: AssemblyAIStreamingTurn) -> AssemblyAIStreamingTranscriptUpdate? {
-        guard !turn.transcript.isEmpty || turn.end_of_turn else { return nil }
-
-        let finalized = turn.end_of_turn && turn.turn_is_formatted
-        if finalized {
-            if let existing = finalIndexByTurnOrder[turn.turn_order], finalTexts.indices.contains(existing) {
-                finalTexts[existing] = turn.transcript
-                fullTranscript = finalTexts.joined(separator: " ")
-            } else {
-                finalTexts.append(turn.transcript)
-                finalIndexByTurnOrder[turn.turn_order] = finalTexts.count - 1
-                fullTranscript = fullTranscript.isEmpty
-                    ? turn.transcript
-                    : fullTranscript + " " + turn.transcript
-            }
-            currentInterim = ""
-        } else {
-            currentInterim = turn.transcript
-        }
-
-        let display = fullTranscript.isEmpty ? currentInterim
-            : (currentInterim.isEmpty ? fullTranscript : fullTranscript + " " + currentInterim)
-        return AssemblyAIStreamingTranscriptUpdate(displayText: display, finalizedTurn: finalized)
+    static func sanitized(_ value: TimeInterval) -> TimeInterval {
+        value.isFinite ? max(0, value) : 0
     }
 }

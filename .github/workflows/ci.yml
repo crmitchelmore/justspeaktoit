@@ -384,8 +384,9 @@ jobs:
         # TUIST_WATCH_APP=1 (it needs its own provisioning profile for release
         # signing, so it is excluded from release builds). Build it unsigned
         # here so the flagged target cannot rot. Cheap: eight small source
-        # files plus five shared core files. The watch-face complication
-        # extension is embedded in the app, so this step covers it too.
+        # files plus the dependency-free SpeakWatchCore package product. The
+        # watch-face complication extension is embedded in the app, so this
+        # step covers it too.
         run: |
           set -o pipefail
           TUIST_WATCH_APP=1 TUIST_IOS_KEYBOARD=1 TUIST_IOS_KEYBOARD_DIRECT_CAPTURE=0 tuist generate --no-open
@@ -495,14 +496,37 @@ jobs:
         run: git diff --exit-code Tooling/Package.resolved
 
       - name: Test CI and release gates
-        run: |
-          node --test scripts/tests/*.test.mjs scripts/release-train.test.mjs
-          python3 scripts/generate-release-train-config.py --check
-          ruby scripts/tests/release_apple_test.rb
-          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+        run: make test-tooling
 
-      - name: Test release-notes generator
-        run: node --test Tests/ReleaseNotesTests/*.test.mjs
+  paid-access-worker:
+    name: Paid Access Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: workers/paid-access
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: workers/paid-access/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
 
   api-compatibility:
     name: Public API compatibility
@@ -518,9 +542,9 @@ jobs:
           fetch-depth: 0
 
       # Exported library products must not lose or incompatibly change
-      # public symbols in a non-major PR (issue #680). A PR title carrying
-      # the conventional '!' breaking marker declares the major release and
-      # is allowed through with the diff reported.
+      # public symbols without a declared migration (issue #680). A PR title
+      # carrying the conventional '!' marker permits the reported break;
+      # Stable version selection and publication remain explicit decisions.
       - name: Diagnose breaking public API changes
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}

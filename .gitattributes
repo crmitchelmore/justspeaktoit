@@ -1,1 +1,3 @@
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
+# Vendored upstream files are hashed byte for byte (PROVENANCE.md); never convert their line endings.
+Sources/CWindowsSupport/whisper-cpp/** -text

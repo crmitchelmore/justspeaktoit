@@ -24,13 +24,24 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   private var audioEngine = AVAudioEngine()
   private var activeInputSession: AudioInputDeviceManager.SessionContext?
   private var startedAt: Date?
-  private var latestTranscript = ""
-  /// Folds updates by the hosted client's declared final shape (issue #700);
-  /// re-created in start() once the client is known.
-  private var accumulated = TranscriptAccumulator(shape: .cumulativeTranscript)
+  private var run: SharedClientControllerRun?
+  private var displayedRevision: UInt64 = 0
+  private var displayedTranscriptRevision: UInt64 = 0
+  var stopCompletionTimeout: TimeInterval {
+    guard let budget = (client as? FinalizingStreamingTranscriptionClient)?.finalisationBudget,
+          budget.isFinite, budget > 0 else { return 10 }
+    return max(10, budget + 1)
+  }
+
   private var isStopping = false
   private var isStarting = false
   private let audioProcessor = SharedClientAudioProcessor()
+  // Injectable system boundaries for controller lifecycle tests.
+  var clientFactory: (() -> StreamingTranscriptionClient)?
+  var startCaptureAudio: (() async throws -> Void)?
+  var enqueueClientUpdate: @Sendable (@escaping @MainActor @Sendable () -> Void) -> Void = { update in
+    Task { @MainActor in update() }
+  }
 
   init(
     permissionsManager: PermissionsManager,
@@ -49,41 +60,29 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     currentModel = model
   }
 
-  // swiftlint:disable:next function_body_length
   func start() async throws {
-        guard !isRunning, !isStarting else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
+        guard !isRunning, !isStarting, !isStopping else { throw TranscriptionManagerError.liveSessionAlreadyRunning }
         isStarting = true
         defer { isStarting = false }
         try Task.checkCancellation()
-        let permission = await permissionsManager.ensureGranted(.microphone)
-        try Task.checkCancellation()
-        guard permission.isGranted else {
-            throw TranscriptionManagerError.microphonePermissionMissing
-        }
     guard let model = currentModel,
           let route = LiveTranscriptionRouting.route(for: model),
           let keyIdentifier = route.apiKeyIdentifier else {
       throw LiveTranscriptionClientError.unknownModel(currentModel ?? "")
     }
 
-    let apiKey = try await loadAPIKey(identifier: keyIdentifier)
-    try Task.checkCancellation()
-    guard let client = LiveTranscriptionClientFactory.makeClient(
-      for: route,
-      apiKey: apiKey,
-      language: currentLanguage,
-      keywords: [.meta, .google].contains(route.provider)
-        ? MetaMuseVoiceTranscribe.keywords(from: appSettings.transcriptionKeywords)
-        : [],
-      azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
-    ) else {
-      throw LiveTranscriptionClientError.providerNotAvailable(route.provider)
+    let client = try await makeClient(route: route, keyIdentifier: keyIdentifier)
+    if startCaptureAudio == nil {
+      activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
     }
-
-    activeInputSession = await audioDeviceManager.beginUsingPreferredInput()
     audioEngine = AVAudioEngine()
-    latestTranscript = ""
-    accumulated = TranscriptAccumulator(shape: client.finalShape)
+    let active = SharedClientControllerRun(
+      shape: client.finalShape, modelIdentifier: route.modelID,
+      hasExplicitBoundaries: client is UtteranceBoundaryStreamingClient
+    )
+    run = active
+    displayedRevision = 0
+    displayedTranscriptRevision = 0
     isStopping = false
     self.client = client
 
@@ -91,28 +90,16 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
       // A preferred-input session may have been acquired while cancellation
       // was pending; from here every exit must release it through cleanup.
       try Task.checkCancellation()
-      client.start(
-        onTranscript: { [weak self, weak client] text, isFinal in
-          Task { @MainActor [weak self, weak client] in
-            guard let self else { return }
-            // Cached controllers are reused between recordings, so a message
-            // queued by the previous stream can land here after the next
-            // recording started. Only the current stream owns this state.
-            guard LiveTranscriptionRun.isCurrent(client, activeStream: self.client) else { return }
-            self.handleTranscript(text, isFinal: isFinal)
-          }
-        },
-        onError: { [weak self, weak client] error in
-          Task { @MainActor [weak self, weak client] in
-            guard let self else { return }
-            guard LiveTranscriptionRun.isCurrent(client, activeStream: self.client) else { return }
-            self.delegate?.liveTranscriber(self, didFail: error)
-          }
-        }
-      )
-      try installAudioTap(route: route, client: client)
-      try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      startClient(client, for: active)
+      if let failure = active.snapshot.error { throw failure }
+      if let startCaptureAudio {
+        try await startCaptureAudio()
+      } else {
+        try installAudioTap(route: route, client: client)
+        try await startAudioEngineAfterInputDeviceSettles(audioEngine)
+      }
       try Task.checkCancellation()
+      if let failure = active.snapshot.error { throw failure }
       startedAt = Date()
       isRunning = true
     } catch {
@@ -122,42 +109,75 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   }
 
   func stop() async {
-    guard isRunning, !isStopping else { return }
+    guard isRunning, !isStopping, let active = run, let activeClient = client else { return }
     isStopping = true
+    defer { isStopping = false }
     audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
-    if let client {
-      audioProcessor.drainConverterTail(to: client)
-    }
+    if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
+    audioProcessor.drainConverterTail(to: activeClient)
     audioProcessor.setRunning(false)
 
-    if let finalizingClient = client as? FinalizingStreamingTranscriptionClient {
-      // Contract: `finishAndWait()` returns the session's full transcript, so
-      // this replaces what we have rather than appending to it — appending
-      // would double every word the client already streamed.
-      if let finalTranscript = await finalizingClient.finishAndWait(),
-         latestTranscript != finalTranscript {
-        applyFullTranscript(finalTranscript)
+    let whole: String?
+    if let finalizing = activeClient as? FinalizingStreamingTranscriptionClient {
+      whole = await withTaskCancellationHandler {
+        await finalizing.finishAndWait()
+      } onCancel: { [weak self] in
+        Task { @MainActor [weak self] in
+          guard self?.run === active, active.cancel() else { return }
+          activeClient.cancel()
+        }
       }
     } else {
-      client?.stop()
+      if Task.isCancelled {
+        if active.cancel() { activeClient.cancel() }
+      } else {
+        activeClient.stop()
+      }
+      whole = nil
+    }
+    if Task.isCancelled, active.cancel() { activeClient.cancel() }
+    guard run === active, client === activeClient else { return }
+    let captureDuration = startedAt.map { Date().timeIntervalSince($0) } ?? 0
+    let finalSnapshot = (activeClient as? StreamingTranscriptSnapshotProviding)?
+      .transcriptSnapshot(captureDuration: captureDuration)
+    var snapshot = active.finish(whole: whole, cancelled: Task.isCancelled, projection: finalSnapshot)
+    // Read the synchronous state before retiring identity. Queued provider
+    // errors must reach the owner before a stop can be mistaken for success.
+    apply(snapshot, from: active, terminal: true)
+    // A delegate can cancel synchronously while receiving the terminal text.
+    // Publish that cancellation before success or retirement of this run.
+    if Task.isCancelled, snapshot.error == nil {
+      snapshot = active.finish(whole: nil, cancelled: true)
+      activeClient.cancel()
+      apply(snapshot, from: active, terminal: true)
+    }
+    isRunning = false
+    if snapshot.error == nil {
+      delegate?.liveTranscriber(self, didFinishWith: TranscriptionResult(
+        text: snapshot.text, segments: finalSnapshot?.segments ?? [], confidence: finalSnapshot?.confidence,
+        duration: finalSnapshot?.duration ?? captureDuration,
+        modelIdentifier: active.modelIdentifier, cost: finalSnapshot?.cost,
+        rawPayload: finalSnapshot?.rawPayload, debugInfo: nil
+      ))
     }
     client = nil
-    isRunning = false
-    isStopping = false
-
-    let result = TranscriptionResult(
-      text: latestTranscript,
-      segments: [],
-      confidence: nil,
-      duration: startedAt.map { Date().timeIntervalSince($0) } ?? 0,
-      modelIdentifier: currentModel ?? "",
-      cost: nil,
-      rawPayload: nil,
-      debugInfo: nil
-    )
-    delegate?.liveTranscriber(self, didFinishWith: result)
+    run = nil
     await endActiveInputSession()
+  }
+
+  private func makeClient(route: LiveTranscriptionRoute, keyIdentifier: String) async throws
+    -> StreamingTranscriptionClient {
+    if let clientFactory { return clientFactory() }
+    let permission = await permissionsManager.ensureGranted(.microphone)
+    try Task.checkCancellation()
+    guard permission.isGranted else { throw TranscriptionManagerError.microphonePermissionMissing }
+    let apiKey = try await loadAPIKey(identifier: keyIdentifier)
+    try Task.checkCancellation()
+    guard let created = LiveTranscriptionClientFactory.makeClient(
+      for: route, apiKey: apiKey, language: currentLanguage, options: appSettings.liveClientOptions,
+      azureEndpoint: UserDefaults.standard.string(forKey: AzureSpeechConfiguration.endpointDefaultsKey) ?? ""
+    ) else { throw LiveTranscriptionClientError.providerNotAvailable(route.provider) }
+    return created
   }
 
   private func loadAPIKey(identifier: String) async throws -> String {
@@ -176,47 +196,27 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
     return apiKey
   }
 
-  /// Applies a transcript update, folded by the hosted client's declared
-  /// final shape (issue #700): cumulative finals replace (xAI restates the
-  /// whole turn on every event), standalone segment finals append — including
-  /// repeated identical text, which is a genuine repeat, so a segment-shaped
-  /// provider routed here can no longer lose earlier segments.
-  private func handleTranscript(_ text: String, isFinal: Bool) {
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    let displayText: String
-    if isFinal {
-      displayText = accumulated.append(final: trimmed)
-    } else {
-      displayText = accumulated.display(withInterim: trimmed)
+  private func apply(
+    _ snapshot: SharedClientControllerRun.Snapshot,
+    from active: SharedClientControllerRun,
+    terminal: Bool = false
+  ) {
+    guard run === active, terminal || !isStopping, snapshot.revision > displayedRevision else { return }
+    displayedRevision = snapshot.revision
+    if snapshot.transcriptRevision > displayedTranscriptRevision {
+      displayedTranscriptRevision = snapshot.transcriptRevision
+      delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
+        text: snapshot.text, isFinal: snapshot.isFinal && snapshot.error == nil, confidence: snapshot.confidence
+      ))
+      delegate?.liveTranscriber(self, didUpdatePartial: snapshot.text)
+      if run === active, !active.hasExplicitBoundaries, snapshot.isFinal, snapshot.error == nil,
+         !terminal || !Task.isCancelled {
+        delegate?.liveTranscriber(self, didDetectUtteranceBoundary: snapshot.text)
+      }
     }
-    latestTranscript = displayText
-    delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
-      text: displayText,
-      isFinal: isFinal,
-      confidence: nil
-    ))
-    delegate?.liveTranscriber(self, didUpdatePartial: displayText)
-    if isFinal {
-      delegate?.liveTranscriber(self, didDetectUtteranceBoundary: displayText)
+    if let failure = active.takeFailure() {
+      delegate?.liveTranscriber(self, didFail: failure)
     }
-  }
-
-  /// Adopts a transcript that is already complete (the `finishAndWait()`
-  /// return) as the whole session transcript — replace, never append, or every
-  /// word the client already streamed would double.
-  private func applyFullTranscript(_ transcript: String) {
-    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    accumulated.replace(with: trimmed)
-    latestTranscript = accumulated.text
-    delegate?.liveTranscriber(self, didUpdateWith: LiveTranscriptionUpdate(
-      text: accumulated.text,
-      isFinal: true,
-      confidence: nil
-    ))
-    delegate?.liveTranscriber(self, didUpdatePartial: accumulated.text)
-    delegate?.liveTranscriber(self, didDetectUtteranceBoundary: accumulated.text)
   }
 
   private func installAudioTap(
@@ -252,14 +252,14 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
 
   private func cleanupAfterFailedStart() async {
     audioEngine.stop()
-    audioEngine.inputNode.removeTap(onBus: 0)
+    if startCaptureAudio == nil { audioEngine.inputNode.removeTap(onBus: 0) }
     audioProcessor.setRunning(false)
-    client?.stop()
+    run?.cancel()
+    client?.cancel()
     client = nil
+    run = nil
     isRunning = false
     isStopping = false
-    latestTranscript = ""
-    accumulated.reset()
     startedAt = nil
     await endActiveInputSession()
   }
@@ -271,126 +271,62 @@ final class SharedClientLiveController: NSObject, LiveTranscriptionController {
   }
 }
 
-/// Copies each tap buffer out of a pool and converts it off the render
-/// thread, so the audio callback never allocates or blocks.
-///
-/// Mirrors the per-provider controllers on macOS: one converter cached per
-/// input format, one reusable output buffer, and no `converter.reset()`
-/// between chunks.
-private final class SharedClientAudioProcessor: @unchecked Sendable {
-  private let queue = DispatchQueue(label: "com.speak.app.sharedClient.audioProcessing")
-  private let copyBufferPool = LivePCMBufferPool(
-    maximumBuffers: 4,
-    tapBufferSize: 4096,
-    label: "shared-client"
-  )
-  private let logger = SpeakLogger.logger(category: "SharedClientLiveController")
-  private var isRunning = false
-  private let converterCache = LiveConverterCache()
-  private var reusableOutputBuffer: AVAudioPCMBuffer?
+// MARK: - Client callbacks
 
-  func setRunning(_ running: Bool) {
-    queue.sync {
-      isRunning = running
-      if !running {
-        converterCache.reset()
-        reusableOutputBuffer = nil
-        copyBufferPool.removeAll()
+extension SharedClientLiveController {
+  /// Folds provider callbacks into this recording before any MainActor hop,
+  /// then opens the stream.
+  private func startClient(_ client: StreamingTranscriptionClient, for active: SharedClientControllerRun) {
+    let enqueue = enqueueClientUpdate
+    observeBoundaries(of: client, for: active)
+    client.start(
+      onTranscript: { [weak self, weak client] text, isFinal in
+        // A client with an authoritative result replaces the text rather
+        // than having it folded a second time.
+        let projection = (client as? StreamingTranscriptSnapshotProviding)?
+          .transcriptSnapshot(captureDuration: 0)
+        guard let snapshot = active.receive(text, isFinal: isFinal, projection: projection) else { return }
+        enqueue { [weak self] in self?.apply(snapshot, from: active) }
+      },
+      onError: { [weak self] error in
+        guard let snapshot = active.fail(error) else { return }
+        enqueue { [weak self] in self?.apply(snapshot, from: active) }
       }
-    }
-  }
-
-  /// Flushes the retained resampler's trailing frames down the live send path
-  /// before the converter is released (issue #849).
-  func drainConverterTail(to client: StreamingTranscriptionClient) {
-    queue.sync {
-      guard let tail = converterCache.drainPCM16() else { return }
-      client.sendAudio(tail)
-    }
-  }
-
-  func handleAudioTap(
-    _ buffer: AVAudioPCMBuffer,
-    inputFormat: AVAudioFormat,
-    outputFormat: AVAudioFormat,
-    client: StreamingTranscriptionClient
-  ) {
-    guard let copied = copyPCMBuffer(buffer) else { return }
-    queue.async { [weak self] in
-      guard let self else { return }
-      defer { self.copyBufferPool.recycle(copied) }
-      guard self.isRunning else { return }
-      self.convertAndSend(copied, from: inputFormat, to: outputFormat, client: client)
-    }
-  }
-
-  private func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-    let frameLength = buffer.frameLength
-    guard frameLength > 0,
-          let copy = copyBufferPool.buffer(format: buffer.format, frameCapacity: frameLength) else {
-      return nil
-    }
-    copy.frameLength = frameLength
-    let source = UnsafeMutableAudioBufferListPointer(
-      UnsafeMutablePointer(mutating: buffer.audioBufferList)
     )
-    let destination = UnsafeMutableAudioBufferListPointer(
-      UnsafeMutablePointer(mutating: copy.audioBufferList)
-    )
-    for index in 0..<min(source.count, destination.count) {
-      let sourceBuffer = source[index]
-      guard let sourceData = sourceBuffer.mData,
-            let destinationData = destination[index].mData else { continue }
-      destinationData.copyMemory(from: sourceData, byteCount: Int(sourceBuffer.mDataByteSize))
-      destination[index].mDataByteSize = sourceBuffer.mDataByteSize
-    }
-    return copy
   }
 
-  private func convertAndSend(
-    _ buffer: AVAudioPCMBuffer,
-    from inputFormat: AVAudioFormat,
-    to outputFormat: AVAudioFormat,
-    client: StreamingTranscriptionClient
-  ) {
-    guard let converter = converterCache.converter(from: inputFormat, to: outputFormat) else {
-      logger.error("Failed to create audio converter")
-      return
-    }
-
-    let ratio = outputFormat.sampleRate / inputFormat.sampleRate
-    let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * ratio)) + 1
-    let output: AVAudioPCMBuffer
-    if let reusable = reusableOutputBuffer, reusable.frameCapacity >= capacity {
-      reusable.frameLength = 0
-      output = reusable
-    } else {
-      guard let created = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
-        return
+  /// A client that reports its own utterance boundaries is listened to
+  /// directly; finals of such a client never imply one.
+  private func observeBoundaries(of client: StreamingTranscriptionClient, for active: SharedClientControllerRun) {
+    guard let boundaryClient = client as? UtteranceBoundaryStreamingClient else { return }
+    let enqueue = enqueueClientUpdate
+    boundaryClient.onUtteranceBoundary = { [weak self] text in
+      guard active.isOpen else { return }
+      enqueue { [weak self] in
+        guard let self, self.run === active, active.isOpen else { return }
+        self.delegate?.liveTranscriber(self, didDetectUtteranceBoundary: text)
       }
-      reusableOutputBuffer = created
-      output = created
     }
+  }
+}
 
-    // No `converter.reset()` between chunks: `LiveConverterCache` owns the
-    // retained converter and its end-of-stream drain (see issue #849).
-    var conversionError: NSError?
-    var didProvideInput = false
-    let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
-      guard !didProvideInput else {
-        outStatus.pointee = .noDataNow
-        return nil
-      }
-      didProvideInput = true
-      outStatus.pointee = .haveData
-      return buffer
+/// Folds one provider event into a controller transcript. A provider's
+/// authoritative snapshot replaces the text, even when it is explicitly
+/// empty; otherwise finals fold by the client's declared shape.
+enum SharedTranscriptProjection {
+  static func apply(
+    eventText: String,
+    isFinal: Bool,
+    snapshot: StreamingTranscriptSnapshot?,
+    accumulator: inout TranscriptAccumulator
+  ) -> String? {
+    if let authoritative = snapshot?.resolvedDisplayText {
+      let text = authoritative.trimmingCharacters(in: .whitespacesAndNewlines)
+      accumulator.replace(with: text)
+      return text
     }
-    guard status != .error, conversionError == nil else {
-      logger.error("Audio conversion failed")
-      return
-    }
-    let frameCount = Int(output.frameLength)
-    guard frameCount > 0, let samples = output.int16ChannelData else { return }
-    client.sendAudio(Data(bytes: samples[0], count: frameCount * 2))
+    let text = eventText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return nil }
+    return isFinal ? accumulator.append(final: text) : accumulator.display(withInterim: text)
   }
 }

@@ -122,6 +122,20 @@ final class ComparisonSyncTests: XCTestCase {
         XCTAssertTrue(transport.requestedTokens.isEmpty)
     }
 
+    func testSync_whenICloudDataSyncIsSwitchedOff_doesNothing() async {
+        defaults.set(false, forKey: SyncConfiguration.dataSyncEnabledKey)
+        let transport = FakeComparisonTransport(pages: [.empty])
+        let delegate = FakeComparisonDelegate(pending: [ModelComparisonRevision(round: makeRound())])
+        let engine = await makeEngine(transport: transport, delegate: delegate)
+
+        await engine.sync()
+
+        XCTAssertTrue(transport.uploaded.isEmpty)
+        XCTAssertTrue(transport.requestedTokens.isEmpty)
+        XCTAssertNil(engine.lastError, "Off is a choice, not a failure")
+        XCTAssertEqual(delegate.pendingRevisions().count, 1)
+    }
+
     func testUpload_prefersANewerRemoteCopy() async {
         let local = makeRound()
         var remote = local
@@ -169,6 +183,23 @@ final class ComparisonSyncTests: XCTestCase {
         XCTAssertThrowsError(
             try ComparisonSyncRecord.revision(from: record),
             "A round that fails validation must not be mistaken for a deletion of the local copy"
+        )
+    }
+
+    func testRecord_withARoundPayloadMissingEntries_isNotATombstone() throws {
+        let round = makeRound()
+        let record = try ComparisonSyncRecord.record(from: round)
+        let payload = try XCTUnwrap(record["payload"] as? String)
+        var object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
+        )
+        object.removeValue(forKey: "entries")
+        let stripped = try JSONSerialization.data(withJSONObject: object)
+        record["payload"] = try XCTUnwrap(String(bytes: stripped, encoding: .utf8))
+        XCTAssertNil(ComparisonSyncRecord.round(from: record))
+        XCTAssertThrowsError(
+            try ComparisonSyncRecord.revision(from: record),
+            "A round payload without entries must not be mistaken for a deletion of the local copy"
         )
     }
 

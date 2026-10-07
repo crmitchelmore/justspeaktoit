@@ -177,6 +177,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Views/SettingsView.swift"),
             encoding: .utf8
         )
+        let appSettings = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("Sources/SpeakiOS/Settings/AppSettings.swift"),
+            encoding: .utf8
+        )
         XCTAssertTrue(manifest.contains("environment[\"TUIST_IOS_KEYBOARD\"] ?? \"\""))
         XCTAssertTrue(manifest.contains("let isIOSKeyboardEnabled = [\"1\", \"true\", \"yes\"]"))
         XCTAssertTrue(manifest.contains("if isIOSKeyboardEnabled {"))
@@ -204,7 +208,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(app.contains("guard FeatureFlags.iOSKeyboardEnabled else"))
         XCTAssertTrue(app.contains("KeyboardInstantDictationStore.shared.setEnabled(false)"))
         XCTAssertTrue(settings.contains("if iOSKeyboardEnabled"))
-        XCTAssertTrue(settings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
+        XCTAssertTrue(appSettings.contains("KeyboardDictationPreferencesStore.shared.mirrorAppPreference"))
     }
 
     func testWatchAppBuildFeature_isOffByDefault() throws {
@@ -242,7 +246,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(
             watchTarget.contains("\"WKCompanionAppBundleIdentifier\": .string(trainValue(\"iosBundleIdentifier\"))")
         )
-        XCTAssertTrue(watchTarget.contains("\"Sources/SpeakCore/WatchCaptureProtocol.swift\""))
+        // Shared watch types come from the dependency-free SpeakWatchCore
+        // product, not from SpeakCore files compiled by path (issue #1123).
+        XCTAssertTrue(watchTarget.contains(".package(product: \"SpeakWatchCore\")"))
+        XCTAssertFalse(watchTarget.contains("\"Sources/SpeakCore/"))
     }
 
     func testWatchComplication_shipsOnlyWithTheWatchAppFeatureFlag() throws {
@@ -273,10 +280,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(widgetTarget.contains("product: .appExtension"))
         XCTAssertTrue(watchTarget.contains(".target(name: \"JustSpeakWatchWidgetExtension\")"))
         // Both watch targets compile the shared intent and read the same
-        // App Group container.
+        // App Group container, which SpeakWatchCore provides.
         for target in [widgetTarget, watchTarget] {
             XCTAssertTrue(target.contains("\"JustSpeakWatchShared/**\""))
-            XCTAssertTrue(target.contains("\"Sources/SpeakCore/WatchSharedContainer.swift\""))
+            XCTAssertTrue(target.contains(".package(product: \"SpeakWatchCore\")"))
         }
         XCTAssertTrue(manifest.contains("\"$(inherited) WATCH_WIDGET_EXTENSION\""))
         XCTAssertTrue(entitlements.contains("<string>group.com.justspeaktoit.watch</string>"))
@@ -410,16 +417,13 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(instantCoordinator.contains("iOSHistoryManager.shared.recordTranscription"))
     }
 
-    // swiftlint:disable:next function_body_length
     func testIOSReleaseWorkflowSignsAndValidatesKeyboardExtension() throws {
         let workflow = try String(
             contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/release-ios.yml"),
             encoding: .utf8
         )
-        let autoRelease = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/auto-release.yml"),
-            encoding: .utf8
-        )
+        let retiredAutoReleaseWorkflow = repositoryRoot
+            .appendingPathComponent(".github/workflows/auto-release.yml")
         XCTAssertTrue(workflow.contains("IOS_KEYBOARD_APPSTORE_PROFILE"))
         XCTAssertTrue(workflow.contains("ios-keyboard-appstore.provisionprofile"))
         XCTAssertTrue(workflow.contains("$BUNDLE_ID.keyboard"))
@@ -450,7 +454,7 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(workflow.contains("Keyboard feature is off, but JustSpeakKeyboard.appex was embedded"))
         XCTAssertTrue(workflow.contains("python3 scripts/verify-keyboard-purpose-strings.py"))
         XCTAssertFalse(workflow.contains("Handoff-only keyboard unexpectedly declares $usage_key"))
-        XCTAssertFalse(autoRelease.contains("-f include_keyboard=true"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retiredAutoReleaseWorkflow.path))
         XCTAssertTrue(workflow.contains("ref: ${{ inputs.manifest }}"))
 
         let profileBootstrap = try String(
@@ -625,14 +629,10 @@ final class DistributionBuildIdentityTests: XCTestCase {
         XCTAssertTrue(tapScript.contains("speak-#{version}-arm64.zip"))
         XCTAssertTrue(tapScript.contains("speak-#{version}-x86_64.zip"))
 
-        // Published candidate assets cannot be replaced by the legacy repair lane.
-        let retryWorkflow = try String(
-            contentsOf: repositoryRoot.appendingPathComponent(".github/workflows/publish-speak-cli.yml"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(retryWorkflow.contains("CLI assets are frozen with release-train candidates"))
-        XCTAssertTrue(retryWorkflow.contains("exit 1"))
-        XCTAssertFalse(retryWorkflow.contains("gh release upload"))
+        // Published candidate assets cannot be replaced by the retired legacy repair lane.
+        let retiredCLIRepairWorkflow = repositoryRoot
+            .appendingPathComponent(".github/workflows/publish-speak-cli.yml")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: retiredCLIRepairWorkflow.path))
 
         // Signing tools never arrive through an unverified download while the
         // private key is on disk.

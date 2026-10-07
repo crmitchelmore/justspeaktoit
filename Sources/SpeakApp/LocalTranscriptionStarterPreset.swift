@@ -4,11 +4,15 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
   enum PresetID: String, Hashable {
     case parakeetStreaming
     case whisperKitStreaming
+    case phononBatch
     case whisperKitBatch
+    case whisperKitCompactBatch
+    case whisperKitCompactStreaming
   }
 
   enum Engine: Equatable {
     case parakeet
+    case phonon(LocalTranscriptionModel)
     case whisperKit(LocalTranscriptionModel)
   }
 
@@ -24,7 +28,7 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
     switch engine {
     case .parakeet:
       return FluidAudioParakeetModel.displayName
-    case .whisperKit(let model):
+    case .whisperKit(let model), .phonon(let model):
       return model.displayName
     }
   }
@@ -68,21 +72,55 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
           )
         )
       }
-      return presets
+      return presets + compactPresets(for: mode, availableModels: availableModels, excluding: whisperKitModel)
     case .batch:
-      guard let whisperKitModel else { return [] }
-      return [
-        Self(
-          id: .whisperKitBatch,
-          mode: .batch,
-          engine: .whisperKit(whisperKitModel),
-          recommendation: "Best quality for finished recordings",
-          detail: whisperKitModel.description,
-          runtime: "WhisperKit / Core ML",
-          approximateSizeMB: whisperKitModel.approximateSizeMB
-        )
-      ]
+      return batchPresets(availableModels: availableModels, whisperKitModel: whisperKitModel)
+        + compactPresets(for: mode, availableModels: availableModels, excluding: whisperKitModel)
     }
+  }
+
+  private static func compactPresets(
+    for mode: AppSettings.LocalTranscriptionMode,
+    availableModels: [LocalTranscriptionModel],
+    excluding preferredModel: LocalTranscriptionModel?
+  ) -> [Self] {
+    guard let model = availableModels.filter({
+      $0.engine == .whisperKit && $0.id != preferredModel?.id
+        && $0.approximateSizeMB > 0 && $0.approximateSizeMB <= 200
+        && (mode == .batch || $0.supportsLiveStreaming)
+    }).max(by: { $0.approximateSizeMB < $1.approximateSizeMB }) else { return [] }
+    return [Self(
+      id: mode == .batch ? .whisperKitCompactBatch : .whisperKitCompactStreaming,
+      mode: mode,
+      engine: .whisperKit(model),
+      recommendation: "Smaller download",
+      detail: "Multilingual dictation with less storage and memory than the larger WhisperKit model. "
+        + "Trades accuracy on accents, noise and complex speech for a lighter setup.",
+      runtime: "WhisperKit / Core ML",
+      approximateSizeMB: model.approximateSizeMB
+    )]
+  }
+
+  private static func batchPresets(
+    availableModels: [LocalTranscriptionModel], whisperKitModel: LocalTranscriptionModel?
+  ) -> [Self] {
+    var presets: [Self] = []
+    if PhononLocalModels.isSupportedOnCurrentPlatform,
+       let phonon = availableModels.first(where: { $0.id == PhononLocalModels.phonon2.id }) {
+      presets.append(Self(
+        id: .phononBatch, mode: .batch, engine: .phonon(phonon),
+        recommendation: "Recommended for English", detail: phonon.description,
+        runtime: phonon.engine.displayName, approximateSizeMB: phonon.approximateSizeMB
+      ))
+    }
+    if let whisperKitModel {
+      presets.append(Self(
+        id: .whisperKitBatch, mode: .batch, engine: .whisperKit(whisperKitModel),
+        recommendation: "Best for multilingual recordings", detail: whisperKitModel.description,
+        runtime: "WhisperKit / Core ML", approximateSizeMB: whisperKitModel.approximateSizeMB
+      ))
+    }
+    return presets
   }
 
   /// Routes recordings through this preset.
@@ -91,13 +129,13 @@ struct LocalTranscriptionStarterPreset: Identifiable, Equatable {
   /// that is not installed make every recording fail.
   @MainActor
   func activate(in settings: AppSettings) {
-    settings.transcriptionMode = .localModel
+    settings.selectLocalTranscriptionSource(.downloaded)
     settings.localTranscriptionMode = mode
 
     switch engine {
     case .parakeet:
       settings.localStreamingModelSource = FluidAudioParakeetModel.id
-    case .whisperKit(let model):
+    case .whisperKit(let model), .phonon(let model):
       settings.localTranscriptionModel = model.id
       if mode == .streaming {
         settings.localStreamingModelSource = WhisperKitStreamingModel.id(for: model)

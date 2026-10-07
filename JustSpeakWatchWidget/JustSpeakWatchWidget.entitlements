@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <!-- App Group: shared container the watch app publishes complication
-         state into (see Sources/SpeakCore/WatchSharedContainer.swift). -->
+         state into (see Sources/SpeakWatchCore/WatchSharedContainer.swift). -->
     <key>com.apple.security.application-groups</key>
     <array>
         <string>group.com.justspeaktoit.watch</string>

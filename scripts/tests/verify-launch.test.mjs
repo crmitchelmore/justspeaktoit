@@ -43,9 +43,9 @@ if len(sys.argv)>4: launch+=timedelta(seconds=60)
 capture=launch+timedelta(milliseconds=1)
 secret="PRIVATE_SIGNING_SENTINEL"
 if destination.endswith(".crash"):
- text=f"Process: fixture [{pid}]\\nPath: {path}\\nDate/Time: {capture.isoformat()}\\nException Type: EXC_BAD_ACCESS\\nSecret: {secret}\\n"
+ text=f"Process: fixture [{pid}]\\nPath: {path}\\nDate/Time: {capture.strftime('%Y-%m-%d %H:%M:%S.%f %z')}\\nException Type: EXC_BAD_ACCESS\\nSecret: {secret}\\n"
 else:
- text=json.dumps({"pid":int(pid),"procPath":path,"procLaunch":launch.isoformat(),"captureTime":capture.isoformat(),
+ text=json.dumps({"pid":int(pid),"procPath":path,"procLaunch":launch.strftime('%Y-%m-%d %H:%M:%S.%f %z'),"captureTime":capture.strftime('%Y-%m-%d %H:%M:%S.%f %z'),
   "exception":{"type":"EXC_BAD_ACCESS","rawCodes":[1,0],"secret":secret},
   "usedImages":[{"name":secret,"uuid":secret},{"name":"libswiftCore.dylib","uuid":"12345678-1234-1234-1234-123456789012"}],
   "threads":[{"triggered":True,"name":secret,"frames":[{"imageIndex":1,"imageOffset":123,"symbol":secret},{"imageIndex":0,"imageOffset":456}]}],

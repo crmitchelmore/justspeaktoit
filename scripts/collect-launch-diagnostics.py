@@ -30,7 +30,9 @@ def timestamp(value):
     if not isinstance(value, str):
         return None
     try:
-        result = datetime.fromisoformat(value)
+        # Apple .ips/.crash timestamps separate the numeric UTC offset with a
+        # space, unlike ISO 8601. Preserve timezone information when normalising.
+        result = datetime.fromisoformat(re.sub(r" ([+-]\d{4})$", r"\1", value))
         return result.timestamp() if result.tzinfo else None
     except ValueError:
         return None

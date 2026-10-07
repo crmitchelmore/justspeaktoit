@@ -11,6 +11,8 @@
 #
 # This script is designed to run in CI (GitHub Actions macOS runners) and locally.
 # It does NOT require accessibility permissions or user interaction.
+# Failure evidence is saved to VERIFY_LAUNCH_DIAGNOSTICS_DIR (or a temporary
+# directory); VERIFY_LAUNCH_DIAGNOSTICS_WAIT bounds crash-report delivery polling.
 
 set -euo pipefail
 
@@ -65,6 +67,7 @@ fi
 PROCESS_NAME="$(basename "$APP_EXECUTABLE")"
 APP_PID=""
 CRASH_MARKER="$(mktemp "${TMPDIR:-/tmp}/verify-launch.XXXXXX")"
+PROCESS_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/verify-launch-output.XXXXXX")"
 cleanup() {
     if [ -n "$APP_PID" ]; then
         kill "$APP_PID" 2>/dev/null || true
@@ -74,9 +77,27 @@ cleanup() {
         fi
         wait "$APP_PID" 2>/dev/null || true
     fi
-    rm -f "$CRASH_MARKER"
+    rm -f "$CRASH_MARKER" "$PROCESS_OUTPUT"
 }
 trap cleanup EXIT
+
+collect_failure_diagnostics() {
+    CHILD_PID="$APP_PID"
+    CHILD_STATUS=0
+    wait "$CHILD_PID" 2>/dev/null || CHILD_STATUS=$?
+    # The child is reaped; never send cleanup signals to a potentially reused PID.
+    APP_PID=""
+    echo "  Candidate PID: $CHILD_PID; exit status: $CHILD_STATUS"
+    DIAGNOSTICS_DIR="${VERIFY_LAUNCH_DIAGNOSTICS_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/verify-launch-diagnostics.XXXXXX")}"
+    mkdir -p "$DIAGNOSTICS_DIR"
+    printf 'executable=%s\npid=%s\nexit_status=%s\n' \
+        "$APP_EXECUTABLE" "$CHILD_PID" "$CHILD_STATUS" > "$DIAGNOSTICS_DIR/launch.txt"
+    python3 "$(dirname "$0")/collect-launch-diagnostics.py" \
+        --pid "$CHILD_PID" --name "$PROCESS_NAME" --marker "$CRASH_MARKER" \
+        --stdout "$PROCESS_OUTPUT" --output "$DIAGNOSTICS_DIR" \
+        --wait "${VERIFY_LAUNCH_DIAGNOSTICS_WAIT:-10}" \
+        || echo "⚠️ Launch diagnostic collection failed"
+}
 
 # --- Mark this run's crash-report interval ---
 CRASH_DIR="$HOME/Library/Logs/DiagnosticReports"
@@ -88,12 +109,13 @@ fi
 # --- Launch the app ---
 LAUNCH_START_NS=$(_now_ns)
 echo "  Launching candidate executable..."
-"$APP_EXECUTABLE" &
+"$APP_EXECUTABLE" > "$PROCESS_OUTPUT" 2>&1 &
 APP_PID=$!
 sleep 2
 
 if ! kill -0 "$APP_PID" 2>/dev/null; then
     echo "❌ Candidate process exited during launch"
+    collect_failure_diagnostics
     exit 1
 fi
 
@@ -123,27 +145,7 @@ while [ $ELAPSED -lt "$TIMEOUT_SECONDS" ]; do
     if ! kill -0 "$APP_PID" 2>/dev/null; then
         echo "❌ Process died after ${ELAPSED}s"
 
-        # Check for crash reports
-        if [ -d "$CRASH_DIR" ]; then
-            CRASH_FILES=$(find "$CRASH_DIR" -name "${PROCESS_NAME}*" -newer "$CRASH_MARKER" 2>/dev/null || true)
-            if [ -n "$CRASH_FILES" ]; then
-                echo ""
-                echo "📋 Crash report(s) found:"
-                echo "$CRASH_FILES"
-                echo ""
-                # Print the first few lines of the most recent crash report
-                LATEST=$(echo "$CRASH_FILES" | head -1)
-                echo "--- Start of crash report ---"
-                head -50 "$LATEST" 2>/dev/null || true
-                echo "--- End of excerpt ---"
-            fi
-        fi
-
-        # Check system log for crash entries
-        echo ""
-        echo "📋 Recent system log entries:"
-        log show --predicate "process == '${PROCESS_NAME}'" --last 30s --style compact 2>/dev/null | tail -20 || true
-
+        collect_failure_diagnostics
         exit 1
     fi
 done

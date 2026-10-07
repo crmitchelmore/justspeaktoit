@@ -50,6 +50,37 @@ personal token.
 The local Codex Run action launches Alpha with `script/build_and_run.sh`.
 Alpha starts without a global recording hotkey; configure one in Settings.
 
+### Direct Mac launch failures
+
+Archive/export success is not launch acceptance. Both pre-notarisation and
+post-notarisation launch gates must keep their candidate child alive. An early
+exit (including the initial two-second check) records the exact PID and exit
+status, bounded stdout/stderr, fresh PID-matched `.ips`/`.crash` reports and
+PID-filtered system logs. Crash-report delivery is polled for up to ten seconds;
+system-log collection has its own five-second timeout. Missing diagnostics do
+not turn a failed launch into a pass.
+
+The direct Mac workflow preserves this evidence even when packaging fails, as
+`mac-launch-diagnostics-<manifest>-<attempt>` (seven-day retention), separated by
+architecture and launch phase. It uploads only collected launch evidence, not
+signing environment, profiles, keychains or export logs. Locally, run
+`VERIFY_LAUNCH_DIAGNOSTICS_DIR="$PWD/.artifacts/launch" scripts/verify-launch.sh /path/to/candidate.app`
+to retain the same evidence without replacing an installed app. Each crash
+report is limited to 1 MiB, at most three matching reports are retained, and
+each output/log tail is limited to 64 KiB. Oversized or unavailable reports are
+reported explicitly; a segfault alone does not establish its root cause.
+
+Keep the `AnyView` boundary around normal launch content inside `SpeakApp`'s
+scene. Without it, an isolated Release Alpha candidate from the `alpha-build-23`
+app source crashed while SwiftUI's `AppGraph` resolved scene-associated-type
+metadata: its expanded view tree reached `PaidAccessManager` and
+`Published<String?>` metadata, then dereferenced a null pointer in the Swift
+runtime. The boundary leaves the content, service bootstrap, onboarding and
+paid-access feature gate unchanged while preventing that eager scene metadata
+expansion. `SpeakAppSceneMetadataTests` exercises the associated-type witness
+without starting app services. Local ad-hoc launch acceptance does not replace
+the signed archive/export and notarisation gates on the release runner.
+
 ## Stable
 
 1. Select a delivered and tested `alpha-build-N` and explicit Mac/iOS versions.

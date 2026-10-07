@@ -185,6 +185,15 @@ jobs:
           app-store-connect-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           app-store-connect-key-id: ${{ env.APP_STORE_CONNECT_KEY_ID }}
 
+      - name: Preserve launch failure diagnostics
+        if: ${{ always() && steps.receipt.outputs.status != 'verified' }}
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: mac-launch-diagnostics-${{ inputs.manifest }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/launch-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Publish artefact paths
         if: steps.receipt.outputs.status != 'verified'
         run: |

@@ -484,7 +484,11 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
                     if remaining <= 0:
                         raise ProxyError(408, "Upload deadline reached.")
                     self.connection.settimeout(min(15, remaining))
-                    chunk = self.rfile.read(min(64 * 1024, length - len(chunks)))
+                    try:
+                        chunk = self.rfile.read(min(64 * 1024, length - len(chunks)))
+                    except socket.timeout as error:
+                        self.connection.settimeout(5)
+                        raise ProxyError(408, "Upload receive timeout reached.") from error
                     if not chunk:
                         break
                     chunks.extend(chunk)

@@ -247,6 +247,20 @@ class ProxyTests(unittest.TestCase):
             self.assertEqual(self.request()[0], 408)
         self.assertEqual(self.transport.calls, [])
 
+    def test_slow_upload_receives_408_when_remaining_budget_expires(self):
+        client = socket.create_connection(self.server.server_address, timeout=5)
+        self.addCleanup(client.close)
+        with patch.object(proxy, "MAX_UPLOAD_SECONDS", 0.02):
+            client.sendall((
+                "POST /cognitiveservices/v1 HTTP/1.1\r\nHost: 127.0.0.1:"
+                + str(self.server.server_port) + "\r\nOcp-Apim-Subscription-Key: " + self.token
+                + "\r\nContent-Length: 2\r\n\r\nx"
+            ).encode())
+            response = proxy.http.client.HTTPResponse(client)
+            response.begin()
+            self.assertEqual(response.status, 408)
+        self.assertEqual(self.transport.calls, [])
+
 
 class ConfigurationTests(unittest.TestCase):
     def test_only_fixed_azure_https_origins(self):

@@ -197,6 +197,8 @@ runs:
 
     - name: Verify App Launches (${{ inputs.variant }}, Pre-Notarisation)
       shell: bash
+      env:
+        VERIFY_LAUNCH_DIAGNOSTICS_DIR: ${{ runner.temp }}/launch-diagnostics/${{ inputs.variant }}/pre-notarisation
       run: |
         echo "Verifying signed app launches without crashing..."
         chmod +x scripts/verify-launch.sh
@@ -294,6 +296,8 @@ runs:
 
     - name: Verify App Launches (${{ inputs.variant }}, Post-Notarisation)
       shell: bash
+      env:
+        VERIFY_LAUNCH_DIAGNOSTICS_DIR: ${{ runner.temp }}/launch-diagnostics/${{ inputs.variant }}/post-notarisation
       run: |
         echo "Verifying notarised+stapled app launches without crashing..."
         chmod +x scripts/verify-launch.sh

@@ -9,7 +9,7 @@ import SpeakDesktop
 /// recorded audio uses it when it is set and the credential's region otherwise.
 package enum DesktopHostAzureResource {
     package static let invalidEndpoint = "Use the HTTPS endpoint from your resource\u{2019}s Keys and Endpoint page, "
-        + "ending in cognitiveservices.azure.com or services.ai.azure.com, with no path."
+        + "or http://127.0.0.1:PORT for a local transcription proxy, with no path."
     package static let missingForLive = "Azure live transcription needs your Azure Speech resource endpoint. "
         + "Add it in Settings \u{2192} Azure Speech resource\u{2026}, or choose another model."
 
@@ -26,7 +26,7 @@ package enum DesktopHostAzureResource {
     /// accept, so a saved endpoint can never fail their check later.
     package static func normalized(_ entry: String) throws -> String {
         let endpoint = entry.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard endpoint.isEmpty || (try? AzureSpeechConfiguration.resourceURL(endpoint)) != nil else {
+        guard endpoint.isEmpty || (try? AzureSpeechConfiguration.batchResourceURL(endpoint)) != nil else {
             throw DesktopHostError(message: invalidEndpoint)
         }
         return endpoint
@@ -41,9 +41,11 @@ extension DesktopHostController {
     /// endpoint the recording is refused before its audio file, History record
     /// or socket exists.
     package func requireAzureResource(forLive model: String) throws {
-        guard DesktopLiveTranscription.route(forID: model)?.provider == .azure,
-              azureResourceEndpoint().isEmpty else { return }
-        throw DesktopHostError(message: DesktopHostAzureResource.missingForLive)
+        guard DesktopLiveTranscription.route(forID: model)?.provider == .azure else { return }
+        guard !azureResourceEndpoint().isEmpty else {
+            throw DesktopHostError(message: DesktopHostAzureResource.missingForLive)
+        }
+        _ = try AzureSpeechConfiguration.batchResourceURL(azureResourceEndpoint())
     }
 
     /// Saves an entry `DesktopHostAzureResource.normalized` accepted.

@@ -24,6 +24,10 @@ final class MainManager: ObservableObject {
   @Published private(set) var polishedLivePreview: String = ""
   @Published private(set) var isPolishing: Bool = false
   @Published var lastErrorMessage: String?
+  /// The setting change that would have let the last delivery reach the app the
+  /// user expected. Offered as a one-click action in the menu bar until the next
+  /// session starts or the user applies it.
+  @Published private(set) var pendingDeliveryRemedy: DeliverySettingsRemedy?
   @Published private(set) var canRetryPostProcessing: Bool = false
 
   /// Runtime state of hands-free dictation. Published so the menu bar can show
@@ -214,6 +218,20 @@ final class MainManager: ObservableObject {
       .receive(on: RunLoop.main)
       .sink { [weak self] _ in
         self?.disarmHandsFreeIfDisabled()
+      }
+      .store(in: &cancellables)
+
+    // @Published emits before the value is stored; hopping to the run loop
+    // lets the reconciliation read the new settings.
+    Publishers.CombineLatest4(
+      appSettings.$appSwitchDelivery,
+      appSettings.$textOutputMethod,
+      appSettings.$streamingInsertionEnabled,
+      permissionsManager.$statuses
+    )
+      .receive(on: RunLoop.main)
+      .sink { [weak self] _ in
+        self?.reconcilePendingDeliveryRemedy()
       }
       .store(in: &cancellables)
 
@@ -697,6 +715,7 @@ final class MainManager: ObservableObject {
     session.diagnosticContext = makeHistoryDiagnosticContext()
     activeSession = session
     lastErrorMessage = nil
+    pendingDeliveryRemedy = nil
     livePreview = ""
     polishedLivePreview = ""
     // Every recording starts from a blank live transcript, including batch
@@ -1214,6 +1233,10 @@ final class MainManager: ObservableObject {
       // Handle live text insertion finalization
       var liveFinalizationResult: LiveTextInserter.FinalizationResult = .deferred
       var outputWarning: Error?
+      var deliveryTarget = session.outputTarget
+      var deliveryRemedy: DeliverySettingsRemedy?
+      var focusMovedToOtherApplication = false
+      let usedStreamingInsertion = liveTextInserter.isActive && liveTextInserter.strategy == .rangedStreaming
       if liveTextInserter.isActive {
         liveFinalizationResult = liveTextInserter.applyPolishedFinal(finalText)
         liveTextInserter.end()
@@ -1234,22 +1257,27 @@ final class MainManager: ObservableObject {
         let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
         let outputResult = output.output(text: finalText, target: session.outputTarget)
         outputWarning = outputResult.warning
+        focusMovedToOtherApplication = outputResult.focusMovedToOtherApplication
+        deliveryTarget = outputResult.redirectedTarget ?? session.outputTarget
+        deliveryRemedy = remedy(forDelivery: outputResult)
         session.outputMethod = outputResult.method
         if outputResult.error == nil {
-          recordInsertion(of: finalText, range: outputResult.insertedRange, target: session.outputTarget)
+          recordInsertion(of: finalText, range: outputResult.insertedRange, target: deliveryTarget)
         }
 
         if let error = outputResult.error {
+          let message = deliveryRemedy.annotate(error.localizedDescription)
           session.errors.append(
             HistoryError(
               phase: .output,
               message: "Failed to deliver text",
-              debugDescription: error.localizedDescription
+              debugDescription: deliveryRemedy.annotate(Self.historySafeDescription(of: error))
             )
           )
-          hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
-          state = .failed(error.localizedDescription)
-          lastErrorMessage = error.localizedDescription
+          hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
+          state = .failed(message)
+          lastErrorMessage = message
+          pendingDeliveryRemedy = deliveryRemedy
           attachFailureDiagnostics(to: session)
           let historyItem = session.buildHistoryItem(finalText: finalText)
           await historyManager.append(historyItem)
@@ -1259,16 +1287,23 @@ final class MainManager: ObservableObject {
           return
         }
       case .failed(let error):
+        let remedy = DeliverySettingsRemedy.forLiveInsertionFailure(
+          error,
+          usedStreamingInsertion: usedStreamingInsertion,
+          configuration: DeliverySettingsRemedy.Configuration(settings: appSettings)
+        )
+        let message = remedy.annotate(error.localizedDescription)
         session.errors.append(
           HistoryError(
             phase: .output,
             message: "Failed to deliver text",
-            debugDescription: error.localizedDescription
+            debugDescription: remedy.annotate(Self.historySafeDescription(of: error))
           )
         )
-        hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
-        state = .failed(error.localizedDescription)
-        lastErrorMessage = error.localizedDescription
+        hudManager.finishFailure(headline: "Delivery failed", message: message)
+        state = .failed(message)
+        lastErrorMessage = message
+        pendingDeliveryRemedy = remedy
         attachFailureDiagnostics(to: session)
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
@@ -1278,8 +1313,8 @@ final class MainManager: ObservableObject {
         return
       }
 
-      let focusedElement = session.outputTarget?.focusedElement ?? getFocusedElement()
-      let appName = session.outputTarget?.applicationName
+      let focusedElement = deliveryTarget?.focusedElement ?? getFocusedElement()
+      let appName = deliveryTarget?.applicationName
         ?? NSWorkspace.shared.frontmostApplication?.localizedName
       // A warning means delivery proceeded without proving the current field.
       // Do not associate Voice Edit/correction tracking with the stale capture.
@@ -1296,14 +1331,22 @@ final class MainManager: ObservableObject {
       session.events.append(
         HistoryEvent(kind: .outputDelivered, description: "Output delivered successfully")
       )
-      if let outputWarning {
-        session.events.append(
-          HistoryEvent(
-            kind: .outputDelivered,
-            description: "Delivery warning: \(outputWarning.localizedDescription)"
-          )
-        )
-      }
+      let deliveryNote = Self.deliveryNote(
+        warning: outputWarning,
+        focusMovedToOtherApplication: focusMovedToOtherApplication,
+        destination: appName,
+        remedy: deliveryRemedy
+      )
+      // History can be exported to a public issue, so its copy names no app.
+      recordDeliveryWarning(
+        Self.deliveryNote(
+          warning: outputWarning,
+          focusMovedToOtherApplication: focusMovedToOtherApplication,
+          destination: nil,
+          remedy: deliveryRemedy
+        ),
+        on: session
+      )
       session.destination = appName
       session.lexiconContext = makeLexiconContext(for: finalText, destination: appName)
       if let summary = session.personalCorrections {
@@ -1318,12 +1361,14 @@ final class MainManager: ObservableObject {
         lastErrorMessage = notice.message
         state = .failed(notice.message)
       } else {
+        pendingDeliveryRemedy = deliveryRemedy
         hudManager.finishSuccess(
           message: Self.deliverySuccessMessage(
-            warning: outputWarning,
+            note: deliveryNote,
             stopRequested: session.stopRequested,
             delivered: session.outputDelivered
-          )
+          ),
+          displayDuration: deliveryNote == nil ? nil : hudManager.failureDisplayDuration
         )
         state = .completed(historyItem)
         captureFirstTranscriptionSucceededIfNeeded(session: session)
@@ -1344,13 +1389,62 @@ final class MainManager: ObservableObject {
     }
   }
 
-  private static func deliverySuccessMessage(
+  /// HUD headline for a one-shot delivery that did not insert text. Holding
+  /// the transcript back because the user left the app it was going to is a
+  /// safety choice, not a failure.
+  static func deliveryFailureHeadline(for error: Error) -> String {
+    switch error as? TextOutputError {
+    case .originalApplicationNotInFront, .destinationApplicationChanged:
+      return "Not inserted"
+    default:
+      return "Delivery failed"
+    }
+  }
+
+  /// Error text for History. History can be exported to a public GitHub
+  /// issue, so it must not name the user's apps.
+  static func historySafeDescription(of error: Error) -> String {
+    (error as? TextOutputError)?.historySafeDescription ?? error.localizedDescription
+  }
+
+  /// The remedy, if any, for a one-shot delivery outcome under the current settings.
+  private func remedy(forDelivery outputResult: TextOutputResult) -> DeliverySettingsRemedy? {
+    DeliverySettingsRemedy.forOutput(
+      error: outputResult.error,
+      warning: outputResult.warning,
+      focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
+      configuration: DeliverySettingsRemedy.Configuration(settings: appSettings)
+    )
+  }
+
+  /// What to tell the user about a delivery that succeeded but not quite as
+  /// they may have expected, with the setting that would change it. Nil when
+  /// there is nothing to say.
+  static func deliveryNote(
     warning: Error?,
+    focusMovedToOtherApplication: Bool,
+    destination: String?,
+    remedy: DeliverySettingsRemedy?
+  ) -> String? {
+    let base: String
+    if focusMovedToOtherApplication {
+      base = destination.map { "Sent to \($0), where recording started." }
+        ?? "Sent to the app where recording started."
+    } else if let warning {
+      base = warning.localizedDescription
+    } else {
+      return nil
+    }
+    return remedy.annotate(base)
+  }
+
+  private static func deliverySuccessMessage(
+    note: String?,
     stopRequested: Date?,
     delivered: Date?
   ) -> String {
-    if let warning {
-      return "Delivered — \(warning.localizedDescription)"
+    if let note {
+      return "Delivered — \(note)"
     }
     guard let stopToFinalMs = SessionLatencyMetrics.milliseconds(
       from: stopRequested,
@@ -1405,6 +1499,7 @@ final class MainManager: ObservableObject {
   private func performRetryPostProcessing(with retryData: RetryData) async {
     state = .processing
     lastErrorMessage = nil
+    pendingDeliveryRemedy = nil
     hudManager.beginPostProcessing()
 
     let session = ActiveSession(gesture: .uiButton, hotKeyDescription: appSettings.selectedHotKey.displayString)
@@ -1483,38 +1578,60 @@ final class MainManager: ObservableObject {
       hudManager.beginDelivering()
       let output = SmartTextOutput(permissionsManager: permissionsManager, appSettings: appSettings)
       let outputResult = output.output(text: finalText, target: session.outputTarget)
+      let deliveryTarget = outputResult.redirectedTarget ?? session.outputTarget
+      let deliveryRemedy = remedy(forDelivery: outputResult)
       session.outputMethod = outputResult.method
       session.outputDelivered = Date()
       if outputResult.error == nil {
-        recordInsertion(of: finalText, range: outputResult.insertedRange, target: session.outputTarget)
+        recordInsertion(of: finalText, range: outputResult.insertedRange, target: deliveryTarget)
       }
 
       if let error = outputResult.error {
+        let message = deliveryRemedy.annotate(error.localizedDescription)
         session.errors.append(
           HistoryError(
             phase: .output,
             message: "Failed to deliver text",
-            debugDescription: error.localizedDescription
+            debugDescription: deliveryRemedy.annotate(Self.historySafeDescription(of: error))
           )
         )
-        hudManager.finishFailure(headline: "Delivery failed", message: error.localizedDescription)
-        state = .failed(error.localizedDescription)
-        lastErrorMessage = error.localizedDescription
+        hudManager.finishFailure(headline: Self.deliveryFailureHeadline(for: error), message: message)
+        state = .failed(message)
+        lastErrorMessage = message
+        pendingDeliveryRemedy = deliveryRemedy
         attachFailureDiagnostics(to: session)
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
       } else {
-        recordDeliveryWarning(outputResult.warning, on: session)
+        let appName = deliveryTarget?.applicationName
+          ?? NSWorkspace.shared.frontmostApplication?.localizedName
+        let deliveryNote = Self.deliveryNote(
+          warning: outputResult.warning,
+          focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
+          destination: appName,
+          remedy: deliveryRemedy
+        )
+        recordDeliveryWarning(
+          Self.deliveryNote(
+            warning: outputResult.warning,
+            focusMovedToOtherApplication: outputResult.focusMovedToOtherApplication,
+            destination: nil,
+            remedy: deliveryRemedy
+          ),
+          on: session
+        )
         session.events.append(
           HistoryEvent(kind: .outputDelivered, description: "Retry output delivered successfully")
         )
-        let appName = session.outputTarget?.applicationName
-          ?? NSWorkspace.shared.frontmostApplication?.localizedName
         session.destination = appName
         let historyItem = session.buildHistoryItem(finalText: finalText)
         await historyManager.append(historyItem)
         clearRetryData()
-        hudManager.finishSuccess(message: Self.retryDeliverySuccessMessage(warning: outputResult.warning))
+        pendingDeliveryRemedy = deliveryRemedy
+        hudManager.finishSuccess(
+          message: Self.retryDeliverySuccessMessage(note: deliveryNote),
+          displayDuration: deliveryNote == nil ? nil : hudManager.failureDisplayDuration
+        )
         state = .completed(historyItem)
       }
 
@@ -1543,18 +1660,41 @@ final class MainManager: ObservableObject {
     activeSession = nil
   }
 
-  private func recordDeliveryWarning(_ warning: Error?, on session: ActiveSession) {
-    guard let warning else { return }
+  private func recordDeliveryWarning(_ note: String?, on session: ActiveSession) {
+    guard let note else { return }
     session.events.append(
-      HistoryEvent(
-        kind: .outputDelivered,
-        description: "Delivery warning: \(warning.localizedDescription)"
-      )
+      HistoryEvent(kind: .outputDelivered, description: "Delivery warning: \(note)")
     )
   }
 
-  private static func retryDeliverySuccessMessage(warning: Error?) -> String {
-    warning.map { "Retry delivered — \($0.localizedDescription)" } ?? "Retry Delivered"
+  private static func retryDeliverySuccessMessage(note: String?) -> String {
+    note.map { "Retry delivered — \($0)" } ?? "Retry Delivered"
+  }
+
+  /// Offers a remedy for a delivery made outside a recording session, such as
+  /// pasting the last transcript.
+  func offerDeliveryRemedy(_ remedy: DeliverySettingsRemedy?) {
+    pendingDeliveryRemedy = remedy
+  }
+
+  /// Drops the offered remedy once the user has made that change some other
+  /// way (Settings, System Settings), so the menu never offers a no-op.
+  func reconcilePendingDeliveryRemedy() {
+    guard let remedy = pendingDeliveryRemedy else { return }
+    let satisfied = remedy.isSatisfied(
+      configuration: DeliverySettingsRemedy.Configuration(settings: appSettings),
+      accessibilityGranted: permissionsManager.status(for: .accessibility).isGranted
+    )
+    if satisfied {
+      pendingDeliveryRemedy = nil
+    }
+  }
+
+  /// Applies the setting change offered after the last delivery, then forgets it.
+  func applyPendingDeliveryRemedy() {
+    guard let remedy = pendingDeliveryRemedy else { return }
+    remedy.apply(settings: appSettings, permissions: permissionsManager)
+    pendingDeliveryRemedy = nil
   }
 
   // swiftlint:disable:next cyclomatic_complexity function_body_length

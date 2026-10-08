@@ -240,10 +240,16 @@ final class HUDManager: ObservableObject {
     shortenErrorDisplay ? shortFailureDisplayDuration : standardFailureDisplayDuration
   }
 
-  func finishSuccess(message: String) {
+  func finishSuccess(message: String, displayDuration: TimeInterval? = nil) {
     transition(
       .success(message: message), headline: "Completed", subheadline: message, showsTimer: false)
-    scheduleAutoHide(after: Self.successDisplayDuration)
+    scheduleAutoHide(after: displayDuration ?? Self.successDisplayDuration)
+  }
+
+  /// How long a failure stays on screen under the current preference. Also used
+  /// for successes that carry advice the user needs time to read.
+  var failureDisplayDuration: TimeInterval {
+    Self.failureDisplayDuration(shortenErrorDisplay: appSettings.shortenErrorDisplay)
   }
 
   func finishFailure(message: String) {

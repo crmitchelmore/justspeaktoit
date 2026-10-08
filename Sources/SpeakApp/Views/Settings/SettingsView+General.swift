@@ -127,6 +127,23 @@ extension SettingsView {
           }
           VStack(alignment: .leading, spacing: 8) {
             if DistributionChannel.current.supportsAccessibilityTextInsertion {
+              Picker(
+                AppSettings.AppSwitchDelivery.settingName,
+                selection: settingsBinding(\AppSettings.appSwitchDelivery)
+              ) {
+                ForEach(AppSettings.AppSwitchDelivery.allCases) { option in
+                  Text(option.displayName).tag(option)
+                }
+              }
+              .settingsMenuPicker()
+              .speakTooltip(
+                "Choose what happens if you move to another app while Speak is still transcribing."
+              )
+              .accessibilityLabel("App switch delivery picker")
+              Text(settings.appSwitchDelivery.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
               settingsToggle(
                 "Restore clipboard after paste",
                 isOn: settingsBinding(\AppSettings.restoreClipboardAfterPaste),
